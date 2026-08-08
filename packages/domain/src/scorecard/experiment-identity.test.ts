@@ -8,8 +8,17 @@ import type { GateInput } from "./gate.js";
 // evaluated; these pin that the seals are read AGAINST EACH OTHER: same-experiment axes verify held, a
 // verified difference is a confound a gate refuses, and an unverifiable axis says so instead of guessing.
 
+// A pre-split manifest — only the composite bundle digest (content × selection × grading in one hash).
 const manifest = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => ({
   dataset: { id: "bench", version: "7.0.0", digest: "sha256:aaaa" },
+  harness: { id: "agent", version: "1.0.0", specDigest: "sha256:hhhh" },
+  ...over,
+});
+// A split-seal manifest — per-case semantic digests + the effective-grading seal (the orthogonal axes).
+const sealed = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => ({
+  dataset: { id: "bench", version: "7.0.0", digest: "sha256:composite-a" },
+  cases: { login: "sha256:case-login-a", search: "sha256:case-search-a" },
+  grading: "sha256:grading-a",
   harness: { id: "agent", version: "1.0.0", specDigest: "sha256:hhhh" },
   ...over,
 });
@@ -17,32 +26,77 @@ const manifest = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => (
 describe("experimentIdentity — held / confound / unverified, never a guess", () => {
   it("identical seals hold every axis — and the harness is deliberately not one (it is the treatment)", () => {
     const id = experimentIdentity(
-      manifest({ harness: { id: "agent", version: "1.0.0" } }),
-      manifest({ harness: { id: "agent", version: "2.0.0" } }), // the treatment moved — not a confound
+      sealed({ harness: { id: "agent", version: "1.0.0" } }),
+      sealed({ harness: { id: "agent", version: "2.0.0" } }), // the treatment moved — not a confound
     );
     expect(id.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
     expect(id.confounds).toEqual([]);
     expect(id.unverified).toEqual([]);
   });
 
-  it("a dataset whose CONTENT differs is a verified confound — id/version labels do not decide", () => {
+  it("a SHARED case whose content changed is the dataset confound — and it names the case", () => {
+    const id = experimentIdentity(
+      sealed(),
+      sealed({
+        dataset: { id: "bench", version: "8.0.0", digest: "sha256:composite-b" },
+        cases: { login: "sha256:case-login-EDITED", search: "sha256:case-search-a" },
+      }),
+    );
+    expect(id.confounds.map((c) => c.axis)).toEqual(["dataset_content"]);
+    expect(id.confounds[0]?.detail).toContain("'login'");
+    expect(id.confounds[0]?.detail).toContain("bench@7.0.0");
+  });
+
+  it("a SUBSET is coverage, never a dataset confound — one-sided cases are not this axis's business", () => {
+    // The candidate ran only `login` (80-of-100 shape). Pre-split, the composite digest moved and the pair
+    // was refused as "a different experiment" BEFORE the coverage machinery — with its own allow_partial
+    // knobs — got a vote. The shared case verifies identical, so the axis holds.
+    const id = experimentIdentity(
+      sealed(),
+      sealed({
+        dataset: { id: "bench", version: "7.0.0", digest: "sha256:composite-subset" },
+        cases: { login: "sha256:case-login-a" },
+      }),
+    );
+    expect(id.held).toContain("dataset_content");
+    expect(id.confounds).toEqual([]);
+  });
+
+  it("a grading-only change confounds exactly ONE axis — the composite seal used to claim two", () => {
+    const id = experimentIdentity(sealed(), sealed({ grading: "sha256:grading-B" }));
+    expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+    expect(id.held).toContain("dataset_content");
+  });
+
+  it("pre-split seals that DIFFER are unverifiable on the composite axes — never a confound, never held", () => {
+    // Content, selection and grading moved indistinguishably inside one hash: claiming "different content"
+    // would be as unfounded as claiming "same grading".
     const id = experimentIdentity(
       manifest(),
       manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:bbbb" } }),
     );
-    expect(id.confounds.map((c) => c.axis)).toEqual(["dataset_content"]);
-    expect(id.confounds[0]?.detail).toContain("bench@7.0.0");
-    // …and the same content under a re-registered version label is the SAME experiment.
+    expect(id.confounds).toEqual([]);
+    expect(id.unverified.map((u) => `${u.axis}:${u.reason}`)).toEqual([
+      "dataset_content:composite",
+      "grading_plan:composite",
+    ]);
+    // …while EQUAL composites still verify held (identical everything), and a re-registered version label
+    // over the same content is the same experiment.
     const relabeled = experimentIdentity(
       manifest(),
       manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:aaaa" } }),
     );
-    expect(relabeled.held).toContain("dataset_content");
+    expect(relabeled.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
   });
 
-  it("one side running a grading-plan override while the other runs defaults is a confound", () => {
+  it("one side running a grading-plan override while the other runs defaults is a confound (pre-split seals)", () => {
     const id = experimentIdentity(manifest({ graders: "sha256:gggg" }), manifest());
     expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+  });
+
+  it("mixed seal generations cannot compare grading — unverified, not a guess", () => {
+    const id = experimentIdentity(sealed(), manifest());
+    expect(id.unverified.some((u) => u.axis === "grading_plan" && u.reason === "unsealed")).toBe(true);
   });
 
   it("a different judge selection — or the same selection with an edited document — is a confound", () => {
@@ -74,7 +128,8 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
       manifest(),
     );
     expect(id.confounds).toEqual([]);
-    expect(id.unverified.map((u) => u.reason)).toEqual(["digest_era"]);
+    // Both composite axes are unverifiable across the era gap: content AND the per-case grading defaults.
+    expect(id.unverified.map((u) => u.reason)).toEqual(["digest_era", "digest_era"]);
   });
 
   it("an unsealed side verifies nothing — every axis unverified, none confounded", () => {

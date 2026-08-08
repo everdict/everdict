@@ -207,8 +207,15 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   the verdict policy has its own owner) answers in THREE states: `held` (digests verify identical),
   `confound` (VERIFIED different ⇒ `not_comparable`, reason `confounded`, NO verdict numbers computed —
   unless the axis is acknowledged via `GatePolicy.allowConfounds`, recorded on the decision), or
-  `unverified` (unsealed side / digest-era gap ⇒ reason `identity_unverified`, information never refusal).
-  Rides the diff as `diff.experiment`. A NEW GatePolicy field must ALSO be added to the service's
+  `unverified` (unsealed side / digest-era gap / pre-split composite seal).
+  Rides the diff as `diff.experiment`. **The axes are orthogonal because the SEAL is split**
+  (`manifest.cases` = per-case semantic digests with the runtime-replaced `graders` default STRIPPED;
+  `manifest.grading` = the effective grading semantics — plan, else per-case defaults): the dataset axis
+  compares SHARED cases only (one-sided cases are coverage's business, so a subset is `partial`, never a
+  confound), and a grading-only change moves exactly one axis. The composite `dataset.digest` (post-subset,
+  post-grading hash) stays for `verifyManifest`; a differing composite on pre-split manifests is
+  `unverified` reason `composite` — never a confound, because which of content/selection/grading moved is
+  indistinguishable inside one hash. A NEW GatePolicy field must ALSO be added to the service's
   effective-policy copy (`ScorecardService.gate`) and the HTTP/MCP schemas — `maxMetricLossFraction` shipped
   read by the gate and reachable from nowhere; `gate-policy.routes.test.ts` pins the chain end to end.
   **Product judgment precedes statistics in exactly ONE place, by declaration**: `VerdictPolicy.criticalCases`

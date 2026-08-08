@@ -144,7 +144,9 @@ export const ScorecardDiffResponseSchema = z.object({
       unverified: z.array(
         z.object({
           axis: z.enum(["dataset_content", "grading_plan", "judge_set"]),
-          reason: z.enum(["unsealed", "digest_era"]),
+          // "composite" = a pre-split seal (one bundle digest over content × selection × grading) differs —
+          // WHICH of the three moved is indistinguishable, so no confound claim can be made either way.
+          reason: z.enum(["unsealed", "digest_era", "composite"]),
           detail: z.string(),
         }),
       ),

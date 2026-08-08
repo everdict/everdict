@@ -46,6 +46,15 @@ export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 // trust-kernel contract ⑤.
 export const ScorecardManifestSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
+  // ── The ORTHOGONAL identity axes (additive; the composite `dataset.digest` above hashes the post-subset,
+  // post-grading-plan bundle and stays for verifyManifest + pre-split readers). `cases` maps caseId → a
+  // SEMANTIC digest of the case with its `graders` default STRIPPED: the case contract itself calls that
+  // field a runtime-replaced default, and hashing it as content made a grading-plan change move the dataset
+  // axis and a subset selection move it too — one composite digest answering three different questions.
+  // `grading` digests the EFFECTIVE grading semantics: the runtime plan when one was given, else the
+  // per-case defaults keyed by case id — a default-grader edit is a grading claim, never a content claim.
+  cases: z.record(z.string(), z.string()).optional(),
+  grading: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
   // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just

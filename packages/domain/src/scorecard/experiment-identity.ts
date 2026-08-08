@@ -27,7 +27,10 @@ export interface ExperimentConfound {
 }
 export interface ExperimentUnverified {
   axis: ExperimentAxis;
-  reason: "unsealed" | "digest_era";
+  // "composite" = the side sealed only the COMPOSITE bundle digest (content × selection × grading in one
+  // hash, pre-split manifests): a differing composite cannot say WHICH of the three moved, so the axis is
+  // unverifiable rather than confounded — a subset run or a grading change must not read as a content claim.
+  reason: "unsealed" | "digest_era" | "composite";
   detail: string;
 }
 export interface ExperimentIdentity {
@@ -44,7 +47,7 @@ const era = (digest: string): "sha256" | "legacy" => (digest.startsWith("sha256:
 type AxisReading =
   | { state: "held" }
   | { state: "confound"; detail: string }
-  | { state: "unverified"; reason: "unsealed" | "digest_era"; detail: string };
+  | { state: "unverified"; reason: ExperimentUnverified["reason"]; detail: string };
 
 function compareStamps(what: string, baseline: string, candidate: string): AxisReading {
   if (era(baseline) !== era(candidate))
@@ -57,17 +60,88 @@ function compareStamps(what: string, baseline: string, candidate: string): AxisR
   return { state: "confound", detail: what };
 }
 
+// The dataset axis answers ONE question — are the SHARED cases the same cases? — from the per-case semantic
+// digests. One-sided cases are deliberately not its business: a case the candidate never ran (a subset) or
+// newly added is COVERAGE, first-class in `missing`/`metricCoverage`, and reading it as a content confound
+// let a deliberate 80-of-100 run be refused as "a different experiment" before the coverage machinery — with
+// its own allow_partial knobs — ever got a vote. A pre-split manifest sealed only the composite bundle
+// digest: equal composites still verify held (identical everything), differing composites are UNVERIFIABLE
+// on this axis (content, selection and grading moved indistinguishably), never a confound.
 function datasetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
   const label = (m: ScorecardManifest): string => `${m.dataset.id}@${m.dataset.version}`;
-  return compareStamps(
-    `dataset content differs (${label(b)} → ${label(c)}) — the cases under comparison are not the same cases`,
-    b.dataset.digest,
-    c.dataset.digest,
-  );
+  if (b.cases !== undefined && c.cases !== undefined) {
+    const shared = Object.keys(b.cases).filter((id) => c.cases !== undefined && id in c.cases);
+    const differing: string[] = [];
+    for (const id of shared) {
+      const bd = b.cases[id];
+      const cd = c.cases[id];
+      if (bd === undefined || cd === undefined) continue;
+      if (era(bd) !== era(cd))
+        return {
+          state: "unverified",
+          reason: "digest_era",
+          detail: `case '${id}' is sealed under different digest algorithms — sameness cannot be verified either way`,
+        };
+      if (bd !== cd) differing.push(id);
+    }
+    if (differing.length === 0) return { state: "held" }; // every shared case verified identical (one-sided cases are coverage's axis)
+    const named = differing.slice(0, 3).join("', '");
+    return {
+      state: "confound",
+      detail: `${differing.length} shared case(s) changed content between the sides ('${named}'${differing.length > 3 ? ` and ${differing.length - 3} more` : ""}) (${label(b)} → ${label(c)}) — the same case id no longer names the same task`,
+    };
+  }
+  // Pre-split fallback: only the composite digest exists.
+  if (era(b.dataset.digest) !== era(c.dataset.digest))
+    return {
+      state: "unverified",
+      reason: "digest_era",
+      detail: `dataset seals use different digest algorithms (${era(b.dataset.digest)} vs ${era(c.dataset.digest)}) — sameness cannot be verified either way`,
+    };
+  if (b.dataset.digest === c.dataset.digest) return { state: "held" };
+  return {
+    state: "unverified",
+    reason: "composite",
+    detail: `the sides sealed only composite bundle digests and they differ (${label(b)} → ${label(c)}) — content, selection and grading moved indistinguishably, so no content claim can be made either way`,
+  };
 }
 
+// The grading axis reads the EFFECTIVE grading seal (the runtime plan, else the per-case defaults) when both
+// sides carry one. Pre-split manifests sealed only a plan digest (absent = defaults): a plan-vs-plan or
+// plan-vs-defaults difference is still a verified confound there, but defaults-vs-defaults can only be held
+// when the composite bundle digests match — otherwise a default-grader edit hides, and claiming held would
+// invent the very sameness this axis exists to verify.
 function gradingPlanAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
-  if (b.graders === undefined && c.graders === undefined) return { state: "held" }; // per-case defaults on both
+  if (b.grading !== undefined && c.grading !== undefined) {
+    return compareStamps(
+      "the effective grading differs — the same trace would be scored differently",
+      b.grading,
+      c.grading,
+    );
+  }
+  if (b.grading !== undefined || c.grading !== undefined)
+    return {
+      state: "unverified",
+      reason: "unsealed",
+      detail: `${b.grading === undefined ? "the baseline" : "the candidate"} predates the effective-grading seal — the grading semantics cannot be compared across seal generations`,
+    };
+  // Pre-split on both sides.
+  if (b.graders === undefined && c.graders === undefined) {
+    if (era(b.dataset.digest) !== era(c.dataset.digest))
+      return {
+        state: "unverified",
+        reason: "digest_era",
+        detail:
+          "both sides ran per-case default graders and their composite seals use different digest algorithms — whether the defaults matched cannot be verified either way",
+      };
+    if (b.dataset.digest === c.dataset.digest) return { state: "held" }; // identical composite bundles ⇒ identical per-case defaults
+    return {
+      state: "unverified",
+      reason: "composite",
+      detail:
+        "both sides ran per-case default graders under pre-split seals — whether the defaults matched is not verifiable from the composite digests",
+    };
+  }
   if (b.graders === undefined || c.graders === undefined)
     return {
       state: "confound",

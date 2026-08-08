@@ -26,8 +26,13 @@ const result = (caseId: string, pass: boolean): CaseResult => ({
   scores: [{ graderId: "tests", metric: "tests_pass", value: pass ? 1 : 0, pass }],
 });
 const card = (results: CaseResult[]): Scorecard => ({ suiteId: "s", harness: "h@1", results });
-const manifest = (datasetDigest: string): ScorecardManifest => ({
-  dataset: { id: "bench", version: "7.0.0", digest: datasetDigest },
+// Split-seal manifests: the dataset axis reads per-case SEMANTIC digests, so a differing shared case is a
+// VERIFIED confound (a composite-only difference would be merely unverifiable — content, selection and
+// grading move indistinguishably inside one hash).
+const manifest = (loginCaseDigest: string): ScorecardManifest => ({
+  dataset: { id: "bench", version: "7.0.0", digest: `sha256:composite-${loginCaseDigest}` },
+  cases: { login: loginCaseDigest },
+  grading: "sha256:grading-a",
   harness: { id: "agent", version: "1.0.0" },
 });
 

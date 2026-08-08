@@ -199,12 +199,21 @@ ground truth still passes never blocks, and one case losing three metrics is one
 different treatment": the harness is the treatment, and the dataset content, grading plan and judge
 documents must be HELD CONSTANT or the delta measures the apparatus. `experimentIdentity(bManifest,
 cManifest)` (`@everdict/domain`) reads the two reproducibility manifests against each other and answers
-per axis in THREE states, never two: `held` (digests verify identical — a re-registered dataset version
-with the same content digest still holds), a `confound` (VERIFIED different — the gate refuses the pair as
-`not_comparable`, reason `confounded`, with **no verdict numbers computed**, unless the caller acknowledges
-the axis via `GatePolicy.allowConfounds`, which is then recorded on the decision like a force), or
-`unverified` (an unsealed pre-manifest side, or seals from different digest eras — information, reason
-`identity_unverified`, never a refusal: a claim of sameness would be as unfounded as one of difference).
+per axis in THREE states, never two: `held` (verified identical), a `confound` (VERIFIED different — the
+gate refuses the pair as `not_comparable`, reason `confounded`, with **no verdict numbers computed**,
+unless the caller acknowledges the axis via `GatePolicy.allowConfounds`, recorded on the decision like a
+force), or `unverified` (an unsealed side, a digest-era gap, or a pre-split composite seal).
+
+**The axes are ORTHOGONAL, and the seal keeps them so.** The manifest's split seal carries per-case
+SEMANTIC digests (`manifest.cases`, each case hashed with its runtime-replaced `graders` default stripped)
+and the EFFECTIVE grading seal (`manifest.grading` — the runtime plan, else the per-case defaults). The
+dataset axis compares only the SHARED cases (a shared case whose digest moved = confound, naming the case);
+one-sided cases are COVERAGE — `missing`/`metricCoverage` with their own `allow_partial` knobs — so a
+deliberate 80-of-100 subset is a partial comparison, never "a different experiment", and a grading-only
+change confounds exactly one axis. The composite `dataset.digest` (post-subset, post-grading bundle hash)
+stays for `verifyManifest`; on PRE-SPLIT manifests a differing composite is `unverified` reason
+`composite` — content, selection and grading moved indistinguishably inside one hash, so no confound claim
+can be made either way (equal composites still verify held).
 The read rides the diff as `diff.experiment` (HTTP + MCP + the compare page's banner). The verdict policy
 is deliberately not an axis — policy identity has its own owner (`resolvePolicyResolution` /
 `policyMismatch` / `policyUnresolvable`). Not yet modeled: runtime/OS as a **comparison cohort** (stratify

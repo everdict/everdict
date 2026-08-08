@@ -289,6 +289,18 @@ export class ScorecardService {
       // submit is the only moment the resolved case bundle + resolved spec + grading plan are all in hand.
       manifest: {
         dataset: { id: dataset.id, version: dataset.version, digest: contentDigest(dataset.cases) },
+        // The orthogonal axes (experimentIdentity's inputs): per-case SEMANTIC digests with the runtime-
+        // replaced `graders` default stripped — so a shared case answers "same case?" alone — and the
+        // EFFECTIVE grading semantics (the plan, else the per-case defaults) as its own seal. The composite
+        // `dataset.digest` above conflated content × selection × grading into one hash, which made a
+        // grading-only change read as a dataset confound and a deliberate subset read as a different
+        // experiment.
+        cases: Object.fromEntries(dataset.cases.map((c) => [c.id, contentDigest({ ...c, graders: undefined })])),
+        grading: contentDigest(
+          input.graders && input.graders.length > 0
+            ? input.graders
+            : Object.fromEntries(selectedCases.map((c) => [c.id, c.graders])),
+        ),
         harness: {
           id: input.harness.id,
           version: harnessVersion,
