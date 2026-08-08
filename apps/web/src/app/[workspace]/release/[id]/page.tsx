@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
+import { ReleaseActionsMenu, ReleaseStatusControl } from '@/features/manage-product'
 import { issueHref, issuePageSchema, IssueStatusBadge } from '@/entities/issue'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
 import {
@@ -12,7 +13,6 @@ import {
   type ReleaseDetail,
 } from '@/entities/product'
 import { TrackerHistory } from '@/entities/tracker-history'
-import { ReleaseActionsMenu, ReleaseStatusControl } from '@/features/manage-product'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -22,6 +22,16 @@ import { Card } from '@/shared/ui/card'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
+
+// 시리즈 판정 → 카탈로그 키 (릴리즈 게이트 어휘 그대로)
+const VERDICT_LABEL_KEY = {
+  pass: 'verdictPass',
+  no_baseline: 'verdictNoBaseline',
+  block: 'verdictBlock',
+  blocked_missing: 'verdictBlockedMissing',
+  not_comparable: 'verdictNotComparable',
+  not_evaluated: 'verdictNotEvaluated',
+} as const
 
 export const dynamic = 'force-dynamic'
 
@@ -91,7 +101,10 @@ export default async function ReleasePage({
       />
 
       <p className="text-sm">
-        <Link href={productHref(workspace, release.productId)} className="text-muted-foreground hover:text-foreground">
+        <Link
+          href={productHref(workspace, release.productId)}
+          className="text-muted-foreground hover:text-foreground"
+        >
           ← {t('backToProduct')}
         </Link>
       </p>
@@ -116,7 +129,9 @@ export default async function ReleasePage({
             {t('openIssues', { count: readiness.openIssues })}
           </Badge>
           {readiness.regressedSeries.length > 0 && (
-            <Badge tone="danger">{t('regressedSeries', { count: readiness.regressedSeries.length })}</Badge>
+            <Badge tone="danger">
+              {t('regressedSeries', { count: readiness.regressedSeries.length })}
+            </Badge>
           )}
         </div>
         {readiness.series.length > 0 && (
@@ -140,7 +155,9 @@ export default async function ReleasePage({
                           href={`/${workspace}/scorecard/${series.latest.scorecardId}`}
                           className="hover:text-primary hover:underline"
                         >
-                          {series.latest.passRate !== undefined ? fmtPct(series.latest.passRate) : '—'}
+                          {series.latest.passRate !== undefined
+                            ? fmtPct(series.latest.passRate)
+                            : '—'}
                         </Link>
                       ) : (
                         <span className="text-muted-foreground">{t('notRunYet')}</span>
@@ -152,14 +169,28 @@ export default async function ReleasePage({
                           href={`/${workspace}/scorecard/${series.baseline.scorecardId}`}
                           className="hover:text-primary hover:underline"
                         >
-                          {series.baseline.passRate !== undefined ? fmtPct(series.baseline.passRate) : '—'}
+                          {series.baseline.passRate !== undefined
+                            ? fmtPct(series.baseline.passRate)
+                            : '—'}
                         </Link>
                       ) : (
                         <span className="text-muted-foreground">{t('noBaseline')}</span>
                       )}
                     </td>
                     <td className="px-2 py-1.5">
-                      {series.regressed && <Badge tone="danger">{t('regressed')}</Badge>}
+                      {/* 시리즈별 릴리즈 판정 — 스코어카드 게이트의 어휘. 차단하면 danger, 통과면 success. */}
+                      <Badge
+                        tone={
+                          series.regressed
+                            ? 'danger'
+                            : series.verdict === 'pass'
+                              ? 'success'
+                              : 'outline'
+                        }
+                        title={series.reasons?.join('\n')}
+                      >
+                        {t(VERDICT_LABEL_KEY[series.verdict])}
+                      </Badge>
                     </td>
                   </tr>
                 ))}

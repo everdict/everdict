@@ -33,6 +33,21 @@ function build() {
     versions: versionStore,
     issues: issueStore,
     scorecards: scorecardStore,
+    // The gate seam, faked at the transport level (the real wiring is analytics.diff + evaluateGate — see
+    // main.ts; TRUST-37 certifies that integration): the decision derives from the two records' summaries,
+    // which is enough to drive the route/verdict plumbing under test.
+    seriesGate: async (_tenant, baselineId, candidateId) => {
+      const baseline = await scorecardStore.get(baselineId);
+      const candidate = await scorecardStore.get(candidateId);
+      const rate = (r: typeof baseline) => r?.summary?.find((m) => m.passRate !== undefined)?.passRate;
+      const b = rate(baseline);
+      const c = rate(candidate);
+      if (b === undefined || c === undefined)
+        return { decision: "not_comparable" as const, reasons: [{ kind: "unmeasured_evidence", detail: "no rate" }] };
+      return c < b
+        ? { decision: "block" as const, reasons: [{ kind: "regression", detail: `pass rate fell ${b} → ${c}` }] }
+        : { decision: "pass" as const, reasons: [] };
+    },
     // A fixed clock: the regression test backdates its batches around this instant, and a real clock would
     // make the baseline anchor race the records' own timestamps.
     now: () => "2026-08-04T00:00:00.000Z",
@@ -237,15 +252,55 @@ describe("product routes", () => {
       headers: H,
       payload: { status: "released" },
     });
-    // Then the gate names the regressed series
+    // Then the gate names the regressed series — with the SCORECARD GATE's own verdict, not bare arithmetic
     expect(refused.statusCode).toBe(409);
     expect(refused.json().message).toContain("quality");
     const readiness = (await app.inject({ method: "GET", url: `/releases/${next.id}`, headers: H })).json().readiness;
     expect(readiness.regressedSeries).toEqual(["quality"]);
     expect(readiness.series[0]).toMatchObject({
       key: "quality",
+      verdict: "block",
       latest: { scorecardId: "sc-latest", passRate: 0.6 },
       baseline: { scorecardId: "sc-baseline", passRate: 0.9 },
+    });
+  });
+
+  it("a required series that NEVER RAN blocks the ship — not evaluated is never green (arch-review 7 P0)", async () => {
+    // Pre-fix, releaseReadiness read "absence of evidence as not regressed" and a product whose watched
+    // series had zero evaluations shipped clean — the false green this rewrite exists to kill.
+    const { app } = build();
+    const product = await createProduct(app); // declares the "quality" series; no scorecard ever runs
+    const release = (
+      await app.inject({
+        method: "POST",
+        url: `/products/${product.id}/releases`,
+        headers: H,
+        payload: { name: "2026.3" },
+      })
+    ).json();
+    const refused = await app.inject({
+      method: "POST",
+      url: `/releases/${release.id}/status`,
+      headers: H,
+      payload: { status: "released" },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().message).toContain("quality");
+    const readiness = (await app.inject({ method: "GET", url: `/releases/${release.id}`, headers: H })).json()
+      .readiness;
+    expect(readiness.ready).toBe(false);
+    expect(readiness.series[0]).toMatchObject({ key: "quality", verdict: "not_evaluated", regressed: true });
+    // Forcing the ship records the decision — including the verdict snapshot the gate saw
+    const forced = await app.inject({
+      method: "POST",
+      url: `/releases/${release.id}/status`,
+      headers: H,
+      payload: { status: "released", force: true },
+    });
+    expect(forced.statusCode).toBe(200);
+    expect(forced.json().history.at(-1)?.detail).toMatchObject({
+      forced: true,
+      seriesVerdicts: [{ key: "quality", verdict: "not_evaluated" }],
     });
   });
 

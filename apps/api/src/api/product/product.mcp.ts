@@ -218,7 +218,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
       description:
         "Plan a release — a checkpoint on the product's axis with a name, a target date, and which watch " +
         "series it is judged by (absent = every series). It starts `planned`; shipping goes through " +
-        "set_release_status, which gates on open linked issues and regressed series.",
+        "set_release_status, which gates on open linked issues and non-passing required series verdicts.",
       inputSchema: {
         productId: z.string(),
         name: z.string().min(1).max(200),
@@ -260,9 +260,10 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
     {
       annotations: { readOnlyHint: true },
       description:
-        "One release plus its readiness: open issues linked to the release, and every watched series' latest " +
-        "scorecard against the baseline anchored at the previous ship. Unmeasured never reads as regressed. " +
-        "This is the read that answers 'can we ship'.",
+        "One release plus its readiness: open issues linked to the release, and every watched series' RELEASE " +
+        "VERDICT — the scorecard gate's decision over (previous-ship baseline, latest): pass|block|" +
+        "blocked_missing|not_comparable, plus not_evaluated (no run — blocks a required series; not evaluated " +
+        "is never green) and no_baseline (first ship). This is the read that answers 'can we ship'.",
       inputSchema: { id: z.string() },
     },
     (a) => run(principal, "issues:read", async () => ok(await products.releaseDetail(ws, a.id))),
@@ -293,7 +294,8 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
       annotations: { readOnlyHint: false },
       description:
         "Move a release between planned / released / cancelled. Releasing is a GATE: it refuses while issues " +
-        "linked to the release are open or a watched series has regressed against the previous ship — unless " +
+        "linked to the release are open or any required series' release verdict is not passing (regressed, " +
+        "missing evidence, not comparable, or never evaluated) — unless " +
         "force: true, which is recorded on the fact and in the history. A released release cannot reopen.",
       inputSchema: { id: z.string(), status: ReleaseStatusSchema, force: z.boolean().optional() },
     },

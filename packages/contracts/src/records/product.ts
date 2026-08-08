@@ -73,6 +73,11 @@ export const ProductSeriesSchema = z.object({
   dataset: SeriesCapabilityRefSchema,
   harness: SeriesCapabilityRefSchema,
   judges: z.array(SeriesCapabilityRefSchema).default([]),
+  // Whether this series GATES a release (arch-review 7 P0). Absent = TRUE — fail closed: a series someone
+  // declared worth watching blocks a ship until it is evaluated and passes. Opting a series out of the gate
+  // is an EXPLICIT product choice recorded here, never something inferred from the absence of evidence
+  // ("it never ran, so it cannot have regressed" is exactly the false green this field exists to kill).
+  requiredForRelease: z.boolean().optional(),
 });
 export type ProductSeries = z.infer<typeof ProductSeriesSchema>;
 
@@ -161,8 +166,26 @@ export const ProductServiceVersionRecordSchema = z.object({
 export type ProductServiceVersionRecord = z.infer<typeof ProductServiceVersionRecordSchema>;
 
 // --- Derived readiness (computed on detail reads, never stored) ---
-// Same treatment as the tracker's rollups: the gate's two counts are cheap, always-fresh arithmetic over what
-// the caller already fetched — a stored flag would be a cache to invalidate on every scorecard completion.
+// Same treatment as the tracker's rollups: the gate's verdicts are cheap, always-fresh reads over what the
+// caller already fetched — a stored flag would be a cache to invalidate on every scorecard completion.
+// (The SHIP itself snapshots the per-series verdicts into the release's history entry — the decision is
+// recorded; the live read never is.)
+
+// A series' RELEASE VERDICT (arch-review 7 P0) — the SCORECARD GATE's own vocabulary, not a second truth:
+// pass|block|blocked_missing|not_comparable come verbatim from evaluateGate over (baseline, latest); the
+// product layer adds only its two orchestration states: `not_evaluated` (no succeeded run for the series —
+// which BLOCKS a required series: not evaluated is never green) and `no_baseline` (evidence exists but no
+// prior ship anchors a comparison — the first ship's informational pass; there is nothing to regress FROM).
+export const SeriesVerdictSchema = z.enum([
+  "pass",
+  "no_baseline",
+  "block",
+  "blocked_missing",
+  "not_comparable",
+  "not_evaluated",
+]);
+export type SeriesVerdict = z.infer<typeof SeriesVerdictSchema>;
+
 export const ReleaseSeriesStateSchema = z.object({
   key: z.string(),
   label: z.string(),
@@ -183,8 +206,14 @@ export const ReleaseSeriesStateSchema = z.object({
       createdAt: z.string(),
     })
     .optional(),
-  // Arithmetic, never inference: latest.passRate < baseline.passRate, both measured. Anything unmeasured
-  // (missing baseline, missing rate) reads as NOT regressed — absence of evidence is not a regression.
+  verdict: SeriesVerdictSchema,
+  // The gate's refusal details when the verdict is not a pass — verbatim GateReason.detail strings, so the
+  // release card can say WHY without re-deriving the comparison.
+  reasons: z.array(z.string()).optional(),
+  // Does this series BLOCK the release? true iff it is required (requiredForRelease !== false) and its
+  // verdict is neither pass nor no_baseline. Kept as the boolean the ship gate and history always read —
+  // pre-verdict rows called it "regressed", and the old meaning (a bare pass-rate drop) is exactly the
+  // weaker-second-gate semantics this field no longer carries.
   regressed: z.boolean(),
 });
 export type ReleaseSeriesState = z.infer<typeof ReleaseSeriesStateSchema>;
@@ -192,7 +221,9 @@ export type ReleaseSeriesState = z.infer<typeof ReleaseSeriesStateSchema>;
 export const ReleaseReadinessSchema = z.object({
   openIssues: z.number().int().nonnegative(),
   series: z.array(ReleaseSeriesStateSchema),
-  regressedSeries: z.array(z.string()), // the keys, so the gate's refusal can name them
+  // The keys of every series BLOCKING the ship (required && verdict ∉ {pass, no_baseline}) — the gate's
+  // refusal names them. The field name predates the verdict vocabulary; its content is the blocking set.
+  regressedSeries: z.array(z.string()),
   ready: z.boolean(), // openIssues === 0 && regressedSeries.length === 0
 });
 export type ReleaseReadiness = z.infer<typeof ReleaseReadinessSchema>;

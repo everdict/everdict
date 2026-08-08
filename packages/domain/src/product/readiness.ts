@@ -4,6 +4,7 @@ import type {
   ReleaseReadiness,
   ReleaseRecord,
   ReleaseSeriesState,
+  SeriesVerdict,
 } from "@everdict/contracts";
 
 // Release readiness is PURE arithmetic over what the caller already fetched — no store, no I/O (the tracker's
@@ -26,15 +27,34 @@ export interface SeriesScorecardPoint {
   serviceVersion?: string;
 }
 
-// Arithmetic, never inference: regressed = both rates measured AND the latest fell below the baseline.
-// Anything unmeasured reads as NOT regressed — absence of evidence is not a regression, and a gate that
-// blocked on a series that simply has not run yet would make every new series a release blocker.
-function seriesRegressed(
+// The SCORECARD GATE's decision over (baseline, latest) for one series — computed by the application layer
+// (analytics.diff + evaluateGate, the SAME machinery a CI release gate runs) and handed in. The product
+// layer never invents truth semantics: pass-rate arithmetic bypassed experiment identity, policy identity,
+// scoring revisions, coverage, criticals, trials and FDR — the trust kernel existed and the release
+// decision walked around it (arch-review 7 §2-3: "the weakest release path is the real guarantee").
+export interface SeriesGateReading {
+  verdict: Extract<SeriesVerdict, "pass" | "block" | "blocked_missing" | "not_comparable">;
+  reasons?: string[];
+}
+
+// A series' release verdict. NOT EVALUATED IS NEVER GREEN: a required series with no run blocks the ship —
+// the pre-verdict arithmetic read "absence of evidence as not regressed", which made the product readiness a
+// second, weaker release constitution underneath the scorecard gate. Opting a series out of the gate is the
+// EXPLICIT `requiredForRelease: false` policy, never an inference from missing evidence. `no_baseline` is
+// the first ship's honest state: evidence exists, but no prior ship anchors a regression question.
+function seriesVerdict(
   latest: SeriesScorecardPoint | undefined,
   baseline: SeriesScorecardPoint | undefined,
-): boolean {
-  if (latest?.passRate === undefined || baseline?.passRate === undefined) return false;
-  return latest.passRate < baseline.passRate;
+  gate: SeriesGateReading | undefined,
+): { verdict: SeriesVerdict; reasons?: string[] } {
+  if (latest === undefined) return { verdict: "not_evaluated", reasons: ["this series has no succeeded evaluation"] };
+  if (baseline === undefined) return { verdict: "no_baseline" };
+  if (gate === undefined)
+    return {
+      verdict: "not_comparable",
+      reasons: ["the release gate seam is not configured — refusing to guess a comparison"],
+    };
+  return { verdict: gate.verdict, ...(gate.reasons?.length ? { reasons: gate.reasons } : {}) };
 }
 
 export function releaseReadiness(
@@ -42,11 +62,18 @@ export function releaseReadiness(
   product: ProductRecord,
   latestBySeries: ReadonlyMap<string, SeriesScorecardPoint>,
   baselineBySeries: ReadonlyMap<string, SeriesScorecardPoint>,
+  gateBySeries: ReadonlyMap<string, SeriesGateReading>,
   openIssues: number,
 ): ReleaseReadiness {
   const series: ReleaseSeriesState[] = watchedSeries(product, release).map((entry) => {
     const latest = latestBySeries.get(entry.key);
     const baseline = baselineBySeries.get(entry.key);
+    const { verdict, reasons } = seriesVerdict(latest, baseline, gateBySeries.get(entry.key));
+    // A series blocks when it is REQUIRED (the fail-closed default) and its verdict is not a passing one.
+    // The explicit `requiredForRelease: false` is the only way evidence-less green exists — a recorded
+    // product policy, never an inference.
+    const required = entry.requiredForRelease !== false;
+    const blocks = required && verdict !== "pass" && verdict !== "no_baseline";
     return {
       key: entry.key,
       label: entry.label,
@@ -69,7 +96,9 @@ export function releaseReadiness(
             },
           }
         : {}),
-      regressed: seriesRegressed(latest, baseline),
+      verdict,
+      ...(reasons?.length ? { reasons } : {}),
+      regressed: blocks,
     };
   });
   const regressedSeries = series.filter((entry) => entry.regressed).map((entry) => entry.key);

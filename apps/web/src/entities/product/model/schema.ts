@@ -56,6 +56,8 @@ export const productSeriesSchema = z.object({
   dataset: seriesCapabilityRefSchema,
   harness: seriesCapabilityRefSchema,
   judges: z.array(seriesCapabilityRefSchema).default([]),
+  // 릴리즈 게이트 대상 여부 — 부재 = true(fail-closed). 게이트 제외는 명시적 제품 정책이지 근거 부재의 추론이 아니다.
+  requiredForRelease: z.boolean().optional(),
 })
 
 export const productAutoEvalSchema = z.object({
@@ -123,7 +125,16 @@ export const productDetailSchema = productSchema.extend({
   versions: z.array(productVersionSchema),
 })
 
-// 릴리즈 준비도 — 측정되지 않은 것은 절대 회귀로 읽지 않는다(근거의 부재는 회귀가 아니다).
+// 릴리즈 준비도 — 시리즈별 판정은 스코어카드 게이트의 어휘 그대로(제품 레이어는 진실을 재발명하지 않는다).
+// not_evaluated 는 필수 시리즈에서 절대 green 이 아니다: 평가 없음은 통과가 아니라 차단이다.
+export const seriesVerdictSchema = z.enum([
+  'pass',
+  'no_baseline',
+  'block',
+  'blocked_missing',
+  'not_comparable',
+  'not_evaluated',
+])
 export const releaseSeriesStateSchema = z.object({
   key: z.string(),
   label: z.string(),
@@ -142,6 +153,9 @@ export const releaseSeriesStateSchema = z.object({
       createdAt: z.string(),
     })
     .optional(),
+  verdict: seriesVerdictSchema,
+  reasons: z.array(z.string()).optional(),
+  // 이 시리즈가 출하를 차단하는가 — required && verdict ∉ {pass, no_baseline}
   regressed: z.boolean(),
 })
 
@@ -175,7 +189,7 @@ export const productTimelineSchema = z.object({
       key: z.string(),
       label: z.string(),
       points: z.array(productSeriesPointSchema),
-    }),
+    })
   ),
   issues: z.array(
     z.object({
@@ -186,7 +200,7 @@ export const productTimelineSchema = z.object({
       createdAt: z.string(),
       resolvedAt: z.string().optional(),
       releaseId: z.string().optional(),
-    }),
+    })
   ),
 })
 
@@ -205,7 +219,7 @@ export const productSyncResultSchema = z.object({
       name: z.string(),
       imported: z.number(),
       error: z.string().optional(),
-    }),
+    })
   ),
   triggered: z.array(z.string()),
   failedSeries: z.array(z.object({ key: z.string(), error: z.string() })).optional(),

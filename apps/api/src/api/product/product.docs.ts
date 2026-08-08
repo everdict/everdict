@@ -188,9 +188,11 @@ export const productDocs: Record<
   getRelease: {
     summary: "Get one release with its readiness",
     description:
-      "The record plus how ready it is: open issues linked to the release, and every watched series' latest " +
-      "scorecard against the baseline anchored at the previous released release. Unmeasured never reads as " +
-      "regressed. Requires issues:read.",
+      "The record plus how ready it is: open issues linked to the release, and every watched series' RELEASE " +
+      "VERDICT — the scorecard gate's own decision (pass|block|blocked_missing|not_comparable) over (baseline " +
+      "anchored at the previous ship, latest), plus not_evaluated (no run — which BLOCKS a required series: not " +
+      "evaluated is never green) and no_baseline (first ship). Opting a series out of the gate is the explicit " +
+      "requiredForRelease: false, never inferred from missing evidence. Requires issues:read.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     response: {
@@ -215,9 +217,10 @@ export const productDocs: Record<
     summary: "Move a release between planned / released / cancelled",
     description:
       "Releasing is a GATE: it refuses (409, naming the counts and the series) while issues linked to the " +
-      "release are open or a watched series has regressed against the previous ship — unless `force: true`, " +
-      "which is recorded on the fact and in the history. A released release is history and cannot reopen. " +
-      "Emits release.status_changed. Requires issues:write.",
+      "release are open or any required watched series' release verdict is not passing (regressed, missing " +
+      "evidence, not comparable, or simply never evaluated) — unless `force: true`, which is recorded on the " +
+      "fact and in the history along with the per-series verdict snapshot the decision saw. A released release " +
+      "is history and cannot reopen. Emits release.status_changed. Requires issues:write.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     body: toJsonSchema(SetReleaseStatusBodySchema),

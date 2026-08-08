@@ -29,6 +29,7 @@ import {
   Release,
   type ReleaseEditInput,
   type ReleaseTransition,
+  type SeriesGateReading,
   type SeriesScorecardPoint,
   decisionPassRate,
   releaseReadiness,
@@ -98,8 +99,22 @@ export interface ProductServiceDeps {
   // The release gate's open-issue count (issues linked to the release). Absent = this deployment carries no
   // tracker, and the gate decides on the series alone.
   issues?: IssueStore;
-  // The series trend/readiness points. Absent = no trend: every series reads "not run yet", never "regressed".
+  // The series trend/readiness points. Absent = no trend: every series reads "not run yet" — which BLOCKS a
+  // required series (not evaluated is never green), never silently passes.
   scorecards?: ScorecardStore;
+  // The release gate's evidence seam (arch-review 7 P0): a series' release verdict is the SCORECARD GATE's
+  // decision over (baseline, latest) — analytics.diff + evaluateGate, wired at composition. The product
+  // layer composes decisions; it never invents truth semantics (the pass-rate arithmetic this replaces
+  // bypassed experiment identity, policy identity, scoring revisions, coverage, criticals, trials and FDR).
+  // Absent (unit paths) = a comparable pair reads not_comparable — refusing, never guessing.
+  seriesGate?: (
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+  ) => Promise<{
+    decision: "pass" | "block" | "blocked_missing" | "not_comparable";
+    reasons: Array<{ kind: string; detail: string }>;
+  }>;
   capabilities?: ProductCapabilityCheck;
   events?: PlatformEventEmitter;
   newId?: () => string;
@@ -335,6 +350,9 @@ export class ProductService {
         to: input.status,
         openIssues: readiness.openIssues,
         regressedSeries: readiness.regressedSeries,
+        // The ship-time evidence snapshot — the history entry records WHAT the gate saw (per-series
+        // verdicts); the live readiness keeps moving after the decision.
+        seriesVerdicts: readiness.series.map((s) => ({ key: s.key, verdict: s.verdict })),
         ...(input.force !== undefined ? { force: input.force } : {}),
       },
       actor.subject,
@@ -354,9 +372,10 @@ export class ProductService {
     await this.deps.releases.remove(tenant, id);
   }
 
-  // How ready the release is: open linked issues + every watched series' latest point against its baseline.
-  // The baseline is anchored at the PREVIOUS released release — "did we get worse since we last shipped" is
-  // the question a release conversation asks; a series with no anchor yet reads as not regressed.
+  // How ready the release is: open linked issues + every watched series' RELEASE VERDICT — the SCORECARD
+  // GATE's decision over (baseline, latest), anchored at the PREVIOUS released release. "Did we get worse
+  // since we last shipped" is a question only the gate machinery has the right to answer (arch-review 7 P0):
+  // a bare pass-rate comparison bypassed identity/policy/coverage and read absence of evidence as green.
   async readiness(tenant: string, release: ReleaseRecord): Promise<ReleaseReadiness> {
     const product = await this.get(tenant, release.productId);
     const openIssues =
@@ -371,6 +390,7 @@ export class ProductService {
     const anchor = await this.baselineAnchor(tenant, release);
     const latestBySeries = new Map<string, SeriesScorecardPoint>();
     const baselineBySeries = new Map<string, SeriesScorecardPoint>();
+    const gateBySeries = new Map<string, SeriesGateReading>();
     if (this.deps.scorecards !== undefined) {
       for (const series of watchedSeries(product, release)) {
         const rows = (
@@ -388,10 +408,28 @@ export class ProductService {
         if (anchor !== undefined) {
           const baseline = rows.find((row) => row.createdAt <= anchor);
           if (baseline !== undefined) baselineBySeries.set(series.key, seriesPoint(baseline));
+          // The gate reading — only where a comparable pair exists; the domain owns every other state
+          // (not_evaluated / no_baseline / seam-absent not_comparable).
+          if (latest !== undefined && baseline !== undefined && this.deps.seriesGate !== undefined) {
+            try {
+              const decision = await this.deps.seriesGate(tenant, baseline.id, latest.id);
+              gateBySeries.set(series.key, {
+                verdict: decision.decision,
+                ...(decision.reasons.length > 0 ? { reasons: decision.reasons.map((r) => r.detail) } : {}),
+              });
+            } catch (err) {
+              // A comparison that cannot run (mid-rescore refusal, a deleted record) REFUSES — the honest
+              // reason rides; it never silently reads as pass.
+              gateBySeries.set(series.key, {
+                verdict: "not_comparable",
+                reasons: [err instanceof Error ? err.message : String(err)],
+              });
+            }
+          }
         }
       }
     }
-    return releaseReadiness(release, product, latestBySeries, baselineBySeries, openIssues);
+    return releaseReadiness(release, product, latestBySeries, baselineBySeries, gateBySeries, openIssues);
   }
 
   // The instant the product last shipped BEFORE this release — the baseline's anchor. For a released release

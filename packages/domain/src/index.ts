@@ -247,7 +247,12 @@ export {
   type ReleaseStatusChangeInput,
   type ReleaseTransition,
 } from "./product/release.js";
-export { releaseReadiness, type SeriesScorecardPoint, watchedSeries } from "./product/readiness.js";
+export {
+  releaseReadiness,
+  type SeriesGateReading,
+  type SeriesScorecardPoint,
+  watchedSeries,
+} from "./product/readiness.js";
 
 // ownership — the O-track kernel (roles/envelope/checkpoint invariants; trust-kernel O2/O5/O6)
 export {

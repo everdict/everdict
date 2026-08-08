@@ -78,13 +78,21 @@ newly pinned instance.
 
 ## Readiness + the release axis of regression
 
-`releaseReadiness` (`product/readiness.ts`) is pure arithmetic over what the service fetched: open issues
-LINKED to the release (`ISSUE_LINK_TYPES` gained `product`/`release`; links stay unvalidated pointers, the
-gate counts through the same reverse query) + each watched series' latest succeeded batch against the
-**baseline anchored at the previous released release** ("did we get worse since we last shipped").
-Unmeasured never reads as regressed — absence of evidence is not a regression, and a series that has not run
-cannot block a release. No stored regression flag on the release (no second regression authority): issue
-regression stays the regression watch's, and an issue it reopened blocks the release through the link.
+`releaseReadiness` (`product/readiness.ts`) composes the SCORECARD GATE's decisions (arch-review 7 P0 — the
+product layer never invents truth semantics): open issues LINKED to the release (`ISSUE_LINK_TYPES` gained
+`product`/`release`; links stay unvalidated pointers, the gate counts through the same reverse query) + each
+watched series' **release verdict** — `analytics.diff` + `evaluateGate` (maxRegressions 0, the `seriesGate`
+seam wired at composition) over (latest succeeded batch, **baseline anchored at the previous released
+release**), yielding the gate's own vocabulary `pass|block|blocked_missing|not_comparable` plus the product
+layer's two orchestration states: `not_evaluated` (no run — which **BLOCKS a required series: not evaluated
+is never green**; the pre-verdict arithmetic read absence of evidence as not-regressed, a second and weaker
+release constitution under the scorecard gate) and `no_baseline` (first ship — evidence exists, nothing to
+regress from; passes). Opting a series out of the gate is the EXPLICIT `ProductSeries.requiredForRelease:
+false`, never an inference from missing evidence. `ready = openIssues === 0 && no required series blocks`.
+The SHIP records the per-series verdict snapshot into the release's history entry (the decision's evidence —
+the live readiness keeps moving after); a forced ship past any blocking verdict stays a recorded override.
+No stored regression flag on the release (no second regression authority): issue regression stays the
+regression watch's, and an issue it reopened blocks the release through the link.
 
 ## Reads + surfaces
 

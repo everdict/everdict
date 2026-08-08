@@ -44,7 +44,7 @@ import {
   firstPartyDefaults,
 } from "@everdict/application-control";
 import type { RegistryAuth } from "@everdict/contracts";
-import { perTenantTrustZones } from "@everdict/domain";
+import { evaluateGate, perTenantTrustZones } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -907,6 +907,14 @@ async function main(): Promise<void> {
     versions: productVersionStore,
     issues: issueStore,
     scorecards: scorecardStore,
+    // The release gate's evidence seam (arch-review 7 P0): a series' release verdict IS the scorecard
+    // gate's decision — the same diff + evaluateGate a CI release gate runs, maxRegressions 0. The product
+    // layer composes trust-kernel decisions; it never re-derives "better or worse" from bare pass rates.
+    seriesGate: async (tenant, baselineId, candidateId) => {
+      const diff = await scorecardService.diff(tenant, baselineId, candidateId, {});
+      const evaluation = evaluateGate(diff, { maxRegressions: 0 });
+      return { decision: evaluation.decision, reasons: evaluation.reasons };
+    },
     capabilities: {
       hasDataset: async (tenant, id) => (await datasetRegistry.versions(tenant, id)).length > 0,
       hasHarness: async (tenant, id) => (await harnessInstanceRegistry.versions(tenant, id)).length > 0,
