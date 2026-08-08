@@ -686,3 +686,43 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(calls.some((c) => /SET segment_event_count = segment_event_count \+ \$1/.test(c.text))).toBe(true);
   });
 });
+
+describe("ScorecardStore update guard — the append-only ledgers are append-only in the database too (I5)", () => {
+  it("InMemory: a guard miss answers undefined like a missing id — the caller's conflict signal", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create({
+      id: "g1",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    // Expecting an empty gates ledger commits…
+    expect(await store.update("g1", { gates: [] }, undefined, { expectGatesCount: 0 })).toBeDefined();
+    // …but expecting a length the row no longer has refuses, and the row is untouched.
+    const miss = await store.update("g1", { updatedAt: "t2" }, undefined, { expectScoringCount: 5 });
+    expect(miss).toBeUndefined();
+    expect((await store.get("g1"))?.updatedAt).toBe("t");
+  });
+
+  it("Pg: the guard rides the UPDATE's WHERE — a moved ledger matches zero rows instead of overwriting it", async () => {
+    const calls: Array<{ text: string; params?: unknown[] }> = [];
+    const client = {
+      async query(text: string, params?: unknown[]) {
+        calls.push({ text, params });
+        return { rows: [] };
+      },
+    };
+    const store = new PgScorecardStore(client as ConstructorParameters<typeof PgScorecardStore>[0]);
+    const out = await store.update("g1", { updatedAt: "t2" }, undefined, {
+      expectScoringCount: 2,
+      expectGatesCount: 1,
+    });
+    expect(out).toBeUndefined(); // zero rows matched = the conflict signal
+    expect(calls[0]?.text).toContain("coalesce(jsonb_array_length(scoring), 0) =");
+    expect(calls[0]?.text).toContain("coalesce(jsonb_array_length(gates), 0) =");
+    expect(calls[0]?.params?.slice(-2)).toEqual([2, 1]);
+  });
+});

@@ -41,6 +41,7 @@ import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { refreshSnapshotRefs } from "../ports/artifact-store.js";
+import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
@@ -1456,13 +1457,45 @@ export class ScorecardService {
       ],
       { newId: this.newId, now: this.now },
     );
-    await this.deps.store.update(
+    // Guarded append (I5): two concurrent gates both reading [old...] used to have the last writer eat the
+    // other's decision — a lost GateDecision is a governance-audit defect. A guard miss re-reads and
+    // re-appends on top of whatever landed; both decisions survive.
+    await this.appendGate(
       input.candidate,
-      { gates: [...(record.gates ?? []), decision], updatedAt: this.now() },
+      record,
+      decision,
       facts.map((f) => f.record),
     );
     if (facts.length > 0) void this.deps.events?.pushPersisted?.(facts);
     return decision;
+  }
+
+  // Append one decision to the gates ledger under the optimistic guard, retrying the read-append on a
+  // concurrent writer. Bounded: three straight misses on one row means something is spinning — refuse loudly.
+  private async appendGate(
+    candidateId: string,
+    read: ScorecardRecord,
+    decision: GateDecision,
+    events: OutboxEvent[],
+  ): Promise<void> {
+    let current: ScorecardRecord | undefined = read;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!current) throw new NotFoundError("NOT_FOUND", { scorecard: candidateId }, "scorecard not found.");
+      const gates = current.gates ?? [];
+      const updated = await this.deps.store.update(
+        candidateId,
+        { gates: [...gates, decision], updatedAt: this.now() },
+        events,
+        { expectGatesCount: gates.length },
+      );
+      if (updated !== undefined) return;
+      current = await this.deps.store.get(candidateId); // a concurrent decision landed — append on top of it
+    }
+    throw new ConflictError(
+      "CONFLICT",
+      { scorecard: candidateId },
+      "the gate ledger kept moving under this decision — retry.",
+    );
   }
 
   // B1 — the recorded force: overriding a BLOCK ships anyway, with who and why. Only a blocking decision can
@@ -1508,11 +1541,21 @@ export class ScorecardService {
       ],
       { newId: this.newId, now: this.now },
     );
-    await this.deps.store.update(
+    // Guarded rewrite (I5): an override maps the array in place, so a concurrent gate append between the
+    // read and this write would be eaten. A guard miss = the ledger moved — surface the conflict; the
+    // caller re-reads and re-issues (the decision being overridden is still there).
+    const updated = await this.deps.store.update(
       input.candidate,
       { gates: gates.map((g) => (g.id === decision.id ? overridden : g)), updatedAt: this.now() },
       facts.map((f) => f.record),
+      { expectGatesCount: gates.length },
     );
+    if (updated === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: input.candidate, gate: decision.id },
+        "the gate ledger moved while recording this override — retry.",
+      );
     if (facts.length > 0) void this.deps.events?.pushPersisted?.(facts);
     return overridden;
   }

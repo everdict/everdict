@@ -28,13 +28,30 @@ export interface ScorecardListFilter {
   kind?: "experiment" | "scorecard";
 }
 
+// The append-only ledgers' optimistic guard (arch-review 7 P1, I5): `scoring` and `gates` are written as
+// whole arrays, so two writers that both read [1] and write [1,2A] / [1,2B] silently LOSE an entry — a lost
+// GateDecision is a governance-audit defect, a lost revision breaks scoring identity. A caller appending to
+// either ledger states the length it read; the store commits ONLY if the persisted length still matches
+// (WHERE jsonb_array_length guard on Pg, the same check in memory). A guard miss returns undefined exactly
+// like a missing id — the caller just read the record, so undefined-under-guard IS the conflict signal
+// (retry-reread for gates, refuse for a scoring settle). Append tables are the named longer-term shape.
+export interface ScorecardUpdateGuard {
+  expectScoringCount?: number;
+  expectGatesCount?: number;
+}
+
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
 // Note: list intentionally omits the heavy `scorecard` (trace-included) field (summary only). Get the full thing via get.
 // `events`: E0 outbox rows (stamped facts from the aggregate transition) persisted ATOMICALLY with the write —
 // same contract as RunStore. A call site that passes none keeps its pre-outbox silence.
 export interface ScorecardStore {
   create(record: ScorecardRecord, events?: OutboxEvent[]): Promise<void>;
-  update(id: string, patch: Partial<ScorecardRecord>, events?: OutboxEvent[]): Promise<ScorecardRecord | undefined>;
+  update(
+    id: string,
+    patch: Partial<ScorecardRecord>,
+    events?: OutboxEvent[],
+    guard?: ScorecardUpdateGuard,
+  ): Promise<ScorecardRecord | undefined>;
   get(id: string): Promise<ScorecardRecord | undefined>;
   list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
   // Hard delete (scorecards are result records, not versioned reproducibility artifacts — no tombstone).

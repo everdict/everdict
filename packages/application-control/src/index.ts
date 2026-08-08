@@ -72,7 +72,7 @@ export type {
 } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
-export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";
+export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
 export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";

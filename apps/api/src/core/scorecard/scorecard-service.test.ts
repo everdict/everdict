@@ -6097,3 +6097,48 @@ describe("ScorecardService.gate — the decision pins the revision it actually d
     expect(decision.baselineScoring).toEqual({ revision: 1, scorePlaneDigest: "sha256:plane-1" });
   });
 });
+
+describe("ScorecardService.gate — concurrent decisions both survive the ledger (I5)", () => {
+  it("two interleaved gates converge to BOTH decisions — the guard turns last-writer-wins into read-reappend", async () => {
+    // Pre-fix, both writers read gates=[] and wrote whole arrays [G1] / [G2] — the last one silently ATE the
+    // other's decision (a governance-audit defect: an audit that counts decisions must see every one).
+    const rev1 = {
+      revision: 1,
+      kind: "initial" as const,
+      judges: [{ id: "q", version: "1.0.0" }],
+      scorePlaneDigest: "sha256:plane-1",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    };
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: scorecard(true), scoring: [rev1] }));
+    await store.create(record("cand", { scorecard: scorecard(true), scoring: [rev1] }));
+    const service = svc(store);
+    // Interleave: hold BOTH gates' appends until each has read the empty ledger, then release them together.
+    const originalUpdate = store.update.bind(store);
+    let holdFirst: ((v: void) => void) | undefined;
+    const firstHeld = new Promise<void>((r) => {
+      holdFirst = r;
+    });
+    let appendsSeen = 0;
+    store.update = async (id, patch, events, guard) => {
+      if (patch.gates !== undefined) {
+        appendsSeen++;
+        if (appendsSeen === 1) {
+          // Hold the FIRST append until the SECOND has arrived having read the same empty ledger — the
+          // deterministic lost-update interleaving (a timer here would be a race about a race).
+          await Promise.race([firstHeld, new Promise((r) => setTimeout(r, 500))]);
+        } else if (appendsSeen === 2) {
+          holdFirst?.();
+        }
+      }
+      return originalUpdate(id, patch, events, guard);
+    };
+    const [d1, d2] = await Promise.all([
+      service.gate({ tenant: "acme", baseline: "base", candidate: "cand" }),
+      service.gate({ tenant: "acme", baseline: "base", candidate: "cand" }),
+    ]);
+    const final = await store.get("cand");
+    const ids = (final?.gates ?? []).map((g) => g.id).sort();
+    expect(ids).toEqual([d1.id, d2.id].sort()); // nothing eaten — both recorded
+  });
+});

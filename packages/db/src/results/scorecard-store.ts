@@ -3,6 +3,7 @@ import type { ScorecardRecord } from "@everdict/contracts";
 import type {
   OutboxEvent,
   PlatformEventStore,
+  ScorecardUpdateGuard,
   ScorecardListFilter,
   ScorecardStore,
 } from "@everdict/application-control";
@@ -23,9 +24,15 @@ export class InMemoryScorecardStore implements ScorecardStore {
     id: string,
     patch: Partial<ScorecardRecord>,
     events?: OutboxEvent[],
+    guard?: ScorecardUpdateGuard,
   ): Promise<ScorecardRecord | undefined> {
     const cur = this.cards.get(id);
     if (!cur) return undefined;
+    // The append-only ledgers' optimistic guard (I5) — a miss answers undefined like a missing id; the
+    // caller (which just read the record) treats it as the concurrent-writer conflict it is.
+    if (guard?.expectScoringCount !== undefined && (cur.scoring?.length ?? 0) !== guard.expectScoringCount)
+      return undefined;
+    if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.cards.set(id, next);
     await this.appendEvents(events);

@@ -1,4 +1,9 @@
-import type { OutboxEvent, ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
+import type {
+  OutboxEvent,
+  ScorecardListFilter,
+  ScorecardStore,
+  ScorecardUpdateGuard,
+} from "@everdict/application-control";
 import { type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
@@ -176,6 +181,7 @@ export class PgScorecardStore implements ScorecardStore {
     id: string,
     patch: Partial<ScorecardRecord>,
     events?: OutboxEvent[],
+    guard?: ScorecardUpdateGuard,
   ): Promise<ScorecardRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/summary/scorecard/error/steps/updatedAt).
     const sets: string[] = [];
@@ -291,12 +297,28 @@ export class PgScorecardStore implements ScorecardStore {
     }
     if (sets.length === 0) return this.get(id);
     vals.push(id);
+    const idIdx = i; // the id's 1-based parameter position — guard params follow it
+    // The append-only ledgers' optimistic guard (I5): the whole-array rewrite commits only if the persisted
+    // length still matches what the caller read — two racers both writing [1,2x] can no longer eat an entry.
+    // A guard miss matches zero rows and answers undefined, exactly like a missing id; the caller (which
+    // just read the record) treats it as the concurrent-writer conflict it is.
+    let guardSql = "";
+    if (guard?.expectScoringCount !== undefined) {
+      i++;
+      guardSql += ` AND coalesce(jsonb_array_length(scoring), 0) = $${i}`;
+      vals.push(guard.expectScoringCount);
+    }
+    if (guard?.expectGatesCount !== undefined) {
+      i++;
+      guardSql += ` AND coalesce(jsonb_array_length(gates), 0) = $${i}`;
+      vals.push(guard.expectGatesCount);
+    }
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
       const ev = eventValuesClause(events, vals.length + 1);
       const res = await this.client.query<ScorecardRow>(
-        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *),
+        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
                 WHERE EXISTS (SELECT 1 FROM upd))
@@ -306,7 +328,7 @@ export class PgScorecardStore implements ScorecardStore {
       return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
     }
     const res = await this.client.query<ScorecardRow>(
-      `UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;

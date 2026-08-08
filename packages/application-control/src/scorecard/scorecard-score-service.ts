@@ -372,11 +372,21 @@ export class ScorecardScoreService {
       this.now(),
     );
     const stamped = stampFacts(fresh.tenant, transition.facts, { newId: this.newId, now: this.now });
-    await this.deps.store.update(
+    // Guarded settle (I5): the revision appends ONLY onto the ledger length this pass read. A miss means a
+    // concurrent pass settled first (a stale-takeover's original waking late is the real shape) — the late
+    // settle REFUSES instead of eating the other pass's revision; its marker stays for the next takeover.
+    const settled = await this.deps.store.update(
       record.id,
       transition.patch,
       stamped.map((f) => f.record),
+      { expectScoringCount: fresh.scoring?.length ?? 0 },
     );
+    if (settled === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id },
+        "another scoring pass settled this group first — this pass's aggregate is refused (its revision would have overwritten the ledger).",
+      );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
   }
 
