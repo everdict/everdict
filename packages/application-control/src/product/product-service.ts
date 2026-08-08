@@ -284,6 +284,13 @@ export class ProductService {
     return record;
   }
 
+  // The workspace's releases, optionally one product's. A product filter is 404-scoped first so another
+  // workspace's product id cannot be probed through its releases.
+  async listReleases(tenant: string, productId?: string): Promise<ReleaseRecord[]> {
+    if (productId !== undefined) await this.get(tenant, productId);
+    return this.deps.releases.list(tenant, productId !== undefined ? { productId } : undefined);
+  }
+
   async getRelease(tenant: string, id: string): Promise<ReleaseRecord> {
     const record = await this.deps.releases.get(tenant, id);
     if (!record) throw new NotFoundError("NOT_FOUND", { id }, `release '${id}' not found.`);

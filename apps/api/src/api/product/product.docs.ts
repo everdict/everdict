@@ -30,6 +30,7 @@ export const productDocs: Record<
   | "delete"
   | "sync"
   | "createRelease"
+  | "listReleases"
   | "getRelease"
   | "updateRelease"
   | "setReleaseStatus"
@@ -154,6 +155,18 @@ export const productDocs: Record<
     response: {
       201: { description: "The planned release", ...toJsonSchema(ReleaseRecordSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  listReleases: {
+    summary: "List the workspace's releases",
+    description:
+      "Every product's releases, newest plan first — the read a picker needs. Optional ?product= narrows to " +
+      "one product's. Requires issues:read.",
+    tags: ["product"],
+    querystring: toJsonSchema(z.object({ product: z.string().optional() })),
+    response: {
+      200: { description: "The releases", ...toJsonSchema(z.array(ReleaseRecordSchema)) },
+      ...errorResponses(401, 403, 404),
     },
   },
   getRelease: {

@@ -232,6 +232,27 @@ export function registerProductRoutes(app: FastifyInstance, deps: ServerDeps): v
     },
   );
 
+  // The workspace's releases across every product — the read a picker needs ("attach this issue to a
+  // release" offers what exists, not a free-text id). Optional ?product= narrows to one product's.
+  app.get("/releases", { schema: productDocs.listReleases }, async (req, reply) => {
+    if (!deps.productService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "product service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const query = z.object({ product: z.string().optional() }).safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    try {
+      return reply.send(await deps.productService.listReleases(principal.workspace, query.data.product));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // Detail carries the readiness read — open linked issues + every watched series against its baseline. It is
   // a fan-out, which is why the product detail's release list never serves it.
   app.get<{ Params: { id: string } }>("/releases/:id", { schema: productDocs.getRelease }, async (req, reply) => {

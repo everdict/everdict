@@ -950,6 +950,9 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // 워크스페이스 전체 릴리즈(피커의 read) — ?product= 로 한 프로덕트로 좁힐 수 있다.
+  listReleases: <T>(auth: AuthContext, product?: string) =>
+    call<T>(auth, product ? `/releases?product=${encodeURIComponent(product)}` : '/releases'),
   getRelease: <T>(auth: AuthContext, id: string) => call<T>(auth, `/releases/${encodeURIComponent(id)}`),
   updateRelease: <T>(auth: AuthContext, id: string, patch: unknown) =>
     call<T>(auth, `/releases/${encodeURIComponent(id)}`, {

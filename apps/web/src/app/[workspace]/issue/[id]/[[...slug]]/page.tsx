@@ -9,8 +9,10 @@ import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/is
 import {
   IssueCapabilityControl,
   IssueMentionControl,
+  IssueTimelineLinkControl,
   type CapabilityOption,
 } from '@/features/issue-links'
+import { productsSchema, releaseSchema, type Product as TimelineProduct, type Release } from '@/entities/product'
 import {
   CreateIssueButton,
   IssueActions,
@@ -209,6 +211,8 @@ export default async function IssueDetailPage({
     datasets,
     judges,
     mentionedBy,
+    timelineProducts,
+    releases,
   ] = await Promise.all([
     controlPlane
       .listIssueScorecards(ctx, current.id)
@@ -285,6 +289,16 @@ export default async function IssueDetailPage({
       .listIssues(ctx, { linkType: 'issue', linkId: current.id, limit: MENTION_WINDOW })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
+    // 프로덕트 타임라인의 두 줄(프로덕트·릴리즈) — 링크는 UUID 를 저장하므로 이름으로 풀어 그릴 목록이
+    // 필요하고, 릴리즈 게이트가 이 링크를 세므로 고르는 것이 곧 게이트의 근거가 된다.
+    controlPlane
+      .listProducts(ctx)
+      .then((r) => productsSchema.parse(r))
+      .catch((): TimelineProduct[] => []),
+    controlPlane
+      .listReleases(ctx)
+      .then((r) => releaseSchema.array().parse(r))
+      .catch((): Release[] => []),
   ])
 
   // 이 이슈가 언급한 이슈들 — 링크는 UUID 만 들고 있어 그 자체로는 아무 말도 하지 않는다. 그리려면 식별자·
@@ -658,6 +672,36 @@ export default async function IssueDetailPage({
               return (
                 <PropertyRow key={kind} label={tracker(`linkType.${kind}`)}>
                   <IssueCapabilityControl
+                    workspace={workspace}
+                    issueId={current.id}
+                    type={kind}
+                    links={linked}
+                    options={options}
+                    canWrite={canWrite}
+                  />
+                </PropertyRow>
+              )
+            })}
+            {/* 프로덕트 타임라인 — 이 이슈가 속한 프로덕트와, 막고 있는 릴리즈. 릴리즈 게이트는 이 링크의
+                역방향 질의로 열린 이슈를 세므로, 여기서 거는 한 번이 곧 "이 릴리즈는 이 이슈가 끝나야 나간다"다.
+                고를 것도 걸린 것도 없는 종류는 줄을 내지 않는다(빈 섹션 숨김). */}
+            {(['product', 'release'] as const).map((kind) => {
+              const linked = current.links.filter((link) => link.type === kind)
+              const options =
+                kind === 'product'
+                  ? timelineProducts.map((p) => ({ id: p.id, label: p.name }))
+                  : releases.map((r) => {
+                      const owner = timelineProducts.find((p) => p.id === r.productId)
+                      return {
+                        id: r.id,
+                        label: owner !== undefined ? `${owner.name} · ${r.name}` : r.name,
+                        ...(r.targetDate !== undefined ? { hint: r.targetDate } : {}),
+                      }
+                    })
+              if (linked.length === 0 && !(canWrite && options.length > 0)) return null
+              return (
+                <PropertyRow key={kind} label={tracker(`linkType.${kind}`)}>
+                  <IssueTimelineLinkControl
                     workspace={workspace}
                     issueId={current.id}
                     type={kind}

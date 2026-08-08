@@ -12,7 +12,12 @@ import {
   type ProductDetail,
   type ProductTimeline,
 } from '@/entities/product'
-import { PlanReleaseButton, SyncProductButton } from '@/features/manage-product'
+import {
+  AutoEvalToggle,
+  PlanReleaseButton,
+  ProductActionsMenu,
+  SyncProductButton,
+} from '@/features/manage-product'
 import { ProductTimelineView } from '@/widgets/product-timeline'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -71,12 +76,18 @@ export default async function ProductPage({
         description={product.description}
         actions={
           canWrite ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <AutoEvalToggle
+                productId={product.id}
+                enabled={product.autoEval.enabled}
+                {...(product.autoEval.runtime !== undefined ? { runtime: product.autoEval.runtime } : {})}
+              />
               <SyncProductButton productId={product.id} />
               <PlanReleaseButton
                 productId={product.id}
                 seriesOptions={product.series.map((s) => ({ key: s.key, label: s.label }))}
               />
+              <ProductActionsMenu workspace={workspace} productId={product.id} />
             </div>
           ) : null
         }

@@ -5,12 +5,14 @@ import { issueHref, issuePageSchema, IssueStatusBadge } from '@/entities/issue'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
 import {
   productHref,
+  productSchema,
   releaseDetailSchema,
   ReleaseStatusBadge,
+  type Product,
   type ReleaseDetail,
 } from '@/entities/product'
 import { TrackerHistory } from '@/entities/tracker-history'
-import { ReleaseStatusControl } from '@/features/manage-product'
+import { ReleaseActionsMenu, ReleaseStatusControl } from '@/features/manage-product'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -40,6 +42,13 @@ export default async function ReleasePage({
   } catch {
     notFound()
   }
+  // 편집 다이얼로그의 시리즈 선택지 — 프로덕트가 선언한 것만(없는 키는 400 이다). 실패해도 화면은 뜬다.
+  let product: Product | undefined
+  try {
+    product = productSchema.parse(await controlPlane.getProduct(ctx, release.productId))
+  } catch {
+    product = undefined
+  }
 
   // 이 릴리즈에 링크된 이슈들 — 역방향 질의 하나. 게이트의 openIssues 와 같은 근거다.
   const linkedIssues = await controlPlane
@@ -67,7 +76,18 @@ export default async function ReleasePage({
           </span>
         }
         description={release.description}
-        actions={canWrite ? <ReleaseStatusControl releaseId={release.id} status={release.status} /> : null}
+        actions={
+          canWrite ? (
+            <div className="flex items-center gap-2">
+              <ReleaseStatusControl releaseId={release.id} status={release.status} />
+              <ReleaseActionsMenu
+                workspace={workspace}
+                release={release}
+                seriesOptions={(product?.series ?? []).map((s) => ({ key: s.key, label: s.label }))}
+              />
+            </div>
+          ) : null
+        }
       />
 
       <p className="text-sm">

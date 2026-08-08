@@ -4927,7 +4927,9 @@
       "scorecard": "Scorecard",
       "run": "Run",
       "view": "View",
-      "issue": "Mentions"
+      "issue": "Mentions",
+      "product": "Product",
+      "release": "Release"
     },
     "subject": {
       "issue": "issue",
@@ -5211,7 +5213,8 @@
     "searchIssuePlaceholder": "Search issues",
     "searching": "Searching…",
     "noIssueMatch": "No issues match.",
-    "mentionControlLabel": "Issues this one mentions"
+    "mentionControlLabel": "Issues this one mentions",
+    "missingTarget": "deleted target"
   },
   "projectsPage": {
     "title": "Projects",
@@ -5939,7 +5942,11 @@
       "cancelled": "Cancelled"
     },
     "removeSeries": "Remove {name}",
-    "removeJudge": "Remove {name}"
+    "removeJudge": "Remove {name}",
+    "editTitle": "Edit {name}",
+    "editDescription": "Lists replace what is there; a re-declared service keeps its sync watermark unless its source coordinates changed.",
+    "updateSubmit": "Save changes",
+    "updateError": "Failed to save the product."
   },
   "productPage": {
     "servicesHeading": "Tracked services",
@@ -5960,7 +5967,21 @@
     "versionsHeading": "Imported versions",
     "prerelease": "pre",
     "historyHeading": "History",
-    "subject": "product"
+    "subject": "product",
+    "timelineHeading": "Timeline",
+    "laneReleases": "Releases",
+    "laneIssues": "Issues",
+    "lanesAria": "Product timeline — releases, imported versions and issue lifespans on one time axis",
+    "actions": "Product actions",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteTitle": "Delete this product?",
+    "deleteBody": "Its releases and imported version ledger are deleted with it. Scorecards it fanned out stay.",
+    "deleteKeep": "Keep it",
+    "deleteConfirm": "Delete product",
+    "deleteError": "Failed to delete the product.",
+    "autoEval": "Auto-eval",
+    "autoEvalError": "Failed to change auto-eval."
   },
   "releasePage": {
     "backToProduct": "Back to product",
@@ -5989,6 +6010,23 @@
     "gateBlockedFallback": "Open linked issues or regressed series block this release.",
     "gateForceHint": "Shipping anyway is recorded as a forced release — it will never read as a clean one.",
     "gateKeepWorking": "Keep working",
-    "gateForceShip": "Ship anyway"
+    "gateForceShip": "Ship anyway",
+    "actions": "Release actions",
+    "edit": "Edit",
+    "delete": "Delete",
+    "editTitle": "Edit release",
+    "editName": "Name",
+    "editTargetDate": "Target date",
+    "editSeries": "Watched series",
+    "editSeriesAll": "All series",
+    "editSeriesRemove": "Remove {name}",
+    "editCancel": "Cancel",
+    "editSave": "Save",
+    "editError": "Failed to save the release.",
+    "deleteTitle": "Delete this release?",
+    "deleteBody": "Issues stay — only their link to this release goes with it.",
+    "deleteKeep": "Keep it",
+    "deleteConfirm": "Delete release",
+    "deleteError": "Failed to delete the release."
   }
 }

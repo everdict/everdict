@@ -12,7 +12,7 @@ import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 import { MultiSelect } from '@/shared/ui/multi-select'
 
-import { createProductAction } from '../api/products'
+import { createProductAction, updateProductAction } from '../api/products'
 
 interface ServiceRow {
   name: string
@@ -38,26 +38,60 @@ function slugOf(label: string): string {
     .slice(0, 64)
 }
 
-// 프로덕트 등록 폼. 선택지는 서버가 좁혀 온다(피커 규칙): 데이터셋/하네스/저지는 워크스페이스가 실제로
+// 폼이 미리 채워 받는 기존 프로덕트 — 있으면 수정 모드다. 서비스의 sync 상태는 폼이 만지지 않는다
+// (애그리게이트가 소스 좌표가 같은 한 워터마크를 이어 준다).
+export interface ProductFormInitial {
+  id: string
+  name: string
+  icon?: string
+  description?: string
+  services: { name: string; repository: string; source: 'releases' | 'tags'; tagPrefix?: string }[]
+  series: {
+    key: string
+    label: string
+    dataset: { id: string }
+    harness: { id: string }
+    judges: { id: string }[]
+  }[]
+}
+
+// 프로덕트 등록/수정 폼. 선택지는 서버가 좁혀 온다(피커 규칙): 데이터셋/하네스/저지는 워크스페이스가 실제로
 // 등록한 id 들이고, 컨트롤 플레인은 없는 id 를 400 으로 거절한다.
 export function ProductForm({
   workspace,
   datasetOptions,
   harnessOptions,
   judgeOptions,
+  initial,
 }: {
   workspace: string
   datasetOptions: string[]
   harnessOptions: string[]
   judgeOptions: string[]
+  initial?: ProductFormInitial
 }) {
   const t = useTranslations('productsPage')
   const router = useRouter()
-  const [name, setName] = useState('')
-  const [icon, setIcon] = useState('')
-  const [description, setDescription] = useState('')
-  const [services, setServices] = useState<ServiceRow[]>([])
-  const [series, setSeries] = useState<SeriesRow[]>([])
+  const [name, setName] = useState(initial?.name ?? '')
+  const [icon, setIcon] = useState(initial?.icon ?? '')
+  const [description, setDescription] = useState(initial?.description ?? '')
+  const [services, setServices] = useState<ServiceRow[]>(
+    (initial?.services ?? []).map((row) => ({
+      name: row.name,
+      repository: row.repository,
+      source: row.source,
+      tagPrefix: row.tagPrefix ?? '',
+    }))
+  )
+  const [series, setSeries] = useState<SeriesRow[]>(
+    (initial?.series ?? []).map((row) => ({
+      key: row.key,
+      label: row.label,
+      datasetId: row.dataset.id,
+      harnessId: row.harness.id,
+      judgeIds: row.judges.map((judge) => judge.id),
+    }))
+  )
   const [pending, setPending] = useState(false)
 
   function patchService(index: number, patch: Partial<ServiceRow>) {
@@ -90,15 +124,24 @@ export function ProductForm({
     void (async () => {
       setPending(true)
       try {
-        const r = await createProductAction({
-          name: name.trim(),
-          ...(description.trim().length > 0 ? { description: description.trim() } : {}),
-          ...(icon.trim().length > 0 ? { icon: icon.trim() } : {}),
-          ...(payloadServices.length > 0 ? { services: payloadServices } : {}),
-          ...(payloadSeries.length > 0 ? { series: payloadSeries } : {}),
-        })
+        // 수정은 결과 집합을 통째로 보낸다(리스트 치환 규칙) — 빈 리스트도 "전부 지웠다"는 진짜 답이다.
+        const r = initial
+          ? await updateProductAction(initial.id, {
+              name: name.trim(),
+              description: description.trim().length > 0 ? description.trim() : null,
+              icon: icon.trim().length > 0 ? icon.trim() : null,
+              services: payloadServices,
+              series: payloadSeries,
+            })
+          : await createProductAction({
+              name: name.trim(),
+              ...(description.trim().length > 0 ? { description: description.trim() } : {}),
+              ...(icon.trim().length > 0 ? { icon: icon.trim() } : {}),
+              ...(payloadServices.length > 0 ? { services: payloadServices } : {}),
+              ...(payloadSeries.length > 0 ? { series: payloadSeries } : {}),
+            })
         if (!r.ok || !r.product) {
-          toast.error(r.error ?? t('createError'))
+          toast.error(r.error ?? t(initial ? 'updateError' : 'createError'))
           return
         }
         router.push(productHref(workspace, r.product.id))
@@ -288,7 +331,7 @@ export function ProductForm({
       <div className="flex justify-end">
         <Button onClick={submit} disabled={pending || name.trim().length === 0}>
           {pending && <Loader2 className="size-3.5 animate-spin" />}
-          {t('createSubmit')}
+          {t(initial ? 'updateSubmit' : 'createSubmit')}
         </Button>
       </div>
     </div>

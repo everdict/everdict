@@ -208,6 +208,17 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   );
 
   server.registerTool(
+    "list_releases",
+    {
+      description:
+        "The workspace's releases across every product, newest plan first — what exists to attach an issue " +
+        "to or to ask readiness of. Optionally narrowed to one product.",
+      inputSchema: { product: z.string().optional() },
+    },
+    (a) => run(principal, "issues:read", async () => ok(await products.listReleases(ws, a.product))),
+  );
+
+  server.registerTool(
     "get_release",
     {
       description:

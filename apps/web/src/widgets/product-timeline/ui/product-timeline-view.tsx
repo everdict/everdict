@@ -12,6 +12,8 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { SectionHeader } from '@/shared/ui/section-header'
 
+import { TimelineLanes } from './timeline-lanes'
+
 // 프로덕트 타임라인 — 서버가 합성해 준 한 번의 read 를 그린다(웹은 파생하지 않는다).
 // 시리즈마다 선 차트 하나: x 는 그 시리즈의 배치 시각, 점을 고르면 그 스코어카드로 간다. 릴리즈와 버전은
 // 같은 축의 사건이라 차트 위아래에 스트립/피드로 눕는다 — 측정이 없던 지점은 null 로 선이 끊긴다(0 이 아니다).
@@ -42,6 +44,14 @@ export function ProductTimelineView({
 
   return (
     <div className="space-y-6">
+      {/* 비례 시간축 개요 — 언제 무슨 일이 있었나(릴리즈·버전·이슈). 시리즈의 품질 추이는 아래 차트가 답한다.
+          그릴 사건이 하나도 없으면 섹션째 숨긴다(빈 섹션 숨김). */}
+      {timeline.releases.length + timeline.versions.length + timeline.issues.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('timelineHeading')} />
+          <TimelineLanes workspace={workspace} timeline={timeline} />
+        </section>
+      )}
       {releaseStrip.length > 0 && (
         <section className="space-y-2.5">
           <SectionHeader title={t('releasesStrip')} />
