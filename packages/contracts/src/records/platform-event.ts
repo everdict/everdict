@@ -156,6 +156,9 @@ export const PLATFORM_EVENT_KINDS = [
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",
   "agent.run.awaiting_approval",
+  // Stopped WITHOUT completing, resumably — a budget halt (with its handoff status in the payload) or an
+  // armed wait. A fact, never a judgment: "suspended", not "gave up".
+  "agent.run.suspended",
   "agent.run.completed",
   "agent.run.failed",
   "agent.run.cancelled",
@@ -174,6 +177,7 @@ export type PlatformEventKind = z.infer<typeof PlatformEventKindSchema>;
 export const AGENT_RUN_EVENT_KIND_ALIASES = {
   "agent.run.started": "run.started",
   "agent.run.awaiting_approval": "run.awaiting_approval",
+  "agent.run.suspended": "run.suspended",
   "agent.run.completed": "run.completed",
   "agent.run.failed": "run.failed",
   "agent.run.cancelled": "run.cancelled",

@@ -504,10 +504,18 @@ export class Run {
   // agent.run.* family still carries the lifecycle events — flipping the emit to run.* requires the
   // subject-aware trigger-matcher guard first (the alias charter in contracts/platform-event.ts), or agent
   // completions would become trigger-matchable and reopen the runaway vector. `cancelled` maps onto the
-  // 4-status run lifecycle as failed{CANCELLED} until the session work (P6) widens it.
-  settleAgent(outcome: "completed" | "failed" | "cancelled", message: string, now: string): RunTransition {
+  // run lifecycle as failed{CANCELLED}. `suspended` is its own status: a budget halt or an armed wait
+  // stopped the run WITHOUT completing it — recording that as succeeded made "done" and "stopped mid-task"
+  // indistinguishable to every successor; a resume is a NEW run, so the suspended row settles like a
+  // terminal one (first write wins, never in-flight).
+  settleAgent(
+    outcome: "completed" | "failed" | "cancelled" | "suspended",
+    message: string,
+    now: string,
+  ): RunTransition {
     this.assertNotTerminal("settleAgent");
     if (outcome === "completed") return { patch: { status: "succeeded", updatedAt: now }, facts: [] };
+    if (outcome === "suspended") return { patch: { status: "suspended", updatedAt: now }, facts: [] };
     return {
       patch: {
         status: "failed",
@@ -538,8 +546,9 @@ export class Run {
   }
 
   // Terminal = the record's outcome is settled; nothing may rewrite it (first terminal write wins).
+  // `suspended` settles the ROW (a resume is a new run) while claiming "not done" — settled, not succeeded.
   isTerminal(): boolean {
-    return this.record.status === "succeeded" || this.record.status === "failed";
+    return this.record.status === "succeeded" || this.record.status === "failed" || this.record.status === "suspended";
   }
 
   // A command run settles on HAVING RUN — not on the command agreeing with us. A non-zero exit is the

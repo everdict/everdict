@@ -3,7 +3,11 @@ import { CaseResultSchema, EvalCaseSchema } from "../execution/eval-case.js";
 import { RunUsageSummarySchema } from "../execution/trace.js";
 
 // A run's lifecycle: accept → (scheduler queue/dispatch) → success/failure. The result store keeps this record.
-export const RunStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
+// `suspended` = stopped WITHOUT completing, resumably (an agent run halting at its envelope budget, or
+// parking on an armed wait). Settled like a terminal state — nothing rewrites the row, and it never counts
+// as in-flight — but the claim it makes is "not done yet", never "succeeded": a resume is a NEW run on the
+// ledger (the continuation-leg rule), so the suspended row stays the honest record of where work stopped.
+export const RunStatusSchema = z.enum(["queued", "running", "suspended", "succeeded", "failed"]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 export const RunErrorSchema = z.object({ code: z.string(), message: z.string() });

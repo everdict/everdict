@@ -202,9 +202,9 @@ const internal = {
     summary: "Record an agent-run lifecycle fact (internal)",
     description:
       "Agent service → event-log bridge (docs/architecture/agent-automation.md A5): the activation wrapper reports " +
-      "agent.run.started/completed/failed/cancelled so the fleet view + audit read one durable record. These kinds " +
+      "agent.run.started/suspended/completed/failed/cancelled so the fleet view + audit read one durable record. These kinds " +
       "are never trigger-matchable. Guarded by x-internal-token (403 on mismatch; fail-closed 404 when unset)." +
-      " With runId (P3), the same report also maintains the universal ledger: started opens Run{kind:agent}, a terminal report settles it (idempotent, at-least-once).",
+      " With runId (P3), the same report also maintains the universal ledger: started opens Run{kind:agent}, a terminal report settles it (idempotent, at-least-once); suspended settles it as stopped-without-completing (a budget halt or an armed wait — resumable via a new run).",
     tags: ["internal"],
     body: toJsonSchema(
       z.object({
@@ -212,6 +212,7 @@ const internal = {
         kind: z.enum([
           "agent.run.started",
           "agent.run.awaiting_approval",
+          "agent.run.suspended",
           "agent.run.completed",
           "agent.run.failed",
           "agent.run.cancelled",

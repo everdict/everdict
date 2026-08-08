@@ -279,6 +279,7 @@
     "statusSucceeded": "성공",
     "statusFailed": "실패",
     "statusRunning": "실행중",
+    "statusSuspended": "일시 중단",
     "statusQueued": "대기",
     "noRun": "실행 이력 없음",
     "sortName": "이름순",
@@ -531,6 +532,7 @@
     "statusSucceeded": "성공",
     "statusFailed": "실패",
     "statusRunning": "실행중",
+    "statusSuspended": "일시 중단",
     "statusQueued": "대기",
     "noRun": "실행 이력 없음",
     "sortName": "이름순",
@@ -1773,7 +1775,8 @@
       "ingestion_throttled": "수집 제한",
       "placement_blocked": "배치 대기",
       "circuit_opened": "차단",
-      "awaiting_approval": "승인 대기"
+      "awaiting_approval": "승인 대기",
+      "suspended": "일시 중단"
     },
     "activityDecision": {
       "approved": "승인됨",
@@ -2687,6 +2690,7 @@
   "scorecardList": {
     "statusSucceeded": "성공",
     "statusRunning": "실행중",
+    "statusSuspended": "일시 중단",
     "statusQueued": "대기",
     "statusFailed": "실패",
     "statusSuperseded": "대체됨",
@@ -3433,6 +3437,7 @@
     "statusSucceeded": "성공",
     "statusFailed": "실패",
     "statusRunning": "실행중",
+    "statusSuspended": "일시 중단",
     "statusQueued": "대기",
     "statusSuperseded": "대체됨",
     "statusCancelled": "중지됨",
@@ -4671,6 +4676,7 @@
     "status": {
       "running": "실행 중",
       "awaiting_approval": "승인 대기",
+      "suspended": "일시 중단",
       "completed": "완료",
       "failed": "실패",
       "cancelled": "중지됨"

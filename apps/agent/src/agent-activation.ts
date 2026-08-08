@@ -443,16 +443,31 @@ export class AgentActivator {
       // run, and a per-run bound is the same rule sub-agents follow.
       const envelope = this.envelopeFor(runId, spec, event);
       const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit, envelope);
-      if (outcome?.stopReason === "budget_exhausted")
-        await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome);
-      const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
+      const halted = outcome?.stopReason === "budget_exhausted";
+      const handoff = halted
+        ? await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome)
+        : undefined;
+      // Same rule as the activation leg: stopped-without-completing is SUSPENDED, never completed.
+      const settled = this.stopped.has(sessionId)
+        ? "cancelled"
+        : halted || outcome?.stopReason === "waiting"
+          ? "suspended"
+          : "completed";
       await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
       void this.report(
-        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.completed",
+        settled === "cancelled"
+          ? "agent.run.cancelled"
+          : settled === "suspended"
+            ? "agent.run.suspended"
+            : "agent.run.completed",
         event,
         agentId,
         sessionId,
-        `Agent ${agentId} run ${settled} (${opts.settleLabel}).`,
+        settled === "suspended"
+          ? halted
+            ? `Agent ${agentId} run suspended at its envelope budget (${opts.settleLabel}) — handoff ${handoff ?? "absent"}.`
+            : `Agent ${agentId} run suspended on an armed wait (${opts.settleLabel}).`
+          : `Agent ${agentId} run ${settled} (${opts.settleLabel}).`,
         runRef,
         ...(await this.turnEvidence(workspace, sessionId, baseSeq, outcome)),
       );
@@ -641,16 +656,33 @@ export class AgentActivator {
       const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit, envelope);
       // The halt owes a handoff. Published BEFORE the settle report and inside the try — the run's token is
       // revoked in the finally, and a checkpoint nobody could write is the failure halt_checkpoint names.
-      if (outcome?.stopReason === "budget_exhausted")
-        await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome);
-      const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
+      // Its outcome rides the suspend report: "resumable" is only claimed when the handoff actually landed.
+      const halted = outcome?.stopReason === "budget_exhausted";
+      const handoff = halted
+        ? await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome)
+        : undefined;
+      // A run that stopped WITHOUT completing — a budget halt, or an armed wait — is SUSPENDED, never
+      // completed: the checkpoint says "the work did not finish" and the lifecycle must not contradict it.
+      const settled = this.stopped.has(sessionId)
+        ? "cancelled"
+        : halted || outcome?.stopReason === "waiting"
+          ? "suspended"
+          : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
       void this.report(
-        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.completed",
+        settled === "cancelled"
+          ? "agent.run.cancelled"
+          : settled === "suspended"
+            ? "agent.run.suspended"
+            : "agent.run.completed",
         event,
         agentId,
         sessionId,
-        `Agent ${agentId} run ${settled} (${event.kind}).`,
+        settled === "suspended"
+          ? halted
+            ? `Agent ${agentId} run suspended at its envelope budget (${event.kind}) — handoff ${handoff ?? "absent"}.`
+            : `Agent ${agentId} run suspended on an armed wait (${event.kind}).`
+          : `Agent ${agentId} run ${settled} (${event.kind}).`,
         runRef,
         ...(await this.turnEvidence(event.workspace, sessionId, undefined, outcome)), // fresh session — the whole transcript is this run's
       );
@@ -697,6 +729,9 @@ export class AgentActivator {
   // the control plane's ledger, which is a resolvable reference. Everything about what the work ACHIEVED is
   // the agent's transcript, which the host never read, so it goes in hypotheses where a successor will treat
   // it as something to check rather than something to build on.
+  // Returns the handoff's fate — "published" | "failed" | "absent" — because the suspend report must not
+  // claim more than what happened: a run whose checkpoint publication failed is still suspended (the stop is
+  // real), but it is NOT resumable-from-checkpoint, and the fact says so instead of implying it.
   private async publishHalt(
     agentToken: string,
     envelope: ActivationEnvelope,
@@ -705,9 +740,9 @@ export class AgentActivator {
     sessionId: string,
     event: ActivationEvent,
     outcome: TurnOutcome,
-  ): Promise<void> {
+  ): Promise<"published" | "failed" | "absent"> {
     const publish = this.deps.publishCheckpoint;
-    if (!publish) return;
+    if (!publish) return "absent";
     const spent = outcome.usage ? outcome.usage.inputTokens + outcome.usage.outputTokens : undefined;
     try {
       await publish(agentToken, {
@@ -741,13 +776,16 @@ export class AgentActivator {
         risks: [],
         validationPlan: `Read run ${runId}'s sealed trajectory to determine what was actually applied, then verify the goal independently before declaring it done.`,
       });
+      return "published";
     } catch (err) {
       // Best-effort by contract — the halt is already a fact on the event log; a checkpoint the control plane
-      // refused (or could not be reached for) must not turn a bounded stop into a failed run.
+      // refused (or could not be reached for) must not turn a bounded stop into a failed run. The caller
+      // records the failure on the suspend fact instead of claiming a resumable handoff that does not exist.
       console.error(
         `[agent] failed to publish halt checkpoint for ${agentId}:`,
         err instanceof Error ? err.message : err,
       );
+      return "failed";
     }
   }
 
@@ -800,6 +838,7 @@ export class AgentActivator {
     kind:
       | "agent.run.started"
       | "agent.run.awaiting_approval"
+      | "agent.run.suspended"
       | "agent.run.completed"
       | "agent.run.failed"
       | "agent.run.cancelled",

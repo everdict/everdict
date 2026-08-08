@@ -123,7 +123,8 @@ export const runSchema = z.object({
   tenant: z.string(),
   harness: z.object({ id: z.string(), version: z.string() }),
   caseId: z.string(),
-  status: z.enum(['queued', 'running', 'succeeded', 'failed']),
+  // suspended = an agent run stopped WITHOUT completing, resumably (budget halt / armed wait) — settled, not succeeded.
+  status: z.enum(['queued', 'running', 'suspended', 'succeeded', 'failed']),
   // executable family (universal-run shape, execution-model P0) — unset = a legacy eval run. Readers treat
   // undefined as "eval"; the console badges only the non-eval families (agent/command/sandbox/analysis).
   kind: z.enum(['eval', 'agent', 'command', 'sandbox', 'analysis']).optional(),

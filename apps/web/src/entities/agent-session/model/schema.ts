@@ -31,9 +31,11 @@ export const agentSessionOriginSchema = z.object({
 export type AgentSessionOrigin = z.infer<typeof agentSessionOriginSchema>
 
 // A headless run's lifecycle (the fleet view's status chip). Plain conversations have none.
+// suspended = stopped WITHOUT completing, resumably (a budget halt with its handoff, or an armed wait).
 export const AGENT_RUN_STATUSES = [
   'running',
   'awaiting_approval',
+  'suspended',
   'completed',
   'failed',
   'cancelled',

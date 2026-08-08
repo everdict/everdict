@@ -901,7 +901,7 @@ export class RunService {
 
   async settleAgentRun(
     id: string,
-    outcome: "completed" | "failed" | "cancelled",
+    outcome: "completed" | "failed" | "cancelled" | "suspended",
     message: string,
     trace?: TraceEvent[],
     // The turn's own spans, when the agent recorded them live (N6). Preferred over `trace`: the recorder saw

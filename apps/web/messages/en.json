@@ -279,6 +279,7 @@
     "statusSucceeded": "Succeeded",
     "statusFailed": "Failed",
     "statusRunning": "Running",
+    "statusSuspended": "Suspended",
     "statusQueued": "Queued",
     "noRun": "No runs",
     "sortName": "Name",
@@ -531,6 +532,7 @@
     "statusSucceeded": "Succeeded",
     "statusFailed": "Failed",
     "statusRunning": "Running",
+    "statusSuspended": "Suspended",
     "statusQueued": "Queued",
     "noRun": "No runs",
     "sortName": "Name",
@@ -1773,7 +1775,8 @@
       "ingestion_throttled": "ingestion throttled",
       "placement_blocked": "placement blocked",
       "circuit_opened": "circuit opened",
-      "awaiting_approval": "awaiting approval"
+      "awaiting_approval": "awaiting approval",
+      "suspended": "suspended"
     },
     "activityDecision": {
       "approved": "approved",
@@ -2687,6 +2690,7 @@
   "scorecardList": {
     "statusSucceeded": "Succeeded",
     "statusRunning": "Running",
+    "statusSuspended": "Suspended",
     "statusQueued": "Queued",
     "statusFailed": "Failed",
     "statusSuperseded": "Superseded",
@@ -3433,6 +3437,7 @@
     "statusSucceeded": "Succeeded",
     "statusFailed": "Failed",
     "statusRunning": "Running",
+    "statusSuspended": "Suspended",
     "statusQueued": "Queued",
     "statusSuperseded": "Superseded",
     "statusCancelled": "Cancelled",
@@ -4671,6 +4676,7 @@
     "status": {
       "running": "Running",
       "awaiting_approval": "Awaiting approval",
+      "suspended": "Suspended",
       "completed": "Completed",
       "failed": "Failed",
       "cancelled": "Cancelled"

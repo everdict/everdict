@@ -17,6 +17,8 @@ const MAP: Record<
   succeeded: { tone: 'success', labelKey: 'statusSucceeded' },
   failed: { tone: 'danger', labelKey: 'statusFailed' },
   running: { tone: 'info', labelKey: 'statusRunning', pulse: true },
+  // Stopped without completing, resumably (budget halt / armed wait) — attention, not failure.
+  suspended: { tone: 'info', labelKey: 'statusSuspended' },
   queued: { tone: 'neutral', labelKey: 'statusQueued' },
   superseded: { tone: 'neutral', labelKey: 'statusSuperseded' },
   cancelled: { tone: 'neutral', labelKey: 'statusCancelled' },
@@ -43,6 +45,7 @@ const ICON_CLASS: Record<PillStatus, string> = {
   succeeded: 'text-[var(--color-success)]',
   failed: 'text-destructive',
   running: 'text-primary',
+  suspended: 'text-primary',
   queued: 'text-muted-foreground',
   superseded: 'text-faint',
   cancelled: 'text-faint',

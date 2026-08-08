@@ -205,6 +205,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         kind: z.enum([
           "agent.run.started",
           "agent.run.awaiting_approval",
+          "agent.run.suspended",
           "agent.run.completed",
           "agent.run.failed",
           "agent.run.cancelled",
@@ -306,7 +307,13 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
           });
       } else if (kind !== "agent.run.awaiting_approval") {
         const outcome =
-          kind === "agent.run.completed" ? "completed" : kind === "agent.run.cancelled" ? "cancelled" : "failed";
+          kind === "agent.run.completed"
+            ? "completed"
+            : kind === "agent.run.cancelled"
+              ? "cancelled"
+              : kind === "agent.run.suspended"
+                ? "suspended"
+                : "failed";
         await deps.service.settleAgentRun(runId, outcome, message, body.data.trace, body.data.spans);
       }
     }

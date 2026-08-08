@@ -89,6 +89,7 @@ const ACTIVITY_AXIS_BY_KIND = {
   // The agent at work — its runs and the gate a parked mutation waits at.
   "agent.run.started": "agent",
   "agent.run.awaiting_approval": "agent",
+  "agent.run.suspended": "agent",
   "agent.run.completed": "agent",
   "agent.run.failed": "agent",
   "agent.run.cancelled": "agent",

@@ -27,6 +27,7 @@ const POLL_MS = 5000
 const STATUS_TONE: Record<AgentRunStatus, 'neutral' | 'success' | 'danger' | 'warning' | 'info'> = {
   running: 'info',
   awaiting_approval: 'warning',
+  suspended: 'warning', // stopped without completing (budget halt / armed wait) — attention, not failure
   completed: 'success',
   failed: 'danger',
   cancelled: 'neutral',

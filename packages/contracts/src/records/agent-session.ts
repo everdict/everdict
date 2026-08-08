@@ -50,7 +50,18 @@ export type AgentSessionOrigin = z.infer<typeof AgentSessionOriginSchema>;
 
 // A headless run's lifecycle (the observability anchor — agent-automation A4). Chat sessions have no status
 // (a conversation is not a run); the agent service's activation wrapper owns the transitions.
-export const AGENT_RUN_STATUSES = ["running", "awaiting_approval", "completed", "failed", "cancelled"] as const;
+// `suspended` = the run STOPPED WITHOUT COMPLETING, resumably: a budget-exhausted halt (halt_checkpoint) or
+// an armed wait. Calling those `completed` made "the work is done" and "the work stopped mid-task at its
+// boundary" the same status — the exact distinction a successor (human or automation) decides its next
+// action from.
+export const AGENT_RUN_STATUSES = [
+  "running",
+  "awaiting_approval",
+  "suspended",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
 export const AgentRunStatusSchema = z.enum(AGENT_RUN_STATUSES);
 export type AgentRunStatus = z.infer<typeof AgentRunStatusSchema>;
 

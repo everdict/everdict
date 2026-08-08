@@ -42,6 +42,7 @@ export interface AgentRunEventReport {
   kind:
     | "agent.run.started"
     | "agent.run.awaiting_approval"
+    | "agent.run.suspended"
     | "agent.run.completed"
     | "agent.run.failed"
     | "agent.run.cancelled";

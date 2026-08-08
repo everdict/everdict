@@ -144,6 +144,13 @@ successor treats it as something to check rather than something to build on. Pub
 contract: a control plane that refuses the checkpoint must not turn a bounded stop into a failed run, and the
 halt is already a fact on the event log.
 
+**The lifecycle says what the checkpoint says.** A halted run settles as **`suspended`** — on the session AND
+on the universal run ledger — never `completed`: the checkpoint's own words are "the run halted before
+reporting completion", and a status that contradicts them makes "done" and "stopped mid-task" the same claim.
+The `agent.run.suspended` fact carries the handoff's actual fate (`published` | `failed` | `absent`), so
+"resumable from a checkpoint" is only ever claimed when one landed. A turn parking on an **armed wait**
+suspends the same way — waiting is not completion; the wake resumes it as a new run.
+
 A **scope refusal produces no checkpoint**, and that is not an omission: `refuse_and_replan` returns the
 refusal to the model as a tool result and the run continues. There is no halt to hand off from.
 

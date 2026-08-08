@@ -174,7 +174,7 @@ function activator(opts: {
   const keyStore = opts.keyStore ?? keyStoreStub();
   const mailbox = new AgentMailbox();
   const runs: Array<{ sessionId: string; token: string }> = [];
-  const reports: Array<{ kind: string; runId?: string; trace?: TraceEvent[] }> = [];
+  const reports: Array<{ kind: string; runId?: string; trace?: TraceEvent[]; message?: string }> = [];
   const instance = new AgentActivator({
     registry: opts.registry,
     keyStore,
@@ -191,6 +191,7 @@ function activator(opts: {
         kind: input.kind,
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.trace ? { trace: input.trace } : {}),
+        ...(input.message ? { message: input.message } : {}),
       });
     },
     now: () => new Date().toISOString(),
@@ -878,7 +879,10 @@ describe("activation task envelopes", () => {
     expect(published).toHaveLength(0);
   });
 
-  it("a control plane that refuses the handoff does not turn a bounded stop into a failed run", async () => {
+  it("a control plane that refuses the handoff does not turn a bounded stop into a failed run — it suspends, and says the handoff failed", async () => {
+    // Regression (review §10): a budget halt used to settle as COMPLETED — the checkpoint said "the work did
+    // not finish" while the lifecycle said "done", and a silently-failed checkpoint publication still claimed
+    // a resumable halt. The stop is real, so the run suspends; the fact names the handoff's actual fate.
     const { instance, reports } = activator({
       registry: registryOf(spec()),
       runTurn: async () => ({ stopReason: "budget_exhausted" }),
@@ -888,7 +892,38 @@ describe("activation task envelopes", () => {
     });
     await instance.onEvent(event());
     await instance.idle();
-    // The run still settles as completed — the halt is already a fact on the event log.
-    expect(reports.map((r) => r.kind)).toContain("agent.run.completed");
+    const kinds = reports.map((r) => r.kind);
+    expect(kinds).toContain("agent.run.suspended");
+    expect(kinds).not.toContain("agent.run.completed");
+    expect(kinds).not.toContain("agent.run.failed");
+    const suspend = reports.find((r) => r.kind === "agent.run.suspended");
+    expect(suspend?.message).toContain("handoff failed");
+  });
+
+  it("a budget halt with a PUBLISHED handoff suspends and claims it — never completed", async () => {
+    const { instance, reports } = activator({
+      registry: registryOf(spec()),
+      runTurn: async () => ({ stopReason: "budget_exhausted" }),
+      publishCheckpoint: async () => {},
+    });
+    await instance.onEvent(event());
+    await instance.idle();
+    const suspend = reports.find((r) => r.kind === "agent.run.suspended");
+    expect(suspend?.message).toContain("handoff published");
+  });
+
+  it("a turn parking on an armed wait suspends too — waiting is not completion", async () => {
+    // Regression: a headless run ending stopReason "waiting" also landed in the completed branch — the
+    // session sat armed for its wake while the ledger claimed the work was done.
+    const { instance, reports } = activator({
+      registry: registryOf(spec()),
+      runTurn: async () => ({ stopReason: "waiting" }),
+    });
+    await instance.onEvent(event());
+    await instance.idle();
+    const kinds = reports.map((r) => r.kind);
+    expect(kinds).toContain("agent.run.suspended");
+    expect(kinds).not.toContain("agent.run.completed");
+    expect(reports.find((r) => r.kind === "agent.run.suspended")?.message).toContain("armed wait");
   });
 });

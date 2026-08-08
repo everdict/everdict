@@ -15,7 +15,7 @@ import { runSchema, traceEventSchema } from '@/entities/run'
 export const sandboxTaskSummarySchema = z.object({
   runId: z.string(),
   caseId: z.string(),
-  status: z.enum(['queued', 'running', 'succeeded', 'failed']),
+  status: z.enum(['queued', 'running', 'suspended', 'succeeded', 'failed']),
   taskPreview: z.string(),
   submittedAt: z.string(),
   eventCount: z.number(),
@@ -53,7 +53,7 @@ export type SandboxList = z.infer<typeof sandboxListSchema>
 // One page of a task's trace. `nextCursor` is the index to poll from next; `done` = terminal, stop polling
 // (the same events then serve from the sealed trajectory, so a late replay still works).
 export const sandboxTaskTraceSchema = z.object({
-  status: z.enum(['queued', 'running', 'succeeded', 'failed']),
+  status: z.enum(['queued', 'running', 'suspended', 'succeeded', 'failed']),
   events: z.array(traceEventSchema),
   nextCursor: z.number(),
   done: z.boolean(),
