@@ -3,6 +3,7 @@ import {
   ForbiddenError,
   ISSUE_STATUSES,
   ISSUE_STATUS_CATEGORY,
+  type IssueRecord,
   NotFoundError,
   type ProductAutoEval,
   type ProductRecord,
@@ -14,7 +15,13 @@ import {
   type ReleaseStatus,
   type ScorecardRecord,
 } from "@everdict/contracts";
-import type { ProductDetailResponse, ReleaseDetailResponse } from "@everdict/contracts/wire";
+import type {
+  ProductDetailResponse,
+  ProductTimelineIssue,
+  ProductTimelineResponse,
+  ProductTimelineSeries,
+  ReleaseDetailResponse,
+} from "@everdict/contracts/wire";
 import {
   Product,
   type ProductEditInput,
@@ -44,6 +51,9 @@ const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
 
 // How much of the version ledger a detail read serves — the timeline's visible past, not an export.
 const DETAIL_VERSION_LIMIT = 100;
+
+// The timeline's default window when the caller names none — a quarter, the span a release conversation looks at.
+const TIMELINE_DEFAULT_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
 export interface ProductActor {
   subject: string;
@@ -182,6 +192,71 @@ export class ProductService {
       ...(filter?.service !== undefined ? { service: filter.service } : {}),
       ...(filter?.limit !== undefined ? { limit: filter.limit } : {}),
     });
+  }
+
+  // The product's time axis in ONE read (the pulse's treatment: composed from stores, drawn by the web):
+  // releases (all — a handful, and a planned date may sit beyond any window), the windowed version ledger,
+  // each watch series' scorecard points oldest-first, and the lifecycle markers of linked issues.
+  async timeline(
+    tenant: string,
+    id: string,
+    window?: { from?: string; to?: string },
+  ): Promise<ProductTimelineResponse> {
+    const product = await this.get(tenant, id);
+    const to = window?.to ?? this.now();
+    const from = window?.from ?? new Date(Date.parse(to) - TIMELINE_DEFAULT_WINDOW_MS).toISOString();
+    const releases = await this.deps.releases.list(tenant, { productId: id });
+    const versions = (await this.deps.versions.list(tenant, { productId: id })).filter(
+      (row) => row.publishedAt >= from && row.publishedAt <= to,
+    );
+    const series: ProductTimelineSeries[] = [];
+    for (const entry of product.series) {
+      const rows =
+        this.deps.scorecards === undefined
+          ? []
+          : await this.deps.scorecards.list(tenant, { productId: id, seriesKey: entry.key });
+      series.push({
+        key: entry.key,
+        label: entry.label,
+        points: rows
+          .filter((row) => row.createdAt >= from && row.createdAt <= to)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .map((row) => {
+            const rate = headlinePassRate(row);
+            return {
+              scorecardId: row.id,
+              status: row.status,
+              ...(rate !== null ? { passRate: rate } : {}),
+              createdAt: row.createdAt,
+              ...(row.origin?.serviceVersion !== undefined ? { serviceVersion: row.origin.serviceVersion } : {}),
+              ...(row.origin?.releaseId !== undefined ? { releaseId: row.origin.releaseId } : {}),
+            };
+          }),
+      });
+    }
+    const issues: ProductTimelineIssue[] = [];
+    if (this.deps.issues !== undefined) {
+      const seen = new Set<string>();
+      const collect = (rows: readonly IssueRecord[], releaseId?: string): void => {
+        for (const issue of rows) {
+          if (seen.has(issue.id)) continue;
+          seen.add(issue.id);
+          issues.push({
+            id: issue.id,
+            identifier: issue.identifier,
+            title: issue.title,
+            status: issue.status,
+            createdAt: issue.createdAt,
+            ...(issue.resolution?.at !== undefined ? { resolvedAt: issue.resolution.at } : {}),
+            ...(releaseId !== undefined ? { releaseId } : {}),
+          });
+        }
+      };
+      collect(await this.deps.issues.list(tenant, { link: { type: "product", id } }));
+      for (const release of releases)
+        collect(await this.deps.issues.list(tenant, { link: { type: "release", id: release.id } }), release.id);
+    }
+    return { window: { from, to }, releases, versions, series, issues };
   }
 
   // --- Releases -----------------------------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   MonitorDown,
   Network,
+  Package,
   Puzzle,
   ShieldCheck,
   Store,
@@ -99,6 +100,12 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'initiatives',
         icon: Target,
         keywords: 'initiative release readiness ship 이니셔티브 릴리스 준비',
+      },
+      {
+        href: '/products',
+        labelKey: 'products',
+        icon: Package,
+        keywords: 'product release timeline version ship github 프로덕트 제품 릴리스 버전 타임라인',
       },
       {
         href: '/projects',

@@ -917,6 +917,53 @@ export const controlPlane = {
     }),
   deleteInitiative: (auth: AuthContext, id: string) =>
     callVoid(auth, `/initiatives/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 프로덕트 타임라인(docs/architecture/product-timeline.md) — "무엇을 배포하는가"의 축.
+  listProducts: <T>(auth: AuthContext) => call<T>(auth, '/products'),
+  getProduct: <T>(auth: AuthContext, id: string) => call<T>(auth, `/products/${encodeURIComponent(id)}`),
+  // 서버가 스토어를 합성해 주는 타임라인 한 방 read — 릴리즈 + 버전 원장 + 시리즈 포인트 + 이슈 마커.
+  getProductTimeline: <T>(auth: AuthContext, id: string, window?: { from?: string; to?: string }) => {
+    const q = new URLSearchParams()
+    if (window?.from) q.set('from', window.from)
+    if (window?.to) q.set('to', window.to)
+    const qs = q.toString()
+    return call<T>(
+      auth,
+      qs
+        ? `/products/${encodeURIComponent(id)}/timeline?${qs}`
+        : `/products/${encodeURIComponent(id)}/timeline`,
+    )
+  },
+  createProduct: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/products', { method: 'POST', body: JSON.stringify(body) }),
+  updateProduct: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/products/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteProduct: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/products/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 지금 GitHub 을 당겨온다 — 첫 싱크는 백필(조용), 그 뒤의 새 버전이 워치 시리즈를 돌린다.
+  syncProduct: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/products/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+  createRelease: <T>(auth: AuthContext, productId: string, body: unknown) =>
+    call<T>(auth, `/products/${encodeURIComponent(productId)}/releases`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getRelease: <T>(auth: AuthContext, id: string) => call<T>(auth, `/releases/${encodeURIComponent(id)}`),
+  updateRelease: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/releases/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  // 릴리즈 게이트 — 열린 링크 이슈/회귀 시리즈를 이고 오는 409 계약(force 로만 넘는다).
+  setReleaseStatus: (auth: AuthContext, id: string, body: unknown) =>
+    callWithEnvelope(auth, `/releases/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteRelease: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/releases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listViews: <T>(auth: AuthContext) => call<T>(auth, '/views'),
   getView: <T>(auth: AuthContext, id: string) => call<T>(auth, `/views/${encodeURIComponent(id)}`),
   createView: <T>(auth: AuthContext, body: unknown) =>

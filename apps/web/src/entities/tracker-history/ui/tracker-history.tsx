@@ -286,6 +286,33 @@ function HistoryRow({
           ),
         }
       }
+      // 릴리즈가 나갔다(records/product.ts) — 강행 출하는 "깨끗이 나갔다"가 아니라 "알고도 나갔다"로 읽혀야
+      // 하므로, 프로젝트 완료와 같은 문법으로 forced/openIssues/회귀 시리즈를 칩으로 남긴다.
+      case 'released': {
+        const forced = detailFlag(detail, 'forced')
+        const openIssues = detailNumber(detail, 'openIssues')
+        const regressed = detailStrings(detail, 'regressedSeries')
+        const late = detail?.['onTime'] === false
+        return {
+          icon: CheckCircle2,
+          tone: forced ? 'warning' : 'success',
+          text: t('history.released', { subject }),
+          values: (
+            <>
+              {forced && <Badge tone="danger">{t('history.forced')}</Badge>}
+              {forced && openIssues !== undefined && openIssues > 0 && (
+                <Badge tone="outline">{t('history.openIssues', { count: openIssues })}</Badge>
+              )}
+              {regressed.map((key) => (
+                <Badge key={key} tone="danger">
+                  {key}
+                </Badge>
+              ))}
+              {late && <Badge tone="warning">{t('history.late')}</Badge>}
+            </>
+          ),
+        }
+      }
       case 'cancelled':
         return {
           icon: CircleSlash,

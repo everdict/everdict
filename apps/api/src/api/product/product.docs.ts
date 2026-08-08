@@ -3,6 +3,7 @@ import {
   ProductDetailResponseSchema,
   ProductListResponseSchema,
   ProductSyncResponseSchema,
+  ProductTimelineResponseSchema,
   ReleaseDetailResponseSchema,
 } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
@@ -24,6 +25,7 @@ export const productDocs: Record<
   | "list"
   | "get"
   | "listVersions"
+  | "timeline"
   | "update"
   | "delete"
   | "sync"
@@ -82,6 +84,22 @@ export const productDocs: Record<
     ),
     response: {
       200: { description: "The imported versions", ...toJsonSchema(z.array(ProductServiceVersionRecordSchema)) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  timeline: {
+    summary: "The product's time axis in one read",
+    description:
+      "Releases (past + planned), the windowed version ledger, each watch series' scorecard points (oldest " +
+      "first, with pass rate and the service version that triggered them), and the lifecycle markers of " +
+      "linked issues. Default window: the last 90 days. Requires issues:read.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    querystring: toJsonSchema(
+      z.object({ from: z.string().datetime().optional(), to: z.string().datetime().optional() }),
+    ),
+    response: {
+      200: { description: "The timeline", ...toJsonSchema(ProductTimelineResponseSchema) },
       ...errorResponses(401, 403, 404),
     },
   },

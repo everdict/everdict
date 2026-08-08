@@ -26,6 +26,49 @@ export const ReleaseDetailResponseSchema = ReleaseRecordSchema.extend({
 });
 export type ReleaseDetailResponse = z.infer<typeof ReleaseDetailResponseSchema>;
 
+// GET /products/:id/timeline — the product's time axis in one read: releases (past + planned), the windowed
+// version ledger, each watch series' scorecard points, and the lifecycle markers of linked issues. Composed
+// from stores on the server (the pulse's treatment) so the web draws, never derives.
+export const ProductSeriesPointSchema = z.object({
+  scorecardId: z.string(),
+  status: z.string(),
+  passRate: z.number().optional(),
+  createdAt: z.string(),
+  serviceVersion: z.string().optional(),
+  releaseId: z.string().optional(),
+});
+export type ProductSeriesPoint = z.infer<typeof ProductSeriesPointSchema>;
+
+export const ProductTimelineSeriesSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  points: z.array(ProductSeriesPointSchema), // oldest first — the drawing order
+});
+export type ProductTimelineSeries = z.infer<typeof ProductTimelineSeriesSchema>;
+
+// One linked issue's lifecycle on the axis: when it arrived, whether (and when) it was resolved, and where it
+// stands now — enough to draw a marker and link out, never the whole record.
+export const ProductTimelineIssueSchema = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  resolvedAt: z.string().optional(),
+  // Which release the issue is linked to, when it is release-linked rather than product-linked.
+  releaseId: z.string().optional(),
+});
+export type ProductTimelineIssue = z.infer<typeof ProductTimelineIssueSchema>;
+
+export const ProductTimelineResponseSchema = z.object({
+  window: z.object({ from: z.string(), to: z.string() }),
+  releases: z.array(ReleaseRecordSchema),
+  versions: z.array(ProductServiceVersionRecordSchema),
+  series: z.array(ProductTimelineSeriesSchema),
+  issues: z.array(ProductTimelineIssueSchema),
+});
+export type ProductTimelineResponse = z.infer<typeof ProductTimelineResponseSchema>;
+
 // POST /products/:id/sync — what the pull did, per service, and what it fanned out.
 export const ProductSyncResponseSchema = z.object({
   services: z.array(

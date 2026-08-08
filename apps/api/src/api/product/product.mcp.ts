@@ -99,6 +99,31 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   );
 
   server.registerTool(
+    "get_product_timeline",
+    {
+      description:
+        "The product's time axis in one read: releases (past + planned), the windowed version ledger, each " +
+        "watch series' scorecard points (oldest first, with pass rate and the triggering service version), " +
+        "and linked issues' lifecycle markers. Default window: the last 90 days. This is the read that " +
+        "answers 'how has the product moved between releases'.",
+      inputSchema: {
+        id: z.string(),
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+      },
+    },
+    (a) =>
+      run(principal, "issues:read", async () =>
+        ok(
+          await products.timeline(ws, a.id, {
+            ...(a.from !== undefined ? { from: a.from } : {}),
+            ...(a.to !== undefined ? { to: a.to } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
     "update_product",
     {
       description:
