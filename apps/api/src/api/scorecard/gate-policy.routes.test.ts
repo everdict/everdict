@@ -101,3 +101,54 @@ describe("POST /scorecards/gate — the metric-loss knob reaches the gate", () =
     await app.close();
   });
 });
+
+describe("POST /scorecards/gate — experiment identity refuses a confounded pair", () => {
+  const sealed = (id: string, datasetDigest: string): ScorecardRecord => ({
+    ...record(id, [result("a", ["tests_pass"])]),
+    manifest: {
+      dataset: { id: "smoke", version: id === "base" ? "1.0.0" : "2.0.0", digest: datasetDigest },
+      harness: { id: "h", version: "1" },
+    },
+  });
+
+  it("a dataset whose content differs is a DIFFERENT EXPERIMENT — not_comparable until acknowledged, recorded when it is", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(sealed("base", "sha256:content-a"));
+    await store.create(sealed("cand", "sha256:content-b"));
+    const app = buildServer({
+      service: new RunService({ dispatcher, store: new InMemoryRunStore() }),
+      scorecardService: new ScorecardService({
+        dispatcher,
+        store,
+        datasets: new InMemoryDatasetRegistry(),
+        harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+      }),
+    });
+    const refused = await app.inject({
+      method: "POST",
+      url: "/scorecards/gate",
+      headers: tenant,
+      payload: { baseline: "base", candidate: "cand" },
+    });
+    expect(refused.json().decision).toBe("not_comparable");
+    expect(refused.json().reasons[0].kind).toBe("confounded");
+    expect(refused.json().evidence.regressions).toBeUndefined(); // apparatus numbers are not computed
+
+    const acknowledged = await app.inject({
+      method: "POST",
+      url: "/scorecards/gate",
+      headers: tenant,
+      payload: { baseline: "base", candidate: "cand", policy: { allowConfounds: ["dataset_content"] } },
+    });
+    expect(acknowledged.json().decision).toBe("pass");
+    expect(
+      acknowledged
+        .json()
+        .reasons.some(
+          (r: { kind: string; detail: string }) => r.kind === "confounded" && r.detail.includes("accepted"),
+        ),
+    ).toBe(true);
+    expect(acknowledged.json().policy.allowConfounds).toEqual(["dataset_content"]); // recorded like a force
+    await app.close();
+  });
+});

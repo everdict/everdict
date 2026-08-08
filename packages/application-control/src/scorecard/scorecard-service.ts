@@ -1154,6 +1154,7 @@ export class ScorecardService {
       // unit tests (maxMetricLossFraction shipped exactly that way: read by the gate, reachable from nowhere).
       ...(p?.maxMetricLossFraction !== undefined ? { maxMetricLossFraction: p.maxMetricLossFraction } : {}),
       ...(p?.allowMetricKindChange !== undefined ? { allowMetricKindChange: p.allowMetricKindChange } : {}),
+      ...(p?.allowConfounds !== undefined ? { allowConfounds: p.allowConfounds } : {}),
       ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
       ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
       ...(p?.fdrAlpha !== undefined ? { fdrAlpha: p.fdrAlpha } : {}),

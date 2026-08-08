@@ -193,8 +193,26 @@ not_comparable`, only the first a green light. **The regression unit is the CASE
 `diff.caseTransitions` with `change: "broke"` (each side judged under its own stamped policy), the same unit
 the trials path gates statistically, so trials=1 and trials>1 decide on the same claim. Metric-level pass
 flips (`diff.regressions`) are diagnosis riding the reason text — a diagnostic judge flip on a case whose
-ground truth still passes never blocks, and one case losing three metrics is one regression. Two rules sit
-on top of the fail-closed comparability machinery (SSOT: `docs/architecture/metrics-commercialization.md`):
+ground truth still passes never blocks, and one case losing three metrics is one regression.
+
+**Experiment identity — the right to call it a regression.** A release comparison claims "same experiment,
+different treatment": the harness is the treatment, and the dataset content, grading plan and judge
+documents must be HELD CONSTANT or the delta measures the apparatus. `experimentIdentity(bManifest,
+cManifest)` (`@everdict/domain`) reads the two reproducibility manifests against each other and answers
+per axis in THREE states, never two: `held` (digests verify identical — a re-registered dataset version
+with the same content digest still holds), a `confound` (VERIFIED different — the gate refuses the pair as
+`not_comparable`, reason `confounded`, with **no verdict numbers computed**, unless the caller acknowledges
+the axis via `GatePolicy.allowConfounds`, which is then recorded on the decision like a force), or
+`unverified` (an unsealed pre-manifest side, or seals from different digest eras — information, reason
+`identity_unverified`, never a refusal: a claim of sameness would be as unfounded as one of difference).
+The read rides the diff as `diff.experiment` (HTTP + MCP + the compare page's banner). The verdict policy
+is deliberately not an axis — policy identity has its own owner (`resolvePolicyResolution` /
+`policyMismatch` / `policyUnresolvable`). Not yet modeled: runtime/OS as a **comparison cohort** (stratify
+`login × Windows` from `login × Ubuntu` instead of demanding identity) — the per-case `ExecutionManifest`
+fact exists, the stratified diff does not.
+
+Two further rules sit on top of the fail-closed comparability machinery
+(SSOT: `docs/architecture/metrics-commercialization.md`):
 
 - **Critical cases — the one place product judgment precedes statistics.** `VerdictPolicy.criticalCases`
   (matchers `{caseId: "login"}` or `{prefix: "auth/"}`) names cases whose failure is a product call, not a

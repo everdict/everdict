@@ -1,0 +1,160 @@
+import type { ScorecardManifest } from "@everdict/contracts";
+import { describe, expect, it } from "vitest";
+import { experimentIdentity } from "./experiment-identity.js";
+import { evaluateGate } from "./gate.js";
+import type { GateInput } from "./gate.js";
+
+// Experiment identity — the right to call a diff a regression. The manifest already seals what each batch
+// evaluated; these pin that the seals are read AGAINST EACH OTHER: same-experiment axes verify held, a
+// verified difference is a confound a gate refuses, and an unverifiable axis says so instead of guessing.
+
+const manifest = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => ({
+  dataset: { id: "bench", version: "7.0.0", digest: "sha256:aaaa" },
+  harness: { id: "agent", version: "1.0.0", specDigest: "sha256:hhhh" },
+  ...over,
+});
+
+describe("experimentIdentity — held / confound / unverified, never a guess", () => {
+  it("identical seals hold every axis — and the harness is deliberately not one (it is the treatment)", () => {
+    const id = experimentIdentity(
+      manifest({ harness: { id: "agent", version: "1.0.0" } }),
+      manifest({ harness: { id: "agent", version: "2.0.0" } }), // the treatment moved — not a confound
+    );
+    expect(id.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+    expect(id.confounds).toEqual([]);
+    expect(id.unverified).toEqual([]);
+  });
+
+  it("a dataset whose CONTENT differs is a verified confound — id/version labels do not decide", () => {
+    const id = experimentIdentity(
+      manifest(),
+      manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:bbbb" } }),
+    );
+    expect(id.confounds.map((c) => c.axis)).toEqual(["dataset_content"]);
+    expect(id.confounds[0]?.detail).toContain("bench@7.0.0");
+    // …and the same content under a re-registered version label is the SAME experiment.
+    const relabeled = experimentIdentity(
+      manifest(),
+      manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:aaaa" } }),
+    );
+    expect(relabeled.held).toContain("dataset_content");
+  });
+
+  it("one side running a grading-plan override while the other runs defaults is a confound", () => {
+    const id = experimentIdentity(manifest({ graders: "sha256:gggg" }), manifest());
+    expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+  });
+
+  it("a different judge selection — or the same selection with an edited document — is a confound", () => {
+    const j = (id: string, version: string, specDigest?: string) => ({
+      id,
+      version,
+      ...(specDigest ? { specDigest } : {}),
+    });
+    const selection = experimentIdentity(
+      manifest({ judges: [j("quality", "1", "sha256:j1")] }),
+      manifest({ judges: [j("style", "1", "sha256:j2")] }),
+    );
+    expect(selection.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
+    const edited = experimentIdentity(
+      manifest({ judges: [j("quality", "1", "sha256:j1")] }),
+      manifest({ judges: [j("quality", "1", "sha256:j1-edited")] }),
+    );
+    expect(edited.confounds[0]?.detail).toContain("same id@version, different judge");
+    const unsealedJudge = experimentIdentity(
+      manifest({ judges: [j("quality", "1")] }),
+      manifest({ judges: [j("quality", "1", "sha256:j1")] }),
+    );
+    expect(unsealedJudge.unverified.map((u) => u.reason)).toEqual(["unsealed"]);
+  });
+
+  it("cross-era seals are UNVERIFIED, not a confound — FNV(x) and sha256(x) differ as strings over one document", () => {
+    const id = experimentIdentity(
+      manifest({ dataset: { id: "bench", version: "7.0.0", digest: "0123456789abcdef" } }), // legacy FNV
+      manifest(),
+    );
+    expect(id.confounds).toEqual([]);
+    expect(id.unverified.map((u) => u.reason)).toEqual(["digest_era"]);
+  });
+
+  it("an unsealed side verifies nothing — every axis unverified, none confounded", () => {
+    const id = experimentIdentity(undefined, manifest());
+    expect(id.held).toEqual([]);
+    expect(id.confounds).toEqual([]);
+    expect(id.unverified.map((u) => u.axis)).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+  });
+});
+
+describe("evaluateGate — a confounded pair cannot gate green", () => {
+  const gateInput = (over: Partial<GateInput>): GateInput => ({
+    baseline: "b",
+    candidate: "c",
+    metrics: [],
+    regressions: [],
+    improvements: [],
+    caseTransitions: [],
+    metricCoverage: [],
+    missing: {
+      casesOnlyInBaseline: [],
+      casesOnlyInCandidate: [],
+      metricsOnlyInBaseline: [],
+      metricsOnlyInCandidate: [],
+    },
+    incomparable: [],
+    overlap: { sharedCases: 3, baselineCases: 3, candidateCases: 3 },
+    comparability: "full",
+    ...over,
+  });
+
+  it("a verified confound refuses as not_comparable with NO verdict numbers — a different experiment", () => {
+    const g = evaluateGate(
+      gateInput({
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
+        experiment: {
+          held: ["grading_plan", "judge_set"],
+          confounds: [{ axis: "dataset_content", detail: "dataset content differs (bench@7.0.0 → bench@8.0.0)" }],
+          unverified: [],
+        },
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("not_comparable");
+    expect(g.reasons[0]?.kind).toBe("confounded");
+    expect(g.evidence.regressions).toBeUndefined(); // the numbers measure the apparatus — not computed
+  });
+
+  it("an acknowledged confound proceeds WITH the acknowledgment recorded; unverified identity informs a pass", () => {
+    const acknowledged = evaluateGate(
+      gateInput({
+        experiment: {
+          held: [],
+          confounds: [{ axis: "dataset_content", detail: "dataset content differs" }],
+          unverified: [{ axis: "judge_set", reason: "unsealed", detail: "judge quality@1 carries no spec digest" }],
+        },
+      }),
+      { maxRegressions: 0, allowConfounds: ["dataset_content"] },
+    );
+    expect(acknowledged.decision).toBe("pass");
+    expect(acknowledged.reasons.some((r) => r.kind === "confounded" && r.detail.includes("accepted"))).toBe(true);
+    expect(acknowledged.reasons.some((r) => r.kind === "identity_unverified")).toBe(true);
+  });
+
+  it("an entirely unsealed pair informs and never refuses — history is downgraded, not rewritten", () => {
+    const g = evaluateGate(
+      gateInput({
+        experiment: {
+          held: [],
+          confounds: [],
+          unverified: [
+            { axis: "dataset_content", reason: "unsealed", detail: "both sides are unsealed" },
+            { axis: "grading_plan", reason: "unsealed", detail: "both sides are unsealed" },
+            { axis: "judge_set", reason: "unsealed", detail: "both sides are unsealed" },
+          ],
+        },
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("pass");
+    expect(g.reasons.filter((r) => r.kind === "identity_unverified")).toHaveLength(3);
+  });
+});

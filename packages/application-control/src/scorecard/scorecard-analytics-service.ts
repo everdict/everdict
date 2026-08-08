@@ -12,6 +12,7 @@ import {
   type AnalysisConfig,
   type AnalysisResult,
   DEFAULT_VERDICT_POLICY,
+  type ExperimentIdentity,
   type Leaderboard,
   type MeasurementCoverage,
   type PolicyResolution,
@@ -22,6 +23,7 @@ import {
   contentDigest,
   diffScorecards,
   diffTrials,
+  experimentIdentity,
   flakeIndex,
   gateAudit,
   leaderboard,
@@ -134,14 +136,19 @@ export class ScorecardAnalyticsService {
       record.verdictPolicy ?? (resolution.status !== "unresolvable" ? verdictPolicyRef(resolution.policy) : undefined);
     const bStamp = stampOf(baseRecord, bResolution);
     const cStamp = stampOf(candRecord, cResolution);
+    // The experiment-identity read (held / confounds / unverified) — the two manifests against each other,
+    // so the gate can refuse a comparison whose held-constant axes verifiably differ (a different experiment)
+    // and every consumer sees what the seals could and could not verify.
+    const experiment = experimentIdentity(baseRecord.manifest, candRecord.manifest);
     const withPolicy: ScorecardDiff & {
       policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
       policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
+      experiment: ExperimentIdentity;
     } = policyUnresolvable
-      ? { ...diff, comparability: "none", policyUnresolvable }
+      ? { ...diff, comparability: "none", policyUnresolvable, experiment }
       : policyMismatch && bStamp && cStamp
-        ? { ...diff, comparability: "none", policyMismatch: { baseline: bStamp, candidate: cStamp } }
-        : diff;
+        ? { ...diff, comparability: "none", policyMismatch: { baseline: bStamp, candidate: cStamp }, experiment }
+        : { ...diff, experiment };
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
     // Evidence quality of each side. Aggregates already drop unmeasured scores, so a hollowed-out batch reads

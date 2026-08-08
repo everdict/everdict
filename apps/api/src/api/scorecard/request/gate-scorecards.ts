@@ -18,6 +18,9 @@ export const GateScorecardsBodySchema = z.object({
       maxMetricLossFraction: z.number().min(0).max(1).optional(),
       // allow_partial only: accept kind-changed columns (same metric name, different value kind) deliberately.
       allowMetricKindChange: z.boolean().optional(),
+      // Experiment-identity axes accepted as different (recorded on the decision): a verified confound on an
+      // axis not listed refuses the pair as not_comparable — a different experiment, not a regression.
+      allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])).optional(),
       zThreshold: z.number().positive().optional(),
       minDelta: z.number().min(0).max(1).optional(),
       // Benjamini–Hochberg false-discovery level across the per-case trial tests. Absent = no correction.

@@ -9,6 +9,7 @@ import {
   caseMatches,
 } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
+import type { ExperimentIdentity } from "./experiment-identity.js";
 import type { MeasurementCoverage, ScorecardDiff } from "./scorecard.js";
 import type { TrialDiff } from "./trials.js";
 
@@ -23,6 +24,10 @@ export type GateInput = ScorecardDiff & {
   // A side whose STAMPED policy could not be restored — its verdicts are not re-derivable, so the pair is
   // not comparable. Carries the unrestorable stamp(s) so the refusal names what is missing.
   policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
+  // The manifest-vs-manifest identity read (experimentIdentity): which held-constant axes verifiably differ
+  // (confounds — a different experiment, refused unless acknowledged) and which could not be verified either
+  // way. Optional: a caller without manifests simply cannot gate on identity — the gate invents nothing.
+  experiment?: ExperimentIdentity;
   // Evidence quality of each side (measurementCoverage). Optional: a caller that cannot supply it simply
   // cannot gate on maxUnmeasuredFraction — the gate never invents a coverage number it was not given.
   coverage?: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
@@ -80,6 +85,22 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
     return { decision: "not_comparable", reasons, evidence: { ...structural, comparability: "none" } };
   }
 
+  // A VERIFIED confound on an unacknowledged axis is a different experiment, not a treatment comparison:
+  // the numbers below would measure the drift of the apparatus (dataset content, grading plan, judge
+  // documents), so none of them are computed. Acknowledged confounds and unverifiable axes ride as recorded
+  // reasons on whatever the gate goes on to decide — accepted is not the same claim as identical.
+  const allowedConfounds = new Set(policy.allowConfounds ?? []);
+  const confounds = diff.experiment?.confounds ?? [];
+  const refusedConfounds = confounds.filter((c) => !allowedConfounds.has(c.axis));
+  if (refusedConfounds.length > 0) {
+    for (const c of refusedConfounds)
+      reasons.push({
+        kind: "confounded",
+        detail: `${c.detail} — a held-constant axis of the experiment differs, so this is a different experiment; acknowledge the axis via allowConfounds to compare anyway`,
+      });
+    return { decision: "not_comparable", reasons, evidence: { ...structural, comparability: "none" } };
+  }
+
   if (diff.comparability === "none") {
     if (diff.policyMismatch !== undefined) {
       reasons.push({
@@ -94,6 +115,13 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
     }
     return { decision: "not_comparable", reasons, evidence: structural };
   }
+
+  // Past the refusals, the identity read still rides as RECORDED information on whatever gets decided:
+  // an acknowledged confound is accepted, not identical, and a green light standing on unverified identity
+  // (an unsealed side, a digest-era gap) must say so.
+  for (const c of confounds)
+    reasons.push({ kind: "confounded", detail: `${c.detail} — accepted by policy.allowConfounds (recorded)` });
+  for (const u of diff.experiment?.unverified ?? []) reasons.push({ kind: "identity_unverified", detail: u.detail });
 
   // The regression unit is the CASE VERDICT — one case, one transition, judged by the authority ladder.
   // Metric-level pass flips (diff.regressions) are diagnosis: a diagnostic judge flip on a case whose

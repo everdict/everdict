@@ -32,6 +32,12 @@ export const GatePolicySchema = z.object({
   // question — same name, different meaning, its delta unreadable — so allow_partial still blocks on it
   // unless the caller accepts the column loss explicitly. require_full always blocks.
   allowMetricKindChange: z.boolean().optional(),
+  // Experiment-identity axes the caller ACCEPTS as different (recorded on the decision like a force): a
+  // verified confound on any axis NOT listed here refuses the comparison as not_comparable — a dataset whose
+  // content changed, a grading plan that differs, a judge document that was edited are a different
+  // experiment, not a treatment comparison. Unverifiable axes (unsealed sides) inform, never refuse, and
+  // are not acknowledgeable here.
+  allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])).optional(),
   // Share of the compared scores that may be non-measurements (dead graders / skipped judges). Enforced
   // INDEPENDENTLY of the comparability mode: unmeasured scores do not make a comparison `partial`, they
   // hollow it out from the inside, so a caller that sets this means it under either mode.
@@ -60,6 +66,14 @@ export const GateReasonSchema = z.object({
     "policy_unresolvable",
     "no_shared_cases",
     "kind_changed",
+    // A held-constant axis of the EXPERIMENT verifiably differs between the sides (dataset content, grading
+    // plan, judge set): the delta measures the drift of the apparatus, not the treatment — a different
+    // experiment, not a regression. Refuses unless the policy acknowledges the axis via allowConfounds.
+    "confounded",
+    // An identity axis could not be verified either way (an unsealed pre-manifest side, or seals from
+    // different digest eras). Information, never a refusal — a claim of sameness would be as unfounded as a
+    // claim of difference.
+    "identity_unverified",
     // A case the verdict policy declared CRITICAL either collapsed to a zero pass rate or is absent from the
     // candidate. This is the one place where product judgment precedes statistics: it blocks regardless of
     // significance, regardless of maxRegressions, and regardless of any missingness tolerance.

@@ -482,6 +482,12 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .describe(
               "allow_partial only: accept metrics whose VALUE KIND changed between the sides (same name, different meaning — the delta is unreadable). Unset = a kind change blocks even under allow_partial",
             ),
+          allow_confounds: z
+            .array(z.enum(["dataset_content", "grading_plan", "judge_set"]))
+            .optional()
+            .describe(
+              "experiment-identity axes accepted as DIFFERENT (recorded on the decision): the manifests seal the dataset content, grading plan and judge documents each batch actually evaluated, and a verified difference on an axis not listed here refuses the pair as not_comparable — a different experiment, not a treatment comparison. Unsealed/unverifiable axes inform and never refuse",
+            ),
           z_threshold: z
             .number()
             .positive()
@@ -513,6 +519,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         max_unmeasured_fraction,
         max_metric_loss_fraction,
         allow_metric_kind_change,
+        allow_confounds,
         z_threshold,
         min_delta,
         fdr_alpha,
@@ -531,6 +538,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 ...(max_unmeasured_fraction !== undefined ? { maxUnmeasuredFraction: max_unmeasured_fraction } : {}),
                 ...(max_metric_loss_fraction !== undefined ? { maxMetricLossFraction: max_metric_loss_fraction } : {}),
                 ...(allow_metric_kind_change !== undefined ? { allowMetricKindChange: allow_metric_kind_change } : {}),
+                ...(allow_confounds !== undefined ? { allowConfounds: allow_confounds } : {}),
                 ...(z_threshold !== undefined ? { zThreshold: z_threshold } : {}),
                 ...(min_delta !== undefined ? { minDelta: min_delta } : {}),
                 ...(fdr_alpha !== undefined ? { fdrAlpha: fdr_alpha } : {}),

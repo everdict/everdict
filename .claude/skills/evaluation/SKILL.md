@@ -194,10 +194,23 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   CASE coverage (`maxMissingCases`/`maxMissingFraction`), METRIC coverage (`maxMetricLossFraction` — the
   share of a metric's baseline measurement rate the candidate may lose; rows a grader silently never
   emitted), and measurement quality (`maxUnmeasuredFraction`, which applies under either mode — unmeasured
-  scores hollow a comparison out without ever making it `partial`). Under `require_full` ANY per-metric
+  scores hollow a comparison out without ever making it `partial`). Complete metric disappearance (candidate
+  0 rows) is loss **1.0 in the same algebra** — never routed into set-level missingness the partial branch
+  ignores — and a kind-changed column blocks under `allow_partial` too unless `allowMetricKindChange` accepts
+  it (a column that means something else is not a tolerance question). Under `require_full` ANY per-metric
   coverage loss blocks (`blocked_missing`, reason `missing_metrics` naming the per-metric drop). `zThreshold`/`minDelta` on the policy are the trials diff's
   bar — the gate computes the diff under its OWN statistical policy. Both blocking decisions are overridable
   (recorded, with who and why); `gateAudit` counts them separately.
+  **Experiment identity gates the right to call it a regression** (`experimentIdentity`,
+  `packages/domain/src/scorecard/experiment-identity.ts`): the two manifests are read against each other and
+  each held-constant axis (`dataset_content` / `grading_plan` / `judge_set` — the harness is the TREATMENT,
+  the verdict policy has its own owner) answers in THREE states: `held` (digests verify identical),
+  `confound` (VERIFIED different ⇒ `not_comparable`, reason `confounded`, NO verdict numbers computed —
+  unless the axis is acknowledged via `GatePolicy.allowConfounds`, recorded on the decision), or
+  `unverified` (unsealed side / digest-era gap ⇒ reason `identity_unverified`, information never refusal).
+  Rides the diff as `diff.experiment`. A NEW GatePolicy field must ALSO be added to the service's
+  effective-policy copy (`ScorecardService.gate`) and the HTTP/MCP schemas — `maxMetricLossFraction` shipped
+  read by the gate and reachable from nowhere; `gate-policy.routes.test.ts` pins the chain end to end.
   **Product judgment precedes statistics in exactly ONE place, by declaration**: `VerdictPolicy.criticalCases`
   (matchers `{caseId}` / `{prefix}`) names cases whose collapse `block`s with reason `critical_case_failed`
   regardless of significance, of `maxRegressions`, and of any missingness tolerance — a login case going 3/3 →

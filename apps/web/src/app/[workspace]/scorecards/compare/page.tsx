@@ -118,6 +118,27 @@ export default async function CompareScorecardsPage({
 
       {error && <Callout tone="danger">{t('compareError', { error })}</Callout>}
 
+      {/* Experiment identity BEFORE the deltas: a verified confound means the apparatus differs (dataset
+          content / grading plan / judge documents), so what follows is not a treatment comparison. Unverified
+          axes downgrade the claim without refusing it. */}
+      {diff && diff.experiment && diff.experiment.confounds.length > 0 && (
+        <Callout tone="danger">
+          {t('compareConfounded', {
+            axes: diff.experiment.confounds.map((c) => c.axis.replace('_', ' ')).join(', '),
+          })}
+        </Callout>
+      )}
+      {diff &&
+        diff.experiment &&
+        diff.experiment.confounds.length === 0 &&
+        diff.experiment.unverified.length > 0 && (
+          <Callout tone="warning">
+            {t('compareIdentityUnverified', {
+              axes: diff.experiment.unverified.map((u) => u.axis.replace('_', ' ')).join(', '),
+            })}
+          </Callout>
+        )}
+
       {/* Comparability FIRST — "no differences" and "the comparison does not hold" are different claims, and a
           reader (or gate) must see which one this page is making before any delta below. */}
       {diff && diff.comparability !== 'full' && (

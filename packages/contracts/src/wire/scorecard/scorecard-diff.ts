@@ -135,6 +135,24 @@ export const ScorecardDiffResponseSchema = z.object({
     .describe(
       "Set when a side's STAMPED verdict policy could not be restored (comparability forced to 'none'): those verdicts cannot be re-derived, so the comparison stands on nothing — a gate must refuse rather than re-judge under today's ladder",
     ),
+  experiment: z
+    .object({
+      held: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])),
+      confounds: z.array(
+        z.object({ axis: z.enum(["dataset_content", "grading_plan", "judge_set"]), detail: z.string() }),
+      ),
+      unverified: z.array(
+        z.object({
+          axis: z.enum(["dataset_content", "grading_plan", "judge_set"]),
+          reason: z.enum(["unsealed", "digest_era"]),
+          detail: z.string(),
+        }),
+      ),
+    })
+    .optional()
+    .describe(
+      "Experiment identity — the two reproducibility manifests read against each other. `held` = axes verified identical; `confounds` = axes VERIFIED different (the delta measures the apparatus, not the treatment — a gate refuses unless the axis is acknowledged via allowConfounds); `unverified` = axes with nothing to verify against (an unsealed side, digest-era gap) — information, never a refusal",
+    ),
   trials: z
     .object({
       baseline: z.string(),

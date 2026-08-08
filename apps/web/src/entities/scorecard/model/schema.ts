@@ -429,6 +429,24 @@ export const scorecardDiffSchema = z.object({
       candidate: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
     })
     .optional(),
+  // Experiment identity — the two reproducibility manifests read against each other. `held` = verified
+  // identical; `confounds` = VERIFIED different (a different experiment — the gate refuses unless the axis is
+  // acknowledged); `unverified` = nothing to verify against (unsealed side / digest-era gap) — informational.
+  experiment: z
+    .object({
+      held: z.array(z.enum(['dataset_content', 'grading_plan', 'judge_set'])),
+      confounds: z.array(
+        z.object({ axis: z.enum(['dataset_content', 'grading_plan', 'judge_set']), detail: z.string() })
+      ),
+      unverified: z.array(
+        z.object({
+          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set']),
+          reason: z.enum(['unsealed', 'digest_era']),
+          detail: z.string(),
+        })
+      ),
+    })
+    .optional(),
   trials: trialDiffSchema.optional(), // statistical (pass@k) gate — present only when either side ran trials
 })
 

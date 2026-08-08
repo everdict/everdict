@@ -29,6 +29,13 @@ export {
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
 export { type GateEvaluation, type GateInput, evaluateGate, gateAudit, gatePolicyDigest } from "./scorecard/gate.js";
+export {
+  type ExperimentAxis,
+  type ExperimentConfound,
+  type ExperimentIdentity,
+  type ExperimentUnverified,
+  experimentIdentity,
+} from "./scorecard/experiment-identity.js";
 export { flakeIndex } from "./scorecard/flake.js";
 export {
   applyGradingPlan,

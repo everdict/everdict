@@ -2740,6 +2740,8 @@
     "comparePartial": "부분 비교 — 케이스 {caseCount}건·메트릭 {metricCount}건(한쪽에만 있거나 종류가 바뀜)은 아래 델타에서 제외되었습니다.",
     "comparePolicyMismatch": "서로 다른 판정 정책({baseline} vs {candidate})으로 채점된 배치입니다 — 판정 비교가 성립하지 않습니다.",
     "comparePolicyUnresolvable": "한쪽 배치가 채점에 사용한 판정 정책 문서를 복원할 수 없습니다 — 그 판정을 다시 도출할 수 없으므로 비교가 성립하지 않습니다.",
+    "compareConfounded": "다른 실험입니다 — 고정되어야 할 축이 양쪽에서 검증 가능하게 다릅니다: {axes}. 아래 델타는 처치가 아니라 장치의 변화를 측정한 것이며, 릴리즈 게이트는 해당 축을 명시적으로 승인하지 않는 한 이 비교를 거부합니다.",
+    "compareIdentityUnverified": "실험 동일성을 검증하지 못한 축: {axes}. 한쪽이 봉인되지 않았거나 다이제스트 알고리즘 세대가 달라 동일 여부를 어느 쪽으로도 확인할 수 없습니다.",
     "caseOutcomesStrip": "실행 {executed}건 중 — 판정 {verdicted} · 통과 {passed} · 실패 {failed} · 인프라 실패 {infraFailed} · 미측정 {unmeasured}",
     "scoreUnmeasured": "미측정",
     "title": "스코어카드",
