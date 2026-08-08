@@ -6,7 +6,7 @@ import { z } from 'zod'
 // anchored to @everdict/contracts/wire (re-architecture P4). `import type` only — the wire zod never runs in the web.
 export const adoptedEnvironmentVerifySchema = z.object({
   pullable: z.boolean(),
-  reason: z.enum(['ok', 'auth', 'not-found', 'unreachable']).optional(),
+  reason: z.enum(['ok', 'auth', 'not-found', 'unreachable', 'unregistered-host']).optional(),
   digest: z.string().optional(),
   at: z.string(),
 })

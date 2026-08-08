@@ -137,7 +137,7 @@ export const WorkspaceSettingsSchema = z.object({
         verify: z
           .object({
             pullable: z.boolean(), // can THIS workspace pull the image (Docker Registry v2 manifest reachable)?
-            reason: z.enum(["ok", "auth", "not-found", "unreachable"]).optional(),
+            reason: z.enum(["ok", "auth", "not-found", "unreachable", "unregistered-host"]).optional(),
             digest: z.string().optional(), // the resolved manifest digest when pullable
             at: z.string(), // ISO timestamp of the check
           })

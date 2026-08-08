@@ -15,7 +15,7 @@ import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.j
 // The active pull-usability outcome (the ImageRegistryService.verifyImage shape) + the timestamp the service stamps.
 export interface AdoptedEnvironmentVerify {
   pullable: boolean;
-  reason?: "ok" | "auth" | "not-found" | "unreachable";
+  reason?: "ok" | "auth" | "not-found" | "unreachable" | "unregistered-host";
   digest?: string;
   at: string;
 }
@@ -41,7 +41,11 @@ export interface EnvironmentAdoptionServiceDeps {
   verifyImage: (
     workspace: string,
     imageRef: string,
-  ) => Promise<{ pullable: boolean; reason: "ok" | "auth" | "not-found" | "unreachable"; digest?: string }>;
+  ) => Promise<{
+    pullable: boolean;
+    reason: "ok" | "auth" | "not-found" | "unreachable" | "unregistered-host";
+    digest?: string;
+  }>;
   // The workspace's registry coordinates — for the per-viewer image classification (same source as CapabilityService).
   registryCoordinates: (workspace: string) => Promise<ImageRegistryCoordinates[]>;
   // The workspace's managed-store coordinates (see CapabilityService) — passed so an image reads the same class in

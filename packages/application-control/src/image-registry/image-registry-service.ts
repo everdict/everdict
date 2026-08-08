@@ -233,25 +233,43 @@ export class ImageRegistryService {
   }
 
   // Active pull-usability check for a FULL image ref — can THIS workspace pull it? Parses the ref, resolves the
-  // matching registered registry's pull auth (anonymous when the host isn't a registered registry), and does a Docker
-  // Registry v2 manifest fetch. Classified (never throws): a reachable manifest → pullable; 401/403 → "auth" (e.g. a
-  // publisher's PRIVATE registry not registered here — the cross-tenant "can't pull" signal); 404 → "not-found";
-  // transport/other → "unreachable". Powers environment-adoption verification (warn-not-block).
+  // matching registered registry's pull auth, and does a Docker Registry v2 manifest fetch. Classified (never
+  // throws): a reachable manifest → pullable; 401/403 → "auth" (e.g. a publisher's PRIVATE registry not
+  // registered here — the cross-tenant "can't pull" signal); 404 → "not-found"; transport/other →
+  // "unreachable"; an UNREGISTERED host → "unregistered-host", WITHOUT any fetch. Powers environment-adoption
+  // verification (warn-not-block).
+  //
+  // Unregistered hosts are NOT probed (arch-review 6 follow-up, H12): the host comes out of the AGENT-SUPPLIED
+  // ref, the fetch runs from the control plane's network position, and the reader honors http:// scheme hosts —
+  // so an anonymous probe of an arbitrary host is a promptless reachability oracle for internal services (the
+  // tool is correctly read-annotated; the classified reasons distinguish live/auth/absent/dead). No credential
+  // ever left, but the network position did. Docker Hub stays probeable as THE well-known public default (the
+  // no-host shorthand always meant it); everything else must be a REGISTERED registry — registration without a
+  // pullSecretName is supported (anonymous auth), so "register the registry" is the zero-credential re-enable
+  // path, and it is exactly the workspace image-provenance model (BYO registries as the baseline).
   async verifyImage(
     workspace: string,
     imageRef: string,
-  ): Promise<{ pullable: boolean; reason: "ok" | "auth" | "not-found" | "unreachable"; digest?: string }> {
+  ): Promise<{
+    pullable: boolean;
+    reason: "ok" | "auth" | "not-found" | "unreachable" | "unregistered-host";
+    digest?: string;
+  }> {
     let parsed: ReturnType<typeof parseImageRef>;
     try {
       parsed = parseImageRef(imageRef);
     } catch {
       return { pullable: false, reason: "not-found" };
     }
-    const host = parsed.host ?? "registry-1.docker.io"; // no host → a docker.io shorthand
+    // The Docker Hub aliases collapse onto the canonical probe host — an explicit `docker.io/...` ref is the
+    // same well-known destination the bare shorthand always probed.
+    const DOCKER_HUB = new Set(["registry-1.docker.io", "docker.io", "index.docker.io"]);
+    const host = parsed.host === undefined || DOCKER_HUB.has(parsed.host) ? "registry-1.docker.io" : parsed.host;
     const repository = parsed.host || parsed.path.includes("/") ? parsed.path : `library/${parsed.path}`;
     const reference = parsed.digest ?? parsed.tag ?? "latest";
     const entry = (await this.entries(workspace)).find((r) => r.host === host);
-    const auth = entry ? await this.pullAuthFor(workspace, entry) : undefined; // anonymous when not a registered host
+    if (entry === undefined && host !== "registry-1.docker.io") return { pullable: false, reason: "unregistered-host" };
+    const auth = entry ? await this.pullAuthFor(workspace, entry) : undefined; // Docker Hub only — every other host is registered here
     try {
       const info = await this.deps.reader.inspectManifest({ host }, auth, repository, reference);
       return { pullable: true, reason: "ok", ...(info.digest ? { digest: info.digest } : {}) };

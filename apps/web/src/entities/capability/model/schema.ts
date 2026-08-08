@@ -207,7 +207,7 @@ export type ImageTags = z.infer<typeof imageTagsSchema>
 // 실제로 물어본 결과이고, digest 가 오면 그것이 재현 가능한 핀이다. 실패도 200 결과(pullable:false + reason).
 export const imageVerifySchema = z.object({
   pullable: z.boolean(),
-  reason: z.enum(['ok', 'auth', 'not-found', 'unreachable']),
+  reason: z.enum(['ok', 'auth', 'not-found', 'unreachable', 'unregistered-host']),
   digest: z.string().optional(),
 })
 export type ImageVerify = z.infer<typeof imageVerifySchema>

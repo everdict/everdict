@@ -98,7 +98,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
       {
         annotations: { readOnlyHint: true },
         description:
-          "Can THIS workspace pull a full image ref? Resolves the matching registered registry's pull credential (anonymous for an unregistered host) and fetches the manifest → {pullable, reason: ok|auth|not-found|unreachable, digest?}. A failure is a result, never an error. Use it before registering an environment capability — and pin the returned digest instead of a mutable tag.",
+          "Can THIS workspace pull a full image ref? Resolves the matching registered registry's pull credential and fetches the manifest → {pullable, reason: ok|auth|not-found|unreachable|unregistered-host, digest?}. Only Docker Hub and REGISTERED registries are probed — an unregistered host classifies as unregistered-host without any fetch (register the registry, credentials optional, to verify against it). A failure is a result, never an error. Use it before registering an environment capability — and pin the returned digest instead of a mutable tag.",
         inputSchema: {
           image: z.string().min(1).describe('full image reference — "ghcr.io/acme/env:v3" · "…@sha256:…"'),
         },

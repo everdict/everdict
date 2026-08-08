@@ -9,7 +9,7 @@ import { z } from "zod";
 // Pull-usability snapshot: can THIS workspace pull the image? Taken at adopt / re-verify time (warn-not-block).
 export const AdoptedEnvironmentVerifySchema = z.object({
   pullable: z.boolean(),
-  reason: z.enum(["ok", "auth", "not-found", "unreachable"]).optional(),
+  reason: z.enum(["ok", "auth", "not-found", "unreachable", "unregistered-host"]).optional(),
   digest: z.string().optional(),
   at: z.string().describe("ISO timestamp of the check"),
 });

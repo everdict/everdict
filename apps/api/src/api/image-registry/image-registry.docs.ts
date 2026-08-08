@@ -133,9 +133,12 @@ const docs = {
     summary: "Verify that this workspace can pull an image ref",
     description:
       "Active pull-usability check for a FULL image ref (host/repo:tag or @digest): resolves the matching registered " +
-      "registry's pull credential (anonymous when the host is not registered) and fetches the manifest. A failure is a " +
-      "RESULT, not an error — {pullable:false, reason: auth|not-found|unreachable}. On success the resolved digest is " +
-      "the recommended reproducible pin for an environment capability. Requires harnesses:read.",
+      "registry's pull credential and fetches the manifest. Only Docker Hub and REGISTERED registries are probed — an " +
+      "unregistered host classifies as unregistered-host WITHOUT any fetch (a caller-chosen destination must not turn " +
+      "the control plane into a reachability oracle; register the registry, credentials optional, to verify against " +
+      "it). A failure is a RESULT, not an error — {pullable:false, reason: auth|not-found|unreachable|unregistered-host}. " +
+      "On success the resolved digest is the recommended reproducible pin for an environment capability. Requires " +
+      "harnesses:read.",
     tags: ["image-registry"],
     querystring: toJsonSchema(
       z.object({ image: z.string().describe('Full image reference — "ghcr.io/acme/env:v3" · "…@sha256:…"') }),
@@ -146,7 +149,7 @@ const docs = {
         ...toJsonSchema(
           z.object({
             pullable: z.boolean(),
-            reason: z.enum(["ok", "auth", "not-found", "unreachable"]),
+            reason: z.enum(["ok", "auth", "not-found", "unreachable", "unregistered-host"]),
             digest: z.string().optional(),
           }),
         ),

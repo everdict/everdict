@@ -69,22 +69,36 @@ describe("image registry read routes (tags / manifest)", () => {
     expect(res.json()).toMatchObject({ pullable: true, reason: "ok", digest: "sha256:abc" });
   });
 
-  it("reports a rejected pull as a RESULT (200 + reason), not an error", async () => {
+  it("reports a rejected pull as a RESULT (200 + reason), not an error — and never probes an unregistered host", async () => {
     const settings = new InMemoryWorkspaceSettingsStore();
+    const inspectManifest = vi.fn(async () => {
+      throw new UpstreamError("UPSTREAM_ERROR", { status: 401 }, "unauthorized");
+    });
+    const imageRegistryService = new ImageRegistryService({
+      settings,
+      secretsFor: async () => ({}),
+      reader: {
+        checkConnection: vi.fn(async () => ({ reachable: true, detail: "" })),
+        listTags: vi.fn(async () => []),
+        inspectManifest,
+      },
+    });
     const app = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      imageRegistryService: new ImageRegistryService({
-        settings,
-        secretsFor: async () => ({}),
-        reader: {
-          checkConnection: vi.fn(async () => ({ reachable: true, detail: "" })),
-          listTags: vi.fn(async () => []),
-          inspectManifest: vi.fn(async () => {
-            throw new UpstreamError("UPSTREAM_ERROR", { status: 401 }, "unauthorized");
-          }),
-        },
-      }),
+      imageRegistryService,
     });
+    // Unregistered host: classified WITHOUT any fetch (H12 — a caller-chosen destination must not turn the
+    // control plane into a reachability oracle).
+    const unregistered = await app.inject({
+      method: "GET",
+      url: `/workspace/image-registries/verify?image=${encodeURIComponent("ghcr.io/other/env:v3")}`,
+      headers: acme,
+    });
+    expect(unregistered.statusCode).toBe(200);
+    expect(unregistered.json()).toMatchObject({ pullable: false, reason: "unregistered-host" });
+    expect(inspectManifest).not.toHaveBeenCalled();
+    // Registered (anonymously — no credential required): the probe runs and a 401 classifies as auth.
+    await imageRegistryService.upsert("acme", { name: "ghcr", host: "ghcr.io" });
     const res = await app.inject({
       method: "GET",
       url: `/workspace/image-registries/verify?image=${encodeURIComponent("ghcr.io/other/env:v3")}`,

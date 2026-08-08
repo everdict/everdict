@@ -2,11 +2,12 @@
 // 저작 화면(환경 에디터)과 인벤토리 화면(워크벤치)이 같은 사유 어휘를 써야 해서 한 곳에 둔다.
 export function pullReasonLabel(
   t: (key: string) => string,
-  reason: 'ok' | 'auth' | 'not-found' | 'unreachable' | undefined
+  reason: 'ok' | 'auth' | 'not-found' | 'unreachable' | 'unregistered-host' | undefined
 ): string {
   if (reason === 'auth') return t('verifyAuth')
   if (reason === 'not-found') return t('verifyNotFound')
   if (reason === 'unreachable') return t('verifyUnreachable')
+  if (reason === 'unregistered-host') return t('verifyUnregisteredHost')
   return t('importedNotPullableBadge')
 }
 

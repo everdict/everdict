@@ -6,8 +6,13 @@
 > owns Settings › Images, `GET /v2/token`, and the `managed` class. Read this file for the "a registry you
 > told us about" half: registration, credential resolution, `classifyImageRef`'s `workspace`/`external`/
 > `local`/`unqualified` classes, and `verifyImage` — which stays HTTP here precisely because a registry we do
-> not operate can only be answered by asking it. Everything below predates the managed store and remains true
-> of the BYO path.
+> not operate can only be answered by asking it. **Only Docker Hub and REGISTERED registries are asked**
+> (arch-review 6 follow-up): the host comes out of a caller-supplied ref and the fetch runs from the control
+> plane's network position, so probing an arbitrary unregistered host — anonymously, http:// honored — was a
+> promptless reachability oracle for internal services. An unregistered host now classifies as
+> `unregistered-host` without any fetch; registration (credentials optional — anonymous entries are
+> supported) is the re-enable path, which is exactly this document's provenance model. Everything below
+> predates the managed store and remains true of the BYO path.
 
 > **Status:** ALL SLICES SHIPPED + LIVE-VERIFIED — S1 registration+classification `bd979a4` ·
 > S2 `everdict image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.

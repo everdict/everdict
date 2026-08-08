@@ -4517,6 +4517,7 @@
     "verifyAuth": "Can't pull (no access)",
     "verifyNotFound": "Image not found",
     "verifyUnreachable": "Registry unreachable",
+    "verifyUnregisteredHost": "Registry not registered — add it in Settings to verify",
     "removedFromWorkspace": "Removed \"{name}\" from your workspace.",
     "addTitle": "Add \"{name}\" to your workspace",
     "addCodeNote": "This is a code tool — it runs in a sandbox; code from another workspace only runs on an isolated runtime.",

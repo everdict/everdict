@@ -4,7 +4,9 @@ import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 
 // A service whose reader's inspectManifest throws — for the verifyImage failure-classification cases.
-function throwingSvc(err: unknown) {
+// ghcr.io is REGISTERED (anonymously) so the probe actually runs: an unregistered host is refused before
+// any fetch since H12, which is its own test below.
+async function throwingSvc(err: unknown) {
   const settings = new InMemoryWorkspaceSettingsStore();
   const reader = {
     checkConnection: vi.fn(async () => ({ reachable: true, detail: "ok" })),
@@ -13,7 +15,9 @@ function throwingSvc(err: unknown) {
       throw err;
     }),
   };
-  return new ImageRegistryService({ settings, secretsFor: async () => ({}), reader });
+  const service = new ImageRegistryService({ settings, secretsFor: async () => ({}), reader });
+  await service.upsert("acme", { name: "ghcr", host: "ghcr.io" });
+  return service;
 }
 
 function svc(secrets: Record<string, string> = {}) {
@@ -190,8 +194,22 @@ describe("ImageRegistryService — verifyImage (pull-usability check)", () => {
     );
   });
 
-  it("probes anonymously when the image host is not a registered registry (external/public)", async () => {
+  it("NEVER probes an unregistered host — the agent-chosen destination gets a classification, not a fetch (H12)", async () => {
+    // Regression: the pre-fix service fetched anonymously from the control plane's network position when the
+    // ref's host wasn't a registered registry — with the reader honoring http:// scheme hosts, the classified
+    // return (ok|auth|not-found|unreachable) was a promptless reachability oracle for internal services.
     const { service, reader } = svc();
+    for (const ref of [
+      "public.example.com/org/img@sha256:deadbeef",
+      "http://10.0.0.1:8500/org/img:probe", // the oracle shape: an internal service, plain HTTP
+      "registry.internal.corp/org/img:v1",
+    ]) {
+      expect(await service.verifyImage("acme", ref)).toEqual({ pullable: false, reason: "unregistered-host" });
+    }
+    expect(reader.inspectManifest).not.toHaveBeenCalled(); // no fetch left the control plane
+    // Registering the host (no credential needed — anonymous registration is supported) re-enables the probe:
+    // the provenance model's own path, not a security bypass.
+    await service.upsert("acme", { name: "pub", host: "public.example.com" });
     const r = await service.verifyImage("acme", "public.example.com/org/img@sha256:deadbeef");
     expect(r.pullable).toBe(true);
     expect(reader.inspectManifest).toHaveBeenCalledWith(
@@ -199,6 +217,17 @@ describe("ImageRegistryService — verifyImage (pull-usability check)", () => {
       undefined,
       "org/img",
       "sha256:deadbeef",
+    );
+  });
+
+  it("Docker Hub stays probeable as THE well-known default — shorthand and explicit aliases alike", async () => {
+    const { service, reader } = svc();
+    await service.verifyImage("acme", "docker.io/library/postgres:16");
+    expect(reader.inspectManifest).toHaveBeenLastCalledWith(
+      { host: "registry-1.docker.io" },
+      undefined,
+      "library/postgres",
+      "16",
     );
   });
 
@@ -214,14 +243,14 @@ describe("ImageRegistryService — verifyImage (pull-usability check)", () => {
   });
 
   it("classifies a 401/403 as reason=auth (a publisher's private registry not registered here)", async () => {
-    const service = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 401, host: "ghcr.io" }, "denied"));
+    const service = await throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 401, host: "ghcr.io" }, "denied"));
     expect(await service.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({ pullable: false, reason: "auth" });
   });
 
   it("classifies a 404 as reason=not-found and a transport failure as reason=unreachable", async () => {
-    const notFound = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 404, host: "ghcr.io" }, "no tag"));
+    const notFound = await throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 404, host: "ghcr.io" }, "no tag"));
     expect(await notFound.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({ pullable: false, reason: "not-found" });
-    const transport = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { detail: "ENOTFOUND" }, "unreachable"));
+    const transport = await throwingSvc(new UpstreamError("UPSTREAM_ERROR", { detail: "ENOTFOUND" }, "unreachable"));
     expect(await transport.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({
       pullable: false,
       reason: "unreachable",
