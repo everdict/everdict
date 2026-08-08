@@ -6,8 +6,9 @@ import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
 import type { GradeContext, JudgeSpec, RegistryAuth, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
-import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
+import { resolvePolicyResolution } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import type { S3ArtifactStore } from "@everdict/storage";
@@ -72,6 +73,9 @@ export interface RuntimeAccessReaders {
 // Single-run service + its judge runner. The judge runner is returned too because ScorecardService reuses it.
 export function buildRun(deps: {
   store: RunStore;
+  // Parent-policy resolution for scorecard CHILD runs (RunService.withVerdicts) — cross-resource data goes
+  // through the owning STORE, never a peer service (api-layer rule).
+  scorecardStore: ScorecardStore;
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
@@ -148,6 +152,12 @@ export function buildRun(deps: {
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
     ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — every settled trace seals in the owned store
+    // A child run's verdict is derived under its PARENT's stamped/composed policy (RunService.withVerdicts).
+    scorecardPolicy: async (tenant, scorecardId) => {
+      const record = await deps.scorecardStore.get(scorecardId);
+      if (!record || record.tenant !== tenant) return undefined;
+      return resolvePolicyResolution(record.verdictPolicy, record.manifest?.verdictPolicy);
+    },
     ...(deps.onAgentRunCancelled ? { onAgentRunCancelled: deps.onAgentRunCancelled } : {}),
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),

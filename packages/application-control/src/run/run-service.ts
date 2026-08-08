@@ -24,12 +24,14 @@ import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import {
   type BudgetTracker,
   type HarnessSecretMaps,
+  type PolicyResolution,
   Run,
   type RunTransition,
   type UsageMeter,
   attachChannelsFor,
   billingCharges,
   canReadRun,
+  caseVerdict,
   fsFileCommand,
   fsTreeCommand,
   parseFsFile,
@@ -136,6 +138,14 @@ export interface RunServiceDeps {
   // The OWNED trajectory store (P5 rung 1) — dual-write: the run row keeps its embed for now, and the
   // trajectory ALSO seals here (first write wins). Reads that want the owned copy go through this store.
   trajectories?: TrajectoryStore;
+  // Parent-scorecard verdict-policy resolution for CHILD runs (parentScorecardId set): a child's served
+  // verdict must be derived under the policy that judged its BATCH — the stamped/composed document — not
+  // today's default ladder, or the run detail and the scorecard case dialog disagree about the same
+  // evidence one click apart. Wired by the composition over the scorecard STORE (cross-resource data goes
+  // through the owning store, never a peer service). Absent, scorecard missing, or unresolvable ⇒ the child
+  // serves NO verdict (fail-closed: a verdict is a claim about which rules decided, and without the
+  // document that claim cannot be made).
+  scorecardPolicy?: (tenant: string, scorecardId: string) => Promise<PolicyResolution | undefined>;
   usage?: UsageMeter; // meter-only billing usage — itemized per (source × model), attributed via billingCharges
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -337,7 +347,7 @@ export class RunService {
   async get(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    return this.withLiveTrace(withAttachChannels(await this.withTrajectoryUsage(record)));
+    return this.withLiveTrace(withAttachChannels(await this.withTrajectoryUsage(await this.withVerdict(record))));
   }
 
   // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step). Identical to
@@ -354,6 +364,46 @@ export class RunService {
     if (!record?.result?.snapshot) return record;
     const snapshot = await refreshSnapshotRefs(record.result.snapshot, this.deps.artifacts);
     return snapshot === record.result.snapshot ? record : { ...record, result: { ...record.result, snapshot } };
+  }
+
+  // The served RunRecord.verdict — derived HERE, in the application query layer, never in the DB adapter:
+  // the store cannot know which policy judged a record (a persistence concern must not interpret evidence).
+  // A standalone run has no stamp by construction, so the live default ladder is its policy; a scorecard
+  // CHILD is judged under its PARENT's stamped/composed policy (deps.scorecardPolicy), so the run detail and
+  // the scorecard case dialog answer identically about the same evidence. No resolution / unresolvable ⇒ no
+  // verdict (fail-closed — never a silent re-judgement under today's ladder).
+  private async withVerdict(record: RunRecord): Promise<RunRecord> {
+    const [attached] = await this.withVerdicts([record]);
+    return attached ?? record;
+  }
+
+  private async withVerdicts(records: RunRecord[]): Promise<RunRecord[]> {
+    const resolutions = new Map<string, PolicyResolution | undefined>(); // one parent lookup per batch
+    const out: RunRecord[] = [];
+    for (const r of records) {
+      if (!r.result) {
+        out.push(r);
+        continue;
+      }
+      const parent = r.parentScorecardId;
+      if (parent === undefined || parent === null) {
+        const verdict = caseVerdict(r.result); // no stamp exists for a standalone run — the live ladder IS its policy
+        out.push(verdict !== undefined ? { ...r, verdict } : r);
+        continue;
+      }
+      const key = `${r.tenant}:${parent}`;
+      if (!resolutions.has(key)) {
+        resolutions.set(key, await this.deps.scorecardPolicy?.(r.tenant, parent));
+      }
+      const resolution = resolutions.get(key);
+      if (resolution === undefined || resolution.status === "unresolvable") {
+        out.push(r); // fail-closed: the batch's rules are not in hand, so no verdict is claimed
+        continue;
+      }
+      const verdict = caseVerdict(r.result, resolution.policy);
+      out.push(verdict !== undefined ? { ...r, verdict } : r);
+    }
+    return out;
   }
 
   // A run recorded before executions declared their channels: derive them from the same rule the domain
@@ -661,7 +711,7 @@ export class RunService {
   // runnerId → runs a self-hosted runner executed (runner-detail activity feed), offset-paginated by limit (newest first).
   // `viewer` (the member asking) drops another member's personal executions in the QUERY — a transport always
   // passes it; an internal sweep leaves it unset.
-  list(
+  async list(
     tenant?: string,
     opts?: {
       scorecardId?: string;
@@ -672,7 +722,9 @@ export class RunService {
       viewer?: string;
     },
   ): Promise<RunRecord[]> {
-    return this.deps.store.list(tenant, opts);
+    // Verdicts attach here for the same reason as get(): the policy that judged a child is its parent's,
+    // which the store cannot know. Batched — one parent-policy resolution per distinct scorecard in the page.
+    return this.withVerdicts(await this.deps.store.list(tenant, opts));
   }
 
   private async track(id: string, input: SubmitInput, envelopeId?: string): Promise<void> {

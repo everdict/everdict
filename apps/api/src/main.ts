@@ -666,6 +666,7 @@ async function main(): Promise<void> {
     trajectories: trajectoryStore,
     onAgentRunCancelled: async (tenant, runId) => cascadeCancel.fn?.(tenant, runId),
     store,
+    scorecardStore,
     meteredDispatcher,
     dispatcher,
     settingsStore,

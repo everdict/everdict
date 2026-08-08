@@ -114,9 +114,12 @@ actually provisioned / a topology actually deployed: a synthesized failure or an
 manifest, and its absence means "no world recorded", never linux. Additive, so it does not move the era. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
 `incomparable` (kind_changed) + `overlap`. `preferredMetric` resolves absent metric axes from the data. **The ranking has exactly one
 implementation and is SERVED, never recomputed by a client**: a scorecard's per-case `verdict` and
-`RunRecord.verdict` (derived on read next to `usage`, in `withRunUsage`) both come from this engine, and the
-web's client-side mirrors were deleted in re-architecture P1g. A surface that needs "did this pass" reads the
-served field.
+`RunRecord.verdict` both come from this engine, and the web's client-side mirrors were deleted in
+re-architecture P1g. `RunRecord.verdict` is derived in the APPLICATION query layer
+(`RunService.withVerdicts`), never in the DB adapter — the store cannot know which policy judged a record: a
+standalone run derives under the live default ladder, a scorecard CHILD under its PARENT's stamped/composed
+policy (`deps.scorecardPolicy`, wired over the scorecard store), and an unresolvable parent policy serves NO
+verdict (fail-closed). A surface that needs "did this pass" reads the served field.
 `scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
 gives per-metric count/mean/passRate (auto) — plus, for a metric whose scores carry `label`, a
 `distribution` (label→count; ordinal order for an ordered enum, else by frequency) + `mode` instead of a

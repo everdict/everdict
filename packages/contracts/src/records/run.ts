@@ -139,11 +139,14 @@ export const RunRecordSchema = z.object({
   caseSpec: EvalCaseSchema.optional(),
   // Usage summary — not stored, derived from result.trace (filled on read). Lets the client see tokens/cost without parsing the trace.
   usage: RunUsageSummarySchema.optional(),
-  // Case verdict — not stored either, derived from result.scores by the domain's authority ranking
-  // (`caseVerdict`: ground truth > objective comparison > judge) and filled on the same read as `usage`.
-  // SERVED, never recomputed by a client: the scorecard's per-case verdict works exactly this way, and the
-  // client-side mirrors of this rule were deleted in re-architecture P1g — one authority, one answer.
-  // Undefined = nothing decided it (no pass-bearing grader, or a kind that is not scored at all).
+  // Case verdict — not stored, derived by the APPLICATION query layer (RunService.withVerdicts), never by
+  // the DB adapter: which policy judged a record is a domain interpretation a persistence concern cannot
+  // know. A standalone run is judged under the live default ladder (it has no stamp by construction); a
+  // scorecard CHILD is judged under its PARENT's stamped/composed policy, so the run detail and the
+  // scorecard case dialog answer identically about the same evidence. SERVED, never recomputed by a client
+  // (the client-side mirrors were deleted in re-architecture P1g — one authority, one answer).
+  // Undefined = nothing decided it (no pass-bearing grader, a kind that is not scored, or a child whose
+  // parent policy could not be restored — fail-closed, never a silent re-judgement under today's ladder).
   verdict: z.boolean().optional(),
   error: RunErrorSchema.optional(),
   // Which scorecard batch this run is a child of (if any). Filled by the scorecard as it fans out a child run per case.

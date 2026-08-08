@@ -330,15 +330,13 @@ describe("InMemoryRunStore — usage derivation", () => {
     expect((await store.list("acme"))[0]?.usage?.usd).toBeCloseTo(0.02);
   });
 
-  // The case verdict rides the same derived read as usage, so the run detail can STATE "this case passed"
-  // instead of leaving every reader to sum pass badges — and so no client re-implements the authority
-  // ranking (the mirrors of it were deleted in re-architecture P1g; the server is the one authority).
-  it("derives the case verdict from result.scores by authority rank — ground truth outranks the judge", async () => {
+  // The store must NOT interpret evidence: which policy judged a record is a domain question it cannot
+  // answer (a scorecard child is judged under its PARENT's stamped policy). The served verdict is derived
+  // in the application query layer (RunService.withVerdicts) — re-deriving it here under the default ladder
+  // made the run detail disagree with the scorecard case dialog about the same CaseResult.
+  it("never derives a verdict — the store serves evidence, the application layer interprets it", async () => {
     const store = new InMemoryRunStore();
     await store.create(base);
-    expect((await store.get("r1"))?.verdict).toBeUndefined(); // queued, no result
-
-    // A judge that disagrees with the ground-truth grader must not flip the verdict.
     await store.update("r1", {
       status: "succeeded",
       result: {
@@ -349,17 +347,10 @@ describe("InMemoryRunStore — usage derivation", () => {
         ],
       },
     });
-    expect((await store.get("r1"))?.verdict).toBe(true);
-    expect((await store.list("acme"))[0]?.verdict).toBe(true);
-  });
-
-  it("leaves the verdict undefined when no grader decided one (an agent turn, a scoreless run)", async () => {
-    const store = new InMemoryRunStore();
-    await store.create({ ...base, id: "r2", kind: "agent" });
-    await store.update("r2", { status: "succeeded", result: { ...RESULT, scores: [] } });
-    const rec = await store.get("r2");
-    expect(rec?.verdict).toBeUndefined();
-    expect(rec?.usage?.totalTokens).toBe(2); // usage still derives — the two are independent
+    const rec = await store.get("r1");
+    expect(rec?.verdict).toBeUndefined(); // interpretation is not the adapter's job
+    expect((await store.list("acme"))[0]?.verdict).toBeUndefined();
+    expect(rec?.usage?.totalTokens).toBe(2); // usage still derives — a mechanical sum, not an interpretation
   });
 });
 

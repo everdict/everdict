@@ -1,18 +1,15 @@
 import type { RunRecord } from "@everdict/contracts";
-import { canReadRun, caseVerdict, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
+import { canReadRun, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
 
-// On read, fills the DERIVED fields from the run's result — usage from the trace, the case verdict from the
-// scores (no stored columns → they always match the result, and neither needs a migration). The verdict is
-// served rather than recomputed per client: the scorecard's per-case verdict already works this way, and the
-// authority ranking (ground truth > objective > judge) must have exactly one implementation.
+// On read, fills the DERIVED usage from the run's result trace (no stored column → it always matches the
+// result, and needs no migration). The VERDICT is deliberately NOT derived here: which policy judged a
+// record is a domain interpretation the store cannot know — a scorecard child is judged under its parent's
+// stamped/composed policy, and deriving under the default ladder in a persistence adapter made the run
+// detail disagree with the scorecard case dialog about the same evidence. RunService.withVerdicts is the
+// one owner of that derivation.
 export function withRunUsage(r: RunRecord): RunRecord {
   if (!r.result) return r;
-  const verdict = caseVerdict(r.result);
-  return {
-    ...r,
-    usage: usageFromTrace(r.result.trace),
-    ...(verdict !== undefined ? { verdict } : {}),
-  };
+  return { ...r, usage: usageFromTrace(r.result.trace) };
 }
 
 import type {

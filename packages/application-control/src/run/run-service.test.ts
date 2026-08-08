@@ -1,4 +1,5 @@
 import type { RunRecord } from "@everdict/contracts";
+import { type PolicyResolution, composeVerdictPolicy } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { RunStore } from "../ports/run-store.js";
@@ -207,5 +208,76 @@ describe("RunService fs reads on a self-hosted run (parked-request seam)", () =>
     const { service, commands } = serviceWithExec(() => ({ stdout: "", stderr: "", exitCode: 0 }), selfHostedRun);
     expect((await service.fsTree("r-self"))?.tree).toBeUndefined();
     expect(commands).toHaveLength(0);
+  });
+});
+
+// C4 (review §4): the served RunRecord.verdict is an APPLICATION-layer derivation — the DB adapter cannot
+// know which policy judged a record, so it must not interpret evidence. A scorecard child is judged under
+// its parent's stamped/composed policy; the run detail and the scorecard case dialog must answer
+// identically about the same CaseResult.
+describe("RunService verdict derivation — the application layer owns the interpretation", () => {
+  const settled = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
+    ...runningRun(id),
+    status: "succeeded",
+    result: {
+      caseId: "case-1",
+      harness: "cc@1.0.0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      // Under the DEFAULT ladder the judge rung decides (fail); under a policy declaring custom_gate as
+      // ground truth, custom_gate outranks the judge (pass) — the two policies genuinely disagree.
+      scores: [
+        { graderId: "judge", metric: "judge:quality", value: 0, pass: false },
+        { graderId: "custom_gate", metric: "custom_gate", value: 1, pass: true },
+      ],
+    },
+    ...over,
+  });
+
+  it("a standalone run derives its verdict under the live default ladder — it has no stamp by construction", async () => {
+    const service = new RunService({ dispatcher: unusedDispatcher, store: fakeStore([settled("r1")]) });
+    expect((await service.get("r1"))?.verdict).toBe(false); // judge rung decides
+  });
+
+  it("a scorecard CHILD derives its verdict under its PARENT's stamped policy — run detail ≡ case dialog", async () => {
+    // Regression: the DB adapter derived every verdict under the default ladder, so a child of a batch
+    // judged under a composed policy showed FAIL on the run detail while the scorecard case dialog said
+    // PASS — the same evidence, two answers, one click apart.
+    const composed = composeVerdictPolicy([{ id: "custom_gate", authority: "ground_truth" }]);
+    const resolved: PolicyResolution = { status: "resolved", policy: composed };
+    const asked: string[] = [];
+    const service = new RunService({
+      dispatcher: unusedDispatcher,
+      store: fakeStore([
+        settled("c1", { parentScorecardId: "sc-1" }),
+        settled("c2", { parentScorecardId: "sc-1", caseId: "case-2" }),
+      ]),
+      scorecardPolicy: async (_tenant, scorecardId) => {
+        asked.push(scorecardId);
+        return resolved;
+      },
+    });
+    expect((await service.get("c1"))?.verdict).toBe(true); // custom ground truth outranks the judge
+    // The list batches: one policy resolution per distinct parent, not per row.
+    asked.length = 0;
+    const rows = await service.list("acme", { scorecardId: "sc-1" });
+    expect(rows.map((r) => r.verdict)).toEqual([true, true]);
+    expect(asked).toEqual(["sc-1"]);
+  });
+
+  it("a child whose parent policy is unresolvable (or the seam unwired) serves NO verdict — fail-closed", async () => {
+    const child = settled("c1", { parentScorecardId: "sc-gone" });
+    const unwired = new RunService({ dispatcher: unusedDispatcher, store: fakeStore([child]) });
+    expect((await unwired.get("c1"))?.verdict).toBeUndefined();
+    const unresolvable = new RunService({
+      dispatcher: unusedDispatcher,
+      store: fakeStore([child]),
+      scorecardPolicy: async () => ({
+        status: "unresolvable",
+        ref: { id: "composed", version: "x", digest: "sha256:gone" },
+      }),
+    });
+    // Never a silent re-judgement under today's ladder: without the batch's rules, no claim is made.
+    expect((await unresolvable.get("c1"))?.verdict).toBeUndefined();
   });
 });
