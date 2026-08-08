@@ -6,8 +6,8 @@ import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
-import type { ScorecardServiceDeps } from "./scorecard-shared.js";
 
 // The Temporal scoring pass (planScore/scoreCase) used to read bare judge-metric PRESENCE as "already
 // judged" — an unmeasured placeholder row (the exact state rescore-unmeasured exists to replace) made the

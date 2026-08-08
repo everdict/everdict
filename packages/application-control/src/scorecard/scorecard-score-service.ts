@@ -8,9 +8,10 @@ import {
   type ScorecardRecord,
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardOutcomeExtras, judgeGradeable, summarizeScorecard } from "@everdict/domain";
+import { childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
-import { type ScorecardScoringDeps, childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "./scorecard-shared.js";
+import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
 // aggregate — "re-score with a different judge" and "promote experiment → scorecard" are the same operation

@@ -1,7 +1,7 @@
 import type { CaseResult, Score } from "@everdict/contracts";
 import { ScoreSchema } from "@everdict/contracts";
+import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
-import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "./scorecard-shared.js";
 
 // A CaseResult that failed with a trace error carrying `message`.
 function erroredCase(message: string): CaseResult {

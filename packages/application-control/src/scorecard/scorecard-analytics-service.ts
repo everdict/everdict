@@ -34,7 +34,8 @@ import {
   verdictPolicyRef,
   workspaceOpsReport,
 } from "@everdict/domain";
-import { type ScorecardAnalyticsDeps, analysisArtifactKey } from "./scorecard-shared.js";
+import type { ScorecardAnalyticsDeps } from "./scorecard-deps.js";
+import { analysisArtifactKey } from "./scorecard-observability.js";
 
 // The unrestorable stamp(s) of a comparison, or undefined when both sides resolved. A stamped ref always
 // carries its digest (VerdictPolicyRef), so an unresolvable side can always name what was looked for.

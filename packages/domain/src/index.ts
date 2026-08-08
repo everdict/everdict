@@ -30,6 +30,15 @@ export {
 } from "./scorecard/case-outcome.js";
 export { type GateEvaluation, type GateInput, evaluateGate, gateAudit, gatePolicyDigest } from "./scorecard/gate.js";
 export { flakeIndex } from "./scorecard/flake.js";
+export {
+  applyGradingPlan,
+  caseReason,
+  childKey,
+  hasMeasuredJudgeVerdict,
+  isJudgeMetricOf,
+  selectSubsetCases,
+  stripJudgeScores,
+} from "./scorecard/scoring-plan.js";
 export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {
   composeVerdictPolicy,

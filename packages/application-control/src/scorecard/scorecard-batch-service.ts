@@ -35,6 +35,7 @@ import {
   scorecardModels,
   summarizeScorecard,
 } from "@everdict/domain";
+import { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
 import type { ScoringService } from "../execution/scoring-service.js";
@@ -48,19 +49,15 @@ import type { DispatchOptions } from "../ports/dispatcher.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
+import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
-  type ScorecardBatchDeps,
   analysisBundle,
-  applyGradingPlan,
   batchSettledEvent,
-  caseReason,
-  childKey,
-  embedHarnessSpec,
   exportStepMessage,
   offloadAnalysis,
   offloadResults,
-  selectSubsetCases,
-} from "./scorecard-shared.js";
+} from "./scorecard-observability.js";
+import { embedHarnessSpec } from "./scorecard-plan.js";
 
 // Batch-orchestration collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md
 // R2-b): the live batch lifecycle — the in-process track loop, the Batch-on-Temporal internals (plan/run/finalize),

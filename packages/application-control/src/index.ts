@@ -534,19 +534,18 @@ export {
   type IngestScorecardInput,
   type PullIngestBody,
   type PullIngestInput,
-  type AnalysisBundle,
   type RunScorecardInput,
-  type ScorecardServiceDeps,
+  originSource,
+} from "./scorecard/scorecard-requests.js";
+export {
+  type AnalysisBundle,
   analysisBundle,
-  applyGradingPlan,
-  caseReason,
-  childKey,
   exportStepMessage,
   offloadAnalysis,
   offloadResults,
-  originSource,
-  selectSubsetCases,
-} from "./scorecard/scorecard-shared.js";
+} from "./scorecard/scorecard-observability.js";
+export type { ScorecardServiceDeps } from "./scorecard/scorecard-deps.js";
+export { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
 export { ScorecardService } from "./scorecard/scorecard-service.js";
 export { ScorecardBatchService } from "./scorecard/scorecard-batch-service.js";
 export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js";

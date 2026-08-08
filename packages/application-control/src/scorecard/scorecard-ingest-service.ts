@@ -19,16 +19,14 @@ import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeSco
 import type { ScoringService } from "../execution/scoring-service.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
-import {
-  type IngestScorecardBody,
-  type IngestScorecardInput,
-  type PullIngestBody,
-  type PullIngestInput,
-  type ScorecardIngestDeps,
-  analysisBundle,
-  offloadAnalysis,
-  offloadResults,
-} from "./scorecard-shared.js";
+import type { ScorecardIngestDeps } from "./scorecard-deps.js";
+import { analysisBundle, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
+import type {
+  IngestScorecardBody,
+  IngestScorecardInput,
+  PullIngestBody,
+  PullIngestInput,
+} from "./scorecard-requests.js";
 
 // Sentinel version paired with TRACE_EVAL_REF for the "evaluate traces" path (no dataset / no harness run). Kept
 // distinct from a real registrable version so a trace-eval scorecard is unambiguous (dataset.id === TRACE_EVAL_REF).

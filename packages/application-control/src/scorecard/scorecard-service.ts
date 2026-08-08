@@ -36,6 +36,7 @@ import {
   gatePolicyDigest,
   retryableUnmeasured,
 } from "@everdict/domain";
+import { applyGradingPlan, selectSubsetCases } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -44,35 +45,29 @@ import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
+import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
+import { embedHarnessSpec } from "./scorecard-plan.js";
+import type {
+  IngestScorecardInput,
+  PullIngestInput,
+  RunScorecardInput,
+  SubmitExperimentInput,
+} from "./scorecard-requests.js";
 import { type ScoreGroupInput, ScorecardScoreService } from "./scorecard-score-service.js";
-import {
-  type IngestScorecardInput,
-  type PullIngestInput,
-  type RunScorecardInput,
-  type ScorecardServiceDeps,
-  type SubmitExperimentInput,
-  applyGradingPlan,
-  embedHarnessSpec,
-  selectSubsetCases,
-} from "./scorecard-shared.js";
 
 // Public surface preserved through the R2-b decomposition — the moved declarations stay importable from here.
-export {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  originSource,
-  selectSubsetCases,
-} from "./scorecard-shared.js";
+export { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "./scorecard-requests.js";
+export { selectSubsetCases } from "@everdict/domain";
 export type {
   IngestScorecardBody,
   IngestScorecardInput,
   PullIngestBody,
   PullIngestInput,
   RunScorecardInput,
-  ScorecardServiceDeps,
   SubmitExperimentInput,
-} from "./scorecard-shared.js";
+} from "./scorecard-requests.js";
+export type { ScorecardServiceDeps } from "./scorecard-deps.js";
 export type { ScoreGroupInput } from "./scorecard-score-service.js";
 
 // A scorecard run's async lifecycle: dataset resolution (404 if missing) → create record (202) → batch run (runSuite) → aggregate and persist.

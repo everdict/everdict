@@ -14,7 +14,7 @@ const ALLOWED = new Set([
   "execution/scoring-service.ts", // producer — appends judge verdicts + the unresolved-judge unmeasured row
   "scorecard/scorecard-ingest-service.ts", // producer — concatenates derived + uploaded scores onto the case
   "scorecard/scorecard-score-service.ts", // re-score worklist — strips/replaces whole judge families, never averages
-  "scorecard/scorecard-shared.ts", // gated: caseReason via measuredScores; batchSettledEvent tallies the FAILURES on purpose
+  "scorecard/scorecard-observability.ts", // gated: batchSettledEvent tallies the FAILURES on purpose (caseReason moved to @everdict/domain scoring-plan)
   "trace-sink/trace-sink-service.ts", // gated via measuredScores before anything leaves for a platform
 ]);
 
