@@ -6,7 +6,32 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./scorecard": {
+      "types": "./dist/scorecard/index.d.ts",
+      "default": "./dist/scorecard/index.js"
+    },
+    "./run": {
+      "types": "./dist/run/index.d.ts",
+      "default": "./dist/run/index.js"
+    },
+    "./ownership": {
+      "types": "./dist/ownership/index.d.ts",
+      "default": "./dist/ownership/index.js"
+    },
+    "./notification": {
+      "types": "./dist/notification/index.d.ts",
+      "default": "./dist/notification/index.js"
+    },
+    "./platform-event": {
+      "types": "./dist/platform-event/index.d.ts",
+      "default": "./dist/platform-event/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
