@@ -84,36 +84,6 @@ export interface NewQueuedIngestInput {
   now: string;
 }
 
-// A batch fan-out child run. Like Run.newQueued it is born QUEUED (created at dispatch, flipped to running only when
-// compute actually starts — a runner leases it / a managed backend dispatches it), so a fan-out parked behind one
-// runner reads as "waiting", not falsely "running". Unlike Run.newQueued it never persists caseSpec (the batch
-// re-plans from its dataset — the orchestration field is the resume basis, not per-child case bodies), and its
-// trigger is fixed to "scorecard".
-export interface NewChildRunInput {
-  id: string;
-  tenant: string;
-  harness: { id: string; version: string };
-  caseId: string;
-  parentScorecardId: string;
-  runtime?: string; // the assigned runtime lane (batch runtime or per-case shard target)
-  origin?: RunOrigin; // the batch's WHY, carried onto each case (schedule/member/api — execution-model.md P0)
-  envelope?: RunEnvelope; // the delegated budget this case draws from (§5.2 — {id} of the causer's envelope)
-  now: string;
-}
-
-// The P0 stamps every fan-out child shares: an eval-kind, batch-class task inside the scorecard's group.
-function childRunShape(input: Pick<NewChildRunInput, "parentScorecardId" | "runtime" | "origin" | "envelope">) {
-  return {
-    kind: "eval" as const,
-    class: "batch" as const,
-    lifetime: "task" as const,
-    group: { id: input.parentScorecardId, role: "case" as const },
-    ...(input.origin ? { origin: input.origin } : {}),
-    ...(input.envelope ? { envelope: input.envelope } : {}),
-    ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
-  };
-}
-
 // The label pair every scorecard fact carries — dataset@version × harness@version.
 function batchLabels(record: ScorecardRecord): { dataset: string; harness: string } {
   return {
@@ -244,42 +214,6 @@ export class ScorecardBatch {
     if (source === "github-actions") return { cause: "ci" };
     const cause = source === "web" || source === "mcp" ? ("member" as const) : ("api" as const);
     return { cause, ...(record.createdBy ? { actor: record.createdBy } : {}) };
-  }
-
-  // Fan-out child run, born queued (flipped to running when compute starts; see NewChildRunInput).
-  static newChildRun(input: NewChildRunInput): RunRecord {
-    return {
-      id: input.id,
-      tenant: input.tenant,
-      harness: input.harness,
-      caseId: input.caseId,
-      status: "queued",
-      parentScorecardId: input.parentScorecardId,
-      trigger: "scorecard",
-      ...(input.runtime ? { runtime: input.runtime } : {}),
-      ...childRunShape(input),
-      createdAt: input.now,
-      updatedAt: input.now,
-    };
-  }
-
-  // Seeded child run — a carried-over result materialized as an already-succeeded child (retry-failed on the
-  // Temporal path), so the idempotent planBatch skips it and finalize aggregates it.
-  static newSeededChildRun(input: Omit<NewChildRunInput, "caseId"> & { result: CaseResult }): RunRecord {
-    return {
-      id: input.id,
-      tenant: input.tenant,
-      harness: input.harness,
-      caseId: input.result.caseId,
-      status: "succeeded",
-      result: input.result,
-      parentScorecardId: input.parentScorecardId,
-      trigger: "scorecard",
-      ...(input.runtime ? { runtime: input.runtime } : {}),
-      ...childRunShape(input),
-      createdAt: input.now,
-      updatedAt: input.now,
-    };
   }
 
   // Latest child per case — a batch resumed more than once has several children for a re-run case; the newest

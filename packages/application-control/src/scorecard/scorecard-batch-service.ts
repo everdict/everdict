@@ -29,6 +29,8 @@ import {
   caseVerdict,
   classifyFailure,
   modelBindingLabel,
+  newScorecardChildRun,
+  newSeededScorecardChildRun,
   resolveHarnessSecrets,
   resolvePolicyResolution,
   runEvidenceIdentity,
@@ -537,7 +539,7 @@ export class ScorecardBatchService {
       const caseEnvelope = current ? await this.childEnvelope(current) : undefined; // §5.2 — the delegated pool this case draws from
       let child: RunRecord | undefined;
       if (runStore) {
-        child = ScorecardBatch.newChildRun({
+        child = newScorecardChildRun({
           id: this.newId(),
           tenant: ctx.tenant,
           harness: { id: ctx.harnessId, version: ctx.harnessVersion },
@@ -946,7 +948,7 @@ export class ScorecardBatchService {
         const seededEnvelope = await this.childEnvelope(record);
         for (const r of [...seed, ...recovered]) {
           await this.deps.runStore.create(
-            ScorecardBatch.newSeededChildRun({
+            newSeededScorecardChildRun({
               id: this.newId(),
               tenant: input.tenant,
               harness: src.harness,
@@ -1182,7 +1184,7 @@ export class ScorecardBatchService {
       // leases it / a managed backend dispatches it). Tagged with parentScorecardId, hidden from the activity list by default.
       let child: RunRecord | undefined;
       if (runStore) {
-        child = ScorecardBatch.newChildRun({
+        child = newScorecardChildRun({
           id: this.newId(),
           tenant,
           harness: { id: harnessId, version: harnessVersion },

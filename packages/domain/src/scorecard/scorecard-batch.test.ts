@@ -1,6 +1,7 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
 import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { newScorecardChildRun, newSeededScorecardChildRun } from "../run/scorecard-child.js";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { ScorecardBatch } from "./scorecard-batch.js";
 import { verdictPolicyRef } from "./verdict-policy.js";
@@ -81,7 +82,7 @@ describe("ScorecardBatch — factories", () => {
   });
 
   it("newChildRun materializes a QUEUED fan-out child (trigger=scorecard, no caseSpec) — waiting for a runner, not falsely running", () => {
-    const child = ScorecardBatch.newChildRun({
+    const child = newScorecardChildRun({
       id: "r1",
       tenant: "acme",
       harness: { id: "h", version: "1" },
@@ -103,7 +104,7 @@ describe("ScorecardBatch — factories", () => {
   });
 
   it("newSeededChildRun materializes a carried-over result as an already-succeeded child keyed by the result's caseId", () => {
-    const seeded = ScorecardBatch.newSeededChildRun({
+    const seeded = newSeededScorecardChildRun({
       id: "r2",
       tenant: "acme",
       harness: { id: "h", version: "1" },
@@ -411,7 +412,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
 describe("ScorecardBatch — pure derivations and the child-seed helper", () => {
   it("latestChildPerCase dedups to the newest child per case (a batch resumed more than once has several children per case)", () => {
     const child = (id: string, caseId: string, updatedAt: string) => ({
-      ...ScorecardBatch.newChildRun({
+      ...newScorecardChildRun({
         id,
         tenant: "acme",
         harness: { id: "h", version: "1" },
@@ -450,7 +451,7 @@ describe("ScorecardBatch — pure derivations and the child-seed helper", () => 
 
 describe("ScorecardBatch child runs — the universal-run shape (P0)", () => {
   it("stamps every fan-out child as an eval-kind batch-class task inside the scorecard's group", () => {
-    const child = ScorecardBatch.newChildRun({
+    const child = newScorecardChildRun({
       id: "run-1",
       tenant: "acme",
       harness: { id: "h", version: "1.0.0" },

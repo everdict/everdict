@@ -1,5 +1,8 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
 import type { DomainFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
+import { settleAgentTransition } from "./agent-run.js";
+import { settleCommandTransition } from "./command-run.js";
+import { closeSessionTransition, extendSessionTransition, recordSnapshotTransition } from "./session-run.js";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
@@ -103,12 +106,42 @@ export function canReadRun(record: Pick<RunRecord, "kind" | "createdBy" | "origi
   return audience.scope === "workspace" || audience.subject === viewer;
 }
 
+// ── Shared transition guards (free functions so the per-kind transition modules stand on the SAME rules) ──
+export function isRunTerminal(record: Pick<RunRecord, "status">): boolean {
+  return record.status === "succeeded" || record.status === "failed" || record.status === "suspended";
+}
+
+export function assertRunNotTerminal(record: Pick<RunRecord, "id" | "status">, transition: string): void {
+  if (isRunTerminal(record))
+    throw new ConflictError(
+      "CONFLICT",
+      { run: record.id, status: record.status, transition },
+      `run is already terminal (${record.status}) — ${transition} rejected`,
+    );
+}
+
+// Session-only transitions guard on the session half existing — a task-lifetime run reaching one is a
+// caller bug surfaced as a clean conflict, never a silent no-op.
+export function assertRunSession(
+  record: Pick<RunRecord, "id" | "session">,
+  transition: string,
+): NonNullable<RunRecord["session"]> {
+  const session = record.session;
+  if (session === undefined)
+    throw new ConflictError(
+      "CONFLICT",
+      { run: record.id, transition },
+      `run is not a session — ${transition} rejected`,
+    );
+  return session;
+}
+
 // The emission gate, domain law: scorecard children stay represented by the batch's own facts (flood
 // prevention). The initiator gate was WIDENED (E2 coverage decision, master-plan W6 backlog close-out):
 // a machine-fired completion is workspace news too — the Mattermost channel always posted it, and re-basing
 // that channel onto the log required the log to know. Personal targeting stays conditional (the feed
 // consumer skips actor-less facts), so widening adds facts, never ghost bell rows.
-function terminalFact(record: RunRecord, status: "succeeded" | "failed"): DomainFact[] {
+export function terminalRunFacts(record: RunRecord, status: "succeeded" | "failed"): DomainFact[] {
   if (record.parentScorecardId) return [];
   const kind = status === "succeeded" ? ("run.completed" as const) : ("run.failed" as const);
   return [
@@ -448,16 +481,7 @@ export class Run {
   // its NORMAL completion — expiry included — so every reason settles as succeeded; the reason is stamped
   // on `session.closedReason` for the console. First terminal write wins (close vs expiry race).
   closeSession(reason: "closed" | "expired" | "orphaned", now: string): RunTransition {
-    this.assertNotTerminal("closeSession");
-    const session = this.record.session;
-    return {
-      patch: {
-        status: "succeeded",
-        ...(session !== undefined ? { session: { ...session, closedReason: reason } } : {}),
-        updatedAt: now,
-      },
-      facts: terminalFact(this.record, "succeeded"),
-    };
+    return closeSessionTransition(this.record, reason, now);
   }
 
   // Agent worlds (W1): the session published a snapshot — an environment-capability version whose image IS
@@ -465,35 +489,13 @@ export class Run {
   // half (one session may snapshot many times). The fact is deliberately NOT trigger-matchable in v1: an
   // agent snapshotting on a trigger and waking on its own snapshot is loop guard #1's textbook vector.
   recordSnapshot(input: { world: string; version: string; image: string; now: string }): RunTransition {
-    this.assertNotTerminal("recordSnapshot");
-    const session = this.assertSession("recordSnapshot");
-    return {
-      patch: {
-        session: {
-          ...session,
-          snapshots: [...(session.snapshots ?? []), { version: input.version, image: input.image, at: input.now }],
-        },
-        updatedAt: input.now,
-      },
-      facts: [
-        {
-          kind: "run.snapshotted",
-          subject: { type: "run", id: this.record.id },
-          ...(this.record.createdBy !== undefined ? { actor: this.record.createdBy } : {}),
-          payload: { world: input.world, version: input.version, image: input.image },
-        },
-      ],
-    };
+    return recordSnapshotTransition(this.record, input);
   }
 
   // Keep-alive (touch): push the hard deadline OUT to now+ttl — never pull it in (a touch that could shorten
   // a long-remaining session would make a small ttl a foot-gun), and never announce (upkeep is not news).
   extendSession(ttlSec: number, now: string): RunTransition {
-    this.assertNotTerminal("extendSession");
-    const session = this.assertSession("extendSession");
-    const proposed = new Date(now).getTime() + ttlSec * 1000;
-    const expiresAt = new Date(Math.max(new Date(session.expiresAt).getTime(), proposed)).toISOString();
-    return { patch: { session: { ...session, ttlSec, expiresAt }, updatedAt: now }, facts: [] };
+    return extendSessionTransition(this.record, ttlSec, now);
   }
 
   // Settle an agent run (reported by the agent service). Facts stay DELIBERATELY empty in this slice: the
@@ -509,17 +511,7 @@ export class Run {
     message: string,
     now: string,
   ): RunTransition {
-    this.assertNotTerminal("settleAgent");
-    if (outcome === "completed") return { patch: { status: "succeeded", updatedAt: now }, facts: [] };
-    if (outcome === "suspended") return { patch: { status: "suspended", updatedAt: now }, facts: [] };
-    return {
-      patch: {
-        status: "failed",
-        error: { code: outcome === "cancelled" ? "CANCELLED" : "AGENT_RUN_FAILED", message },
-        updatedAt: now,
-      },
-      facts: [],
-    };
+    return settleAgentTransition(this.record, outcome, message, now);
   }
 
   // The facts describing a record's CREATION (nothing → queued) — the same E0 rule as transitions, for the
@@ -543,7 +535,7 @@ export class Run {
   // Terminal = the record's outcome is settled; nothing may rewrite it (first terminal write wins).
   // `suspended` settles the ROW (a resume is a new run) while claiming "not done" — settled, not succeeded.
   isTerminal(): boolean {
-    return this.record.status === "succeeded" || this.record.status === "failed" || this.record.status === "suspended";
+    return isRunTerminal(this.record);
   }
 
   // A command run settles on HAVING RUN — not on the command agreeing with us. A non-zero exit is the
@@ -552,18 +544,7 @@ export class Run {
   // extension, a sandbox that never came up. Conflating the two would make every failing test script look
   // like broken infrastructure.
   settleCommand(outcome: { exitCode: number; files?: string[] }, now: string): RunTransition {
-    this.assertNotTerminal("settleCommand");
-    return {
-      patch: {
-        status: "succeeded",
-        outputs: {
-          exitCode: outcome.exitCode,
-          ...(outcome.files !== undefined && outcome.files.length > 0 ? { files: outcome.files } : {}),
-        },
-        updatedAt: now,
-      },
-      facts: terminalFact(this.record, "succeeded"),
-    };
+    return settleCommandTransition(this.record, outcome, now);
   }
 
   // Boot recovery may adopt a still-alive backend job's result only while the run is not settled.
@@ -597,7 +578,10 @@ export class Run {
   // queued|running → succeeded (normal completion).
   succeed(result: CaseResult, now: string): RunTransition {
     this.assertNotTerminal("succeed");
-    return { patch: { status: "succeeded", result, updatedAt: now }, facts: terminalFact(this.record, "succeeded") };
+    return {
+      patch: { status: "succeeded", result, updatedAt: now },
+      facts: terminalRunFacts(this.record, "succeeded"),
+    };
   }
 
   // queued|running → failed (execution error, isolated as a run failure).
@@ -608,7 +592,7 @@ export class Run {
     this.assertNotTerminal("fail");
     return {
       patch: { status: "failed", error, ...(result ? { result } : {}), updatedAt: now },
-      facts: terminalFact(this.record, "failed"),
+      facts: terminalRunFacts(this.record, "failed"),
     };
   }
 
@@ -637,24 +621,12 @@ export class Run {
   }
 
   private assertNotTerminal(transition: string): void {
-    if (this.isTerminal())
-      throw new ConflictError(
-        "CONFLICT",
-        { run: this.record.id, status: this.record.status, transition },
-        `run is already terminal (${this.record.status}) — ${transition} rejected`,
-      );
+    assertRunNotTerminal(this.record, transition);
   }
 
   // Session-only transitions guard on the session half existing — a task-lifetime run reaching one is a
   // caller bug, reported as a conflict with the transition named (never a silent no-op).
   private assertSession(transition: string): NonNullable<RunRecord["session"]> {
-    const session = this.record.session;
-    if (session === undefined)
-      throw new ConflictError(
-        "CONFLICT",
-        { run: this.record.id, transition },
-        `run is not a session — ${transition} rejected`,
-      );
-    return session;
+    return assertRunSession(this.record, transition);
   }
 }
