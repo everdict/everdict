@@ -6062,3 +6062,38 @@ function legacyFnvOf(document: unknown): string {
   }
   return hash.toString(16).padStart(16, "0");
 }
+
+describe("ScorecardService.gate — the decision pins the revision it actually diffed (I4)", () => {
+  it("a re-score settling between the diff read and the decision write cannot re-attribute the pin", async () => {
+    // Pre-fix, gate() computed the diff and then REFETCHED both records for currentScoringPin — a rescore
+    // landing in between stamped revision 2 onto numbers revision 1 produced. The snapshot reads once.
+    const rev = (n: number) => ({
+      revision: n,
+      kind: n === 1 ? ("initial" as const) : ("rescore" as const),
+      judges: [{ id: "q", version: `${n}.0.0` }],
+      scorePlaneDigest: `sha256:plane-${n}`,
+      createdAt: "2026-08-09T00:00:00.000Z",
+    });
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: scorecard(true), scoring: [rev(1)] }));
+    await store.create(record("cand", { scorecard: scorecard(true), scoring: [rev(1)] }));
+    const service = svc(store);
+    // Sabotage clock: after the FIRST candidate read (the diff's), the record silently gains revision 2 —
+    // the exact interleaving a concurrent rescore finalize produces.
+    const originalGet = store.get.bind(store);
+    const originalUpdate = store.update.bind(store);
+    let candReads = 0;
+    store.get = async (id: string) => {
+      const rec = await originalGet(id);
+      if (id === "cand" && rec) {
+        candReads++;
+        if (candReads === 1) await originalUpdate("cand", { scoring: [rev(1), rev(2)] });
+      }
+      return rec;
+    };
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    // The decision pins EXACTLY the revision whose plane it compared — never the one that landed after.
+    expect(decision.candidateScoring).toEqual({ revision: 1, scorePlaneDigest: "sha256:plane-1" });
+    expect(decision.baselineScoring).toEqual({ revision: 1, scorePlaneDigest: "sha256:plane-1" });
+  });
+});

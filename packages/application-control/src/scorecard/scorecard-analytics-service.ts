@@ -22,6 +22,7 @@ import {
   type TrialDiff,
   computeAnalysis,
   contentDigest,
+  currentScoringPin,
   diffScorecards,
   diffTrials,
   experimentIdentity,
@@ -60,6 +61,38 @@ function unresolvableStamps(
 // read-side derivations over the store + the pure @everdict/domain aggregations — diff / trend / leaderboard /
 // backfillModels. Composed only by the facade; getRecord is the facade's hydrating get (child-run references →
 // embedded scorecard).
+// The diff result the wire has always served — extracted so diff() and diffSnapshot() share one shape.
+export type ScorecardDiffResult = ScorecardDiff & {
+  trials?: TrialDiff;
+  policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+  policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
+  coverage: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
+  criticalCases?: CaseMatcher[];
+};
+
+// One side of a comparison snapshot: the record the diff actually read, with its scoring pin AT THAT read.
+export interface ComparisonSide {
+  record: ScorecardRecord;
+  pin?: { revision: number; scorePlaneDigest: string };
+}
+export interface ComparisonSnapshot {
+  diff: ScorecardDiffResult;
+  baseline: ComparisonSide;
+  candidate: ComparisonSide;
+}
+
+function snapshotOf(
+  diff: ScorecardDiffResult,
+  baseRecord: ScorecardRecord,
+  candRecord: ScorecardRecord,
+): ComparisonSnapshot {
+  const side = (record: ScorecardRecord): ComparisonSide => {
+    const pin = currentScoringPin(record.scoring);
+    return { record, ...(pin !== undefined ? { pin } : {}) };
+  };
+  return { diff, baseline: side(baseRecord), candidate: side(candRecord) };
+}
+
 export class ScorecardAnalyticsService {
   private readonly now: () => string;
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
@@ -80,15 +113,21 @@ export class ScorecardAnalyticsService {
     baselineId: string,
     candidateId: string,
     opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
-  ): Promise<
-    ScorecardDiff & {
-      trials?: TrialDiff;
-      policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
-      policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
-      coverage: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
-      criticalCases?: CaseMatcher[];
-    }
-  > {
+  ): Promise<ScorecardDiffResult> {
+    return (await this.diffSnapshot(tenant, baselineId, candidateId, opts)).diff;
+  }
+
+  // The COMPARISON SNAPSHOT (arch-review 7 P0, I4): the diff plus the exact records — and their scoring
+  // pins — it was computed from, captured at the ONE read per side. The gate used to compute the diff and
+  // then REFETCH both records for its pins: a re-score landing between the two reads stamped the decision
+  // with a revision that did not produce the numbers it decided on (a classic TOCTOU, in either direction).
+  // A decision must pin what it READ, not what was current when it got around to writing.
+  async diffSnapshot(
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
+  ): Promise<ComparisonSnapshot> {
     const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(
       tenant,
       baselineId,
@@ -162,21 +201,26 @@ export class ScorecardAnalyticsService {
     const withCritical = criticalCases !== undefined && criticalCases.length > 0 ? { criticalCases } : {};
     // An unresolvable stamp gets no statistical signal either: diffTrials would re-derive that side's pass
     // rates under a ladder the batch never ran — the same retroactive rewrite the transitions refuse.
-    if (!hasTrials || policyUnresolvable) return { ...withPolicy, coverage, ...withCritical };
-    return {
-      ...withPolicy,
-      coverage,
-      ...withCritical,
-      // Each side's trial pass rates are computed under its own resolved policy — the statistical regression
-      // signal a gate reads must not be manufactured by re-judging one side.
-      trials: diffTrials(baseline, candidate, {
-        ...(opts.zThreshold !== undefined ? { zThreshold: opts.zThreshold } : {}),
-        ...(opts.minDelta !== undefined ? { minDelta: opts.minDelta } : {}),
-        ...(opts.fdrAlpha !== undefined ? { fdrAlpha: opts.fdrAlpha } : {}),
-        ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
-        ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
-      }),
-    };
+    if (!hasTrials || policyUnresolvable)
+      return snapshotOf({ ...withPolicy, coverage, ...withCritical }, baseRecord, candRecord);
+    return snapshotOf(
+      {
+        ...withPolicy,
+        coverage,
+        ...withCritical,
+        // Each side's trial pass rates are computed under its own resolved policy — the statistical regression
+        // signal a gate reads must not be manufactured by re-judging one side.
+        trials: diffTrials(baseline, candidate, {
+          ...(opts.zThreshold !== undefined ? { zThreshold: opts.zThreshold } : {}),
+          ...(opts.minDelta !== undefined ? { minDelta: opts.minDelta } : {}),
+          ...(opts.fdrAlpha !== undefined ? { fdrAlpha: opts.fdrAlpha } : {}),
+          ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
+          ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
+        }),
+      },
+      baseRecord,
+      candRecord,
+    );
   }
 
   // Workspace ops report (metrics commercialization C1) — the SLA-evidence read: the workspace's OWN

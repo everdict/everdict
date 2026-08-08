@@ -31,7 +31,6 @@ import {
   can,
   composeVerdictPolicy,
   contentDigest,
-  currentScoringPin,
   digestUnder,
   evaluateGate,
   gatePolicyDigest,
@@ -1416,23 +1415,22 @@ export class ScorecardService {
     };
     // The gate's statistical policy IS the trials diff's policy — a caller that raised the significance bar
     // for its release decision must have the diff computed under that bar, not under diffTrials' defaults.
-    const diff = await this.analytics.diff(input.tenant, input.baseline, input.candidate, {
+    // The SNAPSHOT (I4): the diff and the pins come from the SAME single read per side — the decision pins
+    // exactly the revisions whose planes it compared. The pre-fix refetch was a TOCTOU: a re-score landing
+    // between the diff and the pin read stamped a revision that did not produce the compared numbers (and
+    // I3's pass marker means a mid-pass plane refuses upstream, in the same read).
+    const snapshot = await this.analytics.diffSnapshot(input.tenant, input.baseline, input.candidate, {
       ...(input.visibleTeams ? { visibleTeams: input.visibleTeams } : {}),
       ...(policy.zThreshold !== undefined ? { zThreshold: policy.zThreshold } : {}),
       ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
       ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
     });
-    const evaluation = evaluateGate(diff, policy);
+    const evaluation = evaluateGate(snapshot.diff, policy);
     const record = await this.deps.store.get(input.candidate);
     if (!record || record.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
-    // Pin WHICH judgment each side's plane carried at decision time ({revision, scorePlaneDigest}) — a score
-    // plane legally mutates on re-score, so without the pin a later reader silently attributes today's
-    // judgments to this decision. The diff already enforced visibility on both sides; the tenant check here
-    // only guards the pin read itself. Pre-ledger records pin nothing (honest absence).
-    const baselineRecord = await this.deps.store.get(input.baseline);
-    const baselinePin = baselineRecord?.tenant === input.tenant ? currentScoringPin(baselineRecord.scoring) : undefined;
-    const candidatePin = currentScoringPin(record.scoring);
+    const baselinePin = snapshot.baseline.pin;
+    const candidatePin = snapshot.candidate.pin;
     const decision: GateDecision = {
       id: this.newId(),
       baseline: input.baseline,
