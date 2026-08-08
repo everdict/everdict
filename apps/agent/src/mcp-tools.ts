@@ -69,6 +69,24 @@ export type ResolvedMcpServer =
       effects?: EffectContract;
     };
 
+// The effect contract a bridged tool carries to the permission gate. The author's own declaration always
+// wins; without one, a REMOTE transport is structurally external — every call ships its model-chosen
+// arguments to an outside endpoint, so an UNDECLARED remote read-only server is exfiltration-shaped by
+// construction (effectsRequireConsent reason ④: reading the workspace and reaching an outside network are
+// the two halves) and must not run as a plain safe read just because nobody wrote a declaration. The
+// synthesized contract states ONLY the structural fact (the egress). A stdio server runs locally (nothing
+// synthesized), and an undeclared write-capable server is already permit-gated by isReadOnly — demanding
+// its declaration is the registration guard's job.
+export function bridgedEffectsFor(
+  server: Pick<ResolvedMcpServer, "kind" | "write" | "effects">,
+): EffectContract | undefined {
+  if (server.effects) return server.effects;
+  if (server.kind === "http" && !server.write) {
+    return { sideEffect: "none", dataAccess: { egress: "external" } };
+  }
+  return undefined;
+}
+
 // `docker run --rm -i --init [--env NAME …] <image> [args]`. `--init` runs a tiny init as PID 1 so servers that spawn
 // children (e.g. Playwright → chromium) don't leak zombies over the session. Secrets pass through with `--env NAME`
 // (no `=value` on argv, so the values never appear in `ps`/logs) — their VALUES ride in the spawned docker process's
@@ -297,6 +315,7 @@ export function mcpToolProvider(
         // A read-only-bridged server may auto-retry everything it exposes; a write-allowed server only its reads.
         const invoke = makeInvoke(box, connectServer, (tool) => !server.write || isReadOnlyToolName(tool), prefix);
         const toAdd: ToolDefinition[] = [];
+        const effects = bridgedEffectsFor(server);
         for (const t of allowed) {
           const name = `${prefix}${t.name}`;
           if (bridged.some((b) => b.name === name) || toAdd.some((b) => b.name === name)) continue;
@@ -308,7 +327,7 @@ export function mcpToolProvider(
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
               invoke,
-              { isReadOnly: !server.write, ...(server.effects ? { effects: server.effects } : {}) },
+              { isReadOnly: !server.write, ...(effects ? { effects } : {}) },
             ),
           );
         }

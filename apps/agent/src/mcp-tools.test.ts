@@ -1,7 +1,9 @@
+import { effectsRequireConsent } from "@everdict/contracts";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   type McpClientBox,
+  bridgedEffectsFor,
   dockerRunArgs,
   imageAllowed,
   isBaseToolReadOnly,
@@ -108,6 +110,28 @@ describe("base tool default wiring", () => {
       "delete_all_files",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
+  });
+});
+
+describe("bridgedEffectsFor — unknown egress is not a plain read", () => {
+  it("an UNDECLARED remote read-only server synthesizes the structural egress — and it demands consent", () => {
+    // Regression (O5): needsPermit short-circuits on effects === undefined, and read-only MCP servers never
+    // required a declaration — so a remote server shipped model-chosen workspace data to an external URL as
+    // a plain safe read. The transport being remote is a structural fact, not a guess.
+    const effects = bridgedEffectsFor({ kind: "http", write: false });
+    expect(effects).toEqual({ sideEffect: "none", dataAccess: { egress: "external" } });
+    expect(effects && effectsRequireConsent(effects)).toBe(true);
+  });
+
+  it("the author's own declaration always wins over the synthesized one", () => {
+    const declared = { sideEffect: "none" as const, dataAccess: { egress: "none" as const } };
+    expect(bridgedEffectsFor({ kind: "http", write: false, effects: declared })).toBe(declared);
+  });
+
+  it("a local stdio server and a write-capable server synthesize nothing", () => {
+    expect(bridgedEffectsFor({ kind: "stdio", write: false })).toBeUndefined();
+    // write=true is permit-gated by isReadOnly already; its declaration is the registration guard's job.
+    expect(bridgedEffectsFor({ kind: "http", write: true })).toBeUndefined();
   });
 });
 

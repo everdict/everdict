@@ -22,6 +22,10 @@ precedent: `authorizeToolInvocation`, `budgetExhausted`, `effectsRequireConsent`
 3. **readOnly ≠ safe-without-consent.** The permission hook fires for writes OR for a read whose declared
    `effects` require consent (`effectsRequireConsent` — external egress is exfiltration-shaped). Plain
    reads stay ungated (the senses). `PermissionRequest.isReadOnly` carries the REAL access kind.
+   **An UNDECLARED remote MCP read is not a plain read**: the transport being an external endpoint is a
+   structural fact, so the bridge synthesizes `{dataAccess: {egress: "external"}}` for a remote read-only
+   server with no declaration (`bridgedEffectsFor`, apps/agent mcp-tools) — the author's own declaration
+   always wins, stdio (local) servers synthesize nothing.
 4. **Sub-agents shrink, never escape**: the child registry = the parent's read-only tools ∩ the parent's
    own scope, and the parent's envelope binds the child verbatim (per-run budgets re-count from zero).
 5. **A halt owes a handoff.** `budget_exhausted` (and an armed `waiting`) settle as SUSPENDED — never
