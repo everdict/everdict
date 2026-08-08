@@ -3,9 +3,9 @@ import type { ScorecardRecord } from "@everdict/contracts";
 import type {
   OutboxEvent,
   PlatformEventStore,
-  ScorecardUpdateGuard,
   ScorecardListFilter,
   ScorecardStore,
+  ScorecardUpdateGuard,
 } from "@everdict/application-control";
 
 export class InMemoryScorecardStore implements ScorecardStore {
