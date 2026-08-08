@@ -103,17 +103,19 @@ describe("runAgentLoop", () => {
       envelope: {
         id: "env-1",
         goal: "scoped probe",
-        scope: { allowedCapabilities: ["something_else"], forbidden: ["echo"] },
+        scope: { reads: "all", writes: ["something_else"], forbidden: ["echo"] },
         budgets: { tokens: 100_000 },
         stop: { onBudgetExhausted: "halt_checkpoint" },
         escalation: { onScopeExceeded: "refuse_and_replan" },
         rollbackRequired: false,
       },
     });
-    // Then the CHILD's echo call was refused under the same envelope (pre-fix: the child ran unscoped)
+    // Then the CHILD could not use echo (pre-fix: the child ran unscoped). The registry filter now removes a
+    // forbidden tool before the child ever sees it ("unknown tool"); the envelope gate remains the backstop
+    // for a tool that survives into the registry, so either refusal shape proves the escape is closed.
     const childSecond = child.requests[1];
     const refusal = childSecond?.messages.find((m) => m.role === "tool");
-    expect(typeof refusal?.content === "string" && /forbidden|scope/i.test(refusal.content)).toBe(true);
+    expect(typeof refusal?.content === "string" && /forbidden|scope|unknown tool/i.test(refusal.content)).toBe(true);
   });
 
   it("closing out a 3+ item list without a verification step nudges the model to spawn the verifier (LESSON 059 P3)", async () => {
@@ -1592,7 +1594,7 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
   const envelope = {
     id: "env-1",
     goal: "fix the grader",
-    scope: { allowedCapabilities: ["read_file", "edit_file"], forbidden: ["deploy"] },
+    scope: { reads: "all" as const, writes: ["edit_file"], forbidden: ["deploy"] },
     budgets: { tokens: 100 },
     stop: { onBudgetExhausted: "halt_checkpoint" as const },
     escalation: { onScopeExceeded: "refuse_and_replan" as const },
@@ -1624,7 +1626,7 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     expect(typeof toolMsg?.content === "string" && toolMsg.content.includes("forbidden")).toBe(true);
   });
 
-  it("an out-of-scope WRITE is refused; an out-of-scope READ stays allowed (reads are the agent's senses)", async () => {
+  it('an out-of-scope WRITE is refused; a READ rides the DECLARED reads posture (reads: "all")', async () => {
     const { transport, requests } = fakeTransport([
       toolCallsResult([
         { id: "c1", name: "run_migration", args: "{}" },
@@ -1644,6 +1646,55 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     const toolMsgs = (second?.messages ?? []).filter((m) => m.role === "tool");
     expect(toolMsgs.some((m) => typeof m.content === "string" && m.content.includes("out_of_scope"))).toBe(true);
     expect(toolMsgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
+  });
+
+  it("a READ-SCOPED envelope refuses a read tool outside its reads list — the scope means what it says", async () => {
+    // Regression: the kernel discarded out_of_scope for read-only tools, so an evidence-only scope (the
+    // verifier/diagnostician posture) was a type-level claim the runtime never enforced — every read tool in
+    // the registry remained callable. The decision now lives in authorizeToolInvocation and the loop
+    // executes it verbatim for BOTH access kinds.
+    const scoped = { ...envelope, scope: { reads: ["list_runs"], writes: [], forbidden: [] } };
+    const { transport, requests } = fakeTransport([
+      toolCallsResult([
+        { id: "c1", name: "read_secrets", args: "{}" },
+        { id: "c2", name: "list_runs", args: "{}" },
+      ]),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("read_secrets", true), tool("list_runs", true)]),
+      envelope: scoped,
+    });
+    const second = requests[1];
+    const toolMsgs = (second?.messages ?? []).filter((m) => m.role === "tool");
+    expect(toolMsgs.some((m) => typeof m.content === "string" && m.content.includes("out_of_scope"))).toBe(true);
+    expect(toolMsgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
+  });
+
+  it("a read-scoped parent's sub-agent inherits the NARROW read view, not the full registry", async () => {
+    // Regression: the sub-agent registry was every read-only tool unfiltered, so a read-scoped parent could
+    // hand a child the very reads it was itself denied.
+    const child = fakeTransport([toolCallResult("c1", "read_secrets", "{}"), textResult("child done")]);
+    const parent = fakeTransport([
+      toolCallResult("p1", "spawn_agent", JSON.stringify({ task: "probe" })),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport: parent.transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("read_secrets", true), tool("list_runs", true)]),
+      subagentModel: { transport: child.transport, model: "cm" },
+      envelope: { ...envelope, scope: { reads: ["list_runs"], writes: [], forbidden: [] } },
+    });
+    const childSecond = child.requests[1];
+    const answer = childSecond?.messages.find((m) => m.role === "tool");
+    expect(typeof answer?.content === "string" && /unknown tool/i.test(answer.content)).toBe(true);
   });
 
   it("a sub-agent's inherited scope can only SHRINK — a parent's WRITE tool has no door into the child", async () => {

@@ -81,11 +81,11 @@ export function assertIndependentVerification(executor: RoleAssignment, verifier
 // ── O5: the envelope's decisions live IN CONTRACTS beside the schema (the isMeasured precedent) — the
 // agent runtime enforces them without a domain dependency. Re-exported here for domain consumers.
 export {
+  authorizeToolInvocation,
   type BudgetDecision,
   budgetExhausted,
   type EnvelopeDecision,
   type EnvelopeSpend,
-  envelopeAllows,
 } from "@everdict/contracts";
 
 export function assertTaskEnvelope(envelope: TaskEnvelope): void {

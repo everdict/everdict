@@ -4,6 +4,7 @@ import {
   HandoffCheckpointSchema,
   type RoleAssignment,
   type TaskEnvelope,
+  TaskEnvelopeSchema,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -11,9 +12,9 @@ import {
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
+  authorizeToolInvocation,
   budgetExhausted,
   danglingCheckpointRefs,
-  envelopeAllows,
 } from "./ownership.js";
 
 // The ownership kernel's acceptance queries (digo-edu B2/B5/B6 battery) pinned as invariants.
@@ -21,7 +22,7 @@ import {
 const envelope = (over: Partial<TaskEnvelope> = {}): TaskEnvelope => ({
   id: "env-1",
   goal: "fix the failing grader",
-  scope: { allowedCapabilities: ["read_file", "edit_file", "run_tests"], forbidden: ["deploy"] },
+  scope: { reads: "all", writes: ["edit_file", "run_tests"], forbidden: ["deploy"] },
   budgets: { tokens: 100_000 },
   stop: { onBudgetExhausted: "halt_checkpoint" },
   escalation: { onScopeExceeded: "refuse_and_replan" },
@@ -127,14 +128,66 @@ describe("O3 — a verdict needs an independent actor, not just a second role", 
 
 describe("O5 — the envelope is a decision boundary", () => {
   it("scope-exceeding returns refuse_and_replan — proceeding anyway is not in the vocabulary", () => {
-    const decision = envelopeAllows(envelope(), "run_migration");
+    const decision = authorizeToolInvocation({ name: "run_migration", isReadOnly: false }, envelope());
     expect(decision).toEqual({ allowed: false, reason: "out_of_scope", action: "refuse_and_replan" });
   });
 
-  it("forbidden beats allowed — deny precedence when a capability sits on both lists", () => {
-    const e = envelope({ scope: { allowedCapabilities: ["deploy", "edit_file"], forbidden: ["deploy"] } });
-    expect(envelopeAllows(e, "deploy")).toMatchObject({ allowed: false, reason: "forbidden" });
-    expect(envelopeAllows(e, "edit_file")).toEqual({ allowed: true });
+  it("forbidden beats every grant — deny precedence for reads AND writes", () => {
+    const e = envelope({ scope: { reads: "all", writes: ["deploy", "edit_file"], forbidden: ["deploy"] } });
+    expect(authorizeToolInvocation({ name: "deploy", isReadOnly: false }, e)).toMatchObject({
+      allowed: false,
+      reason: "forbidden",
+    });
+    expect(authorizeToolInvocation({ name: "deploy", isReadOnly: true }, e)).toMatchObject({
+      allowed: false,
+      reason: "forbidden",
+    });
+    expect(authorizeToolInvocation({ name: "edit_file", isReadOnly: false }, e)).toEqual({ allowed: true });
+  });
+
+  it("reads mean what they say — an explicit reads list refuses a read tool outside it", () => {
+    // Regression: the previous single-list scope was enforced for writes only, so an evidence-only read
+    // scope (verifier/diagnostician posture) was a type-level claim the runtime never honored.
+    const e = envelope({ scope: { reads: ["list_runs"], writes: [], forbidden: [] } });
+    expect(authorizeToolInvocation({ name: "list_runs", isReadOnly: true }, e)).toEqual({ allowed: true });
+    expect(authorizeToolInvocation({ name: "read_secrets", isReadOnly: true }, e)).toMatchObject({
+      allowed: false,
+      reason: "out_of_scope",
+    });
+    // A tool with NO isReadOnly declaration gets the stricter (write) gate — unknown effects never ride the senses.
+    expect(authorizeToolInvocation({ name: "mystery_tool" }, e)).toMatchObject({
+      allowed: false,
+      reason: "out_of_scope",
+    });
+  });
+
+  it("the legacy single-list scope still parses — reads 'all', the old list becomes writes", () => {
+    // In-flight payloads written before the split keep validating; the transform states exactly what the
+    // runtime enforced for them all along (writes gated, reads open).
+    const parsed = TaskEnvelopeSchema.parse({
+      id: "env-legacy",
+      goal: "old shape",
+      scope: { allowedCapabilities: ["edit_file"], forbidden: ["deploy"] },
+      budgets: { tokens: 10 },
+      stop: { onBudgetExhausted: "halt_checkpoint" },
+      escalation: { onScopeExceeded: "refuse_and_replan" },
+      rollbackRequired: false,
+    });
+    expect(parsed.scope).toEqual({ reads: "all", writes: ["edit_file"], forbidden: ["deploy"] });
+  });
+
+  it("an envelope that may read nothing and write nothing is refused — it is not a task", () => {
+    expect(
+      TaskEnvelopeSchema.safeParse({
+        id: "env-empty",
+        goal: "nothing",
+        scope: { reads: [], writes: [], forbidden: [] },
+        budgets: { tokens: 10 },
+        stop: { onBudgetExhausted: "halt_checkpoint" },
+        escalation: { onScopeExceeded: "refuse_and_replan" },
+        rollbackRequired: false,
+      }).success,
+    ).toBe(false);
   });
 
   it("budget exhaustion halts WITH a checkpoint — dying silently is the failure the envelope prevents", () => {

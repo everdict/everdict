@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
-import { type TaskEnvelope, budgetExhausted, envelopeAllows } from "@everdict/contracts";
+import { type TaskEnvelope, authorizeToolInvocation, budgetExhausted } from "@everdict/contracts";
 import type {
   LlmTransport,
   LlmUsage,
@@ -461,7 +461,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const depth = opts.depth ?? 0;
   // Sub-agents get a READ-ONLY view of the base tools (isolation of capability, not just context): a delegated
   // research/analysis task shouldn't be able to mutate, and N concurrent sub-agents can't race on writes.
-  const subagentRegistry = new ToolRegistry(opts.registry.list().filter((t) => t.isReadOnly === true));
+  // The parent's envelope bounds the view too — a read-scoped parent (verifier posture) must not hand a child
+  // the full read registry it was itself denied.
+  const subagentRegistry = new ToolRegistry(
+    opts.registry
+      .list()
+      .filter((t) => t.isReadOnly === true)
+      .filter((t) => opts.envelope === undefined || authorizeToolInvocation(t, opts.envelope).allowed),
+  );
   // Bound concurrent sub-agents so a single turn requesting many spawns can't fan out without limit.
   const runSubagent = makeSemaphore(opts.maxConcurrentSubagents ?? DEFAULT_MAX_CONCURRENT_SUBAGENTS);
   // Background (fire-and-forget) sub-agents: launched detached so the parent keeps working (overlap); each pushes its
@@ -610,33 +617,38 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           }),
         ]
       : [];
+  // Kernel cognition tools are INTRINSIC: exempt from the envelope's reads/writes scope (an evidence-only
+  // verifier still keeps a todo list and spawns its sub-checks), still refusable via `forbidden`.
+  const intrinsic = (t: ToolDefinition): ToolDefinition => ({ ...t, intrinsic: true });
   const registry = new ToolRegistry([
     ...opts.registry.list(),
-    buildTodoTool(
-      (t) => {
-        todos = t;
-        turnsSinceTodoWrite = 0;
-      },
-      {
-        // Completion-forcing nudge (LESSON 059 P3): fires at the exact loop-exit moment where verification
-        // skips happen — the write that closes the LAST open item. Only where a verifier exists to spawn
-        // (main loop with a registered "verify" subagent type), only on the transition into all-done, and only
-        // when no item was itself a verification step. Prompt-level discipline alone does not survive this
-        // moment; the tool result is the one channel the model reads right then.
-        closeOutNudge: (next) => {
-          if (spawnTools.length === 0 || !subagentTypeByName.has("verify")) return undefined;
-          if (next.length < 3 || !next.every((t) => t.status === "completed")) return undefined;
-          if (todos.length > 0 && todos.every((t) => t.status === "completed")) return undefined; // already closed
-          if (next.some((t) => /verif/i.test(t.content))) return undefined;
-          return VERIFY_CLOSEOUT_NUDGE;
+    intrinsic(
+      buildTodoTool(
+        (t) => {
+          todos = t;
+          turnsSinceTodoWrite = 0;
         },
-      },
+        {
+          // Completion-forcing nudge (LESSON 059 P3): fires at the exact loop-exit moment where verification
+          // skips happen — the write that closes the LAST open item. Only where a verifier exists to spawn
+          // (main loop with a registered "verify" subagent type), only on the transition into all-done, and only
+          // when no item was itself a verification step. Prompt-level discipline alone does not survive this
+          // moment; the tool result is the one channel the model reads right then.
+          closeOutNudge: (next) => {
+            if (spawnTools.length === 0 || !subagentTypeByName.has("verify")) return undefined;
+            if (next.length < 3 || !next.every((t) => t.status === "completed")) return undefined;
+            if (todos.length > 0 && todos.every((t) => t.status === "completed")) return undefined; // already closed
+            if (next.some((t) => /verif/i.test(t.content))) return undefined;
+            return VERIFY_CLOSEOUT_NUDGE;
+          },
+        },
+      ),
     ),
-    buildReadResultTool(resultStore),
-    ...spawnTools,
-    ...planTools,
-    ...structuredTools,
-    ...waitTools,
+    intrinsic(buildReadResultTool(resultStore)),
+    ...spawnTools.map(intrinsic),
+    ...planTools.map(intrinsic),
+    ...structuredTools.map(intrinsic),
+    ...waitTools.map(intrinsic),
   ]);
   // Soft-interrupt state: the CURRENT step's controller (the model stream or the tool batch in flight) and the
   // sticky flag the boundaries consume. The trigger is handed to the host once, up front.
@@ -1017,17 +1029,25 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const parsed = parseArgs(tc.arguments);
       if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
       if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
-      // The envelope's scope gate (O5): forbidden refuses EVERY call; out-of-scope refuses WRITE calls
-      // (reads are the agent's senses — effects are what the scope governs). The refusal is an instruction
-      // to REPLAN, and working around it (another tool, a script) is exactly what the wording forbids.
+      // The envelope's scope gate (O5): the DECISION lives in contracts (authorizeToolInvocation — forbidden
+      // refuses every call; reads check scope.reads, writes check scope.writes) and this loop executes it
+      // VERBATIM — never re-reading the scope underneath it. The refusal is an instruction to REPLAN, and
+      // working around it (another tool, a script) is exactly what the wording forbids.
       if (opts.envelope) {
-        const decision = envelopeAllows(opts.envelope, tool.name);
-        if (!decision.allowed && (decision.reason === "forbidden" || tool.isReadOnly !== true)) {
+        const decision = authorizeToolInvocation(
+          {
+            name: tool.name,
+            ...(tool.isReadOnly !== undefined ? { isReadOnly: tool.isReadOnly } : {}),
+            ...(tool.intrinsic !== undefined ? { intrinsic: tool.intrinsic } : {}),
+          },
+          opts.envelope,
+        );
+        if (!decision.allowed) {
           return {
             content: `Envelope refusal (${decision.reason}): the tool "${tool.name}" is ${
               decision.reason === "forbidden"
                 ? "explicitly forbidden by this task's envelope."
-                : "outside this task's allowed capabilities."
+                : "outside this task's granted scope."
             } Do NOT work around this with another tool or a script. Stop this approach, present a revised plan naming the additional capability you need and its risks, and request approval (refuse_and_replan).`,
             isError: true,
           };

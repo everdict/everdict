@@ -225,13 +225,13 @@ export {
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
+  authorizeToolInvocation,
   type BudgetDecision,
   budgetExhausted,
   type DanglingRef,
   danglingCheckpointRefs,
   type EnvelopeDecision,
   type EnvelopeSpend,
-  envelopeAllows,
 } from "./ownership/ownership.js";
 
 // member — the last-admin invariant (from apps/api core/member)

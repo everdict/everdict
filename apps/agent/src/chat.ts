@@ -1200,14 +1200,24 @@ export async function runChat(
         // O5: the envelope's scope is completed HERE because this is where the agent's granted capabilities
         // finally exist as tool names. Pinning them at task start is the point — a tool that attaches
         // mid-run (a server connected later) is outside the scope this task was authorized under, not
-        // silently inside it. The kernel adds its own control tools (todo, read_result, plan, wait) on top
-        // and those are all read-only, so the gate — which governs WRITES — never sees them; a future
-        // write-capable kernel tool would need listing here deliberately, and the test says so.
+        // silently inside it. The split states what the runtime actually enforces: reads "all" (the
+        // executor posture — reads are the agent's senses), writes = the WRITE-capable tools present at
+        // start. The kernel adds its own control tools (todo, read_result, plan, wait) on top and those are
+        // all read-only, so they ride the reads posture; a future write-capable kernel tool would need
+        // listing in `writes` deliberately, and the test says so. Narrowing writes below "everything
+        // granted" is a product decision (teammate bounding) deferred with it.
         ...(hooks?.envelope
           ? {
               envelope: {
                 ...hooks.envelope,
-                scope: { allowedCapabilities: registry.names(), forbidden: [] },
+                scope: {
+                  reads: "all" as const,
+                  writes: registry
+                    .list()
+                    .filter((t) => t.isReadOnly !== true)
+                    .map((t) => t.name),
+                  forbidden: [],
+                },
               },
             }
           : {}),

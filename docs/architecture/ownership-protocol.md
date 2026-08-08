@@ -48,13 +48,15 @@ wired, on two findings:
    pre-built bundle of classes an agent could be given a subset of; the agent *pulls* each one through a tool
    it decides to call (`get_task_context`, `use_skill`, `get_file`). The only thing injected unasked is the
    environment block — workspace, model, date, paths. There is no menu for a role to select from.
-2. **The job it named is already done, and enforced.** "What may this role draw on" is *which tools it may
-   call*, which is exactly `TaskEnvelope.scope.allowedCapabilities` — honored by the kernel on every call and
+2. **The job it named is done by the envelope's scope.** "What may this role draw on" is *which tools it may
+   call*, which is exactly `TaskEnvelope.scope.reads` — an evidence-only role gets an explicit read list, the
+   default executor posture is `reads: "all"`. Both halves of the scope (`reads` AND `writes`) are honored by
+   the kernel on every call (`authorizeToolInvocation` — the one decision function, executed verbatim) and
    inherited by sub-agents. A second vocabulary for the same concern, read by nothing, is not a weaker
    guarantee. It is a false one.
 
-Verifier context separation stays a principle (above) until there is a verifier spawn site; the scope that
-spawn grants is where it becomes code.
+Verifier context separation stays a principle (above) until there is a verifier spawn site; `scope.reads` is
+the field that spawn fills when it exists.
 
 ### Where this is enforced — and where it is not
 
@@ -74,9 +76,13 @@ it assembles is where the principle becomes code.
 
 ## The envelope
 
-An autonomous task runs inside a `TaskEnvelope`: an allowed capability set (deny wins over allow), at least
-one hard budget (an unbounded autonomous task has no decision boundary — `assertTaskEnvelope` refuses one
-without), and a fixed vocabulary for the two ways a task ends badly.
+An autonomous task runs inside a `TaskEnvelope`: a two-halved scope — `reads` ("all" = the executor posture,
+or an explicit evidence-only list) and `writes` (the effectful capabilities explicitly granted), with
+`forbidden` beating every grant — at least one hard budget (an unbounded autonomous task has no decision
+boundary — `assertTaskEnvelope` refuses one without), and a fixed vocabulary for the two ways a task ends
+badly. The scope decision has ONE owner (`authorizeToolInvocation`, contracts) and the kernel executes its
+answer verbatim for both access kinds; kernel cognition tools (todo, plan, spawn, result paging, wait) are
+`intrinsic` — part of how the agent thinks, outside the scope lists, still refusable via `forbidden`.
 
 - `stop.onBudgetExhausted: "halt_checkpoint"` — stop **and** leave a resumable checkpoint. Dying silently
   mid-task is the exact failure the envelope exists to prevent, so "keep going" is not a value the type offers.
@@ -86,8 +92,9 @@ without), and a fixed vocabulary for the two ways a task ends badly.
 The kernel (`packages/agent-runtime/src/kernel/loop.ts`) honors the envelope on every tool call and at every
 turn boundary, and passes it **verbatim to sub-agents** — without that line a scoped parent could
 `spawn_agent` its way out of its own scope. A child's effective scope can therefore only shrink: it inherits
-the parent's envelope, and the kernel builds its registry from the parent's *read-only* tools, so a write the
-parent held has no door into the child at all.
+the parent's envelope, and the kernel builds its registry from the parent's *read-only* tools **filtered by
+the parent's own scope** (a read-scoped parent must not hand a child the reads it was itself denied), so a
+write the parent held has no door into the child at all.
 
 ### Who actually gets one
 
@@ -116,9 +123,11 @@ are — so it is named here rather than papered over.
 Two seams are worth naming precisely:
 
 - **Scope is completed where the tools resolve.** The activation states the boundary it owns (goal, budgets,
-  vocabularies); `runChat` fills `scope.allowedCapabilities` from the built tool registry, because the agent's
-  granted capabilities only exist as *names* once tools are constructed. Pinning them there is the point — a
-  server connected mid-run is outside the scope the task was authorized under, not silently inside it.
+  vocabularies); `runChat` fills `scope.writes` with the write-capable tools of the built registry (and
+  `reads: "all"` — the executor posture), because the agent's granted capabilities only exist as *names* once
+  tools are constructed. Pinning them there is the point — a server connected mid-run is outside the scope
+  the task was authorized under, not silently inside it. Narrowing writes below "everything granted" is a
+  product decision (teammate bounding) deferred with it.
 - **Budgets are the kernel's units, not dollars.** `spec.budgetUsd` is a different axis: the delegated slice
   governing work an activation *causes* (runs it submits, refused with a 402 at the admission gate, priced on
   the control plane). The loop measures tokens and wall-clock and knows nothing about money, so the envelope

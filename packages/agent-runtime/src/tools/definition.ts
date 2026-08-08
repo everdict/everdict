@@ -51,6 +51,10 @@ export interface ToolDefinition {
   inputSchema?: ZodTypeAny;
   isReadOnly?: boolean;
   isDestructive?: boolean;
+  // A KERNEL cognition tool (todo list, plan, sub-agent spawn, result paging, wait): part of how the agent
+  // thinks, not a workspace capability — exempt from the envelope's reads/writes scope
+  // (authorizeToolInvocation), still refusable via `forbidden`. Set only by the loop on the tools it adds.
+  intrinsic?: boolean;
   // ToolSearch progressive disclosure (Claude Code parity): a deferred tool is held out of the outbound tools[]
   // until the model discovers it via ToolSearch, keeping the per-call surface bounded across many MCP tools.
   isMcp?: boolean;

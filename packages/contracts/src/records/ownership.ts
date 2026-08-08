@@ -71,13 +71,14 @@ export type RoleProfile = z.infer<typeof RoleProfileSchema>;
 //      pre-built bundle of classes; the agent PULLS each through a tool it decides to call
 //      (get_task_context / use_skill / get_file). The only thing injected unasked is the environment block:
 //      workspace, model, date, paths. There is no set of context classes for a role to select among.
-//   ② The job it named is already done, and enforced. "What may this role draw on" is which tools it may
-//      call, which is exactly `TaskEnvelope.scope.allowedCapabilities` — honored by the kernel on every call
-//      and inherited by sub-agents. A second vocabulary for the same concern, read by nothing, is not a
-//      weaker guarantee; it is a false one.
-// Context separation for a verifier (evidence only, never the executor's reasoning) remains a stated
-// PRINCIPLE awaiting a verifier runtime — see docs/architecture/ownership-protocol.md. When that spawn site
-// exists, the scope it grants is where the principle becomes code.
+//   ② The job it named is done by the envelope's scope. "What may this role draw on" is which tools it may
+//      call, which is exactly `TaskEnvelope.scope.reads` — a role that must see evidence only (a verifier,
+//      a diagnostician) gets an explicit read list; the default executor posture is `reads: "all"` (reads
+//      are the agent's senses). The kernel honors BOTH halves on every call (authorizeToolInvocation) and
+//      sub-agents inherit the read scope. A second vocabulary for the same concern would be a false
+//      guarantee, not a weaker one.
+// A verifier RUNTIME (a spawn site that constructs an evidence-only envelope) does not exist yet — see
+// docs/architecture/ownership-protocol.md; when it does, `scope.reads` is the field it fills.
 
 // A role PLUS the actor holding it — the unit the independence invariant is stated over. A bare RoleProfile
 // cannot answer "is the verifier someone else?", so every check that separation matters to takes this.
@@ -88,15 +89,34 @@ export const RoleAssignmentSchema = z.object({
 export type RoleAssignment = z.infer<typeof RoleAssignmentSchema>;
 
 // ── O5: the task envelope ────────────────────────────────────────────────────────────────────────────
+// The scope names BOTH halves of what the task may touch, because the runtime enforces both halves:
+//   reads  — "all" (the default executor posture: reads are the agent's senses) or an explicit capability
+//            list (a verifier/diagnostician sees evidence tools only — context separation as code).
+//   writes — the effectful capabilities this task was explicitly granted. An observer/verifier task has [].
+// A single `allowedCapabilities` list USED to claim both jobs while the kernel enforced it for writes only —
+// a type stating a stronger guarantee than the runtime gave. The legacy shape still parses (reads "all",
+// writes = the old list) so in-flight payloads keep validating.
+const TaskScopeSchema = z
+  .object({
+    reads: z.union([z.literal("all"), z.array(z.string())]),
+    writes: z.array(z.string()),
+    // Deny-precedence: a capability both granted and forbidden is FORBIDDEN — the safer reading always wins.
+    forbidden: z.array(z.string()).default([]),
+  })
+  .refine((s) => s.reads === "all" || s.reads.length > 0 || s.writes.length > 0, {
+    message: "an envelope that may read nothing and write nothing is not a task",
+  });
 export const TaskEnvelopeSchema = z.object({
   id: z.string().min(1),
   goal: z.string().min(1),
   role: OwnershipRoleSchema.optional(), // the RoleProfile this task runs as (absent = unprofiled legacy task)
-  scope: z.object({
-    allowedCapabilities: z.array(z.string()).min(1), // an envelope with no capabilities is not a task
-    // Deny-precedence: a capability both allowed and forbidden is FORBIDDEN — the safer reading always wins.
-    forbidden: z.array(z.string()).default([]),
-  }),
+  scope: z.preprocess((value) => {
+    if (value !== null && typeof value === "object" && "allowedCapabilities" in (value as Record<string, unknown>)) {
+      const legacy = value as { allowedCapabilities: unknown; forbidden?: unknown };
+      return { reads: "all", writes: legacy.allowedCapabilities, forbidden: legacy.forbidden ?? [] };
+    }
+    return value;
+  }, TaskScopeSchema),
   // At least one hard budget — an unbounded autonomous task has no decision boundary (domain-validated).
   budgets: z.object({
     timeSec: z.number().int().positive().optional(),
@@ -182,12 +202,28 @@ export type EnvelopeDecision =
   // approval / hand off), never a soft warning a loop can ignore.
   | { allowed: false; reason: "forbidden" | "out_of_scope"; action: "refuse_and_replan" };
 
-export function envelopeAllows(envelope: TaskEnvelope, capabilityId: string): EnvelopeDecision {
-  // Deny precedence: forbidden beats allowed — when a capability appears on both lists, the safer reading wins.
-  if (envelope.scope.forbidden.includes(capabilityId))
-    return { allowed: false, reason: "forbidden", action: "refuse_and_replan" };
-  if (!envelope.scope.allowedCapabilities.includes(capabilityId))
+// THE tool-invocation decision — the one owner of "may this task call this tool". The runtime executes the
+// answer verbatim; it never re-reads the scope underneath this function (the previous shape had the kernel
+// discard out_of_scope for read tools, quietly narrowing `allowedCapabilities` to writes-only — a downstream
+// reinterpretation of the invariant's own decision function). forbidden refuses regardless of access kind;
+// reads check `scope.reads` ("all" = the executor posture); writes check `scope.writes`. A tool with no
+// isReadOnly declaration is treated as a WRITE — unknown effects get the stricter gate, never the looser.
+// `intrinsic` marks a KERNEL cognition tool (todo list, plan, sub-agent spawn, result paging, wait): part of
+// how the agent thinks, not a workspace capability, so the scope lists do not govern it — an evidence-only
+// verifier can still keep a todo list. An explicit `forbidden` entry still wins (deny precedence is total).
+export function authorizeToolInvocation(
+  tool: { name: string; isReadOnly?: boolean; intrinsic?: boolean },
+  envelope: TaskEnvelope,
+): EnvelopeDecision {
+  const scope = envelope.scope;
+  // Deny precedence: forbidden beats every grant — when a capability appears on both lists, the safer reading wins.
+  if (scope.forbidden.includes(tool.name)) return { allowed: false, reason: "forbidden", action: "refuse_and_replan" };
+  if (tool.intrinsic === true) return { allowed: true };
+  if (tool.isReadOnly === true) {
+    if (scope.reads === "all" || scope.reads.includes(tool.name)) return { allowed: true };
     return { allowed: false, reason: "out_of_scope", action: "refuse_and_replan" };
+  }
+  if (!scope.writes.includes(tool.name)) return { allowed: false, reason: "out_of_scope", action: "refuse_and_replan" };
   return { allowed: true };
 }
 
