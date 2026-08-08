@@ -11,7 +11,13 @@ import type { CaseResult, RegistryAuth } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { CircuitBreaker, UsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
-import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, RuntimeRegistry } from "@everdict/registry";
+import type {
+  DatasetRegistry,
+  HarnessInstanceRegistry,
+  JudgeRegistry,
+  ModelRegistry,
+  RuntimeRegistry,
+} from "@everdict/registry";
 import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
@@ -43,6 +49,7 @@ export function buildScorecard(deps: {
   datasetRegistry: DatasetRegistry;
   harnessInstanceRegistry: HarnessInstanceRegistry;
   judgeRegistry: JudgeRegistry;
+  modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
   judgeRunner: JudgeRunner;
   budget: PersistentBudget;
@@ -73,6 +80,7 @@ export function buildScorecard(deps: {
     datasetRegistry,
     harnessInstanceRegistry,
     judgeRegistry,
+    modelRegistry,
     runtimeRegistry,
     judgeRunner,
     budget,
@@ -212,6 +220,12 @@ export function buildScorecard(deps: {
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,
+    // The manifest's dependency-closure seal: a judge's `{ref}` binding resolves to its concrete version at
+    // submit, so "same spec digest, different actual model" stops reading as an identical judge.
+    resolveModelBinding: async (tenant, binding) => {
+      const spec = await deps.modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
+      return `${binding.ref}@${spec.version}`;
+    },
     judgeRunner,
     budget,
     usage: usageMeter,

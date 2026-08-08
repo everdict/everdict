@@ -703,6 +703,7 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    modelRegistry,
     envelopes: envelopeStore,
     trajectories: trajectoryStore,
     scorecardStore,

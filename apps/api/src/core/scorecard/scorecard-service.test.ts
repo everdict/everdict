@@ -239,6 +239,60 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     });
     const rec = await waitTerminal(store, "sc-pin");
     expect(rec.orchestration?.judges).toEqual([{ id: "quality", version: "2.0.0" }]); // concrete, never "latest"
+    // The manifest seals the CLOSURE: a raw-string model binding is already concrete and rides verbatim.
+    expect(rec.manifest?.judges?.[0]).toMatchObject({ id: "quality", version: "2.0.0", model: "claude-opus-4-8" });
+  });
+
+  it("seals a judge's REF binding to its resolved concrete version — same spec digest, no moving target", async () => {
+    // A spec pinning {ref} with no version is a byte-identical document over a moving target: the manifest
+    // must seal what the ref RESOLVED TO at submit, or two batches under one spec digest can be judged by
+    // different models while identity reads held. The runtime judge config is sealed the same way.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", { ...modelJudge("1.0.0"), model: { ref: "judge-default" } });
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      judges,
+      resolveModelBinding: async (_tenant, binding) => `${binding.ref}@5.0.0`,
+      newId: () => "sc-closure",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "quality", version: "1.0.0" }],
+      judge: { provider: "anthropic", model: { ref: "judge-default" } },
+    });
+    const rec = await waitTerminal(store, "sc-closure");
+    expect(rec.manifest?.judges?.[0]?.model).toBe("judge-default@5.0.0");
+    expect(rec.manifest?.judgeRun).toEqual({ provider: "anthropic", model: "judge-default@5.0.0" });
+  });
+
+  it("an unresolvable binding seals the honest sentinel — never a silent sameness claim", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", { ...modelJudge("1.0.0"), model: { ref: "judge-default" } });
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      judges, // no resolveModelBinding wired
+      newId: () => "sc-unresolved",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "quality", version: "1.0.0" }],
+    });
+    const rec = await waitTerminal(store, "sc-unresolved");
+    expect(rec.manifest?.judges?.[0]?.model).toBe("unresolved");
   });
 
   it("keeps an unknown judge id as-given (the scoring path skips a missing judge, unchanged)", async () => {

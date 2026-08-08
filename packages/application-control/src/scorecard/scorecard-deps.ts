@@ -3,6 +3,7 @@ import type {
   CaseResult,
   Grader,
   JudgeRunConfig,
+  ModelBinding,
   RegistryAuth,
   ScorecardExport,
   ScorecardRecord,
@@ -48,6 +49,12 @@ export interface ScorecardServiceDeps {
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
+  // Resolve a ModelBinding to its CONCRETE identity for the manifest seal ("ref@version" after latest-
+  // resolution; a raw string binding is already concrete and never reaches this). The manifest must seal the
+  // resolved dependency CLOSURE, not the top documents: a judge spec pinning `{ref: "judge-default"}` is a
+  // byte-identical document over a moving target, and two batches sealed under it can be judged by different
+  // models while the spec digests read held. Absent = the closure stays unsealed (identity reads it honestly).
+  resolveModelBinding?: (tenant: string, binding: Exclude<ModelBinding, string>) => Promise<string | undefined>;
   budget?: BudgetTracker; // admit/settle per case
   // Meter-only usage accounting for billing (never blocks) — records each case's harness LLM cost, attributed to the
   // billing tenant. The billable surface is orchestration + verdict, not resold compute. docs/architecture/one-call-sdk.md

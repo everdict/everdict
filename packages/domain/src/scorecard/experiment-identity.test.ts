@@ -122,6 +122,44 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     expect(unsealedJudge.unverified.map((u) => u.reason)).toEqual(["unsealed"]);
   });
 
+  it("the judge CLOSURE decides, not just the document — same specDigest, different resolved model is a confound", () => {
+    // A judge spec pinning {ref: "judge-default"} with no version is a byte-identical document over a moving
+    // target: baseline sealed while latest was v5, candidate while latest was v6. The spec digests read held;
+    // the sealed concrete models are the identity that actually judged.
+    const j = (model?: string) => [
+      { id: "quality", version: "1", specDigest: "sha256:j1", ...(model ? { model } : {}) },
+    ];
+    const moved = experimentIdentity(
+      sealed({ judges: j("judge-default@5.0.0") }),
+      sealed({ judges: j("judge-default@6.0.0") }),
+    );
+    expect(moved.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
+    expect(moved.confounds[0]?.detail).toContain("same document, different judge");
+    const held = experimentIdentity(
+      sealed({ judges: j("judge-default@5.0.0") }),
+      sealed({ judges: j("judge-default@5.0.0") }),
+    );
+    expect(held.held).toContain("judge_set");
+    // An unresolvable binding sealed the honest sentinel — unverifiable, never a sameness claim.
+    const unresolved = experimentIdentity(sealed({ judges: j("unresolved") }), sealed({ judges: j("unresolved") }));
+    expect(unresolved.unverified.map((u) => u.axis)).toEqual(["judge_set"]);
+  });
+
+  it("the RUNTIME judge configuration is identity too — an inline judge under a different model confounds an identical judge list", () => {
+    const differs = experimentIdentity(
+      sealed({ judgeRun: { model: "claude-opus-4-8" } }),
+      sealed({ judgeRun: { model: "gpt-5.4" } }),
+    );
+    expect(differs.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
+    expect(differs.confounds[0]?.detail).toContain("runtime judge configuration");
+    // One side judged under a config, the other under none — a verified apparatus difference.
+    const oneSided = experimentIdentity(sealed({ judgeRun: { model: "claude-opus-4-8" } }), sealed());
+    expect(oneSided.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
+    // A pre-split side never sealed it: unverifiable, not a guess.
+    const crossGen = experimentIdentity(sealed({ judgeRun: { model: "claude-opus-4-8" } }), manifest());
+    expect(crossGen.unverified.some((u) => u.axis === "judge_set" && u.reason === "unsealed")).toBe(true);
+  });
+
   it("cross-era seals are UNVERIFIED, not a confound — FNV(x) and sha256(x) differ as strings over one document", () => {
     const id = experimentIdentity(
       manifest({ dataset: { id: "bench", version: "7.0.0", digest: "0123456789abcdef" } }), // legacy FNV

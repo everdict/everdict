@@ -10,6 +10,7 @@ import {
   type HarnessSpec,
   type ManifestCheck,
   type ManifestVerification,
+  type ModelBinding,
   NotFoundError,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -244,6 +245,16 @@ export class ScorecardService {
 
     // judge model: request override → workspace default (DB) → none (the inline judge grader is skipped in the agent).
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
+    // The runtime judge configuration's CONCRETE identity, sealed for the manifest: orchestration always
+    // knew which model judged; identity must too (an inline judge grader under model A vs B is a different
+    // judging apparatus behind an identical judge list). "unresolved" is an honest sentinel — identity reads
+    // it as unverifiable, never as sameness.
+    const judgeRunSeal = judge
+      ? {
+          ...(judge.provider ? { provider: judge.provider } : {}),
+          model: (await this.sealedModelIdentity(input.tenant, judge.model)) ?? "unresolved",
+        }
+      : undefined;
     const concurrency = input.concurrency ?? this.concurrency;
     const retries = input.retries ?? 1; // transient dispatch retry (throw-only) — default one extra attempt
     // Trials — run each case N times for pass@k / flakiness. Clamp to >=1; 1 keeps single-run behavior byte-identical.
@@ -308,6 +319,7 @@ export class ScorecardService {
         },
         ...(input.graders && input.graders.length > 0 ? { graders: contentDigest(input.graders) } : {}),
         ...(await this.judgeManifest(input.tenant, pinnedJudges)),
+        ...(judgeRunSeal ? { judgeRun: judgeRunSeal } : {}),
         // The composed policy in FULL — it lives nowhere else, and a stamp without its document is a verdict
         // nobody can re-derive.
         ...(composed ? { verdictPolicy: composedPolicy } : {}),
@@ -528,18 +540,33 @@ export class ScorecardService {
   private async judgeManifest(
     tenant: string,
     judges: Array<{ id: string; version: string }>,
-  ): Promise<{ judges?: Array<{ id: string; version: string; specDigest?: string }> }> {
+  ): Promise<{ judges?: Array<{ id: string; version: string; specDigest?: string; model?: string }> }> {
     if (judges.length === 0) return {};
-    const out: Array<{ id: string; version: string; specDigest?: string }> = [];
+    const out: Array<{ id: string; version: string; specDigest?: string; model?: string }> = [];
     for (const j of judges) {
       try {
         const spec = await this.deps.judges?.get(tenant, j.id, j.version);
-        out.push({ ...j, ...(spec ? { specDigest: contentDigest(spec) } : {}) });
+        // The dependency CLOSURE, not just the top document: the spec digest pins bytes, and a nested
+        // `{ref}` with no version pins a moving target — the concrete model this binding resolved to at
+        // seal time is part of the judge's identity. Absent binding (harness-delegating judge) seals
+        // nothing; a binding nobody could resolve seals the honest "unresolved" sentinel.
+        const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
+        const model =
+          binding === undefined ? undefined : ((await this.sealedModelIdentity(tenant, binding)) ?? "unresolved");
+        out.push({ ...j, ...(spec ? { specDigest: contentDigest(spec) } : {}), ...(model ? { model } : {}) });
       } catch {
         out.push({ ...j });
       }
     }
     return { judges: out };
+  }
+
+  // A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
+  // concrete version at seal time). undefined = no resolver wired or the resolution failed.
+  private async sealedModelIdentity(tenant: string, binding: ModelBinding): Promise<string | undefined> {
+    if (typeof binding === "string") return binding;
+    if (!this.deps.resolveModelBinding) return undefined;
+    return await this.deps.resolveModelBinding(tenant, binding).catch(() => undefined);
   }
 
   private async pinJudgeVersions(

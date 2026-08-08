@@ -58,8 +58,26 @@ export const ScorecardManifestSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
   // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just
-  // which ids (an edited judge under the same version would otherwise be indistinguishable).
-  judges: z.array(z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() })).optional(),
+  // which ids (an edited judge under the same version would otherwise be indistinguishable). `model` seals the
+  // CONCRETE model the judge's binding resolved to at submit — a raw binding verbatim, a registry ref as
+  // "ref@version" after latest-resolution, or the "unresolved" sentinel when no resolver could answer. The
+  // spec digest pins a DOCUMENT; a nested `{ref}` with no version pins a moving target, so two batches with
+  // byte-identical judge specs can be judged by different models — the closure, not the top document, is the
+  // identity. Absent model = the judge carries no binding (harness-delegating judge).
+  judges: z
+    .array(
+      z.object({
+        id: z.string(),
+        version: z.string(),
+        specDigest: z.string().optional(),
+        model: z.string().optional(),
+      }),
+    )
+    .optional(),
+  // The runtime judge configuration this batch scored under (request override → workspace default), with its
+  // binding resolved the same way. It applies to INLINE judge graders too, so an identical judge list can
+  // still be judged by a different model — orchestration always knew this; identity now does.
+  judgeRun: z.object({ provider: z.string().optional(), model: z.string() }).optional(),
   // The COMPOSED verdict policy this batch judges under, embedded IN FULL when it differs from the built-in
   // ladder: a composed document lives nowhere else, and a stamp whose document cannot be found is a verdict
   // that cannot be re-derived. Absent = the default ladder.

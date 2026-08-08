@@ -151,6 +151,33 @@ function gradingPlanAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReadin
 }
 
 function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
+  // The RUNTIME judge configuration compares first — it applies to inline judge graders too, so an empty
+  // (or identical) registered-judge selection does not exempt it. It is comparable only across split-seal
+  // generations (`cases` marks one): a pre-split side never sealed it, and absence there is not "none".
+  const bSplit = b.cases !== undefined;
+  const cSplit = c.cases !== undefined;
+  if (bSplit && cSplit) {
+    if (b.judgeRun?.model === "unresolved" || c.judgeRun?.model === "unresolved")
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: "the runtime judge model could not be resolved at seal time — which model judged is unverifiable",
+      };
+    const runKey = (r: ScorecardManifest["judgeRun"]): string =>
+      r === undefined ? "none" : `${r.provider ?? "default"}/${r.model}`;
+    if (runKey(b.judgeRun) !== runKey(c.judgeRun))
+      return {
+        state: "confound",
+        detail: `the runtime judge configuration differs (${runKey(b.judgeRun)} → ${runKey(c.judgeRun)}) — the same trace would be judged by a different model`,
+      };
+  } else if (b.judgeRun !== undefined || c.judgeRun !== undefined) {
+    return {
+      state: "unverified",
+      reason: "unsealed",
+      detail:
+        "a pre-split side never sealed its runtime judge configuration — whether the same model judged cannot be verified",
+    };
+  }
   const bs = [...(b.judges ?? [])].sort((x, y) => (x.id < y.id ? -1 : 1));
   const cs = [...(c.judges ?? [])].sort((x, y) => (x.id < y.id ? -1 : 1));
   if (bs.length === 0 && cs.length === 0) return { state: "held" };
@@ -161,7 +188,9 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
       state: "confound",
       detail: `the judge selection differs ([${selection(bs) || "none"}] vs [${selection(cs) || "none"}]) — different judges produced the judge scores`,
     };
-  // Same selection — verify the DOCUMENTS (an edited judge under the same version is a different judge).
+  // Same selection — verify the DOCUMENTS (an edited judge under the same version is a different judge),
+  // then the CLOSURE: the spec digest pins bytes, and a nested `{ref}` with no version pins a moving
+  // target, so the concrete model the binding resolved to at seal time is part of the judge's identity.
   for (const [i, bj] of bs.entries()) {
     const cj = cs[i];
     if (bj.specDigest === undefined || cj?.specDigest === undefined)
@@ -176,6 +205,24 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
       cj.specDigest,
     );
     if (read.state !== "held") return read;
+    if (bj.model === "unresolved" || cj.model === "unresolved")
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `judge ${name(bj)}'s model binding could not be resolved at seal time — which concrete model judged is unverifiable`,
+      };
+    if (bj.model !== cj.model) {
+      if (bj.model !== undefined && cj.model !== undefined)
+        return {
+          state: "confound",
+          detail: `judge ${name(bj)} resolved different concrete models (${bj.model} → ${cj.model}) — same document, different judge`,
+        };
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `judge ${name(bj)}'s resolved model is sealed on only one side — whether the same model judged cannot be verified`,
+      };
+    }
   }
   return { state: "held" };
 }
