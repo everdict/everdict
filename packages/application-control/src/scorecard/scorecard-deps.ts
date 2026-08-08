@@ -171,8 +171,46 @@ export interface ScorecardServiceDeps {
 // implementation. Pick<> only — no new abstraction, no behavioral change: the facade still passes the one
 // wired object, and structural typing narrows it at each constructor.
 
-// The batch orchestrator — dispatch, budgets, judges, export, recovery: the execution heart keeps the wide view.
-export type ScorecardBatchDeps = Omit<ScorecardServiceDeps, "temporalScores">;
+// The batch orchestrator — dispatch, budgets, export, recovery: the execution heart is the WIDE collaborator,
+// but wide is not "everything it might one day want". The Omit<…,"temporalScores"> this replaces meant every
+// key later added to the bag flowed into the batch surface automatically — a saga being broad and a saga
+// seeing every capability are different claims. Own orchestration keys first, then the slices it forwards
+// wholesale to its helpers (executeCase / offloadResults / offloadAnalysis / collectDeferredTrace), which
+// narrow structurally from the same bag.
+export type ScorecardBatchDeps = Pick<
+  ScorecardServiceDeps,
+  // orchestration: dispatch, recovery, queue, budgets, settlement
+  | "dispatcher"
+  | "store"
+  | "runStore"
+  | "datasets"
+  | "harnesses"
+  | "budget"
+  | "usage"
+  | "envelopes"
+  | "temporalBatches"
+  | "adoptCase"
+  | "cancelQueued"
+  | "queueDepth"
+  | "queuePressure"
+  | "onOrchestrationEvent"
+  | "onComplete"
+  | "events"
+  // evidence + export
+  | "trajectories"
+  | "recordingStore"
+  | "artifacts"
+  | "exportResults"
+  | "exportStreamFor"
+  // forwarded to executeCase / collectDeferredTrace (the in-flight case pipeline)
+  | "scopedSecretsFor"
+  | "secretsFor"
+  | "makeGraders"
+  | "buildTraceSource"
+  | "installationTokenFor"
+  | "repoTokenFor"
+  | "registryAuthsFor"
+>;
 
 // External-trace ingest: no dispatcher, no queue, no recovery — it scores traces someone else produced.
 export type ScorecardIngestDeps = Pick<
