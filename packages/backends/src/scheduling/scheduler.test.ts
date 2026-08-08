@@ -982,6 +982,35 @@ describe("Scheduler — hard tenant quota via the atomic admission permit", () =
     expect(ledger.permits.size).toBe(0);
   });
 
+  it("an abort racing tryAdmit never dispatches — queue removal is the commit point and the permit comes back", async () => {
+    // The window: permitId is assigned, tryAdmit is awaiting, the abort fires → onAbort removes the entry,
+    // rejects it, and releases (a claim that committed behind the abort may land only later). Pre-fix, pump
+    // ignored the second remove()'s false and dispatched the rejected entry anyway — saved only by backends
+    // refusing pre-aborted signals, a convention carrying an invariant — while re-holding a released permit.
+    class GatedLedger extends PermitLedger {
+      releaseGate?: () => void;
+      override async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+        await new Promise<void>((r) => {
+          this.releaseGate = r;
+        });
+        return super.tryAdmit(tenant, permitId, quota);
+      }
+    }
+    const ledger = new GatedLedger();
+    const b = new ControlledBackend("a", 100);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 3, ledger });
+    const controller = new AbortController();
+    const p = sched.dispatch(tjob("acme", "x"), { signal: controller.signal });
+    await flush(); // pump reaches tryAdmit and parks on the gate
+    controller.abort(); // the entry leaves the queue THROUGH onAbort while the claim is still in flight
+    await expect(p).rejects.toMatchObject({ code: "CANCELLED" });
+    ledger.releaseGate?.(); // the claim commits — too late to dispatch
+    await flush();
+    await flush();
+    expect(b.dispatchedIds).toHaveLength(0); // the cancelled entry never reached the backend
+    expect(ledger.permits.size).toBe(0); // the late-committed permit was returned, not held and renewed
+  });
+
   it("dropping a queued entry returns the permit its lost-response claim left behind", async () => {
     // The lost-response shape: the ledger COMMITS the claim but the scheduler sees a refusal (the failure lands
     // between commit and response). The entry stays queued holding a REAL permit; a drop path that only refunds

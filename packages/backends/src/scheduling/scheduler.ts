@@ -442,7 +442,17 @@ export class Scheduler {
             this.holdPermit(entry.permitId);
           }
 
-          this.queue.remove(entry);
+          // The COMMIT POINT. The awaits above (capacity probe, harness room, tryAdmit) leave the abort
+          // listener attached, so an entry cancelled mid-await was already removed and rejected by onAbort —
+          // and its permit released, though a claim whose commit outran the abort may land only now. remove()
+          // answering false IS that cancellation: return the just-claimed permit and never dispatch. The
+          // pre-fix pump ignored the boolean and dispatched the rejected entry anyway, saved only by every
+          // backend refusing a pre-aborted signal — a convention carrying an invariant — while re-holding
+          // (and renewing) a permit onAbort had already dropped.
+          if (!this.queue.remove(entry)) {
+            this.releasePermit(entry);
+            continue;
+          }
           // Leaving the queue → detach the queued-abort listener; from here cancellation rides the signal we hand
           // to backend.dispatch below (the backend stops its poll and reclaims the orchestrator job).
           if (entry.onAbort && entry.signal) entry.signal.removeEventListener("abort", entry.onAbort);
