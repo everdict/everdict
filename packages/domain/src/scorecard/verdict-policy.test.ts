@@ -2,6 +2,7 @@ import type { Score, VerdictPolicy } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_VERDICT_POLICY,
+  DEFAULT_VERDICT_POLICY_V1,
   composeVerdictPolicy,
   evaluateVerdict,
   resolvePolicyResolution,
@@ -125,6 +126,32 @@ describe("evaluateVerdict — the verdict explains itself", () => {
     const failure = { stage: "dispatch", class: "infra", code: "X", message: "m", retryable: true } as const;
     expect(evaluateVerdict({ scores: [s("state", true)], failure })).toEqual({});
   });
+
+  it("observational is verdict-INERT — a pass-bearing observational metric never decides, even in fallback", () => {
+    // Regression: the fallback bucket admitted declared-observational metrics alongside undeclared ones, so
+    // a cost/latency grader that happened to emit `pass` decided the case whenever no rung did — making the
+    // observational declaration WEAKER than saying nothing. "Measured but not pass-deciding" is the whole
+    // definition; the engine now honors it.
+    expect(evaluateVerdict({ scores: [s("cost_usd", true, 0.1)] })).toEqual({});
+    expect(evaluateVerdict({ scores: [s("cost_usd", false, 9.9)] })).toEqual({});
+    // …while a genuinely undeclared metric still reaches the fallback.
+    expect(evaluateVerdict({ scores: [s("cost_usd", false, 9.9), s("custom_check", true)] }).verdict).toBe(true);
+  });
+
+  it("judge criterion sub-scores ALONE never decide — the catch-all judge:* matcher marks them diagnostic", () => {
+    // Regression: with the top-level judge:<id> metric absent (judge died mid-emit, partial ingest), the
+    // 3-segment criterion metrics matched nothing in the v1 document and fell into the undeclared fallback —
+    // deciding a case the policy calls them diagnostic localization of.
+    expect(
+      evaluateVerdict({ scores: [s("judge:quality:helpfulness", false), s("judge:quality:accuracy", false)] }),
+    ).toEqual({});
+    // With the top-level verdict present, it (and only it) decides — first match wins on the 2-segment rung.
+    expect(
+      evaluateVerdict({
+        scores: [s("judge:quality", true), s("judge:quality:helpfulness", false)],
+      }).verdict,
+    ).toBe(true);
+  });
 });
 
 describe("verdict policy identity", () => {
@@ -132,17 +159,19 @@ describe("verdict policy identity", () => {
     const ref = verdictPolicyRef();
     expect(ref).toEqual({
       id: "authority-ladder",
-      version: "1.0.0",
+      version: DEFAULT_VERDICT_POLICY.version,
       digest: verdictPolicyDigest(DEFAULT_VERDICT_POLICY),
     });
     const edited: VerdictPolicy = { ...DEFAULT_VERDICT_POLICY, fallback: "none" };
     expect(verdictPolicyDigest(edited)).not.toBe(ref.digest);
   });
 
-  it("a registered stamp resolves to its exact document", () => {
+  it("a registered stamp resolves to its exact document — including the FROZEN previous version", () => {
+    // A batch stamped under 1.0.0 resolves to the frozen 1.0.0 document, never to today's ladder: the
+    // version bump appended a new document, it did not edit the one that produced those verdicts.
     expect(resolvePolicyResolution({ id: "authority-ladder", version: "1.0.0" })).toEqual({
       status: "resolved",
-      policy: DEFAULT_VERDICT_POLICY,
+      policy: DEFAULT_VERDICT_POLICY_V1,
     });
     expect(resolvePolicyResolution(verdictPolicyRef())).toEqual({
       status: "resolved",
@@ -174,11 +203,13 @@ describe("verdict policy identity", () => {
     // Regression: this resolver is FAIL-CLOSED, so switching contentDigest to sha256 while comparing every
     // stamp against sha256 would have made every batch sealed before V1 `unresolvable` — no verdicts, no gate
     // decisions, for exactly the records the stamp exists to preserve. The stamp names its own algorithm.
-    const legacyDigest = legacyFnvOf(DEFAULT_VERDICT_POLICY);
-    expect(legacyDigest).not.toBe(verdictPolicyDigest(DEFAULT_VERDICT_POLICY)); // the eras really do differ
+    // FNV stamps only ever named the 1.0.0 document (the sha256 switch predates 1.1.0), so the frozen v1 is
+    // what a legacy stamp must restore.
+    const legacyDigest = legacyFnvOf(DEFAULT_VERDICT_POLICY_V1);
+    expect(legacyDigest).not.toBe(verdictPolicyDigest(DEFAULT_VERDICT_POLICY_V1)); // the eras really do differ
     expect(resolvePolicyResolution({ id: "authority-ladder", version: "1.0.0", digest: legacyDigest })).toEqual({
       status: "resolved",
-      policy: DEFAULT_VERDICT_POLICY,
+      policy: DEFAULT_VERDICT_POLICY_V1,
     });
   });
 

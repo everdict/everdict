@@ -32,6 +32,7 @@ export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.
 export {
   composeVerdictPolicy,
   DEFAULT_VERDICT_POLICY,
+  DEFAULT_VERDICT_POLICY_V1,
   evaluateVerdict,
   type PolicyResolution,
   resolvePolicyResolution,

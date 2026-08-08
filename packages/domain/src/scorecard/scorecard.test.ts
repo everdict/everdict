@@ -599,6 +599,19 @@ describe("caseVerdict (authority-based)", () => {
       ),
     ).toBe(true);
   });
+  it("criterion sub-scores stay diagnostic even when the top-level judge verdict is ABSENT", () => {
+    // Regression: the old fixture always carried judge:quality, so the judge rung decided and the criterion
+    // path was never actually exercised — with the top-level metric gone (judge died mid-emit, partial
+    // ingest), 3-segment metrics matched nothing and fell into the undeclared FALLBACK, deciding the case.
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "judge:quality:helpfulness", pass: false },
+          { metric: "judge:quality:milestone:login", pass: false },
+        ]),
+      ),
+    ).toBeUndefined();
+  });
   it("with multiple judges and no policy, the verdict is the explicit unanimous vote over judges only", () => {
     expect(
       caseVerdict(

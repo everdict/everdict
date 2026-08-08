@@ -63,8 +63,13 @@ from `GraderSpec` in `makeGraders` (`packages/graders/src/make-graders.ts`); `ju
 Case verdict is **authority-ranked and POLICY-DRIVEN** (`packages/domain/src/scorecard/verdict-policy.ts`):
 the ladder — ground-truth (`state`/`tests_pass`, priority-ordered) > objective (`answer_match`/`url_matches`/
 `dom_contains`, unanimous) > judge (`judge` + top-level `judge:<id>`, unanimous; criterion/milestone metrics
-are diagnostic and never decide) — is DATA (`DEFAULT_VERDICT_POLICY`, versioned + content-digested), not metric-name
-string arrays. `evaluateVerdict(result, policy)` returns `{verdict, basis}` — the basis names the deciding
+are diagnostic and never decide — a catch-all `judge:` prefix matcher AFTER the 2-segment one marks every
+deeper metric `verdictRole: "diagnostic"`, so criterion sub-scores stay inert even when the top-level judge
+verdict is absent) — is DATA (`DEFAULT_VERDICT_POLICY`, versioned + content-digested), not metric-name
+string arrays. **Observational is verdict-INERT as a full invariant**: a declared-observational metric never
+decides, not even in the undeclared-metric fallback — only metrics the policy has never seen reach the
+fallback. A default-policy change is a NEW appended version (`DEFAULT_VERDICT_POLICY_V1` stays frozen so
+1.0.0 stamps keep resolving; the live document is 1.1.0). `evaluateVerdict(result, policy)` returns `{verdict, basis}` — the basis names the deciding
 rung/aggregation/measurements (served as `verdictBasis` per case); `caseVerdict` is its boolean view. Duplicate
 metrics combine unanimously (never Map last-wins); a pre-outcome failure (dispatch/install/run) yields NO
 verdict (`caseOutcome` = completed|unmeasured|infra_failed; `scorecardOutcomes` serves the denominators).

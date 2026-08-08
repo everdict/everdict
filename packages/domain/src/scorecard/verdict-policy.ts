@@ -39,12 +39,37 @@ export interface VerdictEvaluation {
   invalidated?: { reason: "required_metric_missing"; metric: string };
 }
 
+// The 1.0.0 document EXACTLY as it stamped batches — frozen verbatim so those stamps keep resolving
+// (KNOWN_VERDICT_POLICIES is append-only; an edited document cannot restore the history its stamp names).
+// Its gap: no matcher covered `judge:<id>:<criterion>` (3+ segments), so with the top-level judge metric
+// absent, criterion sub-scores fell into the undeclared fallback and could decide a case the policy calls
+// them diagnostic localization of. 1.1.0 below closes that.
+export const DEFAULT_VERDICT_POLICY_V1: VerdictPolicy = {
+  id: "authority-ladder",
+  version: "1.0.0",
+  metrics: [
+    { match: { metric: "state" }, authority: "ground_truth" },
+    { match: { metric: "tests_pass" }, authority: "ground_truth" },
+    { match: { metric: "answer_match" }, authority: "objective" },
+    { match: { metric: "url_matches" }, authority: "objective" },
+    { match: { metric: "dom_contains" }, authority: "objective" },
+    { match: { metric: "judge" }, authority: "judge" },
+    { match: { prefix: "judge:", segments: 2 }, authority: "judge" },
+    { match: { metric: "cost_usd" }, authority: "observational", direction: "lower_is_better" },
+    { match: { metric: "latency_ms" }, authority: "observational", direction: "lower_is_better" },
+    { match: { metric: "tool_calls" }, authority: "observational", direction: "lower_is_better" },
+  ],
+  rungs: { ground_truth: "priority", objective: "all", judge: "all" },
+  fallback: "all",
+};
+
 // The historical authority ladder as a policy document. version bumps REQUIRE review (constitution-gated
 // once O1 lands): verdicts are derived on read, so an unstamped edit here would rewrite history — the
 // ScorecardBatch stamps this policy's ref at settle precisely so old records resolve their own policy.
+// A change is a NEW VERSION appended below, with the previous document frozen above.
 export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
   id: "authority-ladder",
-  version: "1.0.0",
+  version: "1.1.0",
   metrics: [
     // ground truth — declaration order is the priority order ("priority" rung): state beats tests_pass.
     { match: { metric: "state" }, authority: "ground_truth" },
@@ -54,9 +79,12 @@ export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
     { match: { metric: "url_matches" }, authority: "objective" },
     { match: { metric: "dom_contains" }, authority: "objective" },
     // judge verdicts: legacy "judge" and the real top-level `judge:<id>` (2 segments). Deeper metrics
-    // (`judge:<id>:<criterion>`, milestones) are diagnostic localization and never decide.
+    // (`judge:<id>:<criterion>`, milestones) are diagnostic localization and never decide — the catch-all
+    // prefix matcher AFTER the 2-segment one declares that (first match wins, so top-level judges still
+    // decide; everything deeper is stripped before any rung or fallback can read it).
     { match: { metric: "judge" }, authority: "judge" },
     { match: { prefix: "judge:", segments: 2 }, authority: "judge" },
+    { match: { prefix: "judge:" }, authority: "judge", verdictRole: "diagnostic" },
     // observational trace metrics — directions declared for diff/comparability, never pass-deciding.
     { match: { metric: "cost_usd" }, authority: "observational", direction: "lower_is_better" },
     { match: { metric: "latency_ms" }, authority: "observational", direction: "lower_is_better" },
@@ -68,7 +96,7 @@ export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
 
 // Append-only registry of every policy that has ever stamped a scorecard — resolving a stamp MUST find the
 // exact document, or the historical verdict cannot be re-derived. A new policy version is ADDED, never edited.
-const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [DEFAULT_VERDICT_POLICY];
+const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [DEFAULT_VERDICT_POLICY, DEFAULT_VERDICT_POLICY_V1];
 
 // A stamp as a record carries it: id+version always, digest on everything written since the stamp existed.
 export type StampedPolicyRef = Pick<VerdictPolicyRef, "id" | "version"> & Partial<Pick<VerdictPolicyRef, "digest">>;
@@ -224,14 +252,11 @@ export function evaluateVerdict(
   }
 
   if (policy.fallback === "none") return {};
-  // Fallback: measured pass-bearing scores not claimed by a deciding rung (observational definitions land
-  // here too — declared-but-not-deciding is the same as undeclared for the verdict).
-  const rest = candidates.filter((c) => {
-    const idx = matched.get(c.metric);
-    if (idx === undefined) return true;
-    const authority = policy.metrics[idx]?.authority;
-    return authority === "observational";
-  });
+  // Fallback: measured pass-bearing scores the policy has NEVER SEEN — undeclared metrics only.
+  // Observational is verdict-INERT by definition ("measured but not pass-deciding"): a declared
+  // observational metric that happens to carry a pass must not decide a case just because no rung did —
+  // that would make the declaration weaker than saying nothing at all.
+  const rest = candidates.filter((c) => matched.get(c.metric) === undefined);
   if (rest.length === 0) return {};
   return {
     verdict: combine(policy.fallback, rest),
