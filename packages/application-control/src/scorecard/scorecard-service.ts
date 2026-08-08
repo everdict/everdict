@@ -37,7 +37,7 @@ import {
   gatePolicyDigest,
   retryableUnmeasured,
 } from "@everdict/domain";
-import { applyGradingPlan, selectSubsetCases } from "@everdict/domain";
+import { applyGradingPlan, sealGrading, selectSubsetCases } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -307,17 +307,15 @@ export class ScorecardService {
         // grading-only change read as a dataset confound and a deliberate subset read as a different
         // experiment.
         cases: Object.fromEntries(dataset.cases.map((c) => [c.id, contentDigest({ ...c, graders: undefined })])),
-        grading: contentDigest(
-          input.graders && input.graders.length > 0
-            ? input.graders
-            : Object.fromEntries(selectedCases.map((c) => [c.id, c.graders])),
-        ),
+        // The effective grading seal comes from the ONE production builder (domain sealGrading, H5): a plan
+        // seals its own digest; per-case defaults seal per-case digests (gradingCases) the axis compares over
+        // SHARED cases — the selection-keyed composite alone made an 80/100 subset read as a grading confound.
+        ...sealGrading(input.graders, selectedCases),
         harness: {
           id: input.harness.id,
           version: harnessVersion,
           ...(harnessSpec ? { specDigest: contentDigest(harnessSpec) } : {}),
         },
-        ...(input.graders && input.graders.length > 0 ? { graders: contentDigest(input.graders) } : {}),
         ...(await this.judgeManifest(input.tenant, pinnedJudges)),
         ...(judgeRunSeal ? { judgeRun: judgeRunSeal } : {}),
         // The composed policy in FULL — it lives nowhere else, and a stamp without its document is a verdict

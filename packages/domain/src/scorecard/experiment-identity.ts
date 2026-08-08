@@ -107,17 +107,82 @@ function datasetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
 }
 
 // The grading axis reads the EFFECTIVE grading seal (the runtime plan, else the per-case defaults) when both
-// sides carry one. Pre-split manifests sealed only a plan digest (absent = defaults): a plan-vs-plan or
-// plan-vs-defaults difference is still a verified confound there, but defaults-vs-defaults can only be held
-// when the composite bundle digests match — otherwise a default-grader edit hides, and claiming held would
-// invent the very sameness this axis exists to verify.
+// sides carry one. Like the dataset axis, it answers ONE question — do the SHARED cases grade the same way?
+// — from the per-case grading digests (`gradingCases`): one-sided cases are coverage's axis, and the
+// selection-keyed defaults composite alone made a deliberate 80/100 subset read as a grading confound (H5).
+// Pre-gradingCases defaults seals can still verify held when the composites match; differing composites are
+// UNVERIFIABLE (selection and defaults moved indistinguishably), never a confound. Pre-split manifests
+// sealed only a plan digest (absent = defaults): a plan-vs-plan or plan-vs-defaults difference is still a
+// verified confound there, but defaults-vs-defaults can only be held when the composite bundle digests match
+// — otherwise a default-grader edit hides, and claiming held would invent the very sameness this axis
+// exists to verify.
 function gradingPlanAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
   if (b.grading !== undefined && c.grading !== undefined) {
-    return compareStamps(
-      "the effective grading differs — the same trace would be scored differently",
-      b.grading,
-      c.grading,
-    );
+    // `graders` doubles as the plan marker on a split-seal side (a plan run stamps both; defaults stamp neither).
+    const bPlan = b.graders !== undefined;
+    const cPlan = c.graders !== undefined;
+    if (bPlan !== cPlan)
+      return {
+        state: "confound",
+        detail: `one side ran a grading-plan override and the other ran per-case defaults (${bPlan ? "candidate" : "baseline"} default) — the scoring apparatus differs`,
+      };
+    if (bPlan)
+      return compareStamps(
+        "the grading plan differs — the same trace would be scored differently",
+        b.grading,
+        c.grading,
+      );
+    // Both sides ran per-case defaults. The per-case seals compare SHARED cases only.
+    if (b.gradingCases !== undefined && c.gradingCases !== undefined) {
+      const differing: string[] = [];
+      for (const id of Object.keys(b.gradingCases)) {
+        const bd = b.gradingCases[id];
+        const cd = c.gradingCases[id];
+        if (bd === undefined || cd === undefined) continue; // one-sided case — coverage's axis, not grading's
+        if (era(bd) !== era(cd))
+          return {
+            state: "unverified",
+            reason: "digest_era",
+            detail: `case '${id}'s default graders are sealed under different digest algorithms — sameness cannot be verified either way`,
+          };
+        if (bd !== cd) differing.push(id);
+      }
+      if (differing.length === 0) return { state: "held" };
+      const named = differing.slice(0, 3).join("', '");
+      return {
+        state: "confound",
+        detail: `${differing.length} shared case(s) grade differently between the sides ('${named}'${differing.length > 3 ? ` and ${differing.length - 3} more` : ""}) — the same trace would be scored differently`,
+      };
+    }
+    // At least one side predates the per-case grading seal. The composite is keyed by the SELECTION, so it
+    // can still speak precisely when the selection is verifiably identical (the sealed case-id sets match):
+    // a differing composite over one selection IS a defaults change. Over differing selections, a subset
+    // and a default-grader edit are indistinguishable inside the one hash.
+    if (era(b.grading) !== era(c.grading))
+      return {
+        state: "unverified",
+        reason: "digest_era",
+        detail:
+          "both sides ran per-case default graders and their effective-grading seals use different digest algorithms — sameness cannot be verified either way",
+      };
+    if (b.grading === c.grading) return { state: "held" };
+    const sameSelection =
+      b.cases !== undefined &&
+      c.cases !== undefined &&
+      Object.keys(b.cases).length === Object.keys(c.cases).length &&
+      Object.keys(b.cases).every((id) => c.cases !== undefined && id in c.cases);
+    if (sameSelection)
+      return {
+        state: "confound",
+        detail:
+          "the per-case default graders differ over a verifiably identical selection — the same trace would be scored differently",
+      };
+    return {
+      state: "unverified",
+      reason: "composite",
+      detail:
+        "both sides ran per-case default graders and at least one sealed only the selection-keyed composite — a subset selection and a default-grader edit are indistinguishable, so no grading claim can be made either way",
+    };
   }
   if (b.grading !== undefined || c.grading !== undefined)
     return {

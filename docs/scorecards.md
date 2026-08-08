@@ -222,14 +222,19 @@ force), or `unverified` (an unsealed side, a digest-era gap, or a pre-split comp
 
 **The axes are ORTHOGONAL, and the seal keeps them so.** The manifest's split seal carries per-case
 SEMANTIC digests (`manifest.cases`, each case hashed with its runtime-replaced `graders` default stripped)
-and the EFFECTIVE grading seal (`manifest.grading` — the runtime plan, else the per-case defaults). The
-dataset axis compares only the SHARED cases (a shared case whose digest moved = confound, naming the case);
-one-sided cases are COVERAGE — `missing`/`metricCoverage` with their own `allow_partial` knobs — so a
-deliberate 80-of-100 subset is a partial comparison, never "a different experiment", and a grading-only
-change confounds exactly one axis. The composite `dataset.digest` (post-subset, post-grading bundle hash)
-stays for `verifyManifest`; on PRE-SPLIT manifests a differing composite is `unverified` reason
-`composite` — content, selection and grading moved indistinguishably inside one hash, so no confound claim
-can be made either way (equal composites still verify held).
+and the EFFECTIVE grading seal (`sealGrading`, the ONE production builder: a plan run seals the plan digest
+— selection-independent; a defaults run seals `manifest.gradingCases`, caseId → digest of that case's
+defaults, PLUS the selection-keyed `grading` composite for cross-generation comparability). BOTH content
+axes compare only the SHARED cases (a shared case whose digest — content or grading — moved = confound,
+naming the case); one-sided cases are COVERAGE — `missing`/`metricCoverage` with their own `allow_partial`
+knobs — so a deliberate 80-of-100 subset is a partial comparison, never "a different experiment", and a
+grading-only change confounds exactly one axis (the defaults composite alone made a subset read as a
+grading confound — H5). Against a pre-`gradingCases` seal, a differing defaults composite confounds ONLY
+over a verifiably identical selection (matching `cases` key sets); otherwise the edit and the subset are
+indistinguishable → `unverified` reason `composite`. The composite `dataset.digest` (post-subset,
+post-grading bundle hash) stays for `verifyManifest`; on PRE-SPLIT manifests a differing composite is
+`unverified` reason `composite` — content, selection and grading moved indistinguishably inside one hash,
+so no confound claim can be made either way (equal composites still verify held).
 The read rides the diff as `diff.experiment` (HTTP + MCP + the compare page's banner). The verdict policy
 is deliberately not an axis — policy identity has its own owner (`resolvePolicyResolution` /
 `policyMismatch` / `policyUnresolvable`). Not yet modeled: runtime/OS as a **comparison cohort** (stratify

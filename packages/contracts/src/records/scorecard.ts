@@ -53,8 +53,15 @@ export const ScorecardManifestSchema = z.object({
   // axis and a subset selection move it too — one composite digest answering three different questions.
   // `grading` digests the EFFECTIVE grading semantics: the runtime plan when one was given, else the
   // per-case defaults keyed by case id — a default-grader edit is a grading claim, never a content claim.
+  // `gradingCases` (H5) maps caseId → a digest of THAT case's default graders, so the grading axis can
+  // compare SHARED cases only: the defaults `grading` composite is keyed by the selection, which made an
+  // 80/100 subset read as a grading confound. `grading` stays (plan runs: the plan digest; defaults runs:
+  // the selection-keyed composite, kept so equal composites still verify held against pre-gradingCases
+  // records); absent gradingCases on a defaults run = a pre-H5 seal (differing composites read unverified
+  // "composite", never a confound).
   cases: z.record(z.string(), z.string()).optional(),
   grading: z.string().optional(),
+  gradingCases: z.record(z.string(), z.string()).optional(),
   harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
   // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just

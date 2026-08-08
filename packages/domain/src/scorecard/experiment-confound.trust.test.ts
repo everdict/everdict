@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { experimentIdentity } from "./experiment-identity.js";
 import { evaluateGate } from "./gate.js";
 import { diffScorecards } from "./scorecard.js";
+import { sealGrading } from "./scoring-plan.js";
 
 // Trust suite (docs/trust-certification.md) — TRUST-21 / TRUST-22 / TRUST-25 / TRUST-26 / TRUST-27 / TRUST-30.
 //
@@ -106,14 +107,25 @@ describeTrust("TRUST-26 — a subset is coverage loss, never a dataset confound"
   it("a candidate that ran fewer cases stays a PARTIAL comparison the coverage knobs govern — not 'a different experiment'", () => {
     // Baseline sealed two cases; the candidate deliberately ran one. The shared case verifies identical, so
     // identity holds and the pair reaches the coverage machinery — where allow_partial has its own say.
+    // The grading seal is PRODUCTION-DERIVED (sealGrading over each side's own selection) — the hand-written
+    // identical `grading` this fixture used to carry is exactly how the selection-keyed composite bug hid:
+    // in production the subset's defaults composite differed, and grading confounded before coverage spoke.
+    const defaultGraders = [{ id: "tests" }];
+    const gcase = (id: string): { id: string; graders: Array<{ id: string }> } => ({ id, graders: defaultGraders });
     const baseline = {
       ...manifest("sha256:case-login"),
       cases: { login: "sha256:case-login", search: "sha256:case-search" },
+      ...sealGrading(undefined, [gcase("login"), gcase("search")]),
     };
-    const candidate = { ...manifest("sha256:case-login"), cases: { login: "sha256:case-login" } };
+    const candidate = {
+      ...manifest("sha256:case-login"),
+      cases: { login: "sha256:case-login" },
+      ...sealGrading(undefined, [gcase("login")]),
+    };
     const experiment = experimentIdentity(baseline, candidate);
     expect(experiment.confounds).toEqual([]);
     expect(experiment.held).toContain("dataset_content");
+    expect(experiment.held).toContain("grading_plan"); // shared cases grade identically — the subset moved nothing
 
     const diff = {
       ...diffScorecards(card([result("login", true), result("search", true)]), card([result("login", true)])),

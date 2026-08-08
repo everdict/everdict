@@ -5,10 +5,12 @@ import {
   type EvalCase,
   type GraderSpec,
   type Score,
+  type ScorecardManifest,
   type ScorecardSubset,
   isMeasured,
   measuredScores,
 } from "@everdict/contracts";
+import { contentDigest } from "../provenance/content-digest.js";
 
 // Pure scoring-plan semantics, moved from application-control's scorecard-shared (review §22): grading-plan
 // application, subset selection, the (case, trial) child key, judge-metric ownership and the case-reason
@@ -109,4 +111,22 @@ export function selectSubsetCases(
 export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCase[] {
   if (!plan || plan.length === 0) return cases;
   return cases.map((c) => ({ ...c, graders: plan }));
+}
+
+// The EFFECTIVE grading seal (identity axis inputs; arch-review 6, H5) — THE production builder, used by
+// submit and by every test that claims to exercise production identity (a hand-written fixture here is how
+// the selection-keyed composite bug hid). A runtime plan seals its own digest — selection-independent by
+// construction (`graders` doubles as the plan marker the axis reads). Per-case defaults seal BOTH ways:
+// `gradingCases` (caseId → digest of that case's defaults) is what the axis compares — shared cases only,
+// so a deliberate subset is coverage, never a grading confound — and the selection-keyed `grading`
+// composite is kept so equal composites still verify held against pre-gradingCases records.
+export function sealGrading(
+  plan: GraderSpec[] | undefined,
+  selectedCases: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
+): Pick<ScorecardManifest, "grading" | "graders" | "gradingCases"> {
+  if (plan && plan.length > 0) return { grading: contentDigest(plan), graders: contentDigest(plan) };
+  return {
+    grading: contentDigest(Object.fromEntries(selectedCases.map((c) => [c.id, c.graders]))),
+    gradingCases: Object.fromEntries(selectedCases.map((c) => [c.id, contentDigest(c.graders)])),
+  };
 }

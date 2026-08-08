@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { experimentIdentity } from "./experiment-identity.js";
 import { evaluateGate } from "./gate.js";
 import type { GateInput } from "./gate.js";
+import { sealGrading } from "./scoring-plan.js";
 
 // Experiment identity — the right to call a diff a regression. The manifest already seals what each batch
 // evaluated; these pin that the seals are read AGAINST EACH OTHER: same-experiment axes verify held, a
@@ -66,6 +67,76 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     const id = experimentIdentity(sealed(), sealed({ grading: "sha256:grading-B" }));
     expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
     expect(id.held).toContain("dataset_content");
+  });
+
+  it("a SUBSET with identical defaults holds the grading axis — the selection-keyed composite made it a confound (H5)", () => {
+    // PRODUCTION-DERIVED seals (sealGrading): the full run sealed two cases' defaults, the deliberate subset
+    // sealed one. The shared case grades identically, so the axis holds — one-sided cases are coverage's
+    // business. Pre-fix, the differing selection-keyed composites read as "the scoring apparatus differs".
+    const graders = [{ id: "tests" }];
+    const full = sealed(
+      sealGrading(undefined, [
+        { id: "login", graders },
+        { id: "search", graders },
+      ]),
+    );
+    const subset = sealed({
+      cases: { login: "sha256:case-login-a" },
+      ...sealGrading(undefined, [{ id: "login", graders }]),
+    });
+    const id = experimentIdentity(full, subset);
+    expect(id.confounds).toEqual([]);
+    expect(id.held).toContain("grading_plan");
+  });
+
+  it("a SHARED case whose defaults changed is a verified grading confound — and it names the case", () => {
+    const before = sealed(
+      sealGrading(undefined, [
+        { id: "login", graders: [{ id: "tests" }] },
+        { id: "search", graders: [{ id: "tests" }] },
+      ]),
+    );
+    const after = sealed(
+      sealGrading(undefined, [
+        { id: "login", graders: [{ id: "tests" }, { id: "lint" }] }, // the edit
+        { id: "search", graders: [{ id: "tests" }] },
+      ]),
+    );
+    const id = experimentIdentity(before, after);
+    expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+    expect(id.confounds[0]?.detail).toContain("'login'");
+  });
+
+  it("a split-era plan side against a defaults side is a verified apparatus confound", () => {
+    const plan = sealed(sealGrading([{ id: "custom" }], []));
+    const defaults = sealed(sealGrading(undefined, [{ id: "login", graders: [{ id: "tests" }] }]));
+    const id = experimentIdentity(plan, defaults);
+    expect(id.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+    expect(id.confounds[0]?.detail).toContain("grading-plan override");
+  });
+
+  it("against a pre-gradingCases seal, a differing composite confounds ONLY over an identical selection — a subset stays unverifiable", () => {
+    // The old record sealed only the selection-keyed composite. Same selection + differing composite can
+    // only mean the defaults changed (verified confound); differing selections leave the edit and the
+    // subset indistinguishable inside one hash (unverified "composite", never a guess).
+    const oldFull = sealed({ grading: "sha256:defaults-old" }); // pre-H5: no gradingCases
+    const newFull = sealed(
+      sealGrading(undefined, [
+        { id: "login", graders: [{ id: "tests" }] },
+        { id: "search", graders: [{ id: "tests" }] },
+      ]),
+    );
+    const sameSelection = experimentIdentity(oldFull, newFull);
+    expect(sameSelection.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
+    expect(sameSelection.confounds[0]?.detail).toContain("identical selection");
+
+    const newSubset = sealed({
+      cases: { login: "sha256:case-login-a" },
+      ...sealGrading(undefined, [{ id: "login", graders: [{ id: "tests" }] }]),
+    });
+    const subsetPair = experimentIdentity(oldFull, newSubset);
+    expect(subsetPair.confounds).toEqual([]);
+    expect(subsetPair.unverified.some((u) => u.axis === "grading_plan" && u.reason === "composite")).toBe(true);
   });
 
   it("pre-split seals that DIFFER are unverifiable on the composite axes — never a confound, never held", () => {

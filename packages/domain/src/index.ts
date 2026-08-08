@@ -43,6 +43,7 @@ export {
   childKey,
   hasMeasuredJudgeVerdict,
   isJudgeMetricOf,
+  sealGrading,
   selectSubsetCases,
   stripJudgeScores,
 } from "./scorecard/scoring-plan.js";

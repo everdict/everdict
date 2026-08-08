@@ -1,7 +1,7 @@
 import { ScorecardService } from "@everdict/application-control";
 import type { CaseResult } from "@everdict/contracts";
 import { PgScorecardStore, type ScorecardRecord } from "@everdict/db";
-import { composeVerdictPolicy, verdictPolicyRef } from "@everdict/domain";
+import { composeVerdictPolicy, sealGrading, verdictPolicyRef } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
@@ -70,10 +70,17 @@ describeTrust(
         scorecard: { suiteId: "d@1.0.0", harness: "h@1", results },
         // Split-seal manifest so experiment IDENTITY verifies held — this scenario certifies the COVERAGE
         // refusal, and an unsealed pair now refuses on identity first (TRUST-27's claim, not this one's).
+        // Sealed from EACH SIDE'S OWN case set, grading through the production builder (sealGrading) — the
+        // hand-written identical `grading` this fixture used to carry hid the selection-keyed composite bug:
+        // in production a 4-of-5 candidate's defaults composite differed and grading confounded before
+        // coverage ever spoke.
         manifest: {
           dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
-          cases: Object.fromEntries(["a", "b", "c", "d", "e"].map((c) => [c, `sha256:case-${c}`])),
-          grading: "sha256:grading",
+          cases: Object.fromEntries(results.map((r) => [r.caseId, `sha256:case-${r.caseId}`])),
+          ...sealGrading(
+            undefined,
+            results.map((r) => ({ id: r.caseId, graders: [] })),
+          ),
           harness: { id: "h", version: "1" },
         },
         createdAt: new Date().toISOString(),
