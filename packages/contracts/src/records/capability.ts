@@ -102,6 +102,27 @@ export const EffectContractSchema = z.object({
 });
 export type EffectContract = z.infer<typeof EffectContractSchema>;
 
+// ── What a DECLARATION means for a consent gate (pure, beside the contract — the isMeasured precedent).
+// Lives in contracts because the agent-runtime kernel must consult it on every tool call without a domain
+// dependency: readOnly and safe-without-consent are NOT the same claim, and a read tool whose declaration
+// says its data can leave the boundary is exfiltration-shaped regardless of having no side effect.
+//
+// GUARDED means "keep asking a human even in auto mode". Four independent reasons, any one sufficient:
+export function effectsRequireConsent(effects: EffectContract): boolean {
+  // ① It leaves the boundary. An external effect is the one everdict cannot undo on the caller's behalf.
+  if (effects.sideEffect === "external") return true;
+  // ② A retry is not free. Absent idempotency is UNKNOWN, and unknown is not a smaller risk — a mutation
+  //    nobody promised was safe to repeat gets the same treatment as one declared unsafe.
+  if (effects.sideEffect === "workspace" && effects.idempotent !== true) return true;
+  // ③ The author said it cannot be undone, and wrote the consent requirement down. Reading that is the
+  //    entire reason the tagged form exists.
+  if (typeof effects.rollback === "object" && effects.rollback.kind === "irreversible") return true;
+  // ④ Data leaves the boundary. Orthogonal to sideEffect on purpose: a READ tool that can reach an outside
+  //    network is exfiltration-shaped, and "sideEffect: none" is a true statement about the wrong axis.
+  if (effects.dataAccess?.egress === "external") return true;
+  return false;
+}
+
 export const McpToolSpecSchema = z.object({
   type: z.literal("mcp"),
   url: z.string().url().optional(), // remote MCP endpoint (Streamable HTTP) — auth = requiredSecrets[0] → Authorization header

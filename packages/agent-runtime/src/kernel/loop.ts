@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
-import { type TaskEnvelope, authorizeToolInvocation, budgetExhausted } from "@everdict/contracts";
+import {
+  type TaskEnvelope,
+  authorizeToolInvocation,
+  budgetExhausted,
+  effectsRequireConsent,
+} from "@everdict/contracts";
 import type {
   LlmTransport,
   LlmUsage,
@@ -1059,11 +1064,16 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           isError: true,
         };
       }
-      if (tool.isReadOnly !== true && opts.permit) {
-        // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
+      // readOnly and safe-without-consent are NOT the same claim: a read tool whose declared dataAccess can
+      // reach an outside network is exfiltration-shaped (effectsRequireConsent reason ④), so it consults the
+      // permission hook exactly like a write. Plain reads (no consent-requiring declaration) stay ungated —
+      // reads are the agent's senses.
+      const needsPermit =
+        tool.isReadOnly !== true || (tool.effects !== undefined && effectsRequireConsent(tool.effects));
+      if (needsPermit && opts.permit) {
         const decision = await opts.permit({
           name: tool.name,
-          isReadOnly: false,
+          isReadOnly: tool.isReadOnly === true,
           input: parsed.value,
           // The capability's own declaration rides along, so the host classifies risk from what the author
           // stated rather than from how the tool happens to be spelled.

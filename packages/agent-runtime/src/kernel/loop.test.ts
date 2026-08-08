@@ -1742,3 +1742,63 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     expect(result.stopReason).toBe("budget_exhausted"); // the host checkpoints from here (halt_checkpoint)
   });
 });
+
+// C6 (review §9): readOnly and safe-without-consent are different claims. A read tool whose DECLARED
+// dataAccess can reach an outside network is exfiltration-shaped (effectsRequireConsent reason ④) and must
+// consult the permission hook exactly like a write; a plain read stays ungated (reads are the agent's senses).
+describe("runAgentLoop — consent gate for exfiltration-shaped reads", () => {
+  const readTool = (name: string, effects?: import("@everdict/contracts").EffectContract): ToolDefinition => ({
+    name,
+    description: name,
+    parametersJsonSchema: { type: "object" },
+    isReadOnly: true,
+    ...(effects ? { effects } : {}),
+    call: async () => ({ content: "read ok", isError: false }),
+  });
+
+  it("a read-only tool with dataAccess.egress external reaches the permission hook — and a deny stops it", async () => {
+    // Regression: the hook fired only for isReadOnly !== true, so a read tool declaring external egress was
+    // auto-allowed in EVERY permission mode — the EffectContract→consent chain was severed at the last link.
+    const asked: Array<{ name: string; isReadOnly: boolean }> = [];
+    const { transport, requests } = fakeTransport([toolCallResult("c1", "fetch_url", "{}"), textResult("stopped")]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([
+        readTool("fetch_url", { sideEffect: "none", dataAccess: { reads: "workspace", egress: "external" } }),
+      ]),
+      permit: async (req) => {
+        asked.push({ name: req.name, isReadOnly: req.isReadOnly });
+        return "deny" as const;
+      },
+    });
+    expect(asked).toEqual([{ name: "fetch_url", isReadOnly: true }]); // the hook saw the REAL access kind
+    const second = requests[1];
+    const toolMsg = second?.messages.find((m) => m.role === "tool");
+    expect(typeof toolMsg?.content === "string" && toolMsg.content.includes("Permission denied")).toBe(true);
+  });
+
+  it("a plain read (no consent-requiring declaration) never consults the hook — the senses stay ungated", async () => {
+    const asked: string[] = [];
+    const { transport } = fakeTransport([toolCallResult("c1", "list_runs", "{}"), textResult("done")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([
+        readTool("list_runs"),
+        // A declaration that stays inside the boundary requires no consent either.
+        readTool("read_docs", { sideEffect: "none", dataAccess: { reads: "workspace", egress: "none" } }),
+      ]),
+      permit: async (req) => {
+        asked.push(req.name);
+        return "deny" as const;
+      },
+    });
+    expect(asked).toEqual([]);
+    expect(result.content).toBe("done");
+  });
+});
