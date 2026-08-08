@@ -25,6 +25,11 @@ export class InMemoryProductStore implements ProductStore {
     return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
   }
 
+  async listAll(limit?: number): Promise<ProductRecord[]> {
+    const rows = [...this.byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return limit !== undefined ? rows.slice(0, limit) : rows;
+  }
+
   async update(
     tenant: string,
     id: string,
@@ -129,6 +134,17 @@ export class PgProductStore implements ProductStore {
     if (filter?.limit !== undefined) {
       sql += " LIMIT $2";
       params.push(filter.limit);
+    }
+    const { rows } = await this.client.query<ProductRow>(sql, params);
+    return rows.map(rowToRecord);
+  }
+
+  async listAll(limit?: number): Promise<ProductRecord[]> {
+    const params: unknown[] = [];
+    let sql = "SELECT * FROM everdict_products ORDER BY updated_at DESC";
+    if (limit !== undefined) {
+      sql += " LIMIT $1";
+      params.push(limit);
     }
     const { rows } = await this.client.query<ProductRow>(sql, params);
     return rows.map(rowToRecord);

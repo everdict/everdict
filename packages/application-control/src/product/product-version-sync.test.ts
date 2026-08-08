@@ -25,6 +25,9 @@ class FakeProductStore implements ProductStore {
   async list(_tenant: string, _filter?: ProductListFilter): Promise<ProductRecord[]> {
     return [this.record];
   }
+  async listAll(): Promise<ProductRecord[]> {
+    return [this.record];
+  }
   async update(_tenant: string, _id: string, patch: Partial<ProductRecord>): Promise<ProductRecord | undefined> {
     this.record = { ...this.record, ...patch };
     return this.record;

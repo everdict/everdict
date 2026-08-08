@@ -925,6 +925,19 @@ async function main(): Promise<void> {
       }),
     events: platformEventService,
   });
+  // The background pull (docs/architecture/product-timeline.md): everdict stays the client, so a sweep — not
+  // a webhook — keeps the version ledger close to GitHub. The watermark keeps a quiet pass at one or two
+  // GitHub reads per tracked service; a product with no services costs nothing. Not leader-gated: the ledger
+  // is insert-once by natural key, so two replicas racing import each version exactly once and only one
+  // replica's facts land — the same reasoning the retention sweeps give.
+  const sweepProductVersions = async (): Promise<void> => {
+    const products = await productStore.listAll(200).catch(() => []);
+    for (const product of products) {
+      if (product.services.length === 0) continue;
+      await productVersionSync.sync(product.tenant, product.id, { subject: "everdict:product-sync" }).catch(() => {}); // per-service errors are already recorded on the product's sync state
+    }
+  };
+  setInterval(() => void sweepProductVersions(), 900_000).unref(); // 15 min — release cadence, not a queue
   // The home screen's one read (docs/architecture/workspace-pulse.md) — how the workspace is doing, across every
   // axis at once. Composed from STORES rather than from the services above: the pulse only counts, and routing a
   // count through five peer services would be five services' worth of coupling for arithmetic none of them owns.

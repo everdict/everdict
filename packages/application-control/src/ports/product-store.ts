@@ -12,6 +12,9 @@ export interface ProductStore {
   create(record: ProductRecord, events?: OutboxEvent[]): Promise<void>;
   get(tenant: string, id: string): Promise<ProductRecord | undefined>;
   list(tenant: string, filter?: ProductListFilter): Promise<ProductRecord[]>;
+  // The background sync sweep's read — deployment-wide, every tenant's products in one pass (the same
+  // standing platformEventService.listAll has: an internal reconcile loop is not acting for anyone).
+  listAll(limit?: number): Promise<ProductRecord[]>;
   update(
     tenant: string,
     id: string,

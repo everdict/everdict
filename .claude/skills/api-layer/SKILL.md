@@ -23,7 +23,7 @@ apps/api/src/
     route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
                          resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
     mcp-context.ts     ← McpDeps + McpToolContext + ok/fail/run/plain (the MCP twin of route-context)
-    <domain>/          ← run · scorecard · harness · dataset · judge · model · runtime · benchmark · bundle ·
+    <domain>/          ← run · scorecard · harness · dataset · judge · model · runtime · benchmark · bundle · product ·
                          schedule · view · task · secret · member · workspace · profile · notification · comment ·
                          api-key · runner · github-app · mattermost · trace-sink · image-registry · ci-link ·
                          queue · billing (+ execution/ ops/ = machinery's thin transport surfaces)
