@@ -698,9 +698,23 @@ describe("PgRunStore admission permits (AdmissionLedger.tryAdmit)", () => {
     // CONSERVATION: the counter arm is guarded on the permit's absence, so one permit id can never claim twice.
     expect(claim?.text).toMatch(/NOT EXISTS \(SELECT 1 FROM existing\)/);
     expect(claim?.params).toEqual(["acme", "permit-1", 5]);
-    // Self-heal precedes the claim: stale permits are reaped and the counter decremented by exactly that.
-    const heal = calls.find((c) => c.text.includes("interval '6 hours'"));
-    expect(heal?.text).toMatch(/greatest\(0, in_flight - \(SELECT count\(\*\) FROM reaped\)\)/);
+    // Self-heal precedes the claim: LAPSED-LEASE permits (not merely old ones — renewed_at is the lease) are
+    // reaped fleet-wide with each tenant's counter decremented by exactly its losses. Global sweep: an idle
+    // tenant's leaks heal on any admission, not only its own next ask.
+    const heal = calls.find((c) => c.text.includes("interval '30 minutes'"));
+    expect(heal?.text).toMatch(/renewed_at < now\(\)/);
+    expect(heal?.text).not.toMatch(/tenant = \$1 AND renewed_at/); // no tenant scope on the sweep
+    expect(heal?.text).toMatch(/greatest\(0, c\.in_flight - losses\.n\)/);
+  });
+
+  it("renewing a lease touches renewed_at for exactly the held permits — and an empty renewal never queries", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const store = new PgRunStore(client);
+    await store.renewAdmissions(["p1", "p2"]);
+    expect(calls[0]?.text).toMatch(/SET renewed_at = now\(\) WHERE permit_id = ANY\(\$1\)/);
+    expect(calls[0]?.params).toEqual([["p1", "p2"]]);
+    await store.renewAdmissions([]);
+    expect(calls).toHaveLength(1); // no round-trip for nothing
   });
 
   it("a retry of an already-committed claim answers held — success without a second increment", async () => {

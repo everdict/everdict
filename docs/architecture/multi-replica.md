@@ -54,11 +54,27 @@ re-evaluates on the LATEST row version under the row lock (READ COMMITTED's upda
 insert, with or without an advisory lock, keeps its statement-start snapshot after unblocking and races).
 Two replicas admitting in the same instant therefore serialize on the row, and the quota holds fleet-wide
 **at every instant, not eventually** (TRUST-07 certifies the simultaneous race against real Postgres). Each
-admission also writes a job-keyed permit row, released at settle (idempotent); a replica that dies between
-admit and release leaks its permit for at most the stale-permit TTL (6h — reaped, counter-decremented, on
-later admissions), which **throttles** the tenant briefly and never inflates the quota. A permit-claim
-ERROR is fail-closed for quota'd work — the job stays queued for the next drain — because admitting on
-"could not check" is how a guarantee becomes a suggestion; unquota'd tenants never touch the permit path.
+admission also writes a job-keyed permit row, released at settle (idempotent). A permit-claim ERROR is
+fail-closed for quota'd work — the job stays queued for the next drain — because admitting on "could not
+check" is how a guarantee becomes a suggestion; unquota'd tenants never touch the permit path.
+
+**Conservation.** The counter's invariant is `in_flight == live permit rows`, at every step, under every
+failure. Two protocol rules keep it: a **retry with the same permit id is the same right** — the claim
+answers an existing permit as "held" and its counter arm is guarded on the permit's absence, so a
+lost-response retry can never increment twice (the pre-fix shape left a PERMANENT phantom: release
+decremented once and the reap, with no row left, never recovered it) — and every path that drops a queued
+entry also releases its permit, because a claim that committed behind a lost response is a real permit
+behind a refusal this replica saw. The fleet-admission trust scenarios certify conservation against real
+Postgres; note the in-memory twin CANNOT reproduce counter drift (its count is derived from the permit set
+— the ideal the Pg counter approximates), so Pg-backed tests are the only authority here.
+
+**The permit is a lease, not a timestamp** (mig 0140). The scheduler renews the permits its in-flight work
+holds on a heartbeat (default 10 min, `permitRenewMs`), and the reap — a global sweep on any admission, so
+an idle tenant's leaks still heal — frees only permits whose `renewed_at` lapsed the 30-minute lease
+window. A replica that dies stops renewing and its leak heals in at most the window (**throttling** its
+tenant briefly); a healthy long run renews forever and is never reaped — the wall-clock TTL this replaced
+reaped healthy permits out from under running compute, which **inflated** the quota, the direction the
+ledger exists to close.
 
 ### Leadership (S2)
 

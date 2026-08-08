@@ -22,9 +22,14 @@ export interface AdmissionLedger {
   // limit: an ATOMIC fleet-wide permit (the Pg impl claims a per-tenant counter row whose UPDATE re-evaluates
   // its `in_flight < quota` predicate on the LATEST row version under the row lock — the one single-statement
   // shape READ COMMITTED makes race-proof), so the same-instant double-admit window is closed. The permit is
-  // job-keyed for an idempotent `releaseAdmission`; a replica that dies between the two leaks its permit for
-  // at most the ledger's stale-permit TTL (self-healed on later admissions), throttling — never inflating —
-  // the tenant. Optional: an in-memory single-process wiring is its own serialization already.
+  // job-keyed for an idempotent `releaseAdmission`, and CONSERVED: a retry with the same permit id is the
+  // same right (answered as held, never claimed twice), so the counter always equals the live permit rows.
+  // Optional: an in-memory single-process wiring is its own serialization already.
   tryAdmit?(tenant: string, permitId: string, quota: number): Promise<boolean>;
   releaseAdmission?(permitId: string): Promise<void>;
+  // A permit is a LEASE, not a timestamp: the scheduler renews the permits of work it is still running, and
+  // the ledger's reap frees only permits whose lease lapsed. A replica that dies stops renewing — its leak
+  // heals in at most the lease window; a live long run renews forever and is never reaped, which closes the
+  // quota-INFLATION direction (a wall-clock TTL reaped healthy permits out from under running compute).
+  renewAdmissions?(permitIds: string[]): Promise<void>;
 }

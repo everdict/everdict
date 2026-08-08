@@ -303,15 +303,18 @@ export class PgRunStore implements RunStore {
   // which is the one single-statement shape that closes the same-instant double-admit window. (A count-then-
   // insert — with or without an advisory lock — keeps its statement-start snapshot after unblocking, so two
   // replicas counting the same headroom both insert; that race is exactly what this replaces.)
-  // A permit older than this is a replica that died between admit and release — reaped on later admissions,
-  // with the counter decremented by exactly what was reaped, so a leaked permit throttles its tenant for at
-  // most the TTL and never inflates the quota.
-  private static readonly ADMISSION_PERMIT_TTL = "6 hours";
+  // A permit is a LEASE (mig 0140): the scheduler renews the permits of work it is still running, and the reap
+  // frees only permits whose lease lapsed. A dead replica stops renewing — its leak heals in at most this
+  // window, throttling its tenant briefly; a live long run renews forever and is NEVER reaped (the wall-clock
+  // TTL this replaces reaped healthy permits out from under running compute, inflating the quota).
+  private static readonly ADMISSION_LEASE = "30 minutes";
 
   async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
-    // Ensure the counter row exists (idempotent), then self-heal any crash-leaked permits. Separate atomic
+    // Ensure the counter row exists (idempotent), then self-heal any lapsed-lease permits. Separate atomic
     // statements: healing needs no serialization with the claim — a racing heal at worst frees slots a beat
-    // late, and the claim itself stays the single race-proof statement.
+    // late, and the claim itself stays the single race-proof statement. The sweep is GLOBAL on purpose: a
+    // tenant that stopped submitting never asks again, so its leaked permits must heal on ANY admission,
+    // not only its own next one.
     await this.client.query(
       `INSERT INTO everdict_tenant_admission_counters (tenant, in_flight) VALUES ($1, 0)
        ON CONFLICT (tenant) DO NOTHING`,
@@ -320,13 +323,15 @@ export class PgRunStore implements RunStore {
     await this.client.query(
       `WITH reaped AS (
          DELETE FROM everdict_tenant_admissions
-          WHERE tenant = $1 AND created_at < now() - interval '${PgRunStore.ADMISSION_PERMIT_TTL}'
-          RETURNING 1
+          WHERE renewed_at < now() - interval '${PgRunStore.ADMISSION_LEASE}'
+          RETURNING tenant
+       ), losses AS (
+         SELECT tenant, count(*) AS n FROM reaped GROUP BY tenant
        )
-       UPDATE everdict_tenant_admission_counters
-          SET in_flight = greatest(0, in_flight - (SELECT count(*) FROM reaped)), updated_at = now()
-        WHERE tenant = $1 AND (SELECT count(*) FROM reaped) > 0`,
-      [tenant],
+       UPDATE everdict_tenant_admission_counters c
+          SET in_flight = greatest(0, c.in_flight - losses.n), updated_at = now()
+         FROM losses
+        WHERE c.tenant = losses.tenant`,
     );
     // CONSERVATION: in_flight must always equal the tenant's live permit rows. The permit id is the unit of
     // quota, so a RETRY of a claim whose commit outran its response (the scheduler reuses the entry's permit id)
@@ -355,6 +360,15 @@ export class PgRunStore implements RunStore {
     );
     const row = res.rows[0];
     return Number(row?.held ?? 0) > 0 || Number(row?.admitted ?? 0) > 0;
+  }
+
+  // The lease heartbeat: the scheduler renews every permit of work it is still running. Renewing an already
+  // released (or reaped) permit updates no row — harmless by construction.
+  async renewAdmissions(permitIds: string[]): Promise<void> {
+    if (permitIds.length === 0) return;
+    await this.client.query(`UPDATE everdict_tenant_admissions SET renewed_at = now() WHERE permit_id = ANY($1)`, [
+      permitIds,
+    ]);
   }
 
   // Idempotent by construction: a double release deletes no permit row, so it decrements nothing.

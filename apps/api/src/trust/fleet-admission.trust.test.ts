@@ -239,4 +239,40 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
     expect(await runs.tryAdmit(retryTenant, trustId("p"), 2)).toBe(false);
     expect(await counters()).toEqual({ inFlight: 2, permits: 2 });
   });
+
+  it("the reap frees a lapsed lease but never a renewed one — a long run's permit survives, a dead holder's heals", async () => {
+    // A permit is a LEASE, not a timestamp: reaping on wall-clock age took healthy permits out from under
+    // running compute (quota INFLATION — the direction the ledger exists to close), while a renewed lease must
+    // survive any age. Backdating renewed_at stands in for elapsed time; the sweep runs on the next admission.
+    const leaseTenant = trustId("trust-lease");
+    try {
+      const dead = trustId("permit-dead");
+      const live = trustId("permit-live");
+      expect(await runs.tryAdmit(leaseTenant, dead, 5)).toBe(true);
+      expect(await runs.tryAdmit(leaseTenant, live, 5)).toBe(true);
+      await pg.client.query(
+        "UPDATE everdict_tenant_admissions SET renewed_at = now() - interval '1 hour' WHERE permit_id IN ($1, $2)",
+        [dead, live],
+      );
+      await runs.renewAdmissions([live]); // the live holder's heartbeat — the dead one stays lapsed
+
+      // Any admission sweeps the fleet: the lapsed lease is reaped (counter decremented by exactly it), the
+      // renewed one survives.
+      expect(await runs.tryAdmit(leaseTenant, trustId("p"), 5)).toBe(true);
+      const rows = await pg.client.query<{ permit_id: string }>(
+        "SELECT permit_id FROM everdict_tenant_admissions WHERE tenant = $1 ORDER BY created_at",
+        [leaseTenant],
+      );
+      expect(rows.rows.map((r) => r.permit_id)).not.toContain(dead);
+      expect(rows.rows.map((r) => r.permit_id)).toContain(live);
+      const counter = await pg.client.query<{ in_flight: number }>(
+        "SELECT in_flight FROM everdict_tenant_admission_counters WHERE tenant = $1",
+        [leaseTenant],
+      );
+      expect(Number(counter.rows[0]?.in_flight)).toBe(2); // live + the fresh admit; the dead lease healed
+    } finally {
+      await pg.client.query("DELETE FROM everdict_tenant_admissions WHERE tenant = $1", [leaseTenant]);
+      await pg.client.query("DELETE FROM everdict_tenant_admission_counters WHERE tenant = $1", [leaseTenant]);
+    }
+  });
 });

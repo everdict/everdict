@@ -136,6 +136,10 @@ export class InMemoryRunStore implements RunStore {
     this.admissionPermits.delete(permitId);
   }
 
+  // No wall clock in the twin: a single process's permits die with it, so there is nothing to lease-reap and
+  // renewal is a no-op. The lease semantics are certified against the Pg impl (fleet-admission trust suite).
+  async renewAdmissions(_permitIds: string[]): Promise<void> {}
+
   async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {
     const rows: LiveSessionRow[] = [];
     for (const r of this.runs.values()) {

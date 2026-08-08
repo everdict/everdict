@@ -85,6 +85,9 @@ export interface SchedulerOptions {
   // fleet-wide. Optional on purpose: a single-process control plane (dev, the CLI worker) needs no ledger and
   // behaves exactly as before. Read once per drain, like the cluster capacity probe.
   ledger?: AdmissionLedger;
+  // How often this replica renews the lease on the permits its in-flight work holds (default 10 minutes —
+  // well inside the ledger's lease window, so several missed beats still never look like a dead holder).
+  permitRenewMs?: number;
 }
 
 // The fleet's tenant in-flight, as ONE drain sees it: the ledger reading taken at the top of the drain plus
@@ -201,6 +204,11 @@ export class Scheduler {
   private readonly queue: FairQueue<QueueEntry>;
   private pumping = false;
   private entrySeq = 0; // mints the stable per-entry snapshot handle (q<seq>)
+  // The permits THIS replica's in-flight work holds — renewed on a heartbeat so the ledger's lease reap never
+  // frees a permit out from under running compute. Membership: added on a successful tryAdmit, removed when
+  // the permit is released (settle or queued-drop). The timer exists only while something holds a permit.
+  private readonly livePermits = new Set<string>();
+  private renewTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly registry: BackendRegistry,
@@ -431,6 +439,7 @@ export class Scheduler {
             entry.permitId ??= `${entry.id}-${crypto.randomUUID()}`; // globally unique — q<seq> collides across replicas
             const admitted = await this.opts.ledger.tryAdmit(tenant, entry.permitId, quota).catch(() => false);
             if (!admitted) continue; // quota held elsewhere in the fleet — try the next job
+            this.holdPermit(entry.permitId);
           }
 
           this.queue.remove(entry);
@@ -549,7 +558,31 @@ export class Scheduler {
   // behind the refusal the scheduler saw, and dropping the entry without this held that tenant slot until the
   // reap. Releasing a never-admitted permit id is a ledger no-op, so this is safe on every drop path.
   private releasePermit(entry: QueueEntry): void {
-    if (entry.permitId) void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
+    if (!entry.permitId) return;
+    this.dropPermit(entry.permitId);
+    void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
+  }
+
+  // ── The permit-lease heartbeat ── while this replica holds any permit, renew them all on an interval well
+  // inside the ledger's lease window, so the reap only ever frees permits whose HOLDER died (stopped renewing),
+  // never a healthy long run's. The timer lives only while permits are held and never pins the process.
+  private holdPermit(permitId: string): void {
+    this.livePermits.add(permitId);
+    if (this.renewTimer !== undefined || this.opts.ledger?.renewAdmissions === undefined) return;
+    const timer = setInterval(() => {
+      if (this.livePermits.size === 0) return;
+      void this.opts.ledger?.renewAdmissions?.([...this.livePermits])?.catch?.(() => {});
+    }, this.opts.permitRenewMs ?? 600_000);
+    timer.unref?.();
+    this.renewTimer = timer;
+  }
+
+  private dropPermit(permitId: string): void {
+    this.livePermits.delete(permitId);
+    if (this.livePermits.size === 0 && this.renewTimer !== undefined) {
+      clearInterval(this.renewTimer);
+      this.renewTimer = undefined;
+    }
   }
 
   private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number, cpuNeed: number): void {
@@ -575,8 +608,11 @@ export class Scheduler {
       }, entry.reject)
       .finally(() => {
         this.admission.release(name, tenant, memNeedMb, cpuNeed, harnessKeyOf(entry.job));
-        // Return the fleet-wide permit (idempotent; a failed release self-heals via the ledger's TTL reap).
-        if (entry.permitId) void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
+        // Return the fleet-wide permit (idempotent; a failed release stops renewing, so the lease reap heals it).
+        if (entry.permitId) {
+          this.dropPermit(entry.permitId);
+          void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
+        }
         void this.pump();
       });
   }

@@ -950,6 +950,38 @@ describe("Scheduler — hard tenant quota via the atomic admission permit", () =
     expect(ledger.permits.size).toBe(0); // every permit returned at settle
   });
 
+  it("in-flight permits are renewed on the heartbeat and the heartbeat dies with the last permit", async () => {
+    // The lease contract: the ledger's reap frees only permits whose holder stopped renewing, so the scheduler
+    // must renew everything its running work holds — and stop once nothing does (no timer pinning idle replicas).
+    class RenewRecordingLedger extends PermitLedger {
+      readonly renewed: string[][] = [];
+      async renewAdmissions(permitIds: string[]): Promise<void> {
+        this.renewed.push([...permitIds]);
+      }
+    }
+    const ledger = new RenewRecordingLedger();
+    const b = new ControlledBackend("a", 100);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), {
+      tenantQuota: () => 3,
+      ledger,
+      permitRenewMs: 5,
+    });
+    const p = sched.dispatch(tjob("acme", "x"));
+    await flush();
+    expect(b.dispatchedIds).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 25));
+    expect(ledger.renewed.length).toBeGreaterThan(0); // the lease was renewed while the work ran
+    expect(ledger.renewed[0]).toHaveLength(1);
+
+    b.releaseAll();
+    await p;
+    await flush();
+    const renewsAtSettle = ledger.renewed.length;
+    await new Promise((r) => setTimeout(r, 25));
+    expect(ledger.renewed.length).toBe(renewsAtSettle); // heartbeat stopped with the last permit
+    expect(ledger.permits.size).toBe(0);
+  });
+
   it("dropping a queued entry returns the permit its lost-response claim left behind", async () => {
     // The lost-response shape: the ledger COMMITS the claim but the scheduler sees a refusal (the failure lands
     // between commit and response). The entry stays queued holding a REAL permit; a drop path that only refunds
