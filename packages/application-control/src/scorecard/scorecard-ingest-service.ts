@@ -19,6 +19,7 @@ import {
   ScorecardBatch,
   type ScorecardTransition,
   appendScoringRevision,
+  nextScoringRevision,
   scorecardModels,
   summarizeScorecard,
   verdictSummaryOf,
@@ -350,7 +351,7 @@ export class ScorecardIngestService {
           .catch(() => undefined)
       : undefined;
     const summary = summarizeScorecard(scorecard);
-    const analysisRef = await offloadAnalysis(
+    const analysis = await offloadAnalysis(
       this.deps,
       id,
       analysisBundle(
@@ -358,6 +359,7 @@ export class ScorecardIngestService {
         summary,
         results,
       ),
+      nextScoringRevision(undefined), // an ingest record is freshly minted — its initial revision is 1
     );
     // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
@@ -370,7 +372,8 @@ export class ScorecardIngestService {
       kind: "initial",
       judges,
       results,
-      ...(analysisRef ? { analysisRef } : {}),
+      // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
+      ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });
@@ -385,7 +388,7 @@ export class ScorecardIngestService {
           models,
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
           ...(exported ? { export: exported } : {}),
-          ...(analysisRef ? { analysisRef } : {}),
+          ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
           scoring,
         },
         this.now(),

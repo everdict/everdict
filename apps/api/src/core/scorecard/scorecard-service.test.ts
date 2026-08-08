@@ -54,7 +54,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
-import { ScorecardService } from "@everdict/application-control";
+import { ScorecardService, offloadAnalysis } from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
   async dispatch() {
@@ -6221,5 +6221,100 @@ describe("Scoring identity — the revision ledger records the PASS-START seal (
     expect(scored.scoring?.at(-1)?.judges?.[0]).toMatchObject({ id: "quality", model: "judge-model@1.0.0" });
     // The pass settled: the marker cleared with the same write.
     expect(scored.scoringPass ?? undefined).toBeUndefined();
+  });
+});
+
+describe("Per-revision immutable analysis artifacts (I7)", () => {
+  it("each scoring pass freezes its own bundle — a re-score never rewrites revision history", async () => {
+    // Given an experiment whose initial settle froze revision 1 (no judges yet)
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    } as unknown as JudgeSpec);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const artifacts = new InMemoryArtifactStore();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job) {
+          return {
+            caseId: job.evalCase.id,
+            harness: `${job.harness.id}@${job.harness.version}`,
+            trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }],
+            snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+            scores: [],
+          };
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: {
+        run: async (spec) => [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }],
+      },
+      artifacts,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+    });
+    await waitTerminal(store, record.id);
+
+    // When a scoring pass re-judges the plane (revision 2)
+    await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
+    const scored = await (async () => {
+      for (let i = 0; i < 200; i++) {
+        const rec = await store.get(record.id);
+        if (rec?.scoring?.some((rev) => rev.kind === "rescore")) return rec;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error("scoring did not settle");
+    })();
+
+    // Then each revision's entry points at its OWN frozen artifact under the per-revision key
+    expect(scored.scoring?.map((rev) => rev.revision)).toEqual([1, 2]);
+    expect(scored.scoring?.[0]?.analysisRef).toContain(`analyses/${record.id}/scoring/1.json`);
+    expect(scored.scoring?.[1]?.analysisRef).toContain(`analyses/${record.id}/scoring/2.json`);
+    // …and revision 1's frozen bundle still shows the PRE-judge plane, while the current bundle shows the re-scored one.
+    const asJudged = (bundle: unknown): string[] =>
+      (bundle as { cases: Array<{ scores: Array<{ metric: string }> }> }).cases.flatMap((c) =>
+        c.scores.map((s) => s.metric),
+      );
+    expect(asJudged(await service.analysisBundle("acme", record.id, undefined, 1))).not.toContain("judge:quality");
+    expect(asJudged(await service.analysisBundle("acme", record.id, undefined, 2))).toContain("judge:quality");
+    expect(asJudged(await service.analysisBundle("acme", record.id))).toContain("judge:quality");
+    // A revision the ledger never appended reads NotFound — never a silent fallback to the current bundle.
+    await expect(service.analysisBundle("acme", record.id, undefined, 99)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("a revision-key put failure leaves the current surface intact and the revision honestly artifact-less", async () => {
+    // The two puts are independent best-effort: the record keeps its analysisRef (latest surface), while the
+    // revision entry carries NO ref — never a ref to the mutable current key a later pass would rewrite.
+    const bundle = { scorecardId: "sc", dataset: "d@1", harness: "h@1", summary: [], cases: [], infra: {} };
+    const failing = {
+      async put(key: string): Promise<string> {
+        if (key.includes("/scoring/")) throw new Error("revision bucket down");
+        return `memory://artifacts/${key}`;
+      },
+      async get(): Promise<Uint8Array | undefined> {
+        return undefined;
+      },
+      async publicUrlFor(): Promise<string | undefined> {
+        return undefined;
+      },
+    };
+    const out = await offloadAnalysis({ artifacts: failing }, "sc", bundle as never, 2);
+    expect(out.ref).toContain("analyses/sc.json");
+    expect(out.revisionRef).toBeUndefined();
   });
 });

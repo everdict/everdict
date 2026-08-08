@@ -48,6 +48,13 @@ export interface ScoringPassInput {
   createdBy?: string;
 }
 
+// The revision number the NEXT pass will bear — the one arithmetic owner (appendScoringRevision births the
+// entry with this same number; offload sites name the per-revision artifact with it BEFORE the append, so
+// the artifact key and the ledger entry can never disagree about which revision they describe).
+export function nextScoringRevision(previous: ScoringRevision[] | undefined): number {
+  return (previous?.at(-1)?.revision ?? 0) + 1;
+}
+
 // Append one scoring pass to the ledger — the ONLY way a revision is born, so numbering (strictly
 // increasing, 1-based) and the plane digest cannot drift between the settle and re-score choke points.
 export function appendScoringRevision(
@@ -58,7 +65,7 @@ export function appendScoringRevision(
   return [
     ...prior,
     {
-      revision: (prior.at(-1)?.revision ?? 0) + 1,
+      revision: nextScoringRevision(prior),
       kind: input.kind,
       judges: input.judges,
       ...(input.judgeRun ? { judgeRun: input.judgeRun } : {}),

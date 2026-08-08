@@ -541,6 +541,7 @@ export {
   type AnalysisBundle,
   analysisBundle,
   exportStepMessage,
+  analysisRevisionKey,
   offloadAnalysis,
   offloadResults,
 } from "./scorecard/scorecard-observability.js";

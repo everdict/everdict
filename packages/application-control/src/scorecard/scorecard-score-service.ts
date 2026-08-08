@@ -13,6 +13,7 @@ import {
   ScorecardBatch,
   type ScorecardOutcomeExtras,
   judgeGradeable,
+  nextScoringRevision,
   summarizeScorecard,
   verdictSummaryOf,
 } from "@everdict/domain";
@@ -21,7 +22,7 @@ import { childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "@everdict/d
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
-import { analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
+import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
@@ -346,9 +347,12 @@ export class ScorecardScoreService {
     // (re-judging history under today's ladder would ship a rewritten file); the revision then carries no
     // analysisRef, which is the honest record of "this pass has no frozen artifact".
     const resolution = resolvePolicyResolution(fresh.verdictPolicy, fresh.manifest?.verdictPolicy);
-    const analysisRef =
+    // The pass's revision number comes from the MARKER (sealed at pass start — the same number the guarded
+    // settle below enforces via the ledger length); a marker-less legacy pass derives it from the ledger.
+    const targetRevision = fresh.scoringPass?.targetRevision ?? nextScoringRevision(fresh.scoring);
+    const analysis: AnalysisOffload =
       resolution.status === "unresolvable"
-        ? undefined
+        ? {}
         : await offloadAnalysis(
             this.deps,
             record.id,
@@ -362,12 +366,15 @@ export class ScorecardScoreService {
               results,
               resolution.policy,
             ),
+            targetRevision,
           );
     const scoring = appendScoringRevision(fresh.scoring, {
       kind: "rescore",
       judges: sealed,
       results,
-      ...(analysisRef ? { analysisRef } : {}),
+      // The revision entry points at its own FROZEN artifact — never the mutable current key a later pass
+      // rewrites (I7): historical judgment stays re-derivable, not merely detectable via the plane digest.
+      ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });
@@ -382,7 +389,7 @@ export class ScorecardScoreService {
       ...(resolution.status === "unresolvable" ? {} : { verdictSummary: verdictSummaryOf(results, resolution.policy) }),
       ...(judgeModels.length > 0 ? { judgeModels } : {}),
       scoring,
-      ...(analysisRef ? { analysisRef } : {}),
+      ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
       ...(fresh.manifest ? { manifest: { ...fresh.manifest, judges: mergedManifestJudges } } : {}),
       ...(fresh.orchestration ? { orchestration: { ...fresh.orchestration, judges: mergedPins } } : {}),
       // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds

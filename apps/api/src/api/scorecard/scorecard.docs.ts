@@ -394,11 +394,23 @@ const docs = {
     summary: "Get a scorecard's offloaded analysis bundle",
     description:
       "Fetches the self-contained analysis artifact (ScorecardRecord.analysisRef) server-side and returns it as " +
-      "one JSON document: aggregate summary + per-case verdicts/scores/failures. 404 when the record has no " +
-      "downloadable analysis artifact (no ArtifactStore configured, offload failed, or a non-http ref). Requires " +
-      "scorecards:read (viewer+), workspace-scoped.",
+      "one JSON document: aggregate summary + per-case verdicts/scores/failures. ?revision=N returns that scoring " +
+      "revision's FROZEN artifact (each pass freezes its own bundle — immutable history) instead of the current " +
+      "bundle. 404 when the record has no downloadable analysis artifact (no ArtifactStore configured, offload " +
+      "failed, a non-http ref, or the requested revision has no frozen artifact). Requires scorecards:read " +
+      "(viewer+), workspace-scoped.",
     tags: ["scorecard"],
     params: scorecardIdParams,
+    querystring: toJsonSchema(
+      z.object({
+        revision: z.coerce
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Scoring revision whose frozen analysis artifact to return (default: the current bundle)"),
+      }),
+    ),
     response: {
       200: { description: "The analysis bundle", ...toJsonSchema(ScorecardAnalysisBundleResponseSchema) },
       ...errorResponses(401, 403, 404, 502),

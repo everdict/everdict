@@ -794,13 +794,22 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         annotations: { readOnlyHint: true },
         description:
           "Get a scorecard's offloaded analysis bundle (analysisRef) as one JSON document: aggregate summary + " +
-          "per-case verdicts/scores/failures — the case-level deep dive without reading every child run. 404 when " +
-          "the record has no downloadable analysis artifact.",
-        inputSchema: { id: z.string().describe("Scorecard id") },
+          "per-case verdicts/scores/failures — the case-level deep dive without reading every child run. Pass " +
+          "revision to get that scoring revision's FROZEN artifact (immutable history) instead of the current " +
+          "bundle. 404 when the record has no downloadable analysis artifact (or the revision has no frozen one).",
+        inputSchema: {
+          id: z.string().describe("Scorecard id"),
+          revision: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Scoring revision whose frozen analysis artifact to return (default: the current bundle)"),
+        },
       },
-      ({ id }) =>
+      ({ id, revision }) =>
         run(principal, "scorecards:read", async () =>
-          ok(await scorecards.analysisBundle(ws, id, await visibleTeamsFor(ctx.deps, principal))),
+          ok(await scorecards.analysisBundle(ws, id, await visibleTeamsFor(ctx.deps, principal), revision)),
         ),
     );
 

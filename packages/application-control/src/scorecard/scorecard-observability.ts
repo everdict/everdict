@@ -145,18 +145,42 @@ export function analysisBundle(
 // presigned URL that expires), so the read side derives it from the scorecard id through this same constant.
 export const ANALYSIS_KEY_PREFIX = "analyses/";
 export const analysisArtifactKey = (id: string): string => `${ANALYSIS_KEY_PREFIX}${id}.json`;
+// The per-revision IMMUTABLE artifact (I7): each scoring pass freezes its own bundle under its revision
+// number, so a later re-score can never rewrite what an earlier revision's analysisRef describes. The
+// legacy current key above stays the "latest" surface; this key is the historical record.
+export const analysisRevisionKey = (id: string, revision: number): string =>
+  `${ANALYSIS_KEY_PREFIX}${id}/scoring/${revision}.json`;
 
-// Offload the analysis bundle to object storage → a downloadable ref (ScorecardRecord.analysisRef). Best-effort: no
-// store or a failure returns undefined and never affects the scorecard (same discipline as offloadResults).
+export interface AnalysisOffload {
+  ref?: string; // the CURRENT-key presigned ref (ScorecardRecord.analysisRef — the legacy latest surface)
+  revisionRef?: string; // the per-revision immutable artifact's ref (ScoringRevision.analysisRef)
+}
+
+// Offload the analysis bundle to object storage. Best-effort per key: no store or a failure yields an absent
+// ref and never affects the scorecard (same discipline as offloadResults). When `revision` is given, the
+// bundle ALSO freezes under its per-revision key — each put is independent, so a revision-key failure still
+// leaves the current surface working (and the revision entry honestly carries no artifact, never a ref to
+// the mutable current key that a later pass would rewrite).
 export async function offloadAnalysis(
   deps: Pick<ScorecardServiceDeps, "artifacts">,
   id: string,
   bundle: AnalysisBundle,
-): Promise<string | undefined> {
-  if (!deps.artifacts) return undefined;
+  revision?: number,
+): Promise<AnalysisOffload> {
+  if (!deps.artifacts) return {};
+  const bytes = Buffer.from(JSON.stringify(bundle));
+  const out: AnalysisOffload = {};
   try {
-    return await deps.artifacts.put(analysisArtifactKey(id), Buffer.from(JSON.stringify(bundle)), "application/json");
+    out.ref = await deps.artifacts.put(analysisArtifactKey(id), bytes, "application/json");
   } catch {
-    return undefined;
+    // best-effort — the record simply carries no analysisRef
   }
+  if (revision !== undefined) {
+    try {
+      out.revisionRef = await deps.artifacts.put(analysisRevisionKey(id, revision), bytes, "application/json");
+    } catch {
+      // best-effort — the revision entry simply carries no artifact
+    }
+  }
+  return out;
 }

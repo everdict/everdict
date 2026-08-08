@@ -52,6 +52,7 @@ export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.
 export {
   appendScoringRevision,
   currentScoringPin,
+  nextScoringRevision,
   scorePlaneDigest,
   type ScoringPassInput,
 } from "./scorecard/scoring-revision.js";

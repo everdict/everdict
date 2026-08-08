@@ -1585,7 +1585,7 @@ export class ScorecardService {
     return this.analytics.analysis(tenant, config, visibleTeams);
   }
 
-  analysisBundle(tenant: string, id: string, visibleTeams?: string[]): Promise<unknown> {
-    return this.analytics.analysisBundle(tenant, id, visibleTeams);
+  analysisBundle(tenant: string, id: string, visibleTeams?: string[], revision?: number): Promise<unknown> {
+    return this.analytics.analysisBundle(tenant, id, visibleTeams, revision);
   }
 }

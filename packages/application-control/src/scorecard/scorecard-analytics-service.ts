@@ -39,7 +39,7 @@ import {
   workspaceOpsReport,
 } from "@everdict/domain";
 import type { ScorecardAnalyticsDeps } from "./scorecard-deps.js";
-import { analysisArtifactKey } from "./scorecard-observability.js";
+import { analysisArtifactKey, analysisRevisionKey } from "./scorecard-observability.js";
 
 // The unrestorable stamp(s) of a comparison, or undefined when both sides resolved. A stamped ref always
 // carries its digest (VerdictPolicyRef), so an unresolvable side can always name what was looked for.
@@ -371,16 +371,41 @@ export class ScorecardAnalyticsService {
   // ref answers 403) pointing at the SERVER-internal endpoint. So we read the artifact by its KEY through the store,
   // which is stable forever, and keep the ref fetch only as the fallback for an artifact this deployment's store does
   // not hold (a foreign bucket, or no store wired here). A fetch/parse failure is the upstream store's fault → UpstreamError.
-  async analysisBundle(tenant: string, id: string, visibleTeams?: string[]): Promise<unknown> {
+  async analysisBundle(tenant: string, id: string, visibleTeams?: string[], revision?: number): Promise<unknown> {
     const record = await this.getRecord(id);
     if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
+    // A specific scoring revision's FROZEN artifact (I7) — read by its immutable per-revision key; the
+    // ledger entry's own ref is the only fallback. A revision without a frozen artifact (pre-I7 passes,
+    // an offload that failed) reads 404 — the mutable current bundle is never served as history.
+    if (revision !== undefined) {
+      const entry = record.scoring?.find((rev) => rev.revision === revision);
+      if (!entry)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { id, revision },
+          `scorecard '${id}' has no scoring revision ${revision}.`,
+        );
+      const fromRevisionStore = await this.readAnalysisArtifact(id, revision);
+      if (fromRevisionStore !== undefined) return fromRevisionStore;
+      if (entry.analysisRef === undefined || !/^https?:\/\//i.test(entry.analysisRef))
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { id, revision },
+          `scoring revision ${revision} of scorecard '${id}' has no frozen analysis artifact.`,
+        );
+      return await this.fetchAnalysisRef(id, entry.analysisRef);
+    }
     const ref = record.analysisRef;
     if (!ref) throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
     const fromStore = await this.readAnalysisArtifact(id);
     if (fromStore !== undefined) return fromStore;
     if (!/^https?:\/\//i.test(ref))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
+    return await this.fetchAnalysisRef(id, ref);
+  }
+
+  private async fetchAnalysisRef(id: string, ref: string): Promise<unknown> {
     try {
       const res = await fetch(ref);
       if (!res.ok)
@@ -403,8 +428,10 @@ export class ScorecardAnalyticsService {
   // The analysis artifact by KEY — the same key `offloadAnalysis` wrote (`analyses/<id>.json`). undefined = this
   // deployment's store doesn't hold it (no store wired, another bucket, unparseable bytes) → the caller falls back
   // to the ref. A store OUTAGE (as opposed to an absent object) propagates as the store's own UpstreamError.
-  private async readAnalysisArtifact(id: string): Promise<unknown | undefined> {
-    const bytes = await this.deps.artifacts?.get(analysisArtifactKey(id));
+  private async readAnalysisArtifact(id: string, revision?: number): Promise<unknown | undefined> {
+    const bytes = await this.deps.artifacts?.get(
+      revision === undefined ? analysisArtifactKey(id) : analysisRevisionKey(id, revision),
+    );
     if (!bytes) return undefined;
     try {
       return JSON.parse(new TextDecoder().decode(bytes)) as unknown;

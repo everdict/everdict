@@ -165,6 +165,14 @@ they saw — `GateDecision.baselineScoring`/`candidateScoring` `{revision, score
 after the decision is detectable divergence, not silent reattribution. Failed/aborted settles carry no
 revision (they never gate); pre-ledger records pin nothing (honest absence).
 
+**Per-revision immutable artifacts**: each pass ALSO freezes its analysis bundle under
+`analyses/<id>/scoring/<revision>.json` — the revision entry's `analysisRef` points at that frozen object,
+never at the mutable current key (`analyses/<id>.json`, which stays the "latest" surface behind
+`ScorecardRecord.analysisRef`). Historical judgment is therefore re-DERIVABLE (read the old bundle), not
+merely detectable (compare plane digests). `GET /scorecards/:id/analysis?revision=N` serves it; a revision
+whose freeze failed (or predates this) honestly carries no ref and reads 404 — the current bundle is never
+served as history.
+
 ## Two manifests: the evaluation DEFINITION and the evaluation WORLD
 The batch manifest above pins **what we evaluated**. Nothing pinned **where it ran**, so a result carried no
 record of the OS it landed on, the driver that provisioned its compute, or the image that compute came out

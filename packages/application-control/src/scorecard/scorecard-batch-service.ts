@@ -31,6 +31,7 @@ import {
   modelBindingLabel,
   newScorecardChildRun,
   newSeededScorecardChildRun,
+  nextScoringRevision,
   resolveHarnessSecrets,
   resolvePolicyResolution,
   runEvidenceIdentity,
@@ -736,7 +737,17 @@ export class ScorecardBatchService {
     };
     await offloadResults(this.deps, id, results);
     const summary = summarizeScorecard(scorecard);
-    const analysisRef = await offloadAnalysis(
+    // Read-guarded terminal write, checked BEFORE the artifact/export writes: a supersede that raced the
+    // workflow's finalize already settled the record — never revive it to succeeded (first terminal write
+    // wins; a replaced batch also skips its notification), and never let the loser overwrite the winner's
+    // analysis artifact or export its cases (I7 — the artifact is part of the judgment's record).
+    const final = await this.deps.store.get(id);
+    const batch = ScorecardBatch.from(final ?? rec);
+    if (batch.isTerminal()) {
+      this.batchContexts.delete(id);
+      return;
+    }
+    const analysis = await offloadAnalysis(
       this.deps,
       id,
       analysisBundle(
@@ -745,6 +756,7 @@ export class ScorecardBatchService {
         results,
         ctx.verdictPolicy,
       ),
+      nextScoringRevision(final?.scoring),
     );
     // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
     const exported = this.deps.exportResults
@@ -765,14 +777,6 @@ export class ScorecardBatchService {
     const judgeModels = await this.scoring.collectJudgeModels(ctx.tenant, ctx.judges, ctx.judge);
     const runIds = [...latest.values()].map((c) => c.id);
     await this.appendBatchStep(id, { phase: "persist", status: "ok", message: "aggregated and persisted (temporal)" });
-    // Read-guarded terminal write: a supersede that raced the workflow's finalize already settled the record —
-    // never revive it to succeeded (first terminal write wins; a replaced batch also skips its notification).
-    const final = await this.deps.store.get(id);
-    const batch = ScorecardBatch.from(final ?? rec);
-    if (batch.isTerminal()) {
-      this.batchContexts.delete(id);
-      return;
-    }
     // E0 outbox: the completion fact rides the terminal transition (domain-gated on createdBy — the gate the
     // notification path always applied) and persists atomically with the settle; the push after is the latency
     // nudge carrying the same ids (consumer dedup holds).
@@ -784,7 +788,8 @@ export class ScorecardBatchService {
       judges: rec.manifest?.judges ?? ctx.judges,
       ...(rec.manifest?.judgeRun ? { judgeRun: rec.manifest.judgeRun } : {}),
       results,
-      ...(analysisRef ? { analysisRef } : {}),
+      // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
+      ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
     });
@@ -797,7 +802,7 @@ export class ScorecardBatchService {
         models: scorecardModels(scorecard, declared),
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
-        ...(analysisRef ? { analysisRef } : {}),
+        ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
         steps: final?.steps ?? [],
         scoring,
         ...(runIds.length > 0 ? { runIds } : { scorecard }),
@@ -1551,7 +1556,10 @@ export class ScorecardBatchService {
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
-      const analysisRef = await offloadAnalysis(
+      // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
+      // (the settle below re-reads race-tight as before; initial settles are revision 1 in practice).
+      const priorScoring = (await this.deps.store.get(id))?.scoring;
+      const analysis = await offloadAnalysis(
         this.deps,
         id,
         analysisBundle(
@@ -1560,6 +1568,7 @@ export class ScorecardBatchService {
           scorecard.results,
           opts.verdictPolicy,
         ),
+        nextScoringRevision(priorScoring),
       );
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
@@ -1578,7 +1587,7 @@ export class ScorecardBatchService {
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
-        ...(analysisRef ? { analysisRef } : {}),
+        ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
         steps: [...steps],
         ...(hasChildren && seedChildBacked
           ? { runIds: [...seedRunIds, ...caseToChild.values()] }
@@ -1600,7 +1609,8 @@ export class ScorecardBatchService {
             judges: settled.manifest?.judges ?? judges,
             ...(settled.manifest?.judgeRun ? { judgeRun: settled.manifest.judgeRun } : {}),
             results: scorecard.results,
-            ...(analysisRef ? { analysisRef } : {}),
+            // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
+            ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
             createdAt: this.now(),
             ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
           });
