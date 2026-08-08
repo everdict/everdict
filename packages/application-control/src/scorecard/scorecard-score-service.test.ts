@@ -274,7 +274,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     };
     const record: ScorecardRecord = { ...recordWith([result("c1", [unmeasuredPlaceholder])]), runIds: ["child-c1"] };
     const svc = new ScorecardScoreService(
-      { ...deps, runStore, judges, judgeRunner },
+      { ...deps, runStore },
       {
         newId: () => "id-1",
         now: () => "2026-08-07T00:00:00.000Z",

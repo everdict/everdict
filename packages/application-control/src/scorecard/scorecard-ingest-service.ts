@@ -24,7 +24,7 @@ import {
   type IngestScorecardInput,
   type PullIngestBody,
   type PullIngestInput,
-  type ScorecardServiceDeps,
+  type ScorecardIngestDeps,
   analysisBundle,
   offloadAnalysis,
   offloadResults,
@@ -53,7 +53,7 @@ export class ScorecardIngestService {
   private readonly scoring: ScoringService;
 
   constructor(
-    private readonly deps: ScorecardServiceDeps,
+    private readonly deps: ScorecardIngestDeps,
     shared: { newId: () => string; now: () => string; scoring: ScoringService },
   ) {
     this.newId = shared.newId;

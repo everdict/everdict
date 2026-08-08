@@ -34,7 +34,7 @@ import {
   verdictPolicyRef,
   workspaceOpsReport,
 } from "@everdict/domain";
-import { type ScorecardServiceDeps, analysisArtifactKey } from "./scorecard-shared.js";
+import { type ScorecardAnalyticsDeps, analysisArtifactKey } from "./scorecard-shared.js";
 
 // The unrestorable stamp(s) of a comparison, or undefined when both sides resolved. A stamped ref always
 // carries its digest (VerdictPolicyRef), so an unresolvable side can always name what was looked for.
@@ -61,7 +61,7 @@ export class ScorecardAnalyticsService {
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
 
   constructor(
-    private readonly deps: ScorecardServiceDeps,
+    private readonly deps: ScorecardAnalyticsDeps,
     shared: { now: () => string; getRecord: (id: string) => Promise<ScorecardRecord | undefined> },
   ) {
     this.now = shared.now;

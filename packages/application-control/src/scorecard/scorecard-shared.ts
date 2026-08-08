@@ -524,9 +524,48 @@ export interface ScorecardServiceDeps {
   now?: () => string;
 }
 
+// ── Per-collaborator dependency views (review §21) ──
+// The bag above is the UNION a composition root wires once; each collaborator names the slice it actually
+// collaborates with, so the type answers "what does ingest really touch" without reading 400 lines of
+// implementation. Pick<> only — no new abstraction, no behavioral change: the facade still passes the one
+// wired object, and structural typing narrows it at each constructor.
+
+// The batch orchestrator — dispatch, budgets, judges, export, recovery: the execution heart keeps the wide view.
+export type ScorecardBatchDeps = Omit<ScorecardServiceDeps, "temporalScores">;
+
+// External-trace ingest: no dispatcher, no queue, no recovery — it scores traces someone else produced.
+export type ScorecardIngestDeps = Pick<
+  ScorecardServiceDeps,
+  | "store"
+  | "datasets"
+  | "defaultTraceGraders"
+  | "buildTraceSource"
+  | "resolveTraceSourceByName"
+  | "secretsFor"
+  | "spanMappingFor"
+  | "exportResults"
+  | "trajectories"
+  | "artifacts"
+  | "newId"
+  | "now"
+>;
+
+// Read-side analytics: the store and the offloaded-analysis artifacts. Nothing here can dispatch or kill.
+export type ScorecardAnalyticsDeps = Pick<ScorecardServiceDeps, "store" | "artifacts">;
+
+// Detached scoring (phase 2 / re-score): the stores it rewrites plus the Temporal score bridge.
+export type ScorecardScoringDeps = Pick<
+  ScorecardServiceDeps,
+  "store" | "runStore" | "datasets" | "events" | "temporalScores" | "newId" | "now"
+>;
+
 // Offload os-use screenshots (inline base64) to object storage → each result snapshot.screenshotRef=URL, screenshot cleared (slim
 // record). best-effort: on failure keep the base64 (no effect on the scorecard itself). Called after applyJudges (once registry judges have used the image).
-export async function offloadResults(deps: ScorecardServiceDeps, id: string, results: CaseResult[]): Promise<void> {
+export async function offloadResults(
+  deps: Pick<ScorecardServiceDeps, "artifacts">,
+  id: string,
+  results: CaseResult[],
+): Promise<void> {
   if (!deps.artifacts) return;
   for (const r of results) {
     try {

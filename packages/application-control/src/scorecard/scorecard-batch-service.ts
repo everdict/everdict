@@ -49,7 +49,7 @@ import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import {
-  type ScorecardServiceDeps,
+  type ScorecardBatchDeps,
   analysisBundle,
   applyGradingPlan,
   batchSettledEvent,
@@ -79,7 +79,7 @@ export class ScorecardBatchService {
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
 
   constructor(
-    private readonly deps: ScorecardServiceDeps,
+    private readonly deps: ScorecardBatchDeps,
     shared: {
       newId: () => string;
       now: () => string;
