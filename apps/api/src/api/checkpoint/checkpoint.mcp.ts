@@ -11,7 +11,11 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
   if (!deps.checkpointService) return;
   const checkpoints = deps.checkpointService;
 
-  const body = HandoffCheckpointSchema.omit({ id: true, createdAt: true, createdBy: true });
+  const body = HandoffCheckpointSchema.omit({ id: true, createdAt: true, createdBy: true }).extend({
+    // The policy slice of the envelope being suspended — carrying it lets admission enforce
+    // rollbackRequired ⇒ rollbackPlan (stricter only; envelopes are not persisted). HTTP parity.
+    envelope: z.object({ id: z.string().min(1), rollbackRequired: z.boolean().optional() }).optional(),
+  });
 
   server.registerTool(
     "publish_checkpoint",
@@ -27,15 +31,17 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
       inputSchema: body.shape,
     },
     (a) =>
-      run(principal, "agents:write", async () =>
-        ok(
+      run(principal, "agents:write", async () => {
+        const { envelope, ...checkpoint } = body.parse(a);
+        return ok(
           await checkpoints.create({
             tenant: ws,
             createdBy: principal.subject,
-            checkpoint: body.parse(a),
+            checkpoint,
+            ...(envelope ? { envelope } : {}),
           }),
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(

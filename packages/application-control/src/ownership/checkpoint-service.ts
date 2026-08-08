@@ -8,8 +8,9 @@ import {
   NotFoundError,
   type PlatformFact,
   type RoleProfile,
+  type TaskEnvelope,
 } from "@everdict/contracts";
-import { assertIndependentVerification, danglingCheckpointRefs } from "@everdict/domain";
+import { assertCheckpointForEnvelope, assertIndependentVerification, danglingCheckpointRefs } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -66,6 +67,11 @@ export interface CreateCheckpointInput {
   tenant: string;
   createdBy: string;
   checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">;
+  // The policy slice of the envelope this checkpoint suspends. Envelopes are not persisted, so admission can
+  // only enforce the envelope↔checkpoint cross-invariant (rollbackRequired ⇒ rollbackPlan) when the producer
+  // carries the policy in — and a producer volunteering it can only make the gate STRICTER, never looser
+  // (omitting it is exactly today's behavior). The activation's publishHalt sends it.
+  envelope?: Pick<TaskEnvelope, "id"> & Partial<Pick<TaskEnvelope, "rollbackRequired">>;
 }
 
 export class CheckpointService {
@@ -99,6 +105,9 @@ export class CheckpointService {
       );
     }
     await this.assertNotSelfVerification(input.tenant, record);
+    // The envelope↔checkpoint cross-invariant, enforced exactly where the checkpoint is minted (the domain
+    // owns the decision; this service only supplies the inputs the caller carried).
+    if (input.envelope) assertCheckpointForEnvelope(record, input.envelope);
 
     // Stamp what admission actually CHECKED, per reference — "evidence-backed" and "evidence-VERIFIED" are
     // different claims, and a successor weighing a confirmedFact reads which one it holds. A ref whose type

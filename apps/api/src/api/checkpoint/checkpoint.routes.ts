@@ -28,11 +28,13 @@ export function registerCheckpointRoutes(app: FastifyInstance, deps: ServerDeps)
     }
     try {
       // Dangling evidence and self-verification are refused in the service (400) — both need other records.
+      const { envelope, ...checkpoint } = body;
       return reply.code(201).send(
         await deps.checkpointService.create({
           tenant: principal.workspace,
           createdBy: principal.subject,
-          checkpoint: body,
+          checkpoint,
+          ...(envelope ? { envelope } : {}),
         }),
       );
     } catch (err) {

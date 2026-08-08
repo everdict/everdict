@@ -52,9 +52,12 @@ export type ActorRef = z.infer<typeof ActorRefSchema>;
 export const RoleProfileSchema = z.object({
   role: OwnershipRoleSchema,
   // Capability separation: what this role may READ vs WRITE (capability/tool ids). The domain validator
-  // enforces the structural invariants (observer/diagnostician/verifier write NOTHING).
+  // enforces the structural invariants (observer/diagnostician/verifier write NOTHING). `read` mirrors the
+  // envelope scope's vocabulary — "all" (unrestricted senses, the executor posture) or an explicit list —
+  // so the delegation invariant (assertEnvelopeForRole: an envelope's scope never exceeds its role's
+  // ceiling) is decidable without translating between two dialects of the same concern.
   capabilities: z.object({
-    read: z.array(z.string()).default([]),
+    read: z.union([z.literal("all"), z.array(z.string())]).default([]),
     write: z.array(z.string()).default([]),
   }),
   // (Context separation has NO field here on purpose — see the note under RoleProfile below.)

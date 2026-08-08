@@ -191,6 +191,29 @@ describe("handoff checkpoints — a verifier does not check its own work (O3)", 
     ).resolves.toBeDefined();
   });
 
+  it("a rollback-demanding envelope refuses a planless handoff at the minting boundary", async () => {
+    // The cross-invariant existed (assertCheckpointForEnvelope) with zero production callers — envelopes are
+    // not persisted, so admission never saw one. The producer now carries the policy slice in, and carrying
+    // it can only make admission stricter.
+    const svc = new CheckpointService({ store: new FakeCheckpointStore(), resolvers: liveRuns("run-42") });
+    await expect(
+      svc.create({
+        tenant: "acme",
+        createdBy: "agent:fixer:conv-1",
+        checkpoint: body({}),
+        envelope: { id: "env-1", rollbackRequired: true },
+      }),
+    ).rejects.toThrow(/requires rollback/);
+    await expect(
+      svc.create({
+        tenant: "acme",
+        createdBy: "agent:fixer:conv-1",
+        checkpoint: body({ rollbackPlan: "git revert the applied patch series" }),
+        envelope: { id: "env-1", rollbackRequired: true },
+      }),
+    ).resolves.toBeDefined();
+  });
+
   it("refuses an ANONYMOUS verifier checkpoint — omitting `by` is not a way around the independence check", async () => {
     // Regression: `by` is caller-declared (optional on the record, exposed through publish_checkpoint), and a
     // verifier that omitted it made the whole independence check abstain — fail-open on the one field the

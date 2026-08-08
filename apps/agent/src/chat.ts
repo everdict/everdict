@@ -28,6 +28,7 @@ import {
   memberMemorySlug,
   traceIdForRun,
 } from "@everdict/contracts";
+import { assertTaskEnvelope } from "@everdict/domain";
 import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
 import type { AgentTryEvent, AgentTryResult } from "./agent-try.js";
@@ -1205,20 +1206,26 @@ export async function runChat(
         // start. The kernel adds its own control tools (todo, read_result, plan, wait) on top and those are
         // all read-only, so they ride the reads posture; a future write-capable kernel tool would need
         // listing in `writes` deliberately, and the test says so. Narrowing writes below "everything
-        // granted" is a product decision (teammate bounding) deferred with it.
+        // granted" is a product decision (teammate bounding) deferred with it. The domain guard runs at
+        // this compose point — the only place the FULL envelope exists — so an unbudgeted envelope never
+        // reaches the kernel.
         ...(hooks?.envelope
           ? {
-              envelope: {
-                ...hooks.envelope,
-                scope: {
-                  reads: "all" as const,
-                  writes: registry
-                    .list()
-                    .filter((t) => t.isReadOnly !== true)
-                    .map((t) => t.name),
-                  forbidden: [],
-                },
-              },
+              envelope: (() => {
+                const composed = {
+                  ...hooks.envelope,
+                  scope: {
+                    reads: "all" as const,
+                    writes: registry
+                      .list()
+                      .filter((t) => t.isReadOnly !== true)
+                      .map((t) => t.name),
+                    forbidden: [],
+                  },
+                };
+                assertTaskEnvelope(composed);
+                return composed;
+              })(),
             }
           : {}),
         ...(hooks?.permit ? { permit: hooks.permit } : {}),

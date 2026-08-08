@@ -89,7 +89,10 @@ export {
   type EnvelopeSpend,
 } from "@everdict/contracts";
 
-export function assertTaskEnvelope(envelope: TaskEnvelope): void {
+// Narrowed to what it reads so BOTH production envelope authors can call it — the activation composes its
+// envelope without a scope (the turn completes it later), and a guard demanding fields it never reads would
+// exclude exactly the caller it exists for.
+export function assertTaskEnvelope(envelope: Pick<TaskEnvelope, "id" | "budgets">): void {
   const b = envelope.budgets;
   // An unbounded autonomous task has no decision boundary — at least one hard budget, always.
   if (b.timeSec === undefined && b.tokens === undefined && b.usd === undefined) {
@@ -97,6 +100,53 @@ export function assertTaskEnvelope(envelope: TaskEnvelope): void {
       "BAD_REQUEST",
       { id: envelope.id },
       "a task envelope needs at least one hard budget (timeSec | tokens | usd) — an unbounded autonomous task has no decision boundary.",
+    );
+  }
+}
+
+// ── O2×O5: the delegation invariant — a role's capabilities are the CEILING an envelope delegates under ──
+// A RoleProfile says what the ROLE may ever touch; a TaskEnvelope says what THIS task actually got. The
+// second must be a subset of the first, or the role is decorative: a "verifier" envelope carrying
+// `writes: [deploy_production]` typechecks today and the runtime would enforce exactly what it says. The
+// verifier RUNTIME (the spawn site that will construct evidence-only envelopes) does not exist yet — this
+// function is the decision it MUST call when it does, and until then the envelope authors that declare a
+// role are the binding sites.
+export function assertEnvelopeForRole(profile: RoleProfile, envelope: TaskEnvelope): void {
+  if (envelope.role !== undefined && envelope.role !== profile.role) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { envelope: envelope.id, envelopeRole: envelope.role, profileRole: profile.role },
+      `envelope '${envelope.id}' declares role '${envelope.role}' but is being bound to profile '${profile.role}' — a task cannot run as a role its envelope did not state.`,
+    );
+  }
+  const grantedWrites = new Set(profile.capabilities.write);
+  const excessWrites = envelope.scope.writes.filter((w) => !grantedWrites.has(w));
+  if (excessWrites.length > 0) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { envelope: envelope.id, role: profile.role, writes: excessWrites },
+      `envelope '${envelope.id}' delegates write capabilities the '${profile.role}' role does not hold (${excessWrites.join(", ")}) — an envelope is a subset of its role, never an escalation.`,
+    );
+  }
+  const grantedReads = profile.capabilities.read;
+  if (envelope.scope.reads === "all") {
+    if (grantedReads !== "all") {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { envelope: envelope.id, role: profile.role },
+        `envelope '${envelope.id}' delegates unrestricted reads but the '${profile.role}' role reads an explicit list — "all" is not a subset of a restriction.`,
+      );
+    }
+    return;
+  }
+  if (grantedReads === "all") return; // an unrestricted role admits any explicit list
+  const readable = new Set(grantedReads);
+  const excessReads = envelope.scope.reads.filter((r) => !readable.has(r));
+  if (excessReads.length > 0) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { envelope: envelope.id, role: profile.role, reads: excessReads },
+      `envelope '${envelope.id}' delegates read capabilities the '${profile.role}' role does not hold (${excessReads.join(", ")}).`,
     );
   }
 }
@@ -127,7 +177,13 @@ export async function danglingCheckpointRefs(
 
 // The envelope↔checkpoint cross-invariant: an envelope that demanded rollback hands off ONLY with a
 // rollback plan — the successor must be able to undo the predecessor's work without the predecessor.
-export function assertCheckpointForEnvelope(checkpoint: HandoffCheckpoint, envelope: TaskEnvelope): void {
+// Narrowed to what it reads: envelopes are not persisted, so the boundary that enforces this (checkpoint
+// admission) receives only the caller-carried policy slice — and a caller volunteering `rollbackRequired`
+// can only make the gate stricter, never looser, so the slice is safe to accept from the producer.
+export function assertCheckpointForEnvelope(
+  checkpoint: HandoffCheckpoint,
+  envelope: Pick<TaskEnvelope, "id"> & Partial<Pick<TaskEnvelope, "rollbackRequired">>,
+): void {
   if (envelope.rollbackRequired && (checkpoint.rollbackPlan === undefined || checkpoint.rollbackPlan === "")) {
     throw new BadRequestError(
       "BAD_REQUEST",

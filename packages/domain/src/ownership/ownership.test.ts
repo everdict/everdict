@@ -3,12 +3,14 @@ import {
   type HandoffCheckpoint,
   HandoffCheckpointSchema,
   type RoleAssignment,
+  type RoleProfile,
   type TaskEnvelope,
   TaskEnvelopeSchema,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   assertCheckpointForEnvelope,
+  assertEnvelopeForRole,
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
@@ -201,6 +203,60 @@ describe("O5 — the envelope is a decision boundary", () => {
 
   it("an envelope with no hard budget is refused — unbounded autonomy has no decision boundary", () => {
     expect(() => assertTaskEnvelope(envelope({ budgets: {} }))).toThrow(/at least one hard budget/);
+  });
+});
+
+describe("O2×O5 — a role's capabilities are the ceiling an envelope delegates under", () => {
+  const profile = (over: Partial<RoleProfile> = {}): RoleProfile => ({
+    role: "verifier",
+    capabilities: { read: ["list_runs", "get_scorecard"], write: [] },
+    requiredEvidence: [],
+    completion: "verified_verdict",
+    ...over,
+  });
+
+  it("a verifier envelope that delegates writes is refused — an envelope is a subset, never an escalation", () => {
+    // The type-level hole this closes: role "verifier" + scope.writes ["deploy_production"] typechecked and
+    // the runtime would have enforced exactly what the envelope said — nothing tied scope to role.
+    expect(() =>
+      assertEnvelopeForRole(
+        profile(),
+        envelope({ role: "verifier", scope: { reads: ["list_runs"], writes: ["deploy_production"], forbidden: [] } }),
+      ),
+    ).toThrow(/never an escalation/);
+  });
+
+  it('an explicit-read role cannot delegate "all" — unrestricted is not a subset of a restriction', () => {
+    expect(() =>
+      assertEnvelopeForRole(
+        profile(),
+        envelope({ role: "verifier", scope: { reads: "all", writes: [], forbidden: [] } }),
+      ),
+    ).toThrow(/not a subset of a restriction/);
+  });
+
+  it("a subset envelope passes; an unrestricted-read role admits any explicit list", () => {
+    expect(() =>
+      assertEnvelopeForRole(
+        profile(),
+        envelope({ role: "verifier", scope: { reads: ["list_runs"], writes: [], forbidden: [] } }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertEnvelopeForRole(
+        profile({ role: "executor", capabilities: { read: "all", write: ["edit_file"] }, completion: "change_set" }),
+        envelope({ role: "executor", scope: { reads: ["anything"], writes: ["edit_file"], forbidden: [] } }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("an envelope bound to a profile of a DIFFERENT role is refused — the declared role is not decoration", () => {
+    expect(() =>
+      assertEnvelopeForRole(
+        profile(),
+        envelope({ role: "executor", scope: { reads: ["list_runs"], writes: [], forbidden: [] } }),
+      ),
+    ).toThrow(/cannot run as a role its envelope did not state/);
   });
 });
 

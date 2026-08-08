@@ -72,7 +72,18 @@ Everdict has no verifier runtime today. Context separation — a verifier receiv
 executor's trajectory or reasoning — is therefore a stated **principle**, not a live guard: there is no
 spawn site to bind it to, and writing one so the protocol looks complete would be a claim rather than a
 check. When verifier-role work becomes spawnable, that spawn is the third enforcement site, and the context
-it assembles is where the principle becomes code.
+it assembles is where the principle becomes code. The DECISION that spawn must call already exists:
+`assertEnvelopeForRole(profile, envelope)` (`@everdict/domain`) holds the delegation invariant — a role's
+capabilities are the CEILING, the envelope's scope must be a subset (`reads: "all"` is delegable only by an
+unrestricted-read profile; excess writes/reads refuse) — so a "verifier" envelope carrying production writes
+stops typechecking its way into a runtime that would enforce exactly what it says.
+
+Independence reads the **executor identity, never attribution**: `Run.origin.executor` records who performed
+the work at creation (`agent:<id>` on activation and chat-turn runs) while `createdBy` stays the principal
+the run acted as — the composition's `runActor` prefers the executor, which is what lets the same agent
+filing from a *later* activation still be caught by the actor leg. And a VERIFIER checkpoint must declare
+`by`: an anonymous verification used to make the whole independence check abstain — fail-open on the one
+field the caller controls — and now refuses at admission.
 
 ## The envelope
 
@@ -88,6 +99,13 @@ answer verbatim for both access kinds; kernel cognition tools (todo, plan, spawn
   mid-task is the exact failure the envelope exists to prevent, so "keep going" is not a value the type offers.
 - `escalation.onScopeExceeded: "refuse_and_replan"` — a refusal is data the runtime acts on, never a warning
   a loop can log and ignore.
+- `rollbackRequired` reaches the checkpoint boundary through the PRODUCER: envelopes are not persisted, so
+  `publishHalt` carries the envelope's policy slice (`{id, rollbackRequired}`) in the checkpoint body and
+  admission calls `assertCheckpointForEnvelope` — a rollback-demanding envelope refuses a planless handoff
+  where the checkpoint is minted. Carrying the slice is stricter-only (omitting it is exactly the old
+  behavior), which is why a caller-declared slice is safe. Both envelope AUTHORS run `assertTaskEnvelope` at
+  their compose point (the activation's `envelopeFor`, the chat turn's scope completion) — the budget
+  invariant fires where an envelope is born, not only in unit tests.
 
 The kernel (`packages/agent-runtime/src/kernel/loop.ts`) honors the envelope on every tool call and at every
 turn boundary, and passes it **verbatim to sub-agents** — without that line a scoped parent could

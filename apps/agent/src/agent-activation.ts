@@ -10,7 +10,7 @@ import type {
   TraceSpan,
 } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
-import { eventSelectorMatches } from "@everdict/domain";
+import { assertTaskEnvelope, eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
 import { type AgentTurnUsage, transcriptToTrace } from "./run-trace.js";
@@ -137,7 +137,11 @@ export interface AgentActivatorDeps {
   // a failed run, and the halt itself is already on the event log either way.
   publishCheckpoint?: (
     agentToken: string,
-    checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">,
+    checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy"> & {
+      // The suspended envelope's policy slice — admission enforces rollbackRequired ⇒ rollbackPlan from it
+      // (envelopes are not persisted, so the producer is the only carrier; stricter-only, safe to declare).
+      envelope?: Pick<TaskEnvelope, "id"> & Partial<Pick<TaskEnvelope, "rollbackRequired">>;
+    },
   ) => Promise<void>;
 }
 
@@ -711,7 +715,7 @@ export class AgentActivator {
   // `role` stays absent — an agent spec declares no ownership role, and stamping "executor" on it would be a
   // claim the record cannot back. Scope is completed by the turn, which is where the toolset resolves.
   private envelopeFor(runId: string, spec: AgentSpec, event: ActivationEvent): ActivationEnvelope {
-    return {
+    const envelope: ActivationEnvelope = {
       id: runId,
       goal: spec.task ?? `React to ${event.kind}: ${event.message}`,
       budgets: { tokens: ACTIVATION_TOKEN_BUDGET, timeSec: ACTIVATION_TIME_BUDGET_SEC },
@@ -721,6 +725,10 @@ export class AgentActivator {
       // plan the host has no way to write. When agents carry ownership roles, the role decides this.
       rollbackRequired: false,
     };
+    // The domain guard at the author (O5): an unbudgeted envelope never reaches the kernel. The budgets are
+    // constants today, so this cannot throw — the call exists so the invariant fires the moment they stop being.
+    assertTaskEnvelope(envelope);
+    return envelope;
   }
 
   // The handoff a halted run owes its successor (O6). The host writes this, not the agent: the agent is out
@@ -747,6 +755,9 @@ export class AgentActivator {
     try {
       await publish(agentToken, {
         envelopeId: envelope.id,
+        // The envelope's policy slice rides along so ADMISSION can enforce the rollbackRequired ⇒
+        // rollbackPlan cross-invariant (envelopes are not persisted; the producer is the only carrier).
+        envelope: { id: envelope.id, rollbackRequired: envelope.rollbackRequired },
         goal: envelope.goal,
         by: { id: `agent:${agentId}`, sessionId, runId },
         currentState: `The run halted at its task envelope's budget before reporting completion. Its trajectory up to the halt is sealed on run ${runId}.`,
