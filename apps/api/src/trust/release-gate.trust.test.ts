@@ -1,5 +1,6 @@
 import { ScorecardService } from "@everdict/application-control";
 import type { CaseResult } from "@everdict/contracts";
+import { MANIFEST_IDENTITY_VERSION } from "@everdict/contracts";
 import { PgScorecardStore, type ScorecardRecord } from "@everdict/db";
 import { composeVerdictPolicy, sealGrading, verdictPolicyRef } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
@@ -75,6 +76,7 @@ describeTrust(
         // in production a 4-of-5 candidate's defaults composite differed and grading confounded before
         // coverage ever spoke.
         manifest: {
+          identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8) — legacy empty closures read unverified
           dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
           cases: Object.fromEntries(results.map((r) => [r.caseId, `sha256:case-${r.caseId}`])),
           ...sealGrading(
@@ -165,6 +167,7 @@ describeTrust(
       const basePolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
       const candPolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "ground_truth" }]);
       const manifestFor = (p: typeof basePolicy) => ({
+        identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
         dataset: { id: "d", version: "1.0.0", digest: "dd" },
         harness: { id: "h", version: "1" },
         verdictPolicy: p,

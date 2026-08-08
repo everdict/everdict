@@ -1,4 +1,5 @@
 import type { CaseResult, Scorecard, ScorecardManifest } from "@everdict/contracts";
+import { MANIFEST_IDENTITY_VERSION } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { experimentIdentity } from "./experiment-identity.js";
 import { evaluateGate } from "./gate.js";
@@ -31,6 +32,7 @@ const card = (results: CaseResult[]): Scorecard => ({ suiteId: "s", harness: "h@
 // VERIFIED confound (a composite-only difference would be merely unverifiable — content, selection and
 // grading move indistinguishably inside one hash).
 const manifest = (loginCaseDigest: string): ScorecardManifest => ({
+  identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8) — legacy pairs' empty closures read unverified
   dataset: { id: "bench", version: "7.0.0", digest: `sha256:composite-${loginCaseDigest}` },
   cases: { login: loginCaseDigest },
   grading: "sha256:grading-a",
