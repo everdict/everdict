@@ -89,6 +89,9 @@ export function registerBrowserSessionTools(server: McpServer, ctx: McpToolConte
     server.registerTool(
       "browser_session_ticket",
       {
+        // MINTS a credential — never a read. Previously unannotated, so only the name classifier's lack of a
+        // matching read prefix kept it gated: safety by luck, now by declaration.
+        annotations: { readOnlyHint: false },
         description:
           "Mint a short-lived single-use WebSocket ticket for a browser session (owner-only). The client opens " +
           "WS /browser-sessions/:id?ticket=… to stream the screencast and send input.",

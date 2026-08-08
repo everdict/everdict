@@ -30,7 +30,8 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "set_agent_tool",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: durable self-modification — changes which tools the agent holds. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Turn one tool on or off FOR THE CALLING MEMBER (enabled true/false), or pass null to follow the workspace " +
         "default again. The workspace's agent configuration is untouched — this only changes the caller's own " +
@@ -59,7 +60,8 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "probe_agent_tool",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: outbound connect carrying the member's resolved secret. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Test-connect one MCP tool with the secret THIS member's agent would use and list what the server really " +
         "serves — the live answer to 'what functions does this tool have' and the first check when a tool misbehaves. " +
@@ -107,7 +109,8 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "set_agent_skill",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: durable self-modification — changes which skills the agent follows. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Turn one skill on or off FOR THE CALLING MEMBER (enabled true/false), or pass null to follow the workspace " +
         "default again. The workspace's skill library is untouched — this only changes which procedures the caller's " +

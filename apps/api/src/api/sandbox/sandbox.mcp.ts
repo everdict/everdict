@@ -269,7 +269,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "touch_sandbox",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: mutates the session's hard deadline (record + reaper timer). The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Extend a live sandbox session's hard deadline to now+ttl (keep-alive; clamped to the max, never " +
         "shortens). Extends process memory, the run record, and the durable reaper's timer. Creator-or-admin.",
@@ -361,7 +362,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "sandbox_exec",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: executes a shell command in the live session. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Run one shell command (`sh -c`) inside a live sandbox session and get stdout/stderr/exitCode. " +
         "Creator-or-admin only — checked before the command runs. The exec is appended to the session's trajectory.",
@@ -380,7 +382,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "close_sandbox",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: destructive teardown — container down, trajectory sealed, run settled. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Close a sandbox session: tears the container down, seals the session trajectory, settles the run as " +
         "succeeded with session.closedReason. A world session with hibernate on snapshots BEFORE the container " +

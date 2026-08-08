@@ -87,7 +87,8 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "exec_in_run",
     {
-      annotations: { readOnlyHint: true },
+      // NOT a read: executes a shell command in the run's live container. The authz action (:read) says who may CALL, never what it DOES.
+      annotations: { readOnlyHint: false },
       description:
         "Run a one-shot shell command inside a run's live sandbox container (web-terminal exec). Creator-or-admin only; found=false = no live container",
       inputSchema: { id: z.string(), command: z.string() },

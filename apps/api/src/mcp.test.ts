@@ -2423,3 +2423,37 @@ describe("subscription tools — BFF↔MCP parity (E3 §6)", () => {
     expect(denied.isError).toBe(true); // agents:write is member+
   });
 });
+
+describe("MCP — effect annotations (authorization is not effect semantics)", () => {
+  // The F7 sweep derived readOnlyHint from each handler's authz ACTION, and eight :read-gated tools are not
+  // reads — two shell execs, a destructive teardown, a deadline mutation, two durable agent self-
+  // modifications, an external PR, an outbound probe carrying a member secret — plus one unannotated ticket
+  // MINT kept safe only by the name classifier's luck. readOnlyHint decides the permission-gate skip, the
+  // plan-mode bypass, concurrent dispatch AND reconnect auto-retry, so a wrong `true` is a promptless,
+  // plan-transparent, auto-retried mutation. This pins every one of them as declared-effectful.
+  const EFFECTFUL = [
+    "exec_in_run",
+    "sandbox_exec",
+    "close_sandbox",
+    "touch_sandbox",
+    "set_agent_tool",
+    "set_agent_skill",
+    "open_ci_setup_pr",
+    "probe_agent_tool",
+    "browser_session_ticket",
+  ];
+
+  it("no effectful tool is annotated read-only — the annotation states what the handler DOES, not who may call it", async () => {
+    const deps = harness();
+    const client = await connect(deps, ["admin"]);
+    const tools = (await client.listTools()).tools;
+    const byName = new Map(tools.map((t) => [t.name, t]));
+    const present = EFFECTFUL.filter((name) => byName.has(name));
+    // The harness wires the core services — if this floor drops, the guard went vacuous, which is a failure.
+    expect(present.length).toBeGreaterThanOrEqual(4);
+    for (const name of present) {
+      const hint = (byName.get(name)?.annotations as { readOnlyHint?: boolean } | undefined)?.readOnlyHint;
+      expect({ name, hint }).toEqual({ name, hint: false });
+    }
+  });
+});

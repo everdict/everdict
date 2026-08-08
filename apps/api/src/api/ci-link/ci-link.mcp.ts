@@ -95,7 +95,8 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "open_ci_setup_pr",
       {
-        annotations: { readOnlyHint: true },
+        // NOT a read: opens a pull request in an external GitHub repo. The authz action (:read) says who may CALL, never what it DOES.
+        annotations: { readOnlyHint: false },
         description:
           "Synthesize the Everdict eval workflow YAML in a linked repo and open a setup-PR (workspace GitHub App token). Merging it activates CI eval. The workflow always targets self-hosted runners — 400 if the self:ws pool has no shared runner (register one first via github_install_workspace_runner).",
         inputSchema: {

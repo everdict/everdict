@@ -22,6 +22,13 @@ precedent: `authorizeToolInvocation`, `budgetExhausted`, `effectsRequireConsent`
 3. **readOnly ≠ safe-without-consent.** The permission hook fires for writes OR for a read whose declared
    `effects` require consent (`effectsRequireConsent` — external egress is exfiltration-shaped). Plain
    reads stay ungated (the senses). `PermissionRequest.isReadOnly` carries the REAL access kind.
+   **The annotation derives from what the HANDLER DOES — never from the RBAC action.** `runs:read` says
+   who may CALL; it does not make `exec_in_run` (a shell in the live container) a read. Deriving
+   readOnlyHint from the authz action mislabeled 8 mutating tools as promptless, plan-mode-transparent,
+   auto-retried and concurrency-grouped reads (mcp.test.ts's effect-annotations guard pins them).
+   Named deferral: credentialed-egress READS (github/mattermost/trace-source/image-registry reads that ship
+   workspace-held tokens outbound) are honest reads but exfiltration-shaped — base-tool `effects`
+   declarations are the follow-up sweep.
    **A base tool's access is DECLARED, not inferred**: every control-plane MCP handler gates on an Action
    string, and registration surfaces it as `annotations.readOnlyHint` — the agent bridge consumes the
    declaration first (`baseToolReadOnly`) and the name-prefix classifier is the compatibility FALLBACK only
