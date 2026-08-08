@@ -250,7 +250,16 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const judges = new InMemoryJudgeRegistry();
-    await judges.register("acme", { ...modelJudge("1.0.0"), model: { ref: "judge-default" } });
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: { ref: "judge-default" },
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
       dispatcher: okDispatch,
@@ -276,7 +285,16 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const judges = new InMemoryJudgeRegistry();
-    await judges.register("acme", { ...modelJudge("1.0.0"), model: { ref: "judge-default" } });
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: { ref: "judge-default" },
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
       dispatcher: okDispatch,
