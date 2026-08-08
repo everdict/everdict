@@ -44,6 +44,13 @@ failure mode the suite exists to catch, so the runner is held to it too.
 | TRUST-09 | Boot recovery reclaims a **dead** replica's batch and leaves a live one's alone; an unreadable heartbeat set reclaims nothing | `apps/api/src/trust/replica-recovery.trust.test.ts` |
 | TRUST-10 | Caused work draws from its delegator's envelope — an exhausted cap refuses (402), runaway depth refuses (429), a forged causer refuses (400) | `apps/api/src/trust/envelope-budget.trust.test.ts` |
 | TRUST-11 | A verifier checkpoint filed by the actor that executed the run is refused; a "fact" citing evidence that does not exist is refused | `apps/api/src/trust/self-verification.trust.test.ts` |
+| TRUST-12 | The same evidence has **one verdict**: a scorecard child's served run verdict derives under its PARENT's stamped/composed policy — run detail ≡ case dialog, across the real Pg row mappers | `apps/api/src/trust/verdict-consistency.trust.test.ts` |
+| TRUST-13 | The release-regression unit is the **case verdict in every mode**: trials=1 and trials>1 gate on the same claim; a diagnostic metric flip blocks in neither; one collapsed case counts once | `packages/domain/src/scorecard/regression-unit.trust.test.ts` |
+| TRUST-14 | An **evidence-only read scope means what it says**: the kernel refuses a read outside `scope.reads` | `packages/agent-runtime/src/kernel/envelope-consent.trust.test.ts` |
+| TRUST-15 | readOnly is not safe-without-consent: a read with declared **external egress** consults the permission hook in every mode | `packages/agent-runtime/src/kernel/envelope-consent.trust.test.ts` |
+| TRUST-16 | A budget halt **suspends** (never completed), and resumability is claimed only when the handoff actually landed (`handoff published|failed|absent` on the fact) | `apps/agent/src/suspended-halt.trust.test.ts` |
+| TRUST-17 | One policy document has **one identity across digest eras**: an FNV-era stamp and a sha256 stamp of the same document resolve, compare equal, and never read as a mismatch | `packages/domain/src/scorecard/policy-era.trust.test.ts` |
+| TRUST-18 | A **silently-unemitted score row cannot gate green**: 99 of 100 vanished measurements is blocked_missing, never "0 regressions" | `packages/domain/src/scorecard/regression-unit.trust.test.ts` |
 
 Plus the pre-existing live scenario test the nightly can now satisfy:
 
