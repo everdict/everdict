@@ -58,6 +58,10 @@ export function regressionWatch(deps: RegressionWatchDeps): PlatformEventConsume
       // A partial run (explicit subset of the dataset) never reopens an issue — a 2-case rerun's rate is not
       // the guarantee's rate, and reopening on it is exactly the false alarm that erodes trust in the watch.
       if (candidate.subset) return;
+      // A live/failed scoring pass = the plane is between revisions (or broken) — reopening someone's issue
+      // on a half-applied re-score is a state mutation over a plane no revision owns. The watch DEFERS: the
+      // settle emits its own scorecard.scored fact, and the next completion sweep re-reads a settled plane.
+      if ((candidate.scoringPass ?? undefined) !== undefined) return;
       const candidateRate = passRateOf(candidate);
       if (candidateRate === undefined) return; // nothing gradeable to compare
 
@@ -74,6 +78,8 @@ export function regressionWatch(deps: RegressionWatchDeps): PlatformEventConsume
 
         const baseline = await deps.scorecards.get(baselineId);
         if (!baseline || baseline.tenant !== event.tenant) continue;
+        // The BASELINE side too — the closing scorecard can itself be mid-rescore (both sides are live planes).
+        if ((baseline.scoringPass ?? undefined) !== undefined) continue;
         // A late-arriving OLD batch must not look like a regression — only a run after the resolution counts.
         if (candidate.createdAt <= baseline.createdAt) continue;
         // Cross-HARNESS-version drops are the signal (the harness moved, the guarantee did not) — but a

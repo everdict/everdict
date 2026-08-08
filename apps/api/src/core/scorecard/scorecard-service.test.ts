@@ -443,6 +443,30 @@ describe("ScorecardService — constitution seed (verdict-authority declarations
 });
 
 describe("ScorecardService.diff", () => {
+  it("REFUSES while a scoring pass is live or abandoned on either side — the plane between revisions is not comparable (I3)", async () => {
+    // Pre-fix, a re-score's strip-first window (and a FAILED Temporal pass, which nothing settles) left a
+    // persisted plane belonging to NO completed revision — and diff/gate read it as if it were one.
+    const store = new InMemoryScorecardStore();
+    const pass = {
+      targetRevision: 2,
+      baseRevision: 1,
+      judges: [{ id: "quality", version: "2.0.0" }],
+      startedAt: "2026-08-09T00:00:00.000Z",
+      status: "running" as const,
+    };
+    await store.create(record("base", { scorecard: scorecard(true) }));
+    await store.create(record("cand", { scorecard: scorecard(false), scoringPass: pass }));
+    await expect(svc(store).diff("acme", "base", "cand")).rejects.toThrow(/between revisions/);
+    // The abandoned shape refuses with its own honest message — broken evidence, not a readable revision.
+    await store.create(
+      record("cand2", {
+        scorecard: scorecard(false),
+        scoringPass: { ...pass, status: "failed" as const, failure: "worker died" },
+      }),
+    );
+    await expect(svc(store).diff("acme", "base", "cand2")).rejects.toThrow(/ABANDONED scoring pass/);
+  });
+
   it("reports pass transitions as regression/improvement", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("base", { scorecard: scorecard(true) }));

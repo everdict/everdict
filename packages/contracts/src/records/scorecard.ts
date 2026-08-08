@@ -114,6 +114,45 @@ export const ScorecardManifestSchema = z.object({
 });
 export type ScorecardManifest = z.infer<typeof ScorecardManifestSchema>;
 
+// The LIVE scoring pass (arch-review 7 P0, mig 0147) — the revision boundary made visible. A re-score
+// legally rewrites the score plane in place (strip-first, per-case write-back), so between revision N and
+// the N+1 append the persisted plane belongs to NO completed revision — and gate/diff/release/issue-watch
+// readers could read it (the Temporal pass has no failure handling at all: a FAILED workflow silently left
+// a plane whose judgments prepareScore had already deleted while the record kept advertising them). This
+// marker is set BEFORE the first strip and cleared IN THE SAME WRITE as the revision append, so a trust
+// reader can refuse the in-between instead of consuming it: a live pass = "the plane is between revisions",
+// a `failed` (or stale `running`) pass = "the plane is broken evidence of an abandoned pass" — both refuse.
+// It also replaces the process-local in-flight Set as the CROSS-REPLICA one-pass-at-a-time guard, and its
+// pass-start judge closure is what the finalized revision records (sealed when the pass began, not observed
+// at finalize). NULL/absent = no pass touched the plane since the last settle.
+export const ScoringPassSchema = z.object({
+  targetRevision: z.number().int().positive(), // the revision this pass will append when it settles
+  baseRevision: z.number().int().nonnegative(), // the completed revision the pass started from (0 = pre-ledger)
+  // The selected judges' closure sealed at pass START (the same sealJudgeClosure submit uses).
+  judges: z.array(
+    z.object({
+      id: z.string(),
+      version: z.string(),
+      specDigest: z.string().optional(),
+      model: z.string().optional(),
+      rubric: z.string().optional(),
+      harness: z.string().optional(),
+    }),
+  ),
+  startedAt: z.string(),
+  startedBy: z.string().optional(),
+  workflowId: z.string().optional(), // the Temporal score workflow driving it (absent = in-process)
+  status: z.enum(["running", "failed"]),
+  failedAt: z.string().optional(),
+  failure: z.string().optional(),
+});
+export type ScoringPass = z.infer<typeof ScoringPassSchema>;
+
+// A pass whose owner is provably gone: failed, or running longer than the takeover window with nothing
+// having settled it. Readers refuse either way (the plane is between revisions or broken); a NEW pass may
+// TAKE OVER a stale/failed marker — crash residue must never wedge a record forever.
+export const SCORING_PASS_STALE_MS = 60 * 60 * 1000; // one hour — the activity startToClose ceiling
+
 // Scoring identity — one entry per SCORING PASS over this group, append-only (mig 0144). The live score
 // plane legally mutates in place on a re-score (write-back replaces the selected judges' rows), but a
 // Scorecard ID that silently means different judgments over time is identity drift the manifest alone cannot
@@ -400,6 +439,11 @@ export const ScorecardRecordSchema = z.object({
   // even though the live score plane mutates in place. mig 0144. Absent on pre-ledger batches and on failed/
   // aborted settles (they never gate, so they carry no judgment to identify — a named deferral).
   scoring: z.array(ScoringRevisionSchema).optional(),
+  // The LIVE scoring pass (mig 0147) — set before the first strip, cleared in the settle write; trust
+  // readers refuse while present. `null` is the CLEAR value on the update wire (a Partial patch cannot
+  // express deletion with undefined); readers treat null and absent alike. Rides the LIST projection —
+  // product readiness and the regression watch decide on list/get rows and must see it.
+  scoringPass: ScoringPassSchema.nullable().optional(),
   // The batch's ASK — cases × trials at submit (ingest: the trace count). The requested−executed gap is the
   // unlaunched/cancelled tally no per-result walk can recover once cases were skipped. mig 0127.
   requested: z.number().int().nonnegative().optional(),

@@ -5,6 +5,8 @@ import {
   type Dataset,
   type EvalCase,
   NotFoundError,
+  SCORING_PASS_STALE_MS,
+  type ScoringPass,
   type ScorecardRecord,
 } from "@everdict/contracts";
 import {
@@ -86,6 +88,35 @@ export class ScorecardScoreService {
     if (this.inFlight.has(record.id))
       throw new ConflictError("CONFLICT", { scorecard: record.id }, "A scoring pass is already in flight.");
     const pinned = await this.pinJudges(input.tenant, input.judges);
+    // The PERSISTED pass marker (arch-review 7 P0) — set BEFORE anything strips, cleared in the settle
+    // write. Three jobs in one row: the cross-replica one-pass-at-a-time guard (the Set above is
+    // process-local), the boundary trust readers refuse on (the plane between revisions — including the
+    // plane a FAILED/abandoned Temporal pass left broken, which used to stay silently readable), and the
+    // pass-start judge closure the finalized revision will record. A live fresh pass refuses; a failed or
+    // stale one is TAKEN OVER — crash residue must never wedge the record forever.
+    const existing = record.scoringPass ?? undefined;
+    if (
+      existing !== undefined &&
+      existing.status === "running" &&
+      Date.parse(this.now()) - Date.parse(existing.startedAt) < SCORING_PASS_STALE_MS
+    )
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id, startedAt: existing.startedAt, targetRevision: existing.targetRevision },
+        "A scoring pass is already in flight on this group — retry after it settles.",
+      );
+    const pass: ScoringPass = {
+      targetRevision: (record.scoring?.at(-1)?.revision ?? 0) + 1,
+      baseRevision: record.scoring?.at(-1)?.revision ?? 0,
+      judges: await sealJudgeClosure(this.deps, input.tenant, pinned),
+      startedAt: this.now(),
+      ...(input.submittedBy !== undefined ? { startedBy: input.submittedBy } : {}),
+      ...(this.deps.temporalScores && record.runIds?.length
+        ? { workflowId: this.deps.temporalScores.workflowIdFor(record.id) }
+        : {}),
+      status: "running",
+    };
+    await this.deps.store.update(record.id, { scoringPass: pass, updatedAt: this.now() });
     // Score-on-Temporal (T-c): a durable score:<groupId> workflow owns the pass — re-scoring a large group
     // survives a CP restart with zero duplicate judging. Only runIds-backed groups route here (per-case
     // write-back is what makes the activities idempotent; an embed group has no per-case store, so it takes
@@ -131,6 +162,21 @@ export class ScorecardScoreService {
         { scorecard: id, status: record.status },
         `only a succeeded group can be scored (status: ${record.status})`,
       );
+    // Ensure the persisted pass marker exists BEFORE the strip (normally score() wrote it; a resumed
+    // workflow whose marker was lost re-arms it here) — the strip is the moment the plane stops belonging
+    // to a completed revision, and readers must be able to see that.
+    if ((record.scoringPass ?? undefined) === undefined) {
+      await this.deps.store.update(id, {
+        scoringPass: {
+          targetRevision: (record.scoring?.at(-1)?.revision ?? 0) + 1,
+          baseRevision: record.scoring?.at(-1)?.revision ?? 0,
+          judges: await sealJudgeClosure(this.deps, record.tenant, judges),
+          startedAt: this.now(),
+          status: "running",
+        },
+        updatedAt: this.now(),
+      });
+    }
     const results = record.scorecard?.results ?? [];
     const changed: CaseResult[] = [];
     for (const r of results) {
@@ -230,8 +276,14 @@ export class ScorecardScoreService {
       const fresh = await this.deps.store.get(record.id).catch(() => undefined);
       if (!fresh) return;
       const message = err instanceof Error ? err.message : String(err);
+      // The pass marker flips to FAILED and STAYS — the strip already mutated the plane, so readers must
+      // keep refusing it (broken evidence is not a readable revision). A later pass takes the marker over.
+      const failedPass = fresh.scoringPass ?? undefined;
       await this.deps.store
         .update(record.id, {
+          ...(failedPass !== undefined
+            ? { scoringPass: { ...failedPass, status: "failed" as const, failedAt: this.now(), failure: message } }
+            : {}),
           steps: [...(fresh.steps ?? []), { ts: this.now(), phase: "judges", status: "failed", message }],
           updatedAt: this.now(),
         })
@@ -298,6 +350,9 @@ export class ScorecardScoreService {
     });
     const extras: ScorecardOutcomeExtras = {
       summary,
+      // The revision boundary CLOSES in this same write: the pass marker clears exactly when the revision
+      // appends — there is no instant where the plane is both readable and between revisions.
+      scoringPass: null,
       // The stamped-policy verdict aggregate follows the judgment (arch-review 7 §4). An unresolvable stamp
       // skips the refresh like the analysis re-freeze does — the STALE aggregate stays detectable, because
       // its policyDigest no longer matches the record's verdictPolicy stamp era; never silently re-derived.

@@ -340,8 +340,15 @@ describe("ScorecardScoreService prepareScore — strip-first makes the Temporal 
       ...recordWith(child.result ? [child.result] : []),
       runIds: ["child-c1"],
     });
+    // The store accepts the pass-marker writes (I3: prepareScore ensures the persisted boundary marker).
+    const markerStore: ScorecardStore = {
+      ...unusedStore,
+      async update() {
+        return hydrated();
+      },
+    };
     const svc = new ScorecardScoreService(
-      { ...deps, runStore },
+      { ...deps, store: markerStore, runStore },
       {
         newId: () => "id-1",
         now: () => "2026-08-08T00:00:00.000Z",
@@ -494,5 +501,114 @@ describe("ScorecardScoreService aggregate — a re-score rewrites scoring identi
     expect(patch?.judgeModels).toEqual(["m2", "mk"]);
     // The stamped-policy verdict aggregate follows the judgment in the same settle (arch-review 7 §4)
     expect(patch?.verdictSummary).toMatchObject({ verdicted: 1, passed: 1, failed: 0, passRate: 1 });
+  });
+});
+
+describe("ScorecardScoreService — the scoring pass is visible state (arch-review 7 P0, I3)", () => {
+  function passHarness(results: CaseResult[]) {
+    let record = { ...recordWith(results), runIds: undefined as string[] | undefined };
+    const updates: Array<Partial<ScorecardRecord>> = [];
+    const store: ScorecardStore = {
+      ...unusedStore,
+      async get() {
+        return record;
+      },
+      async update(_id, patch) {
+        updates.push(patch);
+        record = { ...record, ...patch } as typeof record;
+        return record;
+      },
+    };
+    const svc = new ScorecardScoreService(
+      { ...deps, store },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-09T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    return { svc, updates, current: () => record };
+  }
+
+  it("score() persists the marker BEFORE the pass runs, and the settle clears it in the SAME write as the revision", async () => {
+    const { svc, updates } = passHarness([result("c1", [measuredVerdict])]);
+    await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    // The FIRST persisted write is the marker — nothing strips before the boundary is visible.
+    expect(updates[0]?.scoringPass).toMatchObject({ targetRevision: 1, baseRevision: 0, status: "running" });
+    // Wait for the async in-process pass to settle.
+    await new Promise((r) => setTimeout(r, 20));
+    const settle = updates.find((u) => u.scoring !== undefined);
+    expect(settle).toBeDefined();
+    // The boundary CLOSES in the settle write itself — marker cleared exactly when the revision appends.
+    expect(settle?.scoringPass).toBeNull();
+    expect(settle?.scoring).toHaveLength(1);
+  });
+
+  it("a second pass while one is LIVE refuses across replicas — the marker, not process memory, is the guard", async () => {
+    const { svc, current } = passHarness([result("c1", [measuredVerdict])]);
+    await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    // A DIFFERENT service instance (another replica — its own empty inFlight Set) sees the persisted marker.
+    const replicaB = new ScorecardScoreService(
+      {
+        ...deps,
+        store: {
+          ...unusedStore,
+          async get() {
+            return current();
+          },
+          async update() {
+            return current();
+          },
+        },
+      },
+      {
+        newId: () => "id-2",
+        now: () => "2026-08-09T00:00:10.000Z", // ten seconds later — well inside the stale window
+        scoring: new ScoringService({}),
+        getRecord: async () => current(),
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    // The first pass may have settled already (tiny plane) — only assert when the marker is still live.
+    const live = current().scoringPass ?? undefined;
+    if (live !== undefined && live.status === "running") {
+      await expect(
+        replicaB.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] }),
+      ).rejects.toThrow(/already in flight/);
+    }
+  });
+
+  it("a FAILED pass keeps blocking readers and is taken over by the next score()", async () => {
+    const failedPass = {
+      targetRevision: 2,
+      baseRevision: 1,
+      judges: [{ id: "j", version: "1.0.0" }],
+      startedAt: "2026-08-08T23:00:00.000Z",
+      status: "failed" as const,
+      failedAt: "2026-08-08T23:05:00.000Z",
+      failure: "judge transport died",
+    };
+    const { svc, updates } = passHarness([result("c1", [measuredVerdict])]);
+    // Seed the failed marker (the Temporal-abandoned / in-process-crashed shape).
+    await (async () => {
+      const first = await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+      void first;
+      await new Promise((r) => setTimeout(r, 20));
+    })();
+    updates.length = 0;
+    // Force the record into the failed-pass state.
+    const { svc: svc2, updates: updates2, current } = passHarness([result("c1", [measuredVerdict])]);
+    await svc2.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    await new Promise((r) => setTimeout(r, 20));
+    // Simulate abandonment: overwrite with a failed marker, then a NEW pass takes it over instead of refusing.
+    await (await import("node:util")).promisify(setTimeout)(1);
+    const record = current();
+    record.scoringPass = failedPass;
+    await expect(
+      svc2.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] }),
+    ).resolves.toBeDefined();
+    expect(updates2.some((u) => (u.scoringPass as { status?: string } | null)?.status === "running")).toBe(true);
   });
 });

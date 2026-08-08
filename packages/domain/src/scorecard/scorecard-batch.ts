@@ -57,6 +57,7 @@ export type ScorecardOutcomeExtras = Partial<
     | "scorecard"
     | "analysisRef"
     | "scoring"
+    | "scoringPass"
     | "manifest"
     | "orchestration"
   >

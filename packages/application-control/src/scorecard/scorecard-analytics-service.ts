@@ -2,6 +2,7 @@ import {
   AppError,
   BadRequestError,
   type CaseMatcher,
+  ConflictError,
   NotFoundError,
   type Scorecard,
   type ScorecardRecord,
@@ -398,6 +399,19 @@ export class ScorecardAnalyticsService {
         "BAD_REQUEST",
         { id, status: record.status },
         `scorecard '${id}' is not complete yet (status=${record.status}).`,
+      );
+    // The revision boundary (arch-review 7 P0): while a scoring pass is live the persisted plane belongs to
+    // NO completed revision, and a failed/abandoned pass left it BROKEN (judgments stripped, aggregate still
+    // advertising them) — a comparison over either is a number nobody has the right to derive. Refuse
+    // loudly; the pass settling (or a takeover pass) is the way through.
+    const pass = record.scoringPass ?? undefined;
+    if (pass !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { id, scoringPass: { status: pass.status, targetRevision: pass.targetRevision, startedAt: pass.startedAt } },
+        pass.status === "failed"
+          ? `scorecard '${id}' carries an ABANDONED scoring pass (revision ${pass.targetRevision} failed mid-plane) — its score plane is not readable evidence; re-score to settle it.`
+          : `scorecard '${id}' has a scoring pass in flight (revision ${pass.targetRevision}) — its score plane is between revisions; retry after it settles.`,
       );
     return { scorecard: record.scorecard, record };
   }
