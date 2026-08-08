@@ -43,21 +43,36 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
   it("offloads the bundle to the store as application/json → a downloadable ref, bytes recoverable", async () => {
     const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const ref = await offloadAnalysis({ artifacts: store }, "sc1", bundle);
-    expect(ref).toBe("memory://artifacts/analyses/sc1.json");
+    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle);
+    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
     const stored = store.objects.get("analyses/sc1.json");
     expect(stored?.contentType).toBe("application/json");
     // the FULL analysis is stored (round-trips), not a truncated preview.
     const decoded = JSON.parse(Buffer.from(stored?.data ?? new Uint8Array()).toString()) as AnalysisBundle;
     expect(decoded).toEqual(bundle);
+    // Without a revision, only the CURRENT key is written — the per-revision freeze is opt-in per call.
+    expect(offload.revisionRef).toBeUndefined();
   });
 
-  it("is best-effort: no store → undefined (dev fallback, never breaks the scorecard)", async () => {
+  it("also freezes the bundle under its per-revision key when the pass names one", async () => {
+    // The immutable history lane: each scoring pass writes its own object, so a later pass rewriting the
+    // current key can never rewrite what an earlier revision's analysisRef describes.
+    const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: undefined }, "sc1", bundle)).toBeUndefined();
+    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle, 2);
+    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
+    expect(offload.revisionRef).toBe("memory://artifacts/analyses/sc1/scoring/2.json");
+    const frozen = store.objects.get("analyses/sc1/scoring/2.json");
+    expect(frozen?.contentType).toBe("application/json");
+    expect(JSON.parse(Buffer.from(frozen?.data ?? new Uint8Array()).toString())).toEqual(bundle);
   });
 
-  it("is best-effort: a store failure → undefined, swallowed (a broken object store never fails the eval)", async () => {
+  it("is best-effort: no store → no refs at all (dev fallback, never breaks the scorecard)", async () => {
+    const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
+    expect(await offloadAnalysis({ artifacts: undefined }, "sc1", bundle, 2)).toEqual({});
+  });
+
+  it("is best-effort per key: a store failure → no ref, swallowed (a broken object store never fails the eval)", async () => {
     const failing: ArtifactStore = {
       async put() {
         throw new Error("s3 down");
@@ -70,6 +85,27 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle)).toBeUndefined();
+    expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle, 2)).toEqual({});
+  });
+
+  it("a revision-key failure leaves the current surface intact — the entry stays honestly artifact-less", async () => {
+    // The two puts are independent: the record keeps its analysisRef while the revision entry carries NO
+    // ref, rather than a ref to the mutable current key that a later pass would rewrite.
+    const halfBroken: ArtifactStore = {
+      async put(key: string) {
+        if (key.includes("/scoring/")) throw new Error("revision bucket down");
+        return `memory://artifacts/${key}`;
+      },
+      async get() {
+        return undefined;
+      },
+      async publicUrlFor() {
+        return undefined;
+      },
+    };
+    const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
+    const offload = await offloadAnalysis({ artifacts: halfBroken }, "sc1", bundle, 2);
+    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
+    expect(offload.revisionRef).toBeUndefined();
   });
 });

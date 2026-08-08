@@ -54,7 +54,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
-import { ScorecardService, offloadAnalysis } from "@everdict/application-control";
+import { ScorecardService } from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
   async dispatch() {
@@ -6305,26 +6305,5 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
     expect(asJudged(await service.analysisBundle("acme", record.id))).toContain("judge:quality");
     // A revision the ledger never appended reads NotFound — never a silent fallback to the current bundle.
     await expect(service.analysisBundle("acme", record.id, undefined, 99)).rejects.toBeInstanceOf(NotFoundError);
-  });
-
-  it("a revision-key put failure leaves the current surface intact and the revision honestly artifact-less", async () => {
-    // The two puts are independent best-effort: the record keeps its analysisRef (latest surface), while the
-    // revision entry carries NO ref — never a ref to the mutable current key a later pass would rewrite.
-    const bundle = { scorecardId: "sc", dataset: "d@1", harness: "h@1", summary: [], cases: [], infra: {} };
-    const failing = {
-      async put(key: string): Promise<string> {
-        if (key.includes("/scoring/")) throw new Error("revision bucket down");
-        return `memory://artifacts/${key}`;
-      },
-      async get(): Promise<Uint8Array | undefined> {
-        return undefined;
-      },
-      async publicUrlFor(): Promise<string | undefined> {
-        return undefined;
-      },
-    };
-    const out = await offloadAnalysis({ artifacts: failing }, "sc", bundle as never, 2);
-    expect(out.ref).toContain("analyses/sc.json");
-    expect(out.revisionRef).toBeUndefined();
   });
 });
