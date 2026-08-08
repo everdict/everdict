@@ -190,4 +190,17 @@ describe("handoff checkpoints — a verifier does not check its own work (O3)", 
       }),
     ).resolves.toBeDefined();
   });
+
+  it("refuses an ANONYMOUS verifier checkpoint — omitting `by` is not a way around the independence check", async () => {
+    // Regression: `by` is caller-declared (optional on the record, exposed through publish_checkpoint), and a
+    // verifier that omitted it made the whole independence check abstain — fail-open on the one field the
+    // caller controls. A verification claim without an identity cannot claim independence.
+    await expect(
+      service({ id: "agent:fixer", runId: "run-42" }).create({
+        tenant: "acme",
+        createdBy: "agent:fixer:conv-1",
+        checkpoint: body({ role: "verifier" }),
+      }),
+    ).rejects.toThrow(/must declare who verified/);
+  });
 });

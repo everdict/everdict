@@ -223,6 +223,10 @@ export class Run {
         eventKind: input.eventKind,
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(input.createdBy !== undefined ? { actor: input.createdBy } : {}),
+        // The executor is RECORDED, never inferred: createdBy is the principal the run acts as, and reading
+        // the actor back out of it is what let an agent verify its own work (checkpoint independence compares
+        // member:kim against agent:fixer — namespaces that can never collide).
+        executor: `agent:${input.agentId}`,
       },
       group: { id: input.sessionId, role: "turn" },
       // The envelope THIS run delegates downstream (§5.2): its own id is the envelope id — every caused run
@@ -259,7 +263,8 @@ export class Run {
       kind: "agent",
       class: "interactive",
       lifetime: "task",
-      origin: { cause: "member", actor: input.actor },
+      // The member asked (cause/actor/createdBy); the AGENT executed — recorded, same as the activation path.
+      origin: { cause: "member", actor: input.actor, executor: `agent:${input.agentId}` },
       group: { id: input.sessionId, role: "turn" },
       createdAt: input.now,
       updatedAt: input.now,

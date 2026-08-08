@@ -267,12 +267,17 @@ export function buildCheckpoint(deps: {
     },
     // The independence linkage (O3): the ACTOR a referenced run executed as, with the context it ran in —
     // runId always, sessionId when the run belongs to a session group (agent turns) — so the domain's full
-    // actor/run/session invariant applies, not an id-only comparison.
+    // actor/run/session invariant applies, not an id-only comparison. The EXECUTOR outranks attribution:
+    // createdBy is the principal the run acted AS (member:kim), origin.executor is who actually performed it
+    // (agent:fixer) — resolving the actor from createdBy compared namespaces that can never collide, so the
+    // very agent that produced the work passed as its independent verifier.
     runActor: async (tenant, id) => {
       const record = await deps.runStore.get(id);
-      if (record?.tenant !== tenant || record.createdBy === undefined) return undefined;
+      if (record?.tenant !== tenant) return undefined;
+      const actorId = record.origin?.executor ?? record.createdBy;
+      if (actorId === undefined) return undefined;
       return {
-        id: record.createdBy,
+        id: actorId,
         runId: record.id,
         ...(record.group?.id !== undefined ? { sessionId: record.group.id } : {}),
       };

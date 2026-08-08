@@ -258,6 +258,23 @@ describe("Run — agent activations on the ledger (P3)", () => {
     expect(() => RunRecordSchema.parse(record)).not.toThrow();
   });
 
+  it("records the EXECUTOR as a creation-time fact — createdBy stays the principal, never re-derived", () => {
+    // Regression (O1): the actor was inferred from createdBy (the member the run acts AS), so checkpoint
+    // independence compared member:kim against agent:fixer — namespaces that never collide — and the very
+    // agent that produced a run could verify it. The executor is recorded where the run is born.
+    expect(agentRun().origin?.executor).toBe("agent:sentinel");
+    const turn = Run.newChatTurn({
+      id: "r1",
+      tenant: "acme",
+      agentId: "helper",
+      sessionId: "s1",
+      actor: "alice",
+      now: "2026-08-03T00:00:00.000Z",
+    });
+    expect(turn.origin?.executor).toBe("agent:helper");
+    expect(turn.createdBy).toBe("alice");
+  });
+
   it("settleAgent maps completed/failed/cancelled onto the 4-status lifecycle with NO facts (the agent.run.* family still announces)", () => {
     expect(Run.from(agentRun()).settleAgent("completed", "done", "t1")).toEqual({
       patch: { status: "succeeded", updatedAt: "t1" },

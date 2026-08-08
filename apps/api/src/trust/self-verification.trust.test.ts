@@ -50,7 +50,10 @@ describeTrust(
       tenant = trustId("trust-verify");
       runs = new PgRunStore(pg.client);
 
-      // Given: a real run row, created by the EXECUTOR. This row is the linkage every guard below reads.
+      // Given: a real run row shaped the way PRODUCTION writes it — createdBy is the PRINCIPAL (the member
+      // the activation acts as) and origin.executor records who actually performed the work. The earlier
+      // premise put the agent id in createdBy, which production never does: the check then only worked in
+      // the test, while a live agent (attributed to member:kim) verified its own work unchallenged.
       executedRunId = trustId("run");
       const record: RunRecord = {
         id: executedRunId,
@@ -58,7 +61,8 @@ describeTrust(
         harness: { id: "scripted", version: "0" },
         caseId: "c1",
         status: "succeeded",
-        createdBy: EXECUTOR,
+        createdBy: "member:kim",
+        origin: { cause: "event", actor: "member:kim", executor: EXECUTOR },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -68,11 +72,15 @@ describeTrust(
         store: new PgHandoffCheckpointStore(pg.client),
         // Bound to the real stores, exactly as the composition root binds them.
         resolvers: { run: async (t, id) => (await runs.get(id))?.tenant === t },
+        // Mirrors the composition root: the EXECUTOR outranks attribution — createdBy is who the run acted
+        // AS, origin.executor is who performed it, and only the latter can catch agent self-verification.
         runActor: async (t, id) => {
           const run = await runs.get(id);
-          if (run?.tenant !== t || run.createdBy === undefined) return undefined;
+          if (run?.tenant !== t) return undefined;
+          const actorId = run.origin?.executor ?? run.createdBy;
+          if (actorId === undefined) return undefined;
           return {
-            id: run.createdBy,
+            id: actorId,
             runId: run.id,
             ...(run.group?.id !== undefined ? { sessionId: run.group.id } : {}),
           };

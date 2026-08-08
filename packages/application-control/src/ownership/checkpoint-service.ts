@@ -145,7 +145,17 @@ export class CheckpointService {
   private async assertNotSelfVerification(tenant: string, checkpoint: HandoffCheckpointRecord): Promise<void> {
     const { runActor } = this.deps;
     const actor = checkpoint.by;
-    if (checkpoint.role !== "verifier" || !actor || !runActor) return;
+    if (checkpoint.role !== "verifier") return;
+    // A verifier that declines to say who verified is not independent by construction — `by` is optional on
+    // the record (executor checkpoints, plain handoffs), but a VERIFICATION claim without an identity used to
+    // make the whole independence check abstain, which is a fail-open on the one field the caller controls.
+    if (!actor)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { role: checkpoint.role },
+        "a verifier checkpoint must declare who verified (`by`) — an anonymous verification cannot claim independence.",
+      );
+    if (!runActor) return;
     const verifier = { profile: VERIFIER_ASSIGNMENT_PROFILE, actor };
     const runIds = new Set(
       [...checkpoint.confirmedFacts.flatMap((f) => f.refs), ...checkpoint.actionsTaken.flatMap((a) => a.refs)]

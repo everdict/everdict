@@ -39,6 +39,11 @@ export type RunLifetime = z.infer<typeof RunLifetimeSchema>;
 export const RunOriginSchema = z.object({
   cause: z.enum(["member", "schedule", "event", "run", "ci", "api"]),
   actor: z.string().optional(), // the member subject behind the cause, when there is one
+  // WHO actually performed the work (`agent:<id>` for an agent run) — a RECORDED creation-time fact, never
+  // inferred. `actor`/`createdBy` are the PRINCIPAL (the member the work acts as and is attributed to);
+  // re-deriving the executor out of attribution is what let an agent pass as independent of its own work
+  // (member:kim ≠ agent:fixer). Absent = the principal executed in person (a member's own run).
+  executor: z.string().optional(),
   scheduleId: z.string().optional(),
   eventId: z.string().optional(),
   eventKind: z.string().optional(),
