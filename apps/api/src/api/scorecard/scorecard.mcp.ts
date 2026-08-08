@@ -492,7 +492,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               "allow_partial only: accept metrics whose VALUE KIND changed between the sides (same name, different meaning — the delta is unreadable). Unset = a kind change blocks even under allow_partial",
             ),
           allow_confounds: z
-            .array(z.enum(["dataset_content", "grading_plan", "judge_set"]))
+            .array(z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"]))
             .optional()
             .describe(
               "experiment-identity axes accepted as DIFFERENT (recorded on the decision): the manifests seal the dataset content, grading plan and judge documents each batch actually evaluated, and a verified difference on an axis not listed here refuses the pair as not_comparable — a different experiment, not a treatment comparison",

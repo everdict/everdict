@@ -1,11 +1,11 @@
-import type { CaseResult, JudgeSpec, Score } from "@everdict/contracts";
+import type { CaseResult, HarnessSpec, JudgeSpec, Score } from "@everdict/contracts";
 import { ScoreSchema } from "@everdict/contracts";
 import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
-import { sealJudgeClosure } from "./scorecard-plan.js";
+import { sealHarnessModelClosure, sealJudgeClosure } from "./scorecard-plan.js";
 
 // A CaseResult that failed with a trace error carrying `message`.
 function erroredCase(message: string): CaseResult {
@@ -157,5 +157,51 @@ describe("sealJudgeClosure — the whole closure, one sealer (H8)", () => {
     ]);
     expect(sealed[0]?.harness).toBe("grader-agent@4.0.0");
     expect(sealed[0]?.model).toBeUndefined(); // no binding — the delegate judges
+  });
+});
+
+describe("sealHarnessModelClosure — the treatment's own moving reference (H13)", () => {
+  const resolveModelBinding = async (_t: string, b: { ref: string; version?: string }) =>
+    `${b.ref}@${b.version ?? "5.0.0"}`;
+  const command = (model?: { ref: string } | string): HarnessSpec =>
+    ({
+      kind: "command",
+      id: "cli",
+      version: "1.0.0",
+      command: "run {{task}}",
+      ...(model !== undefined ? { model } : {}),
+      trace: { kind: "none" },
+      setup: [],
+      params: {},
+    }) as unknown as HarnessSpec;
+
+  it("seals a command harness's {ref} binding to its concrete resolution — and 'unresolved' without a resolver", async () => {
+    expect(await sealHarnessModelClosure({ resolveModelBinding }, "acme", command({ ref: "agent-model" }))).toEqual({
+      model: "agent-model@5.0.0",
+    });
+    expect(await sealHarnessModelClosure({}, "acme", command({ ref: "agent-model" }))).toEqual({
+      model: "unresolved",
+    });
+    // A raw string binding is already concrete — verbatim, no resolver needed.
+    expect(await sealHarnessModelClosure({}, "acme", command("claude-opus-4-8"))).toEqual({
+      model: "claude-opus-4-8",
+    });
+    // No binding = nothing to seal, never a claim.
+    expect(await sealHarnessModelClosure({}, "acme", command())).toEqual({});
+  });
+
+  it("seals a service harness per service, keyed by service name", async () => {
+    const spec = {
+      kind: "service",
+      id: "topo",
+      version: "1.0.0",
+      services: [
+        { name: "api", image: "img-a", model: { ref: "agent-model" } },
+        { name: "worker", image: "img-b" }, // no binding — absent from the seal
+      ],
+    } as unknown as HarnessSpec;
+    expect(await sealHarnessModelClosure({ resolveModelBinding }, "acme", spec)).toEqual({
+      serviceModels: { api: "agent-model@5.0.0" },
+    });
   });
 });

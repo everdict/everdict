@@ -9,6 +9,12 @@ import type { ScorecardManifest } from "@everdict/contracts";
 // module is where the two seals are read AGAINST EACH OTHER, so "benchmark@7 under judge J1" vs
 // "benchmark@8 under judge J2" stops reaching a release gate as a clean treatment comparison.
 //
+// The harness IDENTITY stays the treatment — but its MODEL CLOSURE is an axis (harness_model, H13): a
+// harness binding's `{ref}` without a version resolves latest at dispatch, so the same harness id@version
+// with a held specDigest can execute under a different model. When the comparison claims a HELD harness
+// (same id@version, same document), that drift is apparatus, not treatment — the exact argument the judge
+// closure already won. When the harness itself moved, the axis claims nothing (the delta IS the treatment).
+//
 // Three answers per axis, never two: an axis is `held` (verified same), a `confound` (VERIFIED different —
 // the gate refuses unless the caller acknowledges it), or `unverified` (nothing to verify with: an unsealed
 // side, or stamps from different digest eras that cannot be compared — a claim of sameness would be as
@@ -19,7 +25,7 @@ import type { ScorecardManifest } from "@everdict/contracts";
 // (resolvePolicyResolution / policyMismatch / policyUnresolvable), and two owners for one invariant is how
 // the answers drift apart.
 
-export type ExperimentAxis = "dataset_content" | "grading_plan" | "judge_set";
+export type ExperimentAxis = "dataset_content" | "grading_plan" | "judge_set" | "harness_model";
 
 export interface ExperimentConfound {
   axis: ExperimentAxis;
@@ -320,13 +326,66 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
   return { state: "held" };
 }
 
+// The harness MODEL closure axis (H13). Applies only under a HELD treatment — same harness id@version AND
+// the same document (equal specDigests, or both absent for a built-in): an ephemeral-pin swap changes the
+// spec bytes under one id@version, and a pin swap IS the treatment in a PR eval. Under a held treatment the
+// sealed closures compare exactly like the judges': both sides sealing nothing is held (no binding, or two
+// pre-closure seals — the judge-closure compat precedent), a one-sided seal is a seal-generation gap
+// (unverified), "unresolved" is honest ignorance (unverified), and a verified difference is a confound —
+// the same trace-producing run was executed by a different underlying model.
+function harnessModelAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
+  const treatmentHeld =
+    b.harness.id === c.harness.id &&
+    b.harness.version === c.harness.version &&
+    b.harness.specDigest === c.harness.specDigest;
+  if (!treatmentHeld) return { state: "held" }; // the delta IS the treatment — no under-the-treatment claim applies
+  const sealedOf = (m: ScorecardManifest): Record<string, string> => ({
+    ...(m.harness.model !== undefined ? { "": m.harness.model } : {}),
+    ...(m.harness.serviceModels ?? {}),
+  });
+  const bs = sealedOf(b);
+  const cs = sealedOf(c);
+  const bEmpty = Object.keys(bs).length === 0;
+  const cEmpty = Object.keys(cs).length === 0;
+  if (bEmpty && cEmpty) return { state: "held" }; // no binding to drift — or two pre-closure seals (compat)
+  if (bEmpty || cEmpty)
+    return {
+      state: "unverified",
+      reason: "unsealed",
+      detail: `${bEmpty ? "the baseline" : "the candidate"} predates the harness model-closure seal — whether the same model executed cannot be verified`,
+    };
+  for (const key of new Set([...Object.keys(bs), ...Object.keys(cs)])) {
+    const label = key === "" ? "the harness model" : `service '${key}'s model`;
+    const bv = bs[key];
+    const cv = cs[key];
+    if (bv === "unresolved" || cv === "unresolved")
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `${label} binding could not be resolved at seal time — which concrete model executed is unverifiable`,
+      };
+    if (bv === undefined || cv === undefined)
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `${label} is sealed on only one side — whether the same model executed cannot be verified`,
+      };
+    if (bv !== cv)
+      return {
+        state: "confound",
+        detail: `${label} resolved differently (${bv} → ${cv}) under a HELD harness ${b.harness.id}@${b.harness.version} — same harness document, different executing model`,
+      };
+  }
+  return { state: "held" };
+}
+
 // The identity read. An entirely unsealed side (pre-manifest batch, mig 0126) verifies NOTHING: every axis
 // is unverified — which downgrades the claim a gate may make, without rewriting history as a refusal.
 export function experimentIdentity(
   baseline: ScorecardManifest | undefined,
   candidate: ScorecardManifest | undefined,
 ): ExperimentIdentity {
-  const axes: ExperimentAxis[] = ["dataset_content", "grading_plan", "judge_set"];
+  const axes: ExperimentAxis[] = ["dataset_content", "grading_plan", "judge_set", "harness_model"];
   if (baseline === undefined || candidate === undefined) {
     const sides =
       baseline === undefined && candidate === undefined
@@ -348,6 +407,7 @@ export function experimentIdentity(
     ["dataset_content", datasetAxis(baseline, candidate)],
     ["grading_plan", gradingPlanAxis(baseline, candidate)],
     ["judge_set", judgeSetAxis(baseline, candidate)],
+    ["harness_model", harnessModelAxis(baseline, candidate)],
   ];
   const out: ExperimentIdentity = { held: [], confounds: [], unverified: [] };
   for (const [axis, reading] of readings) {

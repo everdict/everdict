@@ -30,7 +30,7 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
       sealed({ harness: { id: "agent", version: "1.0.0" } }),
       sealed({ harness: { id: "agent", version: "2.0.0" } }), // the treatment moved — not a confound
     );
-    expect(id.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+    expect(id.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
     expect(id.confounds).toEqual([]);
     expect(id.unverified).toEqual([]);
   });
@@ -157,7 +157,7 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
       manifest(),
       manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:aaaa" } }),
     );
-    expect(relabeled.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+    expect(relabeled.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
   });
 
   it("one side running a grading-plan override while the other runs defaults is a confound (pre-split seals)", () => {
@@ -270,6 +270,56 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     expect(crossGen.unverified.some((u) => u.axis === "judge_set" && u.reason === "unsealed")).toBe(true);
   });
 
+  it("the harness MODEL closure confounds only under a HELD treatment (H13)", () => {
+    // A harness binding's {ref} without a version resolves latest at dispatch — the judge-closure argument,
+    // applied to the treatment itself. The axis speaks ONLY when the harness identity is held: a version
+    // bump or an ephemeral-pin swap (different specDigest under one id@version) IS the treatment.
+    const withModel = (model?: string): ScorecardManifest =>
+      sealed({ harness: { id: "agent", version: "1.0.0", specDigest: "sha256:hhhh", ...(model ? { model } : {}) } });
+    const moved = experimentIdentity(withModel("x@5.0.0"), withModel("x@6.0.0"));
+    expect(moved.confounds.map((c) => c.axis)).toEqual(["harness_model"]);
+    expect(moved.confounds[0]?.detail).toContain("different executing model");
+
+    // The treatment moved (a version bump) — closures differ, and the axis deliberately claims nothing.
+    const treatment = experimentIdentity(
+      withModel("x@5.0.0"),
+      sealed({ harness: { id: "agent", version: "2.0.0", specDigest: "sha256:h2", model: "x@6.0.0" } }),
+    );
+    expect(treatment.confounds).toEqual([]);
+    expect(treatment.held).toContain("harness_model");
+
+    // An ephemeral-pin swap: same id@version, different document — the pin IS the treatment in a PR eval.
+    const pinSwap = experimentIdentity(
+      withModel("x@5.0.0"),
+      sealed({ harness: { id: "agent", version: "1.0.0", specDigest: "sha256:PINNED", model: "x@6.0.0" } }),
+    );
+    expect(pinSwap.confounds).toEqual([]);
+
+    // A one-sided seal is a seal-generation gap; an unresolved seal is honest ignorance — never sameness.
+    const oneSided = experimentIdentity(withModel("x@5.0.0"), withModel(undefined));
+    expect(oneSided.confounds).toEqual([]);
+    expect(oneSided.unverified.some((u) => u.axis === "harness_model" && u.reason === "unsealed")).toBe(true);
+    const unresolved = experimentIdentity(withModel("unresolved"), withModel("unresolved"));
+    expect(unresolved.unverified.some((u) => u.axis === "harness_model")).toBe(true);
+
+    // Both sides sealing nothing is held — no binding to drift, or two pre-closure seals (compat precedent).
+    expect(experimentIdentity(withModel(undefined), withModel(undefined)).held).toContain("harness_model");
+
+    // A service harness's closure is per service, and the confound names the one that moved.
+    const topo = (api: string): ScorecardManifest =>
+      sealed({
+        harness: {
+          id: "topo",
+          version: "1.0.0",
+          specDigest: "sha256:t",
+          serviceModels: { api, worker: "y@1.0.0" },
+        },
+      });
+    const svcMoved = experimentIdentity(topo("x@5.0.0"), topo("x@6.0.0"));
+    expect(svcMoved.confounds.map((c) => c.axis)).toEqual(["harness_model"]);
+    expect(svcMoved.confounds[0]?.detail).toContain("service 'api'");
+  });
+
   it("cross-era seals are UNVERIFIED, not a confound — FNV(x) and sha256(x) differ as strings over one document", () => {
     const id = experimentIdentity(
       manifest({ dataset: { id: "bench", version: "7.0.0", digest: "0123456789abcdef" } }), // legacy FNV
@@ -284,7 +334,7 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     const id = experimentIdentity(undefined, manifest());
     expect(id.held).toEqual([]);
     expect(id.confounds).toEqual([]);
-    expect(id.unverified.map((u) => u.axis)).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+    expect(id.unverified.map((u) => u.axis)).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
   });
 });
 

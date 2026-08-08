@@ -48,7 +48,7 @@ import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
-import { embedHarnessSpec, sealJudgeClosure, sealedModelIdentity } from "./scorecard-plan.js";
+import { embedHarnessSpec, sealHarnessModelClosure, sealJudgeClosure, sealedModelIdentity } from "./scorecard-plan.js";
 import type {
   IngestScorecardInput,
   PullIngestInput,
@@ -319,6 +319,9 @@ export class ScorecardService {
           id: input.harness.id,
           version: harnessVersion,
           ...(harnessSpec ? { specDigest: contentDigest(harnessSpec) } : {}),
+          // The model closure (H13) — the spec digest pins bytes that still contain an UNRESOLVED `{ref}`;
+          // what that ref resolves to at dispatch is part of what executed, so it seals here like the judges'.
+          ...(await sealHarnessModelClosure(this.deps, input.tenant, harnessSpec)),
         },
         ...(await this.judgeManifest(input.tenant, pinnedJudges)),
         ...(judgeRunSeal ? { judgeRun: judgeRunSeal } : {}),
@@ -1206,6 +1209,61 @@ export class ScorecardService {
         }
       } else {
         checks.push({ subject: "harness", stored: m.harness.specDigest, status: "unverifiable" });
+      }
+    }
+    // The harness MODEL closure (H13) — the specDigest check above verifies bytes that still contain an
+    // UNRESOLVED `{ref}`, so it can report "match" while the executing model moved. The sealed closure
+    // re-resolves through the SAME sealer submit used; a `drifted` here means re-running today would not
+    // execute under the model this batch ran with.
+    const sealedHarnessModels: Record<string, string> = {
+      ...(m.harness.model !== undefined ? { "": m.harness.model } : {}),
+      ...(m.harness.serviceModels ?? {}),
+    };
+    if (Object.keys(sealedHarnessModels).length > 0) {
+      const currentSpec = this.deps.harnesses
+        ? await this.deps.harnesses.get(tenant, m.harness.id, m.harness.version).catch(() => undefined)
+        : undefined;
+      const currentClosure =
+        currentSpec === undefined ? undefined : await sealHarnessModelClosure(this.deps, tenant, currentSpec);
+      const currentModels: Record<string, string> | undefined =
+        currentClosure === undefined
+          ? undefined
+          : {
+              ...(currentClosure.model !== undefined ? { "": currentClosure.model } : {}),
+              ...(currentClosure.serviceModels ?? {}),
+            };
+      for (const [key, sealedValue] of Object.entries(sealedHarnessModels)) {
+        const subject = key === "" ? "harness:model" : `harness:model:${key}`;
+        if (sealedValue === "unresolved") {
+          checks.push({
+            subject,
+            stored: sealedValue,
+            status: "unverifiable",
+            note: "the model binding was sealed as unresolved — nothing to re-verify",
+          });
+          continue;
+        }
+        const currentValue = currentModels?.[key];
+        if (currentValue === undefined || currentValue === "unresolved") {
+          checks.push({
+            subject,
+            stored: sealedValue,
+            status: "missing",
+            note: "the model binding no longer resolves",
+          });
+          continue;
+        }
+        checks.push({
+          subject,
+          stored: sealedValue,
+          current: currentValue,
+          status: sealedValue === currentValue ? "match" : "drifted",
+          ...(sealedValue !== currentValue
+            ? {
+                note: "re-resolving today reaches a different model — reproducing this batch now would not execute identically",
+              }
+            : {}),
+        });
       }
     }
     for (const j of m.judges ?? []) {

@@ -100,6 +100,33 @@ export async function sealJudgeClosure(
   return out;
 }
 
+// The HARNESS model closure (H13 — the judge argument, applied to the treatment): a command harness's
+// binding and each service's binding are ModelBindings whose `{ref}` without a version resolves LATEST at
+// dispatch, per case — so two batches with byte-identical harness specs (held specDigest) can execute under
+// different models. Sealed with the SAME resolution the judge closure uses; the harness stays the treatment,
+// so this seal confounds only under a held harness identity (experimentIdentity harness_model axis).
+// A process-kind harness carries no binding; absent fields = nothing to seal, never a claim of sameness.
+export async function sealHarnessModelClosure(
+  deps: Pick<ScorecardServiceDeps, "resolveModelBinding">,
+  tenant: string,
+  spec: HarnessSpec | undefined,
+): Promise<{ model?: string; serviceModels?: Record<string, string> }> {
+  if (spec === undefined) return {};
+  if (spec.kind === "command") {
+    if (spec.model === undefined) return {};
+    return { model: (await sealedModelIdentity(deps, tenant, spec.model)) ?? "unresolved" };
+  }
+  if (spec.kind === "service") {
+    const serviceModels: Record<string, string> = {};
+    for (const s of spec.services) {
+      if (s.model === undefined) continue;
+      serviceModels[s.name] = (await sealedModelIdentity(deps, tenant, s.model)) ?? "unresolved";
+    }
+    return Object.keys(serviceModels).length > 0 ? { serviceModels } : {};
+  }
+  return {};
+}
+
 // Seal one versioned reference: an explicit pin is already concrete (registry versions are immutable — the
 // pin names one document forever); a "latest" ref resolves to the concrete version NOW, or seals the honest
 // "unresolved" sentinel when no registry (or no such entry) can answer.

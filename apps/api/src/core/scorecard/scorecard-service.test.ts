@@ -7,6 +7,7 @@ import {
   ConflictError,
   type Dataset,
   ForbiddenError,
+  type HarnessSpec,
   type HarnessTemplateSpec,
   type JudgeSpec,
   NotFoundError,
@@ -5889,6 +5890,58 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
     const rubricCheck = after.checks.find((c) => c.subject === "judge:quality:rubric");
     expect(rubricCheck?.status).toBe("drifted");
     expect(rubricCheck?.current).toBe("style@2.0.0");
+  });
+
+  it("seals the HARNESS model closure at submit — and verifyManifest reports the drift specDigest cannot see (H13)", async () => {
+    // A command harness binding {ref} without a version resolves LATEST at dispatch: registering a new model
+    // version changes what executes while the spec bytes — and therefore specDigest — stay identical.
+    // Pre-fix, verifyManifest reported "match" for exactly that state: a false assurance from the assurance
+    // surface. The closure now seals at submit and re-resolves at verify, so the pair below is the claim:
+    // `harness` (the document) matches AND `harness:model` (the closure) reports drifted.
+    class StubHarnessRegistry extends InMemoryHarnessInstanceRegistry {
+      constructor(private readonly spec: HarnessSpec) {
+        super(new InMemoryHarnessTemplateRegistry());
+      }
+      override get() {
+        return Promise.resolve(this.spec);
+      }
+    }
+    const commandSpec = {
+      kind: "command",
+      id: "cli",
+      version: "1.0.0",
+      command: "run {{task}}",
+      model: { ref: "agent-model" },
+      trace: { kind: "none" },
+      setup: [],
+      params: {},
+    } as unknown as HarnessSpec;
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    let latest = "5.0.0"; // the model registry's moving latest
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      harnesses: new StubHarnessRegistry(commandSpec),
+      resolveModelBinding: async (_tenant, binding) => `${binding.ref}@${latest}`,
+      newId: () => "sc-harness-closure",
+    });
+    await service
+      .submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "cli", version: "1.0.0" } })
+      .catch(() => undefined); // the throwing dispatcher fails the pipeline later — the record is already sealed
+    const rec = await store.get("sc-harness-closure");
+    expect(rec?.manifest?.harness.model).toBe("agent-model@5.0.0"); // the closure, sealed like the judges'
+
+    // The registry's latest MOVES. The spec bytes never changed — the document facet still matches — but the
+    // closure facet says re-running today would not execute under the model this batch ran with.
+    latest = "6.0.0";
+    const v = await service.verifyManifest("acme", "sc-harness-closure");
+    expect(v.checks.find((c) => c.subject === "harness")?.status).toBe("match");
+    const closure = v.checks.find((c) => c.subject === "harness:model");
+    expect(closure?.status).toBe("drifted");
+    expect(closure?.current).toBe("agent-model@6.0.0");
   });
 
   it("verifyManifest verifies a legacy FNV-sealed manifest under its OWN algorithm, and says so in the caveat", async () => {

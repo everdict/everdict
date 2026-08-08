@@ -20,7 +20,7 @@ export const GateScorecardsBodySchema = z.object({
       allowMetricKindChange: z.boolean().optional(),
       // Experiment-identity axes accepted as different (recorded on the decision): a verified confound on an
       // axis not listed refuses the pair as not_comparable — a different experiment, not a regression.
-      allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])).optional(),
+      allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"])).optional(),
       // Accept UNVERIFIABLE identity (unsealed side / digest-era gap / pre-split composite seal) explicitly —
       // by default the gate refuses to issue green on an identity nobody can verify.
       allowUnverifiedIdentity: z.boolean().optional(),

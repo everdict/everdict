@@ -36,7 +36,7 @@ export const GatePolicySchema = z.object({
   // verified confound on any axis NOT listed here refuses the comparison as not_comparable — a dataset whose
   // content changed, a grading plan that differs, a judge document that was edited are a different
   // experiment, not a treatment comparison.
-  allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])).optional(),
+  allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"])).optional(),
   // UNVERIFIABLE identity (an unsealed side, a digest-era gap, a pre-split composite seal) also refuses the
   // GATE by default: analytics may honestly say "unknown", but a release gate issuing green on an identity
   // nobody can verify is a guarantee standing on nothing — the same reason an unresolvable policy refuses.
@@ -197,8 +197,8 @@ export type GateAudit = z.infer<typeof GateAuditSchema>;
 // which of the two stamp eras this record's were, so no one mistakes the claim.
 export const ManifestCheckSchema = z.object({
   // "dataset" (composite) | "cases" (per-case content seals, aggregated) | "grading" (effective grading) |
-  // "harness" | "judge:<id>" (spec document) | "judge:<id>:model|rubric|harness" (closure re-resolution) |
-  // "judge_run" | "verdict_policy"
+  // "harness" | "harness:model[:<service>]" (the harness model closure re-resolution) | "judge:<id>" (spec
+  // document) | "judge:<id>:model|rubric|harness" (closure re-resolution) | "judge_run" | "verdict_policy"
   subject: z.string(),
   stored: z.string(),
   current: z.string().optional(),

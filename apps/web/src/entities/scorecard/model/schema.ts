@@ -434,13 +434,16 @@ export const scorecardDiffSchema = z.object({
   // acknowledged); `unverified` = nothing to verify against (unsealed side / digest-era gap) — informational.
   experiment: z
     .object({
-      held: z.array(z.enum(['dataset_content', 'grading_plan', 'judge_set'])),
+      held: z.array(z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model'])),
       confounds: z.array(
-        z.object({ axis: z.enum(['dataset_content', 'grading_plan', 'judge_set']), detail: z.string() })
+        z.object({
+          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model']),
+          detail: z.string(),
+        })
       ),
       unverified: z.array(
         z.object({
-          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set']),
+          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model']),
           // 'composite' = a pre-split seal (one bundle digest over content × selection × grading) differs —
           // which of the three moved is indistinguishable, so neither sameness nor difference is claimable.
           reason: z.enum(['unsealed', 'digest_era', 'composite']),

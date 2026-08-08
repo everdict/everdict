@@ -242,6 +242,18 @@ indistinguishable → `unverified` reason `composite`. The composite `dataset.di
 post-grading bundle hash) stays for `verifyManifest`; on PRE-SPLIT manifests a differing composite is
 `unverified` reason `composite` — content, selection and grading moved indistinguishably inside one hash,
 so no confound claim can be made either way (equal composites still verify held).
+**The harness IDENTITY stays the treatment — but its MODEL CLOSURE is an axis** (`harness_model`, H13): a
+harness binding's `{ref}` without a version resolves latest at DISPATCH, so the same harness id@version with
+a held specDigest can execute under a different model — the judge-closure argument, applied to the treatment
+itself. The seal (`sealHarnessModelClosure`: `manifest.harness.model` for a command harness,
+`.serviceModels` per service) pins the resolution at submit; the axis speaks ONLY under a held treatment
+(same id@version AND the same document — an ephemeral-pin swap IS the treatment): a verified difference
+confounds, a one-sided or "unresolved" seal reads unverified, both-absent reads held (no binding, or two
+pre-closure seals — the compat precedent the judge closure set). `verifyManifest` re-resolves it as the
+`harness:model[:<service>]` facets, so "the document matched" can no longer stand in for "the same model
+executed". Named deferrals: per-case dispatch-time divergence report-back (the ModelResolvingDispatcher
+already holds the concrete answer and discards it), product-readiness identity wiring, leaderboard
+`declared` resolution.
 The read rides the diff as `diff.experiment` (HTTP + MCP + the compare page's banner). The verdict policy
 is deliberately not an axis — policy identity has its own owner (`resolvePolicyResolution` /
 `policyMismatch` / `policyUnresolvable`). Not yet modeled: runtime/OS as a **comparison cohort** (stratify

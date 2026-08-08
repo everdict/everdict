@@ -62,7 +62,21 @@ export const ScorecardManifestSchema = z.object({
   cases: z.record(z.string(), z.string()).optional(),
   grading: z.string().optional(),
   gradingCases: z.record(z.string(), z.string()).optional(),
-  harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
+  // Resolved spec (specDigest absent: built-in with no declarative spec) + the sealed MODEL closure (H13 —
+  // the judge argument, applied to the harness): a command harness's binding / each service's binding is a
+  // ModelBinding whose `{ref}` without a version resolves LATEST at dispatch, so two batches with
+  // byte-identical harness specs can execute under different models while specDigest reads held. `model`
+  // (command) / `serviceModels` (service, keyed by service name) seal what the binding resolved to at submit
+  // — "ref@version" | a raw binding verbatim | the honest "unresolved" sentinel. Absent = no binding (or a
+  // pre-closure seal). The harness stays the TREATMENT: its closure confounds only when the harness identity
+  // itself is held (experimentIdentity harness_model axis).
+  harness: z.object({
+    id: z.string(),
+    version: z.string(),
+    specDigest: z.string().optional(),
+    model: z.string().optional(),
+    serviceModels: z.record(z.string(), z.string()).optional(),
+  }),
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
   // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just
   // which ids (an edited judge under the same version would otherwise be indistinguishable). `model` seals the
