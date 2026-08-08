@@ -68,13 +68,19 @@ behind a refusal this replica saw. The fleet-admission trust scenarios certify c
 Postgres; note the in-memory twin CANNOT reproduce counter drift (its count is derived from the permit set
 — the ideal the Pg counter approximates), so Pg-backed tests are the only authority here.
 
-**The permit is a lease, not a timestamp** (mig 0140). The scheduler renews the permits its in-flight work
-holds on a heartbeat (default 10 min, `permitRenewMs`), and the reap — a global sweep on any admission, so
-an idle tenant's leaks still heal — frees only permits whose `renewed_at` lapsed the 30-minute lease
-window. A replica that dies stops renewing and its leak heals in at most the window (**throttling** its
-tenant briefly); a healthy long run renews forever and is never reaped — the wall-clock TTL this replaced
-reaped healthy permits out from under running compute, which **inflated** the quota, the direction the
-ledger exists to close.
+**The permit is a lease, not a timestamp** (mig 0140; `renewed_at` indexed by mig 0142). The scheduler
+renews the permits its in-flight work holds on a heartbeat (default 10 min, `permitRenewMs`), and the reap
+— a global sweep on any admission, so an idle tenant's leaks still heal — frees only permits whose
+`renewed_at` lapsed the 30-minute lease window. **The claim, stated exactly**: the quota is race-proof at
+admission and CRASH-recoverable — a replica that dies stops renewing and its leak heals in at most the
+window (throttling its tenant briefly), while a healthy long run keeps renewing instead of being reaped on
+wall-clock age. It is **not partition-fenced**: a replica cut off from the database but not from its
+orchestrator keeps driving compute while its renewals fail — "stopped renewing" and "stopped running" are
+indistinguishable at the ledger — so after the window another replica may admit replacement work and the
+fleet briefly exceeds the quota by the partitioned holder's share. Named next steps, taken only if the
+guarantees are ever needed: **fencing** (renewal-failure self-kill, or fenced execution tokens the
+backends verify) for hard-under-partition, and a **periodic leader-side reaper** replacing the hot-path
+sweep once permit volume makes even the indexed scan a tax.
 
 ### Leadership (S2)
 

@@ -304,10 +304,16 @@ export class PgRunStore implements RunStore {
   // which is the one single-statement shape that closes the same-instant double-admit window. (A count-then-
   // insert — with or without an advisory lock — keeps its statement-start snapshot after unblocking, so two
   // replicas counting the same headroom both insert; that race is exactly what this replaces.)
-  // A permit is a LEASE (mig 0140): the scheduler renews the permits of work it is still running, and the reap
-  // frees only permits whose lease lapsed. A dead replica stops renewing — its leak heals in at most this
-  // window, throttling its tenant briefly; a live long run renews forever and is NEVER reaped (the wall-clock
-  // TTL this replaces reaped healthy permits out from under running compute, inflating the quota).
+  // A permit is a LEASE (mig 0140): the scheduler renews the permits of work it is still running, and the
+  // reap frees only permits whose lease lapsed. What that buys, PRECISELY: race-proof admission plus crash
+  // recovery — a replica that dies stops renewing and its leak heals in at most this window (throttling its
+  // tenant briefly), while a healthy long run keeps renewing instead of being reaped on wall-clock age. What
+  // it does NOT buy is partition fencing: a replica cut off from the DATABASE but not from its orchestrator
+  // keeps driving compute while its renewals fail — "stopped renewing" and "stopped running" are
+  // indistinguishable here — so after the window another replica may admit replacement work and the fleet
+  // briefly exceeds the quota by the partitioned holder's share. Closing that needs fencing (renewal-failure
+  // self-kill, or fenced execution tokens the backends verify): the named next step if hard-under-partition
+  // is ever required.
   private static readonly ADMISSION_LEASE = "30 minutes";
 
   async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {

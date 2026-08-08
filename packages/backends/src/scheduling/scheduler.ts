@@ -574,8 +574,10 @@ export class Scheduler {
   }
 
   // ── The permit-lease heartbeat ── while this replica holds any permit, renew them all on an interval well
-  // inside the ledger's lease window, so the reap only ever frees permits whose HOLDER died (stopped renewing),
-  // never a healthy long run's. The timer lives only while permits are held and never pins the process.
+  // inside the ledger's lease window, so the reap frees only permits whose holder STOPPED RENEWING — death,
+  // or a ledger partition the reap cannot distinguish from it (a partitioned-but-alive holder's compute can
+  // briefly exceed the quota; see AdmissionLedger). The timer lives only while permits are held and never
+  // pins the process.
   private holdPermit(permitId: string): void {
     this.livePermits.add(permitId);
     if (this.renewTimer !== undefined || this.opts.ledger?.renewAdmissions === undefined) return;

@@ -28,8 +28,11 @@ export interface AdmissionLedger {
   tryAdmit?(tenant: string, permitId: string, quota: number): Promise<boolean>;
   releaseAdmission?(permitId: string): Promise<void>;
   // A permit is a LEASE, not a timestamp: the scheduler renews the permits of work it is still running, and
-  // the ledger's reap frees only permits whose lease lapsed. A replica that dies stops renewing — its leak
-  // heals in at most the lease window; a live long run renews forever and is never reaped, which closes the
-  // quota-INFLATION direction (a wall-clock TTL reaped healthy permits out from under running compute).
+  // the ledger's reap frees only permits whose lease lapsed. The claim, stated exactly: CRASH-recoverable —
+  // a dead replica stops renewing and heals within the window — and never reaping a healthy renewing run.
+  // NOT partition-fenced: a holder cut off from the ledger but not from its orchestrator keeps driving
+  // compute while its renewals fail, and after the window the fleet can briefly exceed the quota by that
+  // holder's share. Fencing (renewal-failure self-kill / fenced execution tokens) is the named next step if
+  // hard-under-partition is ever required.
   renewAdmissions?(permitIds: string[]): Promise<void>;
 }
