@@ -78,6 +78,16 @@ export type ResolvedMcpServer =
       effects?: EffectContract;
     };
 
+// Whether ANY of an external server's tools may be auto-retried after a transport death. A read-only-
+// bridged server: yes (its exposed set is our read-name filter). A write-enabled server: NEVER — a retry
+// re-issues a call whose first outcome is unknown, the per-tool semantics are a third party's, and the
+// pre-fix name-prefix classification trusted the untrusted surface with the weaker signal (a third-party
+// `get_or_create_*` double-fires). Per-tool retry returns only with locally-trusted adopted-capability
+// metadata; until then the model gets an explicit error and decides.
+export function externalServerCanRetry(server: Pick<ResolvedMcpServer, "write">): boolean {
+  return !server.write;
+}
+
 // The effect contract a bridged tool carries to the permission gate. The author's own declaration always
 // wins; without one, a REMOTE transport is structurally external — every call ships its model-chosen
 // arguments to an outside endpoint, so an UNDECLARED remote read-only server is exfiltration-shaped by
@@ -331,8 +341,13 @@ export function mcpToolProvider(
         const listed = (await client.listTools()).tools;
         const allowed = server.write ? listed : listed.filter((t) => isReadOnlyToolName(t.name));
         const box: McpClientBox = { current: client };
-        // A read-only-bridged server may auto-retry everything it exposes; a write-allowed server only its reads.
-        const invoke = makeInvoke(box, connectServer, (tool) => !server.write || isReadOnlyToolName(tool), prefix);
+        // A read-only-bridged server may auto-retry everything it exposes (its tool set is OUR read-name
+        // filter). A write-allowed server gets NO automatic retry at all: a retry re-issues a call whose
+        // first outcome is unknown, its per-tool semantics are a third party's, and classifying them by
+        // NAME trusted the untrusted surface with the weaker signal — a `get_or_create_*` or `get_credit`
+        // double-fires. Per-tool retry for external servers returns only with locally-trusted adopted-
+        // capability metadata (named deferral); until then the model gets an explicit error and decides.
+        const invoke = makeInvoke(box, connectServer, () => externalServerCanRetry(server), prefix);
         const toAdd: ToolDefinition[] = [];
         const effects = bridgedEffectsFor(server);
         for (const t of allowed) {

@@ -6,6 +6,7 @@ import {
   baseToolReadOnly,
   bridgedEffectsFor,
   dockerRunArgs,
+  externalServerCanRetry,
   imageAllowed,
   isBaseToolReadOnly,
   isDefaultBaseTool,
@@ -126,6 +127,17 @@ describe("baseToolReadOnly — the server's declaration outranks the name", () =
     expect(baseToolReadOnly({ name: "list_runs" })).toBe(true);
     expect(baseToolReadOnly({ name: "delete_dataset" })).toBe(false);
     expect(baseToolReadOnly({ name: "get_image_push_credentials" })).toBe(false); // the blacklist still guards the fallback
+  });
+});
+
+describe("externalServerCanRetry — names are not idempotency", () => {
+  it("a write-enabled external server is NEVER auto-retried — not even its get_-named tools", () => {
+    // Regression: the retry predicate classified a third-party write server's tools by NAME PREFIX, so a
+    // `get_or_create_*` or `get_credit` was silently re-issued after a transport death with its first
+    // outcome unknown — while the permission layer treated the same tools as mutating. One surface, two
+    // contradictory safety answers, with the weaker one deciding the dangerous case.
+    expect(externalServerCanRetry({ write: true })).toBe(false);
+    expect(externalServerCanRetry({ write: false })).toBe(true); // read-only-bridged: our own filter bounds the set
   });
 });
 
