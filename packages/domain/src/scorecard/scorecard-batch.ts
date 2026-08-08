@@ -41,10 +41,23 @@ function judgedUnder(policy?: VerdictPolicy): { traceProjectionVersion: number; 
   return { traceProjectionVersion: SPANS_TO_EVENTS_VERSION, verdictPolicy: verdictPolicyRef(policy) };
 }
 
+// `scoring` is the append-only scoring-identity ledger every judged settle carries; `manifest`/
+// `orchestration` ride ONLY the rescore transition — a re-score rewrites scoring identity, so it refreshes
+// the judge views (manifest.judges + orchestration.judges) to the merged effective set in the same write.
 export type ScorecardOutcomeExtras = Partial<
   Pick<
     ScorecardRecord,
-    "summary" | "models" | "judgeModels" | "export" | "steps" | "runIds" | "scorecard" | "analysisRef"
+    | "summary"
+    | "models"
+    | "judgeModels"
+    | "export"
+    | "steps"
+    | "runIds"
+    | "scorecard"
+    | "analysisRef"
+    | "scoring"
+    | "manifest"
+    | "orchestration"
   >
 >;
 
@@ -439,6 +452,9 @@ export class ScorecardBatch {
     const summary = extras.summary ?? this.record.summary;
     // Authority-ranked, not first-in-summary — same rule as batchTerminalFact (summary order is not authority).
     const passRate = headlinePassRate({ ...(summary ? { summary } : {}) }) ?? undefined;
+    // The scoring revision this pass appended (when the service supplied the ledger) — the fact names WHICH
+    // judgment era begins here, so a consumer can correlate it with gate pins without re-reading the record.
+    const revision = extras.scoring?.at(-1)?.revision;
     return {
       patch: { ...(promoted ? { kind: "scorecard" as const } : {}), ...extras, updatedAt: now },
       facts: [
@@ -452,6 +468,7 @@ export class ScorecardBatch {
             harness,
             ...(passRate !== undefined ? { passRate } : {}),
             ...(promoted ? { promoted: true } : {}),
+            ...(revision !== undefined ? { revision } : {}),
           },
         },
       ],

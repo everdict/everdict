@@ -13,6 +13,7 @@ const ALLOWED = new Set([
   "scorecard/case-outcome.ts", // delegates to caseVerdict (gated)
   "scorecard/scorecard-batch.ts", // aggregate lifecycle — carries results, does not aggregate scores
   "scorecard/scoring-plan.ts", // judge-metric ownership + caseReason — gated via isMeasured/measuredScores (moved from application-control scorecard-shared)
+  "scorecard/scoring-revision.ts", // scorePlaneDigest — identity over the WHOLE plane on purpose (a digest is not an aggregation: it never averages, and unmeasured rows are part of the judgment record it identifies; the union discriminates them explicitly)
   "trace/spans-to-events.ts", // producer side (no Score consumption) — listed defensively if it ever matches
 ]);
 

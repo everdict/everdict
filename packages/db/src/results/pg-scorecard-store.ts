@@ -28,6 +28,7 @@ interface ScorecardRow {
   manifest: unknown; // reproducibility digests sealed at submit (mig 0126)
   requested: number | string | null; // the batch's ask — cases × trials at submit (mig 0127)
   gates: unknown; // release-gate decisions recorded against this candidate (mig 0128)
+  scoring: unknown; // append-only scoring-identity ledger — one entry per scoring pass (mig 0144)
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -73,6 +74,10 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     ...(row.requested !== null && row.requested !== undefined ? { requested: Number(row.requested) } : {}),
     // lightweight — the gate audit scans the ledger for decisions; a handful of small artifacts per row
     ...(row.gates !== null && row.gates !== undefined ? { gates: row.gates as ScorecardRecord["gates"] } : {}),
+    // detail-shaped consumers (gate pins, diff, audit) read through get(); list omits the column like the other detail jsonb
+    ...(row.scoring !== null && row.scoring !== undefined
+      ? { scoring: row.scoring as ScorecardRecord["scoring"] }
+      : {}),
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -86,9 +91,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, owner_replica, created_at, updated_at)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)";
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -123,6 +128,7 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.traceProjectionVersion ?? null,
     r.verdictPolicy ? JSON.stringify(r.verdictPolicy) : null,
     r.gates ? JSON.stringify(r.gates) : null,
+    r.scoring ? JSON.stringify(r.scoring) : null,
     // The writer is the driver — same stamp, same reason as the run store's.
     r.ownerReplica ?? replicaId ?? null,
     r.createdAt,
@@ -189,6 +195,12 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`orchestration = $${i++}`);
       vals.push(JSON.stringify(patch.orchestration));
     }
+    if (patch.manifest !== undefined) {
+      // a re-score refreshes manifest.judges/judgeRun to the merged effective set (scoring identity follows
+      // the judgment) — dropping it would keep certifying the submit-era judges over a re-judged plane.
+      sets.push(`manifest = $${i++}`);
+      vals.push(JSON.stringify(patch.manifest));
+    }
     if (patch.models !== undefined) {
       sets.push(`models = $${i++}`);
       vals.push(JSON.stringify(patch.models));
@@ -223,6 +235,11 @@ export class PgScorecardStore implements ScorecardStore {
       // append-path (gate decide/override) — the service writes the whole array back (small artifacts).
       sets.push(`gates = $${i++}`);
       vals.push(JSON.stringify(patch.gates));
+    }
+    if (patch.scoring !== undefined) {
+      // append-path (settle/rescore) — the scoring-identity ledger; the service writes the whole array back.
+      sets.push(`scoring = $${i++}`);
+      vals.push(JSON.stringify(patch.scoring));
     }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical

@@ -142,6 +142,22 @@ collision-resistant evidence about the document; a legacy FNV stamp answers "is 
 against honest data but never "was this tampered with?". Under either, the write barriers are the
 admin-gated submit paths.
 
+## Scoring revisions — the JUDGMENT axis of identity (mig 0144)
+The manifest pins what was **evaluated**; nothing pinned what was **judged, and when** — a re-score
+(`POST /scorecards/:id/score`) legally rewrites the score plane in place, so the same scorecard id could
+mean different judgments over time with no record of the change. Every judged settle now appends a
+`ScoringRevision` to `ScorecardRecord.scoring[]` (append-only): `{revision, kind: initial|rescore, judges
+[with sealed model closures — the same `sealJudgeClosure` submit uses], judgeRun?, scorePlaneDigest,
+analysisRef?, createdAt, createdBy?}`. `scorePlaneDigest` is `contentDigest` over the whole plane
+(`caseId#trial` → judgment-projected scores — value/pass/label/status/reason, never the rationale prose), so
+two reads that disagree on it read different judgments. A re-score is **replace-selected / keep-others**, and
+it rewrites everything that DESCRIBES scoring identity in the same settle: `manifest.judges` /
+`orchestration.judges` refresh to the merged effective set, `judgeModels` recomputes over that set (never a
+union with history), and the analysis artifact re-freezes from the pass's own plane. Gate decisions pin what
+they saw — `GateDecision.baselineScoring`/`candidateScoring` `{revision, scorePlaneDigest}` — so a re-score
+after the decision is detectable divergence, not silent reattribution. Failed/aborted settles carry no
+revision (they never gate); pre-ledger records pin nothing (honest absence).
+
 ## Two manifests: the evaluation DEFINITION and the evaluation WORLD
 The batch manifest above pins **what we evaluated**. Nothing pinned **where it ran**, so a result carried no
 record of the OS it landed on, the driver that provisioned its compute, or the image that compute came out

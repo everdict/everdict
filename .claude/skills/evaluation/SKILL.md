@@ -44,6 +44,15 @@ judge (deleted/bad version) is never silently dropped: `ScoringService.resolveJu
 stream stamps a per-case `unmeasured{unsupported, retryable:false}` row — a batch never settles claiming a
 judge it did not run.
 
+**Scoring identity is append-only** (`ScorecardRecord.scoring[]`, mig 0144; docs/scorecards.md §Scoring
+revisions): every judged settle appends a `ScoringRevision` — the pass's judges with their sealed model
+closures (the SAME `sealJudgeClosure` submit's manifest uses, in `scorecard-plan.ts`) + a `scorePlaneDigest`
+of the whole plane (judgment projection only — never rationale prose). The rescore aggregate REWRITES what
+describes identity in the same settle: `manifest.judges`/`orchestration.judges` refresh to the merged
+replace-selected/keep-others set, `judgeModels` recomputes CURRENT (never unions history), the analysis
+artifact re-freezes. Gates pin `{revision, scorePlaneDigest}` per side (`GateDecision.baselineScoring`/
+`candidateScoring`) so a later re-score is detectable divergence. Failed/aborted settles append no revision.
+
 **Stop/cancel.** `ScorecardService.cancel(tenant,id)` (`POST /scorecards/:id/cancel` + `cancel_scorecard`) stops a
 queued/running batch → new terminal `cancelled` status (domain `ScorecardBatch.cancel`/`canCancel`; like
 `superseded`, excluded from baseline/diff/leaderboard/trend, which positively filter `succeeded`). It shares the

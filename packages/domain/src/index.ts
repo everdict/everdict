@@ -48,6 +48,12 @@ export {
 } from "./scorecard/scoring-plan.js";
 export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {
+  appendScoringRevision,
+  currentScoringPin,
+  scorePlaneDigest,
+  type ScoringPassInput,
+} from "./scorecard/scoring-revision.js";
+export {
   composeVerdictPolicy,
   DEFAULT_VERDICT_POLICY,
   DEFAULT_VERDICT_POLICY_V1,

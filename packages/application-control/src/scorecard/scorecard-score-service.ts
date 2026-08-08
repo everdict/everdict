@@ -8,10 +8,13 @@ import {
   type ScorecardRecord,
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardOutcomeExtras, judgeGradeable, summarizeScorecard } from "@everdict/domain";
+import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
 import { childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
+import { analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
+import { sealJudgeClosure } from "./scorecard-plan.js";
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
 // aggregate — "re-score with a different judge" and "promote experiment → scorecard" are the same operation
@@ -201,6 +204,12 @@ export class ScorecardScoreService {
 
   // Aggregate to the group through the domain transition — the scorecard.scored fact rides the E0 outbox.
   // Shared by the in-process pass (its own scored results) and the workflow finalize (the hydrated reload).
+  // A re-score REWRITES SCORING IDENTITY, so this write also rewrites everything that describes it: the
+  // manifest/orchestration judge views refresh to the merged effective set (replace-selected/keep-others —
+  // the same semantics the write-back applies to the score plane itself), judgeModels recomputes over that
+  // set (never a union with history), the analysis artifact re-freezes from THIS pass's plane, and the
+  // append-only scoring ledger gains the pass's revision. Before this, the record kept certifying the
+  // submit-era judges over a plane a different judge had since re-scored.
   private async aggregate(
     record: ScorecardRecord,
     base: NonNullable<ScorecardRecord["scorecard"]>,
@@ -209,17 +218,58 @@ export class ScorecardScoreService {
     submittedBy: string | undefined,
   ): Promise<void> {
     const summary = summarizeScorecard({ ...base, results });
-    const newJudgeModels = await this.scoring.collectJudgeModels(record.tenant, judges, undefined);
-    const judgeModels = [...new Set([...(record.judgeModels ?? []), ...newJudgeModels])].sort();
+    const fresh = await this.deps.store.get(record.id);
+    if (!fresh) return;
+    // The selected judges' closure, sealed by the SAME function submit uses (scorecard-plan sealJudgeClosure)
+    // — two seals of "the judge closure" on one record must mean the same thing.
+    const sealed = await sealJudgeClosure(this.deps, record.tenant, judges);
+    const selectedIds = new Set(judges.map((j) => j.id));
+    const mergedManifestJudges = [...(fresh.manifest?.judges ?? []).filter((j) => !selectedIds.has(j.id)), ...sealed];
+    const mergedPins = [...(fresh.orchestration?.judges ?? []).filter((j) => !selectedIds.has(j.id)), ...judges];
+    // CURRENT judge models — the merged effective set under the batch's own inline judge config. The pre-fix
+    // union kept advertising a replaced judge's model as this record's judge forever.
+    const judgeModels = await this.scoring.collectJudgeModels(record.tenant, mergedPins, fresh.orchestration?.judge);
+    // Re-freeze the analysis artifact from this pass's plane under the batch's own stamped policy — the
+    // previous bundle describes scores that no longer exist. An unresolvable stamp skips the re-freeze
+    // (re-judging history under today's ladder would ship a rewritten file); the revision then carries no
+    // analysisRef, which is the honest record of "this pass has no frozen artifact".
+    const resolution = resolvePolicyResolution(fresh.verdictPolicy, fresh.manifest?.verdictPolicy);
+    const analysisRef =
+      resolution.status === "unresolvable"
+        ? undefined
+        : await offloadAnalysis(
+            this.deps,
+            record.id,
+            analysisBundle(
+              {
+                scorecardId: record.id,
+                dataset: `${fresh.dataset.id}@${fresh.dataset.version}`,
+                harness: `${fresh.harness.id}@${fresh.harness.version}`,
+              },
+              summary,
+              results,
+              resolution.policy,
+            ),
+          );
+    const scoring = appendScoringRevision(fresh.scoring, {
+      kind: "rescore",
+      judges: sealed,
+      results,
+      ...(analysisRef ? { analysisRef } : {}),
+      createdAt: this.now(),
+      ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
+    });
     const extras: ScorecardOutcomeExtras = {
       summary,
       ...(judgeModels.length > 0 ? { judgeModels } : {}),
+      scoring,
+      ...(analysisRef ? { analysisRef } : {}),
+      ...(fresh.manifest ? { manifest: { ...fresh.manifest, judges: mergedManifestJudges } } : {}),
+      ...(fresh.orchestration ? { orchestration: { ...fresh.orchestration, judges: mergedPins } } : {}),
       // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
       // and hydrate from the (re-scored) children, so the embed stays out of the row.
       ...(record.runIds?.length ? {} : { scorecard: { ...base, results } }),
     };
-    const fresh = await this.deps.store.get(record.id);
-    if (!fresh) return;
     const transition = ScorecardBatch.from(fresh).rescore(
       extras,
       submittedBy !== undefined ? { actor: submittedBy } : {},

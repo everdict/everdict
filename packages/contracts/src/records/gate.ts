@@ -105,10 +105,23 @@ export const GateOverrideSchema = z.object({
 });
 export type GateOverride = z.infer<typeof GateOverrideSchema>;
 
+// The scoring revision the gate READ on one side of the comparison: a score plane legally mutates later
+// (re-score), so the decision pins {revision, scorePlaneDigest} — a reader that finds the record's current
+// digest diverged from the pin knows this decision judged a plane that no longer exists, instead of silently
+// attributing today's judgments to yesterday's verdict. Absent on sides that predate the scoring ledger
+// (nothing to pin — honest absence, never a placeholder).
+export const GateScoringPinSchema = z.object({
+  revision: z.number().int().positive(),
+  scorePlaneDigest: z.string(),
+});
+export type GateScoringPin = z.infer<typeof GateScoringPinSchema>;
+
 export const GateDecisionSchema = z.object({
   id: z.string(),
   baseline: z.string(), // scorecard id
   candidate: z.string(), // scorecard id (the record this decision is appended to)
+  baselineScoring: GateScoringPinSchema.optional(),
+  candidateScoring: GateScoringPinSchema.optional(),
   // `blocked_missing` = the comparison held, but not over enough: the gate refuses to read a verdict out of
   // an incomplete comparison rather than issue a green light the evidence does not support. It blocks like
   // `block` and is overridable like `block` (a team may knowingly ship on a subset — with a stated reason).

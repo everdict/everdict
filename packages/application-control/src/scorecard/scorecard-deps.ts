@@ -239,8 +239,20 @@ export type ScorecardIngestDeps = Pick<
 // Read-side analytics: the store and the offloaded-analysis artifacts. Nothing here can dispatch or kill.
 export type ScorecardAnalyticsDeps = Pick<ScorecardServiceDeps, "store" | "artifacts">;
 
-// Detached scoring (phase 2 / re-score): the stores it rewrites plus the Temporal score bridge.
+// Detached scoring (phase 2 / re-score): the stores it rewrites plus the Temporal score bridge. `judges` +
+// `resolveModelBinding` let the rescore aggregate re-seal the selected judges' closure (the same sealer as
+// submit), and `artifacts` lets it re-freeze the analysis bundle from the pass's own plane — a re-score
+// rewrites scoring identity, so it must be able to rewrite everything that DESCRIBES that identity.
 export type ScorecardScoringDeps = Pick<
   ScorecardServiceDeps,
-  "store" | "runStore" | "datasets" | "events" | "temporalScores" | "newId" | "now"
+  | "store"
+  | "runStore"
+  | "datasets"
+  | "events"
+  | "temporalScores"
+  | "newId"
+  | "now"
+  | "judges"
+  | "resolveModelBinding"
+  | "artifacts"
 >;

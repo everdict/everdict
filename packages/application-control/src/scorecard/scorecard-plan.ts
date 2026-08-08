@@ -1,4 +1,6 @@
-import { AppError, BadRequestError, type HarnessSpec, NotFoundError } from "@everdict/contracts";
+import { AppError, BadRequestError, type HarnessSpec, type ModelBinding, NotFoundError } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
+import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 
 // Harness-spec resolution for a batch (review §22): the one non-pure resolution helper the submit paths
 // share — everything else that lived beside it moved to its own concern (domain scoring-plan / requests /
@@ -29,4 +31,48 @@ export async function embedHarnessSpec(
       }`,
     );
   }
+}
+
+// A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
+// concrete version at seal time). undefined = no resolver wired or the resolution failed.
+export async function sealedModelIdentity(
+  deps: Pick<ScorecardServiceDeps, "resolveModelBinding">,
+  tenant: string,
+  binding: ModelBinding,
+): Promise<string | undefined> {
+  if (typeof binding === "string") return binding;
+  if (!deps.resolveModelBinding) return undefined;
+  return await deps.resolveModelBinding(tenant, binding).catch(() => undefined);
+}
+
+// Which judge DOCUMENTS score a batch — id + version + spec digest + the sealed model closure. ONE sealer
+// shared by the submit seal (manifest.judges) and the re-score refresh (a later pass rewriting the same
+// identity), so "the judge closure" can never mean two different things on the same record. The spec digest
+// pins bytes; the sealed model pins what a nested `{ref}` binding RESOLVED to ("ref@version" | a raw binding
+// verbatim | the honest "unresolved" sentinel when no resolver could answer; absent = the judge carries no
+// binding, e.g. harness-delegating). Best-effort per judge: an unresolvable spec keeps its id/version bare
+// rather than failing the pass.
+export async function sealJudgeClosure(
+  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding">,
+  tenant: string,
+  judges: Array<{ id: string; version: string }>,
+): Promise<Array<{ id: string; version: string; specDigest?: string; model?: string }>> {
+  const out: Array<{ id: string; version: string; specDigest?: string; model?: string }> = [];
+  for (const j of judges) {
+    try {
+      const spec = await deps.judges?.get(tenant, j.id, j.version);
+      const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
+      const model =
+        binding === undefined ? undefined : ((await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved");
+      out.push({
+        id: j.id,
+        version: j.version,
+        ...(spec ? { specDigest: contentDigest(spec) } : {}),
+        ...(model ? { model } : {}),
+      });
+    } catch {
+      out.push({ id: j.id, version: j.version });
+    }
+  }
+  return out;
 }

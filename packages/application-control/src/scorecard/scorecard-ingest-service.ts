@@ -15,7 +15,13 @@ import {
   snapshotFromEvidence,
   toScores,
 } from "@everdict/contracts";
-import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
+import {
+  ScorecardBatch,
+  type ScorecardTransition,
+  appendScoringRevision,
+  scorecardModels,
+  summarizeScorecard,
+} from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
@@ -356,6 +362,17 @@ export class ScorecardIngestService {
     const models = scorecardModels(scorecard);
     // judge axis: ingest has no inline judge, so only the models of the applied registered judges.
     const judgeModels = await this.scoring.collectJudgeModels(tenant, judges, undefined);
+    // Scoring identity — the INITIAL revision. An ingest batch has no submit-time manifest, so the ledger
+    // carries the applied judge pins bare (no sealed model closure — a named gap the judgeModels field and
+    // any later re-score's sealed revision cover).
+    const scoring = appendScoringRevision(undefined, {
+      kind: "initial",
+      judges,
+      results,
+      ...(analysisRef ? { analysisRef } : {}),
+      createdAt: this.now(),
+      ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
+    });
     await this.settleIngest(id, (batch) =>
       batch.succeed(
         {
@@ -365,6 +382,7 @@ export class ScorecardIngestService {
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
           ...(exported ? { export: exported } : {}),
           ...(analysisRef ? { analysisRef } : {}),
+          scoring,
         },
         this.now(),
       ),

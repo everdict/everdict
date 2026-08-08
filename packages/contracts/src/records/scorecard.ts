@@ -85,6 +85,40 @@ export const ScorecardManifestSchema = z.object({
 });
 export type ScorecardManifest = z.infer<typeof ScorecardManifestSchema>;
 
+// Scoring identity — one entry per SCORING PASS over this group, append-only (mig 0144). The live score
+// plane legally mutates in place on a re-score (write-back replaces the selected judges' rows), but a
+// Scorecard ID that silently means different judgments over time is identity drift the manifest alone cannot
+// see: the manifest says what was EVALUATED, this ledger says what was JUDGED, and when. Each pass records
+// the selected judges with their sealed model closures and a content digest of the whole score plane it left
+// behind — so "which judgment did you read" is answerable after the fact (gate decisions pin it:
+// GateDecision.baselineScoring/candidateScoring). `judges` is the pass's SELECTED set only — a re-score
+// replaces the selected judges' rows and keeps every other score (replace-selected / keep-others); the
+// record's manifest/orchestration judge views are refreshed to the merged EFFECTIVE set at the same write.
+export const ScoringRevisionSchema = z.object({
+  revision: z.number().int().positive(), // 1-based, strictly increasing per record
+  kind: z.enum(["initial", "rescore"]),
+  judges: z.array(
+    z.object({
+      id: z.string(),
+      version: z.string(),
+      specDigest: z.string().optional(), // the judge DOCUMENT this pass ran (same seal as manifest.judges)
+      model: z.string().optional(), // the sealed model closure ("ref@version" | raw | "unresolved")
+    }),
+  ),
+  // The runtime judge configuration in effect for the pass — rides the INITIAL pass only (it governs inline
+  // judge graders, which a detached re-score never touches).
+  judgeRun: z.object({ provider: z.string().optional(), model: z.string() }).optional(),
+  // contentDigest over the FULL score plane as of this pass (caseId#trial → judgment-projected scores) — two
+  // reads that disagree on it read different judgments, whatever the record id says.
+  scorePlaneDigest: z.string(),
+  // The analysis artifact frozen from THIS pass's plane (absent: no artifact store / offload failed / the
+  // stamped verdict policy could not be restored, in which case re-freezing would rewrite history).
+  analysisRef: z.string().optional(),
+  createdAt: z.string(),
+  createdBy: z.string().optional(),
+});
+export type ScoringRevision = z.infer<typeof ScoringRevisionSchema>;
+
 // The scorecard's denominators (isomorphic to @everdict/domain scorecardOutcomes) — served next to casePass so
 // no client conflates 841/970 (verdicted) with 841/1000 (requested). infraFailed cases carry NO product verdict;
 // they are recovery work, never product failures. DERIVED on read, never persisted.
@@ -253,8 +287,11 @@ export const ScorecardRecordSchema = z.object({
   // children (median duration × remaining / concurrency). Never stored. docs/architecture/work-queue.md
   etaSeconds: z.number().optional(),
   models: ScorecardModelsSchema.optional(), // the models this run used (leaderboard axis, lightweight → included in list too). Unset for past records.
-  // The judge model(s) that scored this run — if the model axis is 'the LLM the harness used', this is the 'grader'. Filter/display
-  // for fair comparison (same judge). Distinct of inline judge config.model + registered model-judge spec.model. Lightweight → included in list too.
+  // The judge model(s) of this record's CURRENT effective judge set — if the model axis is 'the LLM the
+  // harness used', this is the 'grader'. Filter/display for fair comparison (same judge). Distinct of inline
+  // judge config.model + registered model-judge spec.model; a re-score RECOMPUTES it over the merged
+  // effective set (never a union with history — a replaced judge's model is no longer this record's judge).
+  // Per-pass truth lives in `scoring[]`. Lightweight → included in list too.
   judgeModels: z.array(z.string()).optional(),
   origin: ScorecardOriginSchema.optional(), // trigger provenance — lightweight, so included in list too. Unset for past records.
   // Runner (submitter subject) — to show/filter "who ran it" (avatar+name). If origin.source is 'where', this is 'who'.
@@ -306,6 +343,10 @@ export const ScorecardRecordSchema = z.object({
   // Release-gate decisions recorded AGAINST this candidate (A1/B1) — append-only; the audit report scans
   // these instead of a separate store (ledger-derivation principle). mig 0128.
   gates: z.array(GateDecisionSchema).optional(),
+  // Scoring identity ledger — one entry per scoring pass (the initial settle + each re-score), append-only
+  // even though the live score plane mutates in place. mig 0144. Absent on pre-ledger batches and on failed/
+  // aborted settles (they never gate, so they carry no judgment to identify — a named deferral).
+  scoring: z.array(ScoringRevisionSchema).optional(),
   // The batch's ASK — cases × trials at submit (ingest: the trace count). The requested−executed gap is the
   // unlaunched/cancelled tally no per-result walk can recover once cases were skipped. mig 0127.
   requested: z.number().int().nonnegative().optional(),

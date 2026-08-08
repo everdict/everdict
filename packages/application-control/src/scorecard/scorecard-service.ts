@@ -10,7 +10,6 @@ import {
   type HarnessSpec,
   type ManifestCheck,
   type ManifestVerification,
-  type ModelBinding,
   NotFoundError,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -32,6 +31,7 @@ import {
   can,
   composeVerdictPolicy,
   contentDigest,
+  currentScoringPin,
   digestUnder,
   evaluateGate,
   gatePolicyDigest,
@@ -48,7 +48,7 @@ import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
-import { embedHarnessSpec } from "./scorecard-plan.js";
+import { embedHarnessSpec, sealJudgeClosure, sealedModelIdentity } from "./scorecard-plan.js";
 import type {
   IngestScorecardInput,
   PullIngestInput,
@@ -252,7 +252,7 @@ export class ScorecardService {
     const judgeRunSeal = judge
       ? {
           ...(judge.provider ? { provider: judge.provider } : {}),
-          model: (await this.sealedModelIdentity(input.tenant, judge.model)) ?? "unresolved",
+          model: (await sealedModelIdentity(this.deps, input.tenant, judge.model)) ?? "unresolved",
         }
       : undefined;
     const concurrency = input.concurrency ?? this.concurrency;
@@ -530,43 +530,17 @@ export class ScorecardService {
     return this.scoreService.finalizeScore(id, judges, submittedBy);
   }
 
-  // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the
-  // exact judge that scored — the same reproducibility guarantee harness/dataset already have. No registry (unit paths)
-  // or an unresolvable id → keep the ref as-given; the scoring path stamps a per-case unmeasured row for a judge it
-  // cannot resolve (never a silent skip), so the manifest's selection and the scores always account for each other.
-  // Which judge DOCUMENTS score this batch — id+version+spec digest (an edited judge under the same version
-  // would otherwise be indistinguishable in the manifest). Best-effort per judge: an unresolvable spec keeps
-  // its id/version with no digest rather than failing the submit.
+  // Which judge DOCUMENTS score this batch — delegated to the ONE sealer (sealJudgeClosure) the re-score
+  // refresh also uses, so submit-time and rescore-time judge identity can never diverge in meaning. Absent
+  // registry (unit paths) / an unresolvable id keeps the ref as-given; the scoring path stamps a per-case
+  // unmeasured row for a judge it cannot resolve (never a silent skip), so the manifest's selection and the
+  // scores always account for each other.
   private async judgeManifest(
     tenant: string,
     judges: Array<{ id: string; version: string }>,
   ): Promise<{ judges?: Array<{ id: string; version: string; specDigest?: string; model?: string }> }> {
     if (judges.length === 0) return {};
-    const out: Array<{ id: string; version: string; specDigest?: string; model?: string }> = [];
-    for (const j of judges) {
-      try {
-        const spec = await this.deps.judges?.get(tenant, j.id, j.version);
-        // The dependency CLOSURE, not just the top document: the spec digest pins bytes, and a nested
-        // `{ref}` with no version pins a moving target — the concrete model this binding resolved to at
-        // seal time is part of the judge's identity. Absent binding (harness-delegating judge) seals
-        // nothing; a binding nobody could resolve seals the honest "unresolved" sentinel.
-        const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
-        const model =
-          binding === undefined ? undefined : ((await this.sealedModelIdentity(tenant, binding)) ?? "unresolved");
-        out.push({ ...j, ...(spec ? { specDigest: contentDigest(spec) } : {}), ...(model ? { model } : {}) });
-      } catch {
-        out.push({ ...j });
-      }
-    }
-    return { judges: out };
-  }
-
-  // A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
-  // concrete version at seal time). undefined = no resolver wired or the resolution failed.
-  private async sealedModelIdentity(tenant: string, binding: ModelBinding): Promise<string | undefined> {
-    if (typeof binding === "string") return binding;
-    if (!this.deps.resolveModelBinding) return undefined;
-    return await this.deps.resolveModelBinding(tenant, binding).catch(() => undefined);
+    return { judges: await sealJudgeClosure(this.deps, tenant, judges) };
   }
 
   private async pinJudgeVersions(
@@ -1208,19 +1182,28 @@ export class ScorecardService {
       ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
     });
     const evaluation = evaluateGate(diff, policy);
+    const record = await this.deps.store.get(input.candidate);
+    if (!record || record.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
+    // Pin WHICH judgment each side's plane carried at decision time ({revision, scorePlaneDigest}) — a score
+    // plane legally mutates on re-score, so without the pin a later reader silently attributes today's
+    // judgments to this decision. The diff already enforced visibility on both sides; the tenant check here
+    // only guards the pin read itself. Pre-ledger records pin nothing (honest absence).
+    const baselineRecord = await this.deps.store.get(input.baseline);
+    const baselinePin = baselineRecord?.tenant === input.tenant ? currentScoringPin(baselineRecord.scoring) : undefined;
+    const candidatePin = currentScoringPin(record.scoring);
     const decision: GateDecision = {
       id: this.newId(),
       baseline: input.baseline,
       candidate: input.candidate,
+      ...(baselinePin ? { baselineScoring: baselinePin } : {}),
+      ...(candidatePin ? { candidateScoring: candidatePin } : {}),
       ...evaluation,
       policy,
       policyDigest: gatePolicyDigest(policy),
       ...(input.decidedBy !== undefined ? { decidedBy: input.decidedBy } : {}),
       decidedAt: this.now(),
     };
-    const record = await this.deps.store.get(input.candidate);
-    if (!record || record.tenant !== input.tenant)
-      throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
     const facts = stampFacts(
       input.tenant,
       [

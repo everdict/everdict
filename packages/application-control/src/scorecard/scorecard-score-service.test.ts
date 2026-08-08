@@ -288,3 +288,136 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     expect(seenRunIds).toEqual(["child-c1"]);
   });
 });
+
+describe("ScorecardScoreService aggregate — a re-score rewrites scoring identity (arch-review 6, H3)", () => {
+  // Pre-fix, the aggregate patched only summary/judgeModels: the record kept certifying the SUBMIT-era
+  // judges (manifest.judges / orchestration.judges) over a plane a different judge had since re-scored, and
+  // judgeModels unioned history so a replaced judge's model stayed advertised forever.
+  it("appends a rescore revision, refreshes the judge views to the merged effective set, and recomputes judgeModels", async () => {
+    const specFor = (id: string, version: string, model: string): JudgeSpec => ({
+      kind: "model",
+      id,
+      version,
+      provider: "anthropic",
+      model,
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    const registry: JudgeRegistry = {
+      async register() {
+        throw new Error("unused");
+      },
+      async has() {
+        return true;
+      },
+      async get(_tenant, id, version) {
+        if (id === "j" && version === "2.0.0") return specFor("j", "2.0.0", "m2");
+        if (id === "k" && version === "1.0.0") return specFor("k", "1.0.0", "mk");
+        throw new Error(`no such judge ${id}@${version}`);
+      },
+      async versions() {
+        return [];
+      },
+      async ownVersions() {
+        return [];
+      },
+      async list() {
+        return [];
+      },
+      async moveToTeam() {
+        throw new Error("unused");
+      },
+      async creatorOfVersion() {
+        return undefined;
+      },
+      async softDelete() {
+        throw new Error("unused");
+      },
+      async setVersionTags() {
+        throw new Error("unused");
+      },
+      async versionTags() {
+        return {};
+      },
+    };
+    const record: ScorecardRecord = {
+      ...recordWith([result("c1", [measuredVerdict])]),
+      judgeModels: ["m1", "mk"],
+      orchestration: {
+        judges: [
+          { id: "j", version: "1.0.0" },
+          { id: "k", version: "1.0.0" },
+        ],
+        concurrency: 1,
+        retries: 0,
+      },
+      manifest: {
+        dataset: { id: "d", version: "1.0.0", digest: "sha256:ds" },
+        harness: { id: "h", version: "1" },
+        judges: [
+          { id: "j", version: "1.0.0", specDigest: "sha256:j1", model: "m1" },
+          { id: "k", version: "1.0.0", specDigest: "sha256:k1", model: "mk" },
+        ],
+      },
+      scoring: [
+        {
+          revision: 1,
+          kind: "initial",
+          judges: [
+            { id: "j", version: "1.0.0", model: "m1" },
+            { id: "k", version: "1.0.0", model: "mk" },
+          ],
+          scorePlaneDigest: "sha256:initial",
+          createdAt: "2026-08-07T00:00:00.000Z",
+        },
+      ],
+    };
+    const updates: Array<Partial<ScorecardRecord>> = [];
+    const store: ScorecardStore = {
+      ...unusedStore,
+      async get() {
+        return record;
+      },
+      async update(_id, patch) {
+        updates.push(patch);
+        return { ...record, ...patch };
+      },
+    };
+    const svc = new ScorecardScoreService(
+      { ...deps, store, judges: registry },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({ judges: registry }),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    // When judge j is re-scored at version 2.0.0 (model m2), replacing its 1.0.0 (model m1) pass
+    await svc.finalizeScore("sc-1", [{ id: "j", version: "2.0.0" }], "bob");
+    const patch = updates.at(-1);
+    expect(patch).toBeDefined();
+    // The ledger APPENDS — history intact, the new pass identified with its own sealed closure
+    expect(patch?.scoring).toHaveLength(2);
+    expect(patch?.scoring?.[0]).toEqual(record.scoring?.[0]);
+    expect(patch?.scoring?.[1]).toMatchObject({
+      revision: 2,
+      kind: "rescore",
+      createdBy: "bob",
+      judges: [{ id: "j", version: "2.0.0", model: "m2" }],
+    });
+    expect(patch?.scoring?.[1]?.scorePlaneDigest).toMatch(/^sha256:/);
+    // Replace-selected / keep-others — k survives untouched, j is the NEW closure
+    expect(patch?.manifest?.judges).toEqual([
+      { id: "k", version: "1.0.0", specDigest: "sha256:k1", model: "mk" },
+      expect.objectContaining({ id: "j", version: "2.0.0", model: "m2" }),
+    ]);
+    expect(patch?.orchestration?.judges).toEqual([
+      { id: "k", version: "1.0.0" },
+      { id: "j", version: "2.0.0" },
+    ]);
+    // judgeModels reads CURRENT — the replaced judge's model (m1) is no longer this record's judge
+    expect(patch?.judgeModels).toEqual(["m2", "mk"]);
+  });
+});

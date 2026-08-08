@@ -37,7 +37,7 @@ import {
   scorecardModels,
   summarizeScorecard,
 } from "@everdict/domain";
-import { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
+import { appendScoringRevision, applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
 import type { ScoringService } from "../execution/scoring-service.js";
@@ -749,6 +749,18 @@ export class ScorecardBatchService {
     // E0 outbox: the completion fact rides the terminal transition (domain-gated on createdBy — the gate the
     // notification path always applied) and persists atomically with the settle; the push after is the latency
     // nudge carrying the same ids (consumer dedup holds).
+    // Scoring identity — the INITIAL revision: which judges (the sealed manifest closure when present — it
+    // carries the models — else the bare pins) judged which plane. Every later re-score APPENDS; this entry
+    // is what its revision numbers count from.
+    const scoring = appendScoringRevision(final?.scoring, {
+      kind: "initial",
+      judges: rec.manifest?.judges ?? ctx.judges,
+      ...(rec.manifest?.judgeRun ? { judgeRun: rec.manifest.judgeRun } : {}),
+      results,
+      ...(analysisRef ? { analysisRef } : {}),
+      createdAt: this.now(),
+      ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
+    });
     const settlement = batch.succeed(
       {
         summary,
@@ -757,6 +769,7 @@ export class ScorecardBatchService {
         ...(exported ? { export: exported } : {}),
         ...(analysisRef ? { analysisRef } : {}),
         steps: final?.steps ?? [],
+        scoring,
         ...(runIds.length > 0 ? { runIds } : { scorecard }),
       },
       this.now(),
@@ -1524,7 +1537,18 @@ export class ScorecardBatchService {
           await this.deps.store.update(id, batch.settleAborted(extras, this.now()).patch);
         } else if (!batch.isTerminal()) {
           // E0 outbox: the completion fact rides the terminal transition and persists atomically with the settle.
-          const settlement = batch.succeed(extras, this.now());
+          // Scoring identity — the INITIAL revision (same shape as the Temporal finalize; aborted settles
+          // deliberately carry none: a cancelled batch never gates, so it has no judgment to identify).
+          const scoring = appendScoringRevision(settled.scoring, {
+            kind: "initial",
+            judges: settled.manifest?.judges ?? judges,
+            ...(settled.manifest?.judgeRun ? { judgeRun: settled.manifest.judgeRun } : {}),
+            results: scorecard.results,
+            ...(analysisRef ? { analysisRef } : {}),
+            createdAt: this.now(),
+            ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
+          });
+          const settlement = batch.succeed({ ...extras, scoring }, this.now());
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
           await this.deps.store.update(
             id,
