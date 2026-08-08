@@ -51,6 +51,9 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
       base({
         comparability: "full",
         policyUnresolvable: { candidate: { id: "composed", version: "0a1b2c3d", digest: "no-such-document" } },
+        // The leak shape: transitions somebody upstream still computed. The refusal must not repeat them.
+        regressions: [{ caseId: "x", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" }],
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
       }),
       { maxRegressions: 0 },
     );
@@ -58,6 +61,24 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
     expect(g.reasons[0]?.kind).toBe("policy_unresolvable");
     expect(g.reasons[0]?.detail).toContain("no-such-document");
     expect(g.evidence.comparability).toBe("none");
+    // Unknown policy means unknown verdict: the refusal carries NO regression numbers — the pre-fix order
+    // computed them first and the not_comparable decision spread "regressions: 1" into persisted evidence.
+    expect(g.evidence.regressions).toBeUndefined();
+    expect(g.evidence.improvements).toBeUndefined();
+  });
+
+  it("a comparability-none refusal carries no verdict-derived numbers either — structure only", () => {
+    const g = evaluateGate(
+      base({
+        comparability: "none",
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("not_comparable");
+    expect(g.evidence.regressions).toBeUndefined();
+    expect(g.evidence.improvements).toBeUndefined();
+    expect(g.evidence.missingCases).toBeDefined(); // the structural half still rides
   });
 
   it("a regression blocks under maxRegressions 0 and the reason names the case", () => {

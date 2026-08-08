@@ -111,12 +111,13 @@ export class ScorecardAnalyticsService {
           ? DEFAULT_VERDICT_POLICY
           : bResolution.policy
         : cResolution.policy;
-    // Case transitions (the gate's regression unit) are judged under each side's OWN resolved policy — an
-    // unresolvable side contributes no policy (the pair is refused as not_comparable below anyway).
+    // Case transitions (the gate's regression unit) are judged under each side's OWN resolved policy. An
+    // unresolvable side is passed EXPLICITLY — omitting it made diffScorecards fall back to the other side's
+    // ladder and re-judge verdicts the batch never produced (the transitions then leaked into gate evidence).
     const diff = diffScorecards(baseline, candidate, {
       policy: directionPolicy,
-      ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
-      ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
+      baselinePolicy: bResolution.status !== "unresolvable" ? bResolution.policy : "unresolvable",
+      candidatePolicy: cResolution.status !== "unresolvable" ? cResolution.policy : "unresolvable",
     });
     // Two batches judged under different verdict-policy DOCUMENTS are not the same experiment: their verdicts
     // (and therefore pass transitions) were produced by different rules. The comparison is flagged as NOT
@@ -151,7 +152,9 @@ export class ScorecardAnalyticsService {
     // and inventing critical cases out of the default ladder would be the same retroactive rewrite.
     const criticalCases = cResolution.status !== "unresolvable" ? cResolution.policy.criticalCases : undefined;
     const withCritical = criticalCases !== undefined && criticalCases.length > 0 ? { criticalCases } : {};
-    if (!hasTrials) return { ...withPolicy, coverage, ...withCritical };
+    // An unresolvable stamp gets no statistical signal either: diffTrials would re-derive that side's pass
+    // rates under a ladder the batch never ran — the same retroactive rewrite the transitions refuse.
+    if (!hasTrials || policyUnresolvable) return { ...withPolicy, coverage, ...withCritical };
     return {
       ...withPolicy,
       coverage,

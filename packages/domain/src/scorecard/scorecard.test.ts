@@ -512,6 +512,23 @@ describe("diffScorecards — the case-verdict transition is the release-regressi
     expect(diff.caseTransitions.filter((t) => t.change === "broke")).toHaveLength(1); // one case broke — the WHAT
   });
 
+  it("an unresolvable side produces NO transitions — unknown policy means unknown verdict, not a re-judgment", () => {
+    // Given a pair whose case would read as "broke" under any ladder — but the baseline's stamped policy
+    // could not be restored. Pre-fix, `?? policy` re-judged the baseline under the candidate's (or default)
+    // ladder and minted the broke transition anyway; those numbers then leaked into persisted gate evidence.
+    const base = cardOf([withScores("a", [{ metric: "tests_pass", value: 1, pass: true }])]);
+    const cand = cardOf([withScores("a", [{ metric: "tests_pass", value: 0, pass: false }])]);
+    const diff = diffScorecards(base, cand, { baselinePolicy: "unresolvable" });
+    expect(diff.caseTransitions).toEqual([]);
+    expect(diff.transitionsUnavailable).toBe("baseline");
+    const both = diffScorecards(base, cand, { baselinePolicy: "unresolvable", candidatePolicy: "unresolvable" });
+    expect(both.transitionsUnavailable).toBe("both");
+    // And a resolved pair is untouched by the new plumbing.
+    const resolved = diffScorecards(base, cand);
+    expect(resolved.transitionsUnavailable).toBeUndefined();
+    expect(resolved.caseTransitions.filter((t) => t.change === "broke")).toHaveLength(1);
+  });
+
   it("each side's verdict is derived under ITS OWN policy — the transition compares what each batch claimed", () => {
     const base = cardOf([withScores("a", [{ metric: "custom_gate", value: 1, pass: true }])]);
     const cand = cardOf([withScores("a", [{ metric: "custom_gate", value: 0, pass: false }])]);

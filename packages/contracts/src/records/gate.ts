@@ -94,8 +94,11 @@ export const GateDecisionSchema = z.object({
   // The comparison evidence the decision stands on (counts, never the full diff — that is re-derivable).
   evidence: z.object({
     comparability: z.enum(["full", "partial", "none"]),
-    regressions: z.number().int().nonnegative(),
-    improvements: z.number().int().nonnegative(),
+    // ABSENT when the gate refused to compare (unresolvable policy stamp / comparability none): a regression
+    // count exists only where verdicts do — "0 regressions" on a not_comparable decision is a claim the gate
+    // has no right to make, and the pre-fix shape persisted exactly that.
+    regressions: z.number().int().nonnegative().optional(),
+    improvements: z.number().int().nonnegative().optional(),
     missingCases: z.number().int().nonnegative(),
     trialsGated: z.boolean(), // true = the regression count is the Fisher-gated trials diff, not raw transitions
     // The share of the BASELINE's cases the candidate never ran — ABSENT when the baseline had no cases

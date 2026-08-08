@@ -1184,7 +1184,7 @@ export class ScorecardService {
           subject: { type: "scorecard", id: input.candidate },
           ...(input.decidedBy !== undefined ? { actor: input.decidedBy } : {}),
           payload: { decision: decision.decision, baseline: input.baseline, gateId: decision.id },
-          message: `release gate: ${decision.decision} (${decision.evidence.regressions} regression(s), comparability ${decision.evidence.comparability})`,
+          message: `release gate: ${decision.decision} (${decision.evidence.regressions !== undefined ? `${decision.evidence.regressions} regression(s)` : "no verdict evidence"}, comparability ${decision.evidence.comparability})`,
         },
       ],
       { newId: this.newId, now: this.now },

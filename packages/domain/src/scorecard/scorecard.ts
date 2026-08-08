@@ -249,6 +249,10 @@ export interface ScorecardDiff {
   // Case-VERDICT transitions over shared (case, trial) pairs — the regression unit a gate decides in.
   // Same unit as diffTrials' per-case rates, so trials=1 and trials>1 gate on the same claim.
   caseTransitions: CaseTransition[];
+  // Present when a side's policy was passed as "unresolvable": that side's verdicts cannot be re-derived, so
+  // NO transitions were computed (`caseTransitions` is empty) — unknown policy means unknown verdict, and an
+  // empty list plus this marker is a different claim from "no case moved".
+  transitionsUnavailable?: "baseline" | "candidate" | "both";
   // Per-metric measurement coverage of each side — how many outcome-bearing rows actually carried a
   // measured score for the metric. The scorecard-level metric sets in `missing` cannot see a metric that
   // survives on ONE row; a coverage drop between the sides downgrades comparability to partial.
@@ -366,7 +370,14 @@ function caseTransitions(
 export function diffScorecards(
   baseline: Scorecard,
   candidate: Scorecard,
-  opts: { policy?: VerdictPolicy; baselinePolicy?: VerdictPolicy; candidatePolicy?: VerdictPolicy } = {},
+  opts: {
+    policy?: VerdictPolicy;
+    // The policy that side's verdicts were HISTORICALLY judged under. Omitted = compare both sides under
+    // `policy` (the deliberate one-ladder mode for never-stamped pairs). "unresolvable" = the side HAS a
+    // stamp that could not be restored — passed explicitly so it can never fall through to a re-judgment.
+    baselinePolicy?: VerdictPolicy | "unresolvable";
+    candidatePolicy?: VerdictPolicy | "unresolvable";
+  } = {},
 ): ScorecardDiff {
   const policy = opts.policy ?? DEFAULT_VERDICT_POLICY;
   const b = scoreMap(baseline);
@@ -390,12 +401,21 @@ export function diffScorecards(
       }
     }
   }
-  const transitions = caseTransitions(
-    baseline,
-    candidate,
-    opts.baselinePolicy ?? policy,
-    opts.candidatePolicy ?? policy,
-  );
+  // Unknown policy ⇒ unknown verdict. A side passed as "unresolvable" gets NO transitions — the pre-fix `??`
+  // fallback silently re-judged that side under the other side's (or the default) ladder, minting "broke"
+  // rows the batch never produced, and those numbers leaked into persisted gate evidence.
+  const bp = opts.baselinePolicy ?? policy;
+  const cp = opts.candidatePolicy ?? policy;
+  const transitionsUnavailable =
+    bp === "unresolvable"
+      ? cp === "unresolvable"
+        ? ("both" as const)
+        : ("baseline" as const)
+      : cp === "unresolvable"
+        ? ("candidate" as const)
+        : undefined;
+  const transitions =
+    bp === "unresolvable" || cp === "unresolvable" ? [] : caseTransitions(baseline, candidate, bp, cp);
   const bCases = new Set(baseline.results.map((r) => r.caseId));
   const cCases = new Set(candidate.results.map((r) => r.caseId));
   const sumB = summarizeScorecard(baseline);
@@ -453,6 +473,7 @@ export function diffScorecards(
     regressions,
     improvements,
     caseTransitions: transitions,
+    ...(transitionsUnavailable !== undefined ? { transitionsUnavailable } : {}),
     metricCoverage: coverage,
     missing,
     incomparable,

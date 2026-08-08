@@ -73,6 +73,12 @@ export const ScorecardDiffResponseSchema = z.object({
     .describe(
       "Case-verdict transitions over shared (case, trial) pairs, each side judged under its own stamped policy — the unit release gates decide in (same unit as the trials block)",
     ),
+  transitionsUnavailable: z
+    .enum(["baseline", "candidate", "both"])
+    .optional()
+    .describe(
+      "Present when a side's stamped policy could not be restored: NO transitions were computed (unknown policy means unknown verdict) — an empty caseTransitions plus this marker is a different claim from 'no case moved'",
+    ),
   metricCoverage: z
     .array(
       z.object({

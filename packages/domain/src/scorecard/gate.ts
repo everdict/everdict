@@ -43,13 +43,6 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // When trials rode along, the Fisher-gated trial diff is the authoritative regression signal — raw
   // last-trial pass transitions are noise on a trial run (the diffTrials contract).
   const trialsGated = diff.trials !== undefined;
-  // The regression unit is the CASE VERDICT — one case, one transition, judged by the authority ladder.
-  // Metric-level pass flips (diff.regressions) are diagnosis: a diagnostic judge flip on a case whose
-  // ground truth still passes is not a case that "flipped pass → fail", and one case losing three metrics
-  // is one regression, not three. Same unit as the trials path, so trials=1 and trials>1 gate identically.
-  const brokeCases = diff.caseTransitions.filter((t) => t.change === "broke");
-  const fixedCases = diff.caseTransitions.filter((t) => t.change === "fixed");
-  const regressions = trialsGated && diff.trials ? diff.trials.regressions.length : brokeCases.length;
   // Cases the CANDIDATE never ran, against the baseline's own case count: "how much of what we compared
   // against did this candidate actually cover?". A candidate that ADDED cases lost no coverage, so extra
   // candidate-only cases are counted in missingCases but never inflate this fraction.
@@ -58,26 +51,20 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // The WORSE of the two sides: a comparison is only as measured as its weaker half — a baseline made of
   // placeholders makes "no regression" meaningless just as surely as a hollow candidate does.
   const unmeasuredFraction = worstUnmeasuredFraction(diff.coverage);
-  // Product judgment, computed before any statistics can weigh in on it.
-  const critical = criticalReasons(diff);
-  // Regressions the per-case test found and the BH correction then withdrew. Counted only when a correction
-  // actually ran — absence says "no correction", which is not the same claim as "nothing was suppressed".
-  const suppressedByFdr =
-    trialsGated && diff.trials?.fdrAlpha !== undefined
-      ? diff.trials.cases.filter((c) => c.fdrSuppressed === true).length
-      : undefined;
-  const evidence: GateEvaluation["evidence"] = {
+  // The STRUCTURAL half of the evidence — what was and wasn't compared. Computable regardless of whether the
+  // verdicts themselves can be trusted, which is why the refusal paths below may carry it.
+  const structural = {
     comparability: diff.comparability,
-    regressions,
-    improvements: trialsGated && diff.trials ? diff.trials.improvements.length : fixedCases.length,
     missingCases: diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
     trialsGated,
     ...(missingFraction !== undefined ? { missingFraction } : {}),
     ...(unmeasuredFraction !== undefined ? { unmeasuredFraction } : {}),
-    ...(diff.criticalCases !== undefined ? { criticalFailures: critical.length } : {}),
-    ...(suppressedByFdr !== undefined ? { suppressedByFdr } : {}),
   };
 
+  // ── The refusals come FIRST, before any verdict-derived number exists ──
+  // Unknown policy means unknown verdict: a not_comparable decision must not carry regression counts — the
+  // pre-fix order computed them first and the refusal then SPREAD them into persisted gate evidence and the
+  // decided-fact message ("regressions: 3, decision: not_comparable"), numbers nobody had the right to derive.
   // An unrestorable stamp refuses BEFORE the comparability check rather than inside it: the caller forces
   // `none` on this too, but a gate that only refuses when someone else remembered to mark the diff is a gate
   // one forgotten line away from a false green light.
@@ -90,7 +77,7 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
       kind: "policy_unresolvable",
       detail: `the stamped verdict policy of the ${sides.join(" and ")} could not be restored — those verdicts cannot be re-derived, and re-judging them under today's ladder would decide this release on numbers the batch never produced`,
     });
-    return { decision: "not_comparable", reasons, evidence: { ...evidence, comparability: "none" } };
+    return { decision: "not_comparable", reasons, evidence: { ...structural, comparability: "none" } };
   }
 
   if (diff.comparability === "none") {
@@ -105,8 +92,31 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
         detail: "no shared cases or metrics — there is nothing this comparison can claim",
       });
     }
-    return { decision: "not_comparable", reasons, evidence };
+    return { decision: "not_comparable", reasons, evidence: structural };
   }
+
+  // The regression unit is the CASE VERDICT — one case, one transition, judged by the authority ladder.
+  // Metric-level pass flips (diff.regressions) are diagnosis: a diagnostic judge flip on a case whose
+  // ground truth still passes is not a case that "flipped pass → fail", and one case losing three metrics
+  // is one regression, not three. Same unit as the trials path, so trials=1 and trials>1 gate identically.
+  const brokeCases = diff.caseTransitions.filter((t) => t.change === "broke");
+  const fixedCases = diff.caseTransitions.filter((t) => t.change === "fixed");
+  const regressions = trialsGated && diff.trials ? diff.trials.regressions.length : brokeCases.length;
+  // Product judgment, computed before any statistics can weigh in on it.
+  const critical = criticalReasons(diff);
+  // Regressions the per-case test found and the BH correction then withdrew. Counted only when a correction
+  // actually ran — absence says "no correction", which is not the same claim as "nothing was suppressed".
+  const suppressedByFdr =
+    trialsGated && diff.trials?.fdrAlpha !== undefined
+      ? diff.trials.cases.filter((c) => c.fdrSuppressed === true).length
+      : undefined;
+  const evidence: GateEvaluation["evidence"] = {
+    ...structural,
+    regressions,
+    improvements: trialsGated && diff.trials ? diff.trials.improvements.length : fixedCases.length,
+    ...(diff.criticalCases !== undefined ? { criticalFailures: critical.length } : {}),
+    ...(suppressedByFdr !== undefined ? { suppressedByFdr } : {}),
+  };
 
   // ── Missingness, decided BEFORE the arithmetic ──
   // `partial` means the comparison held only over part of what was asked: cases the candidate never ran,

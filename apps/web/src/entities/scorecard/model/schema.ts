@@ -385,6 +385,9 @@ export const scorecardDiffSchema = z.object({
       change: z.enum(['broke', 'fixed', 'same', 'unmeasured']),
     })
   ),
+  // A side's stamped policy could not be restored → NO transitions were computed (unknown policy means
+  // unknown verdict) — an empty caseTransitions with this marker is a different claim from "no case moved".
+  transitionsUnavailable: z.enum(['baseline', 'candidate', 'both']).optional(),
   // Per-metric measurement coverage of each side — measured rows / outcome-bearing rows. A coverage drop
   // (rows a grader silently never emitted) downgrades comparability to partial.
   metricCoverage: z.array(
