@@ -1061,4 +1061,32 @@ describe("Scheduler — hard tenant quota via the atomic admission permit", () =
     expect(b.dispatchedIds).toHaveLength(1);
     expect(tryAdmitSpy).not.toHaveBeenCalled();
   });
+
+  it("one runtime's probe failure stops one runtime — the rest of the fleet keeps draining (H7)", async () => {
+    // Regression: a tenant-registered runtime whose capacity probe throws (revoked K8s token, kubectl
+    // missing on its lane) rejected the whole probe Promise.all — the drain died and EVERY backend's queue
+    // stalled behind one bad registration. The failed backend is now simply absent from the capacity
+    // snapshot: its own pinned job stays queued (fail-closed for that runtime), everything else places.
+    class DeadProbeBackend extends ControlledBackend {
+      override async capacity(): Promise<never> {
+        throw new Error("Unauthorized: the cluster token was revoked");
+      }
+    }
+    const dead = new DeadProbeBackend("dead", 5);
+    const alive = new ControlledBackend("alive", 5);
+    const sched = new Scheduler(new BackendRegistry().register("dead", dead).register("alive", alive));
+
+    const pinnedToAlive = sched.dispatch(job("alive"));
+    const pinnedToDead = sched.dispatch(job("dead"));
+    void pinnedToDead.catch(() => {}); // stays queued in this test — never settled, never unhandled
+    await flush();
+
+    expect(alive.dispatchedIds).toHaveLength(1); // the healthy runtime drained normally
+    expect(dead.dispatchedIds).toHaveLength(0); // nothing placed on the unprobeable runtime
+    expect(sched.stats().queued).toBe(1); // its job waits for the next pump instead of killing this one
+
+    alive.releaseAll();
+    await flush();
+    await expect(pinnedToAlive).resolves.toMatchObject({ harness: "alive" });
+  });
 });

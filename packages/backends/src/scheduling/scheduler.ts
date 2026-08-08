@@ -332,11 +332,20 @@ export class Scheduler {
   // Probe every backend's capacity once — the ONLY cluster round-trip in a pump. Nomad/K8s capacity() is a live HTTP
   // probe, so it must not run per placement: external usage doesn't change within a single drain, and the scheduler's
   // own placements are tracked locally in inFlight (see freeSlotsFrom). Probing per round was O(rounds) probes/pump.
+  // Per-backend ISOLATION (arch-review 6, H7): one runtime's probe failure stops ONE runtime, not the fleet.
+  // A tenant-registered K8s runtime with a revoked token (or kubectl missing on its lane) used to reject the
+  // whole Promise.all, killing the drain — every OTHER backend's queue stalled behind one bad registration.
+  // A failed probe now leaves that backend absent from the caps map: no capacity known → nothing placed on it
+  // this pump (fail-closed for the one runtime; its jobs stay queued), everything else drains normally.
   private async probeCapacities(): Promise<Map<string, BackendCapacity>> {
     const caps = new Map<string, BackendCapacity>();
     await Promise.all(
       this.registry.names().map(async (name) => {
-        caps.set(name, await this.registry.get(name).capacity());
+        try {
+          caps.set(name, await this.registry.get(name).capacity());
+        } catch {
+          // absent from the map = no slots this pump — the queue keeps the jobs, the next pump re-probes
+        }
       }),
     );
     return caps;
