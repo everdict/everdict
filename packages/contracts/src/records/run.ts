@@ -58,7 +58,13 @@ export type RunOrigin = z.infer<typeof RunOriginSchema>;
 // id, which is exactly why the names must not blur. See the naming note beside TaskEnvelopeSchema.
 export const RunEnvelopeSchema = z.object({
   id: z.string(),
+  // capUsd = the METERED realized-cost stop (O7: meter + headroom, never a reservation); capRuns = the HARD
+  // atomic fan-out cap (claim-first request admission, H6). Enforced in admitCausedWork.
   capUsd: z.number().nonnegative().optional(),
+  // RESERVED — DECLARED BUT NOT ENFORCED (H10): no admission path reads capTokens and no DTO can set it
+  // today. It stays in the schema as the named token-budget dimension so stamped envelopes stay forward-
+  // compatible, but a value here bounds NOTHING — do not present it as a limit until an enforcement point
+  // exists (usage metering already records tokens; the gate does not).
   capTokens: z.number().int().nonnegative().optional(),
   capRuns: z.number().int().nonnegative().optional(),
 });

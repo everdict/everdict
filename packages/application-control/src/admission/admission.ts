@@ -99,6 +99,9 @@ export async function admitCausedWork(
     );
   const root = envelope.id === causer.id ? causer : await deps.runStore.get(envelope.id);
   const caps = root?.envelope;
+  // capTokens is deliberately NOT in this predicate — it is a declared-but-unenforced reserved dimension
+  // (see RunEnvelopeSchema, H10): the gate reading it without a token meter at admission time would turn a
+  // reservation nobody tracks into a refusal nobody can explain.
   if (deps.envelopes && caps && (caps.capUsd !== undefined || caps.capRuns !== undefined)) {
     // A refusal is a state the workspace should SEE, not only an error the caller swallows: budget.exceeded
     // announces it on the log (subject = the delegating run whose envelope refused). Agent causers stamp the

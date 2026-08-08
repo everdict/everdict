@@ -181,6 +181,8 @@ export const runSchema = z.object({
     .object({
       id: z.string(),
       capUsd: z.number().optional(),
+      // RESERVED — declared but not enforced by the control plane (contracts RunEnvelopeSchema, H10):
+      // never render it as a limit; nothing bounds token spend today.
       capTokens: z.number().optional(),
       capRuns: z.number().optional(),
     })
