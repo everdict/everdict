@@ -187,6 +187,9 @@ export class ScorecardService {
     // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
     // headroom is checked here (402 past the cap, 429 past the depth guard, NEVER silently) before any
     // case exists; the children stamp the envelope at creation and settle real cost against it per case.
+    // The batch id is minted BEFORE the gate and doubles as the admission's request identity (H6) — a
+    // re-admission of this same submission is the same right, never a second charge against the envelope.
+    const batchId = this.newId();
     if (input.origin?.causedByRunId && this.deps.runStore) {
       const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
       await admitCausedWork(
@@ -199,6 +202,7 @@ export class ScorecardService {
         input.tenant,
         input.origin.causedByRunId,
         selectedCases.length * trialsForCount,
+        { requestId: `adm:scorecard:${batchId}` },
       );
     }
 
@@ -273,7 +277,7 @@ export class ScorecardService {
 
     // Record assembly is the domain's job (ScorecardBatch.newQueued) — the service only orchestrates.
     const record: ScorecardRecord = ScorecardBatch.newQueued({
-      id: this.newId(),
+      id: batchId,
       tenant: input.tenant,
       ...(input.kind ? { kind: input.kind } : {}),
       dataset: { id: dataset.id, version: dataset.version },

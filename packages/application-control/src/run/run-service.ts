@@ -295,6 +295,9 @@ export class RunService {
     if (target) await this.deps.preflightPlacement?.({ tenant: input.tenant, target, harness: input.harness });
     // P4 causal leg FIRST (§5.1 order): caused work draws from its causer's envelope (402 past the cap,
     // 429 past the depth guard) and is stamped with it; only then the tenant-level budget gate.
+    // The record id is minted BEFORE the gate and doubles as the admission's request identity (H6) — a
+    // re-admission of this same creation is the same right, never a second charge.
+    const runId = this.newId();
     const causedEnvelope = input.causedByRunId
       ? await admitCausedWork(
           {
@@ -306,6 +309,7 @@ export class RunService {
           input.tenant,
           input.causedByRunId,
           1,
+          { requestId: `adm:run:${runId}` },
         )
       : undefined;
     this.deps.budget?.admit(input.tenant); // PaymentRequiredError (402) when exceeded — no run created
@@ -318,7 +322,7 @@ export class RunService {
     // Record assembly is the domain's job (Run.newQueued) — the service only orchestrates. The persisted
     // (placement-injected) case body is boot recovery's re-dispatch basis (mig 0051).
     const record: RunRecord = Run.newQueued({
-      id: this.newId(),
+      id: runId,
       tenant: effective.tenant,
       harness: effective.harness,
       evalCase: effective.case,

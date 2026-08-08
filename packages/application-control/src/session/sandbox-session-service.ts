@@ -536,6 +536,9 @@ export class SandboxSessionService {
     // envelope and answers the depth / in-flight guards, then the tenant's own budget. A session that an
     // agent opens used to answer neither — an agent loop could hold sessions open spending against nobody.
     const causedByRunId = input.agent?.runId;
+    // The session record id is minted BEFORE the gate and doubles as the admission's request identity (H6)
+    // — a re-admission of this same session creation is the same right, never a second charge.
+    const sessionRunId = this.newId();
     const envelope = causedByRunId
       ? await admitCausedWork(
           {
@@ -547,6 +550,7 @@ export class SandboxSessionService {
           input.tenant,
           causedByRunId,
           1,
+          { requestId: `adm:session:${sessionRunId}` },
         )
       : undefined;
     this.deps.budget?.admit(input.tenant); // 402 past the tenant cap — before a container exists
@@ -627,7 +631,7 @@ export class SandboxSessionService {
       const conversation =
         delegation !== undefined || (resolved.playground !== undefined && input.harness?.conversation === true);
       const record = Run.newSandboxSession({
-        id: this.newId(),
+        id: sessionRunId,
         tenant: input.tenant,
         ...(causedByRunId !== undefined
           ? { origin: { cause: "member" as const, actor: input.createdBy, causedByRunId } }
@@ -774,6 +778,8 @@ export class SandboxSessionService {
       ...(this.deps.frontdoorMaxTotal !== undefined ? { maxTotal: this.deps.frontdoorMaxTotal } : {}),
     });
     const causedByRunId = input.agent?.runId;
+    // Same H6 discipline as the sandbox path: the record id IS the admission's request identity.
+    const id = this.newId();
     const envelope = causedByRunId
       ? await admitCausedWork(
           {
@@ -785,11 +791,11 @@ export class SandboxSessionService {
           input.tenant,
           causedByRunId,
           1,
+          { requestId: `adm:session:${id}` },
         )
       : undefined;
     this.deps.budget?.admit(input.tenant); // 402 past the tenant cap — before any topology work
     const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
-    const id = this.newId();
     const conversation = resolved.open(id);
     let booted: { frontDoorBase: string; cdpBase?: string };
     try {

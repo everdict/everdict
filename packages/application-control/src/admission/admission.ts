@@ -43,8 +43,10 @@ export async function admitCausedWork(
   causedByRunId: string,
   countRuns: number,
   // The admission's identity for retry idempotency: a caller that retries after a lost response MUST reuse
-  // it, or the committed claim counts twice. Absent = a fresh identity per call (today's callers never
-  // retry an admission — a client-level resubmit is a NEW ask); threading a natural id is the upgrade path.
+  // it, or the committed claim counts twice. Every service caller threads the CREATED RECORD's id
+  // (`adm:<lane>:<recordId>`) — the natural name of the logical creation, so a re-admission of the same
+  // creation (resume, activity retry) is the same right. Absent = a fresh identity per call (exotic callers
+  // only; a client-level resubmit is a NEW ask).
   opts?: { requestId?: string },
 ): Promise<RunEnvelope | undefined> {
   const causer = await deps.runStore.get(causedByRunId);

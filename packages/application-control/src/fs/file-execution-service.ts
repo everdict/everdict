@@ -130,8 +130,11 @@ export class FileExecutionService {
     const command = `timeout ${timeoutSec} sh -c ${shq(plan.command)}`;
 
     // The gate, in §5.1 order: the causal leg first (caused work draws from its causer), then the tenant's
-    // own budget. Before any compute is taken — a refusal must cost nothing.
+    // own budget. Before any compute is taken — a refusal must cost nothing. The run id is minted BEFORE the
+    // gate and doubles as the admission's request identity (H6) — a re-admission of this same execution is
+    // the same right, never a second charge.
     const runs = this.deps.runs;
+    const execRunId = this.newId();
     const envelope =
       causedByRunId && runs
         ? await admitCausedWork(
@@ -144,6 +147,7 @@ export class FileExecutionService {
             tenant,
             causedByRunId,
             1,
+            { requestId: `adm:file-exec:${execRunId}` },
           )
         : undefined; // no ledger composed = no causer to verify against (the composition always wires one)
     this.deps.budget?.admit(tenant); // 402 past the tenant cap — no container, no row
@@ -154,6 +158,7 @@ export class FileExecutionService {
     const runId = await this.openRun(
       tenant,
       {
+        id: execRunId,
         path: input.path,
         image: plan.image,
         ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
@@ -206,13 +211,13 @@ export class FileExecutionService {
 
   private async openRun(
     tenant: string,
-    what: { path: string; image: string; runtime?: string; causedByRunId?: string; envelope?: RunEnvelope },
+    // `id` is minted by the caller BEFORE the admission gate — it doubles as the admission request identity.
+    what: { id: string; path: string; image: string; runtime?: string; causedByRunId?: string; envelope?: RunEnvelope },
     actor?: FsActor,
   ): Promise<string | undefined> {
     const runs = this.deps.runs;
     if (!runs) return undefined;
     const record = Run.newFileCommand({
-      id: this.newId(),
       tenant,
       ...what,
       createdBy: memberBehind(actor),
