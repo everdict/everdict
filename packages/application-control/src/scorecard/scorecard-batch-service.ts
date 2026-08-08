@@ -47,7 +47,7 @@ import {
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
-import type { ScoringService } from "../execution/scoring-service.js";
+import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
 import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
@@ -66,7 +66,7 @@ import {
   offloadAnalysis,
   offloadResults,
 } from "./scorecard-observability.js";
-import { embedHarnessSpec } from "./scorecard-plan.js";
+import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 
 // Batch-orchestration collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md
 // R2-b): the live batch lifecycle — the in-process track loop, the Batch-on-Temporal internals (plan/run/finalize),
@@ -243,12 +243,15 @@ export class ScorecardBatchService {
       const harnesses = this.deps.harnesses;
       // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
       // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
-      harnessSpec = await embedHarnessSpec(
-        () =>
-          pins && Object.keys(pins).length > 0
-            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
-        { id: rec.harness.id, version: rec.harness.version },
+      harnessSpec = pinHarnessSpecToClosure(
+        await embedHarnessSpec(
+          () =>
+            pins && Object.keys(pins).length > 0
+              ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+              : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+          { id: rec.harness.id, version: rec.harness.version },
+        ),
+        rec.manifest?.harness,
       );
     }
     const remaining = dataset.cases.length - seed.length;
@@ -268,6 +271,7 @@ export class ScorecardBatchService {
         seed,
         seedRunIds,
         retries: orch.retries,
+        ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
         ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
@@ -290,6 +294,7 @@ export class ScorecardBatchService {
       harnessVersion: string;
       harnessSpec?: HarnessSpec;
       judges: Array<{ id: string; version: string }>;
+      sealedJudges?: SealedJudgeClosure[]; // manifest.judges — the submit-time closure the per-case judging pins to (I6)
       judge?: JudgeRunConfig;
       retries: number;
       concurrency: number;
@@ -348,12 +353,17 @@ export class ScorecardBatchService {
       const harnesses = this.deps.harnesses;
       // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
       // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
-      harnessSpec = await embedHarnessSpec(
-        () =>
-          pins && Object.keys(pins).length > 0
-            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
-        { id: rec.harness.id, version: rec.harness.version },
+      // Re-resolution re-applies the manifest pin (I6): the registry document is identical bytes (immutable
+      // version), but its `{ref}` bindings must execute the SUBMIT-time resolution, not today's `latest`.
+      harnessSpec = pinHarnessSpecToClosure(
+        await embedHarnessSpec(
+          () =>
+            pins && Object.keys(pins).length > 0
+              ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+              : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+          { id: rec.harness.id, version: rec.harness.version },
+        ),
+        rec.manifest?.harness,
       );
     }
     const owner = rec.createdBy ?? rec.tenant;
@@ -373,6 +383,7 @@ export class ScorecardBatchService {
       harnessVersion: rec.harness.version,
       ...(harnessSpec ? { harnessSpec } : {}),
       judges: orch.judges,
+      ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
       ...(orch.judge ? { judge: orch.judge } : {}),
       retries: orch.retries,
       concurrency: orch.concurrency,
@@ -663,7 +674,16 @@ export class ScorecardBatchService {
       // execution plane sealed just above, so the judge plane joins an already-named trajectory).
       if (ctx.judges.length > 0) {
         await this.scoring
-          .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner, () => child?.id)
+          .applyJudges(
+            ctx.tenant,
+            ctx.dataset,
+            [result],
+            ctx.judges,
+            undefined,
+            ctx.owner,
+            () => child?.id,
+            ctx.sealedJudges,
+          )
           .catch(() => {});
       }
       if (runStore && child)
@@ -884,12 +904,17 @@ export class ScorecardBatchService {
       const harnesses = this.deps.harnesses;
       // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit); a
       // registered-but-invalid spec fails the retry with a clear 400 rather than re-dispatching a malformed job.
-      harnessSpec = await embedHarnessSpec(
-        () =>
-          pins && Object.keys(pins).length > 0
-            ? harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
-            : harnesses.get(input.tenant, src.harness.id, src.harness.version),
-        { id: src.harness.id, version: src.harness.version },
+      // The retry re-runs the SOURCE batch's experiment — its manifest closure pins the re-resolved spec's
+      // moving bindings, so a moved `latest` model cannot silently change what the retry executes (I6).
+      harnessSpec = pinHarnessSpecToClosure(
+        await embedHarnessSpec(
+          () =>
+            pins && Object.keys(pins).length > 0
+              ? harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
+              : harnesses.get(input.tenant, src.harness.id, src.harness.version),
+          { id: src.harness.id, version: src.harness.version },
+        ),
+        src.manifest?.harness,
       );
     }
 
@@ -948,7 +973,16 @@ export class ScorecardBatchService {
           healed += 1;
           if (orch.judges.length > 0)
             await this.scoring
-              .applyJudges(input.tenant, dataset, [attempt], orch.judges, src.runtime, input.submittedBy)
+              .applyJudges(
+                input.tenant,
+                dataset,
+                [attempt],
+                orch.judges,
+                src.runtime,
+                input.submittedBy,
+                undefined,
+                src.manifest?.judges,
+              )
               .catch(() => {});
         }
         recovered.push(attempt);
@@ -1013,6 +1047,7 @@ export class ScorecardBatchService {
         {
           seed: [...seed, ...recovered],
           retries: orch.retries,
+          ...(src.manifest?.judges ? { sealedJudges: src.manifest.judges } : {}),
           ...(boosted > 0 ? { memoryBoostMb } : {}),
           ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
           resumeNote,
@@ -1127,6 +1162,9 @@ export class ScorecardBatchService {
       // per-case verdicts and the settle-time derivations are decided by it, so what a member watches during
       // the batch is what the settled record stamps.
       verdictPolicy?: VerdictPolicy;
+      // The submit-time judge closure (manifest.judges) — the judge stream concretizes its moving refs to
+      // THIS resolution, so the seal is the pin instead of a second resolution's observation (I6).
+      sealedJudges?: SealedJudgeClosure[];
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1332,8 +1370,14 @@ export class ScorecardBatchService {
       // docs/architecture/streaming-case-pipeline.md
       // The child-run resolver lets each case's judge seal its own execution as a judge:<id> plane on that child —
       // caseToChild is filled at dispatch time, so it already holds the entry by the time onResult pushes the case.
-      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime, owner, (cid, trial) =>
-        caseToChild.get(childKey(cid, trial)),
+      const judgeStream = await this.scoring.createJudgeStream(
+        tenant,
+        dataset,
+        judges,
+        runtime,
+        owner,
+        (cid, trial) => caseToChild.get(childKey(cid, trial)),
+        opts.sealedJudges,
       );
       // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
       // (live visibility + whatever went out survives even if the batch dies midway). If not wired,

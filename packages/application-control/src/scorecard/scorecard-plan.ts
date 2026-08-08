@@ -127,6 +127,42 @@ export async function sealHarnessModelClosure(
   return {};
 }
 
+// Seal becomes PIN (I6): rewrite the spec's moving model bindings to the closure the manifest sealed, so
+// dispatch executes the submit-time resolution instead of re-resolving `latest` per case. Only a `{ref}`
+// binding with NO version pins (raw strings and explicit versions are already concrete); a seal that names a
+// different ref, or the honest "unresolved" sentinel, pins nothing — the binding stays floating and the
+// manifest keeps saying so. The returned spec preserves identity when nothing pins (no gratuitous copies).
+export function pinHarnessSpecToClosure(
+  spec: HarnessSpec | undefined,
+  closure: { model?: string; serviceModels?: Record<string, string> } | undefined,
+): HarnessSpec | undefined {
+  if (spec === undefined || closure === undefined) return spec;
+  if (spec.kind === "command") {
+    const pinned = pinModelBinding(spec.model, closure.model);
+    return pinned === spec.model ? spec : { ...spec, model: pinned };
+  }
+  if (spec.kind === "service") {
+    let changed = false;
+    const services = spec.services.map((s) => {
+      const pinned = pinModelBinding(s.model, closure.serviceModels?.[s.name]);
+      if (pinned === s.model) return s;
+      changed = true;
+      return { ...s, model: pinned };
+    });
+    return changed ? { ...spec, services } : spec;
+  }
+  return spec;
+}
+
+function pinModelBinding(binding: ModelBinding | undefined, sealed: string | undefined): ModelBinding | undefined {
+  if (binding === undefined || typeof binding === "string") return binding;
+  if (binding.version !== undefined) return binding;
+  if (sealed === undefined || sealed === "unresolved") return binding;
+  const at = sealed.lastIndexOf("@");
+  if (at <= 0 || sealed.slice(0, at) !== binding.ref) return binding;
+  return { ...binding, version: sealed.slice(at + 1) };
+}
+
 // Seal one versioned reference: an explicit pin is already concrete (registry versions are immutable — the
 // pin names one document forever); a "latest" ref resolves to the concrete version NOW, or seals the honest
 // "unresolved" sentinel when no registry (or no such entry) can answer.

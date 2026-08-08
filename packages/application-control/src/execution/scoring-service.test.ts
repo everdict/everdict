@@ -100,3 +100,146 @@ describe("ScoringService — a SELECTED judge that cannot be resolved stays visi
     expect(result.scores[0] !== undefined && "value" in result.scores[0]).toBe(false);
   });
 });
+
+describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (seal→pin, I6)", () => {
+  const modelRefJudge = (over: Partial<JudgeSpec> = {}): JudgeSpec =>
+    ({
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: { ref: "judge-model" },
+      rubric: { id: "review-rubric", version: "latest" },
+      inputs: ["trace"],
+      tags: [],
+      ...over,
+    }) as unknown as JudgeSpec;
+  const gradeable = (): CaseResult => ({
+    caseId: "c1",
+    harness: "h@1",
+    trace: [{ t: 0, kind: "message", role: "assistant", text: "done" }],
+    snapshot: { kind: "prompt", output: "" },
+    scores: [],
+  });
+  const registryOf = (spec: JudgeSpec) =>
+    ({ get: async () => spec }) as unknown as import("../ports/judge-registry.js").JudgeRegistry;
+
+  it("the sealed closure IS the pin — the registry moving mid-pass cannot change what judges", async () => {
+    // Given a pass whose closure sealed rubric@3 and judge-model@3, while the LIVE registries already answer 9
+    // (the exact Temporal drift: applyJudges re-resolved per case, so case 1 and case 100 judged differently).
+    const seen: JudgeSpec[] = [];
+    const service = new ScoringService({
+      judges: registryOf(modelRefJudge()),
+      judgeRunner: {
+        async run(spec) {
+          seen.push(spec);
+          return [{ graderId: "judge", metric: "judge:quality", value: 1 }];
+        },
+      },
+      rubrics: { get: async () => ({ id: "review-rubric", version: "9" }) as never },
+      resolveModelBinding: async () => "judge-model@9",
+    });
+    const sealed = [{ id: "quality", version: "latest", model: "judge-model@3", rubric: "review-rubric@3" }];
+
+    // When two per-case applyJudges calls run under the SAME sealed closure (the batch context carries it)
+    await service.applyJudges(
+      "acme",
+      { id: "d", version: "1", cases: [CASE], tags: [] },
+      [gradeable()],
+      [{ id: "quality", version: "latest" }],
+      undefined,
+      "bob",
+      undefined,
+      sealed,
+    );
+    await service.applyJudges(
+      "acme",
+      { id: "d", version: "1", cases: [CASE], tags: [] },
+      [gradeable()],
+      [{ id: "quality", version: "latest" }],
+      undefined,
+      "bob",
+      undefined,
+      sealed,
+    );
+
+    // Then every case judged under the SEALED resolution, not the moved registry's
+    expect(seen).toHaveLength(2);
+    for (const spec of seen) {
+      expect(spec).toMatchObject({
+        model: { ref: "judge-model", version: "3" },
+        rubric: { id: "review-rubric", version: "3" },
+      });
+    }
+  });
+
+  it("without a seal, a floating ref still pins ONCE per pass from the live registry", async () => {
+    const seen: JudgeSpec[] = [];
+    const service = new ScoringService({
+      judges: registryOf(modelRefJudge()),
+      judgeRunner: {
+        async run(spec) {
+          seen.push(spec);
+          return [{ graderId: "judge", metric: "judge:quality", value: 1 }];
+        },
+      },
+      rubrics: { get: async () => ({ id: "review-rubric", version: "7" }) as never },
+      resolveModelBinding: async (_t, b) => `${b.ref}@7`,
+    });
+    const stream = await service.createJudgeStream("acme", { id: "d", version: "1", cases: [CASE], tags: [] }, [
+      { id: "quality", version: "latest" },
+    ]);
+    await stream.push(gradeable());
+    await stream.settle();
+    expect(seen[0]).toMatchObject({
+      model: { ref: "judge-model", version: "7" },
+      rubric: { id: "review-rubric", version: "7" },
+    });
+  });
+
+  it("a harness judge's delegated agent pins to the sealed version; 'unresolved' seals pin nothing", async () => {
+    const harnessJudge = {
+      kind: "harness",
+      id: "agentic",
+      version: "1.0.0",
+      harness: { id: "reviewer", version: "latest" },
+      tags: [],
+    } as unknown as JudgeSpec;
+    const seen: JudgeSpec[] = [];
+    const service = new ScoringService({
+      judges: registryOf(harnessJudge),
+      judgeRunner: {
+        async run(spec) {
+          seen.push(spec);
+          return [{ graderId: "judge", metric: "judge:agentic", value: 1 }];
+        },
+      },
+    });
+    const sealedPinned = [{ id: "agentic", version: "latest", harness: "reviewer@2" }];
+    await service.applyJudges(
+      "acme",
+      { id: "d", version: "1", cases: [CASE], tags: [] },
+      [gradeable()],
+      [{ id: "agentic", version: "latest" }],
+      undefined,
+      "bob",
+      undefined,
+      sealedPinned,
+    );
+    expect(seen[0]).toMatchObject({ harness: { id: "reviewer", version: "2" } });
+
+    // The honest sentinel stays floating — never parsed into a fake version.
+    const sealedUnresolved = [{ id: "agentic", version: "latest", harness: "unresolved" }];
+    await service.applyJudges(
+      "acme",
+      { id: "d", version: "1", cases: [CASE], tags: [] },
+      [gradeable()],
+      [{ id: "agentic", version: "latest" }],
+      undefined,
+      "bob",
+      undefined,
+      sealedUnresolved,
+    );
+    expect(seen[1]).toMatchObject({ harness: { id: "reviewer", version: "latest" } });
+  });
+});

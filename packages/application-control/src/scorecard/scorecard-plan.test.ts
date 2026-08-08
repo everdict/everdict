@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
-import { sealHarnessModelClosure, sealJudgeClosure } from "./scorecard-plan.js";
+import { pinHarnessSpecToClosure, sealHarnessModelClosure, sealJudgeClosure } from "./scorecard-plan.js";
 
 // A CaseResult that failed with a trace error carrying `message`.
 function erroredCase(message: string): CaseResult {
@@ -203,5 +203,52 @@ describe("sealHarnessModelClosure — the treatment's own moving reference (H13)
     expect(await sealHarnessModelClosure({ resolveModelBinding }, "acme", spec)).toEqual({
       serviceModels: { api: "agent-model@5.0.0" },
     });
+  });
+});
+
+describe("pinHarnessSpecToClosure — the seal IS the pin (I6)", () => {
+  const command = (model?: { ref: string; version?: string } | string): HarnessSpec =>
+    ({
+      kind: "command",
+      id: "cli",
+      version: "1.0.0",
+      command: "run {{task}}",
+      ...(model !== undefined ? { model } : {}),
+      trace: { kind: "none" },
+      setup: [],
+      params: {},
+    }) as unknown as HarnessSpec;
+
+  it("rewrites a floating {ref} to the sealed resolution, so dispatch executes what the manifest recorded", () => {
+    const pinned = pinHarnessSpecToClosure(command({ ref: "agent-model" }), { model: "agent-model@3" });
+    expect(pinned && "model" in pinned ? pinned.model : undefined).toEqual({ ref: "agent-model", version: "3" });
+  });
+
+  it("pins nothing when already concrete, sealed 'unresolved', a foreign ref's seal, or no closure", () => {
+    const explicit = command({ ref: "agent-model", version: "1" });
+    expect(pinHarnessSpecToClosure(explicit, { model: "agent-model@3" })).toBe(explicit); // explicit pin wins
+    const raw = command("claude-opus-4-8");
+    expect(pinHarnessSpecToClosure(raw, { model: "whatever@3" })).toBe(raw); // raw strings are concrete
+    const floating = command({ ref: "agent-model" });
+    expect(pinHarnessSpecToClosure(floating, { model: "unresolved" })).toBe(floating); // honest sentinel
+    expect(pinHarnessSpecToClosure(floating, { model: "other-model@3" })).toBe(floating); // foreign seal
+    expect(pinHarnessSpecToClosure(floating, undefined)).toBe(floating); // legacy record, no manifest
+  });
+
+  it("pins a service harness per service by name, leaving unsealed services untouched", () => {
+    const spec = {
+      kind: "service",
+      id: "topo",
+      version: "1.0.0",
+      services: [
+        { name: "api", image: "img-a", model: { ref: "agent-model" } },
+        { name: "worker", image: "img-b", model: { ref: "worker-model" } },
+      ],
+    } as unknown as HarnessSpec;
+    const pinned = pinHarnessSpecToClosure(spec, { serviceModels: { api: "agent-model@3" } });
+    expect(pinned && pinned.kind === "service" ? pinned.services.map((s) => s.model) : []).toEqual([
+      { ref: "agent-model", version: "3" },
+      { ref: "worker-model" },
+    ]);
   });
 });

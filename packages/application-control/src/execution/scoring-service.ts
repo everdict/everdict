@@ -10,8 +10,10 @@ import type {
 } from "@everdict/contracts";
 import { judgeGradeable, modelBindingLabel } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
+import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { RubricRegistry } from "../ports/rubric-registry.js";
 
 // Scoring concern — pure evaluation over results (traces): apply judges · collect judge models.
 // Independent of execution: it scores the same whether the trace is a live batch's output or pulled externally via ingest.
@@ -22,6 +24,34 @@ export interface ScoringServiceDeps {
   judges?: JudgeRegistry; // judge resolution (owner/_shared fallback)
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / harness dispatch / skip)
   caseConcurrency?: number; // concurrency cap for case-axis judges (default 4) — protects against provider rate limits
+  // The pass-pinning resolvers (arch-review 7 P1, I6): a judge spec's moving refs — rubric {ref} at latest,
+  // a harness judge's delegated agent at latest, a model {ref} with no version — used to re-resolve PER
+  // CASE inside the runner, so `latest` moving mid-pass judged case 1 under rubric@5 and case 100 under
+  // rubric@6. resolveJudges now CONCRETIZES each spec once per pass (preferring the pass's SEALED closure
+  // when the caller carries one); the runner then resolves immutable pins. Absent = the ref stays floating
+  // for that facet (today's behavior, honest fallback).
+  rubrics?: Pick<RubricRegistry, "get">;
+  harnesses?: Pick<HarnessInstanceRegistry, "get">;
+  resolveModelBinding?: (tenant: string, binding: { ref: string; version?: string }) => Promise<string | undefined>;
+}
+
+// The sealed closure a pass carries (manifest.judges at submit; ScoringPass.judges on a re-score) — the
+// concretization SOURCE when present, so the seal IS the pin instead of a second resolution's observation.
+export interface SealedJudgeClosure {
+  id: string;
+  version: string;
+  model?: string;
+  rubric?: string;
+  harness?: string;
+}
+
+// "id@version" → its version half, when the id half matches the expected ref id. "unresolved"/raw strings
+// pin nothing.
+function sealedVersionOf(sealed: string | undefined, refId: string): string | undefined {
+  if (sealed === undefined || sealed === "unresolved") return undefined;
+  const at = sealed.lastIndexOf("@");
+  if (at <= 0) return undefined;
+  return sealed.slice(0, at) === refId ? sealed.slice(at + 1) : undefined;
 }
 
 // A result is gradeable by a judge only if it produced a normal eval outcome. `failure` is exactly the "did NOT produce
@@ -66,18 +96,75 @@ export class ScoringService {
   async resolveJudges(
     tenant: string,
     judges: Array<{ id: string; version: string }>,
+    sealed?: SealedJudgeClosure[],
   ): Promise<{ specs: JudgeSpec[]; unresolved: Array<{ id: string; version: string; message: string }> }> {
     if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return { specs: [], unresolved: [] };
     const specs: JudgeSpec[] = [];
     const unresolved: Array<{ id: string; version: string; message: string }> = [];
     for (const sel of judges) {
       try {
-        specs.push(await this.deps.judges.get(tenant, sel.id, sel.version || "latest"));
+        const raw = await this.deps.judges.get(tenant, sel.id, sel.version || "latest");
+        // Sealed entries are keyed by the SELECTION (id + selected version, "latest" included) — the same
+        // key sealJudgeClosure recorded — not by the resolved spec's concrete version.
+        const hint = sealed?.find((s) => s.id === sel.id && s.version === sel.version);
+        specs.push(await this.concretize(tenant, raw, hint));
       } catch (err) {
         unresolved.push({ ...sel, message: err instanceof Error ? err.message : String(err) });
       }
     }
     return { specs, unresolved };
+  }
+
+  // PIN the spec's moving refs once per pass (I6): the sealed closure wins (the seal IS the pin — the
+  // manifest/pass recorded what should execute); a floating ref with no seal resolves ONCE here; a facet
+  // nobody can resolve stays floating (the runner's per-case resolution remains the honest fallback).
+  // Registry versions are immutable, so a concrete pin makes every later resolution byte-stable.
+  private async concretize(
+    tenant: string,
+    spec: JudgeSpec,
+    sealed: SealedJudgeClosure | undefined,
+  ): Promise<JudgeSpec> {
+    let next = spec;
+    // rubric {ref} — inline text needs no pin (it IS the document).
+    if ("rubric" in next && next.rubric !== undefined && typeof next.rubric !== "string") {
+      const ref = next.rubric;
+      const version =
+        sealedVersionOf(sealed?.rubric, ref.id) ??
+        (ref.version && ref.version !== "latest"
+          ? ref.version
+          : await this.deps.rubrics
+              ?.get(tenant, ref.id, ref.version || "latest")
+              .then((r) => r.version)
+              .catch(() => undefined));
+      if (version !== undefined && version !== ref.version) next = { ...next, rubric: { ...ref, version } };
+    }
+    // delegated harness (harness judges).
+    if (next.kind === "harness") {
+      const ref = next.harness;
+      const version =
+        sealedVersionOf(sealed?.harness, ref.id) ??
+        (ref.version && ref.version !== "latest"
+          ? ref.version
+          : await this.deps.harnesses
+              ?.get(tenant, ref.id, ref.version || "latest")
+              .then((s) => s.version)
+              .catch(() => undefined));
+      if (version !== undefined && version !== ref.version) next = { ...next, harness: { ...ref, version } };
+    }
+    // model {ref} with no pinned version.
+    if ("model" in next && next.model !== undefined && typeof next.model !== "string") {
+      const ref = next.model;
+      const version =
+        sealedVersionOf(sealed?.model, ref.ref) ??
+        (ref.version !== undefined
+          ? ref.version
+          : await this.deps
+              .resolveModelBinding?.(tenant, ref)
+              .then((s) => sealedVersionOf(s, ref.ref))
+              .catch(() => undefined));
+      if (version !== undefined && version !== ref.version) next = { ...next, model: { ...ref, version } };
+    }
+    return next;
   }
 
   // Apply the resolved judges to one case in order — score order within a case is deterministic (selection order); parallelism is on the case axis only.
@@ -124,8 +211,10 @@ export class ScoringService {
     // the runner seals the judge's own execution as a judge:<id> plane on that run's trajectory. Absent/undefined
     // (ingest, recollect-before-children) = judges still run and are still metered; no evidence plane lands.
     runIdOf?: (caseId: string, trial?: number) => string | undefined,
+    // The pass's sealed closure (manifest.judges / ScoringPass.judges) — the concretization source (I6).
+    sealed?: SealedJudgeClosure[],
   ): Promise<JudgeStream> {
-    const { specs, unresolved } = await this.resolveJudges(tenant, judges);
+    const { specs, unresolved } = await this.resolveJudges(tenant, judges, sealed);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
     const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
     const limit = createLimiter(this.deps.caseConcurrency ?? 4);
@@ -186,8 +275,9 @@ export class ScoringService {
     runtime?: string,
     submittedBy?: string,
     runIdOf?: (caseId: string, trial?: number) => string | undefined,
+    sealed?: SealedJudgeClosure[],
   ): Promise<void> {
-    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy, runIdOf);
+    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy, runIdOf, sealed);
     for (const result of results) stream.push(result);
     await stream.settle();
   }

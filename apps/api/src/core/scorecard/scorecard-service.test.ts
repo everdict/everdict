@@ -6115,7 +6115,7 @@ describe("ScorecardService.gate — concurrent decisions both survive the ledger
     const service = svc(store);
     // Interleave: hold BOTH gates' appends until each has read the empty ledger, then release them together.
     const originalUpdate = store.update.bind(store);
-    let holdFirst: ((v: void) => void) | undefined;
+    let holdFirst: (() => void) | undefined;
     const firstHeld = new Promise<void>((r) => {
       holdFirst = r;
     });
@@ -6140,5 +6140,86 @@ describe("ScorecardService.gate — concurrent decisions both survive the ledger
     const final = await store.get("cand");
     const ids = (final?.gates ?? []).map((g) => g.id).sort();
     expect(ids).toEqual([d1.id, d2.id].sort()); // nothing eaten — both recorded
+  });
+});
+
+describe("Scoring identity — the revision ledger records the PASS-START seal (I6)", () => {
+  it("a judge's model ref moving mid-pass rewrites neither the judged spec nor the ledger's closure", async () => {
+    // Given a judge whose model is a floating {ref} — sealed at pass start as judge-model@1.0.0
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: { ref: "judge-model" },
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    } as unknown as JudgeSpec);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let latest = "1.0.0";
+    let release: () => void = () => {};
+    const judgeGate = new Promise<void>((r) => {
+      release = r;
+    });
+    const judgedSpecs: JudgeSpec[] = [];
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job) {
+          return {
+            caseId: job.evalCase.id,
+            harness: `${job.harness.id}@${job.harness.version}`,
+            trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }],
+            snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+            scores: [],
+          };
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: {
+        run: async (spec) => {
+          await judgeGate; // hold judging until the registry has MOVED — the drift window under test
+          judgedSpecs.push(spec);
+          return [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }];
+        },
+      },
+      resolveModelBinding: async (_tenant, binding) => `${binding.ref}@${latest}`,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+    });
+    await waitTerminal(store, record.id);
+
+    // When the pass starts (the marker seals @1.0.0) and the ref moves BEFORE any case is judged
+    await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
+    latest = "2.0.0";
+    release();
+    const scored = await (async () => {
+      for (let i = 0; i < 200; i++) {
+        const rec = await store.get(record.id);
+        // The experiment's own settle already appended the INITIAL revision — wait for the PASS's rescore.
+        if (rec?.scoring?.some((rev) => rev.kind === "rescore")) return rec;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error("scoring did not settle");
+    })();
+
+    // Then the case judged under the SEALED resolution — not the moved registry's —
+    expect(judgedSpecs[0] && "model" in judgedSpecs[0] ? judgedSpecs[0].model : undefined).toEqual({
+      ref: "judge-model",
+      version: "1.0.0",
+    });
+    // …and the ledger's revision records the pass-start closure, not a finalize-time re-observation.
+    expect(scored.scoring?.at(-1)?.judges?.[0]).toMatchObject({ id: "quality", model: "judge-model@1.0.0" });
+    // The pass settled: the marker cleared with the same write.
+    expect(scored.scoringPass ?? undefined).toBeUndefined();
   });
 });

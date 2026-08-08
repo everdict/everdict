@@ -48,7 +48,13 @@ import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
-import { embedHarnessSpec, sealHarnessModelClosure, sealJudgeClosure, sealedModelIdentity } from "./scorecard-plan.js";
+import {
+  embedHarnessSpec,
+  pinHarnessSpecToClosure,
+  sealHarnessModelClosure,
+  sealJudgeClosure,
+  sealedModelIdentity,
+} from "./scorecard-plan.js";
 import type {
   IngestScorecardInput,
   PullIngestInput,
@@ -98,6 +104,15 @@ export class ScorecardService {
     const scoring = new ScoringService({
       ...(deps.judges ? { judges: deps.judges } : {}),
       ...(deps.judgeRunner ? { judgeRunner: deps.judgeRunner } : {}),
+      // The pass-pinning resolvers (I6) — the spec's moving refs concretize ONCE per pass instead of per case.
+      ...(deps.rubrics ? { rubrics: deps.rubrics } : {}),
+      ...(deps.harnesses ? { harnesses: deps.harnesses } : {}),
+      ...(deps.resolveModelBinding
+        ? {
+            resolveModelBinding: (tenant, binding) =>
+              deps.resolveModelBinding?.(tenant, binding) ?? Promise.resolve(undefined),
+          }
+        : {}),
     });
     const getRecord = (id: string): Promise<ScorecardRecord | undefined> => this.get(id);
     this.batch = new ScorecardBatchService(deps, {
@@ -276,6 +291,10 @@ export class ScorecardService {
       input.submitterTeamId;
 
     // Record assembly is the domain's job (ScorecardBatch.newQueued) — the service only orchestrates.
+    // The harness model closure, computed ONCE: the manifest seals it AND the executed spec pins to it —
+    // the seal IS the pin (I6), not a submit-time observation dispatch re-resolves out from under.
+    const harnessModelClosure = await sealHarnessModelClosure(this.deps, input.tenant, harnessSpec);
+    const executedHarnessSpec = pinHarnessSpecToClosure(harnessSpec, harnessModelClosure);
     const record: ScorecardRecord = ScorecardBatch.newQueued({
       id: batchId,
       tenant: input.tenant,
@@ -321,7 +340,7 @@ export class ScorecardService {
           ...(harnessSpec ? { specDigest: contentDigest(harnessSpec) } : {}),
           // The model closure (H13) — the spec digest pins bytes that still contain an UNRESOLVED `{ref}`;
           // what that ref resolves to at dispatch is part of what executed, so it seals here like the judges'.
-          ...(await sealHarnessModelClosure(this.deps, input.tenant, harnessSpec)),
+          ...harnessModelClosure,
         },
         ...(await this.judgeManifest(input.tenant, pinnedJudges)),
         ...(judgeRunSeal ? { judgeRun: judgeRunSeal } : {}),
@@ -382,7 +401,7 @@ export class ScorecardService {
       dataset,
       input.harness.id,
       harnessVersion,
-      harnessSpec,
+      executedHarnessSpec,
       pinnedJudges,
       input.runtime,
       judge,
@@ -397,6 +416,8 @@ export class ScorecardService {
         // the case-completed fact an agent reacts to) is decided by the same document the settled record
         // stamps. Without it a composed policy's custom ground truth only appeared after the batch finished.
         ...(composed ? { verdictPolicy: composedPolicy } : {}),
+        // The submit-time judge closure — the stream's concretization source, so judging executes the seal (I6).
+        ...(record.manifest?.judges ? { sealedJudges: record.manifest.judges } : {}),
       },
     );
     return record;

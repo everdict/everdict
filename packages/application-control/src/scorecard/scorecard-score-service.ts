@@ -6,8 +6,8 @@ import {
   type EvalCase,
   NotFoundError,
   SCORING_PASS_STALE_MS,
-  type ScoringPass,
   type ScorecardRecord,
+  type ScoringPass,
 } from "@everdict/contracts";
 import {
   ScorecardBatch,
@@ -238,7 +238,18 @@ export class ScorecardScoreService {
     const single: CaseResult = { ...result, scores: stripJudgeScores(result.scores, judges) };
     const dataset = await this.effectiveDataset(record, [single]);
     const runIdOf = await this.childRunIdResolver(record);
-    await this.scoring.applyJudges(record.tenant, dataset, [single], judges, record.runtime, submittedBy, runIdOf);
+    // The pass marker's sealed closure is the concretization source — every scoreCase activity of one pass
+    // judges under the SAME resolution, even when `latest` moves between activities (I6).
+    await this.scoring.applyJudges(
+      record.tenant,
+      dataset,
+      [single],
+      judges,
+      record.runtime,
+      submittedBy,
+      runIdOf,
+      record.scoringPass?.judges,
+    );
     await this.writeBackScores(record, [single]);
     return { scored: true };
   }
@@ -268,7 +279,17 @@ export class ScorecardScoreService {
       }));
       const dataset = await this.effectiveDataset(record, results);
       const runIdOf = await this.childRunIdResolver(record);
-      await this.scoring.applyJudges(record.tenant, dataset, results, judges, record.runtime, submittedBy, runIdOf);
+      const fresh = await this.deps.store.get(record.id).catch(() => undefined);
+      await this.scoring.applyJudges(
+        record.tenant,
+        dataset,
+        results,
+        judges,
+        record.runtime,
+        submittedBy,
+        runIdOf,
+        (fresh ?? record).scoringPass?.judges,
+      );
       await this.writeBackScores(record, results);
       await this.aggregate(record, scorecard, results, judges, submittedBy);
     } catch (err) {
@@ -309,9 +330,11 @@ export class ScorecardScoreService {
     const summary = summarizeScorecard({ ...base, results });
     const fresh = await this.deps.store.get(record.id);
     if (!fresh) return;
-    // The selected judges' closure, sealed by the SAME function submit uses (scorecard-plan sealJudgeClosure)
-    // — two seals of "the judge closure" on one record must mean the same thing.
-    const sealed = await sealJudgeClosure(this.deps, record.tenant, judges);
+    // The revision's closure is the PASS-START seal (the marker score()/prepareScore wrote) — the very
+    // resolution the pass concretized its judges to, so the ledger records what EXECUTED, not what a
+    // finalize-time re-resolution happens to observe after `latest` moved. Sealing live is the fallback
+    // for a marker-less legacy pass only.
+    const sealed = fresh.scoringPass?.judges ?? (await sealJudgeClosure(this.deps, record.tenant, judges));
     const selectedIds = new Set(judges.map((j) => j.id));
     const mergedManifestJudges = [...(fresh.manifest?.judges ?? []).filter((j) => !selectedIds.has(j.id)), ...sealed];
     const mergedPins = [...(fresh.orchestration?.judges ?? []).filter((j) => !selectedIds.has(j.id)), ...judges];
