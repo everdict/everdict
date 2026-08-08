@@ -117,6 +117,22 @@ export class InMemoryRunStore implements RunStore {
     return counts;
   }
 
+  // HARD quota admission (AdmissionLedger.tryAdmit) — single-process, so the synchronous check-and-claim IS
+  // the atomicity the Pg twin buys with its counter-row update re-check. Same permit vocabulary either way.
+  private readonly admissionPermits = new Map<string, string>(); // permitId → tenant
+
+  async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+    let held = 0;
+    for (const t of this.admissionPermits.values()) if (t === tenant) held++;
+    if (held >= quota) return false;
+    this.admissionPermits.set(permitId, tenant);
+    return true;
+  }
+
+  async releaseAdmission(permitId: string): Promise<void> {
+    this.admissionPermits.delete(permitId);
+  }
+
   async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {
     const rows: LiveSessionRow[] = [];
     for (const r of this.runs.values()) {

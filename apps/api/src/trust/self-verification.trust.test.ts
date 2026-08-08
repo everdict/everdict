@@ -115,7 +115,7 @@ describeTrust(
       expect(record.role).toBe("verifier");
       const reread = await service.get(tenant, record.id);
       expect(reread.by?.id).toBe(INDEPENDENT);
-      expect(reread.confirmedFacts[0]?.refs[0]).toEqual({ type: "run", id: executedRunId });
+      expect(reread.confirmedFacts[0]?.refs[0]).toEqual({ type: "run", id: executedRunId, resolution: "verified" }); // the admission-time existence check is durable on the record
     });
 
     it("the executor may still file an EXECUTOR checkpoint about its own run — separation binds verdicts, not reports", async () => {

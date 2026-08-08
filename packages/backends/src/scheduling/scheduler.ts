@@ -51,6 +51,7 @@ export const binPackPolicy: PlacementPolicy = {
 
 interface QueueEntry {
   id: string; // stable snapshot handle (q<seq>) — what the queue page cancels/promotes by
+  permitId?: string; // the fleet-wide admission permit this entry holds (AdmissionLedger.tryAdmit) — released at settle
   job: CaseJob;
   enqueuedAt: number; // aging clock — a long-waiting batch entry is promoted to the urgent scan (starvation guard)
   promoted?: boolean; // operator "jump the line" — scanned with the urgent class and moved to the fair-order front
@@ -379,8 +380,8 @@ export class Scheduler {
         for (const { entry } of this.scanOrder(nowMs)) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;
-          // The quota is measured against the WHOLE control plane when a ledger is wired, against this process
-          // alone when it isn't (see FleetInFlight / SchedulerOptions.ledger).
+          // The snapshot check is the cheap PRE-FILTER (HOL avoidance — skip work that plainly has no
+          // headroom without a write). It is NOT the limit: the atomic permit below is (tryAdmit, TRUST-07).
           if (fleet.countFor(tenant, this.admission.tenantCountFor(tenant)) >= quota) continue; // tenant quota reached
 
           let names: string[];
@@ -418,6 +419,17 @@ export class Scheduler {
 
           const chosen = this.policy.choose(withHarnessRoom, entry.job);
           if (chosen === undefined) continue;
+
+          // HARD quota (TRUST-07): the snapshot above is a stale read by construction — two replicas seeing
+          // the same headroom in the same instant both pass it. The ATOMIC permit is the actual limit; a
+          // refusal leaves the entry queued for the next drain. Fail-CLOSED on a ledger error: a quota is a
+          // guarantee, and admitting on "could not check" is how a guarantee becomes a suggestion (the
+          // pre-filter's own fallback still covers the no-quota and no-ledger wirings).
+          if (Number.isFinite(quota) && this.opts.ledger?.tryAdmit) {
+            entry.permitId ??= `${entry.id}-${crypto.randomUUID()}`; // globally unique — q<seq> collides across replicas
+            const admitted = await this.opts.ledger.tryAdmit(tenant, entry.permitId, quota).catch(() => false);
+            if (!admitted) continue; // quota held elsewhere in the fleet — try the next job
+          }
 
           this.queue.remove(entry);
           // Leaving the queue → detach the queued-abort listener; from here cancellation rides the signal we hand
@@ -552,6 +564,8 @@ export class Scheduler {
       }, entry.reject)
       .finally(() => {
         this.admission.release(name, tenant, memNeedMb, cpuNeed, harnessKeyOf(entry.job));
+        // Return the fleet-wide permit (idempotent; a failed release self-heals via the ledger's TTL reap).
+        if (entry.permitId) void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
         void this.pump();
       });
   }

@@ -1,7 +1,7 @@
 import type { AdmissionLedger } from "@everdict/application-control";
 import { type CaseJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
 import { inMemoryBudget } from "@everdict/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Backend } from "../backend.js";
 import { BackendRegistry } from "../placement/registry.js";
 import { Scheduler, binPackPolicy } from "./scheduler.js";
@@ -890,5 +890,88 @@ describe("Scheduler — harness-keyed capacity (CaseCapacityAware)", () => {
     await flush();
     b.releaseAll();
     await Promise.all(all);
+  });
+});
+
+// C12 (TRUST-07 hardening): the ledger SNAPSHOT is a stale read by construction — two schedulers reading the
+// same headroom in the same instant both pass the pre-filter. The atomic permit (AdmissionLedger.tryAdmit)
+// is the actual limit; these tests drive two Scheduler instances over ONE shared permit ledger.
+describe("Scheduler — hard tenant quota via the atomic admission permit", () => {
+  class PermitLedger implements AdmissionLedger {
+    readonly permits = new Map<string, string>(); // permitId → tenant
+    // A deliberately STALE snapshot: always empty, so the pre-filter never trips and the permit alone gates —
+    // the same worst case as two replicas probing before either has dispatched.
+    async inFlightByTenant(): Promise<Record<string, number>> {
+      return {};
+    }
+    async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+      let held = 0;
+      for (const t of this.permits.values()) if (t === tenant) held++;
+      if (held >= quota) return false;
+      this.permits.set(permitId, tenant);
+      return true;
+    }
+    async releaseAdmission(permitId: string): Promise<void> {
+      this.permits.delete(permitId);
+    }
+  }
+
+  it("two schedulers over one permit ledger admit the quota ONCE — even against a stale snapshot", async () => {
+    const ledger = new PermitLedger();
+    const a = new ControlledBackend("a", 100);
+    const b = new ControlledBackend("b", 100);
+    const schedA = new Scheduler(new BackendRegistry().register("a", a), { tenantQuota: () => 3, ledger });
+    const schedB = new Scheduler(new BackendRegistry().register("b", b), { tenantQuota: () => 3, ledger });
+
+    // Both replicas dispatch a burst CONCURRENTLY — no ledger settling between them, the exact race the
+    // snapshot check cannot see.
+    const pa = [0, 1, 2, 3].map((i) => schedA.dispatch(tjob("acme", `A${i}`)));
+    const pb = [0, 1, 2, 3].map((i) => schedB.dispatch(tjob("acme", `B${i}`)));
+    await flush();
+    await flush();
+
+    expect(a.dispatchedIds.length + b.dispatchedIds.length).toBe(3); // the quota, fleet-wide, exactly once
+    expect(ledger.permits.size).toBe(3);
+
+    // Settling frees permits and the rest are admitted — the limit throttles, it never strands work.
+    a.releaseAll();
+    b.releaseAll();
+    await flush();
+    await flush();
+    a.releaseAll();
+    b.releaseAll();
+    await flush();
+    await flush();
+    a.releaseAll();
+    b.releaseAll();
+    await flush();
+    await Promise.all([...pa, ...pb]);
+    expect(a.dispatchedIds.length + b.dispatchedIds.length).toBe(8);
+    expect(ledger.permits.size).toBe(0); // every permit returned at settle
+  });
+
+  it('a ledger error is FAIL-CLOSED for quota\'d work — admitting on "could not check" is not a guarantee', async () => {
+    const failing: AdmissionLedger = {
+      inFlightByTenant: async () => ({}),
+      tryAdmit: () => Promise.reject(new Error("database unreachable")),
+      releaseAdmission: async () => {},
+    };
+    const b = new ControlledBackend("a", 100);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 1, ledger: failing });
+    void sched.dispatch(tjob("acme", "x"));
+    await flush();
+    expect(b.dispatchedIds).toHaveLength(0); // refused, still queued — never a silent over-admission
+    expect(sched.stats().queued).toBe(1);
+  });
+
+  it("an unquota'd tenant never pays the permit round-trip — the limit binds only where one was stated", async () => {
+    const ledger = new PermitLedger();
+    const tryAdmitSpy = vi.spyOn(ledger, "tryAdmit");
+    const b = new ControlledBackend("a", 100);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { ledger });
+    void sched.dispatch(tjob("acme", "x"));
+    await flush();
+    expect(b.dispatchedIds).toHaveLength(1);
+    expect(tryAdmitSpy).not.toHaveBeenCalled();
   });
 });

@@ -676,3 +676,61 @@ describe("PgCallbackStore", () => {
     expect(await new PgCallbackStore(client).claim("ghost")).toBeUndefined();
   });
 });
+
+// C12 (TRUST-07): the hard-quota permit. The RACE itself is certified against real Postgres
+// (fleet-admission.trust.test.ts); what the fake pins here is the STATEMENT SHAPE the guarantee rests on —
+// the claim must be one UPDATE whose predicate re-evaluates under the row lock, never a count-then-insert.
+describe("PgRunStore admission permits (AdmissionLedger.tryAdmit)", () => {
+  it("claims with a single predicate-guarded counter UPDATE and reports the claim count", async () => {
+    const { client, calls } = fakeClient((text) => {
+      if (text.includes("AS admitted")) return { rows: [{ admitted: 1 }] };
+      return { rows: [] };
+    });
+    const store = new PgRunStore(client);
+    const admitted = await store.tryAdmit("acme", "permit-1", 5);
+    expect(admitted).toBe(true);
+    const claim = calls.find((c) => c.text.includes("in_flight < $3"));
+    expect(claim).toBeDefined();
+    // The race-proof shape: the quota predicate lives INSIDE the UPDATE (EvalPlanQual re-check), and the
+    // permit row is written from the claim, so the two can never disagree.
+    expect(claim?.text).toMatch(/UPDATE everdict_tenant_admission_counters/);
+    expect(claim?.text).toMatch(/INSERT INTO everdict_tenant_admissions/);
+    expect(claim?.params).toEqual(["acme", "permit-1", 5]);
+    // Self-heal precedes the claim: stale permits are reaped and the counter decremented by exactly that.
+    const heal = calls.find((c) => c.text.includes("interval '6 hours'"));
+    expect(heal?.text).toMatch(/greatest\(0, in_flight - \(SELECT count\(\*\) FROM reaped\)\)/);
+  });
+
+  it("a refused claim answers false without writing a permit", async () => {
+    const { client } = fakeClient((text) => {
+      if (text.includes("AS admitted")) return { rows: [{ admitted: 0 }] };
+      return { rows: [] };
+    });
+    const store = new PgRunStore(client);
+    expect(await store.tryAdmit("acme", "permit-2", 0)).toBe(false);
+  });
+
+  it("release deletes the permit and decrements its tenant's counter — idempotent by construction", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const store = new PgRunStore(client);
+    await store.releaseAdmission("permit-1");
+    const release = calls[0];
+    expect(release?.text).toMatch(/DELETE FROM everdict_tenant_admissions WHERE permit_id = \$1/);
+    expect(release?.text).toMatch(/greatest\(0, c.in_flight - 1\)/);
+    expect(release?.params).toEqual(["permit-1"]);
+  });
+});
+
+describe("InMemoryRunStore admission permits — the single-process twin", () => {
+  it("admits up to the quota, refuses past it, and frees on release", async () => {
+    const store = new InMemoryRunStore();
+    expect(await store.tryAdmit("acme", "p1", 2)).toBe(true);
+    expect(await store.tryAdmit("acme", "p2", 2)).toBe(true);
+    expect(await store.tryAdmit("acme", "p3", 2)).toBe(false); // quota held
+    expect(await store.tryAdmit("other", "q1", 2)).toBe(true); // per-tenant
+    await store.releaseAdmission("p1");
+    await store.releaseAdmission("p1"); // double release is a no-op
+    expect(await store.tryAdmit("acme", "p4", 2)).toBe(true);
+    expect(await store.tryAdmit("acme", "p5", 2)).toBe(false);
+  });
+});

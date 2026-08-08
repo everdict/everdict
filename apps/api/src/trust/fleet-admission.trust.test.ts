@@ -97,13 +97,21 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
   let tenant: string;
   let runs: PgRunStore;
 
+  let raceTenant: string;
+
   beforeAll(async () => {
     pg = await openTrustPg();
     tenant = trustId("trust-fleet");
+    raceTenant = trustId("trust-race");
     runs = new PgRunStore(pg.client);
   });
   afterAll(async () => {
-    if (tenant) await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [tenant]);
+    for (const t of [tenant, raceTenant]) {
+      if (!t) continue;
+      await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [t]);
+      await pg.client.query("DELETE FROM everdict_tenant_admissions WHERE tenant = $1", [t]);
+      await pg.client.query("DELETE FROM everdict_tenant_admission_counters WHERE tenant = $1", [t]);
+    }
     await pg?.close();
   });
 
@@ -144,5 +152,53 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
     backendB.releaseAll();
     await Promise.all([...pa, ...pb]);
     expect((await runs.inFlightByTenant())[tenant]).toBeUndefined();
+  });
+
+  it("the SAME-INSTANT race cannot double-spend the quota — admission is an atomic permit, not a snapshot read", async () => {
+    // The scenario above waits for A's rows to land before B starts, so it certifies the eventually-consistent
+    // read and never the race: two replicas probing in the same instant both see the same headroom and — on
+    // the snapshot alone — both admit. The permit (PgRunStore.tryAdmit: a counter-row UPDATE whose
+    // `in_flight < quota` predicate re-evaluates on the LATEST row version under the row lock) is what makes
+    // the quota a hard invariant, and only a real Postgres can prove that shape: a fake re-implements the
+    // race away.
+    const backendA = new LedgerWritingBackend("a", 10, runs);
+    const backendB = new LedgerWritingBackend("b", 10, runs);
+    const opts = { tenantQuota: () => 3, ledger: runs };
+    const replicaA = new Scheduler(new BackendRegistry().register("a", backendA), opts);
+    const replicaB = new Scheduler(new BackendRegistry().register("b", backendB), opts);
+
+    // When: BOTH replicas burst concurrently — nothing has reached the ledger, so both snapshots read zero
+    // in flight and the pre-filter waves everything through. Only the permit stands between 3 and 6.
+    const pa = [0, 1, 2, 3].map((i) => replicaA.dispatch(job(raceTenant, `A${i}`)));
+    const pb = [0, 1, 2, 3].map((i) => replicaB.dispatch(job(raceTenant, `B${i}`)));
+    await until("the fleet to admit the quota", () => backendA.dispatched.length + backendB.dispatched.length >= 3);
+    await settle(); // and then keep NOT admitting — the assertion is about the refusal
+
+    // Then: exactly the quota is in flight, fleet-wide — not once per replica.
+    expect(backendA.dispatched.length + backendB.dispatched.length).toBe(3);
+
+    // And the limit throttles rather than strands: settling returns permits and the rest are admitted.
+    for (let round = 0; round < 8; round++) {
+      backendA.releaseAll();
+      backendB.releaseAll();
+      replicaA.poke();
+      replicaB.poke();
+      if (backendA.dispatched.length + backendB.dispatched.length >= 8) break;
+      await settle();
+    }
+    backendA.releaseAll();
+    backendB.releaseAll();
+    await Promise.all([...pa, ...pb]);
+    expect(backendA.dispatched.length + backendB.dispatched.length).toBe(8);
+    // Every permit returned — the counter holds no residue for the next batch to inherit. The release rides
+    // the settle asynchronously (fire-and-forget, self-healed by the TTL reap if lost), so wait on the row.
+    const counterOf = async (): Promise<number> => {
+      const res = await pg.client.query<{ in_flight: number }>(
+        "SELECT in_flight FROM everdict_tenant_admission_counters WHERE tenant = $1",
+        [raceTenant],
+      );
+      return Number(res.rows[0]?.in_flight ?? 0);
+    };
+    await until("every admission permit to be returned", async () => (await counterOf()) === 0);
   });
 });

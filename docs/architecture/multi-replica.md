@@ -45,10 +45,20 @@ that decides whether it may start would deadlock a workspace sitting at its cap)
 legacy row with no `kind` is an eval run), and task-shaped (a held-open session is bounded by the session
 pool's own cap — counting worlds here would let three open sandboxes block a workspace's evals).
 
-The read is **best-effort**: a ledger that cannot answer falls back to this replica's own counts, because a
-scheduler that refuses to place anything while the database blips is a worse outage than a quota that is
-momentarily per-replica again. The quota is therefore eventually consistent — it removes the systematic N×
-multiplication, not every race between two replicas admitting in the same instant.
+The snapshot read is the cheap **pre-filter** (HOL avoidance — skip work that plainly has no headroom
+without paying a write), and best-effort: a ledger that cannot answer falls back to this replica's own
+counts for the pre-filter. **The limit itself is the atomic permit** (`AdmissionLedger.tryAdmit`, mig 0139):
+before committing a quota'd job to dispatch, the scheduler claims one slot on the tenant's counter row —
+one `UPDATE … SET in_flight = in_flight + 1 WHERE tenant = $1 AND in_flight < $quota`, whose predicate
+re-evaluates on the LATEST row version under the row lock (READ COMMITTED's update re-check; a count-then-
+insert, with or without an advisory lock, keeps its statement-start snapshot after unblocking and races).
+Two replicas admitting in the same instant therefore serialize on the row, and the quota holds fleet-wide
+**at every instant, not eventually** (TRUST-07 certifies the simultaneous race against real Postgres). Each
+admission also writes a job-keyed permit row, released at settle (idempotent); a replica that dies between
+admit and release leaks its permit for at most the stale-permit TTL (6h — reaped, counter-decremented, on
+later admissions), which **throttles** the tenant briefly and never inflates the quota. A permit-claim
+ERROR is fail-closed for quota'd work — the job stays queued for the next drain — because admitting on
+"could not check" is how a guarantee becomes a suggestion; unquota'd tenants never touch the permit path.
 
 ### Leadership (S2)
 

@@ -297,6 +297,68 @@ export class PgRunStore implements RunStore {
     return counts;
   }
 
+  // ── HARD quota admission (AdmissionLedger.tryAdmit — TRUST-07, mig 0139) ──
+  // The claim is ONE UPDATE on the tenant's counter row: under READ COMMITTED a concurrent claim waits on
+  // the row lock and then RE-EVALUATES `in_flight < quota` on the LATEST row version (the update re-check),
+  // which is the one single-statement shape that closes the same-instant double-admit window. (A count-then-
+  // insert — with or without an advisory lock — keeps its statement-start snapshot after unblocking, so two
+  // replicas counting the same headroom both insert; that race is exactly what this replaces.)
+  // A permit older than this is a replica that died between admit and release — reaped on later admissions,
+  // with the counter decremented by exactly what was reaped, so a leaked permit throttles its tenant for at
+  // most the TTL and never inflates the quota.
+  private static readonly ADMISSION_PERMIT_TTL = "6 hours";
+
+  async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+    // Ensure the counter row exists (idempotent), then self-heal any crash-leaked permits. Separate atomic
+    // statements: healing needs no serialization with the claim — a racing heal at worst frees slots a beat
+    // late, and the claim itself stays the single race-proof statement.
+    await this.client.query(
+      `INSERT INTO everdict_tenant_admission_counters (tenant, in_flight) VALUES ($1, 0)
+       ON CONFLICT (tenant) DO NOTHING`,
+      [tenant],
+    );
+    await this.client.query(
+      `WITH reaped AS (
+         DELETE FROM everdict_tenant_admissions
+          WHERE tenant = $1 AND created_at < now() - interval '${PgRunStore.ADMISSION_PERMIT_TTL}'
+          RETURNING 1
+       )
+       UPDATE everdict_tenant_admission_counters
+          SET in_flight = greatest(0, in_flight - (SELECT count(*) FROM reaped)), updated_at = now()
+        WHERE tenant = $1 AND (SELECT count(*) FROM reaped) > 0`,
+      [tenant],
+    );
+    const res = await this.client.query<{ admitted: string | number }>(
+      `WITH claimed AS (
+         UPDATE everdict_tenant_admission_counters
+            SET in_flight = in_flight + 1, updated_at = now()
+          WHERE tenant = $1 AND in_flight < $3
+          RETURNING tenant
+       ), permit AS (
+         INSERT INTO everdict_tenant_admissions (permit_id, tenant)
+         SELECT $2, $1 FROM claimed
+         ON CONFLICT (permit_id) DO NOTHING
+       )
+       SELECT (SELECT count(*) FROM claimed) AS admitted`,
+      [tenant, permitId, quota],
+    );
+    return Number(res.rows[0]?.admitted ?? 0) > 0;
+  }
+
+  // Idempotent by construction: a double release deletes no permit row, so it decrements nothing.
+  async releaseAdmission(permitId: string): Promise<void> {
+    await this.client.query(
+      `WITH removed AS (
+         DELETE FROM everdict_tenant_admissions WHERE permit_id = $1 RETURNING tenant
+       )
+       UPDATE everdict_tenant_admission_counters c
+          SET in_flight = greatest(0, c.in_flight - 1), updated_at = now()
+         FROM removed
+        WHERE c.tenant = removed.tenant`,
+      [permitId],
+    );
+  }
+
   // The session pool as the LEDGER knows it — every replica's held-open compute, not just this process's.
   // No time predicate here on purpose (see the port): the deadline is judged by the clock that wrote it.
   async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {

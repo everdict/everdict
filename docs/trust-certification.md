@@ -39,7 +39,7 @@ failure mode the suite exists to catch, so the runner is held to it too.
 | TRUST-02 | A candidate that ran fewer cases than the baseline is **`blocked_missing`**, never a pass | `apps/api/src/trust/release-gate.trust.test.ts` |
 | TRUST-03 | A stamped verdict policy that cannot be restored (or that disagrees with the baseline's) is **`not_comparable`**, and there is nothing to override | `apps/api/src/trust/release-gate.trust.test.ts` |
 | TRUST-04 | A grader that returns `NaN` produces an **invalid** score, aggregated nowhere | `packages/job-runner/src/grader-failure.trust.test.ts` |
-| TRUST-07 | A workspace quota is **fleet-wide**: two scheduler replicas over one run ledger hand it out once, not once each | `apps/api/src/trust/fleet-admission.trust.test.ts` |
+| TRUST-07 | A workspace quota is **fleet-wide AND race-proof**: two scheduler replicas hand it out once — including when both burst in the same instant against a stale snapshot (the atomic admission permit, mig 0139) | `apps/api/src/trust/fleet-admission.trust.test.ts` |
 | TRUST-08 | Exactly one leader per role; a clean shutdown hands the lease back at once, a crash is replaced only when the lease expires | `apps/api/src/trust/leader-election.trust.test.ts` |
 | TRUST-09 | Boot recovery reclaims a **dead** replica's batch and leaves a live one's alone; an unreadable heartbeat set reclaims nothing | `apps/api/src/trust/replica-recovery.trust.test.ts` |
 | TRUST-10 | Caused work draws from its delegator's envelope — an exhausted cap refuses (402), runaway depth refuses (429), a forged causer refuses (400) | `apps/api/src/trust/envelope-budget.trust.test.ts` |
