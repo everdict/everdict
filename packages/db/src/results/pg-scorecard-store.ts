@@ -323,6 +323,16 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`origin->>'scheduleId' = $${i++}`);
       vals.push(filter.scheduleId);
     }
+    if (filter?.productId) {
+      // the product timeline's trend read (expression-indexed, mig 0138) — the batches a product's version
+      // imports fanned out, optionally narrowed to one watch series.
+      conds.push(`origin->>'productId' = $${i++}`);
+      vals.push(filter.productId);
+    }
+    if (filter?.seriesKey) {
+      conds.push(`origin->>'seriesKey' = $${i++}`);
+      vals.push(filter.seriesKey);
+    }
     if (filter?.causedByRunId) {
       // the batches a run caused (§5.5 cascade-cancel walk) — jsonb field match on the persisted origin.
       conds.push(`origin->>'causedByRunId' = $${i++}`);

@@ -6,6 +6,8 @@ import {
   IssueService,
   KnowledgeEntryService,
   KnowledgeService,
+  ProductService,
+  ProductVersionSync,
   ProjectService,
   TaskService,
   TeamService,
@@ -110,7 +112,7 @@ import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-
 import { PooledBrowserProvisioner } from "./infrastructure/browser-session/pooled-browser-provisioner.js";
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
-import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
+import { githubRepoWriterFactory, githubVersionReaderFactory } from "./infrastructure/github/repo-writer.js";
 import { installProxyDispatcher } from "./infrastructure/http/proxy-dispatcher.js";
 import { probeMcpServer } from "./infrastructure/mcp/probe-mcp.js";
 import { buildServer } from "./server.js";
@@ -210,6 +212,9 @@ async function main(): Promise<void> {
     projectStore,
     initiativeStore,
     initiativeUpdateStore,
+    productStore,
+    releaseStore,
+    productVersionStore,
     browserProfileStore,
     skillStore,
     skillVersionStore,
@@ -884,6 +889,42 @@ async function main(): Promise<void> {
     updates: initiativeUpdateStore,
     events: platformEventService,
   });
+  // The product timeline (docs/architecture/product-timeline.md) — Product ⊃ Release over the imported
+  // version ledger. Series refs are validated against the registries at write time (a dangling id here would
+  // not fail loudly — it would fail every auto-run and read as "the product got worse"). The sync pulls
+  // GitHub releases/tags through the workspace App and fans genuinely new versions out into the watch
+  // series' scorecards, stamped with product/series/version provenance (the trend's x-axis key).
+  const productService = new ProductService({
+    store: productStore,
+    releases: releaseStore,
+    versions: productVersionStore,
+    issues: issueStore,
+    scorecards: scorecardStore,
+    capabilities: {
+      hasDataset: async (tenant, id) => (await datasetRegistry.versions(tenant, id)).length > 0,
+      hasHarness: async (tenant, id) => (await harnessInstanceRegistry.versions(tenant, id)).length > 0,
+      hasJudge: async (tenant, id) => (await judgeRegistry.versions(tenant, id)).length > 0,
+    },
+    events: platformEventService,
+  });
+  const productVersionSync = new ProductVersionSync({
+    products: productStore,
+    releases: releaseStore,
+    versions: productVersionStore,
+    tokens: githubAppService,
+    readers: githubVersionReaderFactory(),
+    submitSeriesRun: async (input) =>
+      scorecardService.submit({
+        tenant: input.tenant,
+        submittedBy: input.submittedBy,
+        dataset: { id: input.dataset.id, version: input.dataset.version ?? "latest" },
+        harness: { id: input.harness.id, version: input.harness.version ?? "latest" },
+        judges: input.judges.map((judge) => ({ id: judge.id, version: judge.version ?? "latest" })),
+        ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+        origin: input.origin,
+      }),
+    events: platformEventService,
+  });
   // The home screen's one read (docs/architecture/workspace-pulse.md) — how the workspace is doing, across every
   // axis at once. Composed from STORES rather than from the services above: the pulse only counts, and routing a
   // count through five peer services would be five services' worth of coupling for arithmetic none of them owns.
@@ -1204,6 +1245,8 @@ async function main(): Promise<void> {
     cycleService, // the team's iterations — /cycles
     projectService,
     initiativeService,
+    productService,
+    productVersionSync,
     workspacePulseService,
     subscriptionService,
     // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant

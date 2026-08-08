@@ -1,0 +1,189 @@
+import { ProductRecordSchema, ProductServiceVersionRecordSchema, ReleaseRecordSchema } from "@everdict/contracts";
+import {
+  ProductDetailResponseSchema,
+  ProductListResponseSchema,
+  ProductSyncResponseSchema,
+  ReleaseDetailResponseSchema,
+} from "@everdict/contracts/wire";
+import type { FastifySchema } from "fastify";
+import { z } from "zod";
+import { errorResponses, toJsonSchema } from "../openapi.js";
+import { CreateProductBodySchema } from "./request/create-product.js";
+import { CreateReleaseBodySchema, UpdateReleaseBodySchema } from "./request/create-release.js";
+import { SetReleaseStatusBodySchema } from "./request/set-release-status.js";
+import { UpdateProductBodySchema } from "./request/update-product.js";
+
+// OpenAPI descriptors for the product timeline (doc-only — never validates/serializes; see api/openapi.ts).
+// A Product is the released thing several services compose: its tracked services' GitHub releases/tags are
+// pulled into a version ledger, its watch series (dataset × harness × judges) are the trends its quality is
+// judged by, and a Release is a gated checkpoint on that axis. Authz reuses the issue pair (read =
+// issues:read, write = issues:write); delete additionally creator-or-admin. Facts product.created /
+// product.service_version_imported / release.created / release.status_changed feed the event log.
+export const productDocs: Record<
+  | "create"
+  | "list"
+  | "get"
+  | "listVersions"
+  | "update"
+  | "delete"
+  | "sync"
+  | "createRelease"
+  | "getRelease"
+  | "updateRelease"
+  | "setReleaseStatus"
+  | "deleteRelease",
+  FastifySchema
+> = {
+  create: {
+    summary: "Create a product on the timeline",
+    description:
+      "The released thing several services compose. `services` name the GitHub repositories whose " +
+      "releases/tags mark 'this component moved'; `series` declare the dataset × harness × judges trends the " +
+      "product is judged by (validated against the workspace's registries). Auto-eval is on by default: a " +
+      "genuinely new imported version submits one scorecard per watched series. Emits product.created. " +
+      "Requires issues:write.",
+    tags: ["product"],
+    body: toJsonSchema(CreateProductBodySchema),
+    response: {
+      201: { description: "The created product", ...toJsonSchema(ProductRecordSchema) },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  list: {
+    summary: "List the workspace's products",
+    description: "Every product, newest activity first. Requires issues:read.",
+    tags: ["product"],
+    response: {
+      200: { description: "The workspace's products", ...toJsonSchema(ProductListResponseSchema) },
+      ...errorResponses(401, 403),
+    },
+  },
+  get: {
+    summary: "Get one product with its releases and recent versions",
+    description:
+      "The record plus every release and the visible slice of the imported version ledger. The per-series " +
+      "trend is GET /products/:id/timeline (windowed). Requires issues:read.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: { description: "The product detail", ...toJsonSchema(ProductDetailResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  listVersions: {
+    summary: "List a product's imported service versions",
+    description:
+      "The version ledger, newest published first (the remote's own clock). Filter by service name. " +
+      "Requires issues:read.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    querystring: toJsonSchema(
+      z.object({ service: z.string().optional(), limit: z.coerce.number().int().positive().max(500).optional() }),
+    ),
+    response: {
+      200: { description: "The imported versions", ...toJsonSchema(z.array(ProductServiceVersionRecordSchema)) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  update: {
+    summary: "Edit a product",
+    description:
+      "Content editing — audit-trail history, no lifecycle facts. Lists replace what is there; a re-declared " +
+      "service keeps its sync watermark unless its repository/source/prefix changed (then the next sync is a " +
+      "fresh backfill). Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(UpdateProductBodySchema),
+    response: {
+      200: { description: "The updated product", ...toJsonSchema(ProductRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  delete: {
+    summary: "Delete a product",
+    description:
+      "Creator or workspace admin only. Its releases and version ledger cascade with it — they exist only " +
+      "under their product. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: { 204: { description: "Deleted", type: "null" }, ...errorResponses(401, 403, 404) },
+  },
+  sync: {
+    summary: "Pull the tracked services' releases/tags from GitHub now",
+    description:
+      "Everdict stays the client — no webhook; this is the timeline's refresh. Per-service soft-fail (an " +
+      "unreachable repository records its error and the rest proceed). The first sync of a service is a " +
+      "BACKFILL: it fills the timeline's past but emits nothing and runs nothing. After that, each genuinely " +
+      "new version emits product.service_version_imported and — when auto-eval is enabled — submits one " +
+      "scorecard per watched series (the active planned release's selection, else every series), stamped " +
+      "with product/series/version provenance. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: { description: "What the pull did, per service", ...toJsonSchema(ProductSyncResponseSchema) },
+      ...errorResponses(401, 403, 404, 502),
+    },
+  },
+  createRelease: {
+    summary: "Plan a release",
+    description:
+      "A checkpoint on the product's axis — a name, a target date, and which watch series it is judged by " +
+      "(absent = every series). It starts `planned`; shipping goes through POST /releases/:id/status, which " +
+      "is a gate. Emits release.created. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(CreateReleaseBodySchema),
+    response: {
+      201: { description: "The planned release", ...toJsonSchema(ReleaseRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  getRelease: {
+    summary: "Get one release with its readiness",
+    description:
+      "The record plus how ready it is: open issues linked to the release, and every watched series' latest " +
+      "scorecard against the baseline anchored at the previous released release. Unmeasured never reads as " +
+      "regressed. Requires issues:read.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: { description: "The release detail", ...toJsonSchema(ReleaseDetailResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  updateRelease: {
+    summary: "Edit a release",
+    description:
+      "Content editing — audit-trail history, no lifecycle facts. `seriesKeys: null` clears the selection " +
+      "back to every series. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(UpdateReleaseBodySchema),
+    response: {
+      200: { description: "The updated release", ...toJsonSchema(ReleaseRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  setReleaseStatus: {
+    summary: "Move a release between planned / released / cancelled",
+    description:
+      "Releasing is a GATE: it refuses (409, naming the counts and the series) while issues linked to the " +
+      "release are open or a watched series has regressed against the previous ship — unless `force: true`, " +
+      "which is recorded on the fact and in the history. A released release is history and cannot reopen. " +
+      "Emits release.status_changed. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(SetReleaseStatusBodySchema),
+    response: {
+      200: { description: "The moved release", ...toJsonSchema(ReleaseRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  deleteRelease: {
+    summary: "Delete a release",
+    description: "Creator or workspace admin only. Requires issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: { 204: { description: "Deleted", type: "null" }, ...errorResponses(401, 403, 404) },
+  },
+};

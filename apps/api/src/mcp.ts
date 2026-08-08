@@ -38,6 +38,7 @@ import { registerMemberTools } from "./api/member/member.mcp.js";
 import { registerModelTools } from "./api/model/model.mcp.js";
 import { registerNotificationTools } from "./api/notification/notification.mcp.js";
 import { registerDriverOpsTools } from "./api/ops/driver.mcp.js";
+import { registerProductTools } from "./api/product/product.mcp.js";
 import { registerProfileTools } from "./api/profile/profile.mcp.js";
 import { registerProjectTools } from "./api/project/project.mcp.js";
 import { registerProxyTools } from "./api/proxy/proxy.mcp.js";
@@ -110,6 +111,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerIssueGithubTools(server, ctx);
   registerProjectTools(server, ctx);
   registerInitiativeTools(server, ctx);
+  registerProductTools(server, ctx);
   registerSubscriptionTools(server, ctx);
   registerSecretTools(server, ctx);
   registerNotificationTools(server, ctx);

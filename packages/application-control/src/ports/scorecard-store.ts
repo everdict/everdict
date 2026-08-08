@@ -17,6 +17,10 @@ export interface ScorecardListFilter {
   visibleTeams?: string[];
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
   scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
+  // The product timeline's trend read (origin.productId / origin.seriesKey — docs/architecture/product-timeline.md):
+  // "this product's batches over time", optionally narrowed to one watch series. The stamp is the x-axis key.
+  productId?: string;
+  seriesKey?: string;
   // Cascade-cancel walk (§5.5): the batches a given run caused (origin.causedByRunId) — the kill switch's read.
   causedByRunId?: string;
   // Group kind (P1): "experiment" = only ungraded phase-1 groups; "scorecard" = only real scorecards (incl. every

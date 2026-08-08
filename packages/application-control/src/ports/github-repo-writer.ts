@@ -95,3 +95,37 @@ export interface GithubRepoWriter {
 export interface GithubRepoWriterFactory {
   for(token: string, host?: string): GithubRepoWriter;
 }
+
+// One repository release (GET /repos/{repo}/releases). `publishedAt` is absent on a draft — the product
+// timeline skips drafts, because "released" is exactly the claim a draft has not made yet.
+export interface GithubRelease {
+  tagName: string;
+  name?: string;
+  body?: string;
+  url: string; // html_url
+  draft: boolean;
+  prerelease: boolean;
+  publishedAt?: string;
+}
+
+// One repository tag (GET /repos/{repo}/tags) — name + the commit it points at. Tags carry no date of their
+// own; the commit's committer date is fetched separately, and only for tags the ledger does not know yet.
+export interface GithubTag {
+  name: string;
+  sha: string;
+}
+
+// The version half of the GitHub read surface, narrowed to what the product timeline's sync needs (the same
+// reasoning GithubRepositoryTokenSource gives: depend on the behaviour, not on the whole repo-ops port — and
+// a separate interface keeps every existing GithubRepoWriter fake compiling untouched).
+export interface GithubVersionReader {
+  listReleases(repository: string, opts: { perPage: number }): Promise<GithubRelease[]>;
+  listTags(repository: string, opts: { perPage: number }): Promise<GithubTag[]>;
+  // The commit's committer date (ISO) — the tag's stand-in for publishedAt. Undefined when the commit cannot
+  // be read (a force-pushed-away sha), which the sync maps to its own import time rather than failing the tag.
+  commitDate(repository: string, sha: string): Promise<string | undefined>;
+}
+
+export interface GithubVersionReaderFactory {
+  for(token: string, host?: string): GithubVersionReader;
+}

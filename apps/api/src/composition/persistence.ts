@@ -12,8 +12,11 @@ import type {
   InitiativeUpdateStore,
   IssueLabelStore,
   IssueStore,
+  ProductStore,
+  ProductVersionStore,
   ProjectStore,
   ProjectUpdateStore,
+  ReleaseStore,
   TeamStore,
   TrajectoryStore,
   WorkflowStateStore,
@@ -47,9 +50,12 @@ import {
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryPlatformEventStore,
+  InMemoryProductStore,
+  InMemoryProductVersionStore,
   InMemoryProjectStore,
   InMemoryProjectUpdateStore,
   InMemoryRecordingStore,
+  InMemoryReleaseStore,
   InMemoryRunStore,
   InMemoryRunnerJobStore,
   InMemoryRunnerStore,
@@ -96,9 +102,12 @@ import {
   PgNotificationStore,
   PgOAuthStateStore,
   PgPlatformEventStore,
+  PgProductStore,
+  PgProductVersionStore,
   PgProjectStore,
   PgProjectUpdateStore,
   PgRecordingStore,
+  PgReleaseStore,
   PgReplicaRegistry,
   PgRunStore,
   PgRunnerJobStore,
@@ -225,6 +234,10 @@ export interface Persistence {
   projectStore: ProjectStore;
   initiativeStore: InitiativeStore;
   initiativeUpdateStore: InitiativeUpdateStore; // the goal's own posted-update timeline (health + the sentence)
+  // The product timeline (docs/architecture/product-timeline.md) — Product ⊃ Release over the version ledger.
+  productStore: ProductStore;
+  releaseStore: ReleaseStore;
+  productVersionStore: ProductVersionStore;
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
   skillVersionStore: SkillVersionStore; // a skill's stamped, immutable versions — the line its working copy moves along
@@ -339,6 +352,9 @@ export async function makePersistence(): Promise<Persistence> {
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
       initiativeUpdateStore: new InMemoryInitiativeUpdateStore(),
+      productStore: new InMemoryProductStore(),
+      releaseStore: new InMemoryReleaseStore(),
+      productVersionStore: new InMemoryProductVersionStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       skillVersionStore: new InMemorySkillVersionStore(),
@@ -402,6 +418,9 @@ export async function makePersistence(): Promise<Persistence> {
     projectStore: new PgProjectStore(client),
     initiativeStore: new PgInitiativeStore(client),
     initiativeUpdateStore: new PgInitiativeUpdateStore(client),
+    productStore: new PgProductStore(client),
+    releaseStore: new PgReleaseStore(client),
+    productVersionStore: new PgProductVersionStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
     skillVersionStore: new PgSkillVersionStore(client),

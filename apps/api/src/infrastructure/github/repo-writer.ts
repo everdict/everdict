@@ -1,4 +1,10 @@
-import type { GithubIssue, GithubRepoWriter, GithubRepoWriterFactory } from "@everdict/application-control";
+import type {
+  GithubIssue,
+  GithubRepoWriter,
+  GithubRepoWriterFactory,
+  GithubVersionReader,
+  GithubVersionReaderFactory,
+} from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
 import { z } from "zod";
 
@@ -267,6 +273,67 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
               `The attachment is larger than the ${opts.maxBytes} byte limit.`,
             );
           return { bytes, contentType };
+        },
+      };
+    },
+  };
+}
+
+// The release/tag shapes the product timeline's sync reads (records/product.ts). Parsed with the same
+// tolerance the issue rows get: only the fields the port promises, everything else ignored.
+const RELEASE_ROW = z.object({
+  tag_name: z.string(),
+  name: z.string().nullish(),
+  body: z.string().nullish(),
+  html_url: z.string(),
+  draft: z.boolean().default(false),
+  prerelease: z.boolean().default(false),
+  published_at: z.string().nullish(),
+});
+const TAG_ROW = z.object({ name: z.string(), commit: z.object({ sha: z.string() }) });
+
+// The version half of the GitHub read surface (GithubVersionReader) — same base/auth/error discipline as the
+// repo writer above, minted per (installation token, host) by the same composition roots.
+export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVersionReaderFactory {
+  return {
+    for(token, host): GithubVersionReader {
+      const base = apiBase(host);
+      const doFetch = fetchImpl ?? fetch;
+      const gh = async (url: string): Promise<Response> => {
+        const res = await doFetch(url, { headers: headers(token) });
+        if (!res.ok) throw await upstream(res, "GitHub API call failed");
+        return res;
+      };
+      return {
+        async listReleases(repository, opts) {
+          const rows = z
+            .array(RELEASE_ROW)
+            .parse(await (await gh(`${base}/repos/${repository}/releases?per_page=${opts.perPage}`)).json());
+          return rows.map((row) => ({
+            tagName: row.tag_name,
+            ...(row.name ? { name: row.name } : {}),
+            ...(row.body ? { body: row.body } : {}),
+            url: row.html_url,
+            draft: row.draft,
+            prerelease: row.prerelease,
+            ...(row.published_at ? { publishedAt: row.published_at } : {}),
+          }));
+        },
+        async listTags(repository, opts) {
+          const rows = z
+            .array(TAG_ROW)
+            .parse(await (await gh(`${base}/repos/${repository}/tags?per_page=${opts.perPage}`)).json());
+          return rows.map((row) => ({ name: row.name, sha: row.commit.sha }));
+        },
+        async commitDate(repository, sha) {
+          // Best-effort by contract: a commit that cannot be read (force-pushed away) is not an error the
+          // whole sync should die on — the caller substitutes its own import time.
+          const res = await doFetch(`${base}/repos/${repository}/commits/${sha}`, { headers: headers(token) });
+          if (!res.ok) return undefined;
+          const parsed = z
+            .object({ commit: z.object({ committer: z.object({ date: z.string() }).nullish() }) })
+            .safeParse(await res.json());
+          return parsed.success ? (parsed.data.commit.committer?.date ?? undefined) : undefined;
         },
       };
     },

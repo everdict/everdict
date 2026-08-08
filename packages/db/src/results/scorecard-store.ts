@@ -56,6 +56,8 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.visibleTeams || c.teamId === undefined || filter.visibleTeams.includes(c.teamId))
       .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge))
       .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId)
+      .filter((c) => !filter?.productId || c.origin?.productId === filter.productId)
+      .filter((c) => !filter?.seriesKey || c.origin?.seriesKey === filter.seriesKey)
       .filter((c) => !filter?.causedByRunId || c.origin?.causedByRunId === filter.causedByRunId)
       // kind filter (P1): "scorecard" also matches every pre-field record (kind unset = scorecard).
       .filter(

@@ -31,6 +31,8 @@ import type {
   InitiativeService,
   IssueLabelService,
   IssueService,
+  ProductService,
+  ProductVersionSync,
   ProjectService,
   SubscriptionService,
   TaskService,
@@ -104,6 +106,8 @@ export interface McpDeps {
   issueLabelService?: IssueLabelService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;
+  productService?: ProductService; // the product timeline (docs/architecture/product-timeline.md)
+  productVersionSync?: ProductVersionSync;
   issueSync?: GithubIssueSync; // GitHub import + manual two-way sync (absent = no workspace GitHub App)
   viewSnapshotService?: ViewSnapshotService; // capture_view_snapshot — write a View's numbers to the workspace filesystem
   harnessTemplates?: HarnessTemplateRegistry;

@@ -152,6 +152,7 @@ export * from "./scorecard/scorecard-trend.js";
 export * from "./scorecard/scorecard.js";
 export * from "./secret/secret-meta.js";
 export * from "./secret/secret-usage.js";
+export * from "./product/product.js";
 export * from "./tracker/initiative.js";
 export * from "./tracker/issue.js";
 export * from "./tracker/project.js";

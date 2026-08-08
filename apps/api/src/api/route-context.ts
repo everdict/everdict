@@ -40,6 +40,8 @@ import type {
   InitiativeService,
   IssueLabelService,
   IssueService,
+  ProductService,
+  ProductVersionSync,
   ProjectService,
   SubscriptionService,
   TaskService,
@@ -177,6 +179,9 @@ export interface ServerDeps {
   issueLabelService?: IssueLabelService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;
+  // The product timeline (docs/architecture/product-timeline.md) — the "what we ship" axis (routes disabled if absent).
+  productService?: ProductService;
+  productVersionSync?: ProductVersionSync; // GitHub release/tag pull + the auto-eval fan-out (absent = no GitHub App)
   issueSync?: GithubIssueSync; // GitHub import + manual two-way sync (absent = no workspace GitHub App)
   viewSnapshotService?: ViewSnapshotService; // capture a View onto the workspace filesystem (route disabled if absent)
   benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)

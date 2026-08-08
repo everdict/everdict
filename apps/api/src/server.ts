@@ -122,6 +122,7 @@ import { registerNotificationRoutes } from "./api/notification/notification.rout
 import { registerDriverOpsRoutes } from "./api/ops/driver.routes.js";
 import { registerInternalRoutes } from "./api/ops/internal.routes.js";
 import { registerOtlpRoutes } from "./api/otlp/otlp.routes.js";
+import { registerProductRoutes } from "./api/product/product.routes.js";
 import { registerProfileRoutes } from "./api/profile/profile.routes.js";
 import { registerProjectRoutes } from "./api/project/project.routes.js";
 import { registerProxyRoutes } from "./api/proxy/proxy.routes.js";
@@ -268,6 +269,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerIssueGithubRoutes(routes, deps);
     registerProjectRoutes(routes, deps);
     registerInitiativeRoutes(routes, deps);
+    registerProductRoutes(routes, deps);
     registerSubscriptionRoutes(routes, deps);
     registerKnowledgeRoutes(routes, deps);
     registerGithubAppRoutes(routes, deps);

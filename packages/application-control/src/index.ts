@@ -198,6 +198,21 @@ export {
   InitiativeService,
   type InitiativeServiceDeps,
 } from "./initiative/initiative-service.js";
+export {
+  type CreateProductInput,
+  type CreateReleaseInput,
+  type ProductActor,
+  type ProductCapabilityCheck,
+  ProductService,
+  type ProductServiceDeps,
+} from "./product/product-service.js";
+export {
+  ProductVersionSync,
+  type ProductVersionSyncDeps,
+  type ProductSyncResult,
+  type ProductSyncServiceOutcome,
+  type SeriesRunSubmitter,
+} from "./product/product-version-sync.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
   type CaptureViewSnapshotInput,
@@ -384,8 +399,12 @@ export type {
   GithubFileContent,
   GithubIssue,
   GithubIssueComment,
+  GithubRelease,
   GithubRepoWriter,
   GithubRepoWriterFactory,
+  GithubTag,
+  GithubVersionReader,
+  GithubVersionReaderFactory,
 } from "./ports/github-repo-writer.js";
 export {
   CiLinkService,
