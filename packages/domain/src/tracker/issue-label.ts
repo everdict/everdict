@@ -1,4 +1,4 @@
-import type { IssueLabelColor, IssueLabelRecord, PlatformFact } from "@everdict/contracts";
+import type { DomainFact, IssueLabelColor, IssueLabelRecord } from "@everdict/contracts";
 import { BadRequestError } from "@everdict/contracts";
 
 // The IssueLabel aggregate (docs/tracker.md) — the workspace's classification vocabulary. Transitions return
@@ -10,7 +10,7 @@ import { BadRequestError } from "@everdict/contracts";
 // rewritten when a label changes its mind about what it is called.
 export interface IssueLabelTransition {
   patch: Partial<IssueLabelRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewIssueLabelInput {
@@ -62,14 +62,13 @@ export class IssueLabel {
     };
   }
 
-  static creationFacts(record: IssueLabelRecord): PlatformFact[] {
+  static creationFacts(record: IssueLabelRecord): DomainFact[] {
     return [
       {
         kind: "issue_label.created",
         subject: { type: "issue_label", id: record.id },
         actor: record.createdBy,
         payload: { name: record.name, color: record.color },
-        message: `Label ${record.name} was defined.`,
       },
     ];
   }
@@ -109,7 +108,6 @@ export class IssueLabel {
           subject: { type: "issue_label", id: this.record.id },
           actor: by,
           payload: { name: patch.name ?? this.record.name, changed },
-          message: `Label ${patch.name ?? this.record.name} was updated.`,
         },
       ],
     };
@@ -118,14 +116,13 @@ export class IssueLabel {
   // Deletion is not a patch — the store removes the row AND strips the id from every issue in the same
   // transaction, which is the invariant that keeps `labelIds` free of dangling pointers. The fact is computed
   // here so the message reads the same as every other label event.
-  deletionFacts(by: string): PlatformFact[] {
+  deletionFacts(by: string): DomainFact[] {
     return [
       {
         kind: "issue_label.deleted",
         subject: { type: "issue_label", id: this.record.id },
         actor: by,
         payload: { name: this.record.name },
-        message: `Label ${this.record.name} was deleted.`,
       },
     ];
   }

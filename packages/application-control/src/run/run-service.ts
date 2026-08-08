@@ -6,10 +6,10 @@ import {
   type CaseJob,
   type CaseRecording,
   type CaseResult,
+  type DomainFact,
   type EvalCase,
   type HarnessSpec,
   type JudgeRunConfig,
-  type PlatformFact,
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
@@ -1038,7 +1038,7 @@ export class RunService {
 
   // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same
   // transaction as the write; the SAME ids then travel the push path, so dedup holds on either route.
-  private stampFacts(tenant: string, facts: PlatformFact[]): StampedFact[] {
+  private stampFacts(tenant: string, facts: DomainFact[]): StampedFact[] {
     return stampFacts(tenant, facts, { newId: this.newId, now: this.now });
   }
 

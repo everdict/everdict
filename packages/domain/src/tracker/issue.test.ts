@@ -114,7 +114,6 @@ describe("Issue — the tracker's unit of intent", () => {
           // A feed row reads the fact alone — the title rides along so the line can say WHAT moved.
           title: "Agent drops the tool result on retry",
         },
-        message: "ENG-1 backlog → in_progress — Agent drops the tool result on retry",
       },
     ]);
   });

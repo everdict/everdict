@@ -11,6 +11,13 @@ SSOT: `docs/architecture/event-plumbing.md` (E0 grammar + same-tx outbox · E1 c
   (`@everdict/contracts`) — never emit an ad-hoc string. A kind exists only with a live emit point.
   Trigger-matchable kinds are the separate `TRIGGERABLE_EVENT_KINDS` allowlist (mirrored in
   `apps/web/src/entities/agent-spec` — update both). Facts only, never judgments ("failed", not "flaky").
+- **Domain facts carry SEMANTIC DATA ONLY** (`DomainFact` — no `message`, no `recipient`; the excess-property
+  check on transition literals enforces it). The one-line `message` and the push `recipient` are the
+  application PROJECTOR's (`fact-projection.ts`, applied at the `stampFacts` choke point) — a new kind's
+  sentence is a `renderFactMessage` template, never a domain string. The payload must therefore carry every
+  value the rendering needs (names, identifiers, titles — not just filterable ids): the projector reads the
+  fact, never the aggregate. Application-side emitters (`PlatformEventEmitter` paths) author `PlatformFact`
+  with their own message — they ARE the projection layer.
 - **A new kind is also CLASSIFIED**: `ACTIVITY_AXIS_BY_KIND` (`contracts/records/workspace-pulse.ts`) says
   which part of the workspace the fact is news about (`work` · `evaluation` · `agent` · `knowledge`), and it
   `satisfies Record<PlatformEventKind, …>` — so the typecheck refuses a kind nobody has placed. That map is

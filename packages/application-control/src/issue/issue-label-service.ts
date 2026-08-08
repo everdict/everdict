@@ -1,4 +1,4 @@
-import { type IssueLabelColor, type IssueLabelRecord, NotFoundError, type PlatformFact } from "@everdict/contracts";
+import { type DomainFact, type IssueLabelColor, type IssueLabelRecord, NotFoundError } from "@everdict/contracts";
 import { IssueLabel, type IssueLabelEditInput } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { IssueLabelStore } from "../ports/issue-label-store.js";
@@ -94,7 +94,7 @@ export class IssueLabelService {
   // transition becomes durable, so no caller can define a label without the workspace hearing about it.
   private async persist<T>(
     tenant: string,
-    facts: PlatformFact[],
+    facts: DomainFact[],
     write: (outbox: OutboxEvent[]) => Promise<T>,
   ): Promise<T> {
     const stamped = stampFacts(tenant, facts, { newId: this.newId, now: this.now });

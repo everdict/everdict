@@ -274,9 +274,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
         kind: "scorecard.completed",
         subject: { type: "scorecard", id: "sc1" },
         actor: "alice",
-        recipient: "alice",
         payload: { status: "succeeded", dataset: "d@1.0.0", harness: "h@1", passRate: 0.5 },
-        message: "Scorecard sc1 succeeded — d@1.0.0 × h@1 (pass rate 50%)",
       },
     ]);
     // A bare failure (no extras.summary) falls back to the record's persisted summary — the notification gate's exact read.
@@ -288,7 +286,6 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     const machine = ScorecardBatch.from({ ...queued(), status: "running" }).succeed({ summary }, "t2").facts[0];
     expect(machine?.kind).toBe("scorecard.completed");
     expect(machine?.actor).toBeUndefined();
-    expect(machine?.recipient).toBeUndefined();
   });
 
   it("every terminal state rejects succeed/fail/start/supersede/cancel — first terminal write wins", () => {
@@ -315,9 +312,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
           kind: "scorecard.cancelled",
           subject: { type: "scorecard", id: "sc1" },
           actor: "alice",
-          recipient: "alice",
           payload: { status: "cancelled", dataset: "d@1.0.0", harness: "h@1" },
-          message: "Scorecard sc1 cancelled — d@1.0.0 × h@1",
         },
       ],
     });
@@ -377,9 +372,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
         kind: "scorecard.scored",
         subject: { type: "scorecard", id: "sc1" },
         actor: "bob", // the RE-SCORER, not the original creator
-        recipient: "bob",
         payload: { status: "succeeded", dataset: "d@1.0.0", harness: "h@1", passRate: 1, promoted: true },
-        message: "Scorecard sc1 scored — d@1.0.0 × h@1 (pass rate 100%) (promoted from experiment)",
       },
     ]);
     // A real scorecard re-scores without a kind flip.
@@ -402,7 +395,6 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
         kind: "scorecard.submitted",
         subject: { type: "scorecard", id: "sc1" },
         actor: "alice",
-        recipient: "alice",
         payload: {
           status: "queued",
           dataset: "d@1.0.0",
@@ -411,7 +403,6 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
           origin: "schedule",
           scheduleId: "sch_1",
         },
-        message: "Scorecard sc1 submitted — d@1.0.0 × h@1 (3 cases)",
       },
     ]);
   });

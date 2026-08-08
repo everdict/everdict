@@ -1,4 +1,5 @@
 import type {
+  DomainFact,
   IssueGithub,
   IssueGithubComment,
   IssueGithubSync,
@@ -13,7 +14,6 @@ import type {
   IssueStatusCategory,
   IssueStatusCause,
   IssueSummary,
-  PlatformFact,
 } from "@everdict/contracts";
 import {
   BadRequestError,
@@ -30,7 +30,7 @@ import { appendHistory } from "./history.js";
 // and the store persists both in one transaction. Transitions must never be spread — always use .patch.
 export interface IssueTransition {
   patch: Partial<IssueRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewIssueLinkInput {
@@ -412,7 +412,7 @@ export class Issue {
     };
   }
 
-  static creationFacts(record: IssueRecord): PlatformFact[] {
+  static creationFacts(record: IssueRecord): DomainFact[] {
     return [
       {
         kind: "issue.created",
@@ -431,7 +431,6 @@ export class Issue {
           // open the GitHub issue without a second read of the record — and without assuming github.com.
           ...(record.github !== undefined ? githubOrigin(record.github) : {}),
         },
-        message: `${record.identifier} filed — ${record.title}`,
       },
     ];
   }
@@ -610,7 +609,6 @@ export class Issue {
           subject: { type: "issue", id: this.record.id },
           actor: by,
           payload: detail,
-          message: `${fromIdentifier} moved to another team as ${input.identifier}`,
         },
       ],
     };
@@ -651,7 +649,6 @@ export class Issue {
           subject: { type: "issue", id: this.record.id },
           actor: by,
           payload: { from, to, cause: "manual", triage: "accepted", identifier: this.record.identifier },
-          message: `${this.record.identifier} accepted from triage`,
         },
       ],
     };
@@ -788,9 +785,9 @@ export class Issue {
             linkType: link.type,
             linkId: link.id,
             identifier: this.record.identifier,
+            title: this.record.title,
             ...(link.version !== undefined ? { version: link.version } : {}),
           },
-          message: `Issue linked to ${link.type} ${link.id} — ${this.record.title}`,
         },
       ],
     };
@@ -1002,7 +999,6 @@ export class Issue {
             ...(this.record.projectId !== undefined ? { projectId: this.record.projectId } : {}),
             ...(options.scorecardId !== undefined ? { scorecardId: options.scorecardId } : {}),
           },
-          message: `${this.record.identifier} ${from} → ${to} — ${this.record.title}`,
         },
       ],
     };

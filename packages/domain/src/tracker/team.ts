@@ -1,4 +1,4 @@
-import type { PlatformFact, TeamRecord } from "@everdict/contracts";
+import type { DomainFact, TeamRecord } from "@everdict/contracts";
 import { BadRequestError, ConflictError, TEAM_KEY_PATTERN, formatIssueIdentifier } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
 
@@ -7,7 +7,7 @@ import { appendHistory } from "./history.js";
 // never be spread — always use .patch.
 export interface TeamTransition {
   patch: Partial<TeamRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewTeamInput {
@@ -111,14 +111,13 @@ export class Team {
     };
   }
 
-  static creationFacts(record: TeamRecord): PlatformFact[] {
+  static creationFacts(record: TeamRecord): DomainFact[] {
     return [
       {
         kind: "team.created",
         subject: { type: "team", id: record.id },
         actor: record.createdBy,
-        payload: { key: record.key, isDefault: record.isDefault },
-        message: `Team created — ${record.name} (${record.key})`,
+        payload: { key: record.key, isDefault: record.isDefault, name: record.name },
       },
     ];
   }
@@ -294,8 +293,7 @@ export class Team {
           kind: "team.member_added",
           subject: { type: "team", id: this.record.id },
           actor: by,
-          payload: { member: subject, key: this.record.key },
-          message: `${subject} joined ${this.record.name}`,
+          payload: { member: subject, key: this.record.key, name: this.record.name },
         },
       ],
     };
@@ -312,8 +310,7 @@ export class Team {
           kind: "team.member_removed",
           subject: { type: "team", id: this.record.id },
           actor: by,
-          payload: { member: subject, key: this.record.key },
-          message: `${subject} left ${this.record.name}`,
+          payload: { member: subject, key: this.record.key, name: this.record.name },
         },
       ],
     };

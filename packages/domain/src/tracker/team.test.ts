@@ -39,7 +39,7 @@ describe("Team — the tracker's grouping layer", () => {
     const [fact] = Team.creationFacts(newTeam());
     expect(fact?.kind).toBe("team.created");
     expect(fact?.subject).toEqual({ type: "team", id: "team-1" });
-    expect(fact?.payload).toEqual({ key: "ENG", isDefault: true });
+    expect(fact?.payload).toEqual({ key: "ENG", isDefault: true, name: "Engineering" });
   });
 });
 
@@ -117,7 +117,7 @@ describe("Team roster — membership changes are facts", () => {
   it("emits team.member_added and appends the durable history entry", () => {
     const transition = Team.from(newTeam()).memberAdded("alice", "dana", LATER);
     expect(transition.facts[0]?.kind).toBe("team.member_added");
-    expect(transition.facts[0]?.payload).toEqual({ member: "alice", key: "ENG" });
+    expect(transition.facts[0]?.payload).toEqual({ member: "alice", key: "ENG", name: "Engineering" });
     expect(transition.patch.history?.at(-1)).toEqual({
       at: LATER,
       by: "dana",

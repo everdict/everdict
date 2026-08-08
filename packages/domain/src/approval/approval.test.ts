@@ -32,7 +32,6 @@ describe("Approval — the parked-mutation decision lifecycle (A6)", () => {
           agentId: "triage-bot",
           expiresAt: "2026-08-06T00:00:00.000Z",
         },
-        message: "Agent approval requested — write_file (session sess-1)",
       },
     ]);
   });

@@ -1,5 +1,5 @@
 import type {
-  PlatformFact,
+  DomainFact,
   ProjectMilestone,
   ProjectRecord,
   ProjectStatus,
@@ -14,7 +14,7 @@ import { excerptOf } from "./update-excerpt.js";
 // question the tracker can answer instead of a spreadsheet. Same {patch, facts} transition contract as Issue.
 export interface ProjectTransition {
   patch: Partial<ProjectRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewProjectInput {
@@ -126,7 +126,7 @@ export class Project {
     };
   }
 
-  static creationFacts(record: ProjectRecord): PlatformFact[] {
+  static creationFacts(record: ProjectRecord): DomainFact[] {
     return [
       {
         kind: "project.created",
@@ -141,7 +141,6 @@ export class Project {
           initiativeIds: record.initiativeIds,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
         },
-        message: `Project created — ${record.name}`,
       },
     ];
   }
@@ -250,7 +249,6 @@ export class Project {
               teamIds: this.record.teamIds,
               initiativeIds: this.record.initiativeIds,
             },
-            message: `${this.record.name} — ${update.health.replace("_", " ")}`,
           },
         ],
       },
@@ -373,7 +371,6 @@ export class Project {
             ...(onTime !== undefined ? { onTime } : {}),
             ...(forced ? { forced: true } : {}),
           },
-          message: `Project ${from} → ${to} — ${this.record.name}`,
         },
       ],
     };

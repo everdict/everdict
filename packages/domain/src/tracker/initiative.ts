@@ -1,9 +1,9 @@
 import type {
+  DomainFact,
   InitiativeRecord,
   InitiativeResource,
   InitiativeStatus,
   InitiativeUpdateRecord,
-  PlatformFact,
   TrackerHealth,
 } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
@@ -15,7 +15,7 @@ import { excerptOf } from "./update-excerpt.js";
 // under it has not been reached. Progress is arithmetic; health is the human's report on top of it.
 export interface InitiativeTransition {
   patch: Partial<InitiativeRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewInitiativeInput {
@@ -103,7 +103,7 @@ export class Initiative {
     };
   }
 
-  static creationFacts(record: InitiativeRecord): PlatformFact[] {
+  static creationFacts(record: InitiativeRecord): DomainFact[] {
     return [
       {
         kind: "initiative.created",
@@ -115,7 +115,6 @@ export class Initiative {
           name: record.name,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
         },
-        message: `Initiative created — ${record.name}`,
       },
     ];
   }
@@ -239,7 +238,6 @@ export class Initiative {
               // re-read the timeline from an event. The full body stays the record.
               excerpt: excerptOf(update.body),
             },
-            message: `${this.record.name} — ${update.health.replace("_", " ")}`,
           },
         ],
       },
@@ -307,7 +305,6 @@ export class Initiative {
             ...(onTime !== undefined ? { onTime } : {}),
             ...(forced ? { forced: true } : {}),
           },
-          message: `Initiative ${from} → ${to} — ${this.record.name}`,
         },
       ],
     };

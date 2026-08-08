@@ -3,6 +3,7 @@ import {
   type ComputeHandle,
   ConflictError,
   type DelegationBrief,
+  type DomainFact,
   type Driver,
   type EvaluableHarness,
   ForbiddenError,
@@ -10,7 +11,6 @@ import {
   type HarnessSpec,
   IMAGE_GRANT_USERNAME,
   NotFoundError,
-  type PlatformFact,
   RateLimitError,
   type RegistryAuth,
   type RunRecord,
@@ -143,7 +143,7 @@ function causedByOf(agent: SandboxAgentAttribution | undefined): string | undefi
 // The facts a transition produced, attributed to the agent behind the call when there is one. Applied at
 // every emit point in this service rather than inside the domain: legality is the aggregate's business,
 // WHO caused it is the caller's.
-function attributed(facts: PlatformFact[], agent: SandboxAgentAttribution | undefined): PlatformFact[] {
+function attributed(facts: DomainFact[], agent: SandboxAgentAttribution | undefined): DomainFact[] {
   const causedBy = causedByOf(agent);
   return causedBy === undefined ? facts : facts.map((fact) => ({ ...fact, causedBy }));
 }

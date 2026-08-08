@@ -1,5 +1,5 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
-import type { PlatformFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
+import type { DomainFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
@@ -11,7 +11,7 @@ import type { PlatformFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, 
 // array is normal: the taxonomy has no kind for the change, or the flood-prevention gate applies.
 export interface RunTransition {
   patch: Partial<RunRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewQueuedRunInput {
@@ -108,20 +108,19 @@ export function canReadRun(record: Pick<RunRecord, "kind" | "createdBy" | "origi
 // a machine-fired completion is workspace news too — the Mattermost channel always posted it, and re-basing
 // that channel onto the log required the log to know. Personal targeting stays conditional (the feed
 // consumer skips actor-less facts), so widening adds facts, never ghost bell rows.
-function terminalFact(record: RunRecord, status: "succeeded" | "failed"): PlatformFact[] {
+function terminalFact(record: RunRecord, status: "succeeded" | "failed"): DomainFact[] {
   if (record.parentScorecardId) return [];
   const kind = status === "succeeded" ? ("run.completed" as const) : ("run.failed" as const);
   return [
     {
       kind,
       subject: { type: "run", id: record.id },
-      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+      ...(record.createdBy !== undefined ? { actor: record.createdBy } : {}),
       payload: {
         status,
         harness: `${record.harness.id}@${record.harness.version}`,
         caseId: record.caseId,
       },
-      message: `Run ${record.id} ${status} — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
     },
   ];
 }
@@ -480,11 +479,8 @@ export class Run {
         {
           kind: "run.snapshotted",
           subject: { type: "run", id: this.record.id },
-          ...(this.record.createdBy !== undefined
-            ? { actor: this.record.createdBy, recipient: this.record.createdBy }
-            : {}),
+          ...(this.record.createdBy !== undefined ? { actor: this.record.createdBy } : {}),
           payload: { world: input.world, version: input.version, image: input.image },
-          message: `Session ${this.record.id} snapshotted world ${input.world}@${input.version}`,
         },
       ],
     };
@@ -528,19 +524,18 @@ export class Run {
 
   // The facts describing a record's CREATION (nothing → queued) — the same E0 rule as transitions, for the
   // factory: standalone runs announce run.submitted; scorecard children stay silent (the batch's facts cover them).
-  static creationFacts(record: RunRecord): PlatformFact[] {
+  static creationFacts(record: RunRecord): DomainFact[] {
     if (record.parentScorecardId) return [];
     return [
       {
         kind: "run.submitted",
         subject: { type: "run", id: record.id },
-        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+        ...(record.createdBy !== undefined ? { actor: record.createdBy } : {}),
         payload: {
           status: record.status,
           harness: `${record.harness.id}@${record.harness.version}`,
           caseId: record.caseId,
         },
-        message: `Run ${record.id} submitted — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
       },
     ];
   }

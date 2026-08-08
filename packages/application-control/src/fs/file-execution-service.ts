@@ -4,6 +4,7 @@ import {
   BadRequestError,
   type ComputeHandle,
   DEFAULT_PLACEMENT_OS,
+  type DomainFact,
   type Driver,
   FILE_EXECUTION_DEFAULT_TIMEOUT_SEC,
   FILE_EXECUTION_MAX_OUTPUT_CHARS,
@@ -15,7 +16,6 @@ import {
   type FileExecutionResult,
   type FsActor,
   NotFoundError,
-  type PlatformFact,
   type RunEnvelope,
   type RunRecord,
   shq,
@@ -36,7 +36,7 @@ function memberBehind(actor: FsActor | undefined): string {
   return actor?.onBehalfOf ?? actor?.subject ?? "system";
 }
 
-function attributedTo(facts: PlatformFact[], actor: FsActor | undefined): PlatformFact[] {
+function attributedTo(facts: DomainFact[], actor: FsActor | undefined): DomainFact[] {
   if (actor?.kind !== "agent" || !actor.agentId) return facts;
   const causedBy = `agent:${actor.agentId}:${actor.conversationId ?? "unknown"}`;
   return facts.map((fact) => ({ ...fact, causedBy }));
@@ -257,7 +257,7 @@ export class FileExecutionService {
   private async closeRun(
     runId: string | undefined,
     actor: FsActor | undefined,
-    transition: (run: Run, now: string) => { patch: Partial<RunRecord>; facts: PlatformFact[] },
+    transition: (run: Run, now: string) => { patch: Partial<RunRecord>; facts: DomainFact[] },
   ): Promise<void> {
     const runs = this.deps.runs;
     if (!runs || runId === undefined) return;

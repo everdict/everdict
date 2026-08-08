@@ -1,4 +1,4 @@
-import type { ApprovalRecord, PlatformFact } from "@everdict/contracts";
+import type { ApprovalRecord, DomainFact } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
 
 // The domain model for a parked agent mutation's decision lifecycle (agent-automation A6):
@@ -8,7 +8,7 @@ import { ConflictError } from "@everdict/contracts";
 // spread — always use .patch.
 export interface ApprovalTransition {
   patch: Partial<ApprovalRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewPendingApprovalInput {
@@ -50,7 +50,7 @@ export class Approval {
   }
 
   // The creation fact — a parked ask is workspace-visible from birth (the fleet/bell surface it).
-  static creationFacts(record: ApprovalRecord): PlatformFact[] {
+  static creationFacts(record: ApprovalRecord): DomainFact[] {
     return [
       {
         kind: "approval.requested",
@@ -62,7 +62,6 @@ export class Approval {
           ...(record.agentId !== undefined ? { agentId: record.agentId } : {}),
           expiresAt: record.expiresAt,
         },
-        message: `Agent approval requested — ${approvalLabel(record)}`,
       },
     ];
   }
@@ -89,7 +88,6 @@ export class Approval {
           subject: { type: "approval", id: this.record.id },
           ...(by.actor !== undefined ? { actor: by.actor } : {}),
           payload: { decision: status, tool: this.record.request.name, sessionId: this.record.sessionId },
-          message: `Agent approval ${status} — ${approvalLabel(this.record)}`,
         },
       ],
     };
@@ -105,7 +103,6 @@ export class Approval {
           kind: "approval.decided",
           subject: { type: "approval", id: this.record.id },
           payload: { decision: "expired", tool: this.record.request.name, sessionId: this.record.sessionId },
-          message: `Agent approval expired — ${approvalLabel(this.record)}`,
         },
       ],
     };

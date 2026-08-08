@@ -61,9 +61,7 @@ describe("Run — the run lifecycle domain model", () => {
     const run = Run.from(queued({ submittedBy: "alice" }));
     const done = run.succeed(RESULT, "t1");
     expect(done.patch).toEqual({ status: "succeeded", result: RESULT, updatedAt: "t1" });
-    expect(done.facts).toMatchObject([
-      { kind: "run.completed", subject: { type: "run", id: "r1" }, actor: "alice", recipient: "alice" },
-    ]);
+    expect(done.facts).toMatchObject([{ kind: "run.completed", subject: { type: "run", id: "r1" }, actor: "alice" }]);
     const failed = run.fail({ code: "INTERNAL", message: "boom" }, "t1");
     expect(failed.patch).toMatchObject({ status: "failed" });
     expect(failed.facts[0]?.kind).toBe("run.failed");
@@ -74,11 +72,11 @@ describe("Run — the run lifecycle domain model", () => {
     const child = Run.from({ ...queued({ submittedBy: "alice" }), parentScorecardId: "sc-1" });
     expect(child.succeed(RESULT, "t1").facts).toEqual([]);
     // A machine-fired completion is workspace news (the Mattermost consumer posts it) — but with no known
-    // initiator there is nobody to bell: the fact carries no actor/recipient, so the feed consumer skips it.
+    // initiator there is nobody to bell: the fact carries no actor, and the projector (fact-projection.ts)
+    // derives no recipient from an actor-less fact — recipient left the DOMAIN fact entirely (review §25).
     const machineFact = Run.from(queued()).succeed(RESULT, "t1").facts[0];
     expect(machineFact?.kind).toBe("run.completed");
     expect(machineFact?.actor).toBeUndefined();
-    expect(machineFact?.recipient).toBeUndefined();
     // Creation: standalone announces run.submitted; a child does not.
     expect(Run.creationFacts(queued({ submittedBy: "alice" }))[0]?.kind).toBe("run.submitted");
     expect(Run.creationFacts({ ...queued(), parentScorecardId: "sc-1" })).toEqual([]);
@@ -167,7 +165,9 @@ describe("Run — playground session cases (a test case inside a live harness se
   it("announces run.submitted at creation (no parent scorecard — the standalone fact gate)", () => {
     const facts = Run.creationFacts(sessionCase());
     expect(facts.map((f) => f.kind)).toEqual(["run.submitted"]);
-    expect(facts[0]?.recipient).toBe("user-1");
+    // The push target is the PROJECTOR's derivation now (recipient = actor for run.* kinds) — the domain
+    // fact carries only the semantic actor.
+    expect(facts[0]?.actor).toBe("user-1");
   });
 
   it("a driver-placed run is NEVER re-dispatched by boot recovery, even with a persisted caseSpec", () => {

@@ -1,5 +1,5 @@
 import type {
-  PlatformFact,
+  DomainFact,
   ProductAutoEval,
   ProductRecord,
   ProductSeries,
@@ -14,7 +14,7 @@ import { appendHistory } from "../tracker/history.js";
 // persists both in one transaction, and transitions must never be spread — always use .patch.
 export interface ProductTransition {
   patch: Partial<ProductRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewProductInput {
@@ -114,7 +114,7 @@ export class Product {
     };
   }
 
-  static creationFacts(record: ProductRecord): PlatformFact[] {
+  static creationFacts(record: ProductRecord): DomainFact[] {
     return [
       {
         kind: "product.created",
@@ -125,7 +125,6 @@ export class Product {
           services: record.services.length,
           series: record.series.length,
         },
-        message: `Product created — ${record.name}`,
       },
     ];
   }
@@ -228,7 +227,7 @@ export class Product {
   // The fact for one imported version — born here so the payload shape has exactly one author. The emit point
   // is the ledger write (idempotent by natural key), so one version can only ever be news once; the payload
   // keeps service/version/repository top-level so a subscription can filter per service.
-  versionImportFact(version: ProductServiceVersionRecord, actor: string): PlatformFact {
+  versionImportFact(version: ProductServiceVersionRecord, actor: string): DomainFact {
     const service = this.record.services.find((entry) => entry.name === version.service);
     return {
       kind: "product.service_version_imported",
@@ -243,7 +242,6 @@ export class Product {
         publishedAt: version.publishedAt,
         name: this.record.name,
       },
-      message: `${version.service} ${version.version} — ${this.record.name}`,
     };
   }
 }

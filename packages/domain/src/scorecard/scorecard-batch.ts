@@ -1,5 +1,5 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
-import type { PlatformFact, RunOrigin } from "@everdict/contracts";
+import type { DomainFact, RunOrigin } from "@everdict/contracts";
 import type {
   RunEnvelope,
   RunRecord,
@@ -25,7 +25,7 @@ import { resolvePolicyResolution, verdictPolicyRef } from "./verdict-policy.js";
 // spread ({...transition} silently drops both halves past the type checker) — always use .patch.
 export interface ScorecardTransition {
   patch: Partial<ScorecardRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 export type ScorecardOrchestration = NonNullable<ScorecardRecord["orchestration"]>;
 export type ScorecardRunError = NonNullable<ScorecardRecord["error"]>;
@@ -130,7 +130,7 @@ function batchTerminalFact(
   record: ScorecardRecord,
   status: "succeeded" | "failed",
   extras: ScorecardOutcomeExtras,
-): PlatformFact[] {
+): DomainFact[] {
   const { dataset, harness } = batchLabels(record);
   // passRate from the summary this terminal write persists (extras wins; a bare failure keeps the record's) —
   // the pointer an agent trigger can filter on (`passRate < 1`) without re-reading the full results.
@@ -142,7 +142,7 @@ function batchTerminalFact(
     {
       kind: status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
       subject: { type: "scorecard", id: record.id },
-      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+      ...(record.createdBy !== undefined ? { actor: record.createdBy } : {}),
       payload: {
         status,
         dataset,
@@ -150,7 +150,6 @@ function batchTerminalFact(
         ...(passRate !== undefined ? { passRate } : {}),
         ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
       },
-      message: `Scorecard ${record.id} ${status} — ${dataset} × ${harness}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}`,
     },
   ];
 }
@@ -207,13 +206,13 @@ export class ScorecardBatch {
   // from here. The case count is submit-time knowledge (the resolved dataset), not on the record, so the
   // caller passes it. Ingest-created batches stay silent today (no submitted fact — the pre-outbox behavior);
   // widening that coverage is an E2 decision, not a default.
-  static creationFacts(record: ScorecardRecord, cases: number): PlatformFact[] {
+  static creationFacts(record: ScorecardRecord, cases: number): DomainFact[] {
     const { dataset, harness } = batchLabels(record);
     return [
       {
         kind: "scorecard.submitted",
         subject: { type: "scorecard", id: record.id },
-        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+        ...(record.createdBy !== undefined ? { actor: record.createdBy } : {}),
         payload: {
           status: record.status,
           dataset,
@@ -222,7 +221,6 @@ export class ScorecardBatch {
           ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
           ...(record.origin?.scheduleId !== undefined ? { scheduleId: record.origin.scheduleId } : {}),
         },
-        message: `Scorecard ${record.id} submitted — ${dataset} × ${harness} (${cases} cases)`,
       },
     ];
   }
@@ -483,11 +481,8 @@ export class ScorecardBatch {
         {
           kind: "scorecard.cancelled",
           subject: { type: "scorecard", id: this.record.id },
-          ...(this.record.createdBy !== undefined
-            ? { actor: this.record.createdBy, recipient: this.record.createdBy }
-            : {}),
+          ...(this.record.createdBy !== undefined ? { actor: this.record.createdBy } : {}),
           payload: { status: "cancelled", dataset, harness },
-          message: `Scorecard ${this.record.id} cancelled — ${dataset} × ${harness}`,
         },
       ],
     };
@@ -516,7 +511,7 @@ export class ScorecardBatch {
         {
           kind: "scorecard.scored",
           subject: { type: "scorecard", id: this.record.id },
-          ...(by.actor !== undefined ? { actor: by.actor, recipient: by.actor } : {}),
+          ...(by.actor !== undefined ? { actor: by.actor } : {}),
           payload: {
             status: this.record.status,
             dataset,
@@ -524,7 +519,6 @@ export class ScorecardBatch {
             ...(passRate !== undefined ? { passRate } : {}),
             ...(promoted ? { promoted: true } : {}),
           },
-          message: `Scorecard ${this.record.id} scored — ${dataset} × ${harness}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}${promoted ? " (promoted from experiment)" : ""}`,
         },
       ],
     };

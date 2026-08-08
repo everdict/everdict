@@ -3,9 +3,9 @@ import type {
   CycleProgress,
   CycleRecord,
   CycleState,
+  DomainFact,
   IssueRecord,
   IssueStatus,
-  PlatformFact,
   TrackerHistoryEntry,
 } from "@everdict/contracts";
 import { BadRequestError, ConflictError, IssueStatusSchema } from "@everdict/contracts";
@@ -16,7 +16,7 @@ import { isOpenIssueStatus } from "./issue.js";
 // rest of the tracker, so the store persists a state change and its fact in one write.
 export interface CycleTransition {
   patch: Partial<CycleRecord>;
-  facts: PlatformFact[];
+  facts: DomainFact[];
 }
 
 export interface NewCycleInput {
@@ -313,7 +313,7 @@ export class Cycle {
     };
   }
 
-  static creationFacts(record: CycleRecord): PlatformFact[] {
+  static creationFacts(record: CycleRecord): DomainFact[] {
     return [
       {
         kind: "cycle.created",
@@ -325,7 +325,6 @@ export class Cycle {
           startsAt: record.startsAt,
           endsAt: record.endsAt,
         },
-        message: `Cycle ${record.number} planned`,
       },
     ];
   }
@@ -399,7 +398,6 @@ export class Cycle {
           subject: { type: "cycle", id: this.record.id },
           actor: by,
           payload: { teamId: this.record.teamId, ...detail },
-          message: `Cycle ${this.record.number} closed${carriedOver > 0 ? ` — ${carriedOver} carried over` : ""}`,
         },
       ],
     };
