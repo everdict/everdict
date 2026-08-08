@@ -327,7 +327,10 @@ describe("runAudience — one rule for who may read an execution", () => {
     expect(canReadRun(record, "bob")).toBe(false);
   });
 
-  it("keeps an activation for the member it acts as — the agent's work is that member's usage", () => {
+  it("opens a headless activation to the workspace — the run row answers like its session door", () => {
+    // Regression (O2): the activation's session is created visibility:"workspace" by design (fleet
+    // observability), but the run row inferred "personal" from the agent kind — one activation, two
+    // audiences. The class the factory stamps (background) is the recorded fact the decision reads.
     const record = Run.newAgentRun({
       id: "r2",
       tenant: "acme",
@@ -337,8 +340,14 @@ describe("runAudience — one rule for who may read an execution", () => {
       createdBy: "alice",
       now: "2026-08-03T00:00:00.000Z",
     });
-    expect(runAudience(record)).toEqual({ scope: "member", subject: "alice" });
-    expect(canReadRun(record, "bob")).toBe(false);
+    expect(record.class).toBe("background");
+    expect(runAudience(record)).toEqual({ scope: "workspace" });
+    expect(canReadRun(record, "bob")).toBe(true);
+  });
+
+  it("keeps a LEGACY classless agent row personal — rows that never declared themselves read conservatively", () => {
+    const legacy = { kind: "agent" as const, createdBy: "alice", origin: { cause: "member" as const, actor: "alice" } };
+    expect(runAudience(legacy)).toEqual({ scope: "member", subject: "alice" });
   });
 
   it("keeps a sandbox session for whoever is at the shell", () => {

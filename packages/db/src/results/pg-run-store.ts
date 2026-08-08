@@ -244,6 +244,7 @@ export class PgRunStore implements RunStore {
          AND (
            $7::text IS NULL
            OR NOT (kind = ANY($8::text[]))
+           OR (kind = 'agent' AND class = 'background')
            OR COALESCE(origin->>'actor', created_by) IS NULL
            OR COALESCE(origin->>'actor', created_by) = $7
          )

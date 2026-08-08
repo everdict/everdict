@@ -71,8 +71,15 @@ export type RunAudience = { scope: "workspace" } | { scope: "member"; subject: s
 // tests assert the two impls agree.
 export const PERSONAL_RUN_KINDS: readonly RunRecord["kind"][] = ["agent", "sandbox"];
 
-export function runAudience(record: Pick<RunRecord, "kind" | "createdBy" | "origin">): RunAudience {
+export function runAudience(record: Pick<RunRecord, "kind" | "class" | "createdBy" | "origin">): RunAudience {
   if (!PERSONAL_RUN_KINDS.includes(record.kind ?? "eval")) return { scope: "workspace" };
+  // The agent kind holds TWO audiences and the record already says which: a BACKGROUND run is headless
+  // automation — workspace fleet observability by design (its session is created `visibility: "workspace"`
+  // for exactly that reason), while an INTERACTIVE turn is one member's conversation. Inferring "personal"
+  // from the kind alone split one activation's evidence two ways — the transcript readable workspace-wide
+  // through the session door, the run/trajectory/list entry locked to the creator. A legacy agent row with
+  // no class stays personal: the conservative reading for rows that never declared themselves.
+  if (record.kind === "agent" && record.class === "background") return { scope: "workspace" };
   // `origin.actor` is the member the run acted FOR (an activation acts as its agent's creator); `createdBy`
   // is the same subject on every factory that stamps both, and the fallback for older rows.
   const owner = record.origin?.actor ?? record.createdBy;
@@ -101,7 +108,10 @@ export function runEvidenceIdentity(record: Pick<RunRecord, "kind" | "caseId" | 
 
 // May `viewer` (a member subject) read this run and its trajectory? Tenancy is checked separately and
 // first — this answers only the within-workspace question.
-export function canReadRun(record: Pick<RunRecord, "kind" | "createdBy" | "origin">, viewer: string): boolean {
+export function canReadRun(
+  record: Pick<RunRecord, "kind" | "class" | "createdBy" | "origin">,
+  viewer: string,
+): boolean {
   const audience = runAudience(record);
   return audience.scope === "workspace" || audience.subject === viewer;
 }

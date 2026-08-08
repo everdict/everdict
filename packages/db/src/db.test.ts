@@ -577,6 +577,32 @@ describe("RunStore — the audience filter (personal executions are their owner'
     expect(await store.list("acme")).toHaveLength(5);
   });
 
+  it("keeps a BACKGROUND agent run on everyone's list — headless automation is workspace observability", async () => {
+    // Regression (O2): the same activation was workspace-visible through its session door (the session store
+    // writes visibility: "workspace" by design) while its run row hid behind the personal-kind filter — one
+    // work item, two audiences. The class column already says which kind of agent run this is.
+    const store = new InMemoryRunStore();
+    await store.create(
+      mk("headless-alice", {
+        kind: "agent",
+        class: "background",
+        createdBy: "alice",
+        origin: { cause: "event", actor: "alice", executor: "agent:watcher" },
+      }),
+    );
+    await store.create(
+      mk("chat-alice", {
+        kind: "agent",
+        class: "interactive",
+        createdBy: "alice",
+        origin: { cause: "member", actor: "alice", executor: "agent:helper" },
+      }),
+    );
+    const bobSees = (await store.list("acme", { viewer: "bob" })).map((r) => r.id);
+    expect(bobSees).toContain("headless-alice"); // fleet observability
+    expect(bobSees).not.toContain("chat-alice"); // still alice's conversation
+  });
+
   it("hides a PRIVATE team's runs — a second ceiling beside the audience one, both above the LIMIT", async () => {
     const store = new InMemoryRunStore();
     await store.create(mk("ours", { teamId: "team-web" }));
@@ -600,6 +626,9 @@ describe("RunStore — the audience filter (personal executions are their owner'
     const sql = calls[0]?.text ?? "";
     expect(sql).toMatch(/NOT \(kind = ANY\(\$8::text\[\]\)\)/);
     expect(sql).toMatch(/COALESCE\(origin->>'actor', created_by\) = \$7/);
+    // The background-agent pass rides IN the same clause: headless automation is workspace observability
+    // (runAudience's class rule), so the SQL restatement must open it too — before the LIMIT like the rest.
+    expect(sql).toMatch(/OR \(kind = 'agent' AND class = 'background'\)/);
     // The filter sits in the WHERE, above the LIMIT — never applied to an already-limited page.
     expect(sql.indexOf("COALESCE(origin->>'actor', created_by) = $7")).toBeLessThan(sql.indexOf("LIMIT $5"));
     expect(calls[0]?.params?.[6]).toBe("alice");
