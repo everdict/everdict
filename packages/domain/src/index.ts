@@ -244,6 +244,7 @@ export { releaseReadiness, type SeriesScorecardPoint, watchedSeries } from "./pr
 // ownership — the O-track kernel (roles/envelope/checkpoint invariants; trust-kernel O2/O5/O6)
 export {
   assertCheckpointForEnvelope,
+  assertCompletionForRole,
   assertEnvelopeForRole,
   assertIndependentVerification,
   assertRoleProfile,

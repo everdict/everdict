@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   assertCheckpointForEnvelope,
+  assertCompletionForRole,
   assertEnvelopeForRole,
   assertIndependentVerification,
   assertRoleProfile,
@@ -257,6 +258,58 @@ describe("O2×O5 — a role's capabilities are the ceiling an envelope delegates
         envelope({ role: "executor", scope: { reads: ["list_runs"], writes: [], forbidden: [] } }),
       ),
     ).toThrow(/cannot run as a role its envelope did not state/);
+  });
+});
+
+describe("O2×O6 — completion evidence is a decision, not a declaration", () => {
+  const cp = (refs: Array<{ type: "run" | "scorecard" | "commit" | "issue" | "trace" | "file"; id: string }>) =>
+    ({
+      id: "cp-1",
+      goal: "verify the fix",
+      currentState: "verified",
+      confirmedFacts: refs.length > 0 ? [{ statement: "checked", refs }] : [],
+      hypotheses: [],
+      actionsTaken: [],
+      openDecisions: [],
+      remainingTasks: [],
+      requiredCapabilities: [],
+      risks: [],
+      validationPlan: "n/a",
+      createdAt: "t",
+      createdBy: "agent:checker",
+    }) as HandoffCheckpoint;
+  const verifier = (requiredEvidence: RoleProfile["requiredEvidence"]): RoleProfile => ({
+    role: "verifier",
+    capabilities: { read: ["scorecards"], write: [] },
+    requiredEvidence,
+    completion: "verified_verdict",
+  });
+
+  it("a role requiring evidence cannot complete without it — and completes WITH it", () => {
+    // Regression (R1): requiredEvidence was read by nothing — "done" stayed whatever the finisher claimed.
+    expect(() => assertCompletionForRole(verifier(["scorecard"]), cp([]))).toThrow(/missing: scorecard/);
+    expect(() =>
+      assertCompletionForRole(verifier(["scorecard"]), cp([{ type: "scorecard", id: "sc-1" }])),
+    ).not.toThrow();
+  });
+
+  it("the vocabulary mapping is explicit — diff satisfies via commit|file, report via file, checkpoint via itself", () => {
+    expect(() =>
+      assertCompletionForRole(verifier(["diff", "report", "checkpoint"]), cp([{ type: "commit", id: "abc" }])),
+    ).toThrow(/missing: report/);
+    expect(() =>
+      assertCompletionForRole(
+        verifier(["diff", "report", "checkpoint"]),
+        cp([
+          { type: "commit", id: "abc" },
+          { type: "file", id: "reports/verdict.md" },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("a profile declaring nothing keeps completion unchanged — the decision arms only on declaration", () => {
+    expect(() => assertCompletionForRole(verifier([]), cp([]))).not.toThrow();
   });
 });
 

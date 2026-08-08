@@ -175,6 +175,43 @@ export async function danglingCheckpointRefs(
   return out;
 }
 
+// ── O2×O6: completion evidence is a DECISION, not a declaration ──
+// RoleProfile.requiredEvidence stated what a role must leave behind and NOTHING ever read it — "done" stayed
+// whatever the finisher claimed. The two vocabularies grew separately (evidence kinds vs CheckpointRef
+// types), so the mapping is explicit: trace→a trace ref, scorecard→a scorecard ref, diff→a commit or file
+// ref, report→a file ref, and "checkpoint" is satisfied by the checkpoint being filed at all. ALL-OF
+// semantics, per the profile's own contract ("the evidence the role MUST leave behind to finish"). The
+// production binding site is checkpoint admission (the one seam holding both the role and the refs); the
+// synthesized assignment profiles declare no requiredEvidence yet, so the decision arms the moment a real
+// profile does — the same decision-ready posture assertEnvelopeForRole ships in.
+const EVIDENCE_REF_TYPES: Record<RoleProfile["requiredEvidence"][number], readonly CheckpointRef["type"][]> = {
+  trace: ["trace"],
+  scorecard: ["scorecard"],
+  diff: ["commit", "file"],
+  report: ["file"],
+  checkpoint: [],
+};
+
+export function assertCompletionForRole(profile: RoleProfile, checkpoint: HandoffCheckpoint): void {
+  if (profile.requiredEvidence.length === 0) return;
+  const present = new Set(
+    [...checkpoint.confirmedFacts.flatMap((f) => f.refs), ...checkpoint.actionsTaken.flatMap((a) => a.refs)].map(
+      (r) => r.type,
+    ),
+  );
+  const missing = profile.requiredEvidence.filter((kind) => {
+    const accepted = EVIDENCE_REF_TYPES[kind];
+    return accepted.length > 0 && !accepted.some((t) => present.has(t));
+  });
+  if (missing.length > 0) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { role: profile.role, missing },
+      `role '${profile.role}' completes only with its declared evidence — missing: ${missing.join(", ")}. A completion without the evidence it promised is a claim, not a result.`,
+    );
+  }
+}
+
 // The envelope↔checkpoint cross-invariant: an envelope that demanded rollback hands off ONLY with a
 // rollback plan — the successor must be able to undo the predecessor's work without the predecessor.
 // Narrowed to what it reads: envelopes are not persisted, so the boundary that enforces this (checkpoint

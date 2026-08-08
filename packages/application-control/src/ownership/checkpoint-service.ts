@@ -10,7 +10,12 @@ import {
   type RoleProfile,
   type TaskEnvelope,
 } from "@everdict/contracts";
-import { assertCheckpointForEnvelope, assertIndependentVerification, danglingCheckpointRefs } from "@everdict/domain";
+import {
+  assertCheckpointForEnvelope,
+  assertCompletionForRole,
+  assertIndependentVerification,
+  danglingCheckpointRefs,
+} from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -108,6 +113,11 @@ export class CheckpointService {
     // The envelope↔checkpoint cross-invariant, enforced exactly where the checkpoint is minted (the domain
     // owns the decision; this service only supplies the inputs the caller carried).
     if (input.envelope) assertCheckpointForEnvelope(record, input.envelope);
+    // Completion evidence (O2×O6): a role-claiming checkpoint completes only with the evidence its profile
+    // declares. The synthesized profiles declare none yet, so this arms the moment a profile does — the
+    // decision exists here, at the one seam holding both the role and the refs, not in a unit test.
+    if (record.role === "verifier") assertCompletionForRole(VERIFIER_ASSIGNMENT_PROFILE, record);
+    else if (record.role === "executor") assertCompletionForRole(EXECUTOR_ASSIGNMENT_PROFILE, record);
 
     // Stamp what admission actually CHECKED, per reference — "evidence-backed" and "evidence-VERIFIED" are
     // different claims, and a successor weighing a confirmedFact reads which one it holds. A ref whose type

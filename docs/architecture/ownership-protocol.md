@@ -78,6 +78,13 @@ capabilities are the CEILING, the envelope's scope must be a subset (`reads: "al
 unrestricted-read profile; excess writes/reads refuse) — so a "verifier" envelope carrying production writes
 stops typechecking its way into a runtime that would enforce exactly what it says.
 
+**Completion is a decision, not a declaration**: `RoleProfile.requiredEvidence` was read by nothing — done
+stayed whatever the finisher claimed. `assertCompletionForRole(profile, checkpoint)` now decides at
+checkpoint admission (the one seam holding both the role and the evidence refs), with the vocabulary
+mapping explicit — `trace`→a trace ref, `scorecard`→a scorecard ref, `diff`→a commit|file ref, `report`→a
+file ref, `checkpoint`→the checkpoint itself. The synthesized assignment profiles declare no evidence yet,
+so the decision arms the moment a real profile does.
+
 Independence reads the **executor identity, never attribution**: `Run.origin.executor` records who performed
 the work at creation (`agent:<id>` on activation and chat-turn runs) while `createdBy` stays the principal
 the run acted as — the composition's `runActor` prefers the executor, which is what lets the same agent
