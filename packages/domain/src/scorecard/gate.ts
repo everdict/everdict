@@ -227,15 +227,18 @@ function worstUnmeasuredFraction(coverage: GateInput["coverage"]): number | unde
   return sides.length > 0 ? Math.max(...sides) : undefined;
 }
 
-// Per-metric coverage LOSS on the candidate side: the metric was measured on both sides, and the candidate
-// measured a smaller share of its rows than the baseline did — rows the grader silently never emitted (a
-// reported-unmeasured row is measurementCoverage's axis; an unemitted row is this one's).
+// Per-metric coverage LOSS on the candidate side: the baseline measured the metric, and the candidate
+// measured a smaller share of its rows — rows the grader silently never emitted (a reported-unmeasured row
+// is measurementCoverage's axis; an unemitted row is this one's). COMPLETE disappearance (candidate 0 rows)
+// is the MAXIMAL loss, 1.0, in the same algebra: the pre-fix both-sides filter routed it into
+// metricsOnlyInBaseline — which allow_partial never reads — so `maxMetricLossFraction: 0` passed a metric
+// that vanished entirely while blocking one that lost a single row.
 function metricCoverageLosses(
   diff: GateInput,
 ): Array<{ metric: string; baselineFraction: number; candidateFraction: number; loss: number }> {
   const fractionOf = (measured: number, cases: number): number => (cases > 0 ? measured / cases : 0);
   return diff.metricCoverage
-    .filter((m) => m.baselineMeasured > 0 && m.candidateMeasured > 0)
+    .filter((m) => m.baselineMeasured > 0) // a candidate-only metric has nothing to lose
     .map((m) => {
       const baselineFraction = fractionOf(m.baselineMeasured, m.baselineCases);
       const candidateFraction = fractionOf(m.candidateMeasured, m.candidateCases);
@@ -321,6 +324,19 @@ function missingnessReasons(
         detail: `metric(s) lost more measurement coverage than the policy's maxMetricLossFraction of ${policy.maxMetricLossFraction} allows (${overMetricLoss
           .map((m) => `${m.metric}: ${(m.loss * 100).toFixed(1)}% lost`)
           .join(", ")})`,
+      });
+    // A kind-changed column is NOT a tolerance question — same name, different meaning, its delta unreadable —
+    // so allow_partial still refuses it unless the caller explicitly accepted the column loss. (The loss knobs
+    // above bound HOW MUCH may be missing; this one is about a column that is present and means something else.)
+    if (diff.incomparable.length > 0 && policy.allowMetricKindChange !== true)
+      out.push({
+        kind: "kind_changed",
+        count: diff.incomparable.length,
+        detail: `metric(s) changed value kind (${diff.incomparable
+          .map((m) => m.metric)
+          .join(
+            ", ",
+          )}) — same name, different meaning; set allowMetricKindChange to accept the column loss deliberately`,
       });
   }
 

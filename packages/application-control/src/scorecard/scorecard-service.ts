@@ -1150,6 +1150,10 @@ export class ScorecardService {
       ...(p?.maxMissingCases !== undefined ? { maxMissingCases: p.maxMissingCases } : {}),
       ...(p?.maxMissingFraction !== undefined ? { maxMissingFraction: p.maxMissingFraction } : {}),
       ...(p?.maxUnmeasuredFraction !== undefined ? { maxUnmeasuredFraction: p.maxUnmeasuredFraction } : {}),
+      // The metric-coverage knobs travel too — a policy field the copy drops is a knob that exists only in
+      // unit tests (maxMetricLossFraction shipped exactly that way: read by the gate, reachable from nowhere).
+      ...(p?.maxMetricLossFraction !== undefined ? { maxMetricLossFraction: p.maxMetricLossFraction } : {}),
+      ...(p?.allowMetricKindChange !== undefined ? { allowMetricKindChange: p.allowMetricKindChange } : {}),
       ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
       ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
       ...(p?.fdrAlpha !== undefined ? { fdrAlpha: p.fdrAlpha } : {}),

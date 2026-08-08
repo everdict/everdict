@@ -531,6 +531,48 @@ describe("evaluateGate — per-metric coverage loss (silent grader omission)", (
     expect(lax.decision).toBe("pass");
   });
 
+  it("complete disappearance is the MAXIMAL loss — maxMetricLossFraction 0 blocks a vanished metric", () => {
+    // The escape hatch this closes: candidate 0/10 rows fell into metricsOnlyInBaseline — which allow_partial
+    // never reads — so the STRICTEST loss setting passed total disappearance while blocking a one-row loss.
+    const vanished = base({
+      comparability: "partial",
+      metricCoverage: [
+        { metric: "tests_pass", baselineCases: 10, baselineMeasured: 10, candidateCases: 10, candidateMeasured: 0 },
+        { metric: "judge:quality", baselineCases: 10, baselineMeasured: 10, candidateCases: 10, candidateMeasured: 10 },
+      ],
+      missing: {
+        casesOnlyInBaseline: [],
+        casesOnlyInCandidate: [],
+        metricsOnlyInBaseline: ["tests_pass"],
+        metricsOnlyInCandidate: [],
+      },
+      overlap: { sharedCases: 10, baselineCases: 10, candidateCases: 10 },
+    });
+    const g = evaluateGate(vanished, { maxRegressions: 0, comparability: "allow_partial", maxMetricLossFraction: 0 });
+    expect(g.decision).toBe("blocked_missing");
+    const reason = g.reasons.find((r) => r.kind === "missing_metrics");
+    expect(reason?.detail).toContain("tests_pass");
+    expect(reason?.detail).toContain("100.0% lost");
+  });
+
+  it("a kind-changed column blocks under allow_partial unless the caller accepts it explicitly", () => {
+    // Loss knobs bound HOW MUCH may be missing; a kind change is a column that is present and means something
+    // else — not a tolerance question, so allow_partial alone does not wave it through.
+    const kindChanged = base({
+      comparability: "partial",
+      incomparable: [{ metric: "quality_tier", reason: "kind_changed" }],
+    });
+    const blocked = evaluateGate(kindChanged, { maxRegressions: 0, comparability: "allow_partial" });
+    expect(blocked.decision).toBe("blocked_missing");
+    expect(blocked.reasons.some((r) => r.kind === "kind_changed" && r.count === 1)).toBe(true);
+    const accepted = evaluateGate(kindChanged, {
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      allowMetricKindChange: true,
+    });
+    expect(accepted.decision).toBe("pass");
+  });
+
   it("full symmetric coverage never trips the gate — the check bites only on loss", () => {
     const g = evaluateGate(
       base({

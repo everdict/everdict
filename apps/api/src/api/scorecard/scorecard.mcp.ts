@@ -468,6 +468,20 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .describe(
               "share of compared scores that may be non-measurements (dead graders / skipped judges); enforced under either comparability mode",
             ),
+          max_metric_loss_fraction: z
+            .number()
+            .min(0)
+            .max(1)
+            .optional()
+            .describe(
+              "allow_partial only: share of a metric's BASELINE measurement rate the candidate may lose before the gate blocks (rows a grader silently never emitted; 100/100 → 1/100 is a 0.99 loss, complete disappearance is 1.0). require_full blocks any loss",
+            ),
+          allow_metric_kind_change: z
+            .boolean()
+            .optional()
+            .describe(
+              "allow_partial only: accept metrics whose VALUE KIND changed between the sides (same name, different meaning — the delta is unreadable). Unset = a kind change blocks even under allow_partial",
+            ),
           z_threshold: z
             .number()
             .positive()
@@ -497,6 +511,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         max_missing_cases,
         max_missing_fraction,
         max_unmeasured_fraction,
+        max_metric_loss_fraction,
+        allow_metric_kind_change,
         z_threshold,
         min_delta,
         fdr_alpha,
@@ -513,6 +529,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 ...(max_missing_cases !== undefined ? { maxMissingCases: max_missing_cases } : {}),
                 ...(max_missing_fraction !== undefined ? { maxMissingFraction: max_missing_fraction } : {}),
                 ...(max_unmeasured_fraction !== undefined ? { maxUnmeasuredFraction: max_unmeasured_fraction } : {}),
+                ...(max_metric_loss_fraction !== undefined ? { maxMetricLossFraction: max_metric_loss_fraction } : {}),
+                ...(allow_metric_kind_change !== undefined ? { allowMetricKindChange: allow_metric_kind_change } : {}),
                 ...(z_threshold !== undefined ? { zThreshold: z_threshold } : {}),
                 ...(min_delta !== undefined ? { minDelta: min_delta } : {}),
                 ...(fdr_alpha !== undefined ? { fdrAlpha: fdr_alpha } : {}),
