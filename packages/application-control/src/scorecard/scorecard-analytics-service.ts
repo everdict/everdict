@@ -19,6 +19,7 @@ import {
   type ScorecardTrend,
   type TrialDiff,
   computeAnalysis,
+  contentDigest,
   diffScorecards,
   diffTrials,
   flakeIndex,
@@ -30,6 +31,7 @@ import {
   resolvePolicyResolution,
   scorecardModels,
   trendSeries,
+  verdictPolicyRef,
   workspaceOpsReport,
 } from "@everdict/domain";
 import { type ScorecardServiceDeps, analysisArtifactKey } from "./scorecard-shared.js";
@@ -115,20 +117,28 @@ export class ScorecardAnalyticsService {
       ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
       ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
     });
-    // Two batches judged under different verdict-policy documents are not the same experiment: their verdicts
+    // Two batches judged under different verdict-policy DOCUMENTS are not the same experiment: their verdicts
     // (and therefore pass transitions) were produced by different rules. The comparison is flagged as NOT
-    // holding — "no differences" and "incomparable" are different claims. Absent stamps (pre-mig records)
-    // resolve to the default ladder, so only a REAL digest divergence trips this.
-    const bPolicy = baseRecord.verdictPolicy;
-    const cPolicy = candRecord.verdictPolicy;
-    const policyMismatch = bPolicy !== undefined && cPolicy !== undefined && bPolicy.digest !== cPolicy.digest;
+    // holding — "no differences" and "incomparable" are different claims. The mismatch is decided on the
+    // RESOLVED documents' canonical identity, never on raw stamp strings: a legacy-FNV stamp and a sha256
+    // stamp of the SAME canonical document are one policy (the resolver dual-reads both eras — comparing the
+    // strings re-introduced the split it exists to bridge), and an unstamped pre-mig record compares as the
+    // frozen v1 ladder it was judged under.
+    const bothResolved = bResolution.status !== "unresolvable" && cResolution.status !== "unresolvable";
+    const policyMismatch = bothResolved && contentDigest(bResolution.policy) !== contentDigest(cResolution.policy);
+    // The refusal names each side by its own stamp when it has one, else by the resolved document's ref —
+    // an unstamped side still judged under a nameable rule-set.
+    const stampOf = (record: ScorecardRecord, resolution: PolicyResolution): VerdictPolicyRef | undefined =>
+      record.verdictPolicy ?? (resolution.status !== "unresolvable" ? verdictPolicyRef(resolution.policy) : undefined);
+    const bStamp = stampOf(baseRecord, bResolution);
+    const cStamp = stampOf(candRecord, cResolution);
     const withPolicy: ScorecardDiff & {
       policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
       policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
     } = policyUnresolvable
       ? { ...diff, comparability: "none", policyUnresolvable }
-      : policyMismatch && bPolicy && cPolicy
-        ? { ...diff, comparability: "none", policyMismatch: { baseline: bPolicy, candidate: cPolicy } }
+      : policyMismatch && bStamp && cStamp
+        ? { ...diff, comparability: "none", policyMismatch: { baseline: bStamp, candidate: cStamp } }
         : diff;
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);

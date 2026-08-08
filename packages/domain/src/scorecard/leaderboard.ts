@@ -1,6 +1,6 @@
 import { metricMatches } from "@everdict/contracts";
 import type { MetricSummary } from "./scorecard.js";
-import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
+import { DEFAULT_VERDICT_POLICY, verdictPolicyIdentity } from "./verdict-policy.js";
 
 // Leaderboard input card — the same *lightweight* shape as trendSeries (@everdict/db ScorecardRecord satisfies it structurally; suite does not depend on db).
 // models is the model(s) this run used (one axis of the leaderboard group key). Where trendSeries lays one harness out along the time axis,
@@ -12,7 +12,9 @@ export interface LeaderboardCard {
   status: string;
   createdAt: string; // ISO
   summary?: MetricSummary[];
-  verdictPolicy?: { digest: string }; // which policy judged this batch (absent = the default ladder)
+  // Which policy judged this batch (absent = pre-stamp, the frozen v1 ladder). id+version ride along so the
+  // identity comparison resolves known documents instead of comparing raw digest strings across eras.
+  verdictPolicy?: { id: string; version: string; digest: string };
   models?: { observed?: string[]; declared?: string; primary?: string };
   judgeModels?: string[]; // The judge model(s) that scored this run — filter/display axis for fair comparison (same judge)
 }
@@ -151,6 +153,8 @@ export function leaderboard(
     })
     .map((r, i) => ({ rank: i + 1, ...r }));
 
-  const policyMixed = new Set(scored.map((s) => s.card.verdictPolicy?.digest ?? "default")).size > 1;
+  // Semantic identity, never the raw stamp: FNV-era and sha256-era stamps of one document (and unstamped
+  // pre-mig cards judged under the same frozen v1 ladder) are ONE rule-set, not a mixed board.
+  const policyMixed = new Set(scored.map((s) => verdictPolicyIdentity(s.card.verdictPolicy))).size > 1;
   return { dataset: opts.datasetId, metric: opts.metric, window, ...(policyMixed ? { policyMixed } : {}), rows };
 }

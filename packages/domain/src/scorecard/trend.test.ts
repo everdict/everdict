@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { type TrendCard, trendSeries } from "./trend.js";
+import { DEFAULT_VERDICT_POLICY_V1, verdictPolicyDigest } from "./verdict-policy.js";
+
+// The pre-sha256 sealer, reproduced verbatim (see verdict-policy.test.ts) — a legacy stamp in these tests is
+// one the OLD code would really have written.
+function legacyFnvOf(document: unknown): string {
+  const canonicalize = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+    if (value !== null && typeof value === "object")
+      return `{${Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
+        .join(",")}}`;
+    return JSON.stringify(value);
+  };
+  const text = canonicalize(document);
+  let hash = 0xcbf29ce484222325n;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= BigInt(text.charCodeAt(i));
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
 
 // Time-ordered scorecards for one dataset (judge passRate varies 1.0 → 0.5 → 0.8).
 const card = (id: string, createdAt: string, passRate: number | null, extra: Partial<TrendCard> = {}): TrendCard => ({
@@ -117,30 +140,62 @@ describe("trend direction (sign-as-verdict sweep)", () => {
 });
 
 describe("trend policy gate", () => {
-  const c = (id: string, createdAt: string, passRate: number, digest?: string) => ({
+  const c = (
+    id: string,
+    createdAt: string,
+    passRate: number,
+    ref?: { id: string; version: string; digest: string },
+  ) => ({
     id,
     dataset: { id: "d", version: "1" },
     harness: { id: "h", version: "1" },
     status: "succeeded",
     createdAt,
     summary: [{ metric: "tests_pass", count: 3, mean: passRate, passRate }],
-    ...(digest ? { verdictPolicy: { digest } } : {}),
+    ...(ref ? { verdictPolicy: ref } : {}),
   });
+  const composed = (digest: string) => ({ id: "composed", version: digest.slice(0, 8), digest });
 
   it("a drop across a policy change is disclosed, never flagged as a regression", () => {
-    const t = trendSeries([c("a", "2026-01-01T00:00:00Z", 1.0, "aaa"), c("b", "2026-01-02T00:00:00Z", 0.5, "bbb")], {
-      datasetId: "d",
-      metric: "tests_pass",
-    });
+    const t = trendSeries(
+      [c("a", "2026-01-01T00:00:00Z", 1.0, composed("aaa")), c("b", "2026-01-02T00:00:00Z", 0.5, composed("bbb"))],
+      {
+        datasetId: "d",
+        metric: "tests_pass",
+      },
+    );
     expect(t.policyMixed).toBe(true);
     expect(t.points[1]?.policyDiffers).toBe(true);
     expect(t.points[1]?.regressed).toBe(false); // different rules produced the two rates
     // the same drop under ONE policy IS a regression
-    const same = trendSeries([c("a", "2026-01-01T00:00:00Z", 1.0, "aaa"), c("b", "2026-01-02T00:00:00Z", 0.5, "aaa")], {
-      datasetId: "d",
-      metric: "tests_pass",
-    });
+    const same = trendSeries(
+      [c("a", "2026-01-01T00:00:00Z", 1.0, composed("aaa")), c("b", "2026-01-02T00:00:00Z", 0.5, composed("aaa"))],
+      {
+        datasetId: "d",
+        metric: "tests_pass",
+      },
+    );
     expect(same.policyMixed).toBeUndefined();
     expect(same.points[1]?.regressed).toBe(true);
+  });
+
+  it("one rule-set across the digest-era boundary is ONE policy — the migration never suppresses a regression", () => {
+    // Regression: identity compared raw stamp strings, so an FNV-stamped v1 card, a sha256-stamped v1 card
+    // and an unstamped pre-mig card read as THREE policies — policyMixed flagged, the real 1.0 → 0.5 drop
+    // never marked regressed, exactly across the boundary the dual-read resolver exists to bridge.
+    const fnvV1 = { id: "authority-ladder", version: "1.0.0", digest: legacyFnvOf(DEFAULT_VERDICT_POLICY_V1) };
+    const shaV1 = { id: "authority-ladder", version: "1.0.0", digest: verdictPolicyDigest(DEFAULT_VERDICT_POLICY_V1) };
+    const t = trendSeries(
+      [
+        c("legacy", "2026-01-01T00:00:00Z", 1.0, fnvV1),
+        c("migrated", "2026-01-02T00:00:00Z", 0.5, shaV1),
+        c("prestamp", "2026-01-03T00:00:00Z", 0.6), // no stamp at all — judged under the same frozen v1 ladder
+      ],
+      { datasetId: "d", metric: "tests_pass" },
+    );
+    expect(t.policyMixed).toBeUndefined();
+    expect(t.points[1]?.policyDiffers).toBeUndefined();
+    expect(t.points[1]?.regressed).toBe(true); // the drop is real and the boundary does not hide it
+    expect(t.points[2]?.regressed).toBe(true);
   });
 });

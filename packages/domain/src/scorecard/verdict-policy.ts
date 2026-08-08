@@ -123,7 +123,9 @@ export type PolicyResolution =
 // This is also the LIST-PATH guard: list reads carry the stamp but not the manifest, and a composed stamp
 // (id "composed", never in the registry) with no embedded document lands here as unresolvable by construction.
 export function resolvePolicyResolution(ref?: StampedPolicyRef, embedded?: VerdictPolicy): PolicyResolution {
-  if (!ref) return { status: "legacy_default", policy: DEFAULT_VERDICT_POLICY };
+  // No stamp = pre-mig-0125, which also means pre-1.1.0: those batches were judged under the FROZEN v1
+  // ladder, so v1 is what restores their history — the live default would re-judge them under newer rules.
+  if (!ref) return { status: "legacy_default", policy: DEFAULT_VERDICT_POLICY_V1 };
   // digestsMatch reads the algorithm off the STAMP: a record sealed under the FNV era verifies against its
   // own document, a record sealed since verifies under sha256. Comparing against one algorithm would make
   // every stamp of the other era unresolvable — which for this fail-closed resolver means erasing history.
@@ -267,6 +269,21 @@ export function evaluateVerdict(
 // ── policy identity ──────────────────────────────────────────────────────────────────────────────────
 export function verdictPolicyDigest(policy: VerdictPolicy): string {
   return contentDigest(policy);
+}
+
+// The SEMANTIC identity of a stamped policy, for cross-batch comparison (trend/leaderboard mixing, diff
+// mismatch). Two stamps name the same rules iff their RESOLVED documents share one canonical digest — raw
+// stamp strings split the identical document across digest eras (a legacy FNV stamp vs a sha256 stamp of
+// the same canonical form read as "different policies", suppressing regressions across the migration
+// boundary). An unstamped card is not its own rule-set either: it was judged under the frozen v1 ladder,
+// so it compares equal to a card that stamped v1 explicitly. A stamp that resolves to no document in hand
+// (a composed policy on a list read) keeps its raw digest as identity — two composed stamps then compare
+// equal only within one era, which is the honest ceiling without the document.
+export function verdictPolicyIdentity(ref?: StampedPolicyRef): string {
+  if (!ref) return contentDigest(DEFAULT_VERDICT_POLICY_V1);
+  const known = KNOWN_VERDICT_POLICIES.find((p) => p.id === ref.id && p.version === ref.version);
+  if (known && (ref.digest === undefined || digestsMatch(ref.digest, known))) return contentDigest(known);
+  return ref.digest ?? `${ref.id}@${ref.version}`;
 }
 
 export function verdictPolicyRef(policy: VerdictPolicy = DEFAULT_VERDICT_POLICY): VerdictPolicyRef {

@@ -40,6 +40,7 @@ export {
   type VerdictBasis,
   type VerdictEvaluation,
   verdictPolicyDigest,
+  verdictPolicyIdentity,
   verdictPolicyRef,
 } from "./scorecard/verdict-policy.js";
 export { contentDigest, digestHex, digestUnder, digestsMatch } from "./provenance/content-digest.js";

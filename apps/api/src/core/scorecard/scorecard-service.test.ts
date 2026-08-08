@@ -29,6 +29,7 @@ import {
 import {
   CircuitBreaker,
   DEFAULT_VERDICT_POLICY,
+  DEFAULT_VERDICT_POLICY_V1,
   type Principal,
   Run,
   composeVerdictPolicy,
@@ -464,6 +465,51 @@ describe("ScorecardService.diff", () => {
       direction: "lower_is_better",
       reading: "improved",
     });
+  });
+
+  it("FNV-era and sha256-era stamps of the SAME policy document are ONE policy — never a mismatch", async () => {
+    // Regression: the mismatch was decided on raw digest strings, so a batch settled in the FNV window and a
+    // batch settled after the sha256 switch — both judged under the identical v1 ladder — read as "different
+    // policies" and the comparison refused as not holding. The resolver dual-reads both eras; the mismatch
+    // must compare the RESOLVED documents' canonical identity.
+    const legacyFnvOf = (document: unknown): string => {
+      const canonicalize = (value: unknown): string => {
+        if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+        if (value !== null && typeof value === "object")
+          return `{${Object.entries(value as Record<string, unknown>)
+            .filter(([, v]) => v !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
+            .join(",")}}`;
+        return JSON.stringify(value);
+      };
+      const text = canonicalize(document);
+      let hash = 0xcbf29ce484222325n;
+      for (let i = 0; i < text.length; i++) {
+        hash ^= BigInt(text.charCodeAt(i));
+        hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+      }
+      return hash.toString(16).padStart(16, "0");
+    };
+    const store = new InMemoryScorecardStore();
+    await store.create(
+      record("base", {
+        scorecard: scorecard(true),
+        verdictPolicy: {
+          id: DEFAULT_VERDICT_POLICY_V1.id,
+          version: DEFAULT_VERDICT_POLICY_V1.version,
+          digest: legacyFnvOf(DEFAULT_VERDICT_POLICY_V1), // sealed in the FNV window
+        },
+      }),
+    );
+    await store.create(
+      record("cand", { scorecard: scorecard(false), verdictPolicy: verdictPolicyRef(DEFAULT_VERDICT_POLICY_V1) }),
+    );
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.policyMismatch).toBeUndefined();
+    expect(diff.policyUnresolvable).toBeUndefined();
+    expect(diff.comparability).toBe("full"); // the real regression below is readable, not refused
+    expect(diff.caseTransitions.find((t) => t.caseId === "c1")?.change).toBe("broke");
   });
 
   it("a stamped policy that cannot be restored makes the comparison NOT hold — never a default re-judgement", async () => {

@@ -7,6 +7,7 @@ import {
   evaluateVerdict,
   resolvePolicyResolution,
   verdictPolicyDigest,
+  verdictPolicyIdentity,
   verdictPolicyRef,
 } from "./verdict-policy.js";
 
@@ -179,10 +180,41 @@ describe("verdict policy identity", () => {
     });
   });
 
-  it("a record with NO stamp is legacy_default — not the same answer as a stamp that resolved", () => {
-    // Pre-mig-0125 rows really were judged under the ladder the default encodes, so restoring it is history,
-    // not a fallback. The status distinguishes it from a resolved stamp so a reader can tell the two apart.
-    expect(resolvePolicyResolution(undefined)).toEqual({ status: "legacy_default", policy: DEFAULT_VERDICT_POLICY });
+  it("a record with NO stamp is legacy_default — restored under the FROZEN v1 ladder, never today's", () => {
+    // Pre-mig-0125 rows also predate 1.1.0: the ladder that judged them is the frozen v1 document, so that
+    // is what restores their history — the live default would re-judge them under newer rules. The status
+    // distinguishes it from a resolved stamp so a reader can tell the two apart.
+    expect(resolvePolicyResolution(undefined)).toEqual({
+      status: "legacy_default",
+      policy: DEFAULT_VERDICT_POLICY_V1,
+    });
+  });
+
+  it("verdictPolicyIdentity — one rule-set has ONE identity across digest eras and stamp presence", () => {
+    // Regression: trend/leaderboard/diff compared raw stamp strings, so a legacy-FNV stamp, a sha256 stamp
+    // of the SAME document, and an unstamped pre-mig card read as three different policies — policyMixed
+    // flagged, regressions suppressed, across exactly the migration boundary dual-read exists to bridge.
+    const v1 = verdictPolicyIdentity({
+      id: "authority-ladder",
+      version: "1.0.0",
+      digest: legacyFnvOf(DEFAULT_VERDICT_POLICY_V1),
+    });
+    const v1Sha = verdictPolicyIdentity({
+      id: "authority-ladder",
+      version: "1.0.0",
+      digest: verdictPolicyDigest(DEFAULT_VERDICT_POLICY_V1),
+    });
+    const unstamped = verdictPolicyIdentity(undefined);
+    expect(v1Sha).toBe(v1);
+    expect(unstamped).toBe(v1);
+    // Different DOCUMENTS keep different identities — 1.1.0 really is a different rule-set from 1.0.0.
+    expect(verdictPolicyIdentity(verdictPolicyRef())).not.toBe(v1);
+    // A stamp resolving nowhere (composed on a list read) keeps its raw digest — the honest ceiling.
+    expect(verdictPolicyIdentity({ id: "composed", version: "abc", digest: "sha256:feed" })).toBe("sha256:feed");
+    // A known id@version whose digest does NOT match the registered document is not that document.
+    expect(verdictPolicyIdentity({ id: "authority-ladder", version: "1.0.0", digest: "sha256:0000" })).toBe(
+      "sha256:0000",
+    );
   });
 
   it("a stamp naming a policy nobody has is UNRESOLVABLE — never the default ladder", () => {

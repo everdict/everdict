@@ -1,6 +1,6 @@
 import { metricMatches } from "@everdict/contracts";
 import type { MetricSummary } from "./scorecard.js";
-import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
+import { DEFAULT_VERDICT_POLICY, verdictPolicyIdentity } from "./verdict-policy.js";
 
 // Period trend / regression-over-time — lays out one (dataset, metric)'s scorecards in time order and views change/regression vs baseline.
 // The input is the *lightweight* shape of a scorecard (list summary is enough) — @everdict/db's ScorecardRecord satisfies this structurally
@@ -12,7 +12,9 @@ export interface TrendCard {
   status: string;
   createdAt: string; // ISO
   summary?: MetricSummary[];
-  verdictPolicy?: { digest: string }; // which policy judged this batch (absent = the default ladder)
+  // Which policy judged this batch (absent = pre-stamp, the frozen v1 ladder). id+version ride along so the
+  // identity comparison can resolve a known document instead of comparing raw digest strings across eras.
+  verdictPolicy?: { id: string; version: string; digest: string };
 }
 
 export interface TrendPoint {
@@ -87,7 +89,11 @@ export function trendSeries(
         ? "higher_is_better"
         : undefined;
 
-  const digestOf = (card: TrendCard): string => card.verdictPolicy?.digest ?? "default";
+  // SEMANTIC policy identity, never the raw stamp string: a legacy-FNV stamp, a sha256 stamp of the same
+  // document, and an unstamped pre-mig card were all judged under one rule-set — comparing raw digests read
+  // them as three policies, flagging policyMixed and suppressing every regression across the migration
+  // boundary. verdictPolicyIdentity resolves known documents to one canonical digest per rule-set.
+  const digestOf = (card: TrendCard): string => verdictPolicyIdentity(card.verdictPolicy);
   const baselineDigest =
     baseline === "first"
       ? (scored.find((s) => s.score !== null)?.card ?? scored[0]?.card)
