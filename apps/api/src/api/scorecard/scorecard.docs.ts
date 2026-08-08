@@ -243,13 +243,18 @@ const docs = {
   verifyManifest: {
     summary: "Verify a scorecard's reproducibility manifest",
     description:
-      "Check every stamped digest against the CURRENT registry state: dataset bundle, resolved harness spec, " +
-      "each judge spec, and the embedded verdict policy. `drifted` = the registry document is no longer " +
-      "exactly what this batch evaluated; `unverifiable` = honest scope (a subset/grading-plan bundle is a " +
-      "selection the record cannot replay). Each check runs under the stamp's own algorithm — `sha256:` " +
-      "stamps are collision-resistant, while pre-sha256 bare-hex FNV stamps stay verifiable but remain " +
-      "identity against honest data, never tamper-evidence; the caveat rides every response and says which " +
-      "this record carried. 400 when the batch predates manifests. Requires scorecards:read.",
+      "Verify the manifest facet by facet against the CURRENT registry state: the dataset composite, the " +
+      "per-case content seals (verified individually — a subset never blocks them), the effective grading " +
+      "(the persisted plan, or per-case registry defaults), the resolved harness spec, each judge spec plus " +
+      "its CLOSURE (the sealed model/rubric/delegated-harness re-resolved through the same sealer submit " +
+      "used), the runtime judge configuration, and the embedded verdict policy. `drifted` = the registry " +
+      "document is no longer exactly what this batch evaluated (closure facets: re-resolving today would " +
+      "not judge identically); `unverifiable` is confined to what genuinely is not replayable — the " +
+      "selection-keyed composites on subset/plan runs and 'unresolved' closure seals. Each digest check " +
+      "runs under the stamp's own algorithm — `sha256:` stamps are collision-resistant, while pre-sha256 " +
+      "bare-hex FNV stamps stay verifiable but remain identity against honest data, never tamper-evidence; " +
+      "the caveat rides every response and says which this record carried. 400 when the batch predates " +
+      "manifests. Requires scorecards:read.",
     tags: ["scorecard"],
     params: scorecardIdParams,
     response: {

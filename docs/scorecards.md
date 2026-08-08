@@ -127,9 +127,14 @@ case bundle, the resolved harness spec, the run-time grading plan, each selected
 closure** (`sealJudgeClosure`: the resolved model binding, a rubric REF's latest-resolution, a harness
 judge's delegated agent — each "id@version" or the honest "unresolved"; a byte-identical spec over a moving
 reference is not the same judge), and the composed verdict policy in full. `POST /scorecards/:id/verify-manifest` (+ MCP `verify_scorecard_manifest`)
-re-checks each stamp against the CURRENT registry state: `match` · `drifted` (the registry document is no
-longer what this batch evaluated) · `missing` · `unverifiable` (a subset/grading-plan bundle is a selection
-the record cannot replay).
+re-checks the seal facet by facet against the CURRENT registry state: `match` · `drifted` (the registry
+document is no longer what this batch evaluated; on the judge-closure facets, re-resolving today would not
+judge identically) · `missing` · `unverifiable` — the last confined (H9) to what genuinely is not
+replayable: the selection-keyed COMPOSITE digests on subset/plan runs and "unresolved" closure seals. The
+split facets verify regardless of selection: `cases` verifies each sealed case individually, `grading`
+recomputes from the persisted plan or the per-case registry defaults, `judge:<id>:model|rubric|harness`
+re-resolves the closure through the same sealer submit used, and `judge_run` re-resolves the persisted
+orchestration config.
 
 `contentDigest` (`@everdict/domain`) hashes the **canonical** JSON (key-sorted, `undefined`-stripped) of the
 schema-parsed document, and stamps **`sha256:<64 hex>`**. Batches sealed before that carry the old bare

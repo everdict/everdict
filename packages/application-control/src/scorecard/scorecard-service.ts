@@ -1046,12 +1046,16 @@ export class ScorecardService {
     return this.analytics.gateAudit(tenant, opts);
   }
 
-  // B3 — manifest verification: every stamped digest checked against the CURRENT registry state. `drifted`
-  // says the registry document is no longer exactly what this batch evaluated; `unverifiable` is honest
-  // scope — a subset/grading-plan bundle was a selection whose inputs the record does not replay. Each check
-  // is made under the STAMP's own algorithm (digestUnder/digestsMatch): batches sealed since V1 carry
-  // collision-resistant `sha256:` stamps, older ones the FNV identity stamp that is evidence against honest
-  // data but never tamper-evidence — which is why the caveat riding the response says which it was.
+  // B3 — manifest verification, facet by facet against the CURRENT registry state (H9 taught it the split
+  // seal). `drifted` says the registry document is no longer exactly what this batch evaluated (for the
+  // moving judge-closure refs: re-resolving today would not judge identically); `unverifiable` is honest
+  // scope, now confined to what genuinely is not replayable — the selection-keyed COMPOSITE digests on
+  // subset/plan runs and "unresolved" closure seals. The split facets verify regardless of selection: each
+  // per-case seal names its content independently, the effective grading recomputes from the persisted plan
+  // or the registry defaults, and the judge closure re-resolves through the SAME sealer submit used. Each
+  // digest check is made under the STAMP's own algorithm (digestUnder/digestsMatch): batches sealed since
+  // V1 carry collision-resistant `sha256:` stamps, older ones the FNV identity stamp that is evidence
+  // against honest data but never tamper-evidence — the caveat riding the response says which it was.
   async verifyManifest(tenant: string, id: string): Promise<ManifestVerification> {
     const record = await this.get(id);
     if (!record || record.tenant !== tenant)
@@ -1064,29 +1068,125 @@ export class ScorecardService {
         "this batch has no reproducibility manifest (sealed before the manifest existed) — there is nothing to verify.",
       );
     const checks: ManifestCheck[] = [];
-    // Dataset — the sealed digest covers the EXACT case bundle evaluated; a subset or run-time grading plan
-    // was a derived selection, so the registry bundle is not the same document (honest unverifiable).
+    // The registry bundle is read once — the composite, per-case and grading checks all compare against it;
+    // an unresolvable bundle reads `missing` on each check that needed it.
+    const bundle = await this.deps.datasets.get(tenant, m.dataset.id, m.dataset.version).catch(() => undefined);
+    // Dataset COMPOSITE — the sealed digest covers the post-subset, post-plan bundle; a subset or run-time
+    // grading plan was a derived selection, so the registry bundle is not the same document (honest
+    // unverifiable — the per-case `cases` check below still verifies the CONTENT).
     if (record.subset !== undefined || m.graders !== undefined) {
       checks.push({
         subject: "dataset",
         stored: m.dataset.digest,
         status: "unverifiable",
-        note: "the sealed bundle was a subset/grading-plan selection — its inputs are not replayable from the record",
+        note: "the sealed composite was a subset/grading-plan selection — not replayable; the per-case seals still verify content",
       });
+    } else if (bundle === undefined) {
+      checks.push({ subject: "dataset", stored: m.dataset.digest, status: "missing" });
     } else {
-      try {
-        const ds = await this.deps.datasets.get(tenant, m.dataset.id, m.dataset.version);
-        // `current` is computed under the STAMP's algorithm (digestUnder) so a legacy-sealed row's stored and
-        // current values stay comparable side by side; the verdict itself is digestsMatch's.
-        const current = digestUnder(m.dataset.digest, ds.cases);
+      // `current` is computed under the STAMP's algorithm (digestUnder) so a legacy-sealed row's stored and
+      // current values stay comparable side by side; the verdict itself is digestsMatch's.
+      const current = digestUnder(m.dataset.digest, bundle.cases);
+      checks.push({
+        subject: "dataset",
+        stored: m.dataset.digest,
+        current,
+        status: current === m.dataset.digest ? "match" : "drifted",
+      });
+    }
+    // Per-case CONTENT seals (H9) — each sealed case names its content independently of the selection, so a
+    // subset run verifies here even while its composite stays unverifiable. Aggregated to one check: stored/
+    // current are digests OVER the two per-case maps (equal maps ⇔ every case equal); drift names the cases.
+    if (m.cases !== undefined) {
+      if (bundle === undefined) {
+        checks.push({ subject: "cases", stored: contentDigest(m.cases), status: "missing" });
+      } else {
+        const byId = new Map(bundle.cases.map((c) => [c.id, c]));
+        const current: Record<string, string> = {};
+        const drifted: string[] = [];
+        for (const [caseId, stamp] of Object.entries(m.cases)) {
+          const c = byId.get(caseId);
+          current[caseId] = c === undefined ? "absent" : digestUnder(stamp, { ...c, graders: undefined });
+          if (current[caseId] !== stamp) drifted.push(caseId);
+        }
+        const named = drifted.slice(0, 3).join("', '");
         checks.push({
-          subject: "dataset",
-          stored: m.dataset.digest,
-          current,
-          status: current === m.dataset.digest ? "match" : "drifted",
+          subject: "cases",
+          stored: contentDigest(m.cases),
+          current: contentDigest(current),
+          status: drifted.length === 0 ? "match" : "drifted",
+          note:
+            drifted.length === 0
+              ? `${Object.keys(m.cases).length} sealed case(s) verified individually — selection never blocks this check`
+              : `${drifted.length} sealed case(s) no longer verify ('${named}'${drifted.length > 3 ? ` and ${drifted.length - 3} more` : ""})`,
         });
-      } catch {
-        checks.push({ subject: "dataset", stored: m.dataset.digest, status: "missing" });
+      }
+    }
+    // Effective grading (H9) — a plan run verifies against the PERSISTED plan (the document lives only on
+    // the record); a defaults run verifies per case against the registry defaults; a pre-gradingCases
+    // defaults seal recomputes its composite only for a full run (a subset composite is not replayable).
+    if (m.grading !== undefined) {
+      if (m.graders !== undefined) {
+        const plan = record.orchestration?.graders;
+        if (plan === undefined) {
+          checks.push({
+            subject: "grading",
+            stored: m.grading,
+            status: "unverifiable",
+            note: "a grading-plan run whose orchestration was not persisted — the plan document is gone",
+          });
+        } else {
+          const current = digestUnder(m.grading, plan);
+          checks.push({
+            subject: "grading",
+            stored: m.grading,
+            current,
+            status: current === m.grading ? "match" : "drifted",
+            note: "the grading plan is a record-embedded document — verified against the persisted orchestration",
+          });
+        }
+      } else if (m.gradingCases !== undefined) {
+        if (bundle === undefined) {
+          checks.push({ subject: "grading", stored: contentDigest(m.gradingCases), status: "missing" });
+        } else {
+          const byId = new Map(bundle.cases.map((c) => [c.id, c]));
+          const current: Record<string, string> = {};
+          const drifted: string[] = [];
+          for (const [caseId, stamp] of Object.entries(m.gradingCases)) {
+            const c = byId.get(caseId);
+            current[caseId] = c === undefined ? "absent" : digestUnder(stamp, c.graders);
+            if (current[caseId] !== stamp) drifted.push(caseId);
+          }
+          checks.push({
+            subject: "grading",
+            stored: contentDigest(m.gradingCases),
+            current: contentDigest(current),
+            status: drifted.length === 0 ? "match" : "drifted",
+            note:
+              drifted.length === 0
+                ? "per-case default graders verified individually against the registry"
+                : `${drifted.length} case(s)' default graders no longer verify ('${drifted.slice(0, 3).join("', '")}')`,
+          });
+        }
+      } else if (record.subset === undefined) {
+        if (bundle === undefined) {
+          checks.push({ subject: "grading", stored: m.grading, status: "missing" });
+        } else {
+          const current = digestUnder(m.grading, Object.fromEntries(bundle.cases.map((c) => [c.id, c.graders])));
+          checks.push({
+            subject: "grading",
+            stored: m.grading,
+            current,
+            status: current === m.grading ? "match" : "drifted",
+          });
+        }
+      } else {
+        checks.push({
+          subject: "grading",
+          stored: m.grading,
+          status: "unverifiable",
+          note: "a pre-gradingCases subset seal — the selection-keyed composite is not replayable",
+        });
       }
     }
     // Harness — only when a resolved spec was sealed and the registry can resolve it now.
@@ -1109,22 +1209,99 @@ export class ScorecardService {
       }
     }
     for (const j of m.judges ?? []) {
-      if (j.specDigest === undefined) continue;
-      if (!this.deps.judges) {
-        checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "unverifiable" });
-        continue;
+      if (j.specDigest !== undefined) {
+        if (!this.deps.judges) {
+          checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "unverifiable" });
+        } else {
+          try {
+            const spec = await this.deps.judges.get(tenant, j.id, j.version);
+            const current = digestUnder(j.specDigest, spec);
+            checks.push({
+              subject: `judge:${j.id}`,
+              stored: j.specDigest,
+              current,
+              status: current === j.specDigest ? "match" : "drifted",
+            });
+          } catch {
+            checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "missing" });
+          }
+        }
       }
-      try {
-        const spec = await this.deps.judges.get(tenant, j.id, j.version);
-        const current = digestUnder(j.specDigest, spec);
+      // The judge CLOSURE (H9) — the sealed model/rubric/harness re-resolve through the SAME sealer submit
+      // used, so "would re-running today judge identically?" is answered by one implementation. A `drifted`
+      // here means the document's moving references reach a different target now; "unresolved" seals are
+      // honest ignorance with nothing to re-verify.
+      if (j.model !== undefined || j.rubric !== undefined || j.harness !== undefined) {
+        const [current] = await sealJudgeClosure(this.deps, tenant, [{ id: j.id, version: j.version }]);
+        const facets: Array<[string, string | undefined, string | undefined]> = [
+          ["model", j.model, current?.model],
+          ["rubric", j.rubric, current?.rubric],
+          ["harness", j.harness, current?.harness],
+        ];
+        for (const [facet, sealedValue, currentValue] of facets) {
+          if (sealedValue === undefined) continue;
+          if (sealedValue === "unresolved") {
+            checks.push({
+              subject: `judge:${j.id}:${facet}`,
+              stored: sealedValue,
+              status: "unverifiable",
+              note: `the ${facet} was sealed as unresolved — nothing to re-verify`,
+            });
+          } else if (currentValue === undefined || currentValue === "unresolved") {
+            checks.push({
+              subject: `judge:${j.id}:${facet}`,
+              stored: sealedValue,
+              status: "missing",
+              note: `the ${facet} reference no longer resolves`,
+            });
+          } else {
+            checks.push({
+              subject: `judge:${j.id}:${facet}`,
+              stored: sealedValue,
+              current: currentValue,
+              status: sealedValue === currentValue ? "match" : "drifted",
+              ...(sealedValue !== currentValue
+                ? {
+                    note: `re-resolving today reaches a different ${facet} — reproducing this batch now would not judge identically`,
+                  }
+                : {}),
+            });
+          }
+        }
+      }
+    }
+    // The runtime judge configuration (H9) — sealed at submit from the request override / workspace default;
+    // verified against the PERSISTED orchestration config through the same model-identity resolution.
+    if (m.judgeRun !== undefined) {
+      const runKey = (r: { provider?: string; model: string }): string => `${r.provider ?? "default"}/${r.model}`;
+      const cfg = record.orchestration?.judge;
+      if (m.judgeRun.model === "unresolved") {
         checks.push({
-          subject: `judge:${j.id}`,
-          stored: j.specDigest,
-          current,
-          status: current === j.specDigest ? "match" : "drifted",
+          subject: "judge_run",
+          stored: runKey(m.judgeRun),
+          status: "unverifiable",
+          note: "the runtime judge model was sealed as unresolved — nothing to re-verify",
         });
-      } catch {
-        checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "missing" });
+      } else if (cfg === undefined) {
+        checks.push({
+          subject: "judge_run",
+          stored: runKey(m.judgeRun),
+          status: "unverifiable",
+          note: "the runtime judge configuration was not persisted in orchestration",
+        });
+      } else {
+        const model = await sealedModelIdentity(this.deps, tenant, cfg.model);
+        if (model === undefined) {
+          checks.push({ subject: "judge_run", stored: runKey(m.judgeRun), status: "missing" });
+        } else {
+          const current = runKey({ ...(cfg.provider !== undefined ? { provider: cfg.provider } : {}), model });
+          checks.push({
+            subject: "judge_run",
+            stored: runKey(m.judgeRun),
+            current,
+            status: current === runKey(m.judgeRun) ? "match" : "drifted",
+          });
+        }
       }
     }
     // Verdict policy — the embedded document must still hash to the stamped digest, else the stamp cannot be

@@ -43,6 +43,7 @@ import {
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
+  InMemoryRubricRegistry,
 } from "@everdict/registry";
 import { InMemoryArtifactStore } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
@@ -5802,6 +5803,92 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
       updatedAt: "2026-08-01T00:00:00.000Z",
     });
     await expect(service.verifyManifest("acme", "vm-old")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("verifyManifest verifies the SPLIT seal — a subset's cases and grading verify individually, and the judge closure re-resolves (H9)", async () => {
+    // Pre-fix, a subset run's whole dataset facet read `unverifiable` and the sealed judge closure
+    // (model/rubric/harness) plus judgeRun were never re-checked at all — the report claimed "every stamped
+    // digest checked" while skipping most of the seal.
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    const rubrics = new InMemoryRubricRegistry();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("never");
+        },
+      },
+      store,
+      datasets,
+      judges,
+      rubrics,
+    });
+    const { contentDigest, sealGrading } = await import("@everdict/domain");
+    const cases = [
+      { id: "a", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      { id: "b", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    ];
+    await datasets.register("acme", { id: "vd2", version: "1.0.0", cases, tags: [] });
+    // A judge whose rubric is a LATEST ref — sealed at submit while latest was 1.0.0.
+    await rubrics.register("acme", { id: "style", version: "1.0.0", text: "clean?", tags: [] });
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      rubric: { id: "style", version: "latest" },
+      inputs: ["trace"],
+      tags: [],
+    });
+    const selected = [cases[0]]; // the deliberate 1-of-2 subset
+    await store.create({
+      id: "vm-split",
+      tenant: "acme",
+      dataset: { id: "vd2", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      subset: { total: 2, selected: 1 },
+      orchestration: {
+        judges: [{ id: "quality", version: "1.0.0" }],
+        judge: { model: "judge-model-x" },
+        concurrency: 1,
+        retries: 0,
+      },
+      manifest: {
+        dataset: { id: "vd2", version: "1.0.0", digest: "sha256:selection-composite" },
+        cases: Object.fromEntries(selected.map((c) => [c?.id ?? "", contentDigest({ ...c, graders: undefined })])),
+        ...sealGrading(
+          undefined,
+          selected.filter((c) => c !== undefined),
+        ),
+        harness: { id: "h", version: "1" },
+        judges: [
+          { id: "quality", version: "1.0.0", specDigest: "sha256:doc", model: "gpt-5.4-mini", rubric: "style@1.0.0" },
+        ],
+        judgeRun: { model: "judge-model-x" },
+      },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    const before = await service.verifyManifest("acme", "vm-split");
+    const by = (subject: string) => before.checks.find((c) => c.subject === subject);
+    expect(by("dataset")?.status).toBe("unverifiable"); // the selection-keyed composite stays honest
+    expect(by("cases")?.status).toBe("match"); // …but the sealed case verifies INDIVIDUALLY despite the subset
+    expect(by("grading")?.status).toBe("match"); // per-case defaults verified against the registry
+    expect(by("judge:quality:model")?.status).toBe("match"); // raw binding re-seals verbatim
+    expect(by("judge:quality:rubric")?.status).toBe("match"); // latest still resolves to 1.0.0
+    expect(by("judge_run")?.status).toBe("match"); // verified against the persisted orchestration config
+
+    // The rubric's latest MOVES — the sealed closure no longer matches a fresh resolution: reproducing this
+    // batch today would judge under a different rubric document, and the report says so.
+    await rubrics.register("acme", { id: "style", version: "2.0.0", text: "clean AND fast?", tags: [] });
+    const after = await service.verifyManifest("acme", "vm-split");
+    const rubricCheck = after.checks.find((c) => c.subject === "judge:quality:rubric");
+    expect(rubricCheck?.status).toBe("drifted");
+    expect(rubricCheck?.current).toBe("style@2.0.0");
   });
 
   it("verifyManifest verifies a legacy FNV-sealed manifest under its OWN algorithm, and says so in the caveat", async () => {

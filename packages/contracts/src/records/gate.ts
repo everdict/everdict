@@ -187,13 +187,19 @@ export const GateAuditSchema = z.object({
 });
 export type GateAudit = z.infer<typeof GateAuditSchema>;
 
-// B3 — manifest verification: each stamped digest checked against the CURRENT registry state, under the
-// STAMP's own algorithm. `drifted` answers "is the registry document still exactly what this batch
-// evaluated?" — collision-resistant evidence for a `sha256:` stamp, identity against honest data only for a
-// pre-sha256 FNV one (bare 16 hex, still verified so history keeps verifying). The caveat rides every
-// response and says which of the two this record's stamps were, so no one mistakes the claim.
+// B3 — manifest verification, facet by facet against the CURRENT registry state, under the STAMP's own
+// algorithm. `drifted` answers "is the registry document still exactly what this batch evaluated?" (for the
+// judge-closure facets: "would re-resolving today judge identically?") — collision-resistant evidence for a
+// `sha256:` stamp, identity against honest data only for a pre-sha256 FNV one (bare 16 hex, still verified
+// so history keeps verifying). `unverifiable` is confined to what genuinely is not replayable: the
+// selection-keyed composites on subset/plan runs and "unresolved" closure seals — the split facets (`cases`,
+// `grading`, the judge closure) verify regardless of selection. The caveat rides every response and says
+// which of the two stamp eras this record's were, so no one mistakes the claim.
 export const ManifestCheckSchema = z.object({
-  subject: z.string(), // "dataset" | "harness" | "judge:<id>" | "verdict_policy"
+  // "dataset" (composite) | "cases" (per-case content seals, aggregated) | "grading" (effective grading) |
+  // "harness" | "judge:<id>" (spec document) | "judge:<id>:model|rubric|harness" (closure re-resolution) |
+  // "judge_run" | "verdict_policy"
+  subject: z.string(),
   stored: z.string(),
   current: z.string().optional(),
   status: z.enum(["match", "drifted", "missing", "unverifiable"]),
