@@ -6,9 +6,16 @@ it supposed to stop, and who says it worked. The protocol answers each with a ty
 enforcement site.
 
 - **`RoleProfile`** — what a role may touch and what "done" means for it.
-- **`TaskEnvelope`** — the decision boundary an autonomous task runs inside.
+- **`TaskEnvelope`** — spoken name **AutonomyBoundary**: the decision boundary an autonomous task runs inside.
 - **`HandoffCheckpoint`** — a resumable state transfer, where facts carry evidence and everything else is a
   hypothesis that says so.
+
+**Two "envelopes", two concepts — keep the names apart.** A `TaskEnvelope` is the **AutonomyBoundary**
+(kernel-enforced, never persisted); `RunRecord.envelope` is the **CausalBudget** (capUsd/capRuns — the
+delegated spend caused work draws from, enforced at the admission gate, persisted as a spend ledger). On an
+agent activation BOTH key on the run id, which is exactly why the language must not blur: *an agent run
+executes inside an AutonomyBoundary; caused work draws from its CausalBudget.* The symbol rename is deferred
+to a wire-breaking version — the language is not.
 
 Contracts: `packages/contracts/src/records/ownership.ts`. Invariants: `packages/domain/src/ownership/`.
 

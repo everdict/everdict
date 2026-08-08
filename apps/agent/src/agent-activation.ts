@@ -710,8 +710,11 @@ export class AgentActivator {
     }
   }
 
-  // The decision boundary this activation runs inside (O5). The envelope's id is the RUN id: a task envelope
-  // is per-execution, and reusing the agent id would make two concurrent activations share one boundary.
+  // The AUTONOMY BOUNDARY this activation runs inside (the O5 TaskEnvelope). Its id is the RUN id: a
+  // boundary is per-execution, and reusing the agent id would make two concurrent activations share one.
+  // NOTE the same run id ALSO names the run's CAUSAL BUDGET (RunRecord.envelope — the delegated spend caused
+  // work draws from): two different contracts behind one identifier and one unlucky shared word — see the
+  // naming note beside TaskEnvelopeSchema in contracts records/ownership.ts.
   // `role` stays absent — an agent spec declares no ownership role, and stamping "executor" on it would be a
   // claim the record cannot back. Scope is completed by the turn, which is where the toolset resolves.
   private envelopeFor(runId: string, spec: AgentSpec, event: ActivationEvent): ActivationEnvelope {

@@ -91,7 +91,14 @@ export const RoleAssignmentSchema = z.object({
 });
 export type RoleAssignment = z.infer<typeof RoleAssignmentSchema>;
 
-// ── O5: the task envelope ────────────────────────────────────────────────────────────────────────────
+// ── O5: the task envelope — spoken name: the AUTONOMY BOUNDARY ──────────────────────────────────────
+// Two unrelated contracts share the word "envelope" and, on an agent activation, even one ID (both key on
+// the run id). Keep the CONCEPTS apart by name: a TaskEnvelope is the AUTONOMY BOUNDARY one autonomous task
+// runs inside (goal, tool scope, hard budgets, stop/escalation, rollback — enforced by the agent kernel,
+// never persisted); a RunEnvelope (records/run.ts) is the CAUSAL BUDGET a run delegates to the work it
+// causes (capUsd/capRuns — enforced at the control plane's admission gate, persisted as a spend ledger).
+// "An agent run executes inside an AutonomyBoundary; caused work draws from its CausalBudget." The symbol
+// rename itself is deferred to a wire-breaking version — the language is not.
 // The scope names BOTH halves of what the task may touch, because the runtime enforces both halves:
 //   reads  — "all" (the default executor posture: reads are the agent's senses) or an explicit capability
 //            list (a verifier/diagnostician sees evidence tools only — context separation as code).

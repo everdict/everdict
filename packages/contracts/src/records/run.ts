@@ -51,7 +51,11 @@ export const RunOriginSchema = z.object({
 });
 export type RunOrigin = z.infer<typeof RunOriginSchema>;
 
-// The budget this run draws from (and delegates to runs it causes). P0 stamps it; P4 enforces it.
+// The budget this run draws from (and delegates to runs it causes) — spoken name: the CAUSAL BUDGET.
+// P0 stamps it; P4 enforces it (admitCausedWork). NOT the TaskEnvelope (records/ownership.ts — the
+// AUTONOMY BOUNDARY the agent kernel enforces): different budget vocabularies, different enforcement
+// points, different persistence, one unlucky shared word — and on an agent activation both key on the run
+// id, which is exactly why the names must not blur. See the naming note beside TaskEnvelopeSchema.
 export const RunEnvelopeSchema = z.object({
   id: z.string(),
   capUsd: z.number().nonnegative().optional(),
