@@ -37,7 +37,14 @@ import {
   scorecardModels,
   summarizeScorecard,
 } from "@everdict/domain";
-import { appendScoringRevision, applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
+import {
+  appendScoringRevision,
+  applyGradingPlan,
+  caseReason,
+  childKey,
+  selectSubsetCases,
+  verdictSummaryOf,
+} from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
 import type { ScoringService } from "../execution/scoring-service.js";
@@ -764,6 +771,9 @@ export class ScorecardBatchService {
     const settlement = batch.succeed(
       {
         summary,
+        // The stamped-policy verdict aggregate (arch-review 7 §4) — the number release-shaped surfaces read,
+        // so the headline's hardcoded authority ladder can never contradict the actual case verdicts.
+        verdictSummary: verdictSummaryOf(results, ctx.verdictPolicy),
         models: scorecardModels(scorecard, declared),
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
@@ -1519,6 +1529,8 @@ export class ScorecardBatchService {
       if (hasChildren) await this.writeBackResults(id, caseToChild, scorecard.results);
       const extras: ScorecardOutcomeExtras = {
         summary,
+        // The stamped-policy verdict aggregate (arch-review 7 §4) — same derivation as the Temporal finalize.
+        verdictSummary: verdictSummaryOf(scorecard.results, opts.verdictPolicy),
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),

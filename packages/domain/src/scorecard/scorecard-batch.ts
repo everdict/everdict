@@ -48,6 +48,7 @@ export type ScorecardOutcomeExtras = Partial<
   Pick<
     ScorecardRecord,
     | "summary"
+    | "verdictSummary"
     | "models"
     | "judgeModels"
     | "export"

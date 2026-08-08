@@ -492,5 +492,7 @@ describe("ScorecardScoreService aggregate — a re-score rewrites scoring identi
     ]);
     // judgeModels reads CURRENT — the replaced judge's model (m1) is no longer this record's judge
     expect(patch?.judgeModels).toEqual(["m2", "mk"]);
+    // The stamped-policy verdict aggregate follows the judgment in the same settle (arch-review 7 §4)
+    expect(patch?.verdictSummary).toMatchObject({ verdicted: 1, passed: 1, failed: 0, passRate: 1 });
   });
 });

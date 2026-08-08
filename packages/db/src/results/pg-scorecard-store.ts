@@ -34,6 +34,7 @@ interface ScorecardRow {
   steps: unknown;
   run_ids: unknown;
   owner_replica: string | null; // which control-plane replica drives this batch (mig 0135)
+  verdict_summary: unknown; // stamped-policy verdict aggregate (mig 0146) — what release-shaped surfaces read
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -84,6 +85,8 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // detail-only lightweight reference (get only, like steps)
     // Lightweight — boot recovery reads the LIST, so the owner must ride it or the check cannot be made.
     ownerReplica: row.owner_replica ?? undefined,
+    // Lightweight — product readiness/timeline read the LIST, and this is the number they stand on.
+    verdictSummary: (row.verdict_summary as ScorecardRecord["verdictSummary"]) ?? undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -91,9 +94,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)";
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -133,6 +136,7 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.ownerReplica ?? replicaId ?? null,
     r.createdAt,
     r.updatedAt,
+    r.verdictSummary ? JSON.stringify(r.verdictSummary) : null,
   ];
 }
 
@@ -240,6 +244,12 @@ export class PgScorecardStore implements ScorecardStore {
       // append-path (settle/rescore) — the scoring-identity ledger; the service writes the whole array back.
       sets.push(`scoring = $${i++}`);
       vals.push(JSON.stringify(patch.scoring));
+    }
+    if (patch.verdictSummary !== undefined) {
+      // settle/rescore — the stamped-policy verdict aggregate (mig 0146); dropping it would leave release
+      // surfaces standing on the pre-rescore number.
+      sets.push(`verdict_summary = $${i++}`);
+      vals.push(JSON.stringify(patch.verdictSummary));
     }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical
@@ -363,7 +373,7 @@ export class PgScorecardStore implements ScorecardStore {
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
       // batches a live replica is still driving. It is one text column, not a heavy one.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

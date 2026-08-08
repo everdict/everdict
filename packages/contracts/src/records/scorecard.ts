@@ -150,6 +150,23 @@ export const ScoringRevisionSchema = z.object({
 });
 export type ScoringRevision = z.infer<typeof ScoringRevisionSchema>;
 
+// The batch's OWN verdict aggregate — computed under the STAMPED verdict policy at settle and PERSISTED
+// (arch-review 7 §4). headlinePassRate ranks metrics by a hardcoded authority ladder that cannot know a
+// composed policy's custom ground_truth metrics, so a surface acting on the headline (product timeline,
+// release readiness, dashboards) could contradict the actual case verdicts. This is the number those
+// surfaces read: passed/failed/verdicted over authority-ranked caseVerdict under the batch's own policy,
+// with the policy's digest stamped so a stale aggregate (e.g. after a re-score whose stamp could not be
+// restored) is DETECTABLE against record.verdictPolicy.digest instead of silently trusted.
+export const VerdictSummarySchema = z.object({
+  verdicted: z.number().int().nonnegative(),
+  passed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  // ABSENT when verdicted === 0 — a rate over nothing is absence, never 0 (the annihilated-metric rule).
+  passRate: z.number().optional(),
+  policyDigest: z.string(),
+});
+export type VerdictSummary = z.infer<typeof VerdictSummarySchema>;
+
 // The scorecard's denominators (isomorphic to @everdict/domain scorecardOutcomes) — served next to casePass so
 // no client conflates 841/970 (verdicted) with 841/1000 (requested). infraFailed cases carry NO product verdict;
 // they are recovery work, never product failures. DERIVED on read, never persisted.
@@ -311,6 +328,11 @@ export const ScorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }), // resolved concrete version (never "latest")
   status: ScorecardStatusSchema,
   summary: z.array(MetricSummarySchema).optional(), // lightweight aggregate (for listing)
+  // The stamped-policy verdict aggregate — persisted at every judged settle (succeed / re-score / ingest),
+  // refreshed by a re-score alongside the scoring revision. Lightweight → included in list too (the product
+  // timeline and release readiness read the LIST shape). mig 0146. Absent on pre-field and failed/aborted
+  // settles.
+  verdictSummary: VerdictSummarySchema.optional(),
   // Trial roll-up (pass@k / flakiness) — DERIVED on get() from the scorecard's repeated trials, never stored (like
   // RunRecord.usage). Present only when the batch ran trials>1. docs/architecture/trial-based-verdict.md
   trialSummary: ScorecardTrialSummarySchema.optional(),

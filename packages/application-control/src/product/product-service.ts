@@ -30,7 +30,7 @@ import {
   type ReleaseEditInput,
   type ReleaseTransition,
   type SeriesScorecardPoint,
-  headlinePassRate,
+  decisionPassRate,
   releaseReadiness,
   watchedSeries,
 } from "@everdict/domain";
@@ -222,7 +222,7 @@ export class ProductService {
           .filter((row) => row.createdAt >= from && row.createdAt <= to)
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
           .map((row) => {
-            const rate = headlinePassRate(row);
+            const rate = decisionPassRate(row); // stamped-policy aggregate first — same number the release stands on
             return {
               scorecardId: row.id,
               status: row.status,
@@ -462,7 +462,9 @@ export class ProductService {
 
 // One list row's contribution to a series trend — the shape the domain arithmetic reads.
 function seriesPoint(record: ScorecardRecord): SeriesScorecardPoint {
-  const rate = headlinePassRate(record);
+  // The stamped-policy verdict aggregate when the record carries one (arch-review 7 §4) — the release
+  // decision and the case dialog must never rank a metric differently; headline is the legacy fallback.
+  const rate = decisionPassRate(record);
   return {
     scorecardId: record.id,
     ...(rate !== null ? { passRate: rate } : {}),

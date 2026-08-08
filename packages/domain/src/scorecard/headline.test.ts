@@ -1,5 +1,8 @@
+import type { CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { headlinePassRate, preferredMetric } from "./headline.js";
+import { decisionPassRate, headlinePassRate, preferredMetric } from "./headline.js";
+import { summarizeScorecard, verdictSummaryOf } from "./scorecard.js";
+import { composeVerdictPolicy, verdictPolicyRef } from "./verdict-policy.js";
 
 describe("headlinePassRate", () => {
   it("a real judge:<id> pass rate outranks an arbitrary metric (dead-name family regression)", () => {
@@ -37,5 +40,45 @@ describe("headlinePassRate", () => {
       ],
     });
     expect(rate).toBe(1);
+  });
+});
+
+describe("verdictSummaryOf / decisionPassRate — the stamped policy's own aggregate (arch-review 7 §4)", () => {
+  const scored = (pass: boolean): CaseResult => ({
+    caseId: `c-${Math.abs(Number(pass))}`,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "prompt", output: "done" },
+    scores: [
+      // The composed policy declares this metric GROUND TRUTH — it decides the case…
+      { graderId: "biz", metric: "custom_business_state", value: pass ? 1 : 0, pass },
+      // …while the judge disagrees, and the judge is the highest rung the headline LADDER can see.
+      { graderId: "quality", metric: "judge:quality", value: pass ? 0 : 1, pass: !pass },
+    ],
+  });
+
+  it("a composed ground_truth metric decides the aggregate even though the headline ladder cannot see it", () => {
+    const composed = composeVerdictPolicy([{ id: "custom_business_state", authority: "ground_truth" }]);
+    const results = [scored(true), scored(true)];
+    // The headline ranks judge:quality (its ladder knows nothing of the custom metric) — and reads 0%.
+    expect(headlinePassRate({ summary: summarizeScorecard({ suiteId: "s", harness: "h@1", results }) })).toBe(0);
+    // The persisted aggregate follows caseVerdict under the batch's OWN policy — 100%, digest-stamped.
+    const vs = verdictSummaryOf(results, composed);
+    expect(vs).toMatchObject({ verdicted: 2, passed: 2, failed: 0, passRate: 1 });
+    expect(vs.policyDigest).toBe(verdictPolicyRef(composed).digest);
+    // Decision surfaces read the aggregate first; the headline stays the legacy fallback.
+    expect(decisionPassRate({ verdictSummary: vs })).toBe(1);
+    expect(decisionPassRate({ summary: summarizeScorecard({ suiteId: "s", harness: "h@1", results }) })).toBe(0);
+  });
+
+  it("nothing verdicted is ABSENCE — and a decision surface treats it as the answer, never falling through", () => {
+    const vs = verdictSummaryOf([], undefined);
+    expect(vs).toMatchObject({ verdicted: 0, passed: 0, failed: 0 });
+    expect(vs.passRate).toBeUndefined(); // a rate over nothing is absence, never 0
+    // A record carrying the aggregate does NOT fall through to a metric-level rate the policy might rank
+    // differently — absence is the aggregate's real answer.
+    expect(
+      decisionPassRate({ verdictSummary: vs, summary: [{ metric: "tests_pass", count: 2, passRate: 1 }] }),
+    ).toBeNull();
   });
 });

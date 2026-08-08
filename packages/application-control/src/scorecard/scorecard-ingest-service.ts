@@ -21,6 +21,7 @@ import {
   appendScoringRevision,
   scorecardModels,
   summarizeScorecard,
+  verdictSummaryOf,
 } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
@@ -378,6 +379,9 @@ export class ScorecardIngestService {
         {
           scorecard,
           summary,
+          // The stamped-policy verdict aggregate (arch-review 7 §4). An ingest batch has no manifest, so its
+          // domain stamp (judgedUnder) is the default ladder — the aggregate derives under the SAME policy.
+          verdictSummary: verdictSummaryOf(results, undefined),
           models,
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
           ...(exported ? { export: exported } : {}),

@@ -7,7 +7,13 @@ import {
   NotFoundError,
   type ScorecardRecord,
 } from "@everdict/contracts";
-import { ScorecardBatch, type ScorecardOutcomeExtras, judgeGradeable, summarizeScorecard } from "@everdict/domain";
+import {
+  ScorecardBatch,
+  type ScorecardOutcomeExtras,
+  judgeGradeable,
+  summarizeScorecard,
+  verdictSummaryOf,
+} from "@everdict/domain";
 import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
 import { childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
@@ -292,6 +298,10 @@ export class ScorecardScoreService {
     });
     const extras: ScorecardOutcomeExtras = {
       summary,
+      // The stamped-policy verdict aggregate follows the judgment (arch-review 7 §4). An unresolvable stamp
+      // skips the refresh like the analysis re-freeze does — the STALE aggregate stays detectable, because
+      // its policyDigest no longer matches the record's verdictPolicy stamp era; never silently re-derived.
+      ...(resolution.status === "unresolvable" ? {} : { verdictSummary: verdictSummaryOf(results, resolution.policy) }),
       ...(judgeModels.length > 0 ? { judgeModels } : {}),
       scoring,
       ...(analysisRef ? { analysisRef } : {}),

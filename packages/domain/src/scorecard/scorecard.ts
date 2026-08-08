@@ -3,11 +3,12 @@ import {
   type MeasuredScore,
   type Scorecard,
   type VerdictPolicy,
+  type VerdictSummary,
   isMeasured,
   measuredScores,
   metricMatches,
 } from "@everdict/contracts";
-import { DEFAULT_VERDICT_POLICY, PRE_OUTCOME_STAGES, evaluateVerdict } from "./verdict-policy.js";
+import { DEFAULT_VERDICT_POLICY, PRE_OUTCOME_STAGES, evaluateVerdict, verdictPolicyRef } from "./verdict-policy.js";
 
 export { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 
@@ -26,6 +27,30 @@ export function caseVerdict(
   policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
 ): boolean | undefined {
   return evaluateVerdict(result, policy).verdict;
+}
+
+// The batch's OWN verdict aggregate under its STAMPED policy (arch-review 7 §4) — the PERSISTED twin of
+// scorecardPassRate, stamped with the policy digest so a stale aggregate is detectable against the record's
+// verdictPolicy stamp. headlinePassRate ranks metrics by a hardcoded authority ladder that cannot know a
+// composed policy's custom ground_truth metrics; every release-shaped surface (product readiness, timeline,
+// dashboards) reads THIS instead, so the number a release stands on and the verdict a case dialog shows can
+// never rank differently. passRate is ABSENT when nothing verdicted — a rate over nothing is absence.
+export function verdictSummaryOf(results: CaseResult[], policy?: VerdictPolicy): VerdictSummary {
+  let passed = 0;
+  let failed = 0;
+  for (const r of results) {
+    const v = caseVerdict(r, policy);
+    if (v === true) passed++;
+    else if (v === false) failed++;
+  }
+  const verdicted = passed + failed;
+  return {
+    verdicted,
+    passed,
+    failed,
+    ...(verdicted > 0 ? { passRate: passed / verdicted } : {}),
+    policyDigest: verdictPolicyRef(policy).digest,
+  };
 }
 
 // Per-case pass rate of a scorecard (aggregated via the authority-based caseVerdict). Cases with no pass-deciding grader are excluded.

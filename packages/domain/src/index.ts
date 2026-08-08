@@ -20,6 +20,7 @@ export {
   type ScorecardDiff,
   scorecardPassRate,
   summarizeScorecard,
+  verdictSummaryOf,
 } from "./scorecard/scorecard.js";
 export {
   type CaseOutcome,
@@ -96,7 +97,7 @@ export {
   trendSeries,
 } from "./scorecard/trend.js";
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
-export { headlinePassRate, preferredMetric } from "./scorecard/headline.js";
+export { decisionPassRate, headlinePassRate, preferredMetric } from "./scorecard/headline.js";
 
 // scorecard — flexible analysis pivot (filter/group/pivot/measure), the server-side twin of the web engine
 export {

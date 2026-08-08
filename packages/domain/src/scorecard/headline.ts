@@ -1,3 +1,4 @@
+import type { VerdictSummary } from "@everdict/contracts";
 import type { MetricSummary } from "./scorecard.js";
 import type { ScorecardTrialSummary } from "./trials.js";
 
@@ -30,6 +31,20 @@ export function headlinePassRate(record: {
   const judge = summary.find((x) => isJudgeOverallMetric(x.metric) && x.passRate !== undefined);
   if (judge?.passRate !== undefined) return judge.passRate;
   return summary.find((x) => x.passRate !== undefined)?.passRate ?? null;
+}
+
+// The pass rate a DECISION-shaped surface reads (arch-review 7 §4): the persisted stamped-policy verdict
+// aggregate when the record carries one — its ABSENT passRate is a real answer ("nothing verdicted"), never
+// a licence to fall through to a metric-level rate the policy might rank differently — else the headline
+// ranking for pre-field records. Product readiness, the timeline and any release surface read THIS; the
+// headline stays the display fallback it always was.
+export function decisionPassRate(record: {
+  verdictSummary?: VerdictSummary;
+  trialSummary?: Pick<ScorecardTrialSummary, "passAt1" | "cases">;
+  summary?: MetricSummary[];
+}): number | null {
+  if (record.verdictSummary) return record.verdictSummary.passRate ?? null;
+  return headlinePassRate(record);
 }
 
 // The default analysis metric for a SET of cards (trend/leaderboard axis when the caller names none): the
