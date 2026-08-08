@@ -7,6 +7,7 @@ const base = (over: Partial<GateInput>): GateInput => ({
   metrics: [],
   regressions: [],
   improvements: [],
+  caseTransitions: [],
   missing: { casesOnlyInBaseline: [], casesOnlyInCandidate: [], metricsOnlyInBaseline: [], metricsOnlyInCandidate: [] },
   incomparable: [],
   overlap: { sharedCases: 3, baselineCases: 3, candidateCases: 3 },
@@ -62,12 +63,53 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
     const g = evaluateGate(
       base({
         regressions: [{ caseId: "x", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" }],
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
       }),
       { maxRegressions: 0 },
     );
     expect(g.decision).toBe("block");
-    expect(g.reasons.find((r) => r.kind === "regression")?.caseId).toBe("x");
+    const reason = g.reasons.find((r) => r.kind === "regression");
+    expect(reason?.caseId).toBe("x");
+    expect(reason?.detail).toContain("tests_pass"); // the metric flip rides as diagnosis, not as its own count
     expect(g.evidence).toMatchObject({ regressions: 1, trialsGated: false });
+  });
+
+  it("a diagnostic metric flip on a case whose VERDICT still passes never blocks — the regression unit is the case verdict", () => {
+    // Given a case whose ground truth passed on both sides while a judge metric flipped true → false
+    const g = evaluateGate(
+      base({
+        regressions: [
+          { caseId: "x", metric: "judge:quality", baseline: 1, candidate: 0, delta: -1, passChange: "broke" },
+        ],
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: true, change: "same" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    // Then the gate passes: the authority ladder says the case did NOT flip, and the gate does not
+    // reinterpret the raw metric signal underneath that decision.
+    expect(g.decision).toBe("pass");
+    expect(g.evidence.regressions).toBe(0);
+  });
+
+  it("one case losing three pass-bearing metrics is ONE regression, not three", () => {
+    const flips = ["tests_pass", "answer_match", "judge:quality"].map((metric) => ({
+      caseId: "x",
+      metric,
+      baseline: 1,
+      candidate: 0,
+      delta: -1,
+      passChange: "broke" as const,
+    }));
+    const g = evaluateGate(
+      base({
+        regressions: flips,
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("block");
+    expect(g.evidence.regressions).toBe(1);
+    expect(g.reasons.filter((r) => r.kind === "regression")).toHaveLength(1);
   });
 
   it("with trials, the Fisher-gated trial diff is authoritative — raw transitions never block on their own", () => {
@@ -75,6 +117,7 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
       base({
         // Raw last-trial transitions show a flip, but the statistical gate says noise:
         regressions: [{ caseId: "x", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" }],
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
         trials: {
           baseline: "b",
           candidate: "c",
@@ -223,6 +266,7 @@ describe("evaluateGate — fail-closed on missingness", () => {
     const g = evaluateGate(
       shrunk({
         regressions: [{ caseId: "x", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" }],
+        caseTransitions: [{ caseId: "x", baseline: true, candidate: false, change: "broke" }],
       }),
       { maxRegressions: 0 },
     );
@@ -328,6 +372,7 @@ describe("evaluateGate — critical cases", () => {
         regressions: [
           { caseId: "login", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" },
         ],
+        caseTransitions: [{ caseId: "login", baseline: true, candidate: false, change: "broke" }],
         criticalCases: [{ caseId: "login" }],
       }),
       { maxRegressions: 5 },

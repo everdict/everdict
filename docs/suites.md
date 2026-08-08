@@ -17,9 +17,12 @@ aggregates into a Scorecard + a per-metric summary.
 - `runSuite(suite, version, dispatch, {concurrency})` → `Scorecard`. `dispatch` is any
   `(job) → CaseResult` (a `Backend` / `Router` / `Orchestrator`).
 - `summarizeScorecard(sc)` → per-metric `{count, mean, passRate}`.
-- `diffScorecards(baseline, candidate)` → `{metrics[], regressions[], improvements[]}`. Regressions/
-  improvements are detected by **objective `pass` transitions** (true→false = broke, false→true = fixed);
-  numeric metrics (cost/steps) report a delta without assuming a direction.
+- `diffScorecards(baseline, candidate)` → `{metrics[], regressions[], improvements[], caseTransitions[]}`.
+  **`caseTransitions` is the release-regression unit**: the case-VERDICT transition (`broke|fixed|same|
+  unmeasured`) over shared (case, trial) pairs, each side judged under its own stamped policy — the unit
+  `evaluateGate` counts, and the same unit `diffTrials` gates statistically. `regressions[]`/`improvements[]`
+  are metric-level `pass` flips (true→false = broke, false→true = fixed) — diagnosis of WHY a case moved,
+  never a gate's count; numeric metrics (cost/steps) report a delta without assuming a direction.
 
 ## Suite file
 ```jsonc

@@ -108,7 +108,13 @@ export class ScorecardAnalyticsService {
           ? DEFAULT_VERDICT_POLICY
           : bResolution.policy
         : cResolution.policy;
-    const diff = diffScorecards(baseline, candidate, { policy: directionPolicy });
+    // Case transitions (the gate's regression unit) are judged under each side's OWN resolved policy — an
+    // unresolvable side contributes no policy (the pair is refused as not_comparable below anyway).
+    const diff = diffScorecards(baseline, candidate, {
+      policy: directionPolicy,
+      ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
+      ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
+    });
     // Two batches judged under different verdict-policy documents are not the same experiment: their verdicts
     // (and therefore pass transitions) were produced by different rules. The comparison is flagged as NOT
     // holding — "no differences" and "incomparable" are different claims. Absent stamps (pre-mig records)

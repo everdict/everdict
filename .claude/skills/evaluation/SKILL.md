@@ -158,8 +158,14 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   FIRST**: `comparability: full|partial|none` ("none" = the comparison does not hold — a different claim from
   "no differences"; gates read it before any delta), `missing` enumerates one-sided cases/metrics (never a
   silent skip, never a `?? 0` zero-fill), `metrics` covers BOTH-sided metrics only with `direction`+`reading`
-  (declared in the verdict policy — `delta>0` is never generalized as improvement; cost up = regressed), plus
-  same-case `pass` transitions → `regressions`/`improvements`. The service layer forces `comparability:"none"`
+  (declared in the verdict policy — `delta>0` is never generalized as improvement; cost up = regressed).
+  **Two regression planes, one release unit**: `caseTransitions` are the case-VERDICT transitions over shared
+  (case, trial) pairs — each side judged under ITS OWN resolved policy (`baselinePolicy`/`candidatePolicy`
+  opts) — with `change: broke|fixed|same|unmeasured`; this is the unit `evaluateGate` counts and the same unit
+  `diffTrials` gates in, so trials=1 and trials>1 decide on the same claim. Metric-level `pass` flips
+  (`regressions`/`improvements`) are DIAGNOSIS — which metric moved on which case — and never a gate's count:
+  a diagnostic judge flip on a case whose ground truth still passes is not a regression, and one case losing
+  three metrics is one regression, not three. The service layer forces `comparability:"none"`
   + `policyMismatch` when the two batches' stamped verdict-policy digests differ. `diffTrials` gates small
   samples (<30 trials) by **Fisher's exact test** (z is overconfident at eval-scale n; 3/3→0/3 is honestly
   p=0.1) and applies the `minDelta` practical floor — statistically-significant-but-negligible dips stay out;

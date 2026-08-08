@@ -6,6 +6,7 @@
 // scorecard — verdict authority + pass@k trials + diff/z-test + leaderboard/trend/models (from @everdict/suite)
 export {
   type CaseDelta,
+  type CaseTransition,
   caseVerdict,
   diffScorecards,
   type MeasurementCoverage,

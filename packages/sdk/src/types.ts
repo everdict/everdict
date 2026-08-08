@@ -113,12 +113,21 @@ export interface TrialCaseDelta {
   [k: string]: unknown;
 }
 // baseline vs candidate diff. `trials` is present only when either side ran trials (the statistical gate).
+// `caseTransitions` is the case-VERDICT transition list — the release-regression unit; `regressions`/
+// `improvements` are metric-level diagnosis of why a case moved.
 export interface ScorecardDiff {
   baseline: string;
   candidate: string;
   metrics: Array<{ metric: string; baselineMean: number; candidateMean: number; delta: number }>;
   regressions: Array<{ caseId: string; metric: string; delta: number; [k: string]: unknown }>;
   improvements: Array<{ caseId: string; metric: string; delta: number; [k: string]: unknown }>;
+  caseTransitions: Array<{
+    caseId: string;
+    trial?: number;
+    baseline?: boolean;
+    candidate?: boolean;
+    change: "broke" | "fixed" | "same" | "unmeasured";
+  }>;
   trials?: {
     zThreshold: number;
     cases: TrialCaseDelta[];

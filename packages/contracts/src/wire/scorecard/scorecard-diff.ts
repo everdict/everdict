@@ -11,6 +11,19 @@ const CaseDeltaSchema = z.object({
   passChange: z.enum(["fixed", "broke"]).optional(),
 });
 
+// The CASE-VERDICT transition — the release-regression unit. Metric-level pass flips (CaseDeltaSchema)
+// explain WHY a case moved; whether the case's product verdict moved is the authority ladder's claim, and
+// only a "broke" transition counts against a gate's regression budget.
+const CaseTransitionSchema = z.object({
+  caseId: z.string(),
+  trial: z.number().int().optional(),
+  baseline: z.boolean().optional().describe("The baseline side's case verdict — absent = no verdict"),
+  candidate: z.boolean().optional().describe("The candidate side's case verdict — absent = no verdict"),
+  change: z
+    .enum(["broke", "fixed", "same", "unmeasured"])
+    .describe("'unmeasured' = at least one side produced no verdict for this shared case — never a regression"),
+});
+
 const TrialCaseDeltaSchema = z.object({
   caseId: z.string(),
   baselineRate: z.number(),
@@ -51,8 +64,15 @@ export const ScorecardDiffResponseSchema = z.object({
       }),
     )
     .describe("Metrics present on BOTH sides only — one-sided metrics are enumerated in `missing`, never zero-filled"),
-  regressions: z.array(CaseDeltaSchema),
+  regressions: z
+    .array(CaseDeltaSchema)
+    .describe("Metric-level pass flips — diagnosis; the regression unit a gate counts is caseTransitions"),
   improvements: z.array(CaseDeltaSchema),
+  caseTransitions: z
+    .array(CaseTransitionSchema)
+    .describe(
+      "Case-verdict transitions over shared (case, trial) pairs, each side judged under its own stamped policy — the unit release gates decide in (same unit as the trials block)",
+    ),
   missing: z
     .object({
       casesOnlyInBaseline: z.array(z.string()),

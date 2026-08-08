@@ -12,7 +12,9 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a
   **label** and the `metric` axis stay.
-- **`diffScorecards(baseline, candidate)`** = pass transitions → regressions/improvements (the version-regression
-  core). `trendSeries` (over time) + `scorecardModels`/leaderboard (`(harness × model)` rows, model axis) are the
-  other read lenses — all pure, computed from stored `Scorecard`s.
+- **`diffScorecards(baseline, candidate)`** — TWO regression planes, one unit for release decisions:
+  `caseTransitions` (case-VERDICT transitions, each side judged under its own stamped policy — the unit
+  `evaluateGate` counts, same unit as `diffTrials`) and `regressions`/`improvements` (metric-level pass flips —
+  DIAGNOSIS of why a case moved, never a gate's count). `trendSeries` (over time) + `scorecardModels`/leaderboard
+  (`(harness × model)` rows, model axis) are the other read lenses — all pure, computed from stored `Scorecard`s.
 - Keep this package free of orchestration (no run store, no scheduler) — the control plane wires those (rule `api-layer`).

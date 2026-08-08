@@ -43,7 +43,13 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // When trials rode along, the Fisher-gated trial diff is the authoritative regression signal — raw
   // last-trial pass transitions are noise on a trial run (the diffTrials contract).
   const trialsGated = diff.trials !== undefined;
-  const regressions = trialsGated && diff.trials ? diff.trials.regressions.length : diff.regressions.length;
+  // The regression unit is the CASE VERDICT — one case, one transition, judged by the authority ladder.
+  // Metric-level pass flips (diff.regressions) are diagnosis: a diagnostic judge flip on a case whose
+  // ground truth still passes is not a case that "flipped pass → fail", and one case losing three metrics
+  // is one regression, not three. Same unit as the trials path, so trials=1 and trials>1 gate identically.
+  const brokeCases = diff.caseTransitions.filter((t) => t.change === "broke");
+  const fixedCases = diff.caseTransitions.filter((t) => t.change === "fixed");
+  const regressions = trialsGated && diff.trials ? diff.trials.regressions.length : brokeCases.length;
   // Cases the CANDIDATE never ran, against the baseline's own case count: "how much of what we compared
   // against did this candidate actually cover?". A candidate that ADDED cases lost no coverage, so extra
   // candidate-only cases are counted in missingCases but never inflate this fraction.
@@ -63,7 +69,7 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   const evidence: GateEvaluation["evidence"] = {
     comparability: diff.comparability,
     regressions,
-    improvements: trialsGated && diff.trials ? diff.trials.improvements.length : diff.improvements.length,
+    improvements: trialsGated && diff.trials ? diff.trials.improvements.length : fixedCases.length,
     missingCases: diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
     trialsGated,
     ...(missingFraction !== undefined ? { missingFraction } : {}),
@@ -119,8 +125,13 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
       });
     }
   } else {
-    for (const r of diff.regressions) {
-      reasons.push({ kind: "regression", caseId: r.caseId, detail: "case flipped pass → fail" });
+    for (const t of brokeCases) {
+      const flipped = diff.regressions.filter((r) => r.caseId === t.caseId).map((r) => r.metric);
+      reasons.push({
+        kind: "regression",
+        caseId: t.caseId,
+        detail: `case verdict flipped pass → fail${flipped.length > 0 ? ` (metric(s): ${flipped.join(", ")})` : ""}`,
+      });
     }
   }
   // Kind-changed metrics ride as informational reasons — the comparison holds elsewhere, but these columns
@@ -178,12 +189,15 @@ function criticalReasons(diff: GateInput): GateReason[] {
       });
     }
   } else {
-    for (const r of diff.regressions) {
-      if (!isCritical(r.caseId)) continue;
+    // Case-verdict transitions, not metric flips: a critical case is a case the policy says must not BREAK,
+    // and "broke" is the authority ladder's claim about the case — a diagnostic metric dip on a case whose
+    // verdict still passes is not a broken critical case.
+    for (const t of diff.caseTransitions) {
+      if (t.change !== "broke" || !isCritical(t.caseId)) continue;
       out.push({
         kind: "critical_case_failed",
-        caseId: r.caseId,
-        detail: `critical case '${r.caseId}' flipped pass → fail on metric '${r.metric}' — blocked regardless of the regression budget`,
+        caseId: t.caseId,
+        detail: `critical case '${t.caseId}' verdict flipped pass → fail — blocked regardless of the regression budget`,
       });
     }
   }

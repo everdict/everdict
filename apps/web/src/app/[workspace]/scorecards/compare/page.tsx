@@ -230,18 +230,24 @@ export default async function CompareScorecardsPage({
               </div>
             </section>
           ) : (
+            /* Case-VERDICT transitions — the unit release decisions are made in. The per-metric flips ride
+               each row as diagnosis (which metric moved), never as their own regression count: one case
+               losing three metrics is one regression, and a diagnostic judge flip on a case whose ground
+               truth still passes is no regression at all. */
             <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <DeltaList
+              <CaseTransitionList
                 title={t('regressionsTitle')}
                 tone="danger"
-                items={diff.regressions}
+                items={diff.caseTransitions.filter((tr) => tr.change === 'broke')}
+                metricFlips={diff.regressions}
                 empty={t('noRegressions')}
                 siblingMetrics={diff.metrics.map((m) => m.metric)}
               />
-              <DeltaList
+              <CaseTransitionList
                 title={t('improvementsTitle')}
                 tone="success"
-                items={diff.improvements}
+                items={diff.caseTransitions.filter((tr) => tr.change === 'fixed')}
+                metricFlips={diff.improvements}
                 empty={t('noImprovements')}
                 siblingMetrics={diff.metrics.map((m) => m.metric)}
               />
@@ -304,55 +310,61 @@ function TrialDeltaList({
   )
 }
 
-function DeltaList({
+// A case-VERDICT transition list — one row per case whose product verdict flipped. The metric flips of that
+// case ride as diagnosis chips (why the verdict moved), never as their own rows or counts.
+function CaseTransitionList({
   title,
   tone,
   items,
+  metricFlips,
   empty,
   siblingMetrics,
 }: {
   title: string
   tone: 'danger' | 'success'
-  items: ScorecardDiff['regressions']
+  items: ScorecardDiff['caseTransitions']
+  metricFlips: ScorecardDiff['regressions']
   empty: string
   siblingMetrics?: readonly string[] // judge-metric disambiguation context (the diff's full metric set)
 }) {
-  // Cases with the largest change first — put the notable regressions/improvements on top.
-  const sorted = [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  const flippedMetricsOf = (caseId: string): string[] => [
+    ...new Set(metricFlips.filter((d) => d.caseId === caseId).map((d) => d.metric)),
+  ]
   return (
     <Card className="space-y-2.5 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-[560]">{title}</h2>
         <Badge tone={tone}>{items.length}</Badge>
       </div>
-      {sorted.length === 0 ? (
+      {items.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{empty}</p>
       ) : (
         <ul className="divide-y divide-border/70">
-          {sorted.map((d) => (
-            <li
-              key={`${d.caseId}:${d.metric}`}
-              className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
-            >
-              <span className="min-w-0 truncate font-mono text-[12px]" title={d.metric}>
-                {d.caseId}
-                <span className="text-faint"> · {fmtMetricLabel(d.metric, siblingMetrics)}</span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2 font-mono text-[12px] tabular-nums">
-                <span className="text-muted-foreground">
-                  {d.baseline} → {d.candidate}
+          {items.map((tr) => {
+            const metrics = flippedMetricsOf(tr.caseId)
+            return (
+              <li
+                key={`${tr.caseId}#${tr.trial ?? 0}`}
+                className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
+              >
+                <span className="min-w-0 truncate font-mono text-[12px]">
+                  {tr.caseId}
+                  {tr.trial !== undefined && <span className="text-faint">#{tr.trial}</span>}
                 </span>
-                <span
-                  className={cn(
-                    'font-[510]',
-                    tone === 'danger' ? 'text-destructive' : 'text-[var(--color-success)]'
-                  )}
-                >
-                  {delta(d.delta)}
-                </span>
-              </span>
-            </li>
-          ))}
+                {metrics.length > 0 && (
+                  <span
+                    className={cn(
+                      'shrink-0 font-mono text-[12px]',
+                      tone === 'danger' ? 'text-destructive' : 'text-[var(--color-success)]'
+                    )}
+                    title={metrics.join(', ')}
+                  >
+                    {metrics.map((m) => fmtMetricLabel(m, siblingMetrics)).join(' · ')}
+                  </span>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </Card>

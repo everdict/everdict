@@ -160,6 +160,20 @@ export interface CaseDelta {
   delta: number;
   passChange?: "fixed" | "broke";
 }
+// The CASE-VERDICT transition — the unit a release decision is made in. A metric-level pass flip
+// (CaseDelta.passChange) says WHY a case moved; whether the case's product verdict moved is decided by the
+// authority ladder (caseVerdict under each side's OWN policy), and only that transition counts as a
+// regression. Without this split, a diagnostic judge flip on a case whose ground truth still passes reads
+// as "case flipped pass → fail" to a gate — a claim the case verdict itself contradicts — and one case with
+// three flipped metrics counts as three regressions.
+export interface CaseTransition {
+  caseId: string;
+  trial?: number;
+  baseline?: boolean; // that side's case verdict; absent = the side produced no verdict
+  candidate?: boolean;
+  // "unmeasured" = at least one side has no verdict for this shared case — not comparable, never a regression.
+  change: "broke" | "fixed" | "same" | "unmeasured";
+}
 export interface MetricDelta {
   metric: string;
   baselineMean: number;
@@ -182,8 +196,13 @@ export interface ScorecardDiff {
   baseline: string;
   candidate: string;
   metrics: MetricDelta[]; // metrics present on BOTH sides only — one-sided metrics are in `missing`
+  // Metric-level pass flips — DIAGNOSIS (which metric moved on which case), never the release-regression
+  // unit. The gate counts `caseTransitions` with change "broke"; these arrays explain them.
   regressions: CaseDelta[];
   improvements: CaseDelta[];
+  // Case-VERDICT transitions over shared (case, trial) pairs — the regression unit a gate decides in.
+  // Same unit as diffTrials' per-case rates, so trials=1 and trials>1 gate on the same claim.
+  caseTransitions: CaseTransition[];
   missing: DiffMissing;
   // A metric present on both sides whose VALUE KIND changed (categorical on one side, numeric on the other —
   // same name, different meaning): its delta is not a number anyone should read. Excluded from `metrics`.
@@ -252,16 +271,52 @@ function metricReading(
   return { ...(direction ? { direction } : {}), reading: "unknown" };
 }
 
-// baseline(vA) vs candidate(vB). Regressions/improvements are decided by objective `pass` transitions; numeric
-// deltas are interpreted through the policy's declared directions (no direction ⇒ "unknown", never a sign
-// guess). Missingness is an OUTPUT: one-sided cases/metrics are enumerated, aggregate means are computed only
-// over both-sided metrics (the old `?? 0` fill made a vanished grader read as a mean that crashed to zero,
-// while the case-level loop silently skipped the very same absence), and `comparability` says whether the
-// comparison holds at all.
+// Case-verdict transitions over the (caseId, trial) pairs BOTH sides ran. Each side's verdict is derived
+// under ITS OWN policy — the stamped document that produced that side's historical verdicts — so the
+// transition compares what each batch actually claimed, not a re-judgment under one ladder.
+function caseTransitions(
+  baseline: Scorecard,
+  candidate: Scorecard,
+  baselinePolicy: VerdictPolicy,
+  candidatePolicy: VerdictPolicy,
+): CaseTransition[] {
+  const byKey = (sc: Scorecard): Map<string, CaseResult> => {
+    const m = new Map<string, CaseResult>();
+    for (const r of sc.results) m.set(`${r.caseId}#${r.trial ?? 0}`, r);
+    return m;
+  };
+  const b = byKey(baseline);
+  const c = byKey(candidate);
+  const out: CaseTransition[] = [];
+  for (const [key, cResult] of c) {
+    const bResult = b.get(key);
+    if (!bResult) continue; // one-sided cases are `missing`, first-class already
+    const bv = caseVerdict(bResult, baselinePolicy);
+    const cv = caseVerdict(cResult, candidatePolicy);
+    const change: CaseTransition["change"] =
+      bv === undefined || cv === undefined ? "unmeasured" : bv && !cv ? "broke" : !bv && cv ? "fixed" : "same";
+    out.push({
+      caseId: cResult.caseId,
+      ...(cResult.trial !== undefined ? { trial: cResult.trial } : {}),
+      ...(bv !== undefined ? { baseline: bv } : {}),
+      ...(cv !== undefined ? { candidate: cv } : {}),
+      change,
+    });
+  }
+  return out;
+}
+
+// baseline(vA) vs candidate(vB). The release-regression unit is the CASE-VERDICT transition
+// (`caseTransitions`, each side judged under its own policy); metric-level pass flips stay as diagnosis
+// (`regressions`/`improvements` explain which metric moved). Numeric deltas are interpreted through the
+// policy's declared directions (no direction ⇒ "unknown", never a sign guess). Missingness is an OUTPUT:
+// one-sided cases/metrics are enumerated, aggregate means are computed only over both-sided metrics (the
+// old `?? 0` fill made a vanished grader read as a mean that crashed to zero, while the case-level loop
+// silently skipped the very same absence), and `comparability` says whether the comparison holds at all.
 export function diffScorecards(
   baseline: Scorecard,
   candidate: Scorecard,
-  opts: { policy?: VerdictPolicy } = {},
+  opts: { policy?: VerdictPolicy; baselinePolicy?: VerdictPolicy; candidatePolicy?: VerdictPolicy } = {},
 ): ScorecardDiff {
   const policy = opts.policy ?? DEFAULT_VERDICT_POLICY;
   const b = scoreMap(baseline);
@@ -285,6 +340,12 @@ export function diffScorecards(
       }
     }
   }
+  const transitions = caseTransitions(
+    baseline,
+    candidate,
+    opts.baselinePolicy ?? policy,
+    opts.candidatePolicy ?? policy,
+  );
   const bCases = new Set(baseline.results.map((r) => r.caseId));
   const cCases = new Set(candidate.results.map((r) => r.caseId));
   const sumB = summarizeScorecard(baseline);
@@ -327,6 +388,7 @@ export function diffScorecards(
     metrics,
     regressions,
     improvements,
+    caseTransitions: transitions,
     missing,
     incomparable,
     overlap: { sharedCases, baselineCases: bCases.size, candidateCases: cCases.size },

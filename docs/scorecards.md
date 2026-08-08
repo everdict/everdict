@@ -184,8 +184,12 @@ what the os of a mixed-world batch even means). The per-case fact now exists, wh
 
 ## The release gate: critical cases and multiple comparisons
 `evaluateGate(diff, policy)` (`@everdict/domain`) is the CI decision — `pass | block | blocked_missing |
-not_comparable`, only the first a green light. Two rules sit on top of the fail-closed comparability
-machinery (SSOT: `docs/architecture/metrics-commercialization.md`):
+not_comparable`, only the first a green light. **The regression unit is the CASE VERDICT** — the gate counts
+`diff.caseTransitions` with `change: "broke"` (each side judged under its own stamped policy), the same unit
+the trials path gates statistically, so trials=1 and trials>1 decide on the same claim. Metric-level pass
+flips (`diff.regressions`) are diagnosis riding the reason text — a diagnostic judge flip on a case whose
+ground truth still passes never blocks, and one case losing three metrics is one regression. Two rules sit
+on top of the fail-closed comparability machinery (SSOT: `docs/architecture/metrics-commercialization.md`):
 
 - **Critical cases — the one place product judgment precedes statistics.** `VerdictPolicy.criticalCases`
   (matchers `{caseId: "login"}` or `{prefix: "auth/"}`) names cases whose failure is a product call, not a
@@ -390,7 +394,8 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
     `dataset`/`harness` omitted (the trace-eval sentinel) and `source:{name, correlate:"id"}`.
   Role-gated off `/me` (`scorecards:run` = member+).
 - **Compare `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
-  mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
+  mean Δ table + **regressed/improved CASES (case-verdict transitions, `diff.caseTransitions`)** via
+  `diffScorecards`, with each case's flipped metrics riding as diagnosis chips. This is the
   baseline-vs-candidate payoff. `scorecards:read`.
 - **Ingest `/dashboard/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
   `POST /scorecards/ingest`. **pull**: pick a `source` (OTel/MLflow endpoint + optional auth-secret name) + a

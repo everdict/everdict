@@ -9,6 +9,7 @@ import {
   scorecardPassRate,
   summarizeScorecard,
 } from "./scorecard.js";
+import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
 // Restored from the deleted packages/suite/src/suite.test.ts (P4 sweep B) — the runSuite describes moved to
 // @everdict/application-control, but these pure-aggregation pins were dropped in the sweep. They pin the
@@ -260,6 +261,9 @@ describe("measurement status — an unmeasured score never enters an aggregate",
     };
     const diff = diffScorecards(base, cand);
     expect(diff.regressions).toEqual([]); // a dead grader is not a regression
+    // The case-verdict transition says the same thing in the release unit: the candidate side produced no
+    // verdict, so the shared case is "unmeasured" — never a broke.
+    expect(diff.caseTransitions).toEqual([{ caseId: "a", baseline: true, change: "unmeasured" }]);
   });
 
   it("a case with a classified failure never enters the re-score worklist — its recovery is retry, not scoring", () => {
@@ -447,9 +451,88 @@ describe("diffScorecards", () => {
     const diff = diffScorecards(base, cand);
     expect(diff.regressions.map((d) => d.caseId)).toEqual(["a"]); // a: pass→fail
     expect(diff.improvements.map((d) => d.caseId)).toEqual(["b"]); // b: fail→pass
+    // The case-verdict transitions agree here — the flipped metric IS the deciding rung on both cases.
+    expect(diff.caseTransitions.find((t) => t.caseId === "a")?.change).toBe("broke");
+    expect(diff.caseTransitions.find((t) => t.caseId === "b")?.change).toBe("fixed");
     const steps = diff.metrics.find((m) => m.metric === "tool_calls");
     expect(steps?.baselineMean).toBe(3.5);
     expect(steps?.candidateMean).toBe(3.5);
+  });
+});
+
+describe("diffScorecards — the case-verdict transition is the release-regression unit", () => {
+  const withScores = (caseId: string, scores: { metric: string; value: number; pass?: boolean }[]): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: scores.map((s) => ({ graderId: s.metric, ...s })),
+  });
+  const cardOf = (results: CaseResult[]): Scorecard => ({ suiteId: "s", harness: "h@1", results });
+
+  it("a diagnostic judge flip on a case whose ground truth still passes is diagnosis, never a case transition", () => {
+    // Given: tests_pass (ground truth) PASSES on both sides; judge:quality flips true → false.
+    const base = cardOf([
+      withScores("a", [
+        { metric: "tests_pass", value: 1, pass: true },
+        { metric: "judge:quality", value: 0.9, pass: true },
+      ]),
+    ]);
+    const cand = cardOf([
+      withScores("a", [
+        { metric: "tests_pass", value: 1, pass: true },
+        { metric: "judge:quality", value: 0.2, pass: false },
+      ]),
+    ]);
+    const diff = diffScorecards(base, cand);
+    // The metric flip is real and reported — as diagnosis.
+    expect(diff.regressions.map((d) => d.metric)).toEqual(["judge:quality"]);
+    // But the case VERDICT (authority-first: ground truth outranks the judge) did not move: PASS → PASS.
+    expect(diff.caseTransitions).toEqual([{ caseId: "a", baseline: true, candidate: true, change: "same" }]);
+  });
+
+  it("one case losing several pass-bearing metrics is ONE broke transition", () => {
+    const base = cardOf([
+      withScores("a", [
+        { metric: "tests_pass", value: 1, pass: true },
+        { metric: "answer_match", value: 1, pass: true },
+        { metric: "judge:quality", value: 0.9, pass: true },
+      ]),
+    ]);
+    const cand = cardOf([
+      withScores("a", [
+        { metric: "tests_pass", value: 0, pass: false },
+        { metric: "answer_match", value: 0, pass: false },
+        { metric: "judge:quality", value: 0.1, pass: false },
+      ]),
+    ]);
+    const diff = diffScorecards(base, cand);
+    expect(diff.regressions).toHaveLength(3); // three metric flips — the WHY
+    expect(diff.caseTransitions.filter((t) => t.change === "broke")).toHaveLength(1); // one case broke — the WHAT
+  });
+
+  it("each side's verdict is derived under ITS OWN policy — the transition compares what each batch claimed", () => {
+    const base = cardOf([withScores("a", [{ metric: "custom_gate", value: 1, pass: true }])]);
+    const cand = cardOf([withScores("a", [{ metric: "custom_gate", value: 0, pass: false }])]);
+    // Under the default ladder the undeclared metric decides via fallback: true → false = broke.
+    expect(diffScorecards(base, cand).caseTransitions[0]?.change).toBe("broke");
+    // Under a fallback-less policy neither side produces a verdict — the transition is honest about it.
+    const noFallback = { ...DEFAULT_VERDICT_POLICY, fallback: "none" as const };
+    const diff = diffScorecards(base, cand, { baselinePolicy: noFallback, candidatePolicy: noFallback });
+    expect(diff.caseTransitions[0]?.change).toBe("unmeasured");
+  });
+
+  it("transitions pair trial-to-trial, the same keying as the metric-level diff", () => {
+    const trialResult = (trial: number, pass: boolean): CaseResult => ({
+      ...withScores("a", [{ metric: "tests_pass", value: pass ? 1 : 0, pass }]),
+      trial,
+    });
+    const base = cardOf([trialResult(0, true), trialResult(1, true)]);
+    const cand = cardOf([trialResult(0, false), trialResult(1, true)]);
+    const transitions = diffScorecards(base, cand).caseTransitions;
+    expect(transitions).toHaveLength(2);
+    expect(transitions.find((t) => t.trial === 0)?.change).toBe("broke");
+    expect(transitions.find((t) => t.trial === 1)?.change).toBe("same");
   });
 });
 

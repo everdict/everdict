@@ -371,8 +371,20 @@ export const scorecardDiffSchema = z.object({
       reading: z.enum(['improved', 'regressed', 'unchanged', 'unknown']),
     })
   ),
+  // Metric-level pass flips — diagnosis of why a case moved; the regression unit gates count is caseTransitions.
   regressions: z.array(caseDeltaSchema),
   improvements: z.array(caseDeltaSchema),
+  // Case-VERDICT transitions over shared (case, trial) pairs, each side judged under its own stamped policy —
+  // the unit release decisions are made in ('unmeasured' = a side produced no verdict; never a regression).
+  caseTransitions: z.array(
+    z.object({
+      caseId: z.string(),
+      trial: z.number().int().optional(),
+      baseline: z.boolean().optional(),
+      candidate: z.boolean().optional(),
+      change: z.enum(['broke', 'fixed', 'same', 'unmeasured']),
+    })
+  ),
   // What could NOT be compared — a first-class output, never a silent skip.
   missing: z.object({
     casesOnlyInBaseline: z.array(z.string()),
