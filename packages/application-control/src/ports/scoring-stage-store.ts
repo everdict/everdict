@@ -57,21 +57,12 @@ export interface ScoringStageParity {
   orphaned: string[];
 }
 
-// The CONTRACT-STEP PRECONDITION, written as code so nobody has to reconstruct it from a dashboard.
-// `staged === matched` is NOT it: that holds trivially when nothing was staged.
-export function stagePromotionSafe(parity: ScoringStageParity): boolean {
-  return (
-    parity.expectedJudged === parity.staged &&
-    parity.staged === parity.matched &&
-    parity.missingFromStage.length === 0 &&
-    parity.mismatched.length === 0 &&
-    parity.orphaned.length === 0
-  );
-}
-
 export interface ScoringStageStore {
-  // Stage one pass's judgments for a set of cases. Idempotent per (scorecard, pass, case) — an activity retry
-  // re-stages the same rows rather than accumulating duplicates.
+  // Stage one pass's judgments for a set of cases. FIRST WRITER WINS per (scorecard, pass, case): an
+  // activity retry re-staging the same row is a no-op, and two OVERLAPPING attempts of the same pass — which
+  // the pass fence cannot arbitrate, because both legitimately hold the same passId — resolve to the first
+  // accepted judgment rather than to whichever finished last. Which completion becomes a revision's evidence
+  // has to be a decision, not a race outcome.
   stage(scorecardId: string, passId: string, entries: StagedScores[]): Promise<void>;
   // Everything this pass staged — what a promotion reads.
   staged(scorecardId: string, passId: string): Promise<StagedScores[]>;

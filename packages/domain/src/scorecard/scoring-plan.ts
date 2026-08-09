@@ -86,17 +86,35 @@ export function judgeProgress(
   return (verdict.attempts ?? 0) >= maxAttempts ? "terminal_unmeasured" : "retryable_unmeasured";
 }
 
-// Does this case still have work for THIS pass? The planner's predicate, and the skip predicate `scoreCase`
-// uses — one function, so a case the plan lists is a case the judge will actually act on.
+// WHICH of the selected judges still have work on this case — the unit completion is decided in, and
+// therefore the unit a retry is allowed to touch (arch-review 12).
+//
+// The boolean version below answers "is this case pending", which is what a PLANNER needs. It is not what an
+// EXECUTOR needs, and using it for both put the two out of step: `scoreCase` stripped and re-ran EVERY
+// selected judge because ONE of them was pending. So a case with judge A measured and judge B retrying
+// deleted A's verdict and paid for a second A call — and worse, a judge already declared
+// `terminal_unmeasured` was re-invoked, which is the exact statement the type was introduced to make
+// impossible. Completion granularity and mutation granularity have to be the same unit, or the invariant
+// only describes what the planner believes.
+export function pendingJudgesFor<J extends { id: string }>(
+  result: Pick<CaseResult, "scores">,
+  judges: readonly J[],
+  maxAttempts: number = MAX_JUDGE_ATTEMPTS_PER_PASS,
+): J[] {
+  return judges.filter((j) => {
+    const progress = judgeProgress(result, j.id, maxAttempts);
+    return progress === "absent" || progress === "retryable_unmeasured";
+  });
+}
+
+// Does this case still have work for THIS pass? The PLANNER's predicate — "should this case be on the
+// worklist at all". The executor narrows further with `pendingJudgesFor`.
 export function judgePending(
   result: Pick<CaseResult, "scores">,
   judges: ReadonlyArray<{ id: string }>,
   maxAttempts: number = MAX_JUDGE_ATTEMPTS_PER_PASS,
 ): boolean {
-  return judges.some((j) => {
-    const progress = judgeProgress(result, j.id, maxAttempts);
-    return progress === "absent" || progress === "retryable_unmeasured";
-  });
+  return pendingJudgesFor(result, judges, maxAttempts).length > 0;
 }
 
 // Carry the pass's attempt count onto the judgments it just produced. Called after a case is judged and

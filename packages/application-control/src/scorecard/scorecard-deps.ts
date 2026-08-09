@@ -11,7 +11,13 @@ import type {
   TraceSource,
   TraceSourceConfig,
 } from "@everdict/contracts";
-import type { BudgetTracker, CircuitBreaker, HarnessSecretMaps, UsageMeter } from "@everdict/domain";
+import type {
+  BudgetTracker,
+  CircuitBreaker,
+  HarnessSecretMaps,
+  ScoringStageParity,
+  UsageMeter,
+} from "@everdict/domain";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
@@ -25,7 +31,7 @@ import type { RecordingStore } from "../ports/recording-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
-import type { ScoringStageParity, ScoringStageStore } from "../ports/scoring-stage-store.js";
+import type { ScoringStageStore } from "../ports/scoring-stage-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 import type { OrchestrationEvent } from "./scorecard-observability.js";

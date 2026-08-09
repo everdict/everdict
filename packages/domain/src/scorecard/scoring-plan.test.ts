@@ -6,6 +6,7 @@ import {
   judgeAttemptsOf,
   judgePending,
   judgeProgress,
+  pendingJudgesFor,
   stampJudgeAttempts,
   stripJudgeScores,
 } from "./scoring-plan.js";
@@ -75,5 +76,53 @@ describe("judgeProgress — a pass has to be able to finish", () => {
     const invalid: Score = { graderId: "q", metric: "judge:q", status: "invalid", reason: "contract_violation" };
     expect(stampJudgeAttempts([invalid], [{ id: "q" }], new Map([["q", 2]]))).toEqual([invalid]);
     expect(judgeProgress({ scores: [invalid] }, "q")).toBe("terminal_unmeasured");
+  });
+});
+
+// arch-review 12: completion is decided PER JUDGE and the retry mutated the whole case, so one pending judge
+// dragged its finished neighbours back through the provider — deleting a measured verdict to re-derive it,
+// and re-invoking a judge this very pass had declared terminal.
+describe("pendingJudgesFor — the retry's unit is the judge that is actually pending", () => {
+  const measured = (id: string): Score => ({ graderId: id, metric: `judge:${id}`, value: 1, pass: true });
+  const retryable = (id: string, attempts?: number): Score =>
+    ({
+      graderId: id,
+      metric: `judge:${id}`,
+      status: "unmeasured",
+      reason: "grader_error",
+      retryable: true,
+      ...(attempts !== undefined ? { attempts } : {}),
+    }) as Score;
+  const terminal = (id: string): Score =>
+    ({ graderId: id, metric: `judge:${id}`, status: "unmeasured", reason: "unsupported", retryable: false }) as Score;
+
+  const judges = [{ id: "a" }, { id: "b" }];
+
+  it("returns ONLY the pending judge when a sibling is already measured", () => {
+    const plane = { scores: [measured("a"), retryable("b")] };
+    expect(judgePending(plane, judges)).toBe(true); // the case IS on the worklist…
+    expect(pendingJudgesFor(plane, judges).map((j) => j.id)).toEqual(["b"]); // …for b alone
+  });
+
+  it("never re-lists a TERMINAL judge just because a sibling is retrying", () => {
+    const plane = { scores: [terminal("a"), retryable("b")] };
+    expect(pendingJudgesFor(plane, judges).map((j) => j.id)).toEqual(["b"]);
+  });
+
+  it("a stripped-and-restamped retry touches only the pending judge's rows", () => {
+    // The end-to-end shape the executor now follows: strip `pending`, not `judges`.
+    const plane = { scores: [measured("a"), retryable("b", 1)] };
+    const pending = pendingJudgesFor(plane, judges);
+    const kept = stripJudgeScores(plane.scores, pending);
+    expect(kept).toEqual([measured("a")]); // a's verdict survives — it was never this retry's business
+    const prior = judgeAttemptsOf(plane, pending);
+    expect(prior.get("b")).toBe(1);
+    expect(prior.has("a")).toBe(false); // a measured judge carries no attempt state
+  });
+
+  it("agrees with judgePending in both directions — one predicate, two shapes", () => {
+    const done = { scores: [measured("a"), terminal("b")] };
+    expect(pendingJudgesFor(done, judges)).toEqual([]);
+    expect(judgePending(done, judges)).toBe(false);
   });
 });

@@ -25,6 +25,7 @@ import {
   isJudgeMetricOf,
   judgeAttemptsOf,
   judgePending,
+  pendingJudgesFor,
   stampJudgeAttempts,
   stripJudgeScores,
 } from "@everdict/domain";
@@ -391,16 +392,22 @@ export class ScorecardScoreService {
       );
     const result = (record.scorecard?.results ?? []).find((r) => childKey(r.caseId, r.trial) === key);
     if (!result) return { scored: false, skipped: true };
-    // The SAME predicate as planScore — one function, so a case the plan listed is a case this acts on and a
-    // case it skipped is one the plan will not list again.
-    if (!judgeGradeable(result) || !judgePending(result, judges)) return { scored: false, skipped: true };
-    // What each selected judge had already tried here, read BEFORE the strip removes the evidence of it.
+    if (!judgeGradeable(result)) return { scored: false, skipped: true };
+    // The retry's unit is the JUDGE, not the case (arch-review 12). The planner asks "is this case pending";
+    // this asks "which judges on it are", and only those are stripped and re-run. Using the case-level answer
+    // for both meant one pending judge dragged its already-finished neighbours back through the provider —
+    // deleting a measured verdict to re-derive it, and re-invoking a judge this very pass had declared
+    // `terminal_unmeasured`. An invariant whose completion unit differs from its mutation unit is a statement
+    // about the planner's beliefs, not about what happens.
+    const pending = pendingJudgesFor(result, judges);
+    if (pending.length === 0) return { scored: false, skipped: true };
+    // What each PENDING judge had already tried here, read BEFORE the strip removes the evidence of it.
     // The attempt budget only binds if the count survives the strip that a re-score always performs.
-    const priorAttempts = judgeAttemptsOf(result, judges);
-    // Strip the selected judges' ENTIRE prior output — verdicts, criterion children, placeholders — so the
+    const priorAttempts = judgeAttemptsOf(result, pending);
+    // Strip the PENDING judges' entire prior output — verdicts, criterion children, placeholders — so the
     // re-score replaces rather than accretes (the exact-name strip left stale judge:<id>:<criterion> rows
-    // alive next to fresh ones, compounding on every pass).
-    const single: CaseResult = { ...result, scores: stripJudgeScores(result.scores, judges) };
+    // alive next to fresh ones, compounding on every pass). A judge that is done keeps its rows untouched.
+    const single: CaseResult = { ...result, scores: stripJudgeScores(result.scores, pending) };
     const dataset = await this.effectiveDataset(record, [single]);
     const runIdOf = await this.childRunIdResolver(record);
     // The pass marker's sealed closure is the concretization source — every scoreCase activity of one pass
@@ -409,7 +416,9 @@ export class ScorecardScoreService {
       record.tenant,
       dataset,
       [single],
-      judges,
+      // …and only the PENDING judges are invoked. Passing the full selection here is what actually spent the
+      // provider calls on judges that were already done.
+      pending,
       record.runtime,
       submittedBy,
       runIdOf,
@@ -417,7 +426,9 @@ export class ScorecardScoreService {
     );
     // Count the attempt onto whatever this produced. A verdict ends the counting; another unmeasured row
     // carries prior+1, so a judge that keeps failing the same way exhausts its budget and the pass can end.
-    single.scores = stampJudgeAttempts(single.scores, judges, priorAttempts);
+    single.scores = stampJudgeAttempts(single.scores, pending, priorAttempts);
+    // The STAGE still receives the whole selected-judge delta for this case: judges finished on an earlier
+    // attempt belong in the same row as the one just re-run, because the row is what a promotion writes.
     await this.writeBackScores(record, [single], pass, { judges });
     return { scored: true };
   }

@@ -18,13 +18,17 @@ describe("scoring stage — a pass accumulates judgments nobody else can see", (
     await expect(stage.staged("sc-1", "pass-B")).resolves.toEqual([{ caseKey: "c1#0", scores: [score(0)] }]);
   });
 
-  it("is idempotent per case — an activity retry re-stages rather than accumulating", async () => {
+  // arch-review 12 P1: the pass fence cannot arbitrate two attempts of the SAME pass — Temporal retries an
+  // activity inside one pass, so a timed-out attempt still running and its replacement both present the same
+  // passId and both pass every guard. With a nondeterministic judge that is PASS then FAIL, both legal, and
+  // last-writer-wins made the race decide the revision's evidence.
+  it("keeps the FIRST accepted judgment when one pass stages a case twice", async () => {
     const stage = new InMemoryScoringStageStore();
     await stage.stage("sc-1", "pass-A", [{ caseKey: "c1#0", scores: [score(0)] }]);
     await stage.stage("sc-1", "pass-A", [{ caseKey: "c1#0", scores: [score(1)] }]);
     const staged = await stage.staged("sc-1", "pass-A");
-    expect(staged).toHaveLength(1);
-    expect(staged[0]?.scores).toEqual([score(1)]); // the retry's judgment, not a second row
+    expect(staged).toHaveLength(1); // never a second row
+    expect(staged[0]?.scores).toEqual([score(0)]); // …and the first judgment, not the last writer's
   });
 
   it("clears one pass without touching another's work", async () => {

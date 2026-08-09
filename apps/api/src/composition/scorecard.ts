@@ -4,7 +4,6 @@ import type {
   ScoringStageStore,
   TrajectoryStore,
 } from "@everdict/application-control";
-import { stagePromotionSafe } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
@@ -15,7 +14,7 @@ import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
 import type { CaseResult, RegistryAuth } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
-import type { CircuitBreaker, UsageMeter } from "@everdict/domain";
+import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
 import type {
   DatasetRegistry,
