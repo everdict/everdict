@@ -65,11 +65,21 @@ CREATE TABLE everdict_scoring_stage (
   scorecard_id text NOT NULL,
   pass_id      text NOT NULL,
   case_key     text NOT NULL,   -- caseId#trial
+  judge_id     text NOT NULL,   -- mig 0153 — the unit that independently retries and goes terminal
   scores       jsonb NOT NULL,
   written_at   timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (scorecard_id, pass_id, case_key)
+  PRIMARY KEY (scorecard_id, pass_id, case_key, judge_id)
 );
 ```
+
+**The row's unit is the JUDGE** (mig 0153). Everything else about a judgment already is: `JudgeProgress`, the
+attempt budget, metric-family ownership, and — since the retry was narrowed — the mutation itself. A per-case
+key was the persistence layer disagreeing with the unit the domain mutates, which is the same mismatch this
+generation of review kept finding one layer up. It also could not express what the contract step needs:
+first-writer-wins would arbitrate a whole case (colliding two attempts that judged *different* judges), a
+promotion could not say which judge in a row a given pass produced, and a per-judge attempt CAS would have
+nowhere to live. Re-keyed during the expand phase deliberately — nothing reads the stage to decide anything,
+so the change is free now and a reshape of authoritative data later.
 
 **A staged row means "THIS PASS JUDGED THIS CASE" — nothing else.** The alternative reading (*the full
 desired score plane*) is the one the expand step accidentally shipped: `prepareScore`'s strip also went

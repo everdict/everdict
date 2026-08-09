@@ -1,8 +1,17 @@
 import type { Score } from "@everdict/contracts";
 
-// One case's judgments as a PASS staged them, before anyone can read them.
-export interface StagedScores {
+// ONE JUDGE'S judgment of ONE CASE, as a PASS staged it, before anyone can read it.
+//
+// Keyed per JUDGE, not per case (arch-review 12, mig 0153). Every other property of a judgment is per judge —
+// `JudgeProgress`, the attempt budget, metric-family ownership, and now the retry itself — so a per-case row
+// was the persistence layer disagreeing with the unit the domain actually mutates. It also could not express
+// what the contract step needs: first-writer-wins would arbitrate a whole case (colliding two attempts that
+// judged different judges), and a per-judge attempt CAS would have nowhere to live.
+export interface StagedJudgment {
   caseKey: string; // caseId#trial — the key the score plane is addressed by
+  judgeId: string; // the judge whose family these rows belong to
+  // This judge's rows for this case: the verdict plus its criterion children. Never another judge's, and
+  // never an inherited grader's — that is what makes the promotion's merge explicit.
   scores: Score[];
 }
 
@@ -63,9 +72,9 @@ export interface ScoringStageStore {
   // the pass fence cannot arbitrate, because both legitimately hold the same passId — resolve to the first
   // accepted judgment rather than to whichever finished last. Which completion becomes a revision's evidence
   // has to be a decision, not a race outcome.
-  stage(scorecardId: string, passId: string, entries: StagedScores[]): Promise<void>;
+  stage(scorecardId: string, passId: string, entries: StagedJudgment[]): Promise<void>;
   // Everything this pass staged — what a promotion reads.
-  staged(scorecardId: string, passId: string): Promise<StagedScores[]>;
+  staged(scorecardId: string, passId: string): Promise<StagedJudgment[]>;
   // Drop a pass's stage. Called after a promotion and by the sweep that collects abandoned passes; returns
   // how many rows went, so a caller can report what it collected instead of guessing.
   clear(scorecardId: string, passId: string): Promise<number>;

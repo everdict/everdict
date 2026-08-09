@@ -689,32 +689,37 @@ export class ScorecardScoreService {
     const stage = this.deps.scoringStage;
     if (!report || !stage) return;
     try {
-      const mine = (scores: CaseResult["scores"]) =>
-        scores.filter((s) => judges.some((j) => isJudgeMetricOf(s.metric, j.id)));
-      // caseKey → the delta this pass produced there, as the plane records it.
+      // Compared per (case, JUDGE), matching the stage's key (mig 0153). Per case, a pass that staged one of
+      // two judges on a case counted as "staged" and the missing judge was invisible — the same
+      // measure-only-what-you-wrote blindness the expected/missing split exists to remove, one unit down.
+      const unit = (caseKey: string, judgeId: string) => `${caseKey} ${judgeId}`;
       const produced = new Map<string, CaseResult["scores"]>();
       for (const r of settled) {
         if (!judgeGradeable(r)) continue;
-        const delta = mine(r.scores);
-        if (delta.length > 0) produced.set(childKey(r.caseId, r.trial), delta);
+        const caseKey = childKey(r.caseId, r.trial);
+        for (const j of judges) {
+          const delta = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
+          if (delta.length > 0) produced.set(unit(caseKey, j.id), delta);
+        }
       }
       const staged = await stage.staged(scorecardId, passId);
       if (staged.length === 0 && produced.size === 0) return; // nothing happened — nothing to report
-      const stagedKeys = new Set(staged.map((e) => e.caseKey));
+      const stagedKeys = new Set(staged.map((e) => unit(e.caseKey, e.judgeId)));
       const missingFromStage = [...produced.keys()].filter((k) => !stagedKeys.has(k));
       const mismatched: string[] = [];
       const orphaned: string[] = [];
       let matched = 0;
       for (const entry of staged) {
-        const live = produced.get(entry.caseKey);
+        const key = unit(entry.caseKey, entry.judgeId);
+        const live = produced.get(key);
         if (live === undefined) {
-          orphaned.push(entry.caseKey);
+          orphaned.push(key);
           continue;
         }
         // Structural equality over the delta rows — the promotion would write these bytes verbatim, so the
         // comparison is the same one the promotion's correctness rests on.
         if (JSON.stringify(live) === JSON.stringify(entry.scores)) matched += 1;
-        else mismatched.push(entry.caseKey);
+        else mismatched.push(key);
       }
       report({
         scorecardId,
@@ -806,18 +811,21 @@ export class ScorecardScoreService {
     // the pass having read the inherited rows at exactly the right moment. Staging the delta makes the
     // promotion's merge explicit — inherited evidence stays on the carrier, produced evidence comes from here.
     // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch.
+    // …one row per (case, JUDGE) — the unit everything else about a judgment already uses (mig 0153). A
+    // per-case row made two attempts that judged DIFFERENT judges collide under first-writer-wins, and left
+    // a promotion unable to say which judge in a row a given pass produced.
     if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined && opts.judges) {
       const selected = opts.judges;
-      await this.deps.scoringStage
-        .stage(
-          record.id,
-          pass.passId,
-          results.map((r) => ({
-            caseKey: childKey(r.caseId, r.trial),
-            scores: r.scores.filter((s) => selected.some((j) => isJudgeMetricOf(s.metric, j.id))),
-          })),
-        )
-        .catch(() => undefined);
+      const entries = results.flatMap((r) => {
+        const caseKey = childKey(r.caseId, r.trial);
+        return selected.flatMap((j) => {
+          const scores = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
+          // A judge with no rows on this case produced nothing here — staging an empty row would assert a
+          // judgment that does not exist, and the parity report would then count it as one.
+          return scores.length > 0 ? [{ caseKey, judgeId: j.id, scores }] : [];
+        });
+      });
+      await this.deps.scoringStage.stage(record.id, pass.passId, entries).catch(() => undefined);
     }
     const children = await store.list(record.tenant, { scorecardId: record.id });
     // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
