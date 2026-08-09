@@ -40,10 +40,22 @@ export function headlinePassRate(record: {
 // headline stays the display fallback it always was.
 export function decisionPassRate(record: {
   verdictSummary?: VerdictSummary;
+  verdictPolicy?: { digest?: string };
   trialSummary?: Pick<ScorecardTrialSummary, "passAt1" | "cases">;
   summary?: MetricSummary[];
 }): number | null {
-  if (record.verdictSummary) return record.verdictSummary.passRate ?? null;
+  // …only when the aggregate still describes the policy the record is stamped with. A re-score whose stamped
+  // policy could not be restored deliberately LEAVES the previous aggregate in place (re-judging history
+  // under today's ladder would rewrite it), so the record can carry a verdictSummary computed under a policy
+  // it no longer declares. That was always "detectable via the digest" — and nothing detected it, which made
+  // a stale aggregate readable as current evidence, including as the absolute evidence a bootstrap release
+  // ships on. A mismatch is UNUSABLE, not a fallback to a metric rate the stale policy would rank
+  // differently: absence is the honest answer.
+  if (record.verdictSummary) {
+    const stamped = record.verdictPolicy?.digest;
+    if (stamped !== undefined && record.verdictSummary.policyDigest !== stamped) return null;
+    return record.verdictSummary.passRate ?? null;
+  }
   return headlinePassRate(record);
 }
 

@@ -316,6 +316,27 @@ export class PgScorecardStore implements ScorecardStore {
     // The pass-claim CAS (arch-review 8 P0): exactly one claimant may stamp an epoch onto this row. `null`
     // asks for "no epoch persisted" — an absent marker OR a legacy one — so the first claimant to write an
     // epoch makes every rival's condition false. This is what turns the marker into a lock.
+    // The FENCE. A UUID is never reused, so "the marker is still this pass" cannot be satisfied by a later
+    // pass that happens to hold the same counter value — which is exactly what an epoch-only guard allowed
+    // once a settle cleared the marker and the numbering restarted.
+    if (guard?.expectScoringPassId !== undefined) {
+      if (guard.expectScoringPassId === null) {
+        guardSql += " AND (scoring_pass IS NULL OR scoring_pass->>'passId' IS NULL)";
+      } else {
+        i++;
+        guardSql += ` AND scoring_pass->>'passId' = $${i}`;
+        vals.push(guard.expectScoringPassId);
+      }
+    }
+    // The DATABASE's clock decides reclaimability — the one clock every replica shares. `now()` is the
+    // transaction timestamp, so the read and the decision cannot drift apart the way an application clock
+    // and a later write can.
+    if (guard?.expectScoringPassReclaimable === true) {
+      guardSql +=
+        " AND (scoring_pass IS NULL OR scoring_pass->>'status' = 'failed'" +
+        " OR (scoring_pass ? 'leaseUntil' AND (scoring_pass->>'leaseUntil')::timestamptz <= now())" +
+        " OR (NOT (scoring_pass ? 'leaseUntil') AND (scoring_pass->>'startedAt')::timestamptz <= now() - interval '1 hour'))";
+    }
     if (guard?.expectScoringPassEpoch !== undefined) {
       if (guard.expectScoringPassEpoch === null) {
         guardSql += " AND (scoring_pass IS NULL OR scoring_pass->>'epoch' IS NULL)";
@@ -419,7 +440,7 @@ export class PgScorecardStore implements ScorecardStore {
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
       // batches a live replica is still driving. It is one text column, not a heavy one.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, scoring_pass, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

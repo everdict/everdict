@@ -38,6 +38,18 @@ export interface ScorecardListFilter {
 export interface ScorecardUpdateGuard {
   expectScoringCount?: number;
   expectGatesCount?: number;
+  // The scoring-pass FENCE (arch-review 9 P0): the pass that must still own the marker for this write to
+  // commit. `passId` is a UUID and is never reused, which is what makes it a sound fencing token —
+  // `expectScoringPassEpoch` alone was NOT, because a settle clears the marker and the next claim starts
+  // the count over (1 → null → 1), so a stale writer's epoch could match a completely different pass.
+  //  · a string → "the marker must still be this exact pass"
+  //  · null     → "there must be no marker" (a fresh claim)
+  expectScoringPassId?: string | null;
+  // Take over ONLY a marker the DATABASE considers reclaimable — failed, or a lease that has expired against
+  // the database's own clock. The service still decides WHETHER to attempt a takeover (it needs the reason
+  // for its error message); this makes the database the authority on WHETHER IT MAY, so a fast replica
+  // cannot shoot a healthy pass a slow one is still renewing.
+  expectScoringPassReclaimable?: boolean;
   // The scoring-pass CLAIM's compare-and-swap (arch-review 8 P0). Claiming used to be read-check-write:
   // two replicas both read an absent marker, both decided they owned the pass, and the second write silently
   // replaced the first — a marker is not a lock. The claimant now states the epoch it OBSERVED and the store
@@ -45,6 +57,7 @@ export interface ScorecardUpdateGuard {
   //  · a number → "the marker I read had this epoch" (renewal, takeover of a reclaimable pass, settle)
   //  · null     → "there was no marker, or a legacy one with no epoch" (a fresh claim)
   // A miss returns undefined like a missing id — the caller just read the record, so it IS the conflict.
+  // (diagnostic ordering, NOT the fence) — kept so a reader can see how many passes a record has had.
   expectScoringPassEpoch?: number | null;
 }
 

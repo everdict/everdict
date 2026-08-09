@@ -45,7 +45,12 @@ export interface ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
-    guard?: { expectStatus: ReleaseStatus },
+    // `expectVersion` is the real guard (arch-review 9 P0): a release stays EDITABLE while planned, so a
+    // status-only CAS let a decision evaluated over one watched series set commit onto a record whose set had
+    // been changed by a concurrent edit — status was still `planned`, the guard passed, and the shipped
+    // record watched a series its readiness never looked at. `expectStatus` stays for callers that only care
+    // about the lifecycle transition.
+    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
 }

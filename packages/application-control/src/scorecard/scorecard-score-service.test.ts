@@ -155,14 +155,14 @@ describe("ScorecardScoreService planScore (measured-aware worklist)", () => {
     // Given a case whose only judge:j row is the unmeasured placeholder a dead judge left behind
     const svc = serviceFor(recordWith([result("c1", [unmeasuredPlaceholder])]));
     // When the workflow plans the pass for judge j
-    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }]);
+    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }], "pass-1");
     // Then the case IS on the worklist — the placeholder is what the pass exists to replace
     expect(plan.keys).toEqual(["c1#0"]);
   });
 
   it("does not list a case that already carries a measured verdict", async () => {
     const svc = serviceFor(recordWith([result("c1", [measuredVerdict])]));
-    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }]);
+    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }], "pass-1");
     expect(plan.keys).toEqual([]);
   });
 
@@ -175,7 +175,7 @@ describe("ScorecardScoreService planScore (measured-aware worklist)", () => {
       retryable: true,
     });
     const svc = serviceFor(recordWith([failed]));
-    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }]);
+    const plan = await svc.planScore("sc-1", [{ id: "j", version: "1.0.0" }], "pass-1");
     expect(plan.keys).toEqual([]);
   });
 });
@@ -183,13 +183,13 @@ describe("ScorecardScoreService planScore (measured-aware worklist)", () => {
 describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
   it("skips a case whose verdict is already measured", async () => {
     const svc = serviceFor(recordWith([result("c1", [measuredVerdict])]));
-    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }]);
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
     expect(out).toEqual({ scored: false, skipped: true });
   });
 
   it("proceeds past an unmeasured placeholder instead of reading it as done", async () => {
     const svc = serviceFor(recordWith([result("c1", [unmeasuredPlaceholder])]));
-    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }]);
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
     // Then the case is actually scored (the no-runner ScoringService records its own skip verdicts — the
     // point here is the gate: the placeholder no longer short-circuits the pass as "already judged")
     expect(out.scored).toBe(true);
@@ -204,7 +204,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
       retryable: true,
     });
     const svc = serviceFor(recordWith([failed]));
-    const out = await svc.scoreCase("sc-1", "c2#0", [{ id: "j", version: "1.0.0" }]);
+    const out = await svc.scoreCase("sc-1", "c2#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
     expect(out).toEqual({ scored: false, skipped: true });
   });
 
@@ -313,7 +313,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
         pinJudges: async (_tenant, judgeRefs) => judgeRefs,
       },
     );
-    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }]);
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
     expect(out.scored).toBe(true);
     expect(seenRunIds).toEqual(["child-c1"]);
   });
@@ -389,13 +389,13 @@ describe("ScorecardScoreService prepareScore — strip-first makes the Temporal 
     );
     const v2 = [{ id: "j", version: "2.0.0" }];
     // Pre-strip, the id-only predicate reads quality@1's verdict as "already judged" — the empty plan IS the defect
-    expect((await svc.planScore("sc-1", v2)).keys).toEqual([]);
+    expect((await svc.planScore("sc-1", v2, "pass-1")).keys).toEqual([]);
     // The strip-first step clears the selected judge's prior rows and persists them
-    expect(await svc.prepareScore("sc-1", v2)).toEqual({ stripped: 1 });
+    expect(await svc.prepareScore("sc-1", v2, "pass-1")).toEqual({ stripped: 1 });
     // Now the pass re-judges: the case is on the worklist
-    expect((await svc.planScore("sc-1", v2)).keys).toEqual(["c1#0"]);
+    expect((await svc.planScore("sc-1", v2, "pass-1")).keys).toEqual(["c1#0"]);
     // Idempotent for activity retries — a stripped plane strips to nothing
-    expect(await svc.prepareScore("sc-1", v2)).toEqual({ stripped: 0 });
+    expect(await svc.prepareScore("sc-1", v2, "pass-1")).toEqual({ stripped: 0 });
   });
 });
 
@@ -512,7 +512,7 @@ describe("ScorecardScoreService aggregate — a re-score rewrites scoring identi
       },
     );
     // When judge j is re-scored at version 2.0.0 (model m2), replacing its 1.0.0 (model m1) pass
-    await svc.finalizeScore("sc-1", [{ id: "j", version: "2.0.0" }], "bob");
+    await svc.finalizeScore("sc-1", [{ id: "j", version: "2.0.0" }], "bob", "pass-1");
     const patch = updates.at(-1);
     expect(patch).toBeDefined();
     // The ledger APPENDS — history intact, the new pass identified with its own sealed closure
@@ -675,8 +675,13 @@ describe("scoring-pass ownership (arch-review 8 P0)", () => {
           _id: string,
           patch: Partial<ScorecardRecord>,
           _events?: unknown,
-          guard?: { expectScoringPassEpoch?: number | null },
+          guard?: { expectScoringPassId?: string | null; expectScoringPassEpoch?: number | null },
         ) {
+          // Mirrors the real stores: passId is the FENCE (never reused), epoch is diagnostic ordering.
+          if (guard?.expectScoringPassId !== undefined) {
+            const owner = current.scoringPass?.passId ?? null;
+            if (owner !== guard.expectScoringPassId) return undefined;
+          }
           if (guard?.expectScoringPassEpoch !== undefined) {
             const persisted = current.scoringPass?.epoch ?? null;
             if (persisted !== guard.expectScoringPassEpoch) return undefined;
@@ -799,6 +804,39 @@ describe("scoring-pass ownership (arch-review 8 P0)", () => {
       ConflictError,
     );
     expect(cas.current.scoringPass?.passId).toBe("pass-1");
+  });
+
+  // arch-review 9 P0: epoch is NOT monotonic — a settle clears the marker, so the next claim computes
+  // (undefined ?? 0) + 1 = 1 again. A guard that compares epochs cannot tell a stale writer's epoch 1 from
+  // a brand-new pass's epoch 1, which is textbook ABA. The fence is the passId, which is never reused.
+  it("refuses a stale writer after settle → new claim, even though both hold epoch 1 (ABA)", async () => {
+    const cas = casStore(recordWith([result("c1", [])], null));
+    await svcOver(cas, () => "pass-A").score({
+      tenant: "acme",
+      id: "sc-1",
+      judges: [{ id: "j", version: "1.0.0" }],
+    });
+    const stale = cas.current.scoringPass;
+    expect(stale?.epoch).toBe(1);
+    // A settles: the marker is cleared and the plane becomes a completed revision again.
+    await cas.store.update("sc-1", { scoringPass: null }, undefined, { expectScoringPassId: "pass-A" });
+    // A different pass claims later and gets the SAME epoch number.
+    await svcOver(cas, () => "pass-B").score({
+      tenant: "acme",
+      id: "sc-1",
+      judges: [{ id: "j", version: "1.0.0" }],
+    });
+    expect(cas.current.scoringPass?.passId).toBe("pass-B");
+    expect(cas.current.scoringPass?.epoch).toBe(1); // the counter restarted — this is the ABA condition
+    // The stale writer's epoch matches the live marker's. Its IDENTITY does not, and that is what refuses it.
+    const byEpoch = await cas.store.update("sc-1", { updatedAt: "later" }, undefined, {
+      expectScoringPassEpoch: stale?.epoch ?? null,
+    });
+    expect(byEpoch).toBeDefined(); // an epoch-only guard would have let the stale writer through
+    const byIdentity = await cas.store.update("sc-1", { updatedAt: "later" }, undefined, {
+      expectScoringPassId: "pass-A",
+    });
+    expect(byIdentity).toBeUndefined();
   });
 
   it("DOES take over once the lease expires — crash residue must never wedge a record forever", async () => {

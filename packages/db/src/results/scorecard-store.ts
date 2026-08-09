@@ -1,3 +1,4 @@
+import { SCORING_PASS_STALE_MS } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/contracts";
 
 import type {
@@ -35,6 +36,22 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;
     // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that
     // already stamped one wins and this write is refused.
+    // passId is the FENCE — never reused, so it cannot collide across passes the way an epoch can.
+    if (guard?.expectScoringPassId !== undefined) {
+      const owner = cur.scoringPass?.passId ?? null;
+      if (owner !== guard.expectScoringPassId) return undefined;
+    }
+    // Reclaimability, mirroring the Pg condition. One process, one clock — nothing to arbitrate here.
+    if (guard?.expectScoringPassReclaimable === true) {
+      const live = cur.scoringPass;
+      const reclaimable =
+        !live ||
+        live.status === "failed" ||
+        (live.leaseUntil !== undefined
+          ? Date.parse(live.leaseUntil) <= Date.now()
+          : Date.now() - Date.parse(live.startedAt) >= SCORING_PASS_STALE_MS);
+      if (!reclaimable) return undefined;
+    }
     if (guard?.expectScoringPassEpoch !== undefined) {
       const persisted = cur.scoringPass?.epoch ?? null;
       if (persisted !== guard.expectScoringPassEpoch) return undefined;

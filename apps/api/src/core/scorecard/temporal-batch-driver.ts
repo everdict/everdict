@@ -1,4 +1,4 @@
-import { ConflictError } from "@everdict/contracts";
+import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
 
 // Batch-on-Temporal driver — the control plane starts one durable scorecardBatchWorkflow per batch
@@ -56,7 +56,21 @@ export class TemporalBatchDriver {
     groupId: string;
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
+    // The pass the caller CLAIMED. Without it the workflow's activities present no identity and adopt
+    // whatever marker is live — a superseded workflow would then write under the new owner's authority.
+    passId?: string;
   }): Promise<void> {
+    // Fail at the SOURCE if the identity was dropped on the way here. TypeScript cannot catch this — a
+    // handler whose parameter type omits a property is still assignable (parameter bivariance), which is
+    // exactly how the field went missing between the claim and this driver. The workflow it starts would
+    // otherwise run anonymous, and an anonymous activity is refused downstream with a far less obvious
+    // message than this one.
+    if (!input.passId)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: input.groupId },
+        "a scoring workflow cannot start without the passId its claim minted — the composition adapter dropped it.",
+      );
     const connection = await Connection.connect({ address: this.opts.address });
     try {
       const client = new Client({ connection });
@@ -68,6 +82,7 @@ export class TemporalBatchDriver {
             groupId: input.groupId,
             judges: input.judges,
             ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
             ...(this.opts.continueEvery !== undefined ? { continueEvery: this.opts.continueEvery } : {}),
             ...(this.opts.rotateAtHistoryLength !== undefined
               ? { rotateAtHistoryLength: this.opts.rotateAtHistoryLength }

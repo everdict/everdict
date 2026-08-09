@@ -550,8 +550,9 @@ export class ScorecardService {
   async planScore(
     id: string,
     judges: Array<{ id: string; version: string }>,
+    passId?: string,
   ): Promise<{ keys: string[]; concurrency: number }> {
-    return this.scoreService.planScore(id, judges);
+    return this.scoreService.planScore(id, judges, passId);
   }
 
   async runScoreCase(

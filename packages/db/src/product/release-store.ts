@@ -37,15 +37,18 @@ export class InMemoryReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
-    guard?: { expectStatus: ReleaseStatus },
+    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
     if (!current || current.tenant !== tenant) return undefined;
     // Terminal-race guard: the aggregate decided from the status it READ, so the write commits only from
     // that status. Otherwise two legal decisions (released / cancelled) both pass the domain and the last
     // writer wins — with the loser's fact already in the outbox.
-    if (guard !== undefined && current.status !== guard.expectStatus) return undefined;
-    const next: ReleaseRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    if (guard?.expectStatus !== undefined && current.status !== guard.expectStatus) return undefined;
+    // The aggregate version catches a concurrent EDIT, which a status guard cannot see.
+    if (guard?.expectVersion !== undefined && (current.version ?? 0) !== guard.expectVersion) return undefined;
+    const next0 = { ...current, ...patch, version: (current.version ?? 0) + 1 };
+    const next: ReleaseRecord = { ...next0, id: current.id, tenant: current.tenant };
     this.byId.set(id, next);
     if (events) this.events.push(...events);
     return next;
@@ -62,6 +65,7 @@ export class InMemoryReleaseStore implements ReleaseStore {
 }
 
 interface ReleaseRow extends TrackerRow {
+  version?: number | string | null; // bigint arrives as a string from pg
   product_id: string;
   name: string;
   description: string | null;
@@ -102,6 +106,7 @@ function rowToRecord(row: ReleaseRow): ReleaseRecord {
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
+    ...(row.version !== null && row.version !== undefined ? { version: Number(row.version) } : {}),
     ...(row.target_date !== null ? { targetDate: row.target_date } : {}),
     ...(row.released_at !== null ? { releasedAt: iso(row.released_at) } : {}),
     // NULL = "every series" — a real absence, not an empty selection, so it must not become [].
@@ -166,13 +171,19 @@ export class PgReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
-    guard?: { expectStatus: ReleaseStatus },
+    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
-    const next: ReleaseRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    const next: ReleaseRecord = {
+      ...current,
+      ...patch,
+      id: current.id,
+      tenant: current.tenant,
+      version: (current.version ?? 0) + 1,
+    };
     const sets = `name=$3, description=$4, status=$5, target_date=$6, released_at=$7::timestamptz,
-       series_keys=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz`;
+       series_keys=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz, version=$11`;
     const params: unknown[] = [
       tenant,
       id,
@@ -184,13 +195,18 @@ export class PgReleaseStore implements ReleaseStore {
       next.seriesKeys !== undefined ? JSON.stringify(next.seriesKeys) : null,
       JSON.stringify(next.history),
       next.updatedAt,
+      next.version ?? 0,
     ];
     // …and the status the caller decided FROM, as a WHERE condition — the read above is not the guarantee,
     // this is. A miss matches zero rows and the facts (WHERE EXISTS on the updating CTE) never land either.
     let guardSql = "";
-    if (guard !== undefined) {
+    if (guard?.expectStatus !== undefined) {
       params.push(guard.expectStatus);
-      guardSql = ` AND status=$${params.length}`;
+      guardSql += ` AND status=$${params.length}`;
+    }
+    if (guard?.expectVersion !== undefined) {
+      params.push(guard.expectVersion);
+      guardSql += ` AND coalesce(version, 0)=$${params.length}`;
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

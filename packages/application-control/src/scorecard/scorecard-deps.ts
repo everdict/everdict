@@ -81,9 +81,12 @@ export interface ScorecardServiceDeps {
       groupId: string;
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
-      // The pass the CLAIM minted. The workflow presents it on every activity, so a pass that gets
-      // superseded while a long history rotates is refused instead of writing onto the new owner's plane.
-      passId?: string;
+      // The pass the CLAIM minted — REQUIRED (arch-review 9 P0). It was optional, and an adapter whose
+      // inline parameter type simply omitted it still satisfied this port: structural typing dropped the
+      // field silently between the claim and the workflow, so every production activity arrived with no
+      // identity and ADOPTED whatever marker was live. Required makes that omission a compile error, which
+      // is the only check that watches every adapter on the way to Temporal.
+      passId: string;
     }): Promise<void>;
   };
   // Registered runtime ids for this tenant — powers runtime:"auto" (expand to every registered runtime and shard).

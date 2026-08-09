@@ -435,7 +435,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const body = scoreJudges.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        return reply.send(await deps.scorecardService.planScore(req.params.id, body.data.judges));
+        return reply.send(await deps.scorecardService.planScore(req.params.id, body.data.judges, body.data.passId));
       } catch (err) {
         return sendError(reply, err);
       }

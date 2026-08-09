@@ -208,8 +208,16 @@ export function buildScorecard(deps: {
           temporalBatches: temporalDriver,
           temporalScores: {
             workflowIdFor: (groupId: string) => temporalDriver.scoreWorkflowIdFor(groupId),
-            start: (input: { groupId: string; judges: Array<{ id: string; version: string }>; submittedBy?: string }) =>
-              temporalDriver.startScore(input),
+            // `passId` MUST be listed here. An inline parameter type that omits it still satisfies the port
+            // (structural typing ignores the extra property), so the field was silently dropped between the
+            // claim and the workflow — and an activity with no passId ADOPTS whatever marker is live, which
+            // is precisely the fence being bypassed. Typed explicitly so the drop cannot recur silently.
+            start: (input: {
+              groupId: string;
+              judges: Array<{ id: string; version: string }>;
+              submittedBy?: string;
+              passId?: string;
+            }) => temporalDriver.startScore(input),
           },
         }
       : {}),

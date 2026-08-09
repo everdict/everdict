@@ -5157,13 +5157,13 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     });
 
     // The workflow's plan: all three (case, trial) children are unfinished.
-    const plan = await service.planScore(record.id, sel);
+    const plan = await service.planScore(record.id, sel, claimed);
     expect(plan.keys).toHaveLength(3);
 
     // Judge the first case, then "kill the CP": a fresh plan returns exactly the remainder.
     const first = plan.keys[0] ?? "";
     expect(await service.runScoreCase(record.id, first, sel, undefined, claimed)).toEqual({ scored: true });
-    const resumed = await service.planScore(record.id, sel);
+    const resumed = await service.planScore(record.id, sel, claimed);
     expect(resumed.keys).toHaveLength(2);
     expect(resumed.keys).not.toContain(first);
 

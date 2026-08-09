@@ -109,6 +109,10 @@ export function releaseReadiness(
     return {
       key: entry.key,
       label: entry.label,
+      // Whether this series GATED the decision. Product policy is editable, so a live re-read cannot answer
+      // it afterwards — the field existed but nothing filled it, which made the recorded decision silent
+      // about the one thing that decides whether a non-pass verdict mattered.
+      required,
       ...(latest !== undefined
         ? {
             latest: {
@@ -116,6 +120,9 @@ export function releaseReadiness(
               ...(latest.passRate !== undefined ? { passRate: latest.passRate } : {}),
               createdAt: latest.createdAt,
               ...(latest.serviceVersion !== undefined ? { serviceVersion: latest.serviceVersion } : {}),
+              // WHICH judgment — dropping it here made the release decision record a scorecard id and call
+              // it an evidence reference, which it stops being the moment a re-score lands.
+              ...(latest.scoring !== undefined ? { scoring: latest.scoring } : {}),
             },
           }
         : {}),
@@ -125,6 +132,7 @@ export function releaseReadiness(
               scorecardId: baseline.scorecardId,
               ...(baseline.passRate !== undefined ? { passRate: baseline.passRate } : {}),
               createdAt: baseline.createdAt,
+              ...(baseline.scoring !== undefined ? { scoring: baseline.scoring } : {}),
             },
           }
         : {}),

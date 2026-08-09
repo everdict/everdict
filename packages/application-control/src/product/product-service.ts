@@ -441,14 +441,50 @@ export class ProductService {
         // time search stand in, and then the comparison is honestly anchored on a re-derived guess.
         const pinned = this.baselineFromDecision(previous, series.key);
         const fromDecision = pinned ? rows.find((row) => row.id === pinned.scorecardId) : undefined;
+        // A pinned baseline that CANNOT BE FOUND is missing historical evidence, not licence to compare
+        // against a different scorecard. Falling back to the time search would answer "what did we ship
+        // against last time" with a record no release ever saw — a substitution that looks like an answer.
+        // The time search stands in only for ships that recorded no pin at all.
+        if (pinned !== undefined && fromDecision === undefined) {
+          gateBySeries.set(series.key, {
+            verdict: "not_comparable",
+            reasons: [
+              `the scorecard this product last shipped against (${pinned.scorecardId}) is no longer available — refusing to substitute a different one`,
+            ],
+          });
+        }
         if (pinned !== undefined || anchor !== undefined) {
           const baseline =
-            fromDecision ?? (anchor !== undefined ? rows.find((row) => row.createdAt <= anchor) : undefined);
+            fromDecision ??
+            (pinned !== undefined
+              ? undefined
+              : anchor !== undefined
+                ? rows.find((row) => row.createdAt <= anchor)
+                : undefined);
           if (baseline !== undefined) {
             const point = seriesPoint(baseline);
             // The pin the SHIP recorded wins over the record's current pin: if the scorecard was re-scored
             // since, "what we compared against last time" is the older judgment, and saying so is the point.
             baselineBySeries.set(series.key, pinned?.scoring ? { ...point, scoring: pinned.scoring } : point);
+            // …and if it WAS re-scored, the comparison below cannot be the one the last ship stood on. The
+            // gate reads a scorecard by id and gets whatever judgment lives there NOW; the pinned revision's
+            // plane is not addressable until scoring planes become immutable revisions
+            // (docs/architecture/scoring-plane-revisions.md). Comparing today's judgment while the decision
+            // record claims a pinned one is the lie this pin existed to prevent, so it refuses instead.
+            const livePin = point.scoring;
+            if (
+              pinned?.scoring !== undefined &&
+              livePin !== undefined &&
+              livePin.scorePlaneDigest !== pinned.scoring.scorePlaneDigest
+            ) {
+              gateBySeries.set(series.key, {
+                verdict: "not_comparable",
+                reasons: [
+                  `the baseline scorecard has been re-scored since the last ship (shipped against revision ${pinned.scoring.revision}, now revision ${livePin.revision}) — the judgment this product shipped against is no longer the one a comparison would read`,
+                ],
+              });
+              continue;
+            }
           }
           // The gate reading — only where a comparable pair exists; the domain owns every other state
           // (not_evaluated / no_baseline / seam-absent not_comparable).
@@ -562,15 +598,28 @@ export class ProductService {
       current.id,
       transition.patch,
       stamped.map((s) => s.record),
-      { expectStatus: current.status },
+      // Version, not just status (arch-review 9 P0). A release stays EDITABLE while planned, so a decision
+      // evaluated over seriesKeys=[quality] could commit onto a record another replica had meanwhile changed
+      // to [quality, safety] — status was still `planned`, the guard passed, and the shipped record watched a
+      // series its readiness never looked at. The version moves on ANY write, so an edit invalidates the
+      // decision that did not see it.
+      { expectStatus: current.status, expectVersion: current.version ?? 0 },
     );
     if (updated === undefined) {
       const live = await this.deps.releases.get(current.tenant, current.id);
       if (live !== undefined)
         throw new ConflictError(
           "CONFLICT",
-          { release: current.id, expected: current.status, actual: live.status },
-          `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`,
+          {
+            release: current.id,
+            expected: current.status,
+            actual: live.status,
+            expectedVersion: current.version ?? 0,
+            actualVersion: live.version ?? 0,
+          },
+          live.status !== current.status
+            ? `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`
+            : "this release was edited while the decision was being made — its watched series may differ from the ones this readiness evaluated; re-read it and decide again.",
         );
     }
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: current.id }, `release '${current.id}' not found.`);

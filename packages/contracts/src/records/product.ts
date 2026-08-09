@@ -125,6 +125,10 @@ export const ReleaseStatusSchema = z.enum(RELEASE_STATUSES);
 export type ReleaseStatus = z.infer<typeof ReleaseStatusSchema>;
 
 export const ReleaseRecordSchema = z.object({
+  // Aggregate version (mig 0148) — the optimistic-concurrency token a ship decision commits against. A
+  // release stays EDITABLE while planned, so guarding only on status let a decision made over one watched
+  // set commit onto a record whose set had changed underneath it. Absent on pre-migration rows (read as 0).
+  version: z.number().int().nonnegative().optional(),
   id: z.string(),
   tenant: z.string(),
   productId: z.string(),
