@@ -1,0 +1,30 @@
+-- What a ship decision actually commits against: the product's RELEASE POLICY, not its row version.
+--
+-- Mig 0150 gave Product a version so a release decision could detect its policy moving underneath it. That
+-- was the right invariant with the wrong identity: one counter came to represent three different things —
+-- content revision, release-policy revision, and sync-state revision — because the store bumps it on EVERY
+-- write. Including `markServiceSynced`, whose own contract says it is bookkeeping and moves neither history
+-- nor updated_at.
+--
+-- The consequence only became load-bearing once the 15-minute version sweep joined the CAS constitution: a
+-- background watermark write now bumps the version, so an in-flight ship decision conflicts for a reason
+-- that has nothing to do with its policy. Fail-closed is the right default, but a guard that refuses for
+-- reasons an operator cannot connect to the decision is a guard that gets worked around — which is a trust
+-- risk of its own, not a conservative one.
+--
+-- `release_policy_digest` is a content digest of every series' {key, required, allowNoBaseline}, maintained
+-- by the store on write and compared inside the release's UPDATE statement (the guard is an EXISTS on this
+-- row, so it must be a stored value — it cannot run a per-release computation). Renames, icons, descriptions,
+-- service edits and sync watermarks stop conflicting anything; a change to what gates a release still does.
+--
+-- The aggregate `version` STAYS: it is the product's own lost-update guard (mig 0150's other job), which is a
+-- different question from "is this still the policy I read".
+--
+-- Additive and nullable, and the guard is SELF-HEALING rather than either fail-open or bricking. A digest
+-- cannot be computed in SQL, so existing rows carry NULL until their next write; the release guard reads
+--   release_policy_digest = <expected>  OR  (release_policy_digest IS NULL AND version = <expected version>)
+-- so a legacy product keeps mig 0150's sound-but-over-broad behaviour instead of becoming un-shippable, and
+-- the fallback disappears the first time that product is written. Never `IS NULL → pass`, which would make
+-- every un-migrated product's ship decisions unguarded — the fail-open this shape invites.
+ALTER TABLE everdict_products
+  ADD COLUMN IF NOT EXISTS release_policy_digest TEXT;

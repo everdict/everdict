@@ -309,3 +309,30 @@ export function releasePolicyDocument(
 export function productPolicyDigest(product: ProductRecord, release?: Pick<ReleaseRecord, "seriesKeys">): string {
   return contentDigest(releasePolicyDocument(product, release));
 }
+
+// The digest of a product's ENTIRE release policy — every series' `{key, required, allowNoBaseline}`,
+// independent of any one release (arch-review 12 follow-up).
+//
+// This is what a ship decision commits against, replacing the product's aggregate VERSION. The version was a
+// conservative first guess and it conflated three concerns in one counter: content revision, release-policy
+// revision, and sync-state revision. Every write bumped it — including `markServiceSynced`, whose own contract
+// says it is bookkeeping and moves neither history nor `updatedAt`. So once the 15-minute sweep joined the CAS
+// constitution, a background watermark write could conflict an in-flight ship that its policy had nothing to
+// do with. A guard that refuses for reasons an operator cannot connect to the decision is a guard that gets
+// worked around, and that is a trust risk of its own.
+//
+// Product-wide rather than per-release on purpose: it has to be a single stored value the WRITE STATEMENT can
+// compare (the guard is an EXISTS on the product row — it cannot run a per-release computation), and the
+// over-block it keeps is narrow and honest: editing a series this release does not watch. Renames, icons,
+// descriptions, service edits and sync watermarks no longer conflict anything.
+export function productReleasePolicyDigest(product: Pick<ProductRecord, "series">): string {
+  return contentDigest(
+    [...product.series]
+      .map((s) => ({
+        key: s.key,
+        required: s.requiredForRelease !== false,
+        allowNoBaseline: s.allowNoBaseline === true,
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+  );
+}

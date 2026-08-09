@@ -128,12 +128,25 @@ the schema has no foreign keys by choice, which makes the aggregate boundary a t
 `removeAggregate` deletes all three in a single data-modifying CTE; the previous application-level walk had a
 gap in the middle that a concurrent `createRelease` could insert an orphan into.
 
-**The ship commits against two versions.** `expectStatus` + `expectVersion` guard the release row (mig 0148);
-`expectProduct` guards the PRODUCT's policy version (mig 0150), evaluated as an `EXISTS` inside the same write
-statement. A release gate is decided under a policy that lives in a different aggregate, so the release's own
-version could never see it move — an admin flipping a series to required mid-decision left the release row
-untouched, the guard passed, and the history recorded "required, not_evaluated" on a release that shipped
-without a force.
+**The ship commits against the release's version and the product's POLICY.** `expectStatus` + `expectVersion`
+guard the release row (mig 0148); `expectProduct` guards the product's `release_policy_digest` (mig 0154),
+evaluated as an `EXISTS` inside the same write statement. A release gate is decided under a policy that lives
+in a different aggregate, so the release's own version could never see it move — an admin flipping a series to
+required mid-decision left the release row untouched, the guard passed, and the history recorded "required,
+not_evaluated" on a release that shipped without a force.
+
+The digest replaced the product's row VERSION (mig 0150's first attempt), which was the right invariant with
+the wrong identity: one counter came to mean content revision, release-policy revision AND sync-state
+revision, because the store bumps it on every write — including `markServiceSynced`, whose own contract calls
+itself bookkeeping. That only became load-bearing once the 15-minute sweep joined the CAS constitution, at
+which point a background watermark write conflicted ships whose policy had not moved. Fail-closed is the
+right default, and a guard that refuses for reasons an operator cannot connect to the decision is a guard
+that gets worked around — a trust risk of its own. The digest covers every series' `{key, required,
+allowNoBaseline}`, so renames, icons, service edits and sync watermarks stop conflicting anything; it is
+product-wide rather than per-release because the guard is an `EXISTS` on the product row and must compare a
+stored value. Legacy rows (NULL digest) fall back to the version guard — sound, over-broad, and self-healing
+on that product's next write. The aggregate `version` stays: it is the product's own lost-update guard, a
+different question from "is this still the policy I read".
 No stored regression flag on the release (no second regression authority): issue regression stays the
 regression watch's, and an issue it reopened blocks the release through the link.
 

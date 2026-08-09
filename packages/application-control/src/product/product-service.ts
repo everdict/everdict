@@ -37,6 +37,7 @@ import {
   currentScoringPin,
   decisionPassRate,
   productPolicyDigest,
+  productReleasePolicyDigest,
   releasePolicyDocument,
   releaseReadiness,
   watchedSeries,
@@ -703,16 +704,30 @@ export class ProductService {
       {
         expectStatus: current.status,
         expectVersion: current.version ?? 0,
-        // …and the PRODUCT's policy must still be the one this decision read. A different aggregate, so the
-        // release's own version cannot speak for it.
-        ...(product !== undefined ? { expectProduct: { id: product.id, version: product.version ?? 0 } } : {}),
+        // …and the PRODUCT's POLICY must still be the one this decision read. A different aggregate, so the
+        // release's own version cannot speak for it — and the product's row version cannot either: it bumps
+        // on every write, including the sync sweep's watermark, so it conflicted ships whose policy had not
+        // moved. The digest is the identity; the version rides along only as the legacy fallback for a
+        // product written before the column existed (mig 0154).
+        ...(product !== undefined
+          ? {
+              expectProduct: {
+                id: product.id,
+                version: product.version ?? 0,
+                policyDigest: productReleasePolicyDigest(product),
+              },
+            }
+          : {}),
       },
     );
     if (updated === undefined) {
       const live = await this.deps.releases.get(current.tenant, current.id);
       if (live !== undefined) {
         const liveProduct = product !== undefined ? await this.deps.store.get(current.tenant, product.id) : undefined;
-        const policyMoved = product !== undefined && (liveProduct?.version ?? 0) !== (product.version ?? 0);
+        const policyMoved =
+          product !== undefined &&
+          liveProduct !== undefined &&
+          productReleasePolicyDigest(liveProduct) !== productReleasePolicyDigest(product);
         throw new ConflictError(
           "CONFLICT",
           {

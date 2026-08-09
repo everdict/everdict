@@ -107,6 +107,13 @@ export const ProductRecordSchema = z.object({
   // a decision made under the old policy was recorded as standing on the new one. Absent on pre-migration
   // rows (read as 0).
   version: z.number().int().nonnegative().optional(),
+  // The identity of this product's RELEASE POLICY — a content digest of every series'
+  // {key, required, allowNoBaseline}, maintained by the store on write (mig 0154). A ship decision commits
+  // against THIS rather than against `version`, because the version bumps on every write, including the
+  // 15-minute sync sweep's watermark — so it made a background write conflict a ship whose policy had not
+  // moved. Derived, never author-supplied. Absent on rows written before the column existed; the release
+  // guard then falls back to the version, which is sound and merely over-broad.
+  releasePolicyDigest: z.string().optional(),
   id: z.string(),
   tenant: z.string(),
   name: z.string().min(1),

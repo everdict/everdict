@@ -78,7 +78,12 @@ export interface ReleaseStore {
     guard?: {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
-      expectProduct?: { id: string; version: number };
+      // WHICH POLICY the decision stood on (mig 0154). `policyDigest` is the precise identity — a content
+      // digest of every series' {key, required, allowNoBaseline} — and `version` is the LEGACY fallback the
+      // store uses only while a product predates the column. The version alone conflated content, policy and
+      // sync-watermark revisions in one counter, so a background sweep could conflict a ship its policy had
+      // nothing to do with.
+      expectProduct?: { id: string; version: number; policyDigest: string };
     },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;

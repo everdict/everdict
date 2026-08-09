@@ -9,7 +9,7 @@ import {
   InMemoryReleaseStore,
   InMemoryScorecardStore,
 } from "@everdict/db";
-import { evaluateGate } from "@everdict/domain";
+import { evaluateGate, productReleasePolicyDigest } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
@@ -297,7 +297,9 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
       productId: product.id,
       name: "2026.3",
     });
-    const stalePolicyVersion = product.version ?? 0;
+    // The POLICY this decision read — the identity a ship now commits against (mig 0154). The row version is
+    // carried too, as the store's legacy fallback, but it is not what decides.
+    const stalePolicy = productReleasePolicyDigest(product);
 
     // The concurrent edit lands: quality becomes required. The RELEASE row is untouched — which is exactly
     // why its own version guard passes and cannot protect this decision.
@@ -312,7 +314,8 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
     const guarded = await releases.update("acme", release.id, { status: "released" }, undefined, {
       expectStatus: "planned",
       expectVersion: releaseRow?.version ?? 0, // the release did NOT move — this half passes
-      expectProduct: { id: product.id, version: stalePolicyVersion }, // …and this half refuses
+      // …and this half refuses: the policy digest moved even though nothing about the release did.
+      expectProduct: { id: product.id, version: product.version ?? 0, policyDigest: stalePolicy },
     });
     expect(guarded).toBeUndefined();
     // …and the same write commits once it states the policy it actually read.
@@ -321,7 +324,61 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
       releases.update("acme", release.id, { status: "released" }, undefined, {
         expectStatus: "planned",
         expectVersion: releaseRow?.version ?? 0,
-        expectProduct: { id: product.id, version: fresh?.version ?? 0 },
+        expectProduct: {
+          id: product.id,
+          version: fresh?.version ?? 0,
+          policyDigest: fresh === undefined ? "" : productReleasePolicyDigest(fresh),
+        },
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  // mig 0154: the guard has to refuse for POLICY reasons and only policy reasons. A version-keyed guard
+  // conflicted a ship whenever anything about the product moved — including the 15-minute sync sweep's
+  // watermark, which its own contract calls bookkeeping. A guard that refuses for reasons an operator cannot
+  // connect to the decision is one that gets worked around.
+  it("a NON-policy product edit does not conflict an in-flight ship", async () => {
+    const products = new InMemoryProductStore();
+    const releases = new InMemoryReleaseStore();
+    releases.attachProducts(products);
+    let n = 0;
+    const productService = new ProductService({
+      store: products,
+      releases,
+      versions: new InMemoryProductVersionStore(),
+      newId: () => `t37-rename-${n++}`,
+      now: () => "2026-08-04T00:00:00.000Z",
+    });
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      series: [{ ...SERIES, requiredForRelease: false }],
+    });
+    const release = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+    });
+    const policyAtDecision = productReleasePolicyDigest(product);
+
+    // A rename lands mid-decision. The row version moves; the release policy does not.
+    await productService.update(
+      "acme",
+      product.id,
+      { name: "Support Copilot (EU)" },
+      { subject: "release-captain", isAdmin: true },
+    );
+    const moved = await products.get("acme", product.id);
+    expect(moved?.version).not.toBe(product.version); // the version DID move — the old guard would refuse
+
+    const releaseRow = await releases.get("acme", release.id);
+    await expect(
+      releases.update("acme", release.id, { status: "released" }, undefined, {
+        expectStatus: "planned",
+        expectVersion: releaseRow?.version ?? 0,
+        expectProduct: { id: product.id, version: product.version ?? 0, policyDigest: policyAtDecision },
       }),
     ).resolves.toBeDefined();
   });
