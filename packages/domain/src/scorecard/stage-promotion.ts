@@ -11,6 +11,13 @@
 export interface ScoringStageParity {
   scorecardId: string;
   passId: string;
+  // Did the comparison itself run (arch-review 13 P1)? A parity report that could not be produced — the
+  // stage read threw, the store was gone — used to fire nothing at all, so an operator watching
+  // `mismatched = 0` was watching a series that says the same thing whether every pass agreed or no pass was
+  // ever checked. The suite's oldest rule applies to migration telemetry too: what was not observed is not
+  // green. A `completed: false` report carries the reason and nothing else; it exists to be counted.
+  completed: boolean;
+  failure?: string;
   // What this pass ACTUALLY JUDGED, derived from the settled plane rather than from the stage (arch-review
   // 11). A comparison that walks the staged rows can only report on the writes that SUCCEEDED, so a pass
   // that judged 100 cases and failed to stage 20 graphed as perfect parity over a 20% loss. The stage write
@@ -32,6 +39,7 @@ export interface ScoringStageParity {
 // The contract step's precondition, as code so nobody reconstructs it from a dashboard. `staged === matched`
 // is NOT it: that holds trivially when nothing was staged, which is the exact failure being guarded against.
 export function stagePromotionSafe(parity: ScoringStageParity): boolean {
+  if (!parity.completed) return false; // an unmeasured pass is not a passing one
   return (
     parity.expectedJudged === parity.staged &&
     parity.staged === parity.matched &&

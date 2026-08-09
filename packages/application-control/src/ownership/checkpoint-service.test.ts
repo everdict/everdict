@@ -536,7 +536,7 @@ describe("verification — an affirmative needs full identity AND evidence cover
     }).requestVerification("acme", "cp-cov");
     expect(decision.independence).toBe("enforced");
     expect(decision.verdict).toBe("inconclusive");
-    expect(decision.detail).toContain("never read");
+    expect(decision.detail).toContain("never successfully read");
     expect(decision.evidenceCoverage).toMatchObject({ offered: 2, reviewed: [{ type: "run", id: "run-A" }] });
   });
 
@@ -549,5 +549,54 @@ describe("verification — an affirmative needs full identity AND evidence cover
       reviewed: bothRuns,
     }).requestVerification("acme", "cp-cov");
     expect(decision).toMatchObject({ verdict: "verified", independence: "enforced" });
+  });
+});
+
+// arch-review 13: coverage means SUCCESSFULLY READ, not addressed. The kernel used to report a resource the
+// moment the object gate admitted it — before the tool ran — so a verifier could reach for all three of its
+// refs, get a 404 on every one, and still show full coverage. An affirmative built on three failures.
+describe("verification — a failed read is not coverage", () => {
+  const checkpoint: HandoffCheckpointRecord = {
+    ...HandoffCheckpointSchema.parse({
+      ...body(),
+      id: "cp-fail",
+      createdAt: "2026-08-08T00:00:00.000Z",
+      createdBy: "member:dana",
+    }),
+    tenant: "acme",
+  };
+
+  it("refuses the affirmative and NAMES the failed read", async () => {
+    const svc = new CheckpointService({
+      store: {
+        async create() {},
+        async get() {
+          return checkpoint;
+        },
+        async list() {
+          return [];
+        },
+      },
+      resolvers: {},
+      runActor: async () => ({ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }),
+      verifier: {
+        async verify() {
+          return {
+            verdict: "verified" as const,
+            detail: "looks right",
+            actor: { id: "agent:auditor", runId: "run-Z", sessionId: "conv-Z" },
+            // Addressed, and the read FAILED — the distinction the outcome exists to carry.
+            reviewedResources: [],
+            failedResources: [{ type: "run", id: "run-42" }],
+          };
+        },
+      },
+      newId: () => "vd-fail",
+      now: () => "2026-08-08T01:00:00.000Z",
+    });
+    const decision = await svc.requestVerification("acme", "cp-fail");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("reads FAILED for run:run-42");
+    expect(decision.evidenceCoverage).toMatchObject({ offered: 1, reviewed: [] });
   });
 });

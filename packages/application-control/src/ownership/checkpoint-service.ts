@@ -327,8 +327,12 @@ export class CheckpointService {
             : "partial";
 
     // EVIDENCE coverage: what the RUNTIME saw the verifier read, against what the checkpoint offered.
+    // SUCCESSFULLY read, per the runtime's own outcome — not merely addressed (arch-review 13).
     const reviewed = evidence.filter((ref) =>
       (verdict.reviewedResources ?? []).some((r) => r.type === ref.type && r.id === ref.id),
+    );
+    const failedReads = evidence.filter((ref) =>
+      (verdict.failedResources ?? []).some((r) => r.type === ref.type && r.id === ref.id),
     );
     const granted = new Set<string>(this.deps.verifierTools ?? DEFAULT_VERIFIER_TOOLS);
     const readerFor = (ref: CheckpointRef): string | undefined => EVIDENCE_READER_BY_TYPE[ref.type];
@@ -351,7 +355,13 @@ export class CheckpointService {
           ]
         : []),
       ...(unreviewed.length > 0
-        ? [`the verifier never read ${unreviewed.map((r) => `${r.type}:${r.id}`).join(", ")}`]
+        ? [
+            `the verifier never successfully read ${unreviewed.map((r) => `${r.type}:${r.id}`).join(", ")}${
+              failedReads.length > 0
+                ? ` (reads FAILED for ${failedReads.map((r) => `${r.type}:${r.id}`).join(", ")})`
+                : ""
+            }`,
+          ]
         : []),
       ...(unreachable.length > 0
         ? [`no wired tool can address ${unreachable.map((r) => `${r.type}:${r.id}`).join(", ")}`]
@@ -436,7 +446,12 @@ const EVIDENCE_READER_BY_TYPE: Partial<Record<CheckpointRef["type"], string>> = 
   scorecard: "get_scorecard",
   file: "get_file",
   issue: "get_issue",
-  trace: "get_run_trajectory",
+  // trace: intentionally ABSENT (arch-review 13). A `trace` ref is an EXTERNAL platform's trace — that is why
+  // it has no existence resolver either — so naming `get_run_trajectory` as its reader was wrong twice: the
+  // trajectory belongs to a RUN (the extractor addresses `{type:"run"}`), so an envelope granting
+  // `trace:r-42` would have had the object gate refuse the very call the reachability table said was
+  // possible. Static reachability and runtime addressing must speak one vocabulary, and a `trace` ref is
+  // honestly unreachable here.
   // commit: intentionally absent — no first-party tool reads a tenant's git remote.
 };
 

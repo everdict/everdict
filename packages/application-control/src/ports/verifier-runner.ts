@@ -12,14 +12,23 @@ export interface VerifierVerdict {
   // check that had no way to notice. The runner must say which run and which session its verdict came from,
   // or `assertIndependentVerification` is being asked a question it cannot answer.
   actor: ActorRef;
-  // WHAT THE RUNTIME OBSERVED THE VERIFIER READING — collected by the kernel from actual tool calls, never
-  // assembled from the model's own account of itself (arch-review 12). The resource scope proves a verifier
-  // could not look OUTSIDE the evidence; this is the other half, that it looked INSIDE. A verdict from an
-  // agent that read nothing is a verdict about the question, not about the artifact.
+  // WHAT THE RUNTIME OBSERVED THE VERIFIER SUCCESSFULLY READING — collected by the kernel from actual tool
+  // calls and their OUTCOMES, never assembled from the model's own account of itself (arch-review 12/13).
+  // The resource scope proves a verifier could not look OUTSIDE the evidence; this is the other half, that it
+  // looked INSIDE. A verdict from an agent that read nothing is a verdict about the question, not the
+  // artifact.
+  //
+  // SUCCESSFULLY, not merely addressed: the first version was collected before the tool ran, so a verifier
+  // that addressed all three of its refs and got a 404 on every one still reported full coverage — an
+  // affirmative built on three failures. Attempted and consumed are different facts.
   //
   // Absent = the runner does not report it. The decision then records no evidence coverage and cannot be
   // affirmative — an unmeasured guarantee is not a satisfied one.
   reviewedResources?: Array<{ type: string; id: string }>;
+  // Refs the verifier reached for and could NOT read (a 404, a transport error, a timeout). Recorded so the
+  // decision can say WHY coverage is short rather than leaving an unexplained gap; a failed read is evidence
+  // about the platform, not about the artifact under review.
+  failedResources?: Array<{ type: string; id: string }>;
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed

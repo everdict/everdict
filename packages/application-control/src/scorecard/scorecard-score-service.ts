@@ -724,6 +724,7 @@ export class ScorecardScoreService {
       report({
         scorecardId,
         passId,
+        completed: true,
         expectedJudged: produced.size,
         staged: staged.length,
         missingFromStage,
@@ -731,8 +732,22 @@ export class ScorecardScoreService {
         mismatched,
         orphaned,
       });
-    } catch {
-      // A parity report that cannot run tells us nothing; it must not turn a settled pass into a failed one.
+    } catch (err) {
+      // A parity report that cannot run tells us nothing — and SAYING that is the point (arch-review 13 P1).
+      // Reporting nothing made "every pass agreed" and "no pass was ever checked" the same picture, and the
+      // contract step reads that picture. It still must not turn a settled pass into a failed one.
+      report({
+        scorecardId,
+        passId,
+        completed: false,
+        failure: err instanceof Error ? err.message : String(err),
+        expectedJudged: 0,
+        staged: 0,
+        missingFromStage: [],
+        matched: 0,
+        mismatched: [],
+        orphaned: [],
+      });
     }
   }
 

@@ -248,6 +248,15 @@ export function buildScorecard(deps: {
       const bump = (result: string, n: number) => {
         if (n > 0) metrics.counter("everdict_scoring_stage_parity_total", HELP, { result }, n);
       };
+      // Attempt/outcome coverage first (arch-review 13 P1): a `mismatched = 0` dashboard means nothing
+      // unless you also know how many comparisons actually ran.
+      bump(parity.completed ? "report_completed" : "report_failed", 1);
+      if (!parity.completed) {
+        console.warn(
+          `[scoring-stage] parity report FAILED for ${parity.scorecardId} pass ${parity.passId}: ${parity.failure ?? "unknown"} — this pass is unmeasured, not agreeing`,
+        );
+        return;
+      }
       bump("matched", parity.matched);
       bump("mismatched", parity.mismatched.length);
       bump("orphaned", parity.orphaned.length);

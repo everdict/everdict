@@ -156,11 +156,21 @@ export interface AgentLoopOptions {
   // (tokens/timeSec) halt the run with stopReason "budget_exhausted" so the host can checkpoint. The usd
   // budget is enforced by the host's meter (the loop reports tokens; only the host prices them).
   envelope?: TaskEnvelope;
-  // Called with every OBJECT a granted tool call actually reached, as the kernel saw it (arch-review 12).
-  // The resource scope proves a task could not look OUTSIDE its evidence; this is what proves it looked
-  // INSIDE — and it has to come from the runtime, because "I reviewed the run" is a claim the model can make
-  // without having done it. A verifier host collects these into the decision's evidence coverage.
-  onResourceAccess?: (target: { type: string; id: string }, tool: string) => void;
+  // Called with every OBJECT a granted tool call reached, AND HOW IT WENT (arch-review 13). The resource
+  // scope proves a task could not look OUTSIDE its evidence; this is what proves it looked INSIDE — and it
+  // has to come from the runtime, because "I reviewed the run" is a claim a model can make without having
+  // done it.
+  //
+  // `outcome` is the correction: the first version fired BEFORE the call, so it reported what was
+  // ADDRESSED, not what was READ. A verifier could address all three of its evidence refs, get a 404 on
+  // every one, and still have "full evidence coverage" — an affirmative built on three failures. Attempted
+  // and consumed are different facts, and a consumer that needs the second must not be handed the first
+  // under its name.
+  onResourceAccess?: (access: {
+    target: { type: string; id: string };
+    tool: string;
+    outcome: "success" | "error";
+  }) => void;
   // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
   // model (buildSummarizer); the host can pass one bound to a cheaper "small/fast" model so a mechanical digest doesn't
   // burn the main model. Return "" to decline (loop falls through to structural).
@@ -1038,6 +1048,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     ): Promise<ToolResult> => {
       const tool = registry.get(tc.name);
       const parsed = parseArgs(tc.arguments);
+      // The objects the object-gate admitted for this call, reported with their outcome once the tool ran.
+      let admittedTargets: Array<{ type: string; id: string }> = [];
       if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
       if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
       // The envelope's scope gate (O5): the DECISION lives in contracts (authorizeToolInvocation — forbidden
@@ -1096,12 +1108,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
                 isError: true,
               };
             }
-            // Admitted — so the runtime OBSERVED this object being reached. Reported here rather than after
-            // the call: what matters for coverage is that the task addressed the evidence under a granted
-            // scope; whether the read then errored is the tool result's business, and a host that needs
-            // "successfully read" can compare against the result it already sees.
-            opts.onResourceAccess?.(target, tool.name);
           }
+          // Admitted. The OUTCOME is reported after the call runs (arch-review 13) — reporting here would
+          // say "addressed", and a consumer that needs "read" would be handed the wrong fact under the
+          // right name. See `onResourceAccess`.
+          admittedTargets = targets.kind === "targets" ? targets.values : [];
         }
       }
       if (tool.isReadOnly !== true && inPlanMode) {
@@ -1132,7 +1143,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             isError: true,
           };
       }
-      return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, stepSignal);
+      const result = await invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, stepSignal);
+      // …and NOW the runtime knows how it went. A tool that answered with an error reached its object and
+      // came back with nothing usable, which is a different fact from having consumed it — the consumer
+      // decides what each is worth, and it can only do that if both are reported.
+      if (admittedTargets.length > 0 && opts.onResourceAccess) {
+        for (const target of admittedTargets)
+          opts.onResourceAccess({ target, tool: tool.name, outcome: result.isError ? "error" : "success" });
+      }
+      return result;
     };
     // Dispatch the turn's tool calls with WRITE-SAFETY partitioning (Claude Code's isConcurrencySafe partition,
     // reinterpreted over isReadOnly): consecutive read-only calls run CONCURRENTLY (the model asks for independent
