@@ -1,7 +1,16 @@
-import type { HandoffCheckpoint, HandoffCheckpointRecord } from "@everdict/contracts";
+import type {
+  ActorRef,
+  HandoffCheckpoint,
+  HandoffCheckpointRecord,
+  TaskEnvelope,
+  VerificationDecision,
+} from "@everdict/contracts";
+import { HandoffCheckpointSchema } from "@everdict/contracts";
+import { authorizeResourceAccess } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
+import type { VerificationDecisionStore } from "../ports/verification-decision-store.js";
 import { type CheckpointRefResolvers, CheckpointService } from "./checkpoint-service.js";
 
 // A handoff is only worth resuming from if its evidence is real and its verdict is somebody else's — the two
@@ -225,5 +234,133 @@ describe("handoff checkpoints — a verifier does not check its own work (O3)", 
         checkpoint: body({ role: "verifier" }),
       }),
     ).rejects.toThrow(/must declare who verified/);
+  });
+});
+
+// arch-review 10 P1 — the spawn path. Three things this used to claim and do none of: it never compared the
+// verifier to the executor, it never persisted the verdict, and the "evidence only" envelope put resource
+// ids in the CAPABILITY list where they matched no tool. All three are checked here, at the seam.
+describe("verification — a spawned verdict is checked for independence and FILED", () => {
+  class FakeVerifications implements VerificationDecisionStore {
+    readonly records: VerificationDecision[] = [];
+    readonly events: OutboxEvent[] = [];
+    async create(record: VerificationDecision, events?: OutboxEvent[]): Promise<void> {
+      this.records.push(record);
+      if (events) this.events.push(...events);
+    }
+    async get(): Promise<undefined> {
+      return undefined;
+    }
+    async listForSubject(): Promise<VerificationDecision[]> {
+      return [...this.records];
+    }
+    async list(): Promise<VerificationDecision[]> {
+      return [...this.records];
+    }
+  }
+
+  const checkpoint: HandoffCheckpointRecord = {
+    ...HandoffCheckpointSchema.parse({
+      ...body(),
+      id: "cp-1",
+      createdAt: "2026-08-08T00:00:00.000Z",
+      createdBy: "agent:fixer:conv-1",
+    }),
+    tenant: "acme",
+  };
+
+  function build(opts: {
+    verdictActor: ActorRef;
+    executor?: ActorRef;
+    verifications?: VerificationDecisionStore;
+  }): { svc: CheckpointService; envelopes: TaskEnvelope[] } {
+    const envelopes: TaskEnvelope[] = [];
+    const store: HandoffCheckpointStore = {
+      async create() {},
+      async get() {
+        return checkpoint;
+      },
+      async list() {
+        return [];
+      },
+    };
+    const svc = new CheckpointService({
+      store,
+      resolvers: {},
+      ...(opts.executor ? { runActor: async () => opts.executor } : {}),
+      ...(opts.verifications ? { verifications: opts.verifications } : {}),
+      verifier: {
+        async verify(input) {
+          envelopes.push(input.envelope);
+          return { verdict: "verified", detail: "the run's trace supports the claim", actor: opts.verdictActor };
+        },
+      },
+      newId: () => "vd-1",
+      now: () => "2026-08-08T01:00:00.000Z",
+    });
+    return { svc, envelopes };
+  }
+
+  it("hands the verifier read TOOLS and pins its RESOURCES to the evidence", async () => {
+    const { svc, envelopes } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" } });
+    await svc.requestVerification("acme", "cp-1");
+    const envelope = envelopes[0];
+    expect(envelope?.scope.writes).toEqual([]);
+    // Capability half: real tool names, so the verifier can actually call something. The old shape wrote
+    // "run:run-42" here, which matched no tool — the envelope blocked every call it was meant to permit.
+    expect(envelope?.scope.reads).toContain("get_run");
+    // Resource half: exactly the evidence, and the guard that enforces it.
+    expect(envelope?.scope.resources).toEqual([{ type: "run", id: "run-42" }]);
+    expect(authorizeResourceAccess({ type: "run", id: "run-42" }, envelope as TaskEnvelope)).toEqual({
+      allowed: true,
+    });
+    expect(authorizeResourceAccess({ type: "run", id: "run-43" }, envelope as TaskEnvelope)).toMatchObject({
+      allowed: false,
+    });
+  });
+
+  it("REFUSES a verdict from the actor that did the work — the check that previously did not exist", async () => {
+    const executor: ActorRef = { id: "agent:fixer", runId: "run-42", sessionId: "conv-1" };
+    const { svc } = build({ verdictActor: executor, executor });
+    await expect(svc.requestVerification("acme", "cp-1")).rejects.toThrow(/cannot verify its own work/);
+  });
+
+  it("REFUSES a verdict produced inside the executing session, even from a different agent id", async () => {
+    // The failure a bare-string `actor` could never catch: same session, different id. Everdict's invariant
+    // is actor AND run AND session, and only an ActorRef can be asked the last two.
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", sessionId: "conv-1" },
+      executor: { id: "agent:fixer", runId: "run-42", sessionId: "conv-1" },
+    });
+    await expect(svc.requestVerification("acme", "cp-1")).rejects.toThrow(/executing session/);
+  });
+
+  it("FILES the verdict as a durable decision naming both actors and how independence was decided", async () => {
+    const verifications = new FakeVerifications();
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99", sessionId: "conv-2" },
+      executor: { id: "agent:fixer", runId: "run-42", sessionId: "conv-1" },
+      verifications,
+    });
+    const decision = await svc.requestVerification("acme", "cp-1", { requestedBy: "member:dana" });
+    expect(decision).toMatchObject({
+      subject: { type: "checkpoint", id: "cp-1" },
+      verdict: "verified",
+      independence: "enforced",
+      verifier: { id: "agent:auditor" },
+      executor: { id: "agent:fixer" },
+    });
+    expect(verifications.records).toHaveLength(1);
+    // …and the workspace hears it, with the independence result in the payload — a verdict that could not be
+    // checked must never read like one that was.
+    expect(verifications.events[0]?.kind).toBe("checkpoint.verified");
+  });
+
+  it("says ABSTAINED when the executor cannot be resolved — never silently 'independent'", async () => {
+    const verifications = new FakeVerifications();
+    const { svc } = build({ verdictActor: { id: "agent:auditor" }, verifications });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.independence).toBe("abstained");
+    expect(decision.executor).toBeUndefined();
   });
 });

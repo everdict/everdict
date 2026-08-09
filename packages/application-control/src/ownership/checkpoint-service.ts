@@ -9,6 +9,7 @@ import {
   type PlatformFact,
   type RoleProfile,
   type TaskEnvelope,
+  type VerificationDecision,
 } from "@everdict/contracts";
 import {
   assertCheckpointForEnvelope,
@@ -20,7 +21,8 @@ import {
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
-import type { VerifierRunner, VerifierVerdict } from "../ports/verifier-runner.js";
+import type { VerificationDecisionStore } from "../ports/verification-decision-store.js";
+import type { VerifierRunner } from "../ports/verifier-runner.js";
 
 // Handoff checkpoints (ownership protocol O6 — docs/architecture/ownership-protocol.md). A checkpoint is a
 // resumable state transfer: the successor decides its next action from evidence REFERENCES, not from the
@@ -52,6 +54,14 @@ export interface CheckpointServiceDeps {
   // Spawns an agent IN THE VERIFIER ROLE (the protocol's third enforcement site). Absent = verification stays
   // a human act, which is the honest state for a deployment that has not wired one — never a silent auto-pass.
   verifier?: VerifierRunner;
+  // Where a spawned verifier's verdict becomes a DURABLE, citable decision (arch-review 10 P1). Absent = the
+  // decision is returned but not filed — honest for a deployment with no ledger, and the reason the field is
+  // optional rather than the service pretending it persisted something.
+  verifications?: VerificationDecisionStore;
+  // The read TOOLS a verifier envelope grants (the capability half; the resource half is always the
+  // evidence). Tool names are a deployment's vocabulary, so this is injectable — absent falls back to the
+  // evidence-reader defaults below.
+  verifierTools?: readonly string[];
   newId?: () => string;
   now?: () => string;
 }
@@ -225,14 +235,16 @@ export class CheckpointService {
   // trajectory or reasoning. A verifier that reads how the work was done is reviewing the story; the artifact
   // is the thing under review.
   //
-  // The verdict comes back and is filed as a verifier checkpoint through the ordinary path, which means it
-  // meets `assertIndependentVerification` like any other: an agent that verified its own run is refused here
-  // exactly as a human doing the same would be. Nothing about being an agent relaxes the invariant.
+  // The verdict comes back, is CHECKED for independence, and is FILED as a durable VerificationDecision
+  // (arch-review 10 P1). The previous shape returned the runner's object straight to the caller: nothing
+  // compared the verifier to the executor, nothing was persisted, and the doc beside it claimed both. An
+  // agent verifying its own run was refused by exactly nothing. The invariant is not relaxed for agents —
+  // it was simply never applied, which is the more embarrassing of the two failures.
   async requestVerification(
     tenant: string,
     checkpointId: string,
-    input: { question?: string; budgets?: TaskEnvelope["budgets"] } = {},
-  ): Promise<VerifierVerdict> {
+    input: { question?: string; budgets?: TaskEnvelope["budgets"]; requestedBy?: string } = {},
+  ): Promise<VerificationDecision> {
     if (!this.deps.verifier)
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -248,27 +260,122 @@ export class CheckpointService {
         { checkpoint: checkpointId },
         "this checkpoint is already a verification — verifying a verdict is a second opinion, not the same act.",
       );
-    // The artifact under review: every ref the executor put forward as its evidence.
-    const evidence = [
+    // The artifact under review: every ref the executor put forward as its evidence, deduplicated by
+    // (type, id). These are RESOURCES, not capability names — the distinction the envelope now keeps.
+    const seen = new Set<string>();
+    const evidence: CheckpointRef[] = [];
+    for (const ref of [
       ...checkpoint.confirmedFacts.flatMap((f) => f.refs),
       ...checkpoint.actionsTaken.flatMap((a) => a.refs),
-    ].map((ref) => `${ref.type}:${ref.id}`);
+    ]) {
+      const key = `${ref.type}:${ref.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      evidence.push(ref);
+    }
+    if (evidence.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { checkpoint: checkpointId },
+        "this checkpoint cites no evidence — there is nothing for a verifier to look at, and a verdict about nothing is not a verdict.",
+      );
+    const envelopeId = `verify-${checkpointId}`;
     const envelope = verifierEnvelopeFor(VERIFIER_SPAWN_PROFILE, {
-      id: `verify-${checkpointId}`,
+      id: envelopeId,
       goal: `verify checkpoint ${checkpointId}`,
-      evidence: [...new Set(evidence)],
+      evidence: evidence.map((ref) => ({ type: ref.type, id: ref.id })),
+      // The READ TOOLS that reach those objects — the capability half, kept apart from the resource half
+      // (arch-review 10 P1). Restricted to evidence readers: no trajectory, no conversation, no workspace
+      // browsing. `authorizeResourceAccess` then pins each of these to the evidence above.
+      tools: this.deps.verifierTools ?? DEFAULT_VERIFIER_TOOLS,
       // An autonomous task with no hard budget has no decision boundary — the envelope schema says so and
       // this call site is not exempt from it.
       budgets: input.budgets ?? { tokens: 200_000 },
     });
-    return this.deps.verifier.verify({
+    const verdict = await this.deps.verifier.verify({
       tenant,
       envelope,
       question:
         input.question ??
         `Does this evidence support the checkpoint's confirmed facts? Answer from the evidence alone — you cannot see how the work was done, and that is deliberate.`,
     });
+
+    // INDEPENDENCE, applied to the pair that actually exists (arch-review 10 P1). The domain owns the
+    // comparison — actor AND run AND session — and this service only assembles the two assignments, exactly
+    // as the human-filed path does. A verdict from an agent that ran inside the executing session is refused
+    // here; that shape passed unnoticed while `actor` was a bare string.
+    const executor = await this.executorOf(tenant, evidence);
+    if (executor !== undefined) {
+      assertIndependentVerification(
+        { profile: EXECUTOR_ASSIGNMENT_PROFILE, actor: executor },
+        { profile: VERIFIER_ASSIGNMENT_PROFILE, actor: verdict.actor },
+      );
+    }
+
+    // …and the verdict becomes a RECORD, not a return value. A judgment nobody can look up afterwards
+    // cannot be cited, cannot be audited, and cannot be compared against the next one.
+    const decision: VerificationDecision = {
+      id: this.newId(),
+      tenant,
+      subject: { type: "checkpoint", id: checkpointId },
+      evidence,
+      ...(executor !== undefined ? { executor } : {}),
+      verifier: verdict.actor,
+      verdict: verdict.verdict,
+      detail: verdict.detail,
+      // Which of the two happened, said out loud: an abstention is not a passed check, and a reader weighing
+      // this verdict is entitled to know whether independence was proven or merely unopposed.
+      independence: executor !== undefined ? "enforced" : "abstained",
+      envelopeId,
+      createdAt: this.now(),
+      createdBy: input.requestedBy ?? "system",
+    };
+    if (this.deps.verifications) {
+      const stamped = stampFacts(tenant, [verificationFact(decision)], { newId: this.newId, now: this.now });
+      await this.deps.verifications.create(
+        decision,
+        stamped.map((s) => s.record),
+      );
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    }
+    return decision;
   }
+
+  // The ACTOR whose work is under review — resolved from the evidence's run references, the same linkage the
+  // human-filed path uses. Absent (no run ref, no resolver, an unresolvable run) = the caller abstains
+  // rather than inventing an identity to compare against.
+  private async executorOf(tenant: string, evidence: readonly CheckpointRef[]): Promise<ActorRef | undefined> {
+    const { runActor } = this.deps;
+    if (!runActor) return undefined;
+    for (const ref of evidence) {
+      if (ref.type !== "run") continue;
+      const actor = await runActor(tenant, ref.id);
+      if (actor) return actor;
+    }
+    return undefined;
+  }
+}
+
+// The read tools a spawned verifier may call. Evidence readers only — nothing that reaches the executor's
+// trajectory, reasoning or conversation, which is the whole point of the separation. Overridable per
+// deployment (`verifierTools`) because tool names are a deployment's vocabulary, not a domain constant.
+const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue", "get_trace"] as const;
+
+function verificationFact(decision: VerificationDecision): PlatformFact {
+  return {
+    kind: "checkpoint.verified",
+    subject: { type: "checkpoint", id: decision.subject.id },
+    actor: decision.verifier.id,
+    payload: {
+      decisionId: decision.id,
+      verdict: decision.verdict,
+      independence: decision.independence,
+      evidence: decision.evidence.length,
+    },
+    // Loop guard #1: an agent-produced verdict stamps its own cause, so a verifier agent never wakes on it.
+    ...(decision.verifier.id.startsWith("agent:") ? { causedBy: decision.verifier.id } : {}),
+    message: `Verification ${decision.verdict} — checkpoint ${decision.subject.id}`,
+  };
 }
 
 function creationFact(record: HandoffCheckpointRecord): PlatformFact {

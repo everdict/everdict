@@ -25,6 +25,7 @@ import type {
   ReleaseDetailResponse,
 } from "@everdict/contracts/wire";
 import {
+  type BaselineResolution,
   Product,
   type ProductEditInput,
   type ProductTransition,
@@ -36,6 +37,7 @@ import {
   currentScoringPin,
   decisionPassRate,
   productPolicyDigest,
+  releasePolicyDocument,
   releaseReadiness,
   watchedSeries,
 } from "@everdict/domain";
@@ -111,6 +113,11 @@ export interface ProductServiceDeps {
   // layer composes decisions; it never invents truth semantics (the pass-rate arithmetic this replaces
   // bypassed experiment identity, policy identity, scoring revisions, coverage, criticals, trials and FDR).
   // Absent (unit paths) = a comparable pair reads not_comparable — refusing, never guessing.
+  //
+  // It returns the pins it READ (arch-review 10 P0): the gate captures both records at its one read, and a
+  // release that re-derived them from a separate list read stamped its decision with a revision that may not
+  // have produced the verdict beside it. The seam hands the decision over whole; this service composes, it
+  // does not reassemble.
   seriesGate?: (
     tenant: string,
     baselineId: string,
@@ -118,6 +125,8 @@ export interface ProductServiceDeps {
   ) => Promise<{
     decision: "pass" | "block" | "blocked_missing" | "not_comparable";
     reasons: Array<{ kind: string; detail: string }>;
+    baselineScoring?: GateScoringPin;
+    candidateScoring?: GateScoringPin;
   }>;
   capabilities?: ProductCapabilityCheck;
   events?: PlatformEventEmitter;
@@ -348,8 +357,10 @@ export class ProductService {
     actor: ProductActor,
   ): Promise<ReleaseRecord> {
     const record = await this.getRelease(tenant, id);
-    const readiness = await this.readiness(tenant, record);
+    // ONE product read (arch-review 10 P0) — the policy the decision is EVALUATED under and the policy it
+    // RECORDS are now the same document by construction, not by two reads happening to agree.
     const product = await this.get(tenant, record.productId);
+    const readiness = await this.readinessUnder(tenant, record, product);
     const transition = Release.from(record).setStatus(
       {
         to: input.status,
@@ -382,13 +393,23 @@ export class ProductService {
               }
             : {}),
         })),
-        productPolicyDigest: productPolicyDigest(product),
+        // The policy DOCUMENT, not just its digest (arch-review 10 P0). A digest of a mutable record can
+        // detect that the policy changed and can never say what it was — so a post-mortem on a shipped
+        // release could not answer "which series gated this, and had a bootstrap been approved?" once the
+        // product had been edited. Scoped to the watched series: the policy this decision stood on.
+        productPolicy: releasePolicyDocument(product, record),
+        productPolicyDigest: productPolicyDigest(product, record),
         ...(input.force !== undefined ? { force: input.force } : {}),
       },
       actor.subject,
       this.now(),
     );
-    return this.applyReleaseTransition(record, transition);
+    // …and the write is fenced on the PRODUCT's version too (arch-review 10 P0). The release's own version
+    // cannot protect a policy that lives in a different aggregate: an admin flipping a series to required
+    // while this decision was being made left the release row untouched, so the guard passed and a decision
+    // evaluated under the old policy committed as if it had seen the new one. The guard is evaluated in the
+    // write statement, the same shape as the scoring fence.
+    return this.applyReleaseTransition(record, transition, product);
   }
 
   async removeRelease(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
@@ -407,7 +428,19 @@ export class ProductService {
   // since we last shipped" is a question only the gate machinery has the right to answer (arch-review 7 P0):
   // a bare pass-rate comparison bypassed identity/policy/coverage and read absence of evidence as green.
   async readiness(tenant: string, release: ReleaseRecord): Promise<ReleaseReadiness> {
-    const product = await this.get(tenant, release.productId);
+    return this.readinessUnder(tenant, release, await this.get(tenant, release.productId));
+  }
+
+  // …evaluated under a product the CALLER read (arch-review 10 P0). `setReleaseStatus` used to call
+  // `readiness()` and then read the product AGAIN to record the policy, so the decision could be evaluated
+  // under policy P1 and recorded as standing on P2 — a series flipped to `requiredForRelease: true` in
+  // between produced a history entry reading "required, not_evaluated" on a release that shipped unforced.
+  // One read, threaded; the version guard on the write is what makes it hold under concurrency.
+  private async readinessUnder(
+    tenant: string,
+    release: ReleaseRecord,
+    product: ProductRecord,
+  ): Promise<ReleaseReadiness> {
     const openIssues =
       this.deps.issues === undefined
         ? 0
@@ -420,7 +453,11 @@ export class ProductService {
     const previous = await this.previousShip(tenant, release);
     const anchor = previous?.releasedAt;
     const latestBySeries = new Map<string, SeriesScorecardPoint>();
-    const baselineBySeries = new Map<string, SeriesScorecardPoint>();
+    // WHY each series has (or lacks) a baseline, not merely whether (arch-review 10 P0). Absence used to be
+    // one value with three meanings, and the domain read all three as "first ship" — so an approved
+    // bootstrap silently covered a DELETED baseline. The service resolves which case holds; the domain
+    // decides what each one means.
+    const baselineBySeries = new Map<string, BaselineResolution>();
     const gateBySeries = new Map<string, SeriesGateReading>();
     if (this.deps.scorecards !== undefined) {
       for (const series of watchedSeries(product, release)) {
@@ -442,67 +479,68 @@ export class ProductService {
         const pinned = this.baselineFromDecision(previous, series.key);
         const fromDecision = pinned ? rows.find((row) => row.id === pinned.scorecardId) : undefined;
         // A pinned baseline that CANNOT BE FOUND is missing historical evidence, not licence to compare
-        // against a different scorecard. Falling back to the time search would answer "what did we ship
-        // against last time" with a record no release ever saw — a substitution that looks like an answer.
-        // The time search stands in only for ships that recorded no pin at all.
+        // against a different scorecard — and NOT a first ship either, which is the distinction the
+        // resolution type exists to keep (a `not_comparable` gate reading could not say it, because the
+        // domain never looked at the gate when the baseline was absent). The time search stands in only for
+        // ships that recorded no pin at all.
         if (pinned !== undefined && fromDecision === undefined) {
-          gateBySeries.set(series.key, {
-            verdict: "not_comparable",
-            reasons: [
-              `the scorecard this product last shipped against (${pinned.scorecardId}) is no longer available — refusing to substitute a different one`,
-            ],
+          baselineBySeries.set(series.key, {
+            kind: "missing_historical_evidence",
+            ...(pinned.scoring !== undefined ? { pin: pinned.scoring } : { pin: undefined }),
+            scorecardId: pinned.scorecardId,
           });
+          continue;
         }
-        if (pinned !== undefined || anchor !== undefined) {
-          const baseline =
-            fromDecision ??
-            (pinned !== undefined
-              ? undefined
-              : anchor !== undefined
-                ? rows.find((row) => row.createdAt <= anchor)
-                : undefined);
-          if (baseline !== undefined) {
-            const point = seriesPoint(baseline);
-            // The pin the SHIP recorded wins over the record's current pin: if the scorecard was re-scored
-            // since, "what we compared against last time" is the older judgment, and saying so is the point.
-            baselineBySeries.set(series.key, pinned?.scoring ? { ...point, scoring: pinned.scoring } : point);
-            // …and if it WAS re-scored, the comparison below cannot be the one the last ship stood on. The
-            // gate reads a scorecard by id and gets whatever judgment lives there NOW; the pinned revision's
-            // plane is not addressable until scoring planes become immutable revisions
-            // (docs/architecture/scoring-plane-revisions.md). Comparing today's judgment while the decision
-            // record claims a pinned one is the lie this pin existed to prevent, so it refuses instead.
-            const livePin = point.scoring;
-            if (
-              pinned?.scoring !== undefined &&
-              livePin !== undefined &&
-              livePin.scorePlaneDigest !== pinned.scoring.scorePlaneDigest
-            ) {
-              gateBySeries.set(series.key, {
-                verdict: "not_comparable",
-                reasons: [
-                  `the baseline scorecard has been re-scored since the last ship (shipped against revision ${pinned.scoring.revision}, now revision ${livePin.revision}) — the judgment this product shipped against is no longer the one a comparison would read`,
-                ],
-              });
-              continue;
-            }
-          }
-          // The gate reading — only where a comparable pair exists; the domain owns every other state
-          // (not_evaluated / no_baseline / seam-absent not_comparable).
-          if (latest !== undefined && baseline !== undefined && this.deps.seriesGate !== undefined) {
-            try {
-              const decision = await this.deps.seriesGate(tenant, baseline.id, latest.id);
-              gateBySeries.set(series.key, {
-                verdict: decision.decision,
-                ...(decision.reasons.length > 0 ? { reasons: decision.reasons.map((r) => r.detail) } : {}),
-              });
-            } catch (err) {
-              // A comparison that cannot run (mid-rescore refusal, a deleted record) REFUSES — the honest
-              // reason rides; it never silently reads as pass.
-              gateBySeries.set(series.key, {
-                verdict: "not_comparable",
-                reasons: [err instanceof Error ? err.message : String(err)],
-              });
-            }
+        const baseline =
+          fromDecision ??
+          (pinned === undefined && anchor !== undefined ? rows.find((r) => r.createdAt <= anchor) : undefined);
+        if (baseline === undefined) continue; // no prior ship at all — the domain's first-ship default
+        const point = seriesPoint(baseline);
+        // …and if the pinned scorecard WAS re-scored, the comparison below cannot be the one the last ship
+        // stood on. The gate reads a scorecard by id and gets whatever judgment lives there NOW; the pinned
+        // revision's plane is not addressable until scoring planes become immutable revisions
+        // (docs/architecture/scoring-plane-revisions.md). Comparing today's judgment while the decision
+        // record claims a pinned one is the lie this pin existed to prevent, so it refuses instead.
+        const livePin = point.scoring;
+        if (
+          pinned?.scoring !== undefined &&
+          livePin !== undefined &&
+          livePin.scorePlaneDigest !== pinned.scoring.scorePlaneDigest
+        ) {
+          baselineBySeries.set(series.key, {
+            kind: "revision_unavailable",
+            pin: pinned.scoring,
+            current: livePin,
+            scorecardId: baseline.id,
+          });
+          continue;
+        }
+        // The pin the SHIP recorded wins over the record's current pin: if the scorecard was re-scored since,
+        // "what we compared against last time" is the older judgment, and saying so is the point.
+        baselineBySeries.set(series.key, {
+          kind: "resolved",
+          point: pinned?.scoring ? { ...point, scoring: pinned.scoring } : point,
+        });
+        // The gate reading — only where a comparable pair exists; the domain owns every other state
+        // (not_evaluated / no_baseline / seam-absent not_comparable).
+        if (latest !== undefined && this.deps.seriesGate !== undefined) {
+          try {
+            const decision = await this.deps.seriesGate(tenant, baseline.id, latest.id);
+            gateBySeries.set(series.key, {
+              verdict: decision.decision,
+              ...(decision.reasons.length > 0 ? { reasons: decision.reasons.map((r) => r.detail) } : {}),
+              // The pins the GATE read — see SeriesGateReading. Recorded over the list's, so the decision
+              // names the judgment it decided on.
+              ...(decision.baselineScoring !== undefined ? { baselineScoring: decision.baselineScoring } : {}),
+              ...(decision.candidateScoring !== undefined ? { candidateScoring: decision.candidateScoring } : {}),
+            });
+          } catch (err) {
+            // A comparison that cannot run (mid-rescore refusal, a deleted record) REFUSES — the honest
+            // reason rides; it never silently reads as pass.
+            gateBySeries.set(series.key, {
+              verdict: "not_comparable",
+              reasons: [err instanceof Error ? err.message : String(err)],
+            });
           }
         }
       }
@@ -587,7 +625,13 @@ export class ProductService {
     return updated;
   }
 
-  private async applyReleaseTransition(current: ReleaseRecord, transition: ReleaseTransition): Promise<ReleaseRecord> {
+  private async applyReleaseTransition(
+    current: ReleaseRecord,
+    transition: ReleaseTransition,
+    // The product this decision was evaluated under, when there was one — its version becomes a cross-row
+    // condition on the write (arch-review 10 P0). Absent for plain edits, which stand on no policy.
+    product?: ProductRecord,
+  ): Promise<ReleaseRecord> {
     const stamped = stampFacts(current.tenant, transition.facts, { newId: this.newId, now: this.now });
     // The domain judged this transition legal FROM the status in `current`, so the write commits only from
     // that status (arch-review 8 P1). Without it two replicas could both read `planned`, legally decide
@@ -603,11 +647,19 @@ export class ProductService {
       // to [quality, safety] — status was still `planned`, the guard passed, and the shipped record watched a
       // series its readiness never looked at. The version moves on ANY write, so an edit invalidates the
       // decision that did not see it.
-      { expectStatus: current.status, expectVersion: current.version ?? 0 },
+      {
+        expectStatus: current.status,
+        expectVersion: current.version ?? 0,
+        // …and the PRODUCT's policy must still be the one this decision read. A different aggregate, so the
+        // release's own version cannot speak for it.
+        ...(product !== undefined ? { expectProduct: { id: product.id, version: product.version ?? 0 } } : {}),
+      },
     );
     if (updated === undefined) {
       const live = await this.deps.releases.get(current.tenant, current.id);
-      if (live !== undefined)
+      if (live !== undefined) {
+        const liveProduct = product !== undefined ? await this.deps.store.get(current.tenant, product.id) : undefined;
+        const policyMoved = product !== undefined && (liveProduct?.version ?? 0) !== (product.version ?? 0);
         throw new ConflictError(
           "CONFLICT",
           {
@@ -616,11 +668,17 @@ export class ProductService {
             actual: live.status,
             expectedVersion: current.version ?? 0,
             actualVersion: live.version ?? 0,
+            ...(policyMoved
+              ? { productVersion: { expected: product?.version ?? 0, actual: liveProduct?.version ?? 0 } }
+              : {}),
           },
-          live.status !== current.status
-            ? `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`
-            : "this release was edited while the decision was being made — its watched series may differ from the ones this readiness evaluated; re-read it and decide again.",
+          policyMoved
+            ? "this product's release policy was edited while the decision was being made — which series gate (and whether a bootstrap is approved) may differ from the ones this readiness evaluated; re-read it and decide again."
+            : live.status !== current.status
+              ? `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`
+              : "this release was edited while the decision was being made — its watched series may differ from the ones this readiness evaluated; re-read it and decide again.",
         );
+      }
     }
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: current.id }, `release '${current.id}' not found.`);
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);

@@ -9,7 +9,12 @@ import type { ScorecardService } from "@everdict/application-control";
 import type { AgentRegistry } from "@everdict/application-control";
 import { SubscriptionService } from "@everdict/application-control";
 import { CheckpointService } from "@everdict/application-control";
-import type { HandoffCheckpointStore, IssueStore, PlatformEventEmitter } from "@everdict/application-control";
+import type {
+  HandoffCheckpointStore,
+  IssueStore,
+  PlatformEventEmitter,
+  VerificationDecisionStore,
+} from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
 import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
@@ -242,6 +247,11 @@ export function buildSubscription(deps: {
 // actor — or from inside the same run or session — is refused by the one invariant owner.
 export function buildCheckpoint(deps: {
   handoffCheckpointStore: HandoffCheckpointStore;
+  // Where a spawned verifier's verdict becomes a durable, citable VerificationDecision (arch-review 10 P1) —
+  // separate aggregate from the checkpoint, because a handoff transfers state and a verification is a
+  // judgment. Always wired; the SERVICE keeps it optional so a deployment without a ledger says so rather
+  // than pretending it filed something.
+  verificationDecisionStore?: VerificationDecisionStore;
   runStore: RunStore;
   scorecardStore: ScorecardStore;
   issueStore?: IssueStore;
@@ -282,6 +292,7 @@ export function buildCheckpoint(deps: {
         ...(record.group?.id !== undefined ? { sessionId: record.group.id } : {}),
       };
     },
+    ...(deps.verificationDecisionStore ? { verifications: deps.verificationDecisionStore } : {}),
     ...(deps.events ? { events: deps.events } : {}),
   });
 }

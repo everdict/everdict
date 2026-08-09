@@ -100,6 +100,13 @@ export const ProductAutoEvalSchema = z.object({
 export type ProductAutoEval = z.infer<typeof ProductAutoEvalSchema>;
 
 export const ProductRecordSchema = z.object({
+  // Aggregate version (mig 0150) — bumped on every write, and the token a RELEASE decision commits against.
+  // A release gate is evaluated under this product's series policy (which series gate, which pre-approve a
+  // bootstrap) but lives in a different aggregate, so the release's own version could not protect it: an
+  // admin flipping a series to required mid-decision left the release row untouched, the guard passed, and
+  // a decision made under the old policy was recorded as standing on the new one. Absent on pre-migration
+  // rows (read as 0).
+  version: z.number().int().nonnegative().optional(),
   id: z.string(),
   tenant: z.string(),
   name: z.string().min(1),

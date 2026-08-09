@@ -53,7 +53,12 @@ export interface ReleaseStatusChangeInput {
     baseline?: { scorecardId: string; scoring?: { revision: number; scorePlaneDigest: string } };
     candidate?: { scorecardId: string; scoring?: { revision: number; scorePlaneDigest: string } };
   }>;
-  // The product policy this decision stood on (series membership + required/bootstrap flags).
+  // The product policy this decision stood on (series membership + required/bootstrap flags) — as a
+  // DOCUMENT, because a digest of a mutable record is one-way: it detects that the policy changed and can
+  // never say what it was. "Which series gated this ship, and had a bootstrap been pre-approved?" is the
+  // first question a regression post-mortem asks, and the digest alone could not answer it once the product
+  // had been edited. Scoped to the WATCHED series — the policy this decision actually evaluated.
+  productPolicy?: ReadonlyArray<{ key: string; required: boolean; allowNoBaseline: boolean }>;
   productPolicyDigest?: string;
   force?: boolean;
 }
@@ -215,7 +220,11 @@ export class Release {
           }
         : {}),
       // WHICH product policy this decision stood on — series membership and their required/bootstrap flags
-      // are editable, so a decision that does not name its policy cannot be re-derived.
+      // are editable, so a decision that does not name its policy cannot be re-derived. The DOCUMENT is what
+      // makes it re-derivable; the digest is the cheap "did it change" check beside it.
+      ...(to === "released" && input.productPolicy?.length
+        ? { productPolicy: input.productPolicy.map((s) => ({ ...s })) }
+        : {}),
       ...(to === "released" && input.productPolicyDigest !== undefined
         ? { productPolicyDigest: input.productPolicyDigest }
         : {}),

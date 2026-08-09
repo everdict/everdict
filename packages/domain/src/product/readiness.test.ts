@@ -1,7 +1,13 @@
 import type { ProductRecord, ProductSeries, ReleaseRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { Product } from "./product.js";
-import { type SeriesGateReading, type SeriesScorecardPoint, releaseReadiness, watchedSeries } from "./readiness.js";
+import {
+  type BaselineResolution,
+  type SeriesGateReading,
+  type SeriesScorecardPoint,
+  releaseReadiness,
+  watchedSeries,
+} from "./readiness.js";
 import { Release } from "./release.js";
 
 const NOW = "2026-08-08T00:00:00.000Z";
@@ -43,6 +49,12 @@ const gate = (verdict: SeriesGateReading["verdict"], reasons?: string[]): Series
   ...(reasons ? { reasons } : {}),
 });
 
+// The baseline the previous ship stood on, found and readable — the ordinary case.
+const resolved = (scorecardId: string, passRate?: number): BaselineResolution => ({
+  kind: "resolved",
+  point: point(scorecardId, passRate),
+});
+
 describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a second truth", () => {
   it("watches every product series by default, and only the selection when one was made", () => {
     expect(watchedSeries(product(), release()).map((series) => series.key)).toEqual(["quality", "latency"]);
@@ -58,8 +70,8 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
         ["latency", point("sc-4", 0.9)],
       ]),
       new Map([
-        ["quality", point("sc-1", 0.8)],
-        ["latency", point("sc-3", 0.9)],
+        ["quality", resolved("sc-1", 0.8)],
+        ["latency", resolved("sc-3", 0.9)],
       ]),
       new Map([
         ["quality", gate("block", ["1 regression over the shared cases"])],
@@ -84,7 +96,7 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
       release(),
       product(),
       new Map([["latency", point("sc-2", 0.5)]]),
-      new Map([["latency", point("sc-1", 0.5)]]),
+      new Map([["latency", resolved("sc-1", 0.5)]]),
       new Map([["latency", gate("pass")]]),
       0,
     );
@@ -101,7 +113,7 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
       release(),
       product([{ requiredForRelease: false }]), // quality declared non-gating — a recorded product choice
       new Map([["latency", point("sc-2", 0.5)]]),
-      new Map([["latency", point("sc-1", 0.5)]]),
+      new Map([["latency", resolved("sc-1", 0.5)]]),
       new Map([["latency", gate("pass")]]),
       0,
     );
@@ -156,12 +168,63 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.ready).toBe(false);
   });
 
+  // arch-review 10 P0: `baseline: undefined` used to mean three different things at once, and the weakest
+  // reading won. `allowNoBaseline` is an approval to ship the FIRST time; it must not silently license
+  // shipping after the evidence of the last ship disappeared. Both tests below PASS on the collapsed model.
+  it("LOST historical evidence refuses even under an approved bootstrap — absence of history is not a first ship", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]), // the bootstrap IS approved — and it does not reach this state
+      new Map([["quality", point("sc-2", 0.9)]]),
+      new Map([["quality", { kind: "missing_historical_evidence", pin: undefined, scorecardId: "sc-1" }]]),
+      new Map(),
+      0,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "not_comparable", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("sc-1");
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("a baseline RE-SCORED since the last ship refuses — the pinned judgment is no longer the readable one", () => {
+    const pin = { revision: 1, scorePlaneDigest: "sha256:then" };
+    const current = { revision: 2, scorePlaneDigest: "sha256:now" };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", point("sc-2", 0.9)]]),
+      new Map([["quality", { kind: "revision_unavailable", pin, current, scorecardId: "sc-1" }]]),
+      new Map(),
+      0,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "not_comparable", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("revision 1");
+    expect(readiness.ready).toBe(false);
+  });
+
+  // arch-review 10 P0: the decision records the pins the GATE read, not the ones the trend list happened to
+  // show first. A re-score between those two reads used to stamp a decision with a revision that did not
+  // produce the verdict recorded next to it.
+  it("records the GATE's own scoring pins over the trend list's, on both sides", () => {
+    const listPin = { revision: 1, scorePlaneDigest: "sha256:list" };
+    const gatePin = { revision: 2, scorePlaneDigest: "sha256:gate" };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product(),
+      new Map([["quality", { ...point("sc-2", 0.9), scoring: listPin }]]),
+      new Map([["quality", { kind: "resolved", point: { ...point("sc-1", 0.8), scoring: listPin } }]]),
+      new Map([["quality", { verdict: "pass", baselineScoring: gatePin, candidateScoring: gatePin }]]),
+      0,
+    );
+    expect(readiness.series[0]?.latest?.scoring).toEqual(gatePin);
+    expect(readiness.series[0]?.baseline?.scoring).toEqual(gatePin);
+  });
+
   it("a comparable pair with NO gate reading refuses — the seam being unconfigured is never a pass", () => {
     const readiness = releaseReadiness(
       release(["quality"]),
       product(),
       new Map([["quality", point("sc-2", 0.9)]]),
-      new Map([["quality", point("sc-1", 0.8)]]),
+      new Map([["quality", resolved("sc-1", 0.8)]]),
       new Map(), // no gate reading handed in
       0,
     );
@@ -178,8 +241,8 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
         ["latency", point("sc-4", 0.9)],
       ]),
       new Map([
-        ["quality", point("sc-1", 0.8)],
-        ["latency", point("sc-3", 0.9)],
+        ["quality", resolved("sc-1", 0.8)],
+        ["latency", resolved("sc-3", 0.9)],
       ]),
       new Map([
         ["quality", gate("blocked_missing", ["the candidate skipped 2 of the baseline's cases"])],

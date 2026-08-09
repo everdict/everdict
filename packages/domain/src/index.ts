@@ -249,7 +249,10 @@ export {
   type ReleaseTransition,
 } from "./product/release.js";
 export {
+  type BaselineResolution,
   productPolicyDigest,
+  releasePolicyDocument,
+  type ReleasePolicySeries,
   releaseReadiness,
   type SeriesGateReading,
   type SeriesScorecardPoint,
@@ -265,6 +268,7 @@ export {
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
+  authorizeResourceAccess,
   authorizeToolInvocation,
   type BudgetDecision,
   budgetExhausted,

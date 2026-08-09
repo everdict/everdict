@@ -86,11 +86,34 @@ seam wired at composition) over (latest succeeded batch, **baseline anchored at 
 release**), yielding the gate's own vocabulary `pass|block|blocked_missing|not_comparable` plus the product
 layer's two orchestration states: `not_evaluated` (no run — which **BLOCKS a required series: not evaluated
 is never green**; the pre-verdict arithmetic read absence of evidence as not-regressed, a second and weaker
-release constitution under the scorecard gate) and `no_baseline` (first ship — evidence exists, nothing to
-regress from; passes). Opting a series out of the gate is the EXPLICIT `ProductSeries.requiredForRelease:
-false`, never an inference from missing evidence. `ready = openIssues === 0 && no required series blocks`.
-The SHIP records the per-series verdict snapshot into the release's history entry (the decision's evidence —
-the live readiness keeps moving after); a forced ship past any blocking verdict stays a recorded override.
+release constitution under the scorecard gate), `bootstrap_required` (a first ship nobody approved) and
+`no_baseline` (an APPROVED first ship — evidence exists, nothing to regress from; passes). Opting a series
+out of the gate is the EXPLICIT `ProductSeries.requiredForRelease: false`, never an inference from missing
+evidence. `ready = openIssues === 0 && no required series blocks`.
+
+**"No baseline" is four different facts, and the weakest reading used to win** (arch-review 10 P0).
+`BaselineResolution` names them: `none_first_ship` · `resolved` · `missing_historical_evidence` (a previous
+ship pinned a scorecard that has since been DELETED) · `revision_unavailable` (the pinned scorecard was
+RE-SCORED, so the judgment that ship stood on is no longer the one a comparison would read). Collapsed into a
+bare `undefined`, all four read as "first ship" — so `allowNoBaseline`, a governance approval to ship the
+*first* time, silently licensed shipping after the evidence of the last ship disappeared. Losing the record
+of what we shipped against made the gate weaker, which is exactly backwards. `allowNoBaseline` now applies to
+`none_first_ship` alone; the two loss states are unconditionally `not_comparable` and no flag opens them.
+
+The SHIP records the per-series DECISION into the release's history entry — both sides with their scoring
+pins, whether the series gated, and why. Those pins are the ones the **gate itself** read (`diffSnapshot`
+captures both records at its one read), not a separate trend-list read a re-score may have moved between the
+two. It also records the product **policy document** it stood on, not just a digest: a digest of a mutable
+record detects that the policy changed and can never say what it was, and "which series gated this ship, and
+had a bootstrap been approved?" is the first question a post-mortem asks. A forced ship past any blocking
+verdict stays a recorded override.
+
+**The ship commits against two versions.** `expectStatus` + `expectVersion` guard the release row (mig 0148);
+`expectProduct` guards the PRODUCT's policy version (mig 0150), evaluated as an `EXISTS` inside the same write
+statement. A release gate is decided under a policy that lives in a different aggregate, so the release's own
+version could never see it move — an admin flipping a series to required mid-decision left the release row
+untouched, the guard passed, and the history recorded "required, not_evaluated" on a release that shipped
+without a force.
 No stored regression flag on the release (no second regression authority): issue regression stays the
 regression watch's, and an issue it reopened blocks the release through the link.
 

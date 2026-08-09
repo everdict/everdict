@@ -152,6 +152,13 @@ export const PLATFORM_EVENT_KINDS = [
   // trigger-matchable in v1 — a checkpoint is agent output, and an agent waking on another agent's handoff is
   // the same runaway vector the agent.run.* family is excluded for.
   "checkpoint.created",
+  // An INDEPENDENT ACTOR judged a checkpoint's evidence (arch-review 10 P1) — the verification ledger's fact.
+  // A verdict is the one thing in the ownership protocol that is not the actor's own claim, so the workspace
+  // hears it: someone other than the executor looked at the evidence and said what they found. Payload
+  // carries the decision id, the verdict, how many evidence refs it stood on, and whether the independence
+  // invariant was ENFORCED or abstained — a verdict that could not be checked for independence must not read
+  // like one that was. Deliberately NOT trigger-matchable, for the same reason checkpoint.created is not.
+  "checkpoint.verified",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

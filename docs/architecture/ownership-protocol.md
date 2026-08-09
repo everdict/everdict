@@ -62,8 +62,9 @@ wired, on two findings:
    inherited by sub-agents. A second vocabulary for the same concern, read by nothing, is not a weaker
    guarantee. It is a false one.
 
-Verifier context separation stays a principle (above) until there is a verifier spawn site; `scope.reads` is
-the field that spawn fills when it exists.
+The spawn site exists now (`CheckpointService.requestVerification`), and it fills BOTH halves: `scope.reads`
+gets the read tools, `scope.resources` gets the evidence. The second field had to be added — putting object
+ids in the capability list was the bug, not the design.
 
 ### Where this is enforced — and where it is not
 
@@ -73,25 +74,32 @@ Stated plainly, because a protocol that overstates its own coverage is the failu
 | --- | --- |
 | `assertIndependentVerification` (domain) | **enforced** — the ONE decision function (actor + run + session) |
 | Checkpoint persistence | **enforced where resolvable** — the service assembles both `RoleAssignment`s from the referenced run's executor linkage and calls the domain function; missing linkage abstains |
-| Verifier runtime | **enforced at the spawn** — `verifierEnvelopeFor` builds the only envelope a verifier role may run inside (writes empty, reads = the evidence), `CheckpointService.requestVerification` is the spawn site, and the agent loop enforces the envelope on every tool call incl. sub-agents. A deployment with no runner configured refuses rather than auto-passing |
+| Verifier envelope construction | **enforced** — `verifierEnvelopeFor` builds the only envelope a verifier role may run inside: writes empty, reads = an explicit list of read TOOLS, `scope.resources` = exactly the evidence |
+| Verifier verdict independence | **enforced where resolvable** — `requestVerification` resolves the executor from the evidence's run refs and calls the domain function on the returned `ActorRef`; missing linkage is recorded as `independence: "abstained"`, never as a passed check |
+| Verification durability | **enforced** — the verdict is filed as a `VerificationDecision` (mig 0151), an append-only aggregate separate from the checkpoint |
+| Verifier RUNTIME (the agent that produces the verdict) | **not wired** — `VerifierRunner` has no bound implementation. A deployment with no runner REFUSES the request; a missing verifier never becomes an automatic pass |
 
-Context separation — a verifier receives *evidence only*, never the executor's trajectory or reasoning — is
-now a live guard rather than a stated principle (arch-review 9 P2). It became one the way this document said
-it would: a spawn site appeared, and the context it assembles is where the principle turned into code.
+**Two scopes, because they answer two questions** (arch-review 10 P1). `scope.reads`/`writes`/`forbidden` are
+CAPABILITY names — the strings `authorizeToolInvocation` compares against `tool.name`. `scope.resources` is
+the OBJECT list, and `authorizeResourceAccess` is what enforces it. The verifier envelope needed both and had
+only one: the evidence ids (`run:r1`) were written into `scope.reads`, where they matched no tool name — so
+the spawned verifier could call *nothing at all*, and "evidence only" was enforced by nothing, because no
+guard ever compared a call's target to anything. Two concepts sharing one field is not a weaker guarantee; it
+is a false one, and this one happened to fail in the direction that looked like enforcement.
 
 `verifierEnvelopeFor` (`@everdict/domain`) is a CONSTRUCTOR, not a validator run afterwards — a verifier's
-envelope is not something a caller proposes and we approve. Writes are empty (so the runtime scope agrees
-with the role validator, and `authorizeToolInvocation` refuses every write call at the loop) and reads are
-exactly the evidence ids, never `"all"` — a verifier that can read the executor's trajectory is reviewing the
-executor's story rather than the artifact. Sub-agents inherit the envelope, so a verifier cannot delegate its
-way out of the ceiling. It refuses a non-verifier profile, an empty evidence set, and evidence the profile's
-own read ceiling does not cover.
+envelope is not something a caller proposes and we approve. It refuses a non-verifier profile, an empty
+evidence set, an empty tool set (a verifier that cannot reach its own evidence is a refusal wearing a
+verdict's name), and tools the profile's own read ceiling does not cover. Sub-agents inherit the envelope, so
+a verifier cannot delegate its way out of any of the three separations.
 
-`CheckpointService.requestVerification` is the first caller: the evidence is the checkpoint's own refs (what
-the executor put forward), and the returned verdict is filed through the ordinary path, so it meets
-`assertIndependentVerification` like any other — an agent that verified its own run is refused exactly as a
-human doing the same would be. Nothing about being an agent relaxes the invariant. A deployment that has
-wired no runner REFUSES the request; a missing verifier never becomes an automatic pass. The DECISION that spawn must call already exists:
+`CheckpointService.requestVerification` is the caller: the evidence is the checkpoint's own refs (what the
+executor put forward), the returned verdict is CHECKED against the executor's `ActorRef` — actor, run and
+session — and then FILED as a `VerificationDecision`. Both halves were previously claimed by this document
+and done by neither: the runner's object was returned to the caller untouched, so an agent verifying its own
+run was refused by exactly nothing, and a judgment nobody could look up afterwards could not be cited or
+audited. `VerifierVerdict.actor` is an `ActorRef` for that reason — a bare string can answer only the actor
+third of a three-part invariant. The DECISION that spawn must call already exists:
 `assertEnvelopeForRole(profile, envelope)` (`@everdict/domain`) holds the delegation invariant — a role's
 capabilities are the CEILING, the envelope's scope must be a subset (`reads: "all"` is delegable only by an
 unrestricted-read profile; excess writes/reads refuse) — so a "verifier" envelope carrying production writes

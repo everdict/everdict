@@ -50,7 +50,16 @@ export interface ReleaseStore {
     // been changed by a concurrent edit — status was still `planned`, the guard passed, and the shipped
     // record watched a series its readiness never looked at. `expectStatus` stays for callers that only care
     // about the lifecycle transition.
-    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
+    // `expectProduct` is the CROSS-AGGREGATE half (arch-review 10 P0). A ship decision is evaluated under the
+    // PRODUCT's series policy — which series gate, which pre-approve a bootstrap — and that policy is a
+    // different row, so no amount of guarding on the release could see it move. Evaluated inside the write
+    // statement (an EXISTS over the product row), the same shape as the scoring fence: a guard that reads
+    // the other row first is not a guard, it is a wider window.
+    guard?: {
+      expectStatus?: ReleaseStatus;
+      expectVersion?: number;
+      expectProduct?: { id: string; version: number };
+    },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
 }

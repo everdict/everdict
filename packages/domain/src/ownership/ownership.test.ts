@@ -16,6 +16,7 @@ import {
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
+  authorizeResourceAccess,
   authorizeToolInvocation,
   budgetExhausted,
   danglingCheckpointRefs,
@@ -370,20 +371,48 @@ describe("verifierEnvelopeFor — context separation becomes a constructor, not 
     requiredEvidence: ["scorecard"],
     completion: "verified_verdict",
   };
+  // Two lists, two questions (arch-review 10 P1): which VERBS the verifier may call, and which OBJECTS it
+  // may call them on. They used to be one field, which broke both halves at once.
   const input = {
     id: "env-1",
     goal: "verify the checkpoint",
-    evidence: ["run:r1", "scorecard:sc1"],
+    evidence: [
+      { type: "run", id: "r1" },
+      { type: "scorecard", id: "sc1" },
+    ],
+    tools: ["get_run", "get_scorecard"],
     budgets: { tokens: 1000 },
   };
 
-  it("scopes reads to the evidence and writes to nothing", () => {
+  it("scopes read TOOLS to the evidence readers and writes to nothing", () => {
     const envelope = verifierEnvelopeFor(verifier, input);
     // Not "all" — a verifier that can read the executor's trajectory reviews the executor's story rather than
     // the artifact, which is the failure the separation exists to prevent.
-    expect(envelope.scope.reads).toEqual(["run:r1", "scorecard:sc1"]);
+    expect(envelope.scope.reads).toEqual(["get_run", "get_scorecard"]);
     expect(envelope.scope.writes).toEqual([]);
     expect(envelope.role).toBe("verifier");
+  });
+
+  it("scopes RESOURCES to the evidence — the object half the capability list could never express", () => {
+    const envelope = verifierEnvelopeFor(verifier, input);
+    expect(envelope.scope.resources).toEqual([
+      { type: "run", id: "r1" },
+      { type: "scorecard", id: "sc1" },
+    ]);
+    // …and the guard actually refuses a sibling object reachable by the very same tool. Before the split the
+    // evidence ids sat in `scope.reads`, where they matched no tool name: the verifier could call nothing,
+    // and no guard ever compared a call's TARGET to anything.
+    expect(authorizeResourceAccess({ type: "scorecard", id: "sc1" }, envelope)).toEqual({ allowed: true });
+    expect(authorizeResourceAccess({ type: "scorecard", id: "sc2" }, envelope)).toMatchObject({
+      allowed: false,
+      reason: "out_of_scope",
+    });
+    // The tool itself is grantable — capability and object are independent decisions.
+    expect(authorizeToolInvocation({ name: "get_scorecard", isReadOnly: true }, envelope)).toEqual({ allowed: true });
+  });
+
+  it("refuses a verifier that was granted no read tools — it could not reach its own evidence", () => {
+    expect(() => verifierEnvelopeFor(verifier, { ...input, tools: [] })).toThrow(BadRequestError);
   });
 
   it("refuses any role but verifier — an actor never finally judges its own work", () => {
@@ -400,8 +429,8 @@ describe("verifierEnvelopeFor — context separation becomes a constructor, not 
     expect(() => verifierEnvelopeFor(verifier, { ...input, evidence: [] })).toThrow(BadRequestError);
   });
 
-  it("refuses evidence the profile's own read ceiling does not cover", () => {
-    const narrow: RoleProfile = { ...verifier, capabilities: { read: ["scorecard:sc1"], write: [] } };
+  it("refuses read tools the profile's own ceiling does not cover", () => {
+    const narrow: RoleProfile = { ...verifier, capabilities: { read: ["get_scorecard"], write: [] } };
     expect(() => verifierEnvelopeFor(narrow, input)).toThrow(BadRequestError);
   });
 });

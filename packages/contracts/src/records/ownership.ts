@@ -112,6 +112,15 @@ const TaskScopeSchema = z
     writes: z.array(z.string()),
     // Deny-precedence: a capability both granted and forbidden is FORBIDDEN — the safer reading always wins.
     forbidden: z.array(z.string()).default([]),
+    // WHICH OBJECTS, as opposed to which tools (arch-review 10 P1). `reads`/`writes`/`forbidden` are
+    // CAPABILITY names — the strings `authorizeToolInvocation` compares against `tool.name`. "The verifier may
+    // see run-42 and scorecard-7" is a different sentence, and putting it in `reads` broke both halves at
+    // once: the resource ids matched no tool, so the verifier could call nothing at all, and the guarantee
+    // "evidence only" was never enforced because nothing ever compared a tool's TARGET to anything.
+    //
+    // Absent = no object-level restriction (the executor posture): the capability lists alone decide, which
+    // is exactly today's behavior for every envelope that does not set this.
+    resources: z.array(z.object({ type: z.string().min(1), id: z.string().min(1) })).optional(),
   })
   .refine((s) => s.reads === "all" || s.reads.length > 0 || s.writes.length > 0, {
     message: "an envelope that may read nothing and write nothing is not a task",
@@ -212,6 +221,41 @@ export const HandoffCheckpointRecordSchema = HandoffCheckpointSchema.extend({
 });
 export type HandoffCheckpointRecord = z.infer<typeof HandoffCheckpointRecordSchema>;
 
+// ── The VERIFICATION DECISION — a judgment, not a state transfer ─────────────────────────────────────
+// A HandoffCheckpoint and a verification are related and are NOT the same aggregate (arch-review 10 §10):
+//   · a checkpoint transfers RESUMABLE STATE from a predecessor to a successor;
+//   · a verification is an INDEPENDENT ACTOR'S IMMUTABLE JUDGMENT about evidence.
+// Storing the second as a variant of the first is the same category error `GateDecision` avoided by not being
+// a field on `ScorecardRecord`: it makes "who verified this checkpoint, and did the verdict hold" a question
+// answered by scanning for a checkpoint that happens to reference another one. Separated, the answer is a
+// lookup — and the executor/verifier pair the independence invariant is stated over is a field of the record
+// rather than something a reader re-derives.
+//
+// Immutable by construction: there is no update path. A verifier that changes its mind files a SECOND
+// decision, because "the verdict was revised" and "the verdict was always this" are different histories.
+export const VerificationDecisionSchema = z.object({
+  id: z.string().min(1),
+  tenant: z.string().min(1),
+  // WHAT was verified — the checkpoint (or other subject) whose claims were under review.
+  subject: z.object({ type: z.enum(["checkpoint"]), id: z.string().min(1) }),
+  // The EVIDENCE the verifier was given, and nothing else — the same list that became `scope.resources`.
+  evidence: z.array(CheckpointRefSchema).min(1),
+  // The two identities the independence invariant compares. `executor` is absent when the linkage could not
+  // be resolved (no run reference, no run→actor resolver) — recorded as absent rather than guessed, so a
+  // reader can tell "independent" from "we could not check".
+  executor: ActorRefSchema.optional(),
+  verifier: ActorRefSchema,
+  verdict: z.enum(["verified", "refuted", "inconclusive"]),
+  detail: z.string().min(1),
+  // Whether the independence invariant was actually APPLIED to this pair, or abstained for missing linkage.
+  // A decision that does not say which is a verdict pretending to a check.
+  independence: z.enum(["enforced", "abstained"]),
+  envelopeId: z.string().optional(), // the verifier envelope this ran inside
+  createdAt: z.string(),
+  createdBy: z.string(), // who REQUESTED the verification (the verifier itself is `verifier` above)
+});
+export type VerificationDecision = z.infer<typeof VerificationDecisionSchema>;
+
 // ── O5 decisions (pure, beside the contract — the isMeasured precedent) ──────────────────────────────
 export type EnvelopeDecision =
   | { allowed: true }
@@ -242,6 +286,26 @@ export function authorizeToolInvocation(
   }
   if (!scope.writes.includes(tool.name)) return { allowed: false, reason: "out_of_scope", action: "refuse_and_replan" };
   return { allowed: true };
+}
+
+// THE object-access decision — the SECOND guard, and a different question from the one above (arch-review 10
+// P1). `authorizeToolInvocation` answers "may this task call get_scorecard?"; this answers "may it call it on
+// sc-8?". A verifier holding `get_scorecard` and evidence `scorecard:sc-7` passes the first and must fail the
+// second, and until the two lived apart the guarantee "a verifier sees the evidence and nothing else" had no
+// enforcement anywhere — the evidence ids sat in the capability list, where they matched no tool name and
+// governed no object.
+//
+// An envelope with no `resources` declares no object restriction and admits everything: the executor posture,
+// and what every pre-existing envelope means. The list is a WHITELIST when present — fail-closed, because an
+// evidence-scoped role that silently admitted an unlisted object would be the exact failure this closes.
+export function authorizeResourceAccess(
+  target: { type: string; id: string },
+  envelope: TaskEnvelope,
+): EnvelopeDecision {
+  const resources = envelope.scope.resources;
+  if (resources === undefined) return { allowed: true };
+  if (resources.some((r) => r.type === target.type && r.id === target.id)) return { allowed: true };
+  return { allowed: false, reason: "out_of_scope", action: "refuse_and_replan" };
 }
 
 export interface EnvelopeSpend {

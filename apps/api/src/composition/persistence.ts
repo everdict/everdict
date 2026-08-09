@@ -3,6 +3,7 @@ import type {
   LeaderElector,
   ReplicaRegistry,
   ScoringStageStore,
+  VerificationDecisionStore,
 } from "@everdict/application-control";
 import { soleLeader, soloReplicas } from "@everdict/application-control";
 import type {
@@ -76,6 +77,7 @@ import {
   InMemoryTrajectoryStore,
   InMemoryUsageStore,
   InMemoryUserProfileStore,
+  InMemoryVerificationDecisionStore,
   InMemoryViewStore,
   InMemoryWorkflowStateStore,
   InMemoryWorkspaceInviteStore,
@@ -130,6 +132,7 @@ import {
   PgTrajectoryStore,
   PgUsageStore,
   PgUserProfileStore,
+  PgVerificationDecisionStore,
   PgViewStore,
   PgWorkflowStateStore,
   PgWorkspaceInviteStore,
@@ -233,6 +236,7 @@ export interface Persistence {
   // Handoff checkpoints (ownership O6) — where an autonomous task's resumable state transfer outlives the
   // process that wrote it. Append-only: a predecessor must not rewrite evidence its successor already used.
   handoffCheckpointStore: HandoffCheckpointStore;
+  verificationDecisionStore: VerificationDecisionStore;
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
   teamStore: TeamStore;
@@ -323,6 +327,12 @@ export async function makePersistence(): Promise<Persistence> {
     const inMemoryScorecards = new InMemoryScorecardStore(platformEventStore);
     const inMemoryRuns = new InMemoryRunStore(platformEventStore);
     inMemoryRuns.attachScorecards(inMemoryScorecards);
+    // Same shape for the release gate's CROSS-AGGREGATE policy guard: a ship decision commits only while the
+    // product's policy version is still the one it read. Postgres evaluates that as an EXISTS in the write
+    // statement; in memory the composition hands the release store a reader for the product's version.
+    const inMemoryProducts = new InMemoryProductStore();
+    const inMemoryReleases = new InMemoryReleaseStore();
+    inMemoryReleases.attachProducts(inMemoryProducts);
     return {
       store: inMemoryRuns,
       scoringStageStore: new InMemoryScoringStageStore(),
@@ -360,6 +370,7 @@ export async function makePersistence(): Promise<Persistence> {
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
       handoffCheckpointStore: new InMemoryHandoffCheckpointStore(),
+      verificationDecisionStore: new InMemoryVerificationDecisionStore(),
       taskStore: new InMemoryAgentTaskStore(),
       teamStore: new InMemoryTeamStore(),
       cycleStore: new InMemoryCycleStore(),
@@ -370,8 +381,8 @@ export async function makePersistence(): Promise<Persistence> {
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
       initiativeUpdateStore: new InMemoryInitiativeUpdateStore(),
-      productStore: new InMemoryProductStore(),
-      releaseStore: new InMemoryReleaseStore(),
+      productStore: inMemoryProducts,
+      releaseStore: inMemoryReleases,
       productVersionStore: new InMemoryProductVersionStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
@@ -427,6 +438,7 @@ export async function makePersistence(): Promise<Persistence> {
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
     handoffCheckpointStore: new PgHandoffCheckpointStore(client),
+    verificationDecisionStore: new PgVerificationDecisionStore(client),
     taskStore: new PgAgentTaskStore(client),
     teamStore: new PgTeamStore(client),
     cycleStore: new PgCycleStore(client),

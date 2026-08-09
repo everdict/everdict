@@ -87,11 +87,19 @@ function build() {
     versions: new InMemoryProductVersionStore(),
     issues: new InMemoryIssueStore(),
     scorecards: scorecardStore,
-    // The PRODUCTION seam, byte-for-byte the main.ts wiring — the point of this certification.
+    // The PRODUCTION seam, byte-for-byte the main.ts wiring — the point of this certification. Including
+    // `diffSnapshot` over `diff`: the decision records the pins the GATE read, not a separate list read's
+    // (arch-review 10 P0). A certificate that wires the seam differently from production certifies the wiring
+    // it invented.
     seriesGate: async (tenant, baselineId, candidateId) => {
-      const diff = await scorecardService.diff(tenant, baselineId, candidateId, {});
-      const evaluation = evaluateGate(diff, { maxRegressions: 0 });
-      return { decision: evaluation.decision, reasons: evaluation.reasons };
+      const snapshot = await scorecardService.diffSnapshot(tenant, baselineId, candidateId, {});
+      const evaluation = evaluateGate(snapshot.diff, { maxRegressions: 0 });
+      return {
+        decision: evaluation.decision,
+        reasons: evaluation.reasons,
+        ...(snapshot.baseline.pin !== undefined ? { baselineScoring: snapshot.baseline.pin } : {}),
+        ...(snapshot.candidate.pin !== undefined ? { candidateScoring: snapshot.candidate.pin } : {}),
+      };
     },
     newId: () => `t37-${n++}`,
     now: () => "2026-08-04T00:00:00.000Z",
@@ -99,12 +107,17 @@ function build() {
   return { scorecardStore, productService };
 }
 
+// The series a product ships against. `allowNoBaseline` is DECLARED, because the first ship of a required
+// series is a bootstrap and a bootstrap is a governance decision (arch-review 8/9): a required series with no
+// prior anchor blocks until someone approves shipping on absolute evidence. A fixture that omitted it was
+// certifying a constitution the product no longer has.
 const SERIES: ProductSeries = {
   key: "quality",
   label: "Quality",
   dataset: { id: "support-cases" },
   harness: { id: "copilot" },
   judges: [],
+  allowNoBaseline: true,
 };
 
 describeTrust("TRUST-37 — the release gate is the scorecard gate, certified through the production seam", () => {
@@ -193,7 +206,123 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
     );
     expect(forced.history.at(-1)?.detail).toMatchObject({
       forced: true,
-      seriesVerdicts: expect.arrayContaining([{ key: "quality", verdict: "not_evaluated" }]),
+      // The DECISION, not a verdict word (arch-review 8 P1): the recorded entry names which series gated and
+      // what each one carried, so the ship stays answerable a month later. `seriesVerdicts` was the old
+      // shape and the certificate kept asserting it after the production contract moved — a certificate that
+      // trails the constitution certifies nothing.
+      seriesDecisions: expect.arrayContaining([
+        expect.objectContaining({ key: "quality", verdict: "not_evaluated", required: true }),
+      ]),
     });
+  });
+
+  // arch-review 10 P0. `allowNoBaseline` approves shipping the FIRST time this series ran. It must not
+  // silently cover a ship whose recorded baseline has since been DELETED: history existed and we lost it,
+  // which is a reason to refuse, not to fall back to the bootstrap rule. Before the resolution split, the
+  // missing baseline collapsed into "no baseline" and this shipped GREEN.
+  it("a ship whose recorded baseline has been deleted REFUSES, even with the bootstrap approved", async () => {
+    const { scorecardStore, productService } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [SERIES], // allowNoBaseline: true — approved, and it does not reach the deleted-history state
+    });
+    await scorecardStore.create(
+      seriesBatch("t37-gone", [scored("a", true), scored("b", true)], "2026-07-01T00:00:00.000Z", {
+        productId: product.id,
+        seriesKey: "quality",
+      }),
+    );
+    const first = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.2",
+    });
+    await productService.setReleaseStatus("acme", first.id, { status: "released" }, { subject: "release-captain" });
+
+    // The evidence that ship stood on is deleted; a newer batch exists.
+    await scorecardStore.delete("t37-gone");
+    await scorecardStore.create(
+      seriesBatch("t37-after", [scored("a", true), scored("b", true)], "2026-08-05T00:00:00.000Z", {
+        productId: product.id,
+        seriesKey: "quality",
+      }),
+    );
+    const next = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+    });
+    const readiness = (await productService.releaseDetail("acme", next.id)).readiness;
+    expect(readiness.series[0]).toMatchObject({ key: "quality", verdict: "not_comparable", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("t37-gone");
+    await expect(
+      productService.setReleaseStatus("acme", next.id, { status: "released" }, { subject: "release-captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  // arch-review 10 P0: the release CAS guards the RELEASE row, and the policy it decided under lives in the
+  // PRODUCT row. An edit to the product between readiness and commit used to sail through, recording
+  // "required: true, not_evaluated" on a release that shipped without a force.
+  it("a product policy edited mid-decision refuses the ship — the release's own version cannot see it move", async () => {
+    // Driven at the STORE, deliberately. The race is an interleaving between one decision's readiness read
+    // and its own commit, which a single-threaded service call cannot produce (it now reads the product once
+    // and would simply see the new policy). The invariant being certified is that the WRITE refuses a
+    // decision whose policy moved — so the certificate exercises the write, holding the stale version a
+    // concurrent replica would still be holding.
+    const products = new InMemoryProductStore();
+    const releases = new InMemoryReleaseStore();
+    releases.attachProducts(products);
+    let n = 0;
+    const productService = new ProductService({
+      store: products,
+      releases,
+      versions: new InMemoryProductVersionStore(),
+      newId: () => `t37-race-${n++}`,
+      now: () => "2026-08-04T00:00:00.000Z",
+    });
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      series: [{ ...SERIES, requiredForRelease: false }],
+    });
+    const release = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+    });
+    const stalePolicyVersion = product.version ?? 0;
+
+    // The concurrent edit lands: quality becomes required. The RELEASE row is untouched — which is exactly
+    // why its own version guard passes and cannot protect this decision.
+    await productService.update(
+      "acme",
+      product.id,
+      { series: [{ ...SERIES, requiredForRelease: true }] },
+      { subject: "release-captain", isAdmin: true },
+    );
+
+    const releaseRow = await releases.get("acme", release.id);
+    const guarded = await releases.update("acme", release.id, { status: "released" }, undefined, {
+      expectStatus: "planned",
+      expectVersion: releaseRow?.version ?? 0, // the release did NOT move — this half passes
+      expectProduct: { id: product.id, version: stalePolicyVersion }, // …and this half refuses
+    });
+    expect(guarded).toBeUndefined();
+    // …and the same write commits once it states the policy it actually read.
+    const fresh = await products.get("acme", product.id);
+    await expect(
+      releases.update("acme", release.id, { status: "released" }, undefined, {
+        expectStatus: "planned",
+        expectVersion: releaseRow?.version ?? 0,
+        expectProduct: { id: product.id, version: fresh?.version ?? 0 },
+      }),
+    ).resolves.toBeDefined();
   });
 });

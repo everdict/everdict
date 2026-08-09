@@ -38,7 +38,15 @@ export class InMemoryProductStore implements ProductStore {
   ): Promise<ProductRecord | undefined> {
     const current = this.byId.get(id);
     if (!current || current.tenant !== tenant) return undefined;
-    const next: ProductRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    // The version moves on EVERY write (mig 0150) — a release decision commits against the policy version it
+    // read, and a policy edit must invalidate that decision even though it touches a different aggregate.
+    const next: ProductRecord = {
+      ...current,
+      ...patch,
+      version: (current.version ?? 0) + 1,
+      id: current.id,
+      tenant: current.tenant,
+    };
     this.byId.set(id, next);
     if (events) this.events.push(...events);
     return next;
@@ -49,12 +57,21 @@ export class InMemoryProductStore implements ProductStore {
     if (current && current.tenant === tenant) this.byId.delete(id);
   }
 
+  // Synchronous peek — the release decision's cross-aggregate policy guard needs the product's version at
+  // the moment of the release write, and the Pg store answers that with a sub-select INSIDE the write
+  // statement. Exposed so the in-memory pair gives the same answer without turning the guard into a read
+  // that happens before the write (which is the window the guard exists to close).
+  peek(id: string): ProductRecord | undefined {
+    return this.byId.get(id);
+  }
+
   emittedEvents(): OutboxEvent[] {
     return [...this.events];
   }
 }
 
 interface ProductRow extends TrackerRow {
+  version?: string | number | null;
   name: string;
   description: string | null;
   icon: string | null;
@@ -86,6 +103,7 @@ function insertParams(record: ProductRecord): unknown[] {
 
 function rowToRecord(row: ProductRow): ProductRecord {
   return ProductRecordSchema.parse({
+    version: Number(row.version ?? 0),
     id: row.id,
     tenant: row.tenant,
     name: row.name,
@@ -159,8 +177,10 @@ export class PgProductStore implements ProductStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: ProductRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    // version = version + 1 on EVERY write (mig 0150) — see the in-memory twin. Computed by the DATABASE,
+    // never read-then-written, so two concurrent policy edits cannot land on the same number.
     const sets = `name=$3, description=$4, icon=$5, services=$6::jsonb, series=$7::jsonb,
-       auto_eval=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz`;
+       auto_eval=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz, version = version + 1`;
     const params: unknown[] = [
       tenant,
       id,

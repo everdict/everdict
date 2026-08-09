@@ -97,6 +97,7 @@ const ACTIVITY_AXIS_BY_KIND = {
   "approval.decided": "agent",
   // A handoff checkpoint is agent work stopping at its boundary — news about the agents, like the gate above.
   "checkpoint.created": "agent",
+  "checkpoint.verified": "agent",
   // What the workspace knows — the files and entries members and agents write.
   "file.published": "knowledge",
   "knowledge.created": "knowledge",

@@ -82,6 +82,9 @@ export function assertIndependentVerification(executor: RoleAssignment, verifier
 // ── O5: the envelope's decisions live IN CONTRACTS beside the schema (the isMeasured precedent) — the
 // agent runtime enforces them without a domain dependency. Re-exported here for domain consumers.
 export {
+  // Two decisions, two questions (arch-review 10 P1): may this task call this TOOL, and may it call it on
+  // this OBJECT. One field answering both was a guarantee the runtime never gave.
+  authorizeResourceAccess,
   authorizeToolInvocation,
   type BudgetDecision,
   budgetExhausted,
@@ -238,19 +241,35 @@ export function assertCheckpointForEnvelope(
 // validator run after the fact: a verifier's envelope is not something a caller proposes and we approve — the
 // caller supplies the evidence and the ceiling produces the only envelope that role may run inside.
 //
-// Two separations, both structural rather than advisory:
+// THREE separations, all structural rather than advisory:
 //  · CAPABILITY — writes are empty. The role validator already refuses a verifier profile that can write; this
 //    makes the RUNTIME scope agree, so `authorizeToolInvocation` refuses every write tool call at the loop.
-//  · CONTEXT — reads are exactly the evidence ids, never "all". A verifier that can read the executor's
-//    trajectory and reasoning is reviewing the executor's story, not the artifact; that is the failure the
-//    separation exists to prevent, and an explicit read list is what makes it unavailable rather than
-//    discouraged. Sub-agents inherit the envelope, so a verifier cannot delegate its way out of the ceiling.
+//  · CONTEXT — reads are an explicit list of READ TOOLS, never "all". A verifier that can read the executor's
+//    trajectory and reasoning is reviewing the executor's story, not the artifact.
+//  · OBJECT — `scope.resources` is exactly the evidence, and `authorizeResourceAccess` refuses everything
+//    else. This is the half that used to be missing (arch-review 10 P1): the evidence ids were being written
+//    into `scope.reads`, the CAPABILITY list, where they matched no tool name — so the envelope both blocked
+//    every tool and restricted no object. Two concepts in one field is not a weaker guarantee; it is a false
+//    one, and it happened to fail in the direction that looked like an enforcement.
+// Sub-agents inherit the envelope, so a verifier cannot delegate its way out of any of the three.
 //
 // Refuses (never returns a weakened envelope): a non-verifier profile, a profile whose ceiling does not
 // actually cover the evidence, or an empty evidence set — a verifier with nothing to look at cannot verify.
 export function verifierEnvelopeFor(
   profile: RoleProfile,
-  input: { id: string; goal: string; evidence: readonly string[]; budgets: TaskEnvelope["budgets"] },
+  input: {
+    id: string;
+    goal: string;
+    // The OBJECTS under review — typed references, not strings (arch-review 10 P1). They used to be
+    // `"run:run-42"` strings dropped into `scope.reads`, which is the CAPABILITY list: they matched no tool
+    // name, so the spawned verifier could call nothing at all, and the "evidence only" guarantee was enforced
+    // by nothing because no guard ever compared a tool's target to a resource.
+    evidence: ReadonlyArray<{ type: string; id: string }>;
+    // The read TOOLS the verifier may use to reach that evidence. Two lists because they answer two
+    // questions: which verbs, and on which objects.
+    tools: readonly string[];
+    budgets: TaskEnvelope["budgets"];
+  },
 ): TaskEnvelope {
   if (profile.role !== "verifier")
     throw new BadRequestError(
@@ -262,14 +281,28 @@ export function verifierEnvelopeFor(
     throw new BadRequestError(
       "BAD_REQUEST",
       { envelope: input.id },
-      "a verifier spawned with no evidence has nothing to verify — an empty read scope is a verdict about nothing.",
+      "a verifier spawned with no evidence has nothing to verify — an empty resource scope is a verdict about nothing.",
+    );
+  if (input.tools.length === 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { envelope: input.id },
+      "a verifier spawned with no read tools cannot reach its own evidence — an envelope that can call nothing is a refusal wearing a verdict's name.",
     );
   const envelope: TaskEnvelope = {
     id: input.id,
     goal: input.goal,
     role: "verifier",
-    // Evidence only. Not "all", not the executor's context — the reason this function exists.
-    scope: { reads: [...input.evidence], writes: [], forbidden: [] },
+    scope: {
+      // WHICH VERBS: read tools only, never "all" — a verifier that can read the executor's trajectory is
+      // reviewing the executor's story rather than the artifact.
+      reads: [...input.tools],
+      writes: [],
+      forbidden: [],
+      // WHICH OBJECTS: exactly the evidence. `authorizeResourceAccess` is what makes this a guard rather than
+      // a comment — the tools above can be called, and only on these.
+      resources: input.evidence.map((e) => ({ type: e.type, id: e.id })),
+    },
     budgets: input.budgets,
     stop: { onBudgetExhausted: "halt_checkpoint" },
     escalation: { onScopeExceeded: "refuse_and_replan" },

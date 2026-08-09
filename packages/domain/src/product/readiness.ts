@@ -33,6 +33,33 @@ export interface SeriesScorecardPoint {
   scoring?: GateScoringPin;
 }
 
+// WHY this series has (or has not) a baseline — four different facts that `baseline: undefined` used to
+// collapse into one (arch-review 10 P0).
+//
+// The collapse was not cosmetic. `allowNoBaseline` is a governance decision meaning "this product has never
+// shipped this series, and we approve shipping on absolute evidence" — and it was applied to EVERY absent
+// baseline. So a series whose previous ship pinned a scorecard that has since been DELETED resolved to
+// `baseline: undefined`, was read as "first ship", and shipped green. Losing the evidence of what we last
+// shipped against made the gate weaker, which is precisely backwards: the absence of history is a reason to
+// refuse, not a reason to skip the comparison.
+//
+// The application layer resolves which of these holds (it owns the stores); the domain decides what each one
+// means. Only `none_first_ship` is a bootstrap question at all.
+export type BaselineResolution =
+  // Nothing to compare against because nothing was ever shipped. The genuine first-ship state, and the ONLY
+  // one `allowNoBaseline` speaks to.
+  | { kind: "none_first_ship" }
+  // The previous ship's own candidate, found and readable — the comparison stands on the exact evidence that
+  // ship stood on.
+  | { kind: "resolved"; point: SeriesScorecardPoint }
+  // A previous ship pinned a scorecard and that scorecard is GONE. History existed and we lost it; a
+  // different scorecard is not a substitute, and no policy flag converts this into a bootstrap.
+  | { kind: "missing_historical_evidence"; pin: GateScoringPin | undefined; scorecardId: string }
+  // The pinned scorecard is still here but has been RE-SCORED since: the judgment the last ship compared
+  // against is no longer the one a comparison would read. Addressable only once scoring planes are immutable
+  // revisions (docs/architecture/scoring-plane-revisions.md).
+  | { kind: "revision_unavailable"; pin: GateScoringPin; current: GateScoringPin; scorecardId: string };
+
 // The SCORECARD GATE's decision over (baseline, latest) for one series — computed by the application layer
 // (analytics.diff + evaluateGate, the SAME machinery a CI release gate runs) and handed in. The product
 // layer never invents truth semantics: pass-rate arithmetic bypassed experiment identity, policy identity,
@@ -41,6 +68,16 @@ export interface SeriesScorecardPoint {
 export interface SeriesGateReading {
   verdict: Extract<SeriesVerdict, "pass" | "block" | "blocked_missing" | "not_comparable">;
   reasons?: string[];
+  // The pins the GATE ITSELF read (arch-review 10 P0). The release used to record the pins it saw in the
+  // trend LIST and the verdict it got from a LATER diff — two reads of the same records, so a re-score
+  // landing between them stamped the decision with a revision that did not produce the verdict recorded
+  // beside it. The gate already captures both sides at its one read (ComparisonSnapshot); carrying them here
+  // means the decision records what it DECIDED ON rather than what it looked up first.
+  //
+  // Absent = a gate seam that predates this (or a unit fake); the readiness then falls back to the list pins
+  // and is honestly degraded rather than silently wrong.
+  baselineScoring?: GateScoringPin;
+  candidateScoring?: GateScoringPin;
 }
 
 // A series' release verdict. NOT EVALUATED IS NEVER GREEN: a required series with no run blocks the ship —
@@ -50,18 +87,36 @@ export interface SeriesGateReading {
 // the first ship's honest state: evidence exists, but no prior ship anchors a regression question.
 function seriesVerdict(
   latest: SeriesScorecardPoint | undefined,
-  baseline: SeriesScorecardPoint | undefined,
+  baseline: BaselineResolution,
   gate: SeriesGateReading | undefined,
   allowNoBaseline: boolean,
 ): { verdict: SeriesVerdict; reasons?: string[] } {
   if (latest === undefined) return { verdict: "not_evaluated", reasons: ["this series has no succeeded evaluation"] };
+  // LOST HISTORY IS NOT A BOOTSTRAP (arch-review 10 P0). These two branches used to be indistinguishable from
+  // the first-ship one, which meant `allowNoBaseline` — an approval to ship the FIRST time — silently
+  // licensed shipping after the evidence of the last ship disappeared. A pre-approval cannot cover a
+  // condition it was never shown; both refuse regardless of policy, and no flag opens them.
+  if (baseline.kind === "missing_historical_evidence")
+    return {
+      verdict: "not_comparable",
+      reasons: [
+        `the scorecard this product last shipped this series against (${baseline.scorecardId}) is no longer available — refusing to substitute a different one, and an absent history is not a first ship`,
+      ],
+    };
+  if (baseline.kind === "revision_unavailable")
+    return {
+      verdict: "not_comparable",
+      reasons: [
+        `the baseline scorecard has been re-scored since the last ship (shipped against revision ${baseline.pin.revision}, now revision ${baseline.current.revision}) — the judgment this product shipped against is no longer the one a comparison would read`,
+      ],
+    };
   // A FIRST ship has no prior anchor — true, and not the same sentence as "this is fine to ship". The old
   // reading made `no_baseline` unconditionally passing, so a required series whose only evidence was a batch
   // where every case infra-failed (a succeeded pipeline with nothing verdicted) shipped green: exactly the
   // "absence of evidence read as absence of regression" shape the verdict work set out to close, surviving
   // in the one lane nobody re-read. Shipping without a comparison is now a GOVERNANCE decision — the series
   // policy says `allowNoBaseline` — and even then the evidence has to contain a verdict.
-  if (baseline === undefined) {
+  if (baseline.kind === "none_first_ship") {
     if (!allowNoBaseline)
       return {
         verdict: "bootstrap_required",
@@ -88,19 +143,23 @@ export function releaseReadiness(
   release: ReleaseRecord,
   product: ProductRecord,
   latestBySeries: ReadonlyMap<string, SeriesScorecardPoint>,
-  baselineBySeries: ReadonlyMap<string, SeriesScorecardPoint>,
+  // WHY each series has (or lacks) a baseline — not merely whether. A key with no entry is read as the
+  // first-ship state, the same default the map's absence always meant.
+  baselineBySeries: ReadonlyMap<string, BaselineResolution>,
   gateBySeries: ReadonlyMap<string, SeriesGateReading>,
   openIssues: number,
 ): ReleaseReadiness {
   const series: ReleaseSeriesState[] = watchedSeries(product, release).map((entry) => {
     const latest = latestBySeries.get(entry.key);
-    const baseline = baselineBySeries.get(entry.key);
-    const { verdict, reasons } = seriesVerdict(
-      latest,
-      baseline,
-      gateBySeries.get(entry.key),
-      entry.allowNoBaseline === true,
-    );
+    const resolution = baselineBySeries.get(entry.key) ?? { kind: "none_first_ship" as const };
+    const gate = gateBySeries.get(entry.key);
+    const baseline = resolution.kind === "resolved" ? resolution.point : undefined;
+    const { verdict, reasons } = seriesVerdict(latest, resolution, gate, entry.allowNoBaseline === true);
+    // The pins RECORDED are the gate's own, never the trend list's, whenever the gate ran — see
+    // SeriesGateReading. Falling back to the list pin is correct exactly where no gate ran (not_evaluated,
+    // first ship): there is no second read to disagree with.
+    const candidateScoring = gate?.candidateScoring ?? latest?.scoring;
+    const baselineScoring = gate?.baselineScoring ?? baseline?.scoring;
     // A series blocks when it is REQUIRED (the fail-closed default) and its verdict is not a passing one.
     // The explicit `requiredForRelease: false` is the only way evidence-less green exists — a recorded
     // product policy, never an inference.
@@ -122,7 +181,7 @@ export function releaseReadiness(
               ...(latest.serviceVersion !== undefined ? { serviceVersion: latest.serviceVersion } : {}),
               // WHICH judgment — dropping it here made the release decision record a scorecard id and call
               // it an evidence reference, which it stops being the moment a re-score lands.
-              ...(latest.scoring !== undefined ? { scoring: latest.scoring } : {}),
+              ...(candidateScoring !== undefined ? { scoring: candidateScoring } : {}),
             },
           }
         : {}),
@@ -132,7 +191,7 @@ export function releaseReadiness(
               scorecardId: baseline.scorecardId,
               ...(baseline.passRate !== undefined ? { passRate: baseline.passRate } : {}),
               createdAt: baseline.createdAt,
-              ...(baseline.scoring !== undefined ? { scoring: baseline.scoring } : {}),
+              ...(baselineScoring !== undefined ? { scoring: baselineScoring } : {}),
             },
           }
         : {}),
@@ -150,18 +209,36 @@ export function releaseReadiness(
   };
 }
 
-// The digest of the POLICY a release decision stood on — the watched series and, per series, whether it
-// gated and whether a bootstrap was pre-approved. Series metadata that cannot change a verdict (labels,
-// datasets) is deliberately out: a decision should read as "same policy" when only a label was edited.
-// Deterministic (key-sorted) so two reads of an unchanged policy agree.
-export function productPolicyDigest(product: Pick<ProductRecord, "series">): string {
-  return contentDigest(
-    [...product.series]
-      .map((s) => ({
-        key: s.key,
-        required: s.requiredForRelease !== false,
-        allowNoBaseline: s.allowNoBaseline === true,
-      }))
-      .sort((a, b) => a.key.localeCompare(b.key)),
-  );
+// The POLICY a release decision stood on, as a DOCUMENT (arch-review 10 P0). The decision used to record
+// only a digest, and a digest of a mutable record is a one-way check: it can tell you the policy changed, and
+// it can never tell you what the policy WAS. A ship whose product has since been edited then has an audit
+// trail reading "these series gated" with no way to recover which, or whether a bootstrap had been
+// pre-approved — the exact question a regression post-mortem asks first.
+//
+// Scoped to the WATCHED series, not the product's whole declaration: a decision stands on the policy of the
+// series it actually evaluated, and digesting the others made an edit to a series this release never watched
+// read as a policy change to this release's decision.
+export interface ReleasePolicySeries {
+  key: string;
+  required: boolean;
+  allowNoBaseline: boolean;
+}
+
+export function releasePolicyDocument(
+  product: ProductRecord,
+  release?: Pick<ReleaseRecord, "seriesKeys">,
+): ReleasePolicySeries[] {
+  return watchedSeries(product, release)
+    .map((s) => ({
+      key: s.key,
+      required: s.requiredForRelease !== false,
+      allowNoBaseline: s.allowNoBaseline === true,
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key)); // deterministic — two reads of an unchanged policy agree
+}
+
+// The digest of that document. Series metadata that cannot change a verdict (labels, datasets) is
+// deliberately out: a decision should read as "same policy" when only a label was edited.
+export function productPolicyDigest(product: ProductRecord, release?: Pick<ReleaseRecord, "seriesKeys">): string {
+  return contentDigest(releasePolicyDocument(product, release));
 }

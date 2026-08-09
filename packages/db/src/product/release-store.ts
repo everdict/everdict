@@ -7,6 +7,15 @@ import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row
 export class InMemoryReleaseStore implements ReleaseStore {
   private readonly byId = new Map<string, ReleaseRecord>();
   private readonly events: OutboxEvent[] = [];
+  private productVersion?: (id: string) => number | undefined;
+
+  // Bind the PRODUCT side of the cross-aggregate policy guard (mig 0150). The Pg twin evaluates it as an
+  // EXISTS inside the write statement; unbound here, `expectProduct` ABSTAINS rather than refusing — an
+  // in-memory pair that failed closed on an unwired link would break every unit path that never had one,
+  // and the guard's whole purpose is the concurrent case a single-threaded fake cannot produce anyway.
+  attachProducts(products: { peek(id: string): { version?: number } | undefined }): void {
+    this.productVersion = (id) => products.peek(id)?.version ?? 0;
+  }
 
   async create(record: ReleaseRecord, events?: OutboxEvent[]): Promise<void> {
     this.byId.set(record.id, record);
@@ -37,7 +46,7 @@ export class InMemoryReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
-    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
+    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number; expectProduct?: { id: string; version: number } },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
     if (!current || current.tenant !== tenant) return undefined;
@@ -47,6 +56,11 @@ export class InMemoryReleaseStore implements ReleaseStore {
     if (guard?.expectStatus !== undefined && current.status !== guard.expectStatus) return undefined;
     // The aggregate version catches a concurrent EDIT, which a status guard cannot see.
     if (guard?.expectVersion !== undefined && (current.version ?? 0) !== guard.expectVersion) return undefined;
+    // …and the PRODUCT policy this decision stood on must still be the one it read — a different aggregate,
+    // which no guard on this row could ever see move.
+    if (guard?.expectProduct !== undefined && this.productVersion !== undefined) {
+      if (this.productVersion(guard.expectProduct.id) !== guard.expectProduct.version) return undefined;
+    }
     const next0 = { ...current, ...patch, version: (current.version ?? 0) + 1 };
     const next: ReleaseRecord = { ...next0, id: current.id, tenant: current.tenant };
     this.byId.set(id, next);
@@ -171,7 +185,7 @@ export class PgReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
-    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number },
+    guard?: { expectStatus?: ReleaseStatus; expectVersion?: number; expectProduct?: { id: string; version: number } },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
@@ -207,6 +221,13 @@ export class PgReleaseStore implements ReleaseStore {
     if (guard?.expectVersion !== undefined) {
       params.push(guard.expectVersion);
       guardSql += ` AND coalesce(version, 0)=$${params.length}`;
+    }
+    // The CROSS-ROW half (arch-review 10 P0): the product's policy version, evaluated in the SAME statement
+    // as the write. Read separately it would only be a wider window — the edit lands between the read and
+    // the write and the decision commits anyway, which is exactly the race being closed.
+    if (guard?.expectProduct !== undefined) {
+      params.push(guard.expectProduct.id, guard.expectProduct.version);
+      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.id=$${params.length - 1} AND coalesce(p.version, 0)=$${params.length})`;
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

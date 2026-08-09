@@ -173,6 +173,10 @@ export {
   InMemoryHandoffCheckpointStore,
   PgHandoffCheckpointStore,
 } from "./activity/handoff-checkpoint-store.js";
+export {
+  InMemoryVerificationDecisionStore,
+  PgVerificationDecisionStore,
+} from "./activity/verification-decision-store.js";
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
 export { InMemoryCycleStore, PgCycleStore } from "./tracker/cycle-store.js";
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";

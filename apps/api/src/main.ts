@@ -203,6 +203,7 @@ async function main(): Promise<void> {
     subscriptionStore,
     viewStore,
     handoffCheckpointStore,
+    verificationDecisionStore,
     taskStore,
     teamStore,
     cycleStore,
@@ -794,6 +795,7 @@ async function main(): Promise<void> {
   // service stays honest about what it can verify by only being handed resolvers that exist.
   const checkpointService = buildCheckpoint({
     handoffCheckpointStore,
+    verificationDecisionStore,
     runStore: store,
     scorecardStore,
     // issue + file are everdict-HELD records — resolvable, so "unverifiable" stays reserved for what we
@@ -912,10 +914,19 @@ async function main(): Promise<void> {
     // The release gate's evidence seam (arch-review 7 P0): a series' release verdict IS the scorecard
     // gate's decision — the same diff + evaluateGate a CI release gate runs, maxRegressions 0. The product
     // layer composes trust-kernel decisions; it never re-derives "better or worse" from bare pass rates.
+    // …and it hands back the PINS IT READ (arch-review 10 P0). `diffSnapshot` captures both records at the
+    // one read the diff was computed from, so the release records the judgment its verdict came from — not
+    // whatever a separate trend-list read saw a moment earlier, which a re-score landing in between made a
+    // different judgment entirely.
     seriesGate: async (tenant, baselineId, candidateId) => {
-      const diff = await scorecardService.diff(tenant, baselineId, candidateId, {});
-      const evaluation = evaluateGate(diff, { maxRegressions: 0 });
-      return { decision: evaluation.decision, reasons: evaluation.reasons };
+      const snapshot = await scorecardService.diffSnapshot(tenant, baselineId, candidateId, {});
+      const evaluation = evaluateGate(snapshot.diff, { maxRegressions: 0 });
+      return {
+        decision: evaluation.decision,
+        reasons: evaluation.reasons,
+        ...(snapshot.baseline.pin !== undefined ? { baselineScoring: snapshot.baseline.pin } : {}),
+        ...(snapshot.candidate.pin !== undefined ? { candidateScoring: snapshot.candidate.pin } : {}),
+      };
     },
     capabilities: {
       hasDataset: async (tenant, id) => (await datasetRegistry.versions(tenant, id)).length > 0,
