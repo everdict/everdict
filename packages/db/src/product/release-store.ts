@@ -280,14 +280,20 @@ export class PgReleaseStore implements ReleaseStore {
     // as the write. Read separately it would only be a wider window — the edit lands between the read and
     // the write and the decision commits anyway, which is exactly the race being closed.
     if (guard?.expectProduct !== undefined) {
-      params.push(guard.expectProduct.id, guard.expectProduct.policyDigest, guard.expectProduct.version);
-      const idIdx = params.length - 2;
+      params.push(guard.expectProduct.policyDigest, guard.expectProduct.version);
       const digestIdx = params.length - 1;
       const versionIdx = params.length;
+      // CORRELATED to the row being updated, and TENANT-SCOPED (arch-review 13). The first version compared
+      // `p.id = $callerSuppliedProductId` with no tenant clause — so the guard trusted the caller to restate
+      // a relationship the database already holds (`everdict_product_releases.product_id`), and evaluated it
+      // across every workspace. A trust boundary should never ask the application to re-assert what the
+      // schema knows: correlating to the row makes the guard structurally about THIS release's product, and
+      // the tenant clause makes it structurally about this workspace's.
+      //
       // Self-healing (mig 0154): the digest is the identity; the version is the fallback a product keeps only
       // until its next write populates the column. Never `IS NULL → pass` — that would leave every
       // un-migrated product's ship decisions unguarded, which is the fail-open this shape invites.
-      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.id=$${idIdx} AND (p.release_policy_digest=$${digestIdx} OR (p.release_policy_digest IS NULL AND coalesce(p.version, 0)=$${versionIdx})))`;
+      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (p.release_policy_digest=$${digestIdx} OR (p.release_policy_digest IS NULL AND coalesce(p.version, 0)=$${versionIdx})))`;
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

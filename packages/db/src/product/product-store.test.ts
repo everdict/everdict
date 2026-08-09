@@ -96,7 +96,10 @@ describe("PgProductVersionStore — insert-once decided by SQL, not a racy read"
     const { client, calls } = fakeClient(() => ({ rows: [{ id: "ver-1" }] }));
     const inserted = await new PgProductVersionStore(client).create(version({}), [fact("ev-1")]);
     expect(inserted).toBe(true);
-    expect(calls[0]?.text).toMatch(/ON CONFLICT \(tenant, product_id, service, version\) DO NOTHING/);
+    // The STREAM-scoped key (mig 0155): repointing a service at a different repository makes its versions a
+    // different stream, and keying on the display name alone made the new stream's v1.0.0 collide with the
+    // old one's and vanish as "already known".
+    expect(calls[0]?.text).toMatch(/ON CONFLICT \(tenant, product_id, service, stream_key, version\) DO NOTHING/);
     expect(calls[0]?.text).toMatch(/WHERE EXISTS \(SELECT 1 FROM ins\)/);
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
   });
@@ -152,5 +155,27 @@ describe("InMemoryProductStore / InMemoryReleaseStore", () => {
     const all = await releases.list("acme", { productId: "prod-1" });
     expect(all.map((row) => row.name)).toEqual(["2026.3", "2026.2"]);
     expect(await releases.list("acme", { productId: "prod-1", status: "planned" })).toHaveLength(1);
+  });
+});
+
+// mig 0155: the stream key joins the ledger's identity, and legacy rows are ADOPTED rather than re-imported.
+describe("product version ledger — stream identity, without a news storm on upgrade", () => {
+  it("treats the same version from a DIFFERENT stream as new — the name is not the identity", async () => {
+    const store = new InMemoryProductVersionStore();
+    expect(await store.create(version({ id: "v-a", streamKey: "gh/acme/api" }))).toBe(true);
+    // The service was repointed at another repository; its v1.0.0 is a different release entirely.
+    expect(await store.create(version({ id: "v-b", streamKey: "gh/acme/api-next" }))).toBe(true);
+    expect(await store.list("acme", { productId: "prod-1" })).toHaveLength(2);
+  });
+
+  it("ADOPTS a legacy row instead of re-importing it — an upgrade must not announce years of history", async () => {
+    const store = new InMemoryProductVersionStore();
+    await store.create(version({ id: "v-legacy" })); // written before the column existed: no stream
+    // The first sync after the migration stamps a stream. The row is claimed, NOT re-created.
+    expect(await store.create(version({ id: "v-again", streamKey: "gh/acme/api" }))).toBe(false);
+    const rows = await store.list("acme", { productId: "prod-1" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("v-legacy"); // the original row survives, now carrying its stream
+    expect(rows[0]?.streamKey).toBe("gh/acme/api");
   });
 });

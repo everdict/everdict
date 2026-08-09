@@ -73,10 +73,30 @@ function assertSeries(series: readonly ProductSeries[], productId: string): void
   }
 }
 
-// The source coordinates of a tracked service — when any of these change, the name now points at a different
-// stream of versions, so the sync watermark must NOT survive (the next sync is a fresh backfill).
-function sameSourceCoordinates(a: ProductService, b: ProductService): boolean {
-  return a.repository === b.repository && a.source === b.source && a.host === b.host && a.tagPrefix === b.tagPrefix;
+// WHICH VERSION STREAM a tracked service points at — the identity behind "same service", which is NOT the
+// service's name (arch-review 13). A name is what people call it; the coordinates are what it reads.
+//
+// EXPORTED, and that is the point. This decision had two consumers reading it differently: the product edit
+// applied it correctly (change the coordinates and the watermark cannot survive, because it describes a
+// stream this name no longer tracks), while the sync reconciler re-matched services by NAME alone and could
+// therefore restore repo-A's watermark onto a service now pointing at repo-B. And the version ledger keyed
+// on the name too, so repo-A's v1.0.0 and repo-B's v1.0.0 collided as one row. One invariant with three
+// implementations, two of them wrong. There is now one function, and everything that means "same stream"
+// executes it.
+export function serviceStreamKey(
+  service: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
+): string {
+  // Deliberately readable rather than hashed: it lands in a database column and in error messages, and an
+  // operator asking "why did this re-import" deserves an answer they can read. The separator is a character
+  // no coordinate can contain.
+  return [service.host ?? "", service.repository, service.source, service.tagPrefix ?? ""].join("\u0000");
+}
+
+export function sameSourceCoordinates(
+  a: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
+  b: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
+): boolean {
+  return serviceStreamKey(a) === serviceStreamKey(b);
 }
 
 export class Product {
