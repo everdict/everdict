@@ -39,14 +39,34 @@ export interface StagedScores {
 export interface ScoringStageParity {
   scorecardId: string;
   passId: string;
-  // Cases this pass JUDGED (its staged rows) and, of those, how many carry exactly the scores the live plane
-  // ended up with. `staged === matched` is the promotion's precondition.
+  // What this pass ACTUALLY JUDGED, derived from the settled plane rather than from the stage — the whole
+  // point (arch-review 11). The first version compared only the rows the stage happened to contain, so a
+  // pass that judged 100 cases and failed to stage 20 of them reported 80 staged / 80 matched / 0 mismatched:
+  // a perfect parity score describing a 20% data loss. A measurement that can only see what it wrote cannot
+  // detect that something was not written, and the stage write is best-effort by design.
+  expectedJudged: number;
   staged: number;
+  // Judged, but NOT in the stage. A promotion would silently drop these — the failure mode a stage-only
+  // comparison is structurally blind to.
+  missingFromStage: string[];
+  // Of the staged rows, how many carry exactly the judgments the live plane ended up with.
   matched: number;
   // Cases whose staged judgment differs from the plane — the ones a promotion would have changed.
   mismatched: string[];
   // Staged for a case the plane has no row for at all. A promotion would invent a row here.
   orphaned: string[];
+}
+
+// The CONTRACT-STEP PRECONDITION, written as code so nobody has to reconstruct it from a dashboard.
+// `staged === matched` is NOT it: that holds trivially when nothing was staged.
+export function stagePromotionSafe(parity: ScoringStageParity): boolean {
+  return (
+    parity.expectedJudged === parity.staged &&
+    parity.staged === parity.matched &&
+    parity.missingFromStage.length === 0 &&
+    parity.mismatched.length === 0 &&
+    parity.orphaned.length === 0
+  );
 }
 
 export interface ScoringStageStore {

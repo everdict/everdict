@@ -76,9 +76,14 @@ desired score plane*) is the one the expand step accidentally shipped: `prepareS
 through the write-back, so a row appeared the moment a pass *touched* a case, judged or not. `stage row
 exists → this case is done` is the obvious way to write the promotion, it would have been silently wrong on
 every case the strip cleared and the pass never reached, and the bug would have looked like a scoring bug
-rather than a semantics one (arch-review 10 P1). The strip no longer stages. The delta reading also keeps the
-two provenances apart — what this pass produced vs what it inherited from the previous revision — which is a
-distinction the promotion has to make anyway.
+rather than a semantics one (arch-review 10 P1). The strip no longer stages.
+
+**And a staged row holds THIS PASS'S JUDGMENTS ONLY — a true delta** (arch-review 11). The port said delta
+and the code staged the whole resulting case plane, inherited graders and other judges included. Two costs:
+the promotion could not tell what a pass *produced* from what it merely carried along, and a stage holding
+inherited rows quietly becomes a full-plane snapshot whose correctness depends on the pass having read those
+rows at exactly the right moment. Staged as a delta, the merge is explicit — inherited evidence stays on the
+carrier, produced evidence comes from the stage — which is the distinction the promotion has to make anyway.
 
 - `scoreCase` writes here (keyed by its own pass) instead of onto the child row.
 - `planScore`'s "already judged in THIS pass" predicate reads the stage — which is what the id-only predicate
@@ -96,17 +101,34 @@ unreadable" to what it should have been all along: a lease saying who may promot
 1. **Expand** — add the table (mig 0149). Writers dual-write (stage + carrier) so a rollback loses nothing.
 2. **Deploy** — readers unchanged (carriers are still the truth). The stage is **observed**, and observed
    means *measured*: every settled pass compares its stage against the plane it wrote and reports
-   `everdict_scoring_stage_parity_total{result=matched|mismatched|orphaned}` (`ScoringStageParity`). A week of
-   dual-writing that nobody compared is not evidence that the two agree — it is evidence that both writes
-   happened, which was never in doubt (arch-review 10 P1). The comparison runs strictly after the settle and
-   is strictly non-fatal: a measurement must never be able to fail the thing it measures.
+   `everdict_scoring_stage_parity_total{result=matched|mismatched|orphaned|missing_from_stage}`
+   (`ScoringStageParity`). A week of dual-writing that nobody compared is not evidence that the two agree — it
+   is evidence that both writes happened, which was never in doubt (arch-review 10 P1). The comparison runs
+   strictly after the settle and is strictly non-fatal: a measurement must never be able to fail the thing it
+   measures.
+
+   **The report has to be able to say NO.** Its first version walked the *staged rows* and compared each to
+   the plane, so a pass that judged 100 cases and failed to stage 20 reported 80 staged / 80 matched / 0
+   mismatched — a perfect parity score describing a 20% loss (arch-review 11). A measurement that can only see
+   what it wrote cannot detect that something was not written, and the stage write is best-effort by design.
+   `expectedJudged` is therefore derived from the **settled plane**: a pass strips the selected judges' rows
+   before it starts, so any selected-judge row on the settled plane was produced by this pass — that set is
+   "what this pass judged", independent of whether the stage write survived. `missingFromStage` is the
+   difference, and it is the dimension the contract step actually depends on.
 3. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
 
-Each step ships alone. Step 3 is the one that changes behavior, and its precondition is stated rather than
-assumed: `mismatched` and `orphaned` at zero across real traffic. `orphaned` is called out separately from a
-value mismatch because it is the shape where a promotion would *invent* a row rather than write a different
-one.
+Each step ships alone. Step 3 is the one that changes behavior, and its precondition is code rather than
+prose — `stagePromotionSafe(parity)`:
+
+```
+expectedJudged === staged && staged === matched
+  && missingFromStage = [] && mismatched = [] && orphaned = []
+```
+
+`staged === matched` alone is **not** the precondition: it holds trivially when nothing was staged, which is
+exactly the failure being guarded against. `orphaned` is separate from a value mismatch because it is the
+shape where a promotion would *invent* a row rather than write a different one.
 
 ## What this does NOT change
 

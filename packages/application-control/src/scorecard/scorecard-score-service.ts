@@ -20,7 +20,14 @@ import {
   verdictSummaryOf,
 } from "@everdict/domain";
 import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
-import { childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "@everdict/domain";
+import {
+  childKey,
+  isJudgeMetricOf,
+  judgeAttemptsOf,
+  judgePending,
+  stampJudgeAttempts,
+  stripJudgeScores,
+} from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
@@ -345,10 +352,16 @@ export class ScorecardScoreService {
     await this.owningPass(record, passId);
     const results = record.scorecard?.results ?? [];
     // Pending = judge-gradeable (a classified failure starves the judge — its recovery is retry/re-collect,
-    // not a scoring pass) AND missing a MEASURED verdict from at least one selected judge. Bare metric
-    // presence is NOT "judged": an unmeasured placeholder row is the exact state a re-score exists to replace,
-    // and reading it as done made the Temporal pass a no-op on its own worklist.
-    const missing = results.filter((r) => judgeGradeable(r) && !judges.every((j) => hasMeasuredJudgeVerdict(r, j.id)));
+    // not a scoring pass) AND at least one selected judge still has work to do here.
+    //
+    // "Work to do" is an ORCHESTRATION question, not a measurement one (arch-review 11 P0). Bare metric
+    // presence is not "judged" — an unmeasured placeholder is the exact state a re-score exists to replace —
+    // but neither is every unmeasured row still pending: a judge whose spec cannot be resolved writes
+    // `retryable: false` on every attempt, so reading "no measured verdict" as "still to do" put those cases
+    // back on the worklist at every `continueAsNew`, forever, paying a provider call each time. `judgePending`
+    // separates the two: absent and retryable-under-budget are pending, terminal-unmeasured is done-without-a
+    // -verdict, and every measurement surface keeps reading it as the non-verdict it is.
+    const missing = results.filter((r) => judgeGradeable(r) && judgePending(r, judges));
     return {
       keys: missing.map((r) => childKey(r.caseId, r.trial)),
       concurrency: record.orchestration?.concurrency ?? 4,
@@ -378,10 +391,12 @@ export class ScorecardScoreService {
       );
     const result = (record.scorecard?.results ?? []).find((r) => childKey(r.caseId, r.trial) === key);
     if (!result) return { scored: false, skipped: true };
-    // Same predicate as planScore: a measured verdict per selected judge = done; an unmeasured placeholder
-    // is not. A non-gradeable case (classified failure) is skipped — its recovery is not a scoring pass.
-    if (!judgeGradeable(result) || judges.every((j) => hasMeasuredJudgeVerdict(result, j.id)))
-      return { scored: false, skipped: true };
+    // The SAME predicate as planScore — one function, so a case the plan listed is a case this acts on and a
+    // case it skipped is one the plan will not list again.
+    if (!judgeGradeable(result) || !judgePending(result, judges)) return { scored: false, skipped: true };
+    // What each selected judge had already tried here, read BEFORE the strip removes the evidence of it.
+    // The attempt budget only binds if the count survives the strip that a re-score always performs.
+    const priorAttempts = judgeAttemptsOf(result, judges);
     // Strip the selected judges' ENTIRE prior output — verdicts, criterion children, placeholders — so the
     // re-score replaces rather than accretes (the exact-name strip left stale judge:<id>:<criterion> rows
     // alive next to fresh ones, compounding on every pass).
@@ -400,7 +415,10 @@ export class ScorecardScoreService {
       runIdOf,
       pass.judges,
     );
-    await this.writeBackScores(record, [single], pass);
+    // Count the attempt onto whatever this produced. A verdict ends the counting; another unmeasured row
+    // carries prior+1, so a judge that keeps failing the same way exhausts its budget and the pass can end.
+    single.scores = stampJudgeAttempts(single.scores, judges, priorAttempts);
+    await this.writeBackScores(record, [single], pass, { judges });
     return { scored: true };
   }
 
@@ -487,7 +505,7 @@ export class ScorecardScoreService {
         runIdOf,
         (fresh ?? record).scoringPass?.judges,
       );
-      await this.writeBackScores(record, results, pass);
+      await this.writeBackScores(record, results, pass, { judges });
       await this.aggregate(record, scorecard, results, judges, submittedBy, pass);
     } catch (err) {
       // Best-effort visibility: a failed scoring pass never flips the (already settled) group — it leaves a step.
@@ -639,36 +657,64 @@ export class ScorecardScoreService {
     // watched the two agree on real traffic — dual-writing without ever comparing proves only that both
     // writes happened. Strictly after the settle and strictly non-fatal: a measurement must never be able to
     // fail the thing it measures.
-    if (pass?.passId !== undefined) void this.reportStageParity(record.id, pass.passId, results);
+    if (pass?.passId !== undefined) void this.reportStageParity(record.id, pass.passId, results, judges);
   }
 
-  // Compare what THIS pass staged against the plane it settled. Judgment-delta semantics (see the port), so
-  // the comparison is over the staged cases only: a case this pass never judged has no staged row and is
-  // nothing to disagree about. `orphaned` is the shape that would make a promotion INVENT a row, which is
-  // why it is counted separately from a plain value mismatch.
-  private async reportStageParity(scorecardId: string, passId: string, settled: CaseResult[]): Promise<void> {
+  // Compare what THIS pass staged against the plane it settled — and, first, against what it actually JUDGED.
+  //
+  // `expected` is derived from the SETTLED PLANE, never from the stage (arch-review 11). A pass strips the
+  // selected judges' rows before it starts, so any selected-judge row on the settled plane was produced by
+  // this pass: that set IS "what this pass judged", independently of whether the stage write survived. A
+  // comparison that walked the staged rows alone could only ever report on the writes that succeeded, which
+  // is precisely the failure mode a best-effort write has. Non-gradeable cases are excluded — the strip skips
+  // them, so their surviving old rows are inherited, not produced.
+  private async reportStageParity(
+    scorecardId: string,
+    passId: string,
+    settled: CaseResult[],
+    judges: ReadonlyArray<{ id: string }>,
+  ): Promise<void> {
     const report = this.deps.scoringStageParity;
     const stage = this.deps.scoringStage;
     if (!report || !stage) return;
     try {
+      const mine = (scores: CaseResult["scores"]) =>
+        scores.filter((s) => judges.some((j) => isJudgeMetricOf(s.metric, j.id)));
+      // caseKey → the delta this pass produced there, as the plane records it.
+      const produced = new Map<string, CaseResult["scores"]>();
+      for (const r of settled) {
+        if (!judgeGradeable(r)) continue;
+        const delta = mine(r.scores);
+        if (delta.length > 0) produced.set(childKey(r.caseId, r.trial), delta);
+      }
       const staged = await stage.staged(scorecardId, passId);
-      if (staged.length === 0) return; // an embed group / a pass with no staged judgments — nothing to compare
-      const plane = new Map(settled.map((r) => [childKey(r.caseId, r.trial), r.scores] as const));
+      if (staged.length === 0 && produced.size === 0) return; // nothing happened — nothing to report
+      const stagedKeys = new Set(staged.map((e) => e.caseKey));
+      const missingFromStage = [...produced.keys()].filter((k) => !stagedKeys.has(k));
       const mismatched: string[] = [];
       const orphaned: string[] = [];
       let matched = 0;
       for (const entry of staged) {
-        const live = plane.get(entry.caseKey);
+        const live = produced.get(entry.caseKey);
         if (live === undefined) {
           orphaned.push(entry.caseKey);
           continue;
         }
-        // Structural equality over the score rows — the promotion would write these bytes verbatim, so the
+        // Structural equality over the delta rows — the promotion would write these bytes verbatim, so the
         // comparison is the same one the promotion's correctness rests on.
         if (JSON.stringify(live) === JSON.stringify(entry.scores)) matched += 1;
         else mismatched.push(entry.caseKey);
       }
-      report({ scorecardId, passId, staged: staged.length, matched, mismatched, orphaned });
+      report({
+        scorecardId,
+        passId,
+        expectedJudged: produced.size,
+        staged: staged.length,
+        missingFromStage,
+        matched,
+        mismatched,
+        orphaned,
+      });
     } catch {
       // A parity report that cannot run tells us nothing; it must not turn a settled pass into a failed one.
     }
@@ -729,22 +775,36 @@ export class ScorecardScoreService {
     record: ScorecardRecord,
     results: CaseResult[],
     pass?: ScoringPass,
-    opts: { stage?: boolean } = {},
+    // `judges` is what makes the stage a DELTA — without it there is nothing to select, so the write is
+    // skipped rather than degrading into a full-plane snapshot the promotion would misread.
+    opts: { stage?: boolean; judges?: ReadonlyArray<{ id: string }> } = {},
   ): Promise<void> {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
     const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
-    // …and STAGE the same judgments under this pass (expand step, scoring-plane-revisions.md). Written and
-    // never decided on: the carriers below stay the source of truth for this deploy, so a rollback loses
-    // nothing, and the contract step later makes the finalize promote from here instead of writing through.
-    // A staging failure must not fail a pass that is writing its plane correctly — nothing depends on it yet.
-    // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch (see the port).
-    if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined) {
+    // …and STAGE this pass's judgments (expand step, scoring-plane-revisions.md). Written and never decided
+    // on: the carriers below stay the source of truth for this deploy, so a rollback loses nothing, and the
+    // contract step later makes the finalize promote from here instead of writing through. A staging failure
+    // must not fail a pass that is writing its plane correctly — nothing depends on it yet, and the parity
+    // report at settle is what detects the failure (arch-review 11).
+    //
+    // A TRUE DELTA: only the SELECTED judges' rows (arch-review 11). The port called this a delta and the
+    // code staged the whole resulting case plane — inherited graders and other judges included. Two costs:
+    // the promotion could not tell what this pass PRODUCED from what it merely carried along, and a stage
+    // that contains the inherited plane silently becomes a full-plane snapshot whose correctness depends on
+    // the pass having read the inherited rows at exactly the right moment. Staging the delta makes the
+    // promotion's merge explicit — inherited evidence stays on the carrier, produced evidence comes from here.
+    // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch.
+    if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined && opts.judges) {
+      const selected = opts.judges;
       await this.deps.scoringStage
         .stage(
           record.id,
           pass.passId,
-          results.map((r) => ({ caseKey: childKey(r.caseId, r.trial), scores: r.scores })),
+          results.map((r) => ({
+            caseKey: childKey(r.caseId, r.trial),
+            scores: r.scores.filter((s) => selected.some((j) => isJudgeMetricOf(s.metric, j.id))),
+          })),
         )
         .catch(() => undefined);
     }

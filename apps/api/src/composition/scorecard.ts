@@ -4,6 +4,7 @@ import type {
   ScoringStageStore,
   TrajectoryStore,
 } from "@everdict/application-control";
+import { stagePromotionSafe } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
@@ -244,30 +245,24 @@ export function buildScorecard(deps: {
     // showing only a total says dual-writing happened, which was never in doubt. A mismatch is also logged,
     // named by pass, because a rate alone cannot be investigated.
     scoringStageParity: (parity) => {
-      metrics.counter(
-        "everdict_scoring_stage_parity_total",
-        "Scoring-stage rows compared against the settled plane, by outcome.",
-        { result: "matched" },
-        parity.matched,
-      );
-      if (parity.mismatched.length > 0)
-        metrics.counter(
-          "everdict_scoring_stage_parity_total",
-          "Scoring-stage rows compared against the settled plane, by outcome.",
-          { result: "mismatched" },
-          parity.mismatched.length,
-        );
-      if (parity.orphaned.length > 0)
-        metrics.counter(
-          "everdict_scoring_stage_parity_total",
-          "Scoring-stage rows compared against the settled plane, by outcome.",
-          { result: "orphaned" },
-          parity.orphaned.length,
-        );
-      if (parity.mismatched.length > 0 || parity.orphaned.length > 0)
+      const HELP = "Scoring-stage rows compared against the settled plane, by outcome.";
+      const bump = (result: string, n: number) => {
+        if (n > 0) metrics.counter("everdict_scoring_stage_parity_total", HELP, { result }, n);
+      };
+      bump("matched", parity.matched);
+      bump("mismatched", parity.mismatched.length);
+      bump("orphaned", parity.orphaned.length);
+      // The dimension that makes the metric able to say NO (arch-review 11): judged, and never staged. Without
+      // it the series could only report on writes that happened, so a stage losing a fifth of its rows still
+      // graphed as perfect parity — and the contract step reads this graph.
+      bump("missing_from_stage", parity.missingFromStage.length);
+      // The precondition itself, so an operator reads a verdict rather than reconstructing one from four
+      // series. `stagePromotionSafe` is the same predicate the contract step must gate on.
+      if (!stagePromotionSafe(parity)) {
         console.warn(
-          `[scoring-stage] parity mismatch on ${parity.scorecardId} pass ${parity.passId}: ${parity.matched}/${parity.staged} matched, mismatched=[${parity.mismatched.join(", ")}], orphaned=[${parity.orphaned.join(", ")}]`,
+          `[scoring-stage] parity NOT promotion-safe on ${parity.scorecardId} pass ${parity.passId}: judged=${parity.expectedJudged} staged=${parity.staged} matched=${parity.matched} missing=[${parity.missingFromStage.join(", ")}] mismatched=[${parity.mismatched.join(", ")}] orphaned=[${parity.orphaned.join(", ")}]`,
         );
+      }
     },
     ...(recordingStore ? { recordingStore } : {}),
     datasets: datasetRegistry,

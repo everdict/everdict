@@ -57,6 +57,12 @@ export const UnmeasuredScoreSchema = z
     status: z.literal("unmeasured"),
     reason: z.enum(UNMEASURED_REASONS),
     retryable: z.boolean(), // true ⇒ re-scoring this grader can recover the measurement
+    // How many times the CURRENT scoring pass has attempted this measurement (arch-review 11 P0). Pass-local
+    // for free: a pass strips the selected judges' rows before it starts, so the counter a pass reads is one
+    // it wrote itself. Without it a `retryable: true` failure that never recovers keeps the case on every
+    // continuation's worklist — the same unbounded loop `retryable: false` had, just slower to notice.
+    // Absent = never counted (rows written before this existed, and every non-judge producer).
+    attempts: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type UnmeasuredScore = z.infer<typeof UnmeasuredScoreSchema>;
@@ -113,7 +119,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // A non-object input is passed through untouched so the union — not this function — reports the type error.
 function normalizeScoreShape(raw: unknown): unknown {
   if (!isRecord(raw)) return raw;
-  const { graderId, metric, value, pass, label, detail, status, reason, retryable } = raw;
+  const { graderId, metric, value, pass, label, detail, status, reason, retryable, attempts } = raw;
   const identity = { graderId, metric, ...(detail !== undefined ? { detail } : {}) };
   const invalid = () => ({ ...identity, status: "invalid", reason: "contract_violation" });
 
@@ -124,6 +130,10 @@ function normalizeScoreShape(raw: unknown): unknown {
       status: "unmeasured",
       reason: typeof reason === "string" && UNMEASURED_REASON_SET.has(reason) ? reason : "unsupported",
       retryable: typeof retryable === "boolean" ? retryable : false,
+      // The attempt counter has to SURVIVE normalization. This function runs at every deserialization
+      // boundary, so a field it forgets is a field that silently resets on the next read — and a retry
+      // budget that resets is not a budget.
+      ...(typeof attempts === "number" && Number.isInteger(attempts) && attempts >= 0 ? { attempts } : {}),
     };
   }
   if (status === undefined && pass === undefined && typeof detail === "string") {
