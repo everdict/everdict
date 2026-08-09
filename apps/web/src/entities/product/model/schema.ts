@@ -134,6 +134,9 @@ export const seriesVerdictSchema = z.enum([
   'blocked_missing',
   'not_comparable',
   'not_evaluated',
+  // 첫 출하: 증거는 있지만 비교할 기준이 없다. "비교 불가"와 "출하해도 된다"는 다른 문장이라
+  // 기본은 차단이고, 시리즈 정책 allowNoBaseline 이 명시 승인이다(arch-review 8 P1).
+  'bootstrap_required',
 ])
 export const releaseSeriesStateSchema = z.object({
   key: z.string(),
@@ -143,6 +146,8 @@ export const releaseSeriesStateSchema = z.object({
       scorecardId: z.string(),
       passRate: z.number().optional(),
       createdAt: z.string(),
+      // 어느 판정인가 — 스코어카드 id 는 re-score 가 가능해진 순간부터 증거 참조가 아니다.
+      scoring: z.object({ revision: z.number(), scorePlaneDigest: z.string() }).optional(),
       serviceVersion: z.string().optional(),
     })
     .optional(),
@@ -151,9 +156,13 @@ export const releaseSeriesStateSchema = z.object({
       scorecardId: z.string(),
       passRate: z.number().optional(),
       createdAt: z.string(),
+      // 어느 판정인가 — 스코어카드 id 는 re-score 가 가능해진 순간부터 증거 참조가 아니다.
+      scoring: z.object({ revision: z.number(), scorePlaneDigest: z.string() }).optional(),
     })
     .optional(),
   verdict: seriesVerdictSchema,
+  // 이 시리즈가 결정 시점에 게이트였는가 — 제품 정책은 편집 가능하므로 결정 이후 재조회로는 답할 수 없다.
+  required: z.boolean().optional(),
   reasons: z.array(z.string()).optional(),
   // 이 시리즈가 출하를 차단하는가 — required && verdict ∉ {pass, no_baseline}
   regressed: z.boolean(),

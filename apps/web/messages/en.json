@@ -6018,6 +6018,7 @@
     "verdictBlock": "Regressed",
     "verdictBlockedMissing": "Blocked — missing evidence",
     "verdictNotComparable": "Not comparable",
+    "verdictBootstrapRequired": "First ship — approval needed",
     "verdictNotEvaluated": "Not evaluated",
     "linkedIssuesHeading": "Linked issues",
     "historyHeading": "History",

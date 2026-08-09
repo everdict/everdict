@@ -31,6 +31,7 @@ const VERDICT_LABEL_KEY = {
   blocked_missing: 'verdictBlockedMissing',
   not_comparable: 'verdictNotComparable',
   not_evaluated: 'verdictNotEvaluated',
+  bootstrap_required: 'verdictBootstrapRequired',
 } as const
 
 export const dynamic = 'force-dynamic'

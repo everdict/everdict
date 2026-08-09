@@ -47,7 +47,7 @@ export class InMemoryRunStore implements RunStore {
   // the invariant: an unpaired run store is not part of a scoring topology at all, and refusing instead
   // would break every unrelated test into attaching a stub that always says yes, which is a fence that
   // certifies nothing. The boundary this invariant protects is the Postgres one.
-  attachScorecards(owner: { peek(id: string): { scoringPass?: { passId?: string } } | undefined }): void {
+  attachScorecards(owner: { peek(id: string): { scoringPass?: { passId?: string } | null } | undefined }): void {
     this.scoringPassOwner = (scorecardId) => owner.peek(scorecardId)?.scoringPass?.passId;
   }
 

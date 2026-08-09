@@ -6018,6 +6018,7 @@
     "verdictBlock": "회귀",
     "verdictBlockedMissing": "차단 — 증거 부족",
     "verdictNotComparable": "비교 불가",
+    "verdictBootstrapRequired": "첫 출하 — 승인 필요",
     "verdictNotEvaluated": "평가 안 됨",
     "linkedIssuesHeading": "링크된 이슈",
     "historyHeading": "이력",
