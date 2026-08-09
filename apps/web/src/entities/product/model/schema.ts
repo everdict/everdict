@@ -140,6 +140,9 @@ export const seriesVerdictSchema = z.enum([
   // 이 릴리즈가 판정 기준으로 약속한 시리즈를 제품이 더는 선언하지 않는다(arch-review 12 P0).
   // 측정 결과가 아니라 게이트 자체가 사라진 상태라, 통과가 아니라 항상 차단이다.
   'scope_invalid',
+  // 증거는 있지만 지금 시리즈가 선언한 평가 계약(데이터셋/하네스/저지)과 다른 계약에서 나왔다(arch-review 13 P0).
+  // 질문이 바뀌었으므로 다른 질문에 대한 답이고, 한 번도 평가하지 않은 것과 똑같이 차단한다.
+  'contract_stale',
 ])
 export const releaseSeriesStateSchema = z.object({
   key: z.string(),

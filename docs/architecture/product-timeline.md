@@ -108,6 +108,33 @@ record detects that the policy changed and can never say what it was, and "which
 had a bootstrap been approved?" is the first question a post-mortem asks. A forced ship past any blocking
 verdict stays a recorded override.
 
+**Evidence must answer the question the series asks NOW** (arch-review 13 P0). `seriesKey` is the TREND's
+identity — deliberately stable so relabeling never re-keys history — and readiness selected release evidence
+by it, so editing a series' dataset/harness/judges left yesterday's green standing as today's evidence: same
+key, different question. Worse for version-less refs, where `latest` moves with the product row untouched, so
+neither the row version nor the policy digest could ever see it. A series is therefore two things and gets two
+identities: `key` (the trend) and `seriesContractDigest` (the CONTRACT — the resolved dataset/harness/judge
+closure). Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
+compares against, so the two can never drift into different answers); a newest batch whose stamp differs — or
+is absent, meaning it cannot say which question it answered — is `contract_stale` and blocks a required
+series. An unresolvable contract makes the check ABSTAIN rather than declaring everything stale on our own
+inability to look.
+
+**Service identity is the STREAM, not the name.** `serviceStreamKey` (repository · source · host · tagPrefix)
+is one exported domain decision with three consumers that used to read it differently: the product edit
+applied it (repoint a service and its watermark cannot survive), the sync reconciler re-matched by NAME and
+could restore repo-A's watermark onto repo-B, and the version ledger keyed by name so repo-B's `v1.0.0`
+collided with repo-A's and vanished as "already known". The ledger's natural key now includes the stream
+(mig 0155), with legacy rows ADOPTED on first write rather than re-imported — re-importing would announce
+years of history as news, the exact storm the backfill rule exists to prevent.
+
+**Backfill takes BOTH signals.** "Has this service ever been synced" is answered by the watermark OR a ledger
+row, and backfill requires the absence of both. The watermark alone was fragile (a first sync whose watermark
+write lost its CAS left the service permanently in backfill, silently swallowing every later release); the
+ledger alone is wrong the other way (a repository with no releases yet syncs successfully and imports
+nothing). Wrong in the safe direction: announcing something arguably historical is a reader's judgement,
+swallowing a release is unrecoverable.
+
 **A release's SCOPE is frozen at plan time** (arch-review 12 P0). A release is "a date and a scope somebody
 committed to", and the scope was re-derived from the product's *current* series on every readiness read — so
 deleting a series did not FAIL the gate, it DELETED it: `seriesKeys: ["quality"]` filtered against a product
@@ -123,10 +150,15 @@ failure is legible at the edit rather than discovered later as a release nobody 
 can be bypassed (an import, a migration, another replica), so the gate is the guarantee and the preflight is
 the explanation.
 
-**Deleting a product is ONE statement.** Releases and the version ledger exist only under their product and
-the schema has no foreign keys by choice, which makes the aggregate boundary a transaction's job.
-`removeAggregate` deletes all three in a single data-modifying CTE; the previous application-level walk had a
-gap in the middle that a concurrent `createRelease` could insert an orphan into.
+**Deleting a product is ONE statement, and children SERIALIZE against it.** `removeAggregate` deletes all
+three in a single data-modifying CTE — but atomicity is not serialization: a child INSERT took no lock on the
+parent, so a `createRelease` that read the product before the delete could still insert its orphan after it.
+Mig 0156 makes the relationship a FOREIGN KEY on `(tenant, product_id)` with `ON DELETE CASCADE`, which is
+the parent-row lock protocol (Postgres takes KEY SHARE on the parent for every child insert) obtained without
+a transaction API the `SqlClient` port does not have — and it enforces the TENANT correlation structurally,
+so no application code has to remember to check it. `NOT VALID`: deployments may already hold orphans created
+by the very race being closed, and validating would fail the migration on data the constraint exists to
+prevent more of.
 
 **The ship commits against the release's version and the product's POLICY.** `expectStatus` + `expectVersion`
 guard the release row (mig 0148); `expectProduct` guards the product's `release_policy_digest` (mig 0154),

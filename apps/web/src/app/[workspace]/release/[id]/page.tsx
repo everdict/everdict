@@ -33,6 +33,7 @@ const VERDICT_LABEL_KEY = {
   not_evaluated: 'verdictNotEvaluated',
   bootstrap_required: 'verdictBootstrapRequired',
   scope_invalid: 'verdictScopeInvalid',
+  contract_stale: 'verdictContractStale',
 } as const
 
 export const dynamic = 'force-dynamic'

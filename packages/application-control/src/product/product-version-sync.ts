@@ -6,7 +6,14 @@ import {
   type ProductService as ProductServiceEntry,
   type ProductServiceVersionRecord,
 } from "@everdict/contracts";
-import { Product, watchedSeries } from "@everdict/domain";
+import {
+  Product,
+  type ResolvedSeriesContract,
+  sameSourceCoordinates,
+  seriesContractDigest,
+  serviceStreamKey,
+  watchedSeries,
+} from "@everdict/domain";
 import type { GithubRepositoryTokenSource } from "../issue/github-issue-sync.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { GithubVersionReaderFactory } from "../ports/github-repo-writer.js";
@@ -52,6 +59,8 @@ export type SeriesRunSubmitter = (input: {
     productId: string;
     releaseId?: string;
     seriesKey: string;
+    // The concrete evaluation contract this run answers under — see ProductVersionSync.autoEval.
+    seriesContractDigest?: string;
     serviceVersion?: string;
   };
 }) => Promise<{ id: string }>;
@@ -64,6 +73,11 @@ export interface ProductVersionSyncDeps {
   readers: GithubVersionReaderFactory;
   // Absent = imports land and announce themselves, but nothing runs (a deployment without the eval plane).
   submitSeriesRun?: SeriesRunSubmitter;
+  // Resolve a series' CONCRETE contract at submit time (arch-review 13 P0) — the same seam ProductService
+  // uses at readiness, so the stamp a batch carries and the contract a release compares it against are
+  // produced by one function. Absent = batches ship unstamped, which readiness reads as evidence whose
+  // question cannot be named.
+  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<ResolvedSeriesContract | undefined>;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -96,7 +110,20 @@ export class ProductVersionSync {
     const inserted: ProductServiceVersionRecord[] = [];
     for (const service of initial.services) {
       try {
-        const backfill = service.sync?.syncedAt === undefined;
+        // BACKFILL means "this service has never been synced before", and it takes BOTH signals to answer
+        // that safely (arch-review 13). The watermark alone was fragile: a first sync whose watermark write
+        // lost its CAS three times left the service permanently in backfill — its rows were already in the
+        // insert-once ledger, so the next sync found nothing new, and a genuinely new version arriving later
+        // landed as backfill too. Silently, forever, because news is computed once per row.
+        //
+        // The ledger alone is wrong in the other direction: a service whose repository had no releases yet
+        // synced successfully and imported nothing, so "no rows" would call its FIRST real release history.
+        //
+        // Either signal is evidence of a completed sync, so backfill requires the absence of both. Wrong in
+        // the safe direction: the worst case is announcing a version that was arguably history, which is a
+        // reader's judgement to make — versus silently swallowing a release, which nobody can recover.
+        const backfill =
+          service.sync?.syncedAt === undefined && !(await this.hasImportedHistory(tenant, productId, service.name));
         const rows = await this.importService(tenant, record, service, actor, backfill);
         // A backfilled row counts as imported (it is on the timeline now) but is never news — only
         // post-watermark arrivals reach the auto-eval below.
@@ -121,36 +148,68 @@ export class ProductVersionSync {
     // A miss is not an error here: this is a RECONCILER, and the right answer to "someone else wrote" is to
     // re-read and re-apply only what this sync owns — the per-service watermark — rather than to fail a sweep
     // or to insist on the world it saw first.
-    await this.commitSyncState(tenant, productId, record);
+    const watermarkSaved = await this.commitSyncState(tenant, productId, record);
+    if (!watermarkSaved) {
+      // Say it. The watermark is no longer load-bearing for the backfill boundary (the ledger is), so losing
+      // it costs a re-listing rather than a lost event — but a reconciler that silently fails to persist its
+      // cursor is a reconciler nobody can tell is degraded.
+      outcomes.push({
+        name: "*",
+        imported: 0,
+        error: "sync watermark could not be persisted (concurrent product edits)",
+      });
+    }
     // …and the auto-eval plans against the CURRENT product, not the one read before a network round trip
     // (arch-review 12 P1). Series definitions are editable, so submitting under the definition this sync
     // happened to open with produced batches stamped `seriesKey: quality` that were run under a dataset or
     // harness the product had since replaced — a new evaluation created from a standing policy that no
     // longer stands, landing on the trend as if it were the current one.
-    const current = (await this.deps.products.get(tenant, productId)) ?? record;
+    const current = await this.deps.products.get(tenant, productId);
+    // DELETED mid-sync is a lifecycle fact, not "we could not find the current config" (arch-review 13).
+    // Falling back to the snapshot this sync opened with would submit evaluations for a product that no
+    // longer exists, under a definition nobody can look up — scorecards stamped `productId` for a timeline
+    // that was removed. The imports already landed and the ledger is insert-once, so stopping here loses
+    // nothing that was not already lost by the delete.
+    if (!current) return { services: outcomes, triggered: [] };
     const { triggered, failedSeries } = await this.autoEval(tenant, current, inserted);
     return { services: outcomes, triggered, ...(failedSeries.length > 0 ? { failedSeries } : {}) };
+  }
+
+  // Has this service ever landed a row? The DURABLE half of the backfill discriminator — see `sync`. One row
+  // is enough to answer it, so the read is bounded regardless of how much history a product carries.
+  private async hasImportedHistory(tenant: string, productId: string, service: string): Promise<boolean> {
+    const rows = await this.deps.versions.list(tenant, { productId, service, limit: 1 });
+    return rows.length > 0;
   }
 
   // Persist THIS SYNC'S watermark under the product's optimistic guard, re-folding onto a concurrent edit
   // instead of overwriting it. Bounded: a sweep that keeps losing the race has nothing urgent to save — the
   // watermark is re-derivable from the next run, and the version ledger it protects is insert-once anyway.
-  private async commitSyncState(tenant: string, productId: string, folded: ProductRecord): Promise<void> {
-    const syncByName = new Map(folded.services.map((s) => [s.name, s.sync] as const));
+  private async commitSyncState(tenant: string, productId: string, folded: ProductRecord): Promise<boolean> {
+    // Keyed by NAME but validated on the STREAM (arch-review 13). Restoring by name alone let this
+    // reconciler undo a decision the domain had just made: an edit that repoints "api" from repo-A to repo-B
+    // clears the watermark precisely because it describes a stream the name no longer tracks — and then a
+    // sync that had started before the edit put repo-A's watermark back on repo-B. The domain says
+    // "coordinates decide"; this now executes the same function rather than re-interpreting it as
+    // "same name ⇒ same stream".
+    const foldedByName = new Map(folded.services.map((s) => [s.name, s] as const));
     for (let attempt = 0; attempt < SYNC_COMMIT_ATTEMPTS; attempt++) {
       const live = attempt === 0 ? folded : await this.deps.products.get(tenant, productId);
-      if (!live) return; // the product was deleted mid-sync — there is no watermark to keep
+      if (!live) return true; // the product was deleted mid-sync — there is no watermark to keep
       // Only the sync state is carried forward. Whatever a member changed about names, series or repos is
       // the live record's, and this write must not have an opinion about it.
       const services = live.services.map((s) => {
-        const sync = syncByName.get(s.name);
-        return sync === undefined ? s : { ...s, sync };
+        const mine = foldedByName.get(s.name);
+        // Same name AND same stream, or this sync has nothing to say about it.
+        if (mine === undefined || mine.sync === undefined || !sameSourceCoordinates(mine, s)) return s;
+        return { ...s, sync: mine.sync };
       });
       const written = await this.deps.products.update(tenant, productId, { services }, undefined, {
         expectVersion: live.version ?? 0,
       });
-      if (written !== undefined) return;
+      if (written !== undefined) return true;
     }
+    return false;
   }
 
   private async importService(
@@ -214,6 +273,9 @@ export class ProductVersionSync {
         tenant,
         productId: product.id,
         service: service.name,
+        // WHICH STREAM produced it (mig 0155) — the ledger's insert-once identity. The domain owns what
+        // "same stream" means; this stamps its answer rather than restating the coordinates.
+        streamKey: serviceStreamKey(service),
         ...candidate,
       };
       // A backfill fills the timeline's past without emitting: fifty historical releases arriving at once are
@@ -255,6 +317,15 @@ export class ProductVersionSync {
     const failedSeries: Array<{ key: string; error: string }> = [];
     for (const entry of series) {
       try {
+        // WHICH QUESTION this batch is about to answer (arch-review 13 P0) — the series' concrete
+        // dataset/harness/judge closure, resolved NOW. Version-less refs mean "latest at run time", so the
+        // digest has to be taken over what the run will actually use, not over the refs as written; without
+        // it a release read cannot tell a batch that answered today's question from one that answered
+        // last month's under the same series key. Unresolvable → no stamp, which readiness treats as
+        // evidence whose question cannot be named (blocking, not silently current).
+        const contract = this.deps.resolveSeriesContract
+          ? await this.deps.resolveSeriesContract(tenant, entry).catch(() => undefined)
+          : undefined;
         const submitted = await this.deps.submitSeriesRun({
           tenant,
           // The schedule precedent: a machine-fired batch is submitted as the product's creator — the person
@@ -269,6 +340,7 @@ export class ProductVersionSync {
             productId: product.id,
             ...(planned !== undefined ? { releaseId: planned.id } : {}),
             seriesKey: entry.key,
+            ...(contract !== undefined ? { seriesContractDigest: seriesContractDigest(contract) } : {}),
             ...(serviceVersion !== undefined ? { serviceVersion } : {}),
           },
         });

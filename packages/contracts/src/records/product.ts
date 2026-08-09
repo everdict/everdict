@@ -192,7 +192,14 @@ export const ProductServiceVersionRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   productId: z.string(),
-  service: z.string(), // ProductService.name
+  service: z.string(), // ProductService.name — what people call it
+  // WHICH STREAM this version came from (mig 0155) — `serviceStreamKey`: repository, source, host, tagPrefix.
+  // The name is not the identity: repointing a service at a different repository means the name now tracks a
+  // different stream, which is exactly why the domain clears its sync watermark. Keying the ledger on the
+  // name alone made repo-B's v1.0.0 collide with repo-A's already-imported v1.0.0 and vanish as "known" — a
+  // genuinely new release that could never become news. Absent on rows written before the column existed;
+  // the writer ADOPTS those into the stream their service currently points at rather than re-importing them.
+  streamKey: z.string().optional(),
   version: z.string().min(1), // the tag name, verbatim (no prefix stripping — the record keeps the fact)
   kind: ProductVersionKindSchema,
   prerelease: z.boolean().default(false),
@@ -233,6 +240,11 @@ export const SeriesVerdictSchema = z.enum([
   // fault as a measurement fact. ALWAYS blocking: deleting a series must never be a way to turn a red
   // release green, which is what silently filtering it out of the watch list amounted to.
   "scope_invalid",
+  // Evidence exists for this series, but it was produced under a DIFFERENT evaluation contract than the one
+  // the series declares now (arch-review 13 P0) — a changed dataset, harness or judge selection, or a
+  // version-less ref whose `latest` moved. Not a measurement outcome: the question changed, so the answer is
+  // an answer to a different question. Blocking for a required series, exactly like never having run.
+  "contract_stale",
 ]);
 export type SeriesVerdict = z.infer<typeof SeriesVerdictSchema>;
 

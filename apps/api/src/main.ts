@@ -43,8 +43,8 @@ import {
   firstPartyCatalogExtras,
   firstPartyDefaults,
 } from "@everdict/application-control";
-import type { RegistryAuth } from "@everdict/contracts";
-import { evaluateGate, perTenantTrustZones } from "@everdict/domain";
+import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
+import { type ResolvedSeriesContract, evaluateGate, perTenantTrustZones, resolveRef } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -905,6 +905,40 @@ async function main(): Promise<void> {
   // not fail loudly — it would fail every auto-run and read as "the product got worse"). The sync pulls
   // GitHub releases/tags through the workspace App and fans genuinely new versions out into the watch
   // series' scorecards, stamped with product/series/version provenance (the trend's x-axis key).
+  // WHAT A WATCH SERIES ASKS TODAY, concretely (arch-review 13 P0). A series' refs may omit the version,
+  // which means "latest at run time" — so the contract underneath a series can move with the product row
+  // untouched, and neither the row's version nor its policy digest can see it. Resolving here, at the one
+  // place that knows the registries, keeps the SUBMIT stamp and the READINESS comparison on one function.
+  //
+  // Any unresolvable ref answers `undefined`: a series naming a deleted dataset has no contract to compare
+  // against, and inventing one would be worse than abstaining.
+  const resolveSeriesContract = async (
+    tenant: string,
+    series: ProductSeries,
+  ): Promise<ResolvedSeriesContract | undefined> => {
+    const concrete = async (
+      registry: { versions(tenant: string, id: string): Promise<string[]> },
+      ref: { id: string; version?: string },
+    ): Promise<{ id: string; version: string } | undefined> => {
+      try {
+        const versions = await registry.versions(tenant, ref.id);
+        if (versions.length === 0) return undefined;
+        return { id: ref.id, version: resolveRef(ref.id, ref.version ?? "latest", versions) };
+      } catch {
+        return undefined;
+      }
+    };
+    const dataset = await concrete(datasetRegistry, series.dataset);
+    const harness = await concrete(harnessInstanceRegistry, series.harness);
+    if (dataset === undefined || harness === undefined) return undefined;
+    const judges: Array<{ id: string; version: string }> = [];
+    for (const judge of series.judges) {
+      const resolved = await concrete(judgeRegistry, judge);
+      if (resolved === undefined) return undefined; // a judge we cannot name makes the whole contract unnameable
+      judges.push(resolved);
+    }
+    return { dataset, harness, judges };
+  };
   const productService = new ProductService({
     store: productStore,
     releases: releaseStore,
@@ -933,9 +967,13 @@ async function main(): Promise<void> {
       hasHarness: async (tenant, id) => (await harnessInstanceRegistry.versions(tenant, id)).length > 0,
       hasJudge: async (tenant, id) => (await judgeRegistry.versions(tenant, id)).length > 0,
     },
+    resolveSeriesContract,
     events: platformEventService,
   });
   const productVersionSync = new ProductVersionSync({
+    // The SAME resolver the readiness read uses — one function, so the stamp a batch carries and the
+    // contract a release compares it against can never be produced by two different answers.
+    resolveSeriesContract,
     products: productStore,
     releases: releaseStore,
     versions: productVersionStore,

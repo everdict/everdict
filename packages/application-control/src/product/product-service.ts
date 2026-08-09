@@ -32,6 +32,7 @@ import {
   Release,
   type ReleaseEditInput,
   type ReleaseTransition,
+  type ResolvedSeriesContract,
   type SeriesGateReading,
   type SeriesScorecardPoint,
   currentScoringPin,
@@ -40,6 +41,8 @@ import {
   productReleasePolicyDigest,
   releasePolicyDocument,
   releaseReadiness,
+  resolveWatchedSeries,
+  seriesContractDigest,
   watchedSeries,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -130,6 +133,14 @@ export interface ProductServiceDeps {
     candidateScoring?: GateScoringPin;
   }>;
   capabilities?: ProductCapabilityCheck;
+  // Resolve a series' CONCRETE evaluation contract — the dataset/harness/judge versions a run of it would
+  // actually use right now (arch-review 13 P0). A seam, like `seriesGate`, because resolving `latest`
+  // belongs to the registries and the product layer must not learn their shapes.
+  //
+  // Absent = this deployment cannot answer "what does this series ask today", and the freshness check
+  // ABSTAINS for every series. That is the honest degradation: an unenforceable invariant we can name beats
+  // a made-up one. It is also what keeps unit paths (and any deployment without registries) working.
+  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<ResolvedSeriesContract | undefined>;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -215,12 +226,16 @@ export class ProductService {
     const releases = await this.deps.releases.list(tenant, { productId, status: "planned" });
     for (const release of releases) {
       // What this release COMMITTED to — its frozen promise, or its live selection for one planned before
-      // the freeze existed. A release watching "all" has nothing to lose here: dropping a series is a
-      // deliberate narrowing of what "all" means, and it kept no promise about a specific axis.
-      const promised =
-        release.plannedSeriesKeys !== undefined && release.seriesSelection === "explicit"
-          ? release.plannedSeriesKeys
-          : release.seriesKeys;
+      // the freeze existed.
+      //
+      // The frozen promise counts for BOTH selection modes (arch-review 13). This used to consult it only
+      // for `explicit`, which put two readings of one invariant in the codebase: the gate says `all` froze
+      // what "all" meant that day (and turns a vanished key into `scope_invalid`), while the preflight said
+      // `all` promised nothing about any particular axis and let the edit through. The result was a product
+      // edit that succeeded and a planned release that became un-shippable a moment later, with the
+      // explanation on the wrong side of the transaction — which is the exact job the preflight exists for.
+      // Adding a series is still free under `all`; only removing a promised one is refused.
+      const promised = release.plannedSeriesKeys ?? release.seriesKeys;
       const lost = (promised ?? []).filter((key) => !keys.has(key));
       if (lost.length > 0)
         throw new ConflictError(
@@ -415,7 +430,12 @@ export class ProductService {
         seriesDecisions: readiness.series.map((s) => ({
           key: s.key,
           verdict: s.verdict,
-          required: product.series.find((entry: ProductSeries) => entry.key === s.key)?.requiredForRelease !== false,
+          // The DOMAIN already decided this (arch-review 13) — `releaseReadiness` computes `required` per
+          // series, including for a `scope_invalid` entry whose declaration no longer exists and which
+          // re-deriving from `product.series` would silently read as required-by-absence. A downstream that
+          // rebuilds a decision's meaning from the raw materials is the reconstruction this whole review
+          // generation has been removing.
+          required: s.required,
           ...(s.reasons?.length ? { reasons: s.reasons } : {}),
           ...(s.baseline
             ? {
@@ -500,6 +520,17 @@ export class ProductService {
     // decides what each one means.
     const baselineBySeries = new Map<string, BaselineResolution>();
     const gateBySeries = new Map<string, SeriesGateReading>();
+    // WHAT EACH SERIES ASKS TODAY. Resolved once per readiness read, so the freshness check compares the
+    // stamp a batch carries against the contract now in force rather than against the series' NAME.
+    const contractBySeries = new Map<string, string>();
+    if (this.deps.resolveSeriesContract !== undefined) {
+      for (const series of resolveWatchedSeries(product, release).series) {
+        const contract = await this.deps.resolveSeriesContract(tenant, series).catch(() => undefined);
+        // Unresolvable (a deleted dataset, a registry outage) → no entry, so the check abstains for this
+        // series rather than declaring every batch stale on our own inability to look.
+        if (contract !== undefined) contractBySeries.set(series.key, seriesContractDigest(contract));
+      }
+    }
     if (this.deps.scorecards !== undefined) {
       for (const series of watchedSeries(product, release)) {
         const rows = (
@@ -586,7 +617,15 @@ export class ProductService {
         }
       }
     }
-    return releaseReadiness(release, product, latestBySeries, baselineBySeries, gateBySeries, openIssues);
+    return releaseReadiness(
+      release,
+      product,
+      latestBySeries,
+      baselineBySeries,
+      gateBySeries,
+      openIssues,
+      contractBySeries,
+    );
   }
 
   // The instant the product last shipped BEFORE this release — the baseline's anchor. For a released release
@@ -767,6 +806,10 @@ function seriesPoint(record: ScorecardRecord): SeriesScorecardPoint {
     ...(rate !== null ? { passRate: rate } : {}),
     createdAt: record.createdAt,
     ...(record.origin?.serviceVersion !== undefined ? { serviceVersion: record.origin.serviceVersion } : {}),
+    // WHICH QUESTION this batch answered — compared against what the series asks now.
+    ...(record.origin?.seriesContractDigest !== undefined
+      ? { contractDigest: record.origin.seriesContractDigest }
+      : {}),
     ...(scoring ? { scoring } : {}),
   };
 }

@@ -71,6 +71,36 @@ export function resolveWatchedSeries(product: ProductRecord, release?: ReleaseSc
   };
 }
 
+// The EVALUATION CONTRACT a watch series declares — what it asks, as opposed to what it is called
+// (arch-review 13 P0).
+//
+// A `ProductSeries` carries two unrelated things under one key. `key` is the TREND's identity, deliberately
+// stable so relabeling never re-keys history. `{dataset, harness, judges}` is the CONTRACT — the question
+// being asked. Release readiness selected evidence by the first and then treated it as evidence for the
+// second: "the newest succeeded scorecard stamped `quality`" is not "the newest scorecard that evaluated what
+// `quality` currently means", and editing the series to a new dataset left yesterday's green standing as
+// today's evidence.
+//
+// The refs must be RESOLVED before digesting. A version-less ref means "latest at run time", so the product
+// row need not change at all for the contract underneath it to move — which is why no CAS and no policy
+// digest could ever catch this. The caller resolves (it owns the registries); this function only says what
+// identity means, so the submit side and the readiness side cannot drift into two answers.
+export interface ResolvedSeriesContract {
+  dataset: { id: string; version: string };
+  harness: { id: string; version: string };
+  judges: Array<{ id: string; version: string }>;
+}
+
+export function seriesContractDigest(contract: ResolvedSeriesContract): string {
+  return contentDigest({
+    dataset: contract.dataset,
+    harness: contract.harness,
+    // Judge SELECTION is a set, not a sequence — the order a caller happens to list them in is not a
+    // different question, and letting it be one would make every reorder look like a contract change.
+    judges: [...contract.judges].sort((a, b) => a.id.localeCompare(b.id) || a.version.localeCompare(b.version)),
+  });
+}
+
 // One scorecard's contribution to a series trend — the caller resolves which record is "latest" and which is
 // the baseline (the service anchors the baseline at the previous released release; the domain does not care).
 export interface SeriesScorecardPoint {
@@ -78,6 +108,9 @@ export interface SeriesScorecardPoint {
   passRate?: number;
   createdAt: string;
   serviceVersion?: string;
+  // The contract this batch evaluated under (`origin.seriesContractDigest`). Absent = it predates the stamp
+  // or its contract could not be resolved — evidence whose question cannot be named.
+  contractDigest?: string;
   // WHICH judgment this point is (arch-review 8 P1). A scorecard id alone is not an evidence reference: the
   // same id means different judgments after a re-score, so a decision recorded against the bare id cannot be
   // reproduced — and the next release's baseline, resolved by id, silently reads whatever the plane says now.
@@ -141,8 +174,26 @@ function seriesVerdict(
   baseline: BaselineResolution,
   gate: SeriesGateReading | undefined,
   allowNoBaseline: boolean,
+  // The contract this series declares NOW. Absent = the deployment cannot resolve it (no registry seam), in
+  // which case the check abstains rather than blocking everything — an unenforceable invariant we can name
+  // beats one we made up.
+  contract?: string,
 ): { verdict: SeriesVerdict; reasons?: string[] } {
   if (latest === undefined) return { verdict: "not_evaluated", reasons: ["this series has no succeeded evaluation"] };
+  // THE QUESTION CHANGED (arch-review 13 P0). Evidence stamped with a different contract answered a
+  // different question; a scorecard whose contract is unstamped cannot say which question it answered at
+  // all. Neither is evidence for the series as it stands, and reading either as current is how an edit to
+  // the dataset silently kept yesterday's green.
+  if (contract !== undefined && latest.contractDigest !== contract) {
+    return {
+      verdict: "contract_stale",
+      reasons: [
+        latest.contractDigest === undefined
+          ? `this series' newest evaluation does not record which dataset/harness/judges it ran under, so it cannot be shown to answer the question this series asks now — re-run it`
+          : `this series' newest evaluation ran under a different dataset/harness/judge selection than the series declares now — the question changed, so this is an answer to a different one; re-run it`,
+      ],
+    };
+  }
   // LOST HISTORY IS NOT A BOOTSTRAP (arch-review 10 P0). These two branches used to be indistinguishable from
   // the first-ship one, which meant `allowNoBaseline` — an approval to ship the FIRST time — silently
   // licensed shipping after the evidence of the last ship disappeared. A pre-approval cannot cover a
@@ -199,6 +250,9 @@ export function releaseReadiness(
   baselineBySeries: ReadonlyMap<string, BaselineResolution>,
   gateBySeries: ReadonlyMap<string, SeriesGateReading>,
   openIssues: number,
+  // The CONTRACT each series declares now, resolved (arch-review 13 P0). Absent map / absent key = the
+  // deployment cannot resolve it, and the freshness check abstains for that series.
+  contractBySeries?: ReadonlyMap<string, string>,
 ): ReleaseReadiness {
   const resolution = resolveWatchedSeries(product, release);
   // A gate this release PROMISED and can no longer find blocks unconditionally (arch-review 12 P0). It is
@@ -220,7 +274,13 @@ export function releaseReadiness(
     const resolution = baselineBySeries.get(entry.key) ?? { kind: "none_first_ship" as const };
     const gate = gateBySeries.get(entry.key);
     const baseline = resolution.kind === "resolved" ? resolution.point : undefined;
-    const { verdict, reasons } = seriesVerdict(latest, resolution, gate, entry.allowNoBaseline === true);
+    const { verdict, reasons } = seriesVerdict(
+      latest,
+      resolution,
+      gate,
+      entry.allowNoBaseline === true,
+      contractBySeries?.get(entry.key),
+    );
     // The pins RECORDED are the gate's own, never the trend list's, whenever the gate ran — see
     // SeriesGateReading. Falling back to the list pin is correct exactly where no gate ran (not_evaluated,
     // first ship): there is no second read to disagree with.
@@ -293,7 +353,11 @@ export interface ReleasePolicySeries {
 
 export function releasePolicyDocument(
   product: ProductRecord,
-  release?: Pick<ReleaseRecord, "seriesKeys">,
+  // The FULL scope, not just `seriesKeys` (arch-review 13). `watchedSeries` now reads the frozen promise, so
+  // a signature admitting only the live selection was a type-level lie: it said "this is enough to compute
+  // the policy correctly", and a caller who believed it would silently fall back to the legacy derivation and
+  // build a policy document for a scope the release never committed to.
+  release?: ReleaseScope,
 ): ReleasePolicySeries[] {
   return watchedSeries(product, release)
     .map((s) => ({
@@ -306,7 +370,7 @@ export function releasePolicyDocument(
 
 // The digest of that document. Series metadata that cannot change a verdict (labels, datasets) is
 // deliberately out: a decision should read as "same policy" when only a label was edited.
-export function productPolicyDigest(product: ProductRecord, release?: Pick<ReleaseRecord, "seriesKeys">): string {
+export function productPolicyDigest(product: ProductRecord, release?: ReleaseScope): string {
   return contentDigest(releasePolicyDocument(product, release));
 }
 

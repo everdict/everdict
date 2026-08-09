@@ -329,6 +329,21 @@ export const ScorecardOriginSchema = z.object({
   productId: z.string().optional(),
   releaseId: z.string().optional(),
   seriesKey: z.string().optional(),
+  // WHICH DEFINITION of that series this batch actually evaluated (arch-review 13 P0) — the resolved
+  // dataset / harness / judge closure, digested.
+  //
+  // `seriesKey` is the TREND's identity: it is deliberately stable so relabeling a series never re-keys its
+  // history. That stability made it the wrong thing to select release evidence by. A series is also a
+  // CONTRACT — `{dataset, harness, judges}`, with absent versions meaning "latest at run time" — and the
+  // release read picked "the newest succeeded scorecard stamped with this key", so editing the series to a
+  // new dataset left yesterday's green result standing as today's evidence. Worse for `latest` refs: the
+  // product row need not change at all for the contract underneath it to move, so no CAS and no policy
+  // digest could ever have caught it.
+  //
+  // Stamped at submit from the CONCRETE closure the batch ran under, and compared at readiness against the
+  // series as it stands now. Absent = a batch from before this existed, or one whose contract could not be
+  // resolved: evidence whose contract cannot be named, which a release must not count as current.
+  seriesContractDigest: z.string().optional(),
   serviceVersion: z.string().optional(),
   // Lineage of a retry-failed run — the source scorecard this record re-ran the failed cases of (passing results
   // carried over verbatim). The source record itself is never mutated. docs/architecture/batch-resilience.md

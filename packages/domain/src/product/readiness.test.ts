@@ -6,6 +6,7 @@ import {
   type SeriesGateReading,
   type SeriesScorecardPoint,
   releaseReadiness,
+  seriesContractDigest,
   watchedSeries,
 } from "./readiness.js";
 import { Release } from "./release.js";
@@ -308,5 +309,97 @@ describe("release scope — a promised gate cannot be deleted into a pass", () =
   it("says nothing when the promise still holds — the guard is silent on the healthy path", () => {
     const readiness = releaseReadiness(planned(["quality"]), product(), new Map(), new Map(), new Map(), 0);
     expect(readiness.series.every((s) => s.verdict !== "scope_invalid")).toBe(true);
+  });
+});
+
+// arch-review 13 P0. `seriesKey` is the TREND's identity — deliberately stable so relabeling never re-keys
+// history — and readiness selected release evidence by it. So editing a series to a new dataset/harness/judge
+// left yesterday's green standing as today's evidence: the same key, a different question. Worse for
+// version-less refs, where `latest` moves with the product row untouched, so no CAS and no policy digest
+// could ever see it. Every test here PASSES on the key-only selection.
+describe("series evaluation contract — evidence must answer the question the series asks NOW", () => {
+  const CONTRACT = "sha256:today";
+  const OLD = "sha256:yesterday";
+  const contracts = new Map([["quality", CONTRACT]]);
+
+  const pointWith = (digest?: string): SeriesScorecardPoint => ({
+    scorecardId: "sc-1",
+    passRate: 1,
+    createdAt: NOW,
+    ...(digest !== undefined ? { contractDigest: digest } : {}),
+  });
+
+  it("BLOCKS when the newest evidence ran under a different contract — a green answer to another question", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", pointWith(OLD)]]),
+      new Map(),
+      new Map(),
+      0,
+      contracts,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "contract_stale", regressed: true });
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("BLOCKS unstamped evidence too — a batch that cannot say which question it answered is not current", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", pointWith(undefined)]]),
+      new Map(),
+      new Map(),
+      0,
+      contracts,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "contract_stale", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("does not record");
+  });
+
+  it("passes evidence produced under the CURRENT contract", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", pointWith(CONTRACT)]]),
+      new Map(),
+      new Map(),
+      0,
+      contracts,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "no_baseline", regressed: false });
+  });
+
+  it("ABSTAINS when the deployment cannot resolve the contract — never blocks on our own inability to look", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", pointWith(OLD)]]),
+      new Map(),
+      new Map(),
+      0,
+      new Map(), // no entry for "quality" — unresolvable
+    );
+    expect(readiness.series[0]?.verdict).not.toBe("contract_stale");
+  });
+});
+
+// The identity itself: a judge REORDER is not a different question, and a version change is.
+describe("seriesContractDigest — what counts as the same question", () => {
+  const base = {
+    dataset: { id: "d", version: "1.0.0" },
+    harness: { id: "h", version: "2.0.0" },
+    judges: [
+      { id: "quality", version: "1.0.0" },
+      { id: "safety", version: "1.0.0" },
+    ],
+  };
+  it("is stable under judge ORDER — a selection is a set, and a reorder is not a contract change", () => {
+    expect(seriesContractDigest(base)).toBe(seriesContractDigest({ ...base, judges: [...base.judges].reverse() }));
+  });
+  it("moves when a resolved version moves — which is what `latest` drifting looks like", () => {
+    expect(seriesContractDigest({ ...base, dataset: { id: "d", version: "2.0.0" } })).not.toBe(
+      seriesContractDigest(base),
+    );
   });
 });

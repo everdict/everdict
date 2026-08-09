@@ -248,6 +248,8 @@ export {
   Product,
   type ProductEditInput,
   type ProductTransition,
+  sameSourceCoordinates,
+  serviceStreamKey,
 } from "./product/product.js";
 export {
   type NewReleaseInput,
@@ -264,6 +266,8 @@ export {
   type ReleasePolicySeries,
   releaseReadiness,
   type ReleaseScope,
+  type ResolvedSeriesContract,
+  seriesContractDigest,
   resolveWatchedSeries,
   type SeriesGateReading,
   type SeriesScorecardPoint,
