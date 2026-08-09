@@ -25,6 +25,7 @@ import type { RecordingStore } from "../ports/recording-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import type { ScoringStageStore } from "../ports/scoring-stage-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 import type { OrchestrationEvent } from "./scorecard-observability.js";
@@ -75,6 +76,11 @@ export interface ScorecardServiceDeps {
   // workflow, so re-scoring a large group survives a control-plane restart with zero duplicate judging
   // (planScore is idempotent — unfinished-only). start throws ConflictError when a pass is already running
   // (deterministic workflowId = the dedup); any other start failure degrades to the in-process pass.
+  // The scoring STAGE (docs/architecture/scoring-plane-revisions.md, expand step). When wired, a pass
+  // dual-writes its judgments here as well as onto the live plane — the stage is written and never read, so
+  // this deploy can be rolled back without losing anything, and the contract step later makes the finalize
+  // promote from it. Absent = the pre-stage behavior, unchanged.
+  scoringStage?: ScoringStageStore;
   temporalScores?: {
     workflowIdFor(groupId: string): string;
     start(input: {
@@ -201,6 +207,7 @@ export type ScorecardBatchDeps = Pick<
   | "dispatcher"
   | "store"
   | "runStore"
+  | "scoringStage"
   | "datasets"
   | "harnesses"
   | "budget"
@@ -258,6 +265,7 @@ export type ScorecardScoringDeps = Pick<
   ScorecardServiceDeps,
   | "store"
   | "runStore"
+  | "scoringStage"
   | "datasets"
   | "events"
   | "temporalScores"

@@ -108,6 +108,7 @@ export { PgReplicaRegistry, type PgReplicaRegistryOptions } from "./ops/replica-
 export { InMemoryRunStore } from "./results/run-store.js";
 export { InMemoryRecordingStore } from "./results/recording-store.js";
 export { InMemoryScorecardStore } from "./results/scorecard-store.js";
+export { InMemoryScoringStageStore, PgScoringStageStore } from "./results/scoring-stage-store.js";
 export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";
 export { InMemoryBrowserProfileStore, PgBrowserProfileStore } from "./workspace/browser-profile-store.js";

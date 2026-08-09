@@ -170,6 +170,7 @@ async function main(): Promise<void> {
     store,
     recordingStore,
     scorecardStore,
+    scoringStageStore,
     keyStore,
     harnessTemplateRegistry,
     harnessInstanceRegistry: rawHarnessInstanceRegistry,
@@ -703,6 +704,7 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    scoringStageStore,
     modelRegistry,
     envelopes: envelopeStore,
     trajectories: trajectoryStore,

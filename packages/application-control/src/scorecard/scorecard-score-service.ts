@@ -627,6 +627,19 @@ export class ScorecardScoreService {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
     const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
+    // …and STAGE the same judgments under this pass (expand step, scoring-plane-revisions.md). Written and
+    // never read: the carriers below stay the source of truth for this deploy, so a rollback loses nothing,
+    // and the contract step later makes the finalize promote from here instead of writing through. A staging
+    // failure must not fail a pass that is writing its plane correctly — the stage has no readers yet.
+    if (this.deps.scoringStage && pass?.passId !== undefined) {
+      await this.deps.scoringStage
+        .stage(
+          record.id,
+          pass.passId,
+          results.map((r) => ({ caseKey: childKey(r.caseId, r.trial), scores: r.scores })),
+        )
+        .catch(() => undefined);
+    }
     const children = await store.list(record.tenant, { scorecardId: record.id });
     // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
     // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW

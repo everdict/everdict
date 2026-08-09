@@ -1,4 +1,9 @@
-import type { HandoffCheckpointStore, LeaderElector, ReplicaRegistry } from "@everdict/application-control";
+import type {
+  HandoffCheckpointStore,
+  LeaderElector,
+  ReplicaRegistry,
+  ScoringStageStore,
+} from "@everdict/application-control";
 import { soleLeader, soloReplicas } from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
@@ -61,6 +66,7 @@ import {
   InMemoryRunnerStore,
   InMemoryScheduleStore,
   InMemoryScorecardStore,
+  InMemoryScoringStageStore,
   InMemorySecretStore,
   InMemorySkillStore,
   InMemorySkillVersionStore,
@@ -114,6 +120,7 @@ import {
   PgRunnerStore,
   PgScheduleStore,
   PgScorecardStore,
+  PgScoringStageStore,
   PgSecretStore,
   PgSkillStore,
   PgSkillVersionStore,
@@ -187,6 +194,9 @@ import { CONTROL_PLANE_ROLE, REPLICA_ID } from "./replica.js";
 
 export interface Persistence {
   store: RunStore;
+  // The scoring STAGE (mig 0149) — where a pass accumulates judgments before it owns them. Written and not
+  // yet read (expand step, docs/architecture/scoring-plane-revisions.md).
+  scoringStageStore: ScoringStageStore;
   recordingStore: RecordingStore; // durable replay recording (frames/logs/env/runtime tracks) — persistent by default
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
@@ -315,6 +325,7 @@ export async function makePersistence(): Promise<Persistence> {
     inMemoryRuns.attachScorecards(inMemoryScorecards);
     return {
       store: inMemoryRuns,
+      scoringStageStore: new InMemoryScoringStageStore(),
       recordingStore: new InMemoryRecordingStore(),
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
@@ -381,6 +392,7 @@ export async function makePersistence(): Promise<Persistence> {
   const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
   return {
     store: new PgRunStore(client, REPLICA_ID),
+    scoringStageStore: new PgScoringStageStore(client),
     recordingStore: new PgRecordingStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),

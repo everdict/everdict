@@ -1,4 +1,9 @@
-import type { EnvelopeStore, GithubAppService, TrajectoryStore } from "@everdict/application-control";
+import type {
+  EnvelopeStore,
+  GithubAppService,
+  ScoringStageStore,
+  TrajectoryStore,
+} from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
@@ -37,6 +42,8 @@ export interface ScorecardRuntimeAccess {
 export function buildScorecard(deps: {
   scorecardStore: ScorecardStore;
   runStore: RunStore;
+  // The scoring stage (mig 0149) — a pass dual-writes its judgments here (expand step).
+  scoringStageStore: ScoringStageStore;
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   recordingStore?: RecordingStore;
@@ -72,6 +79,7 @@ export function buildScorecard(deps: {
   const {
     scorecardStore,
     runStore,
+    scoringStageStore,
     recordingStore,
     meteredDispatcher,
     scheduler,
@@ -227,6 +235,7 @@ export function buildScorecard(deps: {
     preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (per runtime in the shard list) at 400
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore,
+    scoringStage: scoringStageStore,
     ...(recordingStore ? { recordingStore } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
