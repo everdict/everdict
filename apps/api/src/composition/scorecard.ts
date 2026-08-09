@@ -215,16 +215,19 @@ export function buildScorecard(deps: {
       ? {
           temporalBatches: temporalDriver,
           temporalScores: {
-            workflowIdFor: (groupId: string) => temporalDriver.scoreWorkflowIdFor(groupId),
-            // `passId` MUST be listed here. An inline parameter type that omits it still satisfies the port
-            // (structural typing ignores the extra property), so the field was silently dropped between the
-            // claim and the workflow — and an activity with no passId ADOPTS whatever marker is live, which
-            // is precisely the fence being bypassed. Typed explicitly so the drop cannot recur silently.
+            // Pass-scoped (arch-review 10 P0) — the database's marker is the sole authority on who owns a
+            // group's plane; this id only deduplicates one pass's own start retries.
+            workflowIdFor: (groupId: string, passId: string) => temporalDriver.scoreWorkflowIdFor(groupId, passId),
+            // `passId` MUST be listed here, and REQUIRED. An inline parameter type that omits (or optionals)
+            // it still satisfies the port — parameter bivariance ignores the difference — so the field was
+            // silently dropped between the claim and the workflow, and an activity with no passId ADOPTS
+            // whatever marker is live, which is precisely the fence being bypassed. Written out so a future
+            // edit that drops it fails at the forwarding call instead of at runtime.
             start: (input: {
               groupId: string;
               judges: Array<{ id: string; version: string }>;
               submittedBy?: string;
-              passId?: string;
+              passId: string;
             }) => temporalDriver.startScore(input),
           },
         }
@@ -236,6 +239,36 @@ export function buildScorecard(deps: {
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore,
     scoringStage: scoringStageStore,
+    // The stage/carrier PARITY signal (arch-review 10 P1) — the evidence the contract step needs before it
+    // can move the source of truth onto the stage. `result` is the whole point of the label: a dashboard
+    // showing only a total says dual-writing happened, which was never in doubt. A mismatch is also logged,
+    // named by pass, because a rate alone cannot be investigated.
+    scoringStageParity: (parity) => {
+      metrics.counter(
+        "everdict_scoring_stage_parity_total",
+        "Scoring-stage rows compared against the settled plane, by outcome.",
+        { result: "matched" },
+        parity.matched,
+      );
+      if (parity.mismatched.length > 0)
+        metrics.counter(
+          "everdict_scoring_stage_parity_total",
+          "Scoring-stage rows compared against the settled plane, by outcome.",
+          { result: "mismatched" },
+          parity.mismatched.length,
+        );
+      if (parity.orphaned.length > 0)
+        metrics.counter(
+          "everdict_scoring_stage_parity_total",
+          "Scoring-stage rows compared against the settled plane, by outcome.",
+          { result: "orphaned" },
+          parity.orphaned.length,
+        );
+      if (parity.mismatched.length > 0 || parity.orphaned.length > 0)
+        console.warn(
+          `[scoring-stage] parity mismatch on ${parity.scorecardId} pass ${parity.passId}: ${parity.matched}/${parity.staged} matched, mismatched=[${parity.mismatched.join(", ")}], orphaned=[${parity.orphaned.join(", ")}]`,
+        );
+    },
     ...(recordingStore ? { recordingStore } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,

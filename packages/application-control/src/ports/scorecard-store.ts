@@ -59,6 +59,16 @@ export interface ScorecardUpdateGuard {
   // A miss returns undefined like a missing id — the caller just read the record, so it IS the conflict.
   // (diagnostic ordering, NOT the fence) — kept so a reader can see how many passes a record has had.
   expectScoringPassEpoch?: number | null;
+  // ONE WRITE INSTRUCTION among the conditions, and it is here for the same reason they are: only the store
+  // can execute it. The lease's END is stamped by the DATABASE (`now() + N seconds`), overwriting whatever
+  // `leaseUntil` the patch carried.
+  //
+  // Why (arch-review 10 P1): `expectScoringPassReclaimable` already asks the database whether a lease has
+  // expired, but the lease INSTANT was minted from the application's clock — so the two halves of one
+  // decision were read off two different clocks. A replica running two minutes fast wrote leases that the
+  // database considered expired on arrival, and its own healthy pass became reclaimable while it worked.
+  // Producer and judge of an interval must share a clock; this makes them.
+  stampScoringLeaseSeconds?: number;
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

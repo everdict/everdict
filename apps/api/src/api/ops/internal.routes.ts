@@ -491,6 +491,23 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       }
     },
   );
+  // The dying score workflow's death notice (arch-review 10 P1): flip THIS pass's marker to `failed` so the
+  // plane keeps refusing readers and the next pass can take over immediately, instead of every reader and
+  // every claimant waiting out a lease on a workflow everyone already knows is gone.
+  app.post<{ Params: { id: string } }>("/internal/groups/:id/score-fail", async (req, reply) => {
+    if (!deps.internalToken || !deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z.object({ passId: z.string().min(1), reason: z.string().min(1).max(2000) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      return reply.send(await deps.scorecardService.failScore(req.params.id, body.data.passId, body.data.reason));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   app.post<{ Params: { id: string } }>(
     "/internal/schedules/:id/fire",

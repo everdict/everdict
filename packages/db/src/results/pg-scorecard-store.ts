@@ -266,8 +266,24 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.scoringPass !== undefined) {
       // pass start (object) / settle-or-takeover clear (null) — the revision-boundary marker; a lane that
       // dropped it would let trust readers consume a plane between revisions.
-      sets.push(`scoring_pass = $${i++}`);
-      vals.push(patch.scoringPass ? JSON.stringify(patch.scoringPass) : null);
+      //
+      // With `stampScoringLeaseSeconds`, the lease's END is written by the DATABASE rather than carried in
+      // the payload: the same clock that later judges the lease expired is the one that set it (see the port).
+      // jsonb_set over the caller's object, so every other field of the marker is exactly what it sent.
+      if (guard?.stampScoringLeaseSeconds !== undefined && patch.scoringPass !== null) {
+        const passIdx = i++;
+        const secIdx = i++;
+        sets.push(
+          // AT TIME ZONE 'UTC' before formatting — `now()` renders in the SESSION's zone, and stamping a
+          // literal "Z" onto a local rendering would write an instant hours away from the one meant. The
+          // reclaimability guard parses this back as timestamptz, so the two must agree on the zone.
+          `scoring_pass = jsonb_set($${passIdx}::jsonb, '{leaseUntil}', to_jsonb(to_char((now() + ($${secIdx} || ' seconds')::interval) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))`,
+        );
+        vals.push(JSON.stringify(patch.scoringPass), String(guard.stampScoringLeaseSeconds));
+      } else {
+        sets.push(`scoring_pass = $${i++}`);
+        vals.push(patch.scoringPass ? JSON.stringify(patch.scoringPass) : null);
+      }
     }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical

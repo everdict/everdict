@@ -19,9 +19,36 @@ export interface StagedScores {
 // Keyed by (scorecard, pass, case) so two passes targeting the same revision cannot see each other's work —
 // the same reason the analysis artifact is keyed by pass and not by the revision it hopes to become.
 //
-// EXPAND STEP: writers dual-write here and onto the carriers; nothing READS this yet. The contract step makes
-// the finalize promote from the stage and deletes the strip. Shipping the table first means a rollback at any
-// point loses nothing, which is the whole reason the migration is split.
+// SEMANTICS — a staged row is THIS PASS'S JUDGMENT OF THIS CASE, and nothing else (arch-review 10 P1). The
+// alternative reading ("the full desired score plane") was the one the expand step accidentally shipped: the
+// strip-first step also wrote back, so a row appeared the moment a pass TOUCHED a case, whether or not it had
+// judged it. `stage row exists → this case is done` is the obvious way to write the promotion, it would have
+// been silently wrong, and the bug would have looked like a scoring bug rather than a semantics one. The
+// delta reading also keeps the two provenances apart: what THIS pass produced vs what it inherited from the
+// previous revision, which is the distinction the promotion has to make anyway.
+//
+// EXPAND STEP: writers dual-write here and onto the carriers; nothing DECIDES on this yet. The finalize reads
+// the stage only to compare it against the carriers and report parity (see ScoringStageParity) — the evidence
+// that has to exist before a promotion can be trusted, since dual-writing for a week proves nothing if nobody
+// ever checked that the two agree. The contract step then makes the finalize promote from the stage and
+// deletes the strip. Shipping the table first means a rollback at any point loses nothing.
+// What one pass's stage looked like against the plane it actually wrote (arch-review 10 P1). The contract
+// step swaps the source of truth from the carriers to the stage, and the only honest basis for that swap is
+// having watched the two agree on real traffic — dual-writing for a week proves nothing if nobody compared
+// them. Reported per settled pass so a mismatch names the pass, not a daily aggregate nobody can trace back.
+export interface ScoringStageParity {
+  scorecardId: string;
+  passId: string;
+  // Cases this pass JUDGED (its staged rows) and, of those, how many carry exactly the scores the live plane
+  // ended up with. `staged === matched` is the promotion's precondition.
+  staged: number;
+  matched: number;
+  // Cases whose staged judgment differs from the plane — the ones a promotion would have changed.
+  mismatched: string[];
+  // Staged for a case the plane has no row for at all. A promotion would invent a row here.
+  orphaned: string[];
+}
+
 export interface ScoringStageStore {
   // Stage one pass's judgments for a set of cases. Idempotent per (scorecard, pass, case) — an activity retry
   // re-stages the same rows rather than accumulating duplicates.

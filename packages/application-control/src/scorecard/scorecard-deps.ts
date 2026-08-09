@@ -25,7 +25,7 @@ import type { RecordingStore } from "../ports/recording-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
-import type { ScoringStageStore } from "../ports/scoring-stage-store.js";
+import type { ScoringStageParity, ScoringStageStore } from "../ports/scoring-stage-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 import type { OrchestrationEvent } from "./scorecard-observability.js";
@@ -81,8 +81,19 @@ export interface ScorecardServiceDeps {
   // this deploy can be rolled back without losing anything, and the contract step later makes the finalize
   // promote from it. Absent = the pre-stage behavior, unchanged.
   scoringStage?: ScoringStageStore;
+  // Where a settled pass reports how its STAGE compared to the plane it wrote (arch-review 10 P1). The
+  // contract step moves the source of truth from the carriers to the stage, and the evidence for that move
+  // is having watched the two agree on real traffic — a week of dual-writing that nobody compared is not
+  // evidence. Absent = no reporting (unit paths); the comparison is skipped, never faked.
+  scoringStageParity?: (parity: ScoringStageParity) => void;
   temporalScores?: {
-    workflowIdFor(groupId: string): string;
+    // PASS-SCOPED (arch-review 10 P0). A group-scoped id made Temporal a SECOND authority on "who owns this
+    // group's score plane", competing with the database's pass marker — and the two disagreed exactly when it
+    // mattered: a takeover pass B legitimately owned the marker, then failed to start because A's workflow
+    // still held the group's id, leaving B holding a plane it could not drive. Ownership is the marker's job
+    // and it does it with a CAS; the workflow id's only remaining job is deduplicating retries of ONE pass's
+    // own start, which a pass-scoped id does exactly.
+    workflowIdFor(groupId: string, passId: string): string;
     start(input: {
       groupId: string;
       judges: Array<{ id: string; version: string }>;
@@ -208,6 +219,7 @@ export type ScorecardBatchDeps = Pick<
   | "store"
   | "runStore"
   | "scoringStage"
+  | "scoringStageParity"
   | "datasets"
   | "harnesses"
   | "budget"
@@ -266,6 +278,7 @@ export type ScorecardScoringDeps = Pick<
   | "store"
   | "runStore"
   | "scoringStage"
+  | "scoringStageParity"
   | "datasets"
   | "events"
   | "temporalScores"

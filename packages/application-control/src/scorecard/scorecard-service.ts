@@ -574,6 +574,11 @@ export class ScorecardService {
     return this.scoreService.finalizeScore(id, judges, submittedBy, passId);
   }
 
+  // A dying scoring workflow's death notice (arch-review 10 P1) — see ScorecardScoreService.failScore.
+  async failScore(id: string, passId: string, reason: string): Promise<{ marked: boolean }> {
+    return this.scoreService.failScore(id, passId, reason);
+  }
+
   // Which judge DOCUMENTS score this batch — delegated to the ONE sealer (sealJudgeClosure) the re-score
   // refresh also uses, so submit-time and rescore-time judge identity can never diverge in meaning. Absent
   // registry (unit paths) / an unresolvable id keeps the ref as-given; the scoring path stamps a per-case
@@ -1027,6 +1032,18 @@ export class ScorecardService {
     opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["diff"]> {
     return this.analytics.diff(tenant, baselineId, candidateId, opts);
+  }
+
+  // The diff PLUS the exact records (and scoring pins) it was computed from — what a decision-recording
+  // caller needs (arch-review 10 P0). The release gate consumes this rather than `diff` so the pins it
+  // records are the ones the verdict came from, instead of a second read that a re-score may have moved.
+  diffSnapshot(
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
+  ): ReturnType<ScorecardAnalyticsService["diffSnapshot"]> {
+    return this.analytics.diffSnapshot(tenant, baselineId, candidateId, opts);
   }
 
   trend(

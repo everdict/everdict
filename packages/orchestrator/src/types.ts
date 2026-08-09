@@ -58,6 +58,13 @@ export interface Activities {
     // activity is refused instead of mutating the plane a newer pass is certifying.
     passId?: string;
   }): Promise<void>;
+  // The pass's DEATH NOTICE (arch-review 10 P1). A workflow that fails terminally — retries exhausted, a
+  // non-retryable activity error, a worker termination — used to just stop, leaving a marker that still said
+  // `running` over a plane the pass had already stripped. Readers then refused for a full lease, and the
+  // takeover had to infer death from a clock; the workflow knew, and had no way to say so. This is the
+  // saying. Best-effort and idempotent by contract, fenced on `passId` so a workflow that died BECAUSE it
+  // was superseded cannot declare its successor's live pass dead.
+  failScore(input: { groupId: string; passId: string; reason: string }): Promise<{ marked: boolean }>;
 
   // --- Durable approvals (orchestration.md T-a, `approval:<id>`) — the workflow owns ONLY the days-long
   // WAIT; park/decide/deliver live on the CP. expireApproval is the deny-on-expiry (idempotent: an

@@ -140,12 +140,19 @@ export const ScoringPassSchema = z.object({
   // this pass, may mutate the plane". The difference is the whole guarantee: without it two replicas both
   // read an absent marker, both write one, and the loser's late writes land on the winner's settled plane —
   // after the marker (the read guard) is already gone, so nothing refuses them.
-  // `epoch` is monotonic per record and is what the CLAIM compare-and-swaps on; `passId` is what every
-  // subsequent write carries so the storage layer can refuse a superseded writer in the same statement.
+  // `passId` IS the token — a UUID, never reused — and it is the ONLY authority: the claim CASes on it, every
+  // later write is fenced on it, the settle is guarded by it.
   // Optional ONLY because rows written before this generation carry none — a marker with no passId is a
   // legacy marker: reclaimable by age, and never fenceable (a fenced write naming a passId refuses it,
   // which is the fail-closed reading of "written by a control plane that had no ownership model").
   passId: z.string().min(1).optional(),
+  // ATTEMPT COUNTER — a DIAGNOSTIC, and deliberately not an authority (arch-review 10 §14). It once was the
+  // fencing token, and it could not be one: a settle CLEARS the marker, so the next claim starts the count
+  // over, and a stale writer holding "1" matched a completely different pass holding "1" (the ABA that
+  // TRUST-42's fourth scenario pins). It survives only to answer "how many passes has this record had",
+  // which is worth knowing and decides nothing. Nothing may key ownership, renewal or reclaim on it —
+  // a non-authoritative concurrency number is the most dangerous field in a trust kernel, because the next
+  // reader assumes a monotonic counter means what it usually means.
   epoch: z.number().int().positive().optional(),
   // ── Liveness. A LEASE, not an age: a healthy 1000-case pass legitimately runs longer than any fixed
   // window, and taking it over because it is "old" is how a working pass gets shot (the same lesson the

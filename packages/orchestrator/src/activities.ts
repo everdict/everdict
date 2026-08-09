@@ -269,5 +269,28 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       );
       if (!res.ok) throw new Error(`Score finalization failed: ${res.status} ${await res.text()}`);
     },
+    // The dying workflow's last word (arch-review 10 P1). Deliberately NEVER throws: it runs from the
+    // workflow's failure path, and an exception here would replace the real cause with a reporting error in
+    // the history the operator reads. A missed notice degrades to the old behavior — the lease expires and a
+    // takeover reclaims the marker — which is exactly the outcome this exists to make faster, not the one it
+    // is load-bearing for.
+    async failScore(input: { groupId: string; passId: string; reason: string }): Promise<{ marked: boolean }> {
+      if (!schedule) return { marked: false };
+      try {
+        const res = await fetch(
+          `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-fail`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+            body: JSON.stringify({ passId: input.passId, reason: input.reason }),
+          },
+        );
+        if (!res.ok) return { marked: false };
+        const json = (await res.json()) as { marked?: unknown };
+        return { marked: json.marked === true };
+      } catch {
+        return { marked: false };
+      }
+    },
   };
 }

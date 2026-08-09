@@ -45,11 +45,17 @@ export class TemporalBatchDriver {
     }
   }
 
-  // Score-on-Temporal (orchestration.md T-c): the detached phase-2 pass as a durable score workflow. The
-  // deterministic workflowId IS the one-pass-per-group dedup — a second start while one runs maps to a
-  // client-visible 409; any other failure propagates for the caller's graceful in-process degrade.
-  scoreWorkflowIdFor(groupId: string): string {
-    return `everdict-score-${groupId}`;
+  // Score-on-Temporal (orchestration.md T-c): the detached phase-2 pass as a durable score workflow.
+  //
+  // PASS-SCOPED, not group-scoped (arch-review 10 P0). One-pass-per-group is the DATABASE's guarantee — the
+  // marker's compare-and-swap — and a group-scoped workflow id made Temporal a second, weaker authority on the
+  // same question. They disagreed in the case that matters: a takeover pass wins the CAS, then cannot start
+  // because the stalled pass's workflow still holds the group's id. Scoped to the pass, an AlreadyStarted can
+  // only mean "this same pass's start was retried", which is the dedup a deterministic id is actually for.
+  // A superseded pass's workflow keeps running for a while and is harmless: every one of its activities
+  // presents ITS passId, and the fence refuses all of them.
+  scoreWorkflowIdFor(groupId: string, passId: string): string {
+    return `everdict-score-${groupId}-${passId}`;
   }
 
   async startScore(input: {
@@ -76,7 +82,7 @@ export class TemporalBatchDriver {
       const client = new Client({ connection });
       await client.workflow.start("scoreGroupWorkflow", {
         taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
-        workflowId: this.scoreWorkflowIdFor(input.groupId),
+        workflowId: this.scoreWorkflowIdFor(input.groupId, input.passId),
         args: [
           {
             groupId: input.groupId,

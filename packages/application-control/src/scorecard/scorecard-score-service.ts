@@ -77,11 +77,15 @@ export class ScorecardScoreService {
     return new Date(Date.parse(this.now()) + SCORING_PASS_LEASE_MS).toISOString();
   }
 
-  // Renew while working (per case / per activity). Guarded by the epoch: a pass that was TAKEN OVER cannot
-  // extend a lease it no longer holds — the renewal simply misses, which is also how the owner finds out.
-  // Returns false when this pass no longer owns the marker; callers stop rather than keep writing.
+  // Renew while working (per case / per activity). Guarded by the pass IDENTITY: a pass that was TAKEN OVER
+  // cannot extend a lease it no longer holds — the renewal simply misses, which is also how the owner finds
+  // out. Returns false when this pass no longer owns the marker; callers stop rather than keep writing.
   private async renewLease(id: string, pass: ScoringPass): Promise<boolean> {
-    if (pass.epoch === undefined) return true; // legacy marker: nothing to renew against, nothing to fence
+    // Keyed on `passId`, never on `epoch` (arch-review 10 §14). The epoch used to gate this, which quietly
+    // made a diagnostic counter decide whether a lease was renewable at all — and a marker with a passId but
+    // no epoch (every marker a future writer mints once epoch is dropped) would have skipped renewal
+    // entirely. The authority is the identity; every other field describes it.
+    if (pass.passId === undefined) return true; // legacy marker: nothing to renew against, nothing to fence
     // Still comfortably held → no write. Renewing on every case would cost a write per judgment for no
     // added safety; the fence on the write itself is what actually refuses a superseded pass.
     if (
@@ -95,7 +99,11 @@ export class ScorecardScoreService {
       id,
       { scoringPass: { ...pass, leaseUntil: this.leaseUntil(), heartbeatAt: this.now() }, updatedAt: this.now() },
       undefined,
-      { expectScoringPassId: pass.passId ?? null },
+      // The STORE stamps the lease's end from the clock that will later judge it expired (arch-review 10 P1).
+      // The `leaseUntil` above is the fallback a store without the capability keeps using; where the
+      // capability exists it is overwritten, and a fast replica can no longer mint a lease the database
+      // considers already dead.
+      { expectScoringPassId: pass.passId ?? null, stampScoringLeaseSeconds: SCORING_PASS_LEASE_MS / 1000 },
     );
     return renewed !== undefined;
   }
@@ -185,7 +193,7 @@ export class ScorecardScoreService {
       startedAt: this.now(),
       ...(input.submittedBy !== undefined ? { startedBy: input.submittedBy } : {}),
       ...(this.deps.temporalScores && record.runIds?.length
-        ? { workflowId: this.deps.temporalScores.workflowIdFor(record.id) }
+        ? { workflowId: this.deps.temporalScores.workflowIdFor(record.id, passId) }
         : {}),
       status: "running",
     };
@@ -198,6 +206,9 @@ export class ScorecardScoreService {
       // replica's clock, and a replica running fast would otherwise declare a healthy pass dead and start a
       // second judging run over the same plane — fenced, so not corrupting, but paid for twice.
       ...(existing !== undefined ? { expectScoringPassReclaimable: true } : {}),
+      // …and the lease this claim is granted is stamped by that same clock. Half of one decision read off
+      // the database's clock and the other half off this process's was the remaining drift.
+      stampScoringLeaseSeconds: SCORING_PASS_LEASE_MS / 1000,
     });
     if (claimed === undefined)
       throw new ConflictError(
@@ -221,14 +232,35 @@ export class ScorecardScoreService {
         return record;
       } catch (err) {
         if (err instanceof ConflictError) {
-          // A workflow for this group is ALREADY running — under a DIFFERENT pass. This claim owns the
-          // marker but drives nothing, so leaving it would park the record for a full lease AND hand the
-          // running workflow a marker it can adopt. Release it, guarded by our own identity so a pass that
-          // took over in the meantime is not clobbered.
+          // A workflow already occupies this pass's workflow id. Since the id is PASS-SCOPED this is now a
+          // near-dead branch (a passId is minted per claim), but it is the branch that decides what happens
+          // to a marker whose driver never started, so it stays and it fails CLOSED.
+          //
+          // It used to clear the marker to `null`, and that was the worst possible answer (arch-review 10
+          // P0): this claim is typically a TAKEOVER of a stalled pass A, and A may have stripped the plane
+          // and re-scored half of it before stalling. Clearing the marker makes that half-mutated plane
+          // READABLE again — the analytics guard refuses only while a marker exists, so `null` walks a
+          // mid-revision plane straight past the one gate that exists to stop it. The plane's damage is not
+          // undone by dropping the note that says it is damaged.
+          //
+          // So the marker STAYS, flipped to `failed`: readers keep refusing (an abandoned plane is not
+          // readable evidence), and the next pass TAKES IT OVER exactly as it takes over any other failed
+          // pass. Guarded by our own identity, so a pass that claimed in the meantime is never clobbered.
           await this.deps.store
-            .update(record.id, { scoringPass: null, updatedAt: this.now() }, undefined, {
-              expectScoringPassId: pass.passId ?? null,
-            })
+            .update(
+              record.id,
+              {
+                scoringPass: {
+                  ...pass,
+                  status: "failed",
+                  failedAt: this.now(),
+                  failure: "the scoring workflow could not start — another execution already holds this pass's id",
+                },
+                updatedAt: this.now(),
+              },
+              undefined,
+              { expectScoringPassId: pass.passId ?? null },
+            )
             .catch(() => undefined);
           throw err;
         }
@@ -282,7 +314,11 @@ export class ScorecardScoreService {
       const scores = stripJudgeScores(r.scores, judges);
       if (scores.length !== r.scores.length) changed.push({ ...r, scores });
     }
-    if (changed.length > 0) await this.writeBackScores(record, changed, pass);
+    // `stage: false` — a strip is not a judgment (arch-review 10 P1). Writing it to the stage made a staged
+    // row mean "this pass touched this case", so the obvious promotion predicate (`a row exists → judged`)
+    // would have been quietly wrong on every case the strip cleared and the pass never got to. The stage
+    // holds what a pass PRODUCED; the carriers keep holding what it inherited.
+    if (changed.length > 0) await this.writeBackScores(record, changed, pass, { stage: false });
     return { stripped: changed.length };
   }
 
@@ -383,6 +419,34 @@ export class ScorecardScoreService {
     // pass could clear a live one's marker and append its revision on top.
     const pass = await this.owningPass(record, passId);
     await this.aggregate(record, base, base.results, judges, submittedBy, pass);
+  }
+
+  // A scoring workflow DIED (arch-review 10 P1). Until this existed, a terminal workflow failure — retries
+  // exhausted, the worker terminated, a non-retryable activity error — left the marker saying `running` and
+  // the plane blocked for a full lease, indistinguishable from a pass that is simply slow. Then the takeover
+  // path had to infer death from a clock, which is exactly the inference the lease replaced the age rule to
+  // avoid; here the workflow KNOWS it is dying and says so, so the next pass takes over immediately.
+  //
+  // The marker flips to `failed` and STAYS: the plane was stripped and partly re-scored, so readers must keep
+  // refusing it. Guarded by the pass identity — a workflow that died BECAUSE it was superseded finds the
+  // marker already belongs to its successor, and this write correctly misses rather than declaring the live
+  // pass dead. Idempotent and best-effort by contract: the caller is a dying workflow's last activity.
+  async failScore(id: string, passId: string, reason: string): Promise<{ marked: boolean }> {
+    const record = await this.getRecord(id);
+    const live = record?.scoringPass ?? undefined;
+    if (!record || live === undefined || live.passId !== passId) return { marked: false };
+    if (live.status === "failed") return { marked: true }; // already settled as abandoned — a retry of this activity
+    const marked = await this.deps.store.update(
+      id,
+      {
+        scoringPass: { ...live, status: "failed", failedAt: this.now(), failure: reason },
+        steps: [...(record.steps ?? []), { ts: this.now(), phase: "judges", status: "failed", message: reason }],
+        updatedAt: this.now(),
+      },
+      undefined,
+      { expectScoringPassId: passId },
+    );
+    return { marked: marked !== undefined };
   }
 
   private async track(
@@ -570,6 +634,44 @@ export class ScorecardScoreService {
         "another scoring pass settled this group first — this pass's aggregate is refused (its revision would have overwritten the ledger).",
       );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    // …and REPORT how the stage compared to the plane this pass just certified (arch-review 10 P1). The
+    // contract step promotes from the stage instead of the carriers, and the basis for that swap is having
+    // watched the two agree on real traffic — dual-writing without ever comparing proves only that both
+    // writes happened. Strictly after the settle and strictly non-fatal: a measurement must never be able to
+    // fail the thing it measures.
+    if (pass?.passId !== undefined) void this.reportStageParity(record.id, pass.passId, results);
+  }
+
+  // Compare what THIS pass staged against the plane it settled. Judgment-delta semantics (see the port), so
+  // the comparison is over the staged cases only: a case this pass never judged has no staged row and is
+  // nothing to disagree about. `orphaned` is the shape that would make a promotion INVENT a row, which is
+  // why it is counted separately from a plain value mismatch.
+  private async reportStageParity(scorecardId: string, passId: string, settled: CaseResult[]): Promise<void> {
+    const report = this.deps.scoringStageParity;
+    const stage = this.deps.scoringStage;
+    if (!report || !stage) return;
+    try {
+      const staged = await stage.staged(scorecardId, passId);
+      if (staged.length === 0) return; // an embed group / a pass with no staged judgments — nothing to compare
+      const plane = new Map(settled.map((r) => [childKey(r.caseId, r.trial), r.scores] as const));
+      const mismatched: string[] = [];
+      const orphaned: string[] = [];
+      let matched = 0;
+      for (const entry of staged) {
+        const live = plane.get(entry.caseKey);
+        if (live === undefined) {
+          orphaned.push(entry.caseKey);
+          continue;
+        }
+        // Structural equality over the score rows — the promotion would write these bytes verbatim, so the
+        // comparison is the same one the promotion's correctness rests on.
+        if (JSON.stringify(live) === JSON.stringify(entry.scores)) matched += 1;
+        else mismatched.push(entry.caseKey);
+      }
+      report({ scorecardId, passId, staged: staged.length, matched, mismatched, orphaned });
+    } catch {
+      // A parity report that cannot run tells us nothing; it must not turn a settled pass into a failed one.
+    }
   }
 
   // The dataset judges align against: the registered one when it resolves; otherwise (ad-hoc experiments under
@@ -623,15 +725,21 @@ export class ScorecardScoreService {
   // here instead would leave the window it exists to close — the winner settles between the check and the
   // write, and the late write then lands on a SETTLED plane where the marker (the read guard) is already
   // gone, so the plane silently stops matching the revision digest that certifies it.
-  private async writeBackScores(record: ScorecardRecord, results: CaseResult[], pass?: ScoringPass): Promise<void> {
+  private async writeBackScores(
+    record: ScorecardRecord,
+    results: CaseResult[],
+    pass?: ScoringPass,
+    opts: { stage?: boolean } = {},
+  ): Promise<void> {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
     const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
     // …and STAGE the same judgments under this pass (expand step, scoring-plane-revisions.md). Written and
-    // never read: the carriers below stay the source of truth for this deploy, so a rollback loses nothing,
-    // and the contract step later makes the finalize promote from here instead of writing through. A staging
-    // failure must not fail a pass that is writing its plane correctly — the stage has no readers yet.
-    if (this.deps.scoringStage && pass?.passId !== undefined) {
+    // never decided on: the carriers below stay the source of truth for this deploy, so a rollback loses
+    // nothing, and the contract step later makes the finalize promote from here instead of writing through.
+    // A staging failure must not fail a pass that is writing its plane correctly — nothing depends on it yet.
+    // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch (see the port).
+    if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined) {
       await this.deps.scoringStage
         .stage(
           record.id,

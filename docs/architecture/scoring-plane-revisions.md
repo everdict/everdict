@@ -71,6 +71,15 @@ CREATE TABLE everdict_scoring_stage (
 );
 ```
 
+**A staged row means "THIS PASS JUDGED THIS CASE" — nothing else.** The alternative reading (*the full
+desired score plane*) is the one the expand step accidentally shipped: `prepareScore`'s strip also went
+through the write-back, so a row appeared the moment a pass *touched* a case, judged or not. `stage row
+exists → this case is done` is the obvious way to write the promotion, it would have been silently wrong on
+every case the strip cleared and the pass never reached, and the bug would have looked like a scoring bug
+rather than a semantics one (arch-review 10 P1). The strip no longer stages. The delta reading also keeps the
+two provenances apart — what this pass produced vs what it inherited from the previous revision — which is a
+distinction the promotion has to make anyway.
+
 - `scoreCase` writes here (keyed by its own pass) instead of onto the child row.
 - `planScore`'s "already judged in THIS pass" predicate reads the stage — which is what the id-only predicate
   was always trying to approximate, so the strip-first step **disappears entirely**.
@@ -84,13 +93,20 @@ unreadable" to what it should have been all along: a lease saying who may promot
 
 ## Migration (expand → deploy → contract, per the db rules)
 
-1. **Expand** — add the table. Writers dual-write (stage + carrier) so a rollback loses nothing.
-2. **Deploy** — readers unchanged (carriers are still the truth). The stage is observed, not trusted.
+1. **Expand** — add the table (mig 0149). Writers dual-write (stage + carrier) so a rollback loses nothing.
+2. **Deploy** — readers unchanged (carriers are still the truth). The stage is **observed**, and observed
+   means *measured*: every settled pass compares its stage against the plane it wrote and reports
+   `everdict_scoring_stage_parity_total{result=matched|mismatched|orphaned}` (`ScoringStageParity`). A week of
+   dual-writing that nobody compared is not evidence that the two agree — it is evidence that both writes
+   happened, which was never in doubt (arch-review 10 P1). The comparison runs strictly after the settle and
+   is strictly non-fatal: a measurement must never be able to fail the thing it measures.
 3. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
 
-Each step ships alone. Step 3 is the one that changes behavior, and by then the stage has been carrying
-shadow traffic long enough to compare against the carriers.
+Each step ships alone. Step 3 is the one that changes behavior, and its precondition is stated rather than
+assumed: `mismatched` and `orphaned` at zero across real traffic. `orphaned` is called out separately from a
+value mismatch because it is the shape where a promotion would *invent* a row rather than write a different
+one.
 
 ## What this does NOT change
 

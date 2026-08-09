@@ -154,53 +154,80 @@ export async function scoreGroupWorkflow(input: {
   continueEvery?: number;
   rotateAtHistoryLength?: number;
 }): Promise<void> {
-  if (!input.prepared)
-    await batchActivities.prepareScore({
+  // A pass that dies must SAY it died (arch-review 10 P1). Without this the marker keeps reading `running`
+  // over a plane the strip already mutated, and "still working" is indistinguishable from "dead since
+  // Tuesday" until the lease runs out. The notice is fenced on this pass's own id, so a workflow that failed
+  // BECAUSE a takeover superseded it finds the marker belongs to its successor and correctly marks nothing.
+  //
+  // `continueAsNew` is deliberately OUTSIDE this guard: the SDK signals rotation by throwing, and catching
+  // that would turn every rotation of a long pass into a death notice against a perfectly live pass.
+  const announceDeath = async (err: unknown): Promise<void> => {
+    if (input.passId === undefined) return; // a pre-identity workflow has no pass to fence the notice on
+    await batchActivities.failScore({
+      groupId: input.groupId,
+      passId: input.passId,
+      reason: `the scoring workflow failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  };
+  let plan: { keys: string[]; concurrency: number };
+  let rotatedEarly = false;
+  let limit: number;
+  try {
+    if (!input.prepared)
+      await batchActivities.prepareScore({
+        groupId: input.groupId,
+        judges: input.judges,
+        ...(input.passId !== undefined ? { passId: input.passId } : {}),
+      });
+    plan = await batchActivities.planScore({
       groupId: input.groupId,
       judges: input.judges,
       ...(input.passId !== undefined ? { passId: input.passId } : {}),
     });
-  const plan = await batchActivities.planScore({
-    groupId: input.groupId,
-    judges: input.judges,
-    ...(input.passId !== undefined ? { passId: input.passId } : {}),
-  });
-  const limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
-  const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
-  const keys = plan.keys.slice(0, limit);
-  let next = 0;
-  let rotatedEarly = false;
-  const lane = async (): Promise<void> => {
-    while (next < keys.length) {
-      const info = workflowInfo();
-      if (info.continueAsNewSuggested || info.historyLength >= rotateAt) {
-        rotatedEarly = true;
-        return;
+    limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
+    const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
+    const keys = plan.keys.slice(0, limit);
+    let next = 0;
+    const lane = async (): Promise<void> => {
+      while (next < keys.length) {
+        const info = workflowInfo();
+        if (info.continueAsNewSuggested || info.historyLength >= rotateAt) {
+          rotatedEarly = true;
+          return;
+        }
+        const i = next++;
+        const key = keys[i];
+        if (key === undefined) continue;
+        await batchActivities.scoreGroupCase({
+          groupId: input.groupId,
+          key,
+          judges: input.judges,
+          ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+          ...(input.passId !== undefined ? { passId: input.passId } : {}),
+        });
       }
-      const i = next++;
-      const key = keys[i];
-      if (key === undefined) continue;
-      await batchActivities.scoreGroupCase({
-        groupId: input.groupId,
-        key,
-        judges: input.judges,
-        ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
-        ...(input.passId !== undefined ? { passId: input.passId } : {}),
-      });
-    }
-  };
-  const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
-  await Promise.all(Array.from({ length: lanes }, () => lane()));
+    };
+    const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
+    await Promise.all(Array.from({ length: lanes }, () => lane()));
+  } catch (err) {
+    await announceDeath(err);
+    throw err;
+  }
   if (rotatedEarly || plan.keys.length > limit) {
     await continueAsNew<typeof scoreGroupWorkflow>({ ...input, prepared: true });
     return;
   }
-  await batchActivities.finalizeScore({
-    groupId: input.groupId,
-    judges: input.judges,
-    ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
-    ...(input.passId !== undefined ? { passId: input.passId } : {}),
-  });
+  try {
+    await batchActivities.finalizeScore({
+      groupId: input.groupId,
+      judges: input.judges,
+      ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+      ...(input.passId !== undefined ? { passId: input.passId } : {}),
+    });
+  } catch (err) {
+    await announceDeath(err);
+    throw err;
+  }
 }
 
 // Durable approval WAIT (orchestration.md T-a, workflowId `everdict-approval-<id>`): park → wait for the

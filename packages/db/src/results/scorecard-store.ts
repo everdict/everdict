@@ -57,6 +57,16 @@ export class InMemoryScorecardStore implements ScorecardStore {
       if (persisted !== guard.expectScoringPassEpoch) return undefined;
     }
     const next = { ...cur, ...patch, id: cur.id };
+    // The store stamps the lease's end (see the port) — one process, one clock, so this is trivially the
+    // same clock the reclaimability check above reads. It still lives HERE rather than at the call site,
+    // because the invariant being kept is "the lease is authored by whoever judges it", and an in-memory
+    // pair that let the caller author it would stop being a faithful stand-in for the Pg one.
+    if (guard?.stampScoringLeaseSeconds !== undefined && next.scoringPass) {
+      next.scoringPass = {
+        ...next.scoringPass,
+        leaseUntil: new Date(Date.now() + guard.stampScoringLeaseSeconds * 1000).toISOString(),
+      };
+    }
     this.cards.set(id, next);
     await this.appendEvents(events);
     return next;

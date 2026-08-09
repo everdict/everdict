@@ -848,4 +848,83 @@ describe("scoring-pass ownership (arch-review 8 P0)", () => {
     // The epoch MOVES on takeover — that is what makes every write the old owner still has in flight miss.
     expect(cas.current.scoringPass?.epoch).toBe(2);
   });
+
+  // arch-review 10 P0. The workflow start failing does not undo what the pass it took over already did to
+  // the plane. Clearing the marker to `null` made a half-stripped, half-re-scored plane READABLE again — the
+  // analytics guard refuses only while a marker exists, so `null` walked mid-revision evidence straight past
+  // the one gate that exists to stop it. The damage is not undone by dropping the note that says it exists.
+  it("marks its OWN pass failed — never clears the marker — when the score workflow cannot start", async () => {
+    const abandoned = livePass({ passId: "pass-A", leaseUntil: "2026-08-07T00:05:00.000Z" });
+    const cas = casStore(recordWith([result("c1", [])], abandoned));
+    const svc = new ScorecardScoreService(
+      {
+        ...deps,
+        store: cas.store,
+        temporalScores: {
+          workflowIdFor: (groupId: string, passId: string) => `everdict-score-${groupId}-${passId}`,
+          start: async () => {
+            throw new ConflictError("CONFLICT", {}, "a scoring pass is already in flight (score workflow running).");
+          },
+        },
+      },
+      {
+        newId: () => "pass-B",
+        now: () => "2026-08-07T00:06:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => ({ ...cas.current, runIds: ["child-c1"] }),
+        pinJudges: async (_t, j) => j,
+      },
+    );
+    await expect(svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] })).rejects.toThrow(
+      ConflictError,
+    );
+    // The marker SURVIVES, owned by the claimant, flagged failed: readers keep refusing the plane and the
+    // next pass takes it over exactly as it takes over any other abandoned pass.
+    expect(cas.current.scoringPass).toBeDefined();
+    expect(cas.current.scoringPass?.passId).toBe("pass-B");
+    expect(cas.current.scoringPass?.status).toBe("failed");
+  });
+
+  // arch-review 10 P0: the workflow id is PASS-scoped, so Temporal stops being a second authority on who
+  // owns a group's plane. A group-scoped id was what made the branch above reachable at all.
+  it("records a PASS-scoped workflow id on the marker, not a group-scoped one", async () => {
+    const cas = casStore(recordWith([result("c1", [])], null));
+    const svc = new ScorecardScoreService(
+      {
+        ...deps,
+        store: cas.store,
+        temporalScores: {
+          workflowIdFor: (groupId: string, passId: string) => `everdict-score-${groupId}-${passId}`,
+          start: async () => undefined,
+        },
+      },
+      {
+        newId: () => "pass-A",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => ({ ...cas.current, runIds: ["child-c1"] }),
+        pinJudges: async (_t, j) => j,
+      },
+    );
+    await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    expect(cas.current.scoringPass?.workflowId).toBe("everdict-score-sc-1-pass-A");
+  });
+
+  // arch-review 10 P1: a workflow that dies terminally must SAY so, or the marker reads `running` over a
+  // stripped plane until the lease runs out — and the takeover is back to inferring death from a clock.
+  it("flips its own marker failed on a workflow death notice, and refuses to touch a successor's", async () => {
+    const live = livePass({ passId: "pass-A" });
+    const cas = casStore(recordWith([result("c1", [])], live));
+    const svc = svcOver(cas, () => "unused");
+    await expect(svc.failScore("sc-1", "pass-A", "the worker was terminated")).resolves.toEqual({ marked: true });
+    expect(cas.current.scoringPass?.status).toBe("failed");
+    expect(cas.current.scoringPass?.failure).toContain("terminated");
+
+    // A workflow that died BECAUSE it was superseded finds the marker belongs to someone else, and marks
+    // nothing — declaring a live pass dead is the one thing this must never do.
+    const takenOver = casStore(recordWith([result("c1", [])], livePass({ passId: "pass-B" })));
+    const svc2 = svcOver(takenOver, () => "unused");
+    await expect(svc2.failScore("sc-1", "pass-A", "superseded")).resolves.toEqual({ marked: false });
+    expect(takenOver.current.scoringPass?.status).toBe("running");
+  });
 });
