@@ -14,10 +14,61 @@ import { contentDigest } from "../provenance/content-digest.js";
 
 // The series a release actually watches: its own selection when it made one, else every series the product
 // declares. Order is the product's declaration order — that is the display order everywhere.
-export function watchedSeries(product: ProductRecord, release?: Pick<ReleaseRecord, "seriesKeys">): ProductSeries[] {
+export function watchedSeries(product: ProductRecord, release?: ReleaseScope): ProductSeries[] {
+  return resolveWatchedSeries(product, release).series;
+}
+
+// What a release watches, and — separately — what it PROMISED to watch and can no longer find
+// (arch-review 12 P0). The old shape returned a bare array built by `filter`, which meant a promised series
+// that had been deleted from the product simply was not in it: no error, no gate, `regressedSeries: []`,
+// `ready: true`. Deleting a series was a way to turn a red release green, sitting underneath every invariant
+// built on top of it — and no CAS could catch it, because the decision reads the new product correctly and
+// the new product is the one missing its gate.
+//
+// The scope is the release's FROZEN promise (`plannedSeriesKeys`) when it has one:
+//   · explicit — exactly the keys it named. A key that vanished is `missing`.
+//   · all      — everything the product declared at plan time, PLUS anything added since (more gates is never
+//                the unsafe direction). A key that vanished is still `missing`.
+// A release planned before the freeze existed has no promise to check, so it degrades to the live product
+// series — honest, and it is the only reading available for it.
+export interface ReleaseScope {
+  seriesKeys?: string[];
+  plannedSeriesKeys?: string[];
+  seriesSelection?: "all" | "explicit";
+}
+
+export interface WatchedSeriesResolution {
+  series: ProductSeries[];
+  // Keys this release committed to that the product no longer declares. Never empty-and-ignored: the caller
+  // turns each into a BLOCKING `scope_invalid` state.
+  missing: string[];
+}
+
+export function resolveWatchedSeries(product: ProductRecord, release?: ReleaseScope): WatchedSeriesResolution {
+  const declared = new Map(product.series.map((s) => [s.key, s] as const));
+  const promised = release?.plannedSeriesKeys;
+  if (promised !== undefined) {
+    const missing = promised.filter((key) => !declared.has(key));
+    // `all` keeps watching series added after the plan; `explicit` watches exactly what it named.
+    const keys =
+      release?.seriesSelection === "explicit"
+        ? promised
+        : [...new Set([...promised, ...product.series.map((s) => s.key)])];
+    const series = keys.flatMap((key) => {
+      const found = declared.get(key);
+      return found ? [found] : [];
+    });
+    return { series, missing };
+  }
+  // No frozen promise (pre-freeze release). The live selection is all we have.
   const keys = release?.seriesKeys;
-  if (keys === undefined) return [...product.series];
-  return product.series.filter((series) => keys.includes(series.key));
+  if (keys === undefined) return { series: [...product.series], missing: [] };
+  return {
+    series: product.series.filter((s) => keys.includes(s.key)),
+    // Even without a freeze, a LIVE selection naming a series the product no longer has is the same fault —
+    // the release still said which axes judge it. This is what protects releases planned before the freeze.
+    missing: keys.filter((key) => !declared.has(key)),
+  };
 }
 
 // One scorecard's contribution to a series trend — the caller resolves which record is "latest" and which is
@@ -149,7 +200,22 @@ export function releaseReadiness(
   gateBySeries: ReadonlyMap<string, SeriesGateReading>,
   openIssues: number,
 ): ReleaseReadiness {
-  const series: ReleaseSeriesState[] = watchedSeries(product, release).map((entry) => {
+  const resolution = resolveWatchedSeries(product, release);
+  // A gate this release PROMISED and can no longer find blocks unconditionally (arch-review 12 P0). It is
+  // not a measurement state, so it does not consult `requiredForRelease` — that flag lives on the series
+  // declaration, and the declaration is the thing that disappeared. Reading a deleted gate as "optional"
+  // would let the same edit that removed the gate also decide it never mattered.
+  const missingScope: ReleaseSeriesState[] = resolution.missing.map((key) => ({
+    key,
+    label: key,
+    required: true,
+    verdict: "scope_invalid" as const,
+    reasons: [
+      `this release is judged on the "${key}" series and the product no longer declares it — the gate was removed, not passed; restore the series or re-plan this release's scope`,
+    ],
+    regressed: true,
+  }));
+  const series: ReleaseSeriesState[] = resolution.series.map((entry) => {
     const latest = latestBySeries.get(entry.key);
     const resolution = baselineBySeries.get(entry.key) ?? { kind: "none_first_ship" as const };
     const gate = gateBySeries.get(entry.key);
@@ -200,10 +266,11 @@ export function releaseReadiness(
       regressed: blocks,
     };
   });
-  const regressedSeries = series.filter((entry) => entry.regressed).map((entry) => entry.key);
+  const all = [...missingScope, ...series];
+  const regressedSeries = all.filter((entry) => entry.regressed).map((entry) => entry.key);
   return {
     openIssues,
-    series,
+    series: all,
     regressedSeries,
     ready: openIssues === 0 && regressedSeries.length === 0,
   };

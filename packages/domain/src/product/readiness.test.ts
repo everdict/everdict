@@ -260,3 +260,53 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.ready).toBe(false);
   });
 });
+
+// arch-review 12 P0. A release is "a date and a scope somebody committed to", and the scope was re-derived
+// from the product's CURRENT series on every read — so deleting a series did not FAIL the gate, it DELETED
+// it. Every test here PASSES on the old `filter` and is the bypass sitting underneath every invariant above.
+describe("release scope — a promised gate cannot be deleted into a pass", () => {
+  const planned = (keys: string[], mode: "all" | "explicit" = "explicit"): ReleaseRecord => ({
+    ...release(mode === "explicit" ? keys : undefined),
+    plannedSeriesKeys: keys,
+    seriesSelection: mode,
+  });
+
+  it("BLOCKS when a promised series is gone from the product — never an empty watch list and ready", () => {
+    const gutted = { ...product(), series: [] }; // the edit that used to make a red release green
+    const readiness = releaseReadiness(planned(["quality"]), gutted, new Map(), new Map(), new Map(), 0);
+    expect(readiness.series).toHaveLength(1);
+    expect(readiness.series[0]).toMatchObject({ key: "quality", verdict: "scope_invalid", regressed: true });
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("blocks regardless of requiredForRelease — the flag lives on the declaration that disappeared", () => {
+    // Otherwise the same edit that removes the gate also gets to decide the gate never mattered.
+    const gutted = { ...product([{ requiredForRelease: false }]), series: [] };
+    const readiness = releaseReadiness(planned(["quality"]), gutted, new Map(), new Map(), new Map(), 0);
+    expect(readiness.series[0]).toMatchObject({ verdict: "scope_invalid", required: true, regressed: true });
+  });
+
+  it("an `all` release keeps watching series ADDED after it was planned — more gates is never unsafe", () => {
+    const readiness = releaseReadiness(
+      planned(["quality"], "all"), // planned when only `quality` existed
+      product(), // …and `latency` has since been added
+      new Map(),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(readiness.series.map((s) => s.key).sort()).toEqual(["latency", "quality"]);
+  });
+
+  it("protects a release planned BEFORE the freeze existed, from its live selection alone", () => {
+    // No plannedSeriesKeys — the degraded path still refuses to filter a named series into nothing.
+    const gutted = { ...product(), series: [] };
+    const readiness = releaseReadiness(release(["quality"]), gutted, new Map(), new Map(), new Map(), 0);
+    expect(readiness.series[0]).toMatchObject({ verdict: "scope_invalid", regressed: true });
+  });
+
+  it("says nothing when the promise still holds — the guard is silent on the healthy path", () => {
+    const readiness = releaseReadiness(planned(["quality"]), product(), new Map(), new Map(), new Map(), 0);
+    expect(readiness.series.every((s) => s.verdict !== "scope_invalid")).toBe(true);
+  });
+});

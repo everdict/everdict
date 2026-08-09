@@ -69,6 +69,11 @@ export interface ProductVersionSyncDeps {
   now?: () => string;
 }
 
+// How many times the reconciler re-folds its watermark onto a concurrent edit before giving up. Bounded on
+// purpose: a sweep that keeps losing has nothing urgent to save — the watermark is re-derivable next run, and
+// the version ledger it guards is insert-once regardless.
+const SYNC_COMMIT_ATTEMPTS = 3;
+
 export class ProductVersionSync {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -107,9 +112,45 @@ export class ProductVersionSync {
         };
       }
     }
-    await this.deps.products.update(tenant, productId, { services: record.services });
-    const { triggered, failedSeries } = await this.autoEval(tenant, record, inserted);
+    // The sync joins the PRODUCT'S CAS CONSTITUTION (arch-review 12 P1). This write used to carry no guard,
+    // so a sweep that read `services` at the top and wrote them back minutes later could revert a member's
+    // edit made in between — silently, because the sync's own `version + 1` proved a write had happened. An
+    // invariant that lives as an optional guard on a port is an invariant every caller may forget, and this
+    // caller had.
+    //
+    // A miss is not an error here: this is a RECONCILER, and the right answer to "someone else wrote" is to
+    // re-read and re-apply only what this sync owns — the per-service watermark — rather than to fail a sweep
+    // or to insist on the world it saw first.
+    await this.commitSyncState(tenant, productId, record);
+    // …and the auto-eval plans against the CURRENT product, not the one read before a network round trip
+    // (arch-review 12 P1). Series definitions are editable, so submitting under the definition this sync
+    // happened to open with produced batches stamped `seriesKey: quality` that were run under a dataset or
+    // harness the product had since replaced — a new evaluation created from a standing policy that no
+    // longer stands, landing on the trend as if it were the current one.
+    const current = (await this.deps.products.get(tenant, productId)) ?? record;
+    const { triggered, failedSeries } = await this.autoEval(tenant, current, inserted);
     return { services: outcomes, triggered, ...(failedSeries.length > 0 ? { failedSeries } : {}) };
+  }
+
+  // Persist THIS SYNC'S watermark under the product's optimistic guard, re-folding onto a concurrent edit
+  // instead of overwriting it. Bounded: a sweep that keeps losing the race has nothing urgent to save — the
+  // watermark is re-derivable from the next run, and the version ledger it protects is insert-once anyway.
+  private async commitSyncState(tenant: string, productId: string, folded: ProductRecord): Promise<void> {
+    const syncByName = new Map(folded.services.map((s) => [s.name, s.sync] as const));
+    for (let attempt = 0; attempt < SYNC_COMMIT_ATTEMPTS; attempt++) {
+      const live = attempt === 0 ? folded : await this.deps.products.get(tenant, productId);
+      if (!live) return; // the product was deleted mid-sync — there is no watermark to keep
+      // Only the sync state is carried forward. Whatever a member changed about names, series or repos is
+      // the live record's, and this write must not have an opinion about it.
+      const services = live.services.map((s) => {
+        const sync = syncByName.get(s.name);
+        return sync === undefined ? s : { ...s, sync };
+      });
+      const written = await this.deps.products.update(tenant, productId, { services }, undefined, {
+        expectVersion: live.version ?? 0,
+      });
+      if (written !== undefined) return;
+    }
   }
 
   private async importService(

@@ -6019,6 +6019,7 @@
     "verdictBlockedMissing": "Blocked — missing evidence",
     "verdictNotComparable": "Not comparable",
     "verdictBootstrapRequired": "First ship — approval needed",
+    "verdictScopeInvalid": "Watched series is gone",
     "verdictNotEvaluated": "Not evaluated",
     "linkedIssuesHeading": "Linked issues",
     "historyHeading": "History",

@@ -33,6 +33,9 @@ class FakeProductStore implements ProductStore {
     return this.record;
   }
   async remove(): Promise<void> {}
+  async removeAggregate(): Promise<{ releases: number; versions: number }> {
+    return { releases: 0, versions: 0 };
+  }
   current(): ProductRecord {
     return this.record;
   }

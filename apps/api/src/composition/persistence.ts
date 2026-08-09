@@ -332,7 +332,15 @@ export async function makePersistence(): Promise<Persistence> {
     // statement; in memory the composition hands the release store a reader for the product's version.
     const inMemoryProducts = new InMemoryProductStore();
     const inMemoryReleases = new InMemoryReleaseStore();
+    const inMemoryProductVersions = new InMemoryProductVersionStore();
     inMemoryReleases.attachProducts(inMemoryProducts);
+    // …and the aggregate cascade the Pg store does in ONE statement. Children live in sibling stores here, so
+    // the composition is where the aggregate boundary is expressible at all.
+    inMemoryProducts.attachChildren((tenant, productId) => {
+      const releases = inMemoryReleases.removeForProduct(tenant, productId);
+      const versions = inMemoryProductVersions.removeAllForProduct(tenant, productId);
+      return { releases, versions };
+    });
     return {
       store: inMemoryRuns,
       scoringStageStore: new InMemoryScoringStageStore(),
@@ -383,7 +391,7 @@ export async function makePersistence(): Promise<Persistence> {
       initiativeUpdateStore: new InMemoryInitiativeUpdateStore(),
       productStore: inMemoryProducts,
       releaseStore: inMemoryReleases,
-      productVersionStore: new InMemoryProductVersionStore(),
+      productVersionStore: inMemoryProductVersions,
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       skillVersionStore: new InMemorySkillVersionStore(),

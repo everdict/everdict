@@ -147,6 +147,23 @@ export const ReleaseRecordSchema = z.object({
   // Which of the product's series this release watches. Absent = every series — the common case; a subset is
   // "this release is judged on these axes", and the gate + the readiness read honor exactly that selection.
   seriesKeys: z.array(z.string()).optional(),
+  // The scope this release COMMITTED TO when it was planned (arch-review 12 P0). A release is "a date and a
+  // scope somebody committed to", and the scope was being re-derived from the product's CURRENT series on
+  // every read — so deleting a series did not fail the gate, it DELETED the gate: `seriesKeys: ["quality"]`
+  // filtered against a product with no `quality` produced an empty watch list, no blocking series, and
+  // `ready: true`. That is a bypass underneath every invariant above it, and the product's version CAS
+  // cannot see it: the decision reads the NEW product correctly, and the new product is the one missing its
+  // gate.
+  //
+  // Frozen at plan time, for BOTH selection modes. An explicit selection freezes what it named; `all`
+  // freezes what "all" meant that day. A series ADDED later is still watched under `all` (more gates is
+  // never the unsafe direction); a promised series that DISAPPEARS is `scope_invalid` and blocks.
+  // Absent on releases planned before this existed — those fall back to the live derivation, which is the
+  // honest degradation for a promise nobody recorded.
+  plannedSeriesKeys: z.array(z.string()).optional(),
+  // How the scope was chosen, so a reader can tell "watch everything" from "watch exactly these" after the
+  // fact — the two behave differently when the product gains a series.
+  seriesSelection: z.enum(["all", "explicit"]).optional(),
   history: z.array(TrackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
   createdAt: z.string(),
@@ -203,6 +220,12 @@ export const SeriesVerdictSchema = z.enum([
   "blocked_missing",
   "not_comparable",
   "not_evaluated",
+  // A series this release PROMISED to watch no longer exists on the product (arch-review 12 P0). Not a
+  // measurement outcome at all — the gate itself is gone. It gets its own verdict because every other value
+  // here describes evidence, and describing a deleted gate as "not evaluated" would file a configuration
+  // fault as a measurement fact. ALWAYS blocking: deleting a series must never be a way to turn a red
+  // release green, which is what silently filtering it out of the watch list amounted to.
+  "scope_invalid",
 ]);
 export type SeriesVerdict = z.infer<typeof SeriesVerdictSchema>;
 

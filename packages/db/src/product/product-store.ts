@@ -61,6 +61,23 @@ export class InMemoryProductStore implements ProductStore {
     if (current && current.tenant === tenant) this.byId.delete(id);
   }
 
+  // The in-memory twin of the atomic cascade. One process, one turn — nothing can interleave, which is the
+  // property the Pg statement buys with a single CTE. Children live in sibling stores here, so the
+  // composition binds them (see attachChildren); unbound, this degrades to deleting the product alone, which
+  // is exactly what a unit path that never created children needs.
+  async removeAggregate(tenant: string, id: string): Promise<{ releases: number; versions: number }> {
+    const counts = this.cascade?.(tenant, id) ?? { releases: 0, versions: 0 };
+    await this.remove(tenant, id);
+    return counts;
+  }
+
+  private cascade?: (tenant: string, productId: string) => { releases: number; versions: number };
+
+  // Bind the child stores the aggregate owns, so the in-memory pair removes what the Pg statement removes.
+  attachChildren(cascade: (tenant: string, productId: string) => { releases: number; versions: number }): void {
+    this.cascade = cascade;
+  }
+
   // Synchronous peek — the release decision's cross-aggregate policy guard needs the product's version at
   // the moment of the release write, and the Pg store answers that with a sub-select INSIDE the write
   // statement. Exposed so the in-memory pair gives the same answer without turning the guard into a read
@@ -226,5 +243,26 @@ export class PgProductStore implements ProductStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_products WHERE tenant=$1 AND id=$2", [tenant, id]);
+  }
+
+  // The aggregate delete as ONE statement (arch-review 12 P1). A single statement is atomic in Postgres, so
+  // there is no instant at which the product is gone but its releases are not — the window an
+  // application-level walk left open, and the one a concurrent createRelease could insert an orphan into.
+  // Data-modifying CTEs all see the same snapshot, which is what makes the three deletes one decision.
+  async removeAggregate(tenant: string, id: string): Promise<{ releases: number; versions: number }> {
+    const { rows } = await this.client.query<{ releases: string | number; versions: string | number }>(
+      `WITH del_releases AS (
+         DELETE FROM everdict_product_releases WHERE tenant=$1 AND product_id=$2 RETURNING 1
+       ), del_versions AS (
+         DELETE FROM everdict_product_service_versions WHERE tenant=$1 AND product_id=$2 RETURNING 1
+       ), del_product AS (
+         DELETE FROM everdict_products WHERE tenant=$1 AND id=$2 RETURNING 1
+       )
+       SELECT (SELECT count(*) FROM del_releases) AS releases,
+              (SELECT count(*) FROM del_versions) AS versions`,
+      [tenant, id],
+    );
+    const row = rows[0];
+    return { releases: Number(row?.releases ?? 0), versions: Number(row?.versions ?? 0) };
   }
 }

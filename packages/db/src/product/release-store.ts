@@ -73,6 +73,20 @@ export class InMemoryReleaseStore implements ReleaseStore {
     if (current && current.tenant === tenant) this.byId.delete(id);
   }
 
+  // The in-memory half of the product's atomic cascade — see PgProductStore.removeAggregate. Synchronous so
+  // the composition can perform the whole aggregate delete in one turn, which is this pair's equivalent of a
+  // single statement.
+  removeForProduct(tenant: string, productId: string): number {
+    let removed = 0;
+    for (const [id, r] of [...this.byId.entries()]) {
+      if (r.tenant === tenant && r.productId === productId) {
+        this.byId.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
   emittedEvents(): OutboxEvent[] {
     return [...this.events];
   }
@@ -87,12 +101,14 @@ interface ReleaseRow extends TrackerRow {
   target_date: string | null;
   released_at: string | Date | null;
   series_keys: unknown;
+  planned_series_keys: unknown;
+  series_selection: string | null;
 }
 
 const RELEASE_COLUMNS =
-  "(id, tenant, product_id, name, description, status, target_date, released_at, series_keys, history, created_by, created_at, updated_at)";
+  "(id, tenant, product_id, name, description, status, target_date, released_at, series_keys, planned_series_keys, series_selection, history, created_by, created_at, updated_at)";
 const RELEASE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10::jsonb,$11,$12::timestamptz,$13::timestamptz)";
+  "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14::timestamptz,$15::timestamptz)";
 
 function insertParams(record: ReleaseRecord): unknown[] {
   return [
@@ -105,6 +121,10 @@ function insertParams(record: ReleaseRecord): unknown[] {
     record.targetDate ?? null,
     record.releasedAt ?? null,
     record.seriesKeys !== undefined ? JSON.stringify(record.seriesKeys) : null,
+    // The FROZEN scope (mig 0152). A column-mapping store drops what it does not name, and this is the field
+    // the whole release-scope guarantee rests on — an unnamed one would have been silently absent forever.
+    record.plannedSeriesKeys !== undefined ? JSON.stringify(record.plannedSeriesKeys) : null,
+    record.seriesSelection ?? null,
     JSON.stringify(record.history),
     record.createdBy,
     record.createdAt,
@@ -125,6 +145,12 @@ function rowToRecord(row: ReleaseRow): ReleaseRecord {
     ...(row.released_at !== null ? { releasedAt: iso(row.released_at) } : {}),
     // NULL = "every series" — a real absence, not an empty selection, so it must not become [].
     ...(row.series_keys !== null ? { seriesKeys: trackerIds(row.series_keys) } : {}),
+    ...(row.planned_series_keys !== null && row.planned_series_keys !== undefined
+      ? { plannedSeriesKeys: trackerIds(row.planned_series_keys) }
+      : {}),
+    ...(row.series_selection !== null && row.series_selection !== undefined
+      ? { seriesSelection: row.series_selection }
+      : {}),
     history: trackerHistory(row.history),
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -196,8 +222,11 @@ export class PgReleaseStore implements ReleaseStore {
       tenant: current.tenant,
       version: (current.version ?? 0) + 1,
     };
+    // …including the FROZEN scope (mig 0152): re-scoping a release re-freezes its promise, and a SET list
+    // that omitted it would let an edit change `seriesKeys` while the release kept demanding the old gates.
     const sets = `name=$3, description=$4, status=$5, target_date=$6, released_at=$7::timestamptz,
-       series_keys=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz, version=$11`;
+       series_keys=$8::jsonb, planned_series_keys=$9::jsonb, series_selection=$10,
+       history=$11::jsonb, updated_at=$12::timestamptz, version=$13`;
     const params: unknown[] = [
       tenant,
       id,
@@ -207,6 +236,8 @@ export class PgReleaseStore implements ReleaseStore {
       next.targetDate ?? null,
       next.releasedAt ?? null,
       next.seriesKeys !== undefined ? JSON.stringify(next.seriesKeys) : null,
+      next.plannedSeriesKeys !== undefined ? JSON.stringify(next.plannedSeriesKeys) : null,
+      next.seriesSelection ?? null,
       JSON.stringify(next.history),
       next.updatedAt,
       next.version ?? 0,

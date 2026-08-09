@@ -189,8 +189,45 @@ export class ProductService {
 
   async update(tenant: string, id: string, fields: ProductEditInput, actor: ProductActor): Promise<ProductRecord> {
     const record = await this.get(tenant, id);
-    if (fields.series !== undefined) await this.assertSeriesRefs(tenant, fields.series);
+    if (fields.series !== undefined) {
+      await this.assertSeriesRefs(tenant, fields.series);
+      await this.assertNoPlannedReleaseLosesItsGate(tenant, id, fields.series);
+    }
     return this.applyTransition(record, Product.from(record).update(fields, actor.subject, this.now()));
+  }
+
+  // The SECOND layer of the release-scope fix (arch-review 12 P0). The readiness check is fail-closed — a
+  // promised-but-missing series blocks — and this is what makes the failure legible instead of mysterious:
+  // the edit that would break a planned release is refused AT the edit, naming the release, rather than
+  // discovered later as a release nobody can ship.
+  //
+  // Both layers exist on purpose. This one is a preflight and can be bypassed (an import, a migration, a
+  // future write path, another replica racing), so it can never be the guarantee; the guarantee is the gate.
+  // A preflight alone would be a check that happens to run today, and a gate alone would refuse at the worst
+  // possible moment with no explanation of what changed.
+  private async assertNoPlannedReleaseLosesItsGate(
+    tenant: string,
+    productId: string,
+    nextSeries: readonly ProductSeries[],
+  ): Promise<void> {
+    const keys = new Set(nextSeries.map((s) => s.key));
+    const releases = await this.deps.releases.list(tenant, { productId, status: "planned" });
+    for (const release of releases) {
+      // What this release COMMITTED to — its frozen promise, or its live selection for one planned before
+      // the freeze existed. A release watching "all" has nothing to lose here: dropping a series is a
+      // deliberate narrowing of what "all" means, and it kept no promise about a specific axis.
+      const promised =
+        release.plannedSeriesKeys !== undefined && release.seriesSelection === "explicit"
+          ? release.plannedSeriesKeys
+          : release.seriesKeys;
+      const lost = (promised ?? []).filter((key) => !keys.has(key));
+      if (lost.length > 0)
+        throw new ConflictError(
+          "CONFLICT",
+          { product: productId, release: release.id, series: lost },
+          `Release "${release.name}" is judged on ${lost.map((k) => `"${k}"`).join(", ")} — removing a series a planned release watches would delete its gate rather than pass it. Re-scope that release first, or cancel it.`,
+        );
+    }
   }
 
   async remove(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
@@ -203,10 +240,13 @@ export class ProductService {
       );
     // Releases and the version ledger exist only under their product (unlike the tracker's shared entities),
     // so deletion cascades rather than refusing — there is nowhere else they could sensibly go.
-    const releases = await this.deps.releases.list(tenant, { productId: id });
-    for (const release of releases) await this.deps.releases.remove(tenant, release.id);
-    await this.deps.versions.removeForProduct(tenant, id);
-    await this.deps.store.remove(tenant, id);
+    //
+    // ATOMICALLY (arch-review 12 P1). This used to walk: list releases, delete each, delete versions, delete
+    // the product — and across replicas that walk has a gap a `createRelease` can insert into, leaving a
+    // release under a product that no longer exists and that nothing ever collects. The schema has no foreign
+    // keys by choice, which means the aggregate boundary is a transaction's job, and imitating a cascade from
+    // application code is exactly where that obligation went missing.
+    await this.deps.store.removeAggregate(tenant, id);
   }
 
   async listVersions(

@@ -137,6 +137,9 @@ export const seriesVerdictSchema = z.enum([
   // 첫 출하: 증거는 있지만 비교할 기준이 없다. "비교 불가"와 "출하해도 된다"는 다른 문장이라
   // 기본은 차단이고, 시리즈 정책 allowNoBaseline 이 명시 승인이다(arch-review 8 P1).
   'bootstrap_required',
+  // 이 릴리즈가 판정 기준으로 약속한 시리즈를 제품이 더는 선언하지 않는다(arch-review 12 P0).
+  // 측정 결과가 아니라 게이트 자체가 사라진 상태라, 통과가 아니라 항상 차단이다.
+  'scope_invalid',
 ])
 export const releaseSeriesStateSchema = z.object({
   key: z.string(),

@@ -108,6 +108,26 @@ record detects that the policy changed and can never say what it was, and "which
 had a bootstrap been approved?" is the first question a post-mortem asks. A forced ship past any blocking
 verdict stays a recorded override.
 
+**A release's SCOPE is frozen at plan time** (arch-review 12 P0). A release is "a date and a scope somebody
+committed to", and the scope was re-derived from the product's *current* series on every readiness read — so
+deleting a series did not FAIL the gate, it DELETED it: `seriesKeys: ["quality"]` filtered against a product
+that no longer declares `quality` produced an empty watch list, no blocking series, and `ready: true`. A
+bypass sitting underneath every invariant above it, and one no CAS can catch — the decision reads the NEW
+product correctly, and the new product is the one missing its gate. `plannedSeriesKeys` + `seriesSelection`
+(mig 0152) record the promise; a promised series the product no longer declares is `scope_invalid`, which
+blocks unconditionally and does NOT consult `requiredForRelease` (the flag lives on the declaration that
+disappeared, so the edit that removed the gate must not also get to decide it never mattered). Under `all`, a
+series ADDED after the plan is still watched — more gates is never the unsafe direction. Two layers, on
+purpose: `ProductService.update` also REFUSES an edit that would strip a planned release's gate, so the
+failure is legible at the edit rather than discovered later as a release nobody can ship — but a preflight
+can be bypassed (an import, a migration, another replica), so the gate is the guarantee and the preflight is
+the explanation.
+
+**Deleting a product is ONE statement.** Releases and the version ledger exist only under their product and
+the schema has no foreign keys by choice, which makes the aggregate boundary a transaction's job.
+`removeAggregate` deletes all three in a single data-modifying CTE; the previous application-level walk had a
+gap in the middle that a concurrent `createRelease` could insert an orphan into.
+
 **The ship commits against two versions.** `expectStatus` + `expectVersion` guard the release row (mig 0148);
 `expectProduct` guards the PRODUCT's policy version (mig 0150), evaluated as an `EXISTS` inside the same write
 statement. A release gate is decided under a policy that lives in a different aggregate, so the release's own

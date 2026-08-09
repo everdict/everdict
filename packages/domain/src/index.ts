@@ -38,6 +38,7 @@ export {
   experimentIdentity,
 } from "./scorecard/experiment-identity.js";
 export { flakeIndex } from "./scorecard/flake.js";
+export { type ScoringStageParity, stagePromotionSafe } from "./scorecard/stage-promotion.js";
 export {
   applyGradingPlan,
   caseReason,
@@ -48,6 +49,7 @@ export {
   type JudgeProgress,
   judgeProgress,
   MAX_JUDGE_ATTEMPTS_PER_PASS,
+  pendingJudgesFor,
   stampJudgeAttempts,
   isJudgeMetricOf,
   sealGrading,
@@ -260,8 +262,11 @@ export {
   releasePolicyDocument,
   type ReleasePolicySeries,
   releaseReadiness,
+  type ReleaseScope,
+  resolveWatchedSeries,
   type SeriesGateReading,
   type SeriesScorecardPoint,
+  type WatchedSeriesResolution,
   watchedSeries,
 } from "./product/readiness.js";
 

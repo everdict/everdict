@@ -98,6 +98,12 @@ export class Release {
       status: "planned",
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       ...(input.seriesKeys !== undefined ? { seriesKeys: input.seriesKeys } : {}),
+      // FREEZE the scope this release commits to (arch-review 12 P0). A release is "a date and a scope
+      // somebody committed to" and the scope was re-derived from the product's current series on every
+      // read — so deleting a series removed the gate instead of failing it. What is promised here is what
+      // the readiness check demands to still find.
+      seriesSelection: input.seriesKeys !== undefined ? "explicit" : "all",
+      plannedSeriesKeys: input.seriesKeys !== undefined ? [...input.seriesKeys] : [...input.productSeriesKeys],
       history: [
         {
           at: input.now,
@@ -158,6 +164,12 @@ export class Release {
       if (next !== undefined) assertSeriesSelection(next, productSeriesKeys, this.record.id);
       if ((next ?? []).join("\0") !== (this.record.seriesKeys ?? []).join("\0")) {
         patch.seriesKeys = next;
+        // Re-scoping RE-FREEZES the promise (arch-review 12 P0) — an edit is a new commitment, and leaving
+        // the old frozen keys would make the release demand gates it just decided not to watch. Clearing the
+        // selection re-freezes against the product's series as they are NOW, which is what "all" was just
+        // chosen to mean.
+        patch.seriesSelection = next !== undefined ? "explicit" : "all";
+        patch.plannedSeriesKeys = next !== undefined ? [...next] : [...productSeriesKeys];
         changed.push("seriesKeys");
       }
     }

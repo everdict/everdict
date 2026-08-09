@@ -32,6 +32,16 @@ export interface ProductStore {
     guard?: { expectVersion?: number },
   ): Promise<ProductRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
+  // Delete the product AND everything that exists only underneath it, ATOMICALLY (arch-review 12 P1). The
+  // schema deliberately has no foreign keys — "dangling state is the service's job" — and the service was
+  // doing it by walking: list releases, delete each, delete versions, delete the product. Across replicas
+  // that walk has a gap in the middle: a `createRelease` reading the product between the list and the final
+  // delete inserts a release under a product that is about to stop existing, and nothing ever collects it.
+  //
+  // Choosing no-FK means the aggregate boundary has to be enforced by a transaction somewhere; imitating a
+  // cascade from application code is where that obligation was quietly dropped. Returns what it removed so a
+  // caller can report it rather than guess.
+  removeAggregate(tenant: string, id: string): Promise<{ releases: number; versions: number }>;
 }
 
 export interface ReleaseListFilter {
