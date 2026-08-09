@@ -35,9 +35,13 @@ export class InMemoryProductStore implements ProductStore {
     id: string,
     patch: Partial<ProductRecord>,
     events?: OutboxEvent[],
+    guard?: { expectVersion?: number },
   ): Promise<ProductRecord | undefined> {
     const current = this.byId.get(id);
     if (!current || current.tenant !== tenant) return undefined;
+    // The aggregate's own optimistic guard — a whole-row rewrite from a stale snapshot reverts whatever the
+    // other writer changed, and for a product that means silently re-opening a release gate.
+    if (guard?.expectVersion !== undefined && (current.version ?? 0) !== guard.expectVersion) return undefined;
     // The version moves on EVERY write (mig 0150) — a release decision commits against the policy version it
     // read, and a policy edit must invalidate that decision even though it touches a different aggregate.
     const next: ProductRecord = {
@@ -173,6 +177,7 @@ export class PgProductStore implements ProductStore {
     id: string,
     patch: Partial<ProductRecord>,
     events?: OutboxEvent[],
+    guard?: { expectVersion?: number },
   ): Promise<ProductRecord | undefined> {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
@@ -193,10 +198,17 @@ export class PgProductStore implements ProductStore {
       JSON.stringify(next.history),
       next.updatedAt,
     ];
+    // …evaluated IN the write statement, like every other guard in this codebase. Checked before the UPDATE
+    // it would only widen the window it exists to close.
+    let guardSql = "";
+    if (guard?.expectVersion !== undefined) {
+      params.push(guard.expectVersion);
+      guardSql = ` AND coalesce(version, 0)=$${params.length}`;
+    }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);
       const { rows } = await this.client.query<ProductRow>(
-        `WITH upd AS (UPDATE everdict_products SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *),
+        `WITH upd AS (UPDATE everdict_products SET ${sets} WHERE tenant=$1 AND id=$2${guardSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
                 WHERE EXISTS (SELECT 1 FROM upd))
@@ -206,7 +218,7 @@ export class PgProductStore implements ProductStore {
       return rows[0] ? rowToRecord(rows[0]) : undefined;
     }
     const { rows } = await this.client.query<ProductRow>(
-      `UPDATE everdict_products SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *`,
+      `UPDATE everdict_products SET ${sets} WHERE tenant=$1 AND id=$2${guardSql} RETURNING *`,
       params,
     );
     return rows[0] ? rowToRecord(rows[0]) : undefined;

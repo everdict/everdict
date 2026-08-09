@@ -15,11 +15,21 @@ export interface ProductStore {
   // The background sync sweep's read — deployment-wide, every tenant's products in one pass (the same
   // standing platformEventService.listAll has: an internal reconcile loop is not acting for anyone).
   listAll(limit?: number): Promise<ProductRecord[]>;
+  // `expectVersion` closes the aggregate's OWN lost update (arch-review 11 P1). The update is a whole-row
+  // rewrite of a record the caller read, so two concurrent edits from the same snapshot silently drop one:
+  // A changes `series`, B changes `description`, B's write carries A's stale `series` and reverts it. The
+  // version incrementing twice proves both writes happened; it does not make both survive. This matters
+  // more here than for an ordinary record because the product's `series` IS the release constitution — a
+  // silently reverted `requiredForRelease` re-opens a gate somebody deliberately closed.
+  //
+  // A miss returns undefined exactly like a missing id; the caller just read the record, so undefined-under-
+  // guard IS the conflict signal.
   update(
     tenant: string,
     id: string,
     patch: Partial<ProductRecord>,
     events?: OutboxEvent[],
+    guard?: { expectVersion?: number },
   ): Promise<ProductRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
 }

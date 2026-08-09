@@ -619,7 +619,20 @@ export class ProductService {
       current.id,
       transition.patch,
       stamped.map((s) => s.record),
+      // The version this transition was computed FROM (arch-review 11 P1). The store rewrites the whole row,
+      // so two edits from one snapshot silently drop the earlier one — and for a product the dropped field
+      // may be `series`, which is the release constitution. A concurrent edit must lose visibly.
+      { expectVersion: current.version ?? 0 },
     );
+    if (updated === undefined) {
+      const live = await this.deps.store.get(current.tenant, current.id);
+      if (live !== undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { product: current.id, expectedVersion: current.version ?? 0, actualVersion: live.version ?? 0 },
+          "this product was edited while your change was being prepared — re-read it and apply your change again (writing now would silently revert the other edit).",
+        );
+    }
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: current.id }, `product '${current.id}' not found.`);
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     return updated;
