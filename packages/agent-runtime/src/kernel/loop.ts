@@ -156,6 +156,11 @@ export interface AgentLoopOptions {
   // (tokens/timeSec) halt the run with stopReason "budget_exhausted" so the host can checkpoint. The usd
   // budget is enforced by the host's meter (the loop reports tokens; only the host prices them).
   envelope?: TaskEnvelope;
+  // Called with every OBJECT a granted tool call actually reached, as the kernel saw it (arch-review 12).
+  // The resource scope proves a task could not look OUTSIDE its evidence; this is what proves it looked
+  // INSIDE — and it has to come from the runtime, because "I reviewed the run" is a claim the model can make
+  // without having done it. A verifier host collects these into the decision's evidence coverage.
+  onResourceAccess?: (target: { type: string; id: string }, tool: string) => void;
   // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
   // model (buildSummarizer); the host can pass one bound to a cheaper "small/fast" model so a mechanical digest doesn't
   // burn the main model. Return "" to decline (loop falls through to structural).
@@ -1076,7 +1081,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
               isError: true,
             };
           }
-          for (const target of tool.resourceTargets(parsed.value)) {
+          const targets = tool.resourceTargets(parsed.value);
+          if (targets.kind === "indeterminate") {
+            return {
+              content: `Envelope refusal (out_of_scope): this task is scoped to specific objects, and the arguments given to "${tool.name}" do not name which object it would touch — so the call cannot be checked against that scope and is refused. Call it with an explicit target (refuse_and_replan).`,
+              isError: true,
+            };
+          }
+          for (const target of targets.kind === "targets" ? targets.values : []) {
             const objectDecision = authorizeResourceAccess(target, opts.envelope);
             if (!objectDecision.allowed) {
               return {
@@ -1084,6 +1096,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
                 isError: true,
               };
             }
+            // Admitted — so the runtime OBSERVED this object being reached. Reported here rather than after
+            // the call: what matters for coverage is that the task addressed the evidence under a granted
+            // scope; whether the read then errored is the tool result's business, and a host that needs
+            // "successfully read" can compare against the result it already sees.
+            opts.onResourceAccess?.(target, tool.name);
           }
         }
       }

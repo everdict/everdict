@@ -12,6 +12,14 @@ export interface VerifierVerdict {
   // check that had no way to notice. The runner must say which run and which session its verdict came from,
   // or `assertIndependentVerification` is being asked a question it cannot answer.
   actor: ActorRef;
+  // WHAT THE RUNTIME OBSERVED THE VERIFIER READING — collected by the kernel from actual tool calls, never
+  // assembled from the model's own account of itself (arch-review 12). The resource scope proves a verifier
+  // could not look OUTSIDE the evidence; this is the other half, that it looked INSIDE. A verdict from an
+  // agent that read nothing is a verdict about the question, not about the artifact.
+  //
+  // Absent = the runner does not report it. The decision then records no evidence coverage and cannot be
+  // affirmative — an unmeasured guarantee is not a satisfied one.
+  reviewedResources?: Array<{ type: string; id: string }>;
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed

@@ -1687,7 +1687,7 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
       // The tool DECLARES which object a call touches — the kernel cannot check a target nobody named.
       resourceTargets: (input) => {
         const id = (input as { id?: unknown }).id;
-        return typeof id === "string" ? [{ type: "run", id }] : [];
+        return typeof id === "string" ? { kind: "targets", values: [{ type: "run", id }] } : { kind: "indeterminate" };
       },
       call: async () => ({ content: "ok", isError: false }),
     };

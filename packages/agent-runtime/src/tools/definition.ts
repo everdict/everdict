@@ -37,6 +37,14 @@ export interface PermissionRequest {
 }
 export type PermissionHook = (req: PermissionRequest) => PermissionDecision | Promise<PermissionDecision>;
 
+// See ToolDefinition.resourceTargets — the three answers a resource extractor can give, kept apart so that
+// "nothing to check" and "I could not tell" never share a representation.
+export type ResourceTarget = { type: string; id: string };
+export type ResourceTargetResult =
+  | { kind: "none" }
+  | { kind: "targets"; values: ResourceTarget[] }
+  | { kind: "indeterminate" };
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -72,7 +80,16 @@ export interface ToolDefinition {
   // `scope.resources` — every executor task today) it is never consulted, so declaring it is only required
   // where object isolation is actually claimed.
   //
-  // Returning [] means "this call touches no addressable object" and passes — a search with no target, say.
-  resourceTargets?: (input: unknown) => Array<{ type: string; id: string }>;
+  // The result is a DISCRIMINATED answer, not a possibly-empty array (arch-review 12 P2). `[]` meant two
+  // opposite things — "this call addresses no object" and "I could not find the target in these arguments" —
+  // and the second silently passed the guard. It is harmless while every wired extractor reads a required
+  // argument; it stops being harmless the moment an evidence tool takes an optional id or a wildcard, and
+  // that is a fail-OPEN a reader would have to reconstruct from two helpers to notice.
+  //   { kind: "none" }              — genuinely targetless (a search, a listing with no anchor). Passes.
+  //   { kind: "targets", values }   — check each one.
+  //   { kind: "indeterminate" }     — the arguments did not yield a target. REFUSED under an object scope,
+  //                                   because a call we cannot describe is a call we cannot promise anything
+  //                                   about.
+  resourceTargets?: (input: unknown) => ResourceTargetResult;
   call: (input: unknown, ctx: ToolContext) => Promise<ToolResult>;
 }

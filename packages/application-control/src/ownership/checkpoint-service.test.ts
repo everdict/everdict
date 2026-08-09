@@ -273,6 +273,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
     verdictActor: ActorRef;
     executor?: ActorRef;
     verifications?: VerificationDecisionStore;
+    reviewed?: Array<{ type: string; id: string }>;
   }): { svc: CheckpointService; envelopes: TaskEnvelope[] } {
     const envelopes: TaskEnvelope[] = [];
     const store: HandoffCheckpointStore = {
@@ -292,7 +293,14 @@ describe("verification — a spawned verdict is checked for independence and FIL
       verifier: {
         async verify(input) {
           envelopes.push(input.envelope);
-          return { verdict: "verified", detail: "the run's trace supports the claim", actor: opts.verdictActor };
+          return {
+            verdict: "verified",
+            detail: "the run's trace supports the claim",
+            actor: opts.verdictActor,
+            // What the RUNTIME observed being read. A verifier that reports nothing gets an `inconclusive`
+            // decision, which is its own test below.
+            reviewedResources: opts.reviewed ?? [{ type: "run", id: "run-42" }],
+          };
         },
       },
       newId: () => "vd-1",
@@ -350,6 +358,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
       verifier: { id: "agent:auditor" },
       executors: [{ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }],
     });
+    expect(decision.evidenceCoverage).toMatchObject({ offered: 1, reviewed: [{ type: "run", id: "run-42" }] });
     expect(verifications.records).toHaveLength(1);
     // …and the workspace hears it, with the independence result in the payload — a verdict that could not be
     // checked must never read like one that was.
@@ -362,6 +371,8 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const decision = await svc.requestVerification("acme", "cp-1");
     expect(decision.independence).toBe("abstained");
     expect(decision.executors).toEqual([]);
+    // …and an unproven independence cannot carry an affirmative verdict.
+    expect(decision.verdict).toBe("inconclusive");
   });
 });
 
@@ -443,5 +454,100 @@ describe("verification — independence is checked against EVERY executor in the
     expect(decision.executors.map((a) => a.id)).toEqual(["agent:alpha", "agent:beta"]);
     expect(decision.independence).toBe("enforced");
     expect(sink.records).toHaveLength(1);
+  });
+});
+
+// arch-review 12: "verified" is a strong word, and the PLATFORM decides whether a decision earns it. Two
+// gaps used to be invisible — independence established against only some of the executors, and a verifier
+// that never opened the evidence at all. Both are recorded, and both refuse an affirmative.
+describe("verification — an affirmative needs full identity AND evidence coverage", () => {
+  const checkpoint: HandoffCheckpointRecord = {
+    ...HandoffCheckpointSchema.parse({
+      ...body({
+        confirmedFacts: [
+          { statement: "the fix holds", refs: [{ type: "run", id: "run-A" }] },
+          { statement: "and it shipped", refs: [{ type: "run", id: "run-B" }] },
+        ],
+      }),
+      id: "cp-cov",
+      createdAt: "2026-08-08T00:00:00.000Z",
+      createdBy: "member:dana",
+    }),
+    tenant: "acme",
+  };
+
+  const svc = (opts: {
+    resolvable: Record<string, ActorRef>;
+    reviewed?: Array<{ type: string; id: string }>;
+  }): CheckpointService =>
+    new CheckpointService({
+      store: {
+        async create() {},
+        async get() {
+          return checkpoint;
+        },
+        async list() {
+          return [];
+        },
+      },
+      resolvers: {},
+      runActor: async (_t, runId) => opts.resolvable[runId],
+      verifier: {
+        async verify() {
+          return {
+            verdict: "verified" as const,
+            detail: "the evidence supports it",
+            actor: { id: "agent:auditor", runId: "run-Z", sessionId: "conv-Z" },
+            ...(opts.reviewed ? { reviewedResources: opts.reviewed } : {}),
+          };
+        },
+      },
+      newId: () => "vd-cov",
+      now: () => "2026-08-08T01:00:00.000Z",
+    });
+
+  const bothRuns = [
+    { type: "run", id: "run-A" },
+    { type: "run", id: "run-B" },
+  ];
+
+  it("records PARTIAL independence and refuses the affirmative when one executor could not be resolved", () => {
+    // The collapse the two-state field made: independent of A, unknown of B, recorded as "enforced".
+    return expect(
+      svc({
+        resolvable: { "run-A": { id: "agent:alpha", runId: "run-A" } },
+        reviewed: bothRuns,
+      }).requestVerification("acme", "cp-cov"),
+    ).resolves.toMatchObject({
+      independence: "partial",
+      verdict: "inconclusive",
+      executorCoverage: { runRefs: 2, unresolvedRunIds: ["run-B"] },
+    });
+  });
+
+  it("refuses the affirmative when the verifier never opened part of its evidence", async () => {
+    // The resource scope proves it could not look OUTSIDE. This is the other half: that it looked INSIDE.
+    const decision = await svc({
+      resolvable: {
+        "run-A": { id: "agent:alpha", runId: "run-A" },
+        "run-B": { id: "agent:beta", runId: "run-B" },
+      },
+      reviewed: [{ type: "run", id: "run-A" }],
+    }).requestVerification("acme", "cp-cov");
+    expect(decision.independence).toBe("enforced");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("never read");
+    expect(decision.evidenceCoverage).toMatchObject({ offered: 2, reviewed: [{ type: "run", id: "run-A" }] });
+  });
+
+  it("AFFIRMS when every executor resolved and every offered ref was read", async () => {
+    const decision = await svc({
+      resolvable: {
+        "run-A": { id: "agent:alpha", runId: "run-A" },
+        "run-B": { id: "agent:beta", runId: "run-B" },
+      },
+      reviewed: bothRuns,
+    }).requestVerification("acme", "cp-cov");
+    expect(decision).toMatchObject({ verdict: "verified", independence: "enforced" });
   });
 });

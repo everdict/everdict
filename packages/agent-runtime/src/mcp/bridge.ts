@@ -1,5 +1,5 @@
 import type { EffectContract } from "@everdict/contracts";
-import type { ToolDefinition, ToolResult } from "../tools/definition.js";
+import type { ResourceTargetResult, ToolDefinition, ToolResult } from "../tools/definition.js";
 
 // A tool spec as returned by an MCP server's tools/list (name + description + JSON-schema input).
 export interface McpToolSpec {
@@ -59,41 +59,36 @@ export function bridgeMcpTools(specs: McpToolSpec[], invoke: McpInvoke): ToolDef
 // Deliberately small. It covers the evidence kinds a checkpoint can cite (CheckpointRef: run, scorecard,
 // file, issue, trace) and nothing else — every other tool stays refused under an object scope, which is the
 // correct posture for a role whose whole definition is "the evidence and nothing else".
-const ID_ARG = (input: unknown): string | undefined => {
-  if (input === null || typeof input !== "object") return undefined;
-  const id = (input as Record<string, unknown>).id;
-  return typeof id === "string" && id.length > 0 ? id : undefined;
-};
 const byId =
   (type: string) =>
-  (input: unknown): Array<{ type: string; id: string }> => {
-    const id = ID_ARG(input);
-    return id === undefined ? [] : [{ type, id }];
+  (input: unknown): ResourceTargetResult => {
+    if (input === null || typeof input !== "object") return { kind: "indeterminate" };
+    const id = (input as Record<string, unknown>).id;
+    // A reader whose id is missing or empty has not told us what it would touch. Under an object scope that
+    // is a refusal, never a pass — the two used to be the same empty array.
+    return typeof id === "string" && id.length > 0
+      ? { kind: "targets", values: [{ type, id }] }
+      : { kind: "indeterminate" };
   };
-const byPath = (input: unknown): Array<{ type: string; id: string }> => {
-  if (input === null || typeof input !== "object") return [];
+const byPath = (input: unknown): ResourceTargetResult => {
+  if (input === null || typeof input !== "object") return { kind: "indeterminate" };
   const path = (input as Record<string, unknown>).path;
-  return typeof path === "string" && path.length > 0 ? [{ type: "file", id: path }] : [];
+  return typeof path === "string" && path.length > 0
+    ? { kind: "targets", values: [{ type: "file", id: path }] }
+    : { kind: "indeterminate" };
 };
 
-export const EVIDENCE_RESOURCE_TARGETS: Readonly<
-  Record<string, (input: unknown) => Array<{ type: string; id: string }>>
-> = {
+export const EVIDENCE_RESOURCE_TARGETS: Readonly<Record<string, (input: unknown) => ResourceTargetResult>> = {
   get_run: byId("run"),
   get_scorecard: byId("scorecard"),
   get_issue: byId("issue"),
-  get_trace: byId("trace"),
+  get_run_trajectory: byId("run"),
   get_file: byPath,
 };
 
-// Attach the declared extractors to a bridged tool set. Applied by the host that knows its own tool
-// vocabulary — the same reasoning `verifierTools` is injectable for: tool names are a deployment's, not the
-// kernel's. A tool with no declaration is left as it is and stays refused under an object scope.
 export function withResourceTargets(
   tools: ToolDefinition[],
-  targets: Readonly<
-    Record<string, (input: unknown) => Array<{ type: string; id: string }>>
-  > = EVIDENCE_RESOURCE_TARGETS,
+  targets: Readonly<Record<string, (input: unknown) => ResourceTargetResult>> = EVIDENCE_RESOURCE_TARGETS,
 ): ToolDefinition[] {
   return tools.map((t) => {
     const extractor = targets[t.name];

@@ -305,13 +305,59 @@ export class CheckpointService {
     // the human-filed path does. Checking one executor was a hole the size of the second: a checkpoint citing
     // run-A (agent A) and run-B (agent B), verified by B, compared B against A, passed, and never looked at
     // the work B did itself.
-    const executors = await this.executorsOf(tenant, evidence);
+    const coverage = await this.executorsOf(tenant, evidence);
+    const executors = coverage.resolved;
     for (const executor of executors) {
       assertIndependentVerification(
         { profile: EXECUTOR_ASSIGNMENT_PROFILE, actor: executor },
         { profile: VERIFIER_ASSIGNMENT_PROFILE, actor: verdict.actor },
       );
     }
+    // Independence coverage is THREE states, not two (arch-review 12). `enforced` means every internal run in
+    // the evidence resolved to an actor and every one of them was compared. If some did not resolve, what we
+    // know is "independent of the ones we could see" — recording that as `enforced` collapses partial
+    // knowledge into the optimistic half, which is the same failure the baseline resolution had.
+    const independence: "enforced" | "partial" | "abstained" =
+      coverage.runRefs === 0
+        ? "abstained"
+        : coverage.unresolvedRunIds.length === 0
+          ? "enforced"
+          : executors.length === 0
+            ? "abstained"
+            : "partial";
+
+    // EVIDENCE coverage: what the RUNTIME saw the verifier read, against what the checkpoint offered.
+    const reviewed = evidence.filter((ref) =>
+      (verdict.reviewedResources ?? []).some((r) => r.type === ref.type && r.id === ref.id),
+    );
+    const granted = new Set<string>(this.deps.verifierTools ?? DEFAULT_VERIFIER_TOOLS);
+    const readerFor = (ref: CheckpointRef): string | undefined => EVIDENCE_READER_BY_TYPE[ref.type];
+    const unreachable = evidence.filter((ref) => {
+      const reader = readerFor(ref);
+      return reader === undefined || !granted.has(reader);
+    });
+    const unreviewed = evidence.filter((ref) => !reviewed.includes(ref) && !unreachable.includes(ref));
+
+    // "VERIFIED" IS A STRONG WORD, and the platform — not the runner — decides whether this decision earns
+    // it. An affirmative needs full independence AND every offered-and-reachable ref actually read; anything
+    // less is `inconclusive` with the gap named. This is not rewriting the verifier's answer: the runner
+    // reported what it concluded, and the platform reports what that conclusion is worth given what was
+    // checked. Merging "it holds" with "I could not tell" is the one thing a trust system must never do, and
+    // an unchecked half is a species of could-not-tell.
+    const gaps: string[] = [
+      ...(independence !== "enforced"
+        ? [
+            `independence could not be established against ${coverage.unresolvedRunIds.length > 0 ? `run(s) ${coverage.unresolvedRunIds.join(", ")}` : "any executor"}`,
+          ]
+        : []),
+      ...(unreviewed.length > 0
+        ? [`the verifier never read ${unreviewed.map((r) => `${r.type}:${r.id}`).join(", ")}`]
+        : []),
+      ...(unreachable.length > 0
+        ? [`no wired tool can address ${unreachable.map((r) => `${r.type}:${r.id}`).join(", ")}`]
+        : []),
+    ];
+    const affirmable = verdict.verdict !== "verified" || gaps.length === 0;
 
     // …and the verdict becomes a RECORD, not a return value. A judgment nobody can look up afterwards
     // cannot be cited, cannot be audited, and cannot be compared against the next one.
@@ -322,11 +368,11 @@ export class CheckpointService {
       evidence,
       executors,
       verifier: verdict.actor,
-      verdict: verdict.verdict,
-      detail: verdict.detail,
-      // Which of the two happened, said out loud: an abstention is not a passed check, and a reader weighing
-      // this verdict is entitled to know whether independence was proven or merely unopposed.
-      independence: executors.length > 0 ? "enforced" : "abstained",
+      verdict: affirmable ? verdict.verdict : "inconclusive",
+      detail: affirmable ? verdict.detail : `${verdict.detail} — recorded as inconclusive: ${gaps.join("; ")}.`,
+      independence,
+      executorCoverage: { runRefs: coverage.runRefs, unresolvedRunIds: coverage.unresolvedRunIds },
+      evidenceCoverage: { offered: evidence.length, reviewed, unreachable },
       envelopeId,
       createdAt: this.now(),
       createdBy: input.requestedBy ?? "system",
@@ -343,32 +389,56 @@ export class CheckpointService {
   }
 
   // EVERY actor whose work is under review — resolved from ALL of the evidence's run references, the same
-  // linkage the human-filed path uses. Empty (no run refs, no resolver, unresolvable runs) = the caller
+  // against. The unresolved ids come back so the decision can NAME the part of the evidence nobody was
   // abstains rather than inventing an identity to compare against. Deduplicated on the full identity, not on
   // the actor id: the same agent in two different sessions is two contexts, and the independence invariant
   // reads run and session as well as actor.
-  private async executorsOf(tenant: string, evidence: readonly CheckpointRef[]): Promise<ActorRef[]> {
+  private async executorsOf(
+    tenant: string,
+    evidence: readonly CheckpointRef[],
+  ): Promise<{ resolved: ActorRef[]; runRefs: number; unresolvedRunIds: string[] }> {
     const { runActor } = this.deps;
-    if (!runActor) return [];
+    const runIds = [...new Set(evidence.filter((r) => r.type === "run").map((r) => r.id))];
+    if (!runActor) return { resolved: [], runRefs: runIds.length, unresolvedRunIds: [...runIds] };
     const seen = new Set<string>();
-    const out: ActorRef[] = [];
-    for (const ref of evidence) {
-      if (ref.type !== "run") continue;
-      const actor = await runActor(tenant, ref.id);
-      if (!actor) continue; // linkage missing for THIS run — skip it, never let it stand for the others
-      const key = `${actor.id} ${actor.runId ?? ""} ${actor.sessionId ?? ""}`;
+    const resolved: ActorRef[] = [];
+    const unresolvedRunIds: string[] = [];
+    for (const runId of runIds) {
+      const actor = await runActor(tenant, runId);
+      if (!actor) {
+        unresolvedRunIds.push(runId); // NAMED, never skipped — an unchecked run is part of the claim
+        continue;
+      }
+      const key = `${actor.id} ${actor.runId ?? ""} ${actor.sessionId ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(actor);
+      resolved.push(actor);
     }
-    return out;
+    return { resolved, runRefs: runIds.length, unresolvedRunIds };
   }
 }
 
 // The read tools a spawned verifier may call. Evidence readers only — nothing that reaches the executor's
 // trajectory, reasoning or conversation, which is the whole point of the separation. Overridable per
 // deployment (`verifierTools`) because tool names are a deployment's vocabulary, not a domain constant.
-const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue", "get_trace"] as const;
+const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue", "get_run_trajectory"] as const;
+
+// WHICH TOOL READS EACH EVIDENCE KIND — the map that decides what a verifier can actually REACH
+// (arch-review 12). The previous default set named `get_trace`, which is not a tool the control-plane surface
+// exposes (the trajectory reader is `get_run_trajectory`), and `commit` has no reader at all because everdict
+// does not host the tenant's git remote. Both facts were invisible: a ref nobody could open was simply never
+// opened, and the verdict came back "verified" anyway.
+//
+// A type with NO entry — or one the deployment did not wire — makes that ref UNREACHABLE, which the decision
+// records and which blocks an affirmative. "We could not look at this" is not "this holds".
+const EVIDENCE_READER_BY_TYPE: Partial<Record<CheckpointRef["type"], string>> = {
+  run: "get_run",
+  scorecard: "get_scorecard",
+  file: "get_file",
+  issue: "get_issue",
+  trace: "get_run_trajectory",
+  // commit: intentionally absent — no first-party tool reads a tenant's git remote.
+};
 
 function verificationFact(decision: VerificationDecision): PlatformFact {
   return {

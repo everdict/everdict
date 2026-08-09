@@ -251,9 +251,35 @@ export const VerificationDecisionSchema = z.object({
   verifier: ActorRefSchema,
   verdict: z.enum(["verified", "refuted", "inconclusive"]),
   detail: z.string().min(1),
-  // Whether the independence invariant was actually APPLIED to this pair, or abstained for missing linkage.
-  // A decision that does not say which is a verdict pretending to a check.
-  independence: z.enum(["enforced", "abstained"]),
+  // Whether the independence invariant was actually applied to EVERY actor in the evidence, to some of them,
+  // or to none. `partial` exists because the two-state version collapsed partial knowledge into a binary and
+  // the optimistic half won (arch-review 12): evidence citing run-A (resolvable) and run-B (linkage missing)
+  // recorded `enforced` — true of A, unknown of B, and read by everyone as true of the verification.
+  independence: z.enum(["enforced", "partial", "abstained"]),
+  // WHICH internal run references could be turned into an actor and which could not. The counts are the
+  // point: `enforced` means every internal run resolved, `partial` names the ones that did not, and a reader
+  // can tell "checked" from "could not check" without re-deriving it.
+  executorCoverage: z
+    .object({
+      runRefs: z.number().int().nonnegative(),
+      unresolvedRunIds: z.array(z.string()).default([]),
+    })
+    .optional(),
+  // WHAT THE VERIFIER ACTUALLY READ, reported by the RUNTIME rather than claimed by the model
+  // (arch-review 12). The resource scope is an upper bound — "it could not look outside the evidence" — and a
+  // verdict needs the lower bound too: that it looked INSIDE. Without this a verifier could answer from the
+  // question alone, read one of four refs, or read none, and still return "verified".
+  //   reviewed    — refs the kernel observed being fetched
+  //   unreachable — refs offered as evidence that no wired tool can address (an external commit, a trace on
+  //                 someone else's platform). Recorded, never silently dropped: they are the part of the
+  //                 claim nobody checked.
+  evidenceCoverage: z
+    .object({
+      offered: z.number().int().nonnegative(),
+      reviewed: z.array(CheckpointRefSchema).default([]),
+      unreachable: z.array(CheckpointRefSchema).default([]),
+    })
+    .optional(),
   envelopeId: z.string().optional(), // the verifier envelope this ran inside
   createdAt: z.string(),
   createdBy: z.string(), // who REQUESTED the verification (the verifier itself is `verifier` above)
