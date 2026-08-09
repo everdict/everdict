@@ -36,6 +36,15 @@ describe.skipIf(!URL)("scoring-pass ownership — live Postgres (arch-review 8 P
     ...over,
   });
 
+  // The measured value of a child's first score. `Score` is a union — an unmeasured score carries no value
+  // at all — so the read narrows rather than asserting past the contract.
+  const firstValue = (record: { result?: { scores?: readonly unknown[] } } | undefined): number | undefined => {
+    const score = record?.result?.scores?.[0];
+    return typeof score === "object" && score !== null && "value" in score
+      ? (score as { value: number }).value
+      : undefined;
+  };
+
   async function seed(id: string): Promise<ScorecardRecord> {
     const record: ScorecardRecord = {
       id,
@@ -164,7 +173,7 @@ describe.skipIf(!URL)("scoring-pass ownership — live Postgres (arch-review 8 P
     );
     expect(superseded).toBeUndefined();
     const child = await runs.get(childId);
-    expect(child?.result?.scores?.[0]?.value).toBe(1); // the winner's judgment, untouched
+    expect(firstValue(child)).toBe(1); // the winner's judgment, untouched
 
     // …and the interleaving the READ GUARD cannot see: the winner SETTLES (marker cleared, plane readable
     // again) and only then does the loser wake. Nothing but the fence is left to refuse it.
@@ -186,6 +195,6 @@ describe.skipIf(!URL)("scoring-pass ownership — live Postgres (arch-review 8 P
     );
     expect(afterSettle).toBeUndefined();
     const settled = await runs.get(childId);
-    expect(settled?.result?.scores?.[0]?.value).toBe(1);
+    expect(firstValue(settled)).toBe(1);
   });
 });
