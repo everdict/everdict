@@ -1,3 +1,4 @@
+import { BadRequestError } from "@everdict/contracts";
 import {
   type ActorRef,
   type HandoffCheckpoint,
@@ -18,6 +19,7 @@ import {
   authorizeToolInvocation,
   budgetExhausted,
   danglingCheckpointRefs,
+  verifierEnvelopeFor,
 } from "./ownership.js";
 
 // The ownership kernel's acceptance queries (digo-edu B2/B5/B6 battery) pinned as invariants.
@@ -356,5 +358,50 @@ describe("O6 — the checkpoint is a resumable state transfer", () => {
     expect(() =>
       assertCheckpointForEnvelope(checkpoint({ rollbackPlan: "git revert the fix commit; re-run sc-6" }), e),
     ).not.toThrow();
+  });
+});
+
+// arch-review 9 P2 — the verifier spawn's envelope. The protocol doc recorded context separation as a
+// PRINCIPLE with no code behind it because nothing spawned a verifier; this is the binding it named.
+describe("verifierEnvelopeFor — context separation becomes a constructor, not a promise", () => {
+  const verifier: RoleProfile = {
+    role: "verifier",
+    capabilities: { read: "all", write: [] },
+    requiredEvidence: ["scorecard"],
+    completion: "verified_verdict",
+  };
+  const input = {
+    id: "env-1",
+    goal: "verify the checkpoint",
+    evidence: ["run:r1", "scorecard:sc1"],
+    budgets: { tokens: 1000 },
+  };
+
+  it("scopes reads to the evidence and writes to nothing", () => {
+    const envelope = verifierEnvelopeFor(verifier, input);
+    // Not "all" — a verifier that can read the executor's trajectory reviews the executor's story rather than
+    // the artifact, which is the failure the separation exists to prevent.
+    expect(envelope.scope.reads).toEqual(["run:r1", "scorecard:sc1"]);
+    expect(envelope.scope.writes).toEqual([]);
+    expect(envelope.role).toBe("verifier");
+  });
+
+  it("refuses any role but verifier — an actor never finally judges its own work", () => {
+    const executor: RoleProfile = {
+      role: "executor",
+      capabilities: { read: "all", write: ["fs:write"] },
+      requiredEvidence: [],
+      completion: "change_set",
+    };
+    expect(() => verifierEnvelopeFor(executor, input)).toThrow(BadRequestError);
+  });
+
+  it("refuses an empty evidence set — a verdict about nothing is not a verdict", () => {
+    expect(() => verifierEnvelopeFor(verifier, { ...input, evidence: [] })).toThrow(BadRequestError);
+  });
+
+  it("refuses evidence the profile's own read ceiling does not cover", () => {
+    const narrow: RoleProfile = { ...verifier, capabilities: { read: ["scorecard:sc1"], write: [] } };
+    expect(() => verifierEnvelopeFor(narrow, input)).toThrow(BadRequestError);
   });
 });

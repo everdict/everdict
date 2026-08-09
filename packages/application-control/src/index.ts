@@ -114,6 +114,7 @@ export type {
 } from "./ports/product-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { HandoffCheckpointStore } from "./ports/handoff-checkpoint-store.js";
+export type { VerifierRunner, VerifierVerdict } from "./ports/verifier-runner.js";
 export {
   CheckpointService,
   type CheckpointRefResolvers,

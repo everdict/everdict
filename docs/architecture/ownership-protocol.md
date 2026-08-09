@@ -73,13 +73,25 @@ Stated plainly, because a protocol that overstates its own coverage is the failu
 | --- | --- |
 | `assertIndependentVerification` (domain) | **enforced** — the ONE decision function (actor + run + session) |
 | Checkpoint persistence | **enforced where resolvable** — the service assembles both `RoleAssignment`s from the referenced run's executor linkage and calls the domain function; missing linkage abstains |
-| Verifier runtime | **absent** — no path spawns an agent in the verifier role |
+| Verifier runtime | **enforced at the spawn** — `verifierEnvelopeFor` builds the only envelope a verifier role may run inside (writes empty, reads = the evidence), `CheckpointService.requestVerification` is the spawn site, and the agent loop enforces the envelope on every tool call incl. sub-agents. A deployment with no runner configured refuses rather than auto-passing |
 
-Everdict has no verifier runtime today. Context separation — a verifier receives *evidence only*, never the
-executor's trajectory or reasoning — is therefore a stated **principle**, not a live guard: there is no
-spawn site to bind it to, and writing one so the protocol looks complete would be a claim rather than a
-check. When verifier-role work becomes spawnable, that spawn is the third enforcement site, and the context
-it assembles is where the principle becomes code. The DECISION that spawn must call already exists:
+Context separation — a verifier receives *evidence only*, never the executor's trajectory or reasoning — is
+now a live guard rather than a stated principle (arch-review 9 P2). It became one the way this document said
+it would: a spawn site appeared, and the context it assembles is where the principle turned into code.
+
+`verifierEnvelopeFor` (`@everdict/domain`) is a CONSTRUCTOR, not a validator run afterwards — a verifier's
+envelope is not something a caller proposes and we approve. Writes are empty (so the runtime scope agrees
+with the role validator, and `authorizeToolInvocation` refuses every write call at the loop) and reads are
+exactly the evidence ids, never `"all"` — a verifier that can read the executor's trajectory is reviewing the
+executor's story rather than the artifact. Sub-agents inherit the envelope, so a verifier cannot delegate its
+way out of the ceiling. It refuses a non-verifier profile, an empty evidence set, and evidence the profile's
+own read ceiling does not cover.
+
+`CheckpointService.requestVerification` is the first caller: the evidence is the checkpoint's own refs (what
+the executor put forward), and the returned verdict is filed through the ordinary path, so it meets
+`assertIndependentVerification` like any other — an agent that verified its own run is refused exactly as a
+human doing the same would be. Nothing about being an agent relaxes the invariant. A deployment that has
+wired no runner REFUSES the request; a missing verifier never becomes an automatic pass. The DECISION that spawn must call already exists:
 `assertEnvelopeForRole(profile, envelope)` (`@everdict/domain`) holds the delegation invariant — a role's
 capabilities are the CEILING, the envelope's scope must be a subset (`reads: "all"` is delegable only by an
 unrestricted-read profile; excess writes/reads refuse) — so a "verifier" envelope carrying production writes

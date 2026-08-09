@@ -261,6 +261,7 @@ export {
   assertCheckpointForEnvelope,
   assertCompletionForRole,
   assertEnvelopeForRole,
+  verifierEnvelopeFor,
   assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,

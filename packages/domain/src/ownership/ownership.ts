@@ -229,3 +229,56 @@ export function assertCheckpointForEnvelope(
     );
   }
 }
+
+// The VERIFIER SPAWN's envelope (arch-review 9 P2 — the third enforcement site).
+//
+// `docs/architecture/ownership-protocol.md` recorded context separation as a PRINCIPLE and said plainly why
+// it was not code: "there is no spawn site to bind it to, and writing one so the protocol looks complete
+// would be a claim rather than a check". This is that binding. It is deliberately a CONSTRUCTOR, not a
+// validator run after the fact: a verifier's envelope is not something a caller proposes and we approve — the
+// caller supplies the evidence and the ceiling produces the only envelope that role may run inside.
+//
+// Two separations, both structural rather than advisory:
+//  · CAPABILITY — writes are empty. The role validator already refuses a verifier profile that can write; this
+//    makes the RUNTIME scope agree, so `authorizeToolInvocation` refuses every write tool call at the loop.
+//  · CONTEXT — reads are exactly the evidence ids, never "all". A verifier that can read the executor's
+//    trajectory and reasoning is reviewing the executor's story, not the artifact; that is the failure the
+//    separation exists to prevent, and an explicit read list is what makes it unavailable rather than
+//    discouraged. Sub-agents inherit the envelope, so a verifier cannot delegate its way out of the ceiling.
+//
+// Refuses (never returns a weakened envelope): a non-verifier profile, a profile whose ceiling does not
+// actually cover the evidence, or an empty evidence set — a verifier with nothing to look at cannot verify.
+export function verifierEnvelopeFor(
+  profile: RoleProfile,
+  input: { id: string; goal: string; evidence: readonly string[]; budgets: TaskEnvelope["budgets"] },
+): TaskEnvelope {
+  if (profile.role !== "verifier")
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { role: profile.role },
+      `only a verifier profile may be spawned as a verifier — '${profile.role}' judging someone else's work is an actor's claim, not a verdict.`,
+    );
+  if (input.evidence.length === 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { envelope: input.id },
+      "a verifier spawned with no evidence has nothing to verify — an empty read scope is a verdict about nothing.",
+    );
+  const envelope: TaskEnvelope = {
+    id: input.id,
+    goal: input.goal,
+    role: "verifier",
+    // Evidence only. Not "all", not the executor's context — the reason this function exists.
+    scope: { reads: [...input.evidence], writes: [], forbidden: [] },
+    budgets: input.budgets,
+    stop: { onBudgetExhausted: "halt_checkpoint" },
+    escalation: { onScopeExceeded: "refuse_and_replan" },
+    rollbackRequired: false,
+  };
+  // The delegation invariant, applied to the envelope this function just built: a role's capabilities are the
+  // CEILING. A verifier profile whose read ceiling is an explicit list that does not cover this evidence is a
+  // real refusal, not a formality — it means the caller is handing the verifier something it was never
+  // profiled to see.
+  assertEnvelopeForRole(profile, envelope);
+  return envelope;
+}

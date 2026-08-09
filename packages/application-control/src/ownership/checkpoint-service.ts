@@ -15,10 +15,12 @@ import {
   assertCompletionForRole,
   assertIndependentVerification,
   danglingCheckpointRefs,
+  verifierEnvelopeFor,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
+import type { VerifierRunner, VerifierVerdict } from "../ports/verifier-runner.js";
 
 // Handoff checkpoints (ownership protocol O6 — docs/architecture/ownership-protocol.md). A checkpoint is a
 // resumable state transfer: the successor decides its next action from evidence REFERENCES, not from the
@@ -47,6 +49,9 @@ export interface CheckpointServiceDeps {
   // invariant we can name beats an enforced one we made up.
   runActor?: (tenant: string, runId: string) => Promise<ActorRef | undefined>;
   events?: PlatformEventEmitter;
+  // Spawns an agent IN THE VERIFIER ROLE (the protocol's third enforcement site). Absent = verification stays
+  // a human act, which is the honest state for a deployment that has not wired one — never a silent auto-pass.
+  verifier?: VerifierRunner;
   newId?: () => string;
   now?: () => string;
 }
@@ -61,6 +66,17 @@ const EXECUTOR_ASSIGNMENT_PROFILE: RoleProfile = {
   requiredEvidence: [],
   completion: "change_set",
 };
+// The profile a SPAWNED verifier runs as. `read: "all"` is the CEILING, not the scope — the envelope built
+// from it narrows reads to the evidence, and a ceiling that is already narrow would only refuse evidence the
+// caller legitimately has. Writes stay empty: the role validator refuses a writing verifier, and the runtime
+// scope must agree or the invariant is only a document.
+const VERIFIER_SPAWN_PROFILE: RoleProfile = {
+  role: "verifier",
+  capabilities: { read: "all", write: [] },
+  requiredEvidence: [],
+  completion: "verified_verdict",
+};
+
 const VERIFIER_ASSIGNMENT_PROFILE: RoleProfile = {
   role: "verifier",
   capabilities: { read: [], write: [] },
@@ -197,6 +213,61 @@ export class CheckpointService {
       stamped.map((s) => s.record),
     );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+  }
+
+  // Ask a VERIFIER to check an executor's checkpoint (arch-review 9 P2). This is the spawn site
+  // `docs/architecture/ownership-protocol.md` said did not exist, and the reason it said the principle was
+  // not code. The separations are not this method's to decide: `verifierEnvelopeFor` builds the only envelope
+  // a verifier role may run inside (writes empty, reads exactly the evidence), and the agent loop enforces it
+  // on every tool call, sub-agents included.
+  //
+  // The evidence is the checkpoint's OWN refs — what the executor put forward — never the executor's
+  // trajectory or reasoning. A verifier that reads how the work was done is reviewing the story; the artifact
+  // is the thing under review.
+  //
+  // The verdict comes back and is filed as a verifier checkpoint through the ordinary path, which means it
+  // meets `assertIndependentVerification` like any other: an agent that verified its own run is refused here
+  // exactly as a human doing the same would be. Nothing about being an agent relaxes the invariant.
+  async requestVerification(
+    tenant: string,
+    checkpointId: string,
+    input: { question?: string; budgets?: TaskEnvelope["budgets"] } = {},
+  ): Promise<VerifierVerdict> {
+    if (!this.deps.verifier)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { checkpoint: checkpointId },
+        "no verifier runtime is configured — verification is a human act in this deployment, and a missing verifier never becomes an automatic pass.",
+      );
+    const checkpoint = await this.deps.store.get(tenant, checkpointId);
+    if (!checkpoint)
+      throw new NotFoundError("NOT_FOUND", { checkpoint: checkpointId }, `checkpoint '${checkpointId}' not found.`);
+    if (checkpoint.role === "verifier")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { checkpoint: checkpointId },
+        "this checkpoint is already a verification — verifying a verdict is a second opinion, not the same act.",
+      );
+    // The artifact under review: every ref the executor put forward as its evidence.
+    const evidence = [
+      ...checkpoint.confirmedFacts.flatMap((f) => f.refs),
+      ...checkpoint.actionsTaken.flatMap((a) => a.refs),
+    ].map((ref) => `${ref.type}:${ref.id}`);
+    const envelope = verifierEnvelopeFor(VERIFIER_SPAWN_PROFILE, {
+      id: `verify-${checkpointId}`,
+      goal: `verify checkpoint ${checkpointId}`,
+      evidence: [...new Set(evidence)],
+      // An autonomous task with no hard budget has no decision boundary — the envelope schema says so and
+      // this call site is not exempt from it.
+      budgets: input.budgets ?? { tokens: 200_000 },
+    });
+    return this.deps.verifier.verify({
+      tenant,
+      envelope,
+      question:
+        input.question ??
+        `Does this evidence support the checkpoint's confirmed facts? Answer from the evidence alone — you cannot see how the work was done, and that is deliberate.`,
+    });
   }
 }
 
