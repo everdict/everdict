@@ -6,6 +6,7 @@ import {
   buildSkillTools,
   buildToolSearchTool,
   mcpToolToDefinition,
+  withResourceTargets,
 } from "@everdict/agent-runtime";
 import type { EffectContract } from "@everdict/contracts";
 import { mcpBridgePrefix } from "@everdict/domain";
@@ -274,8 +275,9 @@ export function mcpToolProvider(
         );
         const invoke = makeInvoke(baseBox, connectBase, (tool) => hints.get(tool) ?? isBaseToolReadOnly(tool));
         baseCall = invoke;
+        const baseDefs: ToolDefinition[] = [];
         for (const t of baseTools) {
-          bridged.push(
+          baseDefs.push(
             mcpToolToDefinition(
               {
                 name: t.name,
@@ -292,6 +294,12 @@ export function mcpToolProvider(
             ),
           );
         }
+        // Declare WHICH OBJECT each evidence reader addresses (arch-review 11 P0). Only the CONTROL-PLANE
+        // surface gets this: these are our own tools with argument shapes we define, so stating their
+        // resource semantics is a statement we are entitled to make. An external workspace server's tools
+        // stay undeclared on purpose — an object-scoped envelope refuses them, which is the honest answer to
+        // "can we promise this call touches nothing outside the evidence?" for someone else's tool.
+        bridged.push(...withResourceTargets(baseDefs));
       } else {
         await baseClient.close().catch(() => {});
       }

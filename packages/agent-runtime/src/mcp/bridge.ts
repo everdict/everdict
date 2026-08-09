@@ -46,3 +46,57 @@ export function mcpToolToDefinition(
 export function bridgeMcpTools(specs: McpToolSpec[], invoke: McpInvoke): ToolDefinition[] {
   return specs.map((s) => mcpToolToDefinition(s, invoke));
 }
+
+// WHICH OBJECT each evidence-reader tool addresses, DECLARED (arch-review 11 P0). An object-scoped envelope —
+// today only a verifier's — refuses any tool that has not stated this, so the table is what makes such an
+// envelope usable at all rather than a task that can call nothing.
+//
+// Declared, never inferred from the tool's spelling. `get_run` reading `{id}` as a run is obvious to a human
+// and is exactly the kind of "grade the capability on its name" the effect contract exists to avoid: a
+// server that later renames or re-shapes a tool would silently change what the guard checks. A table is a
+// statement someone made; a heuristic is one nobody did.
+//
+// Deliberately small. It covers the evidence kinds a checkpoint can cite (CheckpointRef: run, scorecard,
+// file, issue, trace) and nothing else — every other tool stays refused under an object scope, which is the
+// correct posture for a role whose whole definition is "the evidence and nothing else".
+const ID_ARG = (input: unknown): string | undefined => {
+  if (input === null || typeof input !== "object") return undefined;
+  const id = (input as Record<string, unknown>).id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+};
+const byId =
+  (type: string) =>
+  (input: unknown): Array<{ type: string; id: string }> => {
+    const id = ID_ARG(input);
+    return id === undefined ? [] : [{ type, id }];
+  };
+const byPath = (input: unknown): Array<{ type: string; id: string }> => {
+  if (input === null || typeof input !== "object") return [];
+  const path = (input as Record<string, unknown>).path;
+  return typeof path === "string" && path.length > 0 ? [{ type: "file", id: path }] : [];
+};
+
+export const EVIDENCE_RESOURCE_TARGETS: Readonly<
+  Record<string, (input: unknown) => Array<{ type: string; id: string }>>
+> = {
+  get_run: byId("run"),
+  get_scorecard: byId("scorecard"),
+  get_issue: byId("issue"),
+  get_trace: byId("trace"),
+  get_file: byPath,
+};
+
+// Attach the declared extractors to a bridged tool set. Applied by the host that knows its own tool
+// vocabulary — the same reasoning `verifierTools` is injectable for: tool names are a deployment's, not the
+// kernel's. A tool with no declaration is left as it is and stays refused under an object scope.
+export function withResourceTargets(
+  tools: ToolDefinition[],
+  targets: Readonly<
+    Record<string, (input: unknown) => Array<{ type: string; id: string }>>
+  > = EVIDENCE_RESOURCE_TARGETS,
+): ToolDefinition[] {
+  return tools.map((t) => {
+    const extractor = targets[t.name];
+    return extractor === undefined ? t : { ...t, resourceTargets: extractor };
+  });
+}

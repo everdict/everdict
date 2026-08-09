@@ -1675,6 +1675,82 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     expect(toolMsgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
   });
 
+  // arch-review 11 P0: `scope.resources` existed and the runtime never consulted it. An evidence-scoped
+  // envelope — a verifier's — granted the reader tools and then let them read anything, so "the verifier sees
+  // the evidence and nothing else" was true in the contract and nowhere else.
+  it("an OBJECT-scoped envelope refuses the granted tool on an object outside the evidence", async () => {
+    const getRun: ToolDefinition = {
+      name: "get_run",
+      description: "read a run",
+      parametersJsonSchema: { type: "object", properties: { id: { type: "string" } } },
+      isReadOnly: true,
+      // The tool DECLARES which object a call touches — the kernel cannot check a target nobody named.
+      resourceTargets: (input) => {
+        const id = (input as { id?: unknown }).id;
+        return typeof id === "string" ? [{ type: "run", id }] : [];
+      },
+      call: async () => ({ content: "ok", isError: false }),
+    };
+    const scoped = {
+      ...envelope,
+      scope: { reads: ["get_run"], writes: [], forbidden: [], resources: [{ type: "run", id: "run-42" }] },
+    };
+    const { transport, requests } = fakeTransport([
+      toolCallsResult([
+        { id: "c1", name: "get_run", args: '{"id":"run-42"}' }, // the evidence
+        { id: "c2", name: "get_run", args: '{"id":"run-43"}' }, // a sibling reachable by the SAME tool
+      ]),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([getRun]),
+      envelope: scoped,
+    });
+    const msgs = (requests[1]?.messages ?? []).filter((m) => m.role === "tool");
+    expect(msgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
+    expect(msgs.some((m) => typeof m.content === "string" && m.content.includes("run-43"))).toBe(true);
+    expect(msgs.some((m) => typeof m.content === "string" && m.content.includes("out_of_scope"))).toBe(true);
+  });
+
+  it("an OBJECT-scoped envelope refuses a granted tool that never declared what it touches", async () => {
+    // Fail-closed, deliberately. The guarantee is "this and nothing else"; a tool whose resource semantics
+    // nobody stated is one we cannot make that claim about, so it is refused rather than waved through.
+    const scoped = {
+      ...envelope,
+      scope: { reads: ["list_runs"], writes: [], forbidden: [], resources: [{ type: "run", id: "run-42" }] },
+    };
+    const { transport, requests } = fakeTransport([toolCallResult("c1", "list_runs", "{}"), textResult("done")]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("list_runs", true)]),
+      envelope: scoped,
+    });
+    const msgs = (requests[1]?.messages ?? []).filter((m) => m.role === "tool");
+    expect(msgs.some((m) => typeof m.content === "string" && m.content.includes("does not declare"))).toBe(true);
+    expect(msgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(false);
+  });
+
+  it("an envelope with NO object scope is unaffected — every executor task today has none", async () => {
+    const { transport, requests } = fakeTransport([toolCallResult("c1", "list_runs", "{}"), textResult("done")]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("list_runs", true)]),
+      envelope: { ...envelope, scope: { reads: "all" as const, writes: [], forbidden: [] } },
+    });
+    const msgs = (requests[1]?.messages ?? []).filter((m) => m.role === "tool");
+    expect(msgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
+  });
+
   it("a read-scoped parent's sub-agent inherits the NARROW read view, not the full registry", async () => {
     // Regression: the sub-agent registry was every read-only tool unfiltered, so a read-scoped parent could
     // hand a child the very reads it was itself denied.

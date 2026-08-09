@@ -62,5 +62,17 @@ export interface ToolDefinition {
   alwaysLoad?: boolean;
   // One-line capability phrase used by ToolSearch keyword scoring; falls back to `description`.
   searchHint?: string;
+  // WHICH OBJECTS this call would touch, read off its own arguments (arch-review 11 P0). The envelope's
+  // `scope.resources` says which objects a task may reach, and `authorizeResourceAccess` decides — but the
+  // decision needs a target, and only the tool knows how to find one in its own argument shape.
+  //
+  // A tool that does not declare this is REFUSED under an object-scoped envelope. That is not an oversight
+  // budget: the whole guarantee of an evidence-scoped role is "this and nothing else", and a tool whose
+  // resource semantics nobody stated is a tool we cannot say that about. Under an unscoped envelope (no
+  // `scope.resources` — every executor task today) it is never consulted, so declaring it is only required
+  // where object isolation is actually claimed.
+  //
+  // Returning [] means "this call touches no addressable object" and passes — a search with no target, say.
+  resourceTargets?: (input: unknown) => Array<{ type: string; id: string }>;
   call: (input: unknown, ctx: ToolContext) => Promise<ToolResult>;
 }

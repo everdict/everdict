@@ -75,7 +75,8 @@ Stated plainly, because a protocol that overstates its own coverage is the failu
 | `assertIndependentVerification` (domain) | **enforced** — the ONE decision function (actor + run + session) |
 | Checkpoint persistence | **enforced where resolvable** — the service assembles both `RoleAssignment`s from the referenced run's executor linkage and calls the domain function; missing linkage abstains |
 | Verifier envelope construction | **enforced** — `verifierEnvelopeFor` builds the only envelope a verifier role may run inside: writes empty, reads = an explicit list of read TOOLS, `scope.resources` = exactly the evidence |
-| Verifier verdict independence | **enforced where resolvable** — `requestVerification` resolves the executor from the evidence's run refs and calls the domain function on the returned `ActorRef`; missing linkage is recorded as `independence: "abstained"`, never as a passed check |
+| Object scope at the tool call | **enforced** — the kernel calls `authorizeResourceAccess` on every target a tool declares (`ToolDefinition.resourceTargets`) whenever the envelope carries a `scope.resources`. A tool that has NOT declared its resource semantics is refused under such an envelope: the guarantee is "this and nothing else", and we cannot make that claim about a call whose target nobody named |
+| Verifier verdict independence | **enforced where resolvable** — `requestVerification` resolves EVERY executor from the evidence's run refs and calls the domain function against each; missing linkage is recorded as `independence: "abstained"`, never as a passed check |
 | Verification durability | **enforced** — the verdict is filed as a `VerificationDecision` (mig 0151), an append-only aggregate separate from the checkpoint |
 | Verifier RUNTIME (the agent that produces the verdict) | **not wired** — `VerifierRunner` has no bound implementation. A deployment with no runner REFUSES the request; a missing verifier never becomes an automatic pass |
 
@@ -87,6 +88,15 @@ the spawned verifier could call *nothing at all*, and "evidence only" was enforc
 guard ever compared a call's target to anything. Two concepts sharing one field is not a weaker guarantee; it
 is a false one, and this one happened to fail in the direction that looked like enforcement.
 
+Splitting them was necessary and not sufficient: for one wave `authorizeResourceAccess` existed and **nothing
+called it** (arch-review 11 P0), which is the same failure one level up — the guarantee lived in the contract
+and the runtime never asked. The kernel now consults it on every tool call under an object-scoped envelope,
+and a tool reaches its own evidence by DECLARING what it touches (`ToolDefinition.resourceTargets`, a table
+the host attaches for the control-plane surface it owns — declared, never inferred from a tool's spelling).
+Undeclared tools are refused under an object scope; third-party MCP servers are therefore unreachable to an
+evidence-scoped role, which is the honest answer to "can we promise this call touches nothing else?" for
+someone else's tool.
+
 `verifierEnvelopeFor` (`@everdict/domain`) is a CONSTRUCTOR, not a validator run afterwards — a verifier's
 envelope is not something a caller proposes and we approve. It refuses a non-verifier profile, an empty
 evidence set, an empty tool set (a verifier that cannot reach its own evidence is a refusal wearing a
@@ -94,8 +104,11 @@ verdict's name), and tools the profile's own read ceiling does not cover. Sub-ag
 a verifier cannot delegate its way out of any of the three separations.
 
 `CheckpointService.requestVerification` is the caller: the evidence is the checkpoint's own refs (what the
-executor put forward), the returned verdict is CHECKED against the executor's `ActorRef` — actor, run and
-session — and then FILED as a `VerificationDecision`. Both halves were previously claimed by this document
+executor put forward), the returned verdict is CHECKED against EVERY executor's `ActorRef` — actor, run and
+session — and then FILED as a `VerificationDecision`. *Every* executor, because a checkpoint may cite several
+runs with different ones: resolving "the first run reference that resolves" left an independence claim with a
+hole the size of the second executor, and the hole opened for exactly the verifier with the most reason to
+want it — the one whose own work sat in the evidence (arch-review 11). Both halves were previously claimed by this document
 and done by neither: the runner's object was returned to the caller untouched, so an agent verifying its own
 run was refused by exactly nothing, and a judgment nobody could look up afterwards could not be cited or
 audited. `VerifierVerdict.actor` is an `ActorRef` for that reason — a bare string can answer only the actor

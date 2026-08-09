@@ -300,12 +300,13 @@ export class CheckpointService {
         `Does this evidence support the checkpoint's confirmed facts? Answer from the evidence alone — you cannot see how the work was done, and that is deliberate.`,
     });
 
-    // INDEPENDENCE, applied to the pair that actually exists (arch-review 10 P1). The domain owns the
-    // comparison — actor AND run AND session — and this service only assembles the two assignments, exactly
-    // as the human-filed path does. A verdict from an agent that ran inside the executing session is refused
-    // here; that shape passed unnoticed while `actor` was a bare string.
-    const executor = await this.executorOf(tenant, evidence);
-    if (executor !== undefined) {
+    // INDEPENDENCE, applied against EVERY executor in the evidence (arch-review 11). The domain owns the
+    // comparison — actor AND run AND session — and this service only assembles the assignments, exactly as
+    // the human-filed path does. Checking one executor was a hole the size of the second: a checkpoint citing
+    // run-A (agent A) and run-B (agent B), verified by B, compared B against A, passed, and never looked at
+    // the work B did itself.
+    const executors = await this.executorsOf(tenant, evidence);
+    for (const executor of executors) {
       assertIndependentVerification(
         { profile: EXECUTOR_ASSIGNMENT_PROFILE, actor: executor },
         { profile: VERIFIER_ASSIGNMENT_PROFILE, actor: verdict.actor },
@@ -319,13 +320,13 @@ export class CheckpointService {
       tenant,
       subject: { type: "checkpoint", id: checkpointId },
       evidence,
-      ...(executor !== undefined ? { executor } : {}),
+      executors,
       verifier: verdict.actor,
       verdict: verdict.verdict,
       detail: verdict.detail,
       // Which of the two happened, said out loud: an abstention is not a passed check, and a reader weighing
       // this verdict is entitled to know whether independence was proven or merely unopposed.
-      independence: executor !== undefined ? "enforced" : "abstained",
+      independence: executors.length > 0 ? "enforced" : "abstained",
       envelopeId,
       createdAt: this.now(),
       createdBy: input.requestedBy ?? "system",
@@ -341,18 +342,26 @@ export class CheckpointService {
     return decision;
   }
 
-  // The ACTOR whose work is under review — resolved from the evidence's run references, the same linkage the
-  // human-filed path uses. Absent (no run ref, no resolver, an unresolvable run) = the caller abstains
-  // rather than inventing an identity to compare against.
-  private async executorOf(tenant: string, evidence: readonly CheckpointRef[]): Promise<ActorRef | undefined> {
+  // EVERY actor whose work is under review — resolved from ALL of the evidence's run references, the same
+  // linkage the human-filed path uses. Empty (no run refs, no resolver, unresolvable runs) = the caller
+  // abstains rather than inventing an identity to compare against. Deduplicated on the full identity, not on
+  // the actor id: the same agent in two different sessions is two contexts, and the independence invariant
+  // reads run and session as well as actor.
+  private async executorsOf(tenant: string, evidence: readonly CheckpointRef[]): Promise<ActorRef[]> {
     const { runActor } = this.deps;
-    if (!runActor) return undefined;
+    if (!runActor) return [];
+    const seen = new Set<string>();
+    const out: ActorRef[] = [];
     for (const ref of evidence) {
       if (ref.type !== "run") continue;
       const actor = await runActor(tenant, ref.id);
-      if (actor) return actor;
+      if (!actor) continue; // linkage missing for THIS run — skip it, never let it stand for the others
+      const key = `${actor.id} ${actor.runId ?? ""} ${actor.sessionId ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(actor);
     }
-    return undefined;
+    return out;
   }
 }
 

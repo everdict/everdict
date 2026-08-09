@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
 import {
   type TaskEnvelope,
+  authorizeResourceAccess,
   authorizeToolInvocation,
   budgetExhausted,
   effectsRequireConsent,
@@ -1056,6 +1057,34 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             } Do NOT work around this with another tool or a script. Stop this approach, present a revised plan naming the additional capability you need and its risks, and request approval (refuse_and_replan).`,
             isError: true,
           };
+        }
+        // …and the OBJECT gate, which is a different question (arch-review 11 P0). The capability check above
+        // answers "may this task call get_scorecard?"; this answers "may it call it on sc-8?". Without it an
+        // evidence-scoped envelope — a verifier's — granted the reader tools and then let them read anything,
+        // so `scope.resources` was a field the runtime never consulted and "the verifier sees the evidence and
+        // nothing else" was true only in the contract.
+        //
+        // Only armed when the envelope actually declares an object scope; every ordinary executor task has
+        // none and is unaffected. When it IS declared, a non-intrinsic tool that has not stated its resource
+        // semantics is REFUSED: the guarantee is "this and nothing else", and we cannot make that claim about
+        // a call whose target we cannot name. Intrinsic kernel cognition (todo, plan, wait) addresses no
+        // workspace object and stays out of it, exactly as it does for the capability lists.
+        if (opts.envelope.scope.resources !== undefined && tool.intrinsic !== true) {
+          if (tool.resourceTargets === undefined) {
+            return {
+              content: `Envelope refusal (out_of_scope): this task is scoped to specific objects, and the tool "${tool.name}" does not declare which object a call would touch — so it cannot be checked against that scope and is refused. Use a tool that names its target, or stop and request the access you need (refuse_and_replan).`,
+              isError: true,
+            };
+          }
+          for (const target of tool.resourceTargets(parsed.value)) {
+            const objectDecision = authorizeResourceAccess(target, opts.envelope);
+            if (!objectDecision.allowed) {
+              return {
+                content: `Envelope refusal (out_of_scope): this task may read ${target.type} objects only within its granted evidence, and "${target.id}" is not part of it. Do NOT try another route to the same object. Stop this approach and request the access you need, naming why the granted evidence is insufficient (refuse_and_replan).`,
+                isError: true,
+              };
+            }
+          }
         }
       }
       if (tool.isReadOnly !== true && inPlanMode) {

@@ -348,7 +348,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
       verdict: "verified",
       independence: "enforced",
       verifier: { id: "agent:auditor" },
-      executor: { id: "agent:fixer" },
+      executors: [{ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }],
     });
     expect(verifications.records).toHaveLength(1);
     // …and the workspace hears it, with the independence result in the payload — a verdict that could not be
@@ -361,6 +361,87 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const { svc } = build({ verdictActor: { id: "agent:auditor" }, verifications });
     const decision = await svc.requestVerification("acme", "cp-1");
     expect(decision.independence).toBe("abstained");
-    expect(decision.executor).toBeUndefined();
+    expect(decision.executors).toEqual([]);
+  });
+});
+
+// arch-review 11: a checkpoint can cite SEVERAL runs, and they can have different executors. Resolving "the
+// first run reference that resolves" produced an independence claim with a hole exactly the size of the
+// second executor — and the hole opens for the verifier that has the most reason to want it.
+describe("verification — independence is checked against EVERY executor in the evidence", () => {
+  const twoRuns: HandoffCheckpointRecord = {
+    ...HandoffCheckpointSchema.parse({
+      ...body({
+        confirmedFacts: [
+          { statement: "the grader throws on empty traces", refs: [{ type: "run", id: "run-A" }] },
+          { statement: "the fix holds under load", refs: [{ type: "run", id: "run-B" }] },
+        ],
+      }),
+      id: "cp-multi",
+      createdAt: "2026-08-08T00:00:00.000Z",
+      createdBy: "member:dana",
+    }),
+    tenant: "acme",
+  };
+  const actors: Record<string, ActorRef> = {
+    "run-A": { id: "agent:alpha", runId: "run-A", sessionId: "conv-A" },
+    "run-B": { id: "agent:beta", runId: "run-B", sessionId: "conv-B" },
+  };
+
+  const svcWith = (verdictActor: ActorRef, store?: VerificationDecisionStore): CheckpointService =>
+    new CheckpointService({
+      store: {
+        async create() {},
+        async get() {
+          return twoRuns;
+        },
+        async list() {
+          return [];
+        },
+      },
+      resolvers: {},
+      runActor: async (_tenant, runId) => actors[runId],
+      ...(store ? { verifications: store } : {}),
+      verifier: {
+        async verify() {
+          return { verdict: "verified", detail: "both runs support the claim", actor: verdictActor };
+        },
+      },
+      newId: () => "vd-multi",
+      now: () => "2026-08-08T01:00:00.000Z",
+    });
+
+  it("REFUSES a verdict from the SECOND executor, whom a first-match resolver never compared against", async () => {
+    // agent:beta executed run-B, which is in this very evidence. Resolving run-A first and stopping made
+    // beta look independent of alpha — true, and not the question. It is judging its own work.
+    await expect(svcWith(actors["run-B"] as ActorRef).requestVerification("acme", "cp-multi")).rejects.toThrow(
+      /cannot verify its own work/,
+    );
+  });
+
+  it("records EVERY executor the verdict covers, so the decision says what it was checked against", async () => {
+    class Sink implements VerificationDecisionStore {
+      readonly records: VerificationDecision[] = [];
+      async create(record: VerificationDecision): Promise<void> {
+        this.records.push(record);
+      }
+      async get(): Promise<undefined> {
+        return undefined;
+      }
+      async listForSubject(): Promise<VerificationDecision[]> {
+        return [...this.records];
+      }
+      async list(): Promise<VerificationDecision[]> {
+        return [...this.records];
+      }
+    }
+    const sink = new Sink();
+    const decision = await svcWith(
+      { id: "agent:auditor", runId: "run-Z", sessionId: "conv-Z" },
+      sink,
+    ).requestVerification("acme", "cp-multi");
+    expect(decision.executors.map((a) => a.id)).toEqual(["agent:alpha", "agent:beta"]);
+    expect(decision.independence).toBe("enforced");
+    expect(sink.records).toHaveLength(1);
   });
 });

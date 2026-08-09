@@ -240,10 +240,14 @@ export const VerificationDecisionSchema = z.object({
   subject: z.object({ type: z.enum(["checkpoint"]), id: z.string().min(1) }),
   // The EVIDENCE the verifier was given, and nothing else — the same list that became `scope.resources`.
   evidence: z.array(CheckpointRefSchema).min(1),
-  // The two identities the independence invariant compares. `executor` is absent when the linkage could not
-  // be resolved (no run reference, no run→actor resolver) — recorded as absent rather than guessed, so a
-  // reader can tell "independent" from "we could not check".
-  executor: ActorRefSchema.optional(),
+  // EVERY actor whose work this verdict covers, not one of them (arch-review 11). A checkpoint may cite
+  // several runs, and they can have different executors: taking "the first run reference that resolves"
+  // produced a decision that compared the verifier against agent A while agent B's own work sat in the same
+  // evidence, unchecked — an independence claim with a hole exactly the size of the second executor. The
+  // verifier is compared against ALL of them; empty means the linkage could not be resolved at all, which is
+  // recorded as `independence: "abstained"` rather than guessed, so a reader can tell "independent" from
+  // "we could not check".
+  executors: z.array(ActorRefSchema).default([]),
   verifier: ActorRefSchema,
   verdict: z.enum(["verified", "refuted", "inconclusive"]),
   detail: z.string().min(1),
