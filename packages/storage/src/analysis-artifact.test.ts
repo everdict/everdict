@@ -54,22 +54,38 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
     expect(offload.revisionRef).toBeUndefined();
   });
 
-  it("also freezes the bundle under its per-revision key when the pass names one", async () => {
-    // The immutable history lane: each scoring pass writes its own object, so a later pass rewriting the
-    // current key can never rewrite what an earlier revision's analysisRef describes.
+  it("freezes the bundle under the PASS that wrote it, and reports the durable key", async () => {
+    // The immutable history lane, keyed by pass rather than by revision (arch-review 8 P0): two passes can
+    // target the SAME revision number and both freeze before the ledger CAS picks a winner, and an object
+    // store has no compare-and-swap — a revision-keyed write let the loser's bytes land under the winner's
+    // revision. The key is also REPORTED, because a presigned ref expires and the revision number no longer
+    // names the object a historical read has to fetch.
     const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle, 2);
+    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-7");
     expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
-    expect(offload.revisionRef).toBe("memory://artifacts/analyses/sc1/scoring/2.json");
-    const frozen = store.objects.get("analyses/sc1/scoring/2.json");
+    expect(offload.revisionRef).toBe("memory://artifacts/analyses/sc1/passes/pass-7.json");
+    expect(offload.revisionKey).toBe("analyses/sc1/passes/pass-7.json");
+    const frozen = store.objects.get("analyses/sc1/passes/pass-7.json");
     expect(frozen?.contentType).toBe("application/json");
     expect(JSON.parse(Buffer.from(frozen?.data ?? new Uint8Array()).toString())).toEqual(bundle);
   });
 
+  it("two passes racing for one revision write DIFFERENT objects — the loser can never overwrite the winner", async () => {
+    const store = new InMemoryArtifactStore("memory://artifacts/");
+    const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
+    const a = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-A");
+    const b = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-B");
+    expect(a.revisionKey).not.toBe(b.revisionKey);
+    // Both objects survive: an abandoned pass's bundle is evidence of what it was doing, not garbage, and
+    // the ledger entry that won points at its OWN key.
+    expect(store.objects.has("analyses/sc1/passes/pass-A.json")).toBe(true);
+    expect(store.objects.has("analyses/sc1/passes/pass-B.json")).toBe(true);
+  });
+
   it("is best-effort: no store → no refs at all (dev fallback, never breaks the scorecard)", async () => {
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: undefined }, "sc1", bundle, 2)).toEqual({});
+    expect(await offloadAnalysis({ artifacts: undefined }, "sc1", bundle, "pass-7")).toEqual({});
   });
 
   it("is best-effort per key: a store failure → no ref, swallowed (a broken object store never fails the eval)", async () => {
@@ -85,15 +101,15 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle, 2)).toEqual({});
+    expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle, "pass-7")).toEqual({});
   });
 
-  it("a revision-key failure leaves the current surface intact — the entry stays honestly artifact-less", async () => {
+  it("a pass-key failure leaves the current surface intact — the entry stays honestly artifact-less", async () => {
     // The two puts are independent: the record keeps its analysisRef while the revision entry carries NO
     // ref, rather than a ref to the mutable current key that a later pass would rewrite.
     const halfBroken: ArtifactStore = {
       async put(key: string) {
-        if (key.includes("/scoring/")) throw new Error("revision bucket down");
+        if (key.includes("/passes/")) throw new Error("revision bucket down");
         return `memory://artifacts/${key}`;
       },
       async get() {
@@ -104,8 +120,9 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const offload = await offloadAnalysis({ artifacts: halfBroken }, "sc1", bundle, 2);
+    const offload = await offloadAnalysis({ artifacts: halfBroken }, "sc1", bundle, "pass-7");
     expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
     expect(offload.revisionRef).toBeUndefined();
+    expect(offload.revisionKey).toBeUndefined(); // no key either — the entry must not point at bytes that failed
   });
 });
