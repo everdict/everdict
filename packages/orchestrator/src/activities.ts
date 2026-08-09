@@ -121,6 +121,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     async prepareScore(input: {
       groupId: string;
       judges: Array<{ id: string; version: string }>;
+      passId?: string;
     }): Promise<{ stripped: number }> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -128,7 +129,10 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({ judges: input.judges }),
+          body: JSON.stringify({
+            judges: input.judges,
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
+          }),
         },
       );
       if (!res.ok) throw new Error(`Score preparation failed: ${res.status} ${await res.text()}`);
@@ -138,6 +142,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     async planScore(input: {
       groupId: string;
       judges: Array<{ id: string; version: string }>;
+      passId?: string;
     }): Promise<{ keys: string[]; concurrency: number }> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -145,7 +150,10 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({ judges: input.judges }),
+          body: JSON.stringify({
+            judges: input.judges,
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
+          }),
         },
       );
       if (!res.ok) throw new Error(`Score plan failed: ${res.status} ${await res.text()}`);
@@ -158,6 +166,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       key: string;
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
+      passId?: string;
     }): Promise<{ scored: boolean; skipped?: boolean }> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -165,7 +174,12 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({ key: input.key, judges: input.judges, submittedBy: input.submittedBy }),
+          body: JSON.stringify({
+            key: input.key,
+            judges: input.judges,
+            submittedBy: input.submittedBy,
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
+          }),
         },
       );
       if (!res.ok) throw new Error(`Score case failed: ${res.status} ${await res.text()}`);
@@ -238,6 +252,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       groupId: string;
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
+      passId?: string;
     }): Promise<void> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -245,7 +260,11 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({ judges: input.judges, submittedBy: input.submittedBy }),
+          body: JSON.stringify({
+            judges: input.judges,
+            submittedBy: input.submittedBy,
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
+          }),
         },
       );
       if (!res.ok) throw new Error(`Score finalization failed: ${res.status} ${await res.text()}`);

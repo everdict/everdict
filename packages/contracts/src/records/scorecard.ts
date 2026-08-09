@@ -136,6 +136,23 @@ export type ScorecardManifest = z.infer<typeof ScorecardManifestSchema>;
 // pass-start judge closure is what the finalized revision records (sealed when the pass began, not observed
 // at finalize). NULL/absent = no pass touched the plane since the last settle.
 export const ScoringPassSchema = z.object({
+  // ── Ownership (arch-review 8 P0). A marker says "a pass is running"; a TOKEN says "this pass, and only
+  // this pass, may mutate the plane". The difference is the whole guarantee: without it two replicas both
+  // read an absent marker, both write one, and the loser's late writes land on the winner's settled plane —
+  // after the marker (the read guard) is already gone, so nothing refuses them.
+  // `epoch` is monotonic per record and is what the CLAIM compare-and-swaps on; `passId` is what every
+  // subsequent write carries so the storage layer can refuse a superseded writer in the same statement.
+  // Optional ONLY because rows written before this generation carry none — a marker with no passId is a
+  // legacy marker: reclaimable by age, and never fenceable (a fenced write naming a passId refuses it,
+  // which is the fail-closed reading of "written by a control plane that had no ownership model").
+  passId: z.string().min(1).optional(),
+  epoch: z.number().int().positive().optional(),
+  // ── Liveness. A LEASE, not an age: a healthy 1000-case pass legitimately runs longer than any fixed
+  // window, and taking it over because it is "old" is how a working pass gets shot (the same lesson the
+  // fleet permit already learned — TRUST-20 "a permit is a lease, not a timestamp"). The owner renews while
+  // it works; only an expired lease (or a failed pass) is reclaimable.
+  leaseUntil: z.string().optional(),
+  heartbeatAt: z.string().optional(),
   targetRevision: z.number().int().positive(), // the revision this pass will append when it settles
   baseRevision: z.number().int().nonnegative(), // the completed revision the pass started from (0 = pre-ledger)
   // The selected judges' closure sealed at pass START (the same sealJudgeClosure submit uses).
@@ -158,10 +175,29 @@ export const ScoringPassSchema = z.object({
 });
 export type ScoringPass = z.infer<typeof ScoringPassSchema>;
 
-// A pass whose owner is provably gone: failed, or running longer than the takeover window with nothing
-// having settled it. Readers refuse either way (the plane is between revisions or broken); a NEW pass may
-// TAKE OVER a stale/failed marker — crash residue must never wedge a record forever.
+// How long a claim/renewal keeps the pass alive. Short enough that a crashed owner's record is reclaimable
+// in minutes rather than an hour; safe because the owner RENEWS while it works (per case, per activity), so
+// the window bounds "how long since this pass last proved it was alive", never "how long the pass may run".
+export const SCORING_PASS_LEASE_MS = 5 * 60 * 1000;
+// Renew when less than this remains — a heartbeat that only fires at expiry has no margin for a slow write.
+export const SCORING_PASS_RENEW_BEFORE_MS = 2 * 60 * 1000;
+// (legacy) the pre-lease takeover window, kept for records whose marker predates leaseUntil: a running pass
+// with no lease is judged by its startedAt age, exactly as before, so old rows stay reclaimable.
 export const SCORING_PASS_STALE_MS = 60 * 60 * 1000; // one hour — the activity startToClose ceiling
+
+// May a NEW pass take this marker over? Failed = yes (crash residue must never wedge a record forever), an
+// EXPIRED lease = yes (the owner stopped proving it was alive), a live lease = NO however long it has been
+// running. A marker without a lease is legacy and falls back to the age rule.
+// Pure/total and consumed beneath the domain cone (the score service, the store guards, the trust suite).
+export function scoringPassReclaimable(
+  pass: Pick<ScoringPass, "status" | "startedAt"> & { leaseUntil?: string },
+  now: string,
+): boolean {
+  if (pass.status === "failed") return true;
+  const at = Date.parse(now);
+  if (pass.leaseUntil !== undefined) return Date.parse(pass.leaseUntil) <= at;
+  return at - Date.parse(pass.startedAt) >= SCORING_PASS_STALE_MS;
+}
 
 // Scoring identity — one entry per SCORING PASS over this group, append-only (mig 0144). The live score
 // plane legally mutates in place on a re-score (write-back replaces the selected judges' rows), but a
@@ -194,6 +230,11 @@ export const ScoringRevisionSchema = z.object({
   // The analysis artifact frozen from THIS pass's plane (absent: no artifact store / offload failed / the
   // stamped verdict policy could not be restored, in which case re-freezing would rewrite history).
   analysisRef: z.string().optional(),
+  // Its durable object KEY. `analysisRef` is a presigned URL that expires, and the key stopped being
+  // derivable from the revision number when artifacts became pass-scoped (two passes can target one
+  // revision, and the object store has no CAS to decide between them) — so the entry records where its own
+  // bundle lives. Absent on pre-pass-keyed revisions, which still resolve through the legacy derived key.
+  analysisKey: z.string().optional(),
   createdAt: z.string(),
   createdBy: z.string().optional(),
 });

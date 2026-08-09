@@ -28,7 +28,7 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
-import { analysisBundle, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
+import { INITIAL_PASS_ID, analysisBundle, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
 import type {
   IngestScorecardBody,
   IngestScorecardInput,
@@ -359,7 +359,7 @@ export class ScorecardIngestService {
         summary,
         results,
       ),
-      nextScoringRevision(undefined), // an ingest record is freshly minted — its initial revision is 1
+      INITIAL_PASS_ID, // an ingest record is freshly minted — one writer, its initial revision is 1
     );
     // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
@@ -374,6 +374,9 @@ export class ScorecardIngestService {
       results,
       // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+      // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
+      // revision number no longer names the object a historical read has to fetch.
+      ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });

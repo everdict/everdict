@@ -386,7 +386,7 @@ export class ScorecardAnalyticsService {
           { id, revision },
           `scorecard '${id}' has no scoring revision ${revision}.`,
         );
-      const fromRevisionStore = await this.readAnalysisArtifact(id, revision);
+      const fromRevisionStore = await this.readAnalysisArtifact(id, revision, entry.analysisKey);
       if (fromRevisionStore !== undefined) return fromRevisionStore;
       if (entry.analysisRef === undefined || !/^https?:\/\//i.test(entry.analysisRef))
         throw new NotFoundError(
@@ -428,10 +428,11 @@ export class ScorecardAnalyticsService {
   // The analysis artifact by KEY — the same key `offloadAnalysis` wrote (`analyses/<id>.json`). undefined = this
   // deployment's store doesn't hold it (no store wired, another bucket, unparseable bytes) → the caller falls back
   // to the ref. A store OUTAGE (as opposed to an absent object) propagates as the store's own UpstreamError.
-  private async readAnalysisArtifact(id: string, revision?: number): Promise<unknown | undefined> {
-    const bytes = await this.deps.artifacts?.get(
-      revision === undefined ? analysisArtifactKey(id) : analysisRevisionKey(id, revision),
-    );
+  private async readAnalysisArtifact(id: string, revision?: number, key?: string): Promise<unknown | undefined> {
+    // The entry's OWN key wins: artifacts are pass-scoped, so the revision number no longer names the object.
+    // A revision written before that (no key) still resolves through the legacy derived key.
+    const resolved = key ?? (revision === undefined ? analysisArtifactKey(id) : analysisRevisionKey(id, revision));
+    const bytes = await this.deps.artifacts?.get(resolved);
     if (!bytes) return undefined;
     try {
       return JSON.parse(new TextDecoder().decode(bytes)) as unknown;

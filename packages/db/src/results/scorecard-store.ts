@@ -33,6 +33,12 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectScoringCount !== undefined && (cur.scoring?.length ?? 0) !== guard.expectScoringCount)
       return undefined;
     if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;
+    // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that
+    // already stamped one wins and this write is refused.
+    if (guard?.expectScoringPassEpoch !== undefined) {
+      const persisted = cur.scoringPass?.epoch ?? null;
+      if (persisted !== guard.expectScoringPassEpoch) return undefined;
+    }
     const next = { ...cur, ...patch, id: cur.id };
     this.cards.set(id, next);
     await this.appendEvents(events);
@@ -45,6 +51,13 @@ export class InMemoryScorecardStore implements ScorecardStore {
   }
 
   async get(id: string): Promise<ScorecardRecord | undefined> {
+    return this.cards.get(id);
+  }
+
+  // Synchronous peek — the scoring FENCE needs the parent's marker at the moment of a child write, and the
+  // Pg store answers that with a sub-select inside the write statement. Exposed so the in-memory pair can
+  // give the same answer without turning every child write into an await on another store's async read.
+  peek(id: string): ScorecardRecord | undefined {
     return this.cards.get(id);
   }
 

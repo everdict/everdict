@@ -145,15 +145,33 @@ export function analysisBundle(
 // presigned URL that expires), so the read side derives it from the scorecard id through this same constant.
 export const ANALYSIS_KEY_PREFIX = "analyses/";
 export const analysisArtifactKey = (id: string): string => `${ANALYSIS_KEY_PREFIX}${id}.json`;
-// The per-revision IMMUTABLE artifact (I7): each scoring pass freezes its own bundle under its revision
-// number, so a later re-score can never rewrite what an earlier revision's analysisRef describes. The
-// legacy current key above stays the "latest" surface; this key is the historical record.
+// The per-PASS immutable artifact (arch-review 8 P0). Keyed by the pass, not by the revision it hopes to
+// become: two passes can legitimately target the SAME revision number (a takeover starts from the same
+// base), they both freeze a bundle BEFORE the ledger CAS decides which one settles, and the object store
+// has no compare-and-swap — so a revision-keyed write let the LOSER's bytes end up under the winner's
+// revision. The ledger would name revision 2 while the artifact under revision 2 described a pass that
+// never happened. Keying by passId makes that collision impossible instead of unlikely: the winner's
+// ledger entry points at its own key, and the loser's object is simply an orphan nobody references
+// (kept, not deleted — an abandoned pass's bundle is evidence of what it was doing, not garbage).
+// Legacy revision-keyed refs stay readable: the ledger stores the ref it wrote, so old entries resolve
+// through their own key forever.
+export const analysisPassKey = (id: string, passId: string): string =>
+  `${ANALYSIS_KEY_PREFIX}${id}/passes/${passId}.json`;
+// The INITIAL revision's writer. A batch settles once, so revision 1 has no competing pass to disambiguate
+// — but it still deserves a frozen artifact, and giving it a stable synthetic id keeps every revision in one
+// key family instead of splitting history across two schemes.
+export const INITIAL_PASS_ID = "initial";
+// (legacy) the revision-keyed artifact — kept for reading pre-passId revisions, never written anymore.
 export const analysisRevisionKey = (id: string, revision: number): string =>
   `${ANALYSIS_KEY_PREFIX}${id}/scoring/${revision}.json`;
 
 export interface AnalysisOffload {
   ref?: string; // the CURRENT-key presigned ref (ScorecardRecord.analysisRef — the legacy latest surface)
-  revisionRef?: string; // the per-revision immutable artifact's ref (ScoringRevision.analysisRef)
+  revisionRef?: string; // the frozen artifact's presigned ref (ScoringRevision.analysisRef)
+  // The frozen artifact's durable KEY. A presigned ref expires, and the key is no longer derivable from the
+  // revision number now that artifacts are pass-scoped — so the ledger entry has to remember where its own
+  // bundle lives, or a historical read has nothing but an expired URL to go on.
+  revisionKey?: string;
 }
 
 // Offload the analysis bundle to object storage. Best-effort per key: no store or a failure yields an absent
@@ -165,7 +183,9 @@ export async function offloadAnalysis(
   deps: Pick<ScorecardServiceDeps, "artifacts">,
   id: string,
   bundle: AnalysisBundle,
-  revision?: number,
+  // The PASS that is freezing this bundle. Absent = the initial (submit-time) offload, which has no
+  // competing writer and therefore only needs the current key.
+  passId?: string,
 ): Promise<AnalysisOffload> {
   if (!deps.artifacts) return {};
   const bytes = Buffer.from(JSON.stringify(bundle));
@@ -175,9 +195,11 @@ export async function offloadAnalysis(
   } catch {
     // best-effort — the record simply carries no analysisRef
   }
-  if (revision !== undefined) {
+  if (passId !== undefined) {
     try {
-      out.revisionRef = await deps.artifacts.put(analysisRevisionKey(id, revision), bytes, "application/json");
+      const key = analysisPassKey(id, passId);
+      out.revisionRef = await deps.artifacts.put(key, bytes, "application/json");
+      out.revisionKey = key;
     } catch {
       // best-effort — the revision entry simply carries no artifact
     }

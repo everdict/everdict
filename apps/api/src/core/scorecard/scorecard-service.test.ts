@@ -5138,23 +5138,44 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     await waitTerminal(store, record.id);
     const sel = [{ id: "quality", version: "1.0.0" }];
 
+    // A workflow acts as a PASS (arch-review 8 P0): the claim owns the plane and the activities present its
+    // id. In production score() claims and hands off to Temporal; here the marker is seeded directly so the
+    // bridge is exercised on its own, without the in-process pass judging everything first.
+    const claimed = "pass-bridge";
+    await store.update(record.id, {
+      scoringPass: {
+        passId: claimed,
+        epoch: 1,
+        leaseUntil: new Date(Date.now() + 300_000).toISOString(),
+        heartbeatAt: new Date().toISOString(),
+        targetRevision: 2,
+        baseRevision: 1,
+        judges: sel,
+        startedAt: new Date().toISOString(),
+        status: "running",
+      },
+    });
+
     // The workflow's plan: all three (case, trial) children are unfinished.
     const plan = await service.planScore(record.id, sel);
     expect(plan.keys).toHaveLength(3);
 
     // Judge the first case, then "kill the CP": a fresh plan returns exactly the remainder.
     const first = plan.keys[0] ?? "";
-    expect(await service.runScoreCase(record.id, first, sel)).toEqual({ scored: true });
+    expect(await service.runScoreCase(record.id, first, sel, undefined, claimed)).toEqual({ scored: true });
     const resumed = await service.planScore(record.id, sel);
     expect(resumed.keys).toHaveLength(2);
     expect(resumed.keys).not.toContain(first);
 
     // Re-running an already-judged case is a skip — zero duplicate judging.
-    expect(await service.runScoreCase(record.id, first, sel)).toEqual({ scored: false, skipped: true });
+    expect(await service.runScoreCase(record.id, first, sel, undefined, claimed)).toEqual({
+      scored: false,
+      skipped: true,
+    });
     expect(judgeCalls).toBe(1);
 
-    for (const key of resumed.keys) await service.runScoreCase(record.id, key, sel);
-    await service.finalizeScore(record.id, sel, "bob");
+    for (const key of resumed.keys) await service.runScoreCase(record.id, key, sel, undefined, claimed);
+    await service.finalizeScore(record.id, sel, "bob", claimed);
     const done = await store.get(record.id);
     expect(done?.kind).toBe("scorecard"); // promoted by the finalize
     expect(done?.summary?.some((row) => row.metric === "judge:quality" && row.passRate === 1)).toBe(true);
@@ -6293,8 +6314,15 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
     // The manifest's declared seal era (I8) survives the rescore's manifest rewrite — the spread-patch
     // preserves it without re-stamping (the record keeps declaring the generation that actually sealed it).
     expect(scored.manifest?.identityVersion).toBe(MANIFEST_IDENTITY_VERSION);
-    expect(scored.scoring?.[0]?.analysisRef).toContain(`analyses/${record.id}/scoring/1.json`);
-    expect(scored.scoring?.[1]?.analysisRef).toContain(`analyses/${record.id}/scoring/2.json`);
+    // Artifacts are keyed by the PASS that froze them, not by the revision they hope to become
+    // (arch-review 8 P0): two passes can target one revision number and both freeze BEFORE the ledger CAS
+    // picks a winner, so a revision-keyed object let the loser's bytes land under the winner's revision.
+    // Each entry therefore records its own durable key, and the two are DIFFERENT objects.
+    expect(scored.scoring?.[0]?.analysisKey).toBe(`analyses/${record.id}/passes/initial.json`);
+    expect(scored.scoring?.[1]?.analysisKey).toMatch(new RegExp(`^analyses/${record.id}/passes/.+\\.json$`));
+    expect(scored.scoring?.[1]?.analysisKey).not.toBe(scored.scoring?.[0]?.analysisKey);
+    expect(scored.scoring?.[0]?.analysisRef).toContain(`analyses/${record.id}/passes/`);
+    expect(scored.scoring?.[1]?.analysisRef).toContain(`analyses/${record.id}/passes/`);
     // …and revision 1's frozen bundle still shows the PRE-judge plane, while the current bundle shows the re-scored one.
     const asJudged = (bundle: unknown): string[] =>
       (bundle as { cases: Array<{ scores: Array<{ metric: string }> }> }).cases.flatMap((c) =>

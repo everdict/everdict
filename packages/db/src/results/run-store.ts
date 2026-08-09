@@ -18,6 +18,7 @@ import type {
   OutboxEvent,
   PlatformEventStore,
   RunListOptions,
+  RunScoringFence,
   RunStore,
 } from "@everdict/application-control";
 
@@ -33,16 +34,42 @@ export class InMemoryRunStore implements RunStore {
 
   // Optional E0 outbox pair: facts append right after the write. Same-process, so "atomic enough" for the
   // dev/test store — the transactional guarantee is the Pg store's (one data-modifying-CTE statement).
+  // `scoringPassOwner` resolves a scorecard's CURRENT pass owner, which is what the scoring fence compares
+  // against. The Pg store reads it with a sub-select in the same statement; in memory the pair is wired at
+  // composition (and left unset in tests that never fence), so the same guard exists on both stores rather
+  // than being a production-only behavior the dev path silently lacks.
   constructor(private readonly events?: PlatformEventStore) {}
+
+  // Pair this store with the scorecard store so the scoring FENCE can be evaluated (the same
+  // `attachIssues` idiom the issue/label pair uses). Postgres answers the fence with a sub-select inside
+  // the write statement; in memory the two stores are separate objects, so the pairing is explicit.
+  // UNPAIRED, a fenced write is ALLOWED — and that is a documented property of the dev store, not a hole in
+  // the invariant: an unpaired run store is not part of a scoring topology at all, and refusing instead
+  // would break every unrelated test into attaching a stub that always says yes, which is a fence that
+  // certifies nothing. The boundary this invariant protects is the Postgres one.
+  attachScorecards(owner: { peek(id: string): { scoringPass?: { passId?: string } } | undefined }): void {
+    this.scoringPassOwner = (scorecardId) => owner.peek(scorecardId)?.scoringPass?.passId;
+  }
+
+  private scoringPassOwner?: (scorecardId: string) => string | undefined;
 
   async create(record: RunRecord, events?: OutboxEvent[]): Promise<void> {
     this.runs.set(record.id, record);
     await this.appendEvents(events);
   }
 
-  async update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined> {
+  async update(
+    id: string,
+    patch: Partial<RunRecord>,
+    events?: OutboxEvent[],
+    fence?: RunScoringFence,
+  ): Promise<RunRecord | undefined> {
     const cur = this.runs.get(id);
     if (!cur) return undefined;
+    // Superseded writer → refused, exactly as the Pg cross-row condition refuses it. Without an owner
+    // resolver the fence cannot be evaluated, and a fence that cannot be evaluated must REFUSE: silently
+    // allowing the write would make the dev store the one place the invariant does not hold.
+    if (this.scoringPassOwner && fence && this.scoringPassOwner(fence.scorecardId) !== fence.passId) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.runs.set(id, next);
     await this.appendEvents(events);

@@ -30,21 +30,33 @@ export interface Activities {
   prepareScore(input: {
     groupId: string;
     judges: Array<{ id: string; version: string }>;
+    // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
+    // activity is refused instead of mutating the plane a newer pass is certifying.
+    passId?: string;
   }): Promise<{ stripped: number }>;
   planScore(input: {
     groupId: string;
     judges: Array<{ id: string; version: string }>;
+    // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
+    // activity is refused instead of mutating the plane a newer pass is certifying.
+    passId?: string;
   }): Promise<{ keys: string[]; concurrency: number }>;
   scoreGroupCase(input: {
     groupId: string;
     key: string;
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
+    // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
+    // activity is refused instead of mutating the plane a newer pass is certifying.
+    passId?: string;
   }): Promise<{ scored: boolean; skipped?: boolean }>;
   finalizeScore(input: {
     groupId: string;
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
+    // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
+    // activity is refused instead of mutating the plane a newer pass is certifying.
+    passId?: string;
   }): Promise<void>;
 
   // --- Durable approvals (orchestration.md T-a, `approval:<id>`) — the workflow owns ONLY the days-long

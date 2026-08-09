@@ -539,8 +539,12 @@ export class ScorecardService {
   }
 
   // Score-on-Temporal internal bridge (worker activities → these; orchestration.md T-c `score:<groupId>`).
-  async prepareScore(id: string, judges: Array<{ id: string; version: string }>): Promise<{ stripped: number }> {
-    return this.scoreService.prepareScore(id, judges);
+  async prepareScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+    passId?: string,
+  ): Promise<{ stripped: number }> {
+    return this.scoreService.prepareScore(id, judges, passId);
   }
 
   async planScore(
@@ -555,12 +559,18 @@ export class ScorecardService {
     key: string,
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
+    passId?: string,
   ): Promise<{ scored: boolean; skipped?: boolean }> {
-    return this.scoreService.scoreCase(id, key, judges, submittedBy);
+    return this.scoreService.scoreCase(id, key, judges, submittedBy, passId);
   }
 
-  async finalizeScore(id: string, judges: Array<{ id: string; version: string }>, submittedBy?: string): Promise<void> {
-    return this.scoreService.finalizeScore(id, judges, submittedBy);
+  async finalizeScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+    submittedBy?: string,
+    passId?: string,
+  ): Promise<void> {
+    return this.scoreService.finalizeScore(id, judges, submittedBy, passId);
   }
 
   // Which judge DOCUMENTS score this batch — delegated to the ONE sealer (sealJudgeClosure) the re-score

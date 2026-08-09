@@ -3,6 +3,7 @@ import type {
   LiveSessionRow,
   OutboxEvent,
   RunListOptions,
+  RunScoringFence,
   RunStore,
 } from "@everdict/application-control";
 import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
@@ -148,7 +149,12 @@ export class PgRunStore implements RunStore {
     await this.client.query(`INSERT INTO everdict_runs ${RUN_COLUMNS} VALUES ${RUN_VALUES}`, base);
   }
 
-  async update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined> {
+  async update(
+    id: string,
+    patch: Partial<RunRecord>,
+    events?: OutboxEvent[],
+    fence?: RunScoringFence,
+  ): Promise<RunRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/result/error/runtime/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -196,12 +202,23 @@ export class PgRunStore implements RunStore {
     }
     if (sets.length === 0) return this.get(id);
     vals.push(id);
+    // The scoring-pass FENCE (arch-review 8 P0) — a cross-row condition IN the write statement: this row
+    // changes only while the named pass still owns the parent scorecard's marker. Evaluating it in the
+    // service instead would leave exactly the window it exists to close (the winner settles and clears the
+    // marker between the check and the write), so a superseded writer would still land on a settled plane.
+    let fenceSql = "";
+    if (fence) {
+      const scorecardIdx = i + 1;
+      const passIdx = i + 2;
+      fenceSql = ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx})`;
+      vals.push(fence.scorecardId, fence.passId);
+    }
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
       const ev = eventValuesClause(events, vals.length + 1);
       const res = await this.client.query<RunRow>(
-        `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *),
+        `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
                 WHERE EXISTS (SELECT 1 FROM upd))
@@ -211,7 +228,7 @@ export class PgRunStore implements RunStore {
       return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
     }
     const res = await this.client.query<RunRow>(
-      `UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;

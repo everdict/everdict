@@ -81,6 +81,9 @@ export interface ScorecardServiceDeps {
       groupId: string;
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
+      // The pass the CLAIM minted. The workflow presents it on every activity, so a pass that gets
+      // superseded while a long history rotates is refused instead of writing onto the new owner's plane.
+      passId?: string;
     }): Promise<void>;
   };
   // Registered runtime ids for this tenant — powers runtime:"auto" (expand to every registered runtime and shard).

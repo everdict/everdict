@@ -313,6 +313,18 @@ export class PgScorecardStore implements ScorecardStore {
       guardSql += ` AND coalesce(jsonb_array_length(gates), 0) = $${i}`;
       vals.push(guard.expectGatesCount);
     }
+    // The pass-claim CAS (arch-review 8 P0): exactly one claimant may stamp an epoch onto this row. `null`
+    // asks for "no epoch persisted" — an absent marker OR a legacy one — so the first claimant to write an
+    // epoch makes every rival's condition false. This is what turns the marker into a lock.
+    if (guard?.expectScoringPassEpoch !== undefined) {
+      if (guard.expectScoringPassEpoch === null) {
+        guardSql += " AND (scoring_pass IS NULL OR scoring_pass->>'epoch' IS NULL)";
+      } else {
+        i++;
+        guardSql += ` AND (scoring_pass->>'epoch')::bigint = $${i}`;
+        vals.push(guard.expectScoringPassEpoch);
+      }
+    }
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).

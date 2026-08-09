@@ -60,9 +60,27 @@ export interface LiveSessionQuery {
 
 // The run ledger. It also IS the `AdmissionLedger` (see that port): the scheduler's fleet-wide tenant count is
 // derived from these very rows, so the control plane hands its store over instead of keeping a second ledger.
+// The scoring-pass FENCE (arch-review 8 P0). The score plane lives on child run rows, so "only the current
+// pass may mutate it" is a condition about ANOTHER row — and it has to be evaluated in the same statement as
+// the write. Checking it in the service first would be the very TOCTOU it exists to close: between "the
+// marker still names me" and the write, the winning pass can settle and clear the marker, and the late write
+// then lands on a settled plane with nothing left to refuse it. A superseded pass waking hours later is the
+// real shape of this, which is why the guard is a storage-layer condition and not a service-layer check.
+export interface RunScoringFence {
+  scorecardId: string; // the parent whose marker decides
+  passId: string; // the pass claiming the right to write — must still be the marker's owner
+}
+
 export interface RunStore extends AdmissionLedger {
   create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
-  update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined>;
+  // `fence`: commit ONLY while the named scoring pass still owns the parent scorecard's marker. A miss
+  // returns undefined (like a missing id) — the caller treats it as "I was superseded" and stops.
+  update(
+    id: string,
+    patch: Partial<RunRecord>,
+    events?: OutboxEvent[],
+    fence?: RunScoringFence,
+  ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
   // Remove every child run a scorecard fanned out (scorecard hard-delete cascade — orphaned children would

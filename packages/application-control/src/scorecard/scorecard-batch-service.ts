@@ -61,6 +61,7 @@ import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
+  INITIAL_PASS_ID,
   analysisBundle,
   batchSettledEvent,
   exportStepMessage,
@@ -756,7 +757,7 @@ export class ScorecardBatchService {
         results,
         ctx.verdictPolicy,
       ),
-      nextScoringRevision(final?.scoring),
+      INITIAL_PASS_ID,
     );
     // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
     const exported = this.deps.exportResults
@@ -790,6 +791,9 @@ export class ScorecardBatchService {
       results,
       // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+      // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
+      // revision number no longer names the object a historical read has to fetch.
+      ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
     });
@@ -1568,7 +1572,7 @@ export class ScorecardBatchService {
           scorecard.results,
           opts.verdictPolicy,
         ),
-        nextScoringRevision(priorScoring),
+        INITIAL_PASS_ID,
       );
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
@@ -1611,6 +1615,9 @@ export class ScorecardBatchService {
             results: scorecard.results,
             // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
             ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+            // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
+            // revision number no longer names the object a historical read has to fetch.
+            ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
             createdAt: this.now(),
             ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
           });

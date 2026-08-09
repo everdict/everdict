@@ -44,6 +44,7 @@ export interface ScoringPassInput {
   judgeRun?: NonNullable<ScoringRevision["judgeRun"]>;
   results: CaseResult[];
   analysisRef?: string;
+  analysisKey?: string; // its durable object key (the ref expires; artifacts are pass-keyed)
   createdAt: string;
   createdBy?: string;
 }
@@ -71,6 +72,10 @@ export function appendScoringRevision(
       ...(input.judgeRun ? { judgeRun: input.judgeRun } : {}),
       scorePlaneDigest: scorePlaneDigest(input.results),
       ...(input.analysisRef !== undefined ? { analysisRef: input.analysisRef } : {}),
+      // The artifact's durable KEY travels with its ref: the ref is a presigned URL that expires, and the
+      // object is keyed by the writing PASS (two passes can target one revision), so the revision number no
+      // longer names it. Dropping this here would leave every historical read holding a dead URL.
+      ...(input.analysisKey !== undefined ? { analysisKey: input.analysisKey } : {}),
       createdAt: input.createdAt,
       ...(input.createdBy !== undefined ? { createdBy: input.createdBy } : {}),
     },

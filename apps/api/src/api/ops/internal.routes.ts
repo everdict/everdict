@@ -401,6 +401,9 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
   const scoreJudges = z.object({
     judges: z.array(z.object({ id: z.string().min(1), version: z.string().min(1) })).min(1),
     submittedBy: z.string().optional(),
+    // The scoring pass the calling workflow owns (arch-review 8 P0). Optional: a workflow started before
+    // passes carried identity sends none and adopts the live marker — what it can never do is mint one.
+    passId: z.string().min(1).optional(),
   });
   app.post<{ Params: { id: string } }>(
     "/internal/groups/:id/score-prepare",
@@ -414,7 +417,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const body = scoreJudges.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        return reply.send(await deps.scorecardService.prepareScore(req.params.id, body.data.judges));
+        return reply.send(await deps.scorecardService.prepareScore(req.params.id, body.data.judges, body.data.passId));
       } catch (err) {
         return sendError(reply, err);
       }
@@ -456,6 +459,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
             body.data.key,
             body.data.judges,
             body.data.submittedBy,
+            body.data.passId,
           ),
         );
       } catch (err) {
@@ -475,7 +479,12 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const body = scoreJudges.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        await deps.scorecardService.finalizeScore(req.params.id, body.data.judges, body.data.submittedBy);
+        await deps.scorecardService.finalizeScore(
+          req.params.id,
+          body.data.judges,
+          body.data.submittedBy,
+          body.data.passId,
+        );
         return reply.send({ ok: true });
       } catch (err) {
         return sendError(reply, err);

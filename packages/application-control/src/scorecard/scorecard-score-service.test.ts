@@ -1,4 +1,13 @@
-import type { CaseResult, Dataset, JudgeSpec, RunRecord, Score, ScorecardRecord } from "@everdict/contracts";
+import type {
+  CaseResult,
+  Dataset,
+  JudgeSpec,
+  RunRecord,
+  Score,
+  ScorecardRecord,
+  ScoringPass,
+} from "@everdict/contracts";
+import { ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
@@ -89,7 +98,25 @@ function result(caseId: string, scores: Score[], failure?: CaseResult["failure"]
   };
 }
 
-function recordWith(results: CaseResult[]): ScorecardRecord {
+// A pass marker OWNS the score plane (arch-review 8 P0): the strip/judge/settle activities act as a pass,
+// and a record with no marker is a settled revision they must refuse to touch. Fixtures therefore carry the
+// marker their activity is running under, exactly as score()'s claim leaves it.
+function livePass(overrides: Partial<ScoringPass> = {}): ScoringPass {
+  return {
+    passId: "pass-1",
+    epoch: 1,
+    leaseUntil: "2026-08-07T00:05:00.000Z",
+    heartbeatAt: "2026-08-07T00:00:00.000Z",
+    targetRevision: 1,
+    baseRevision: 0,
+    judges: [],
+    startedAt: "2026-08-07T00:00:00.000Z",
+    status: "running",
+    ...overrides,
+  };
+}
+
+function recordWith(results: CaseResult[], pass: ScoringPass | null = livePass()): ScorecardRecord {
   return {
     id: "sc-1",
     tenant: "acme",
@@ -97,6 +124,7 @@ function recordWith(results: CaseResult[]): ScorecardRecord {
     harness: { id: "h", version: "1" },
     status: "succeeded",
     scorecard: { suiteId: "d", harness: "h@1", results },
+    ...(pass ? { scoringPass: pass } : {}),
     createdAt: "2026-08-07T00:00:00.000Z",
     updatedAt: "2026-08-07T00:00:00.000Z",
   };
@@ -244,7 +272,9 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
         throw new Error("unused");
       },
       async update() {
-        return undefined; // write-back target — accepting the patch is enough here
+        // A fenced write-back reads `undefined` as "this pass was superseded", so the fake answers like a
+        // store that ACCEPTED it — the refusal path has its own test below.
+        return child;
       },
       async get() {
         return undefined;
@@ -452,6 +482,13 @@ describe("ScorecardScoreService aggregate — a re-score rewrites scoring identi
           createdAt: "2026-08-07T00:00:00.000Z",
         },
       ],
+      // The pass this finalize belongs to. Its `judges` is the PASS-START seal (what score() wrote), and the
+      // revision records exactly that — never a finalize-time re-resolution.
+      scoringPass: livePass({
+        targetRevision: 2,
+        baseRevision: 1,
+        judges: [{ id: "j", version: "2.0.0", model: "m2" }],
+      }),
     };
     const updates: Array<Partial<ScorecardRecord>> = [];
     const store: ScorecardStore = {
@@ -610,5 +647,167 @@ describe("ScorecardScoreService — the scoring pass is visible state (arch-revi
       svc2.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] }),
     ).resolves.toBeDefined();
     expect(updates2.some((u) => (u.scoringPass as { status?: string } | null)?.status === "running")).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// arch-review 8 P0 — OWNERSHIP. The previous wave made the pass VISIBLE (readers refuse a plane between
+// revisions). Visibility is not ownership: two replicas both read an absent marker, both wrote one, and the
+// loser kept writing onto the winner's plane — after the marker, i.e. the read guard, was already gone.
+// The statement these tests certify is stronger than "a pass is in flight":
+//   at most one pass owns the right to mutate a score plane, and a superseded pass can never write again.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+describe("scoring-pass ownership (arch-review 8 P0)", () => {
+  // A store with the real claim CAS — the guard is the whole subject here, so a fake that ignores it would
+  // certify nothing.
+  function casStore(initial: ScorecardRecord) {
+    let current = initial;
+    return {
+      get current() {
+        return current;
+      },
+      store: {
+        ...unusedStore,
+        async get() {
+          return current;
+        },
+        async update(
+          _id: string,
+          patch: Partial<ScorecardRecord>,
+          _events?: unknown,
+          guard?: { expectScoringPassEpoch?: number | null },
+        ) {
+          if (guard?.expectScoringPassEpoch !== undefined) {
+            const persisted = current.scoringPass?.epoch ?? null;
+            if (persisted !== guard.expectScoringPassEpoch) return undefined;
+          }
+          current = { ...current, ...patch };
+          return current;
+        },
+      } as unknown as ScorecardStore,
+    };
+  }
+
+  function svcOver(cas: ReturnType<typeof casStore>, newId: () => string, now = "2026-08-07T00:00:00.000Z") {
+    return new ScorecardScoreService(
+      { ...deps, store: cas.store },
+      {
+        newId,
+        now: () => now,
+        scoring: new ScoringService({}),
+        getRecord: async () => cas.current,
+        pinJudges: async (_t, j) => j,
+      },
+    );
+  }
+
+  it("gives the pass to exactly ONE of two replicas racing from the same read", async () => {
+    const before = recordWith([result("c1", [])], null);
+    const cas = casStore(before);
+    // Both replicas read the record BEFORE either writes — B keeps that stale snapshot, which is exactly the
+    // interleaving read-check-write lost to (it saw "no pass" and believed it).
+    const a = svcOver(cas, () => "pass-A");
+    const b = new ScorecardScoreService(
+      { ...deps, store: cas.store },
+      {
+        newId: () => "pass-B",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => before,
+        pinJudges: async (_t, j) => j,
+      },
+    );
+    await a.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    await expect(b.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] })).rejects.toThrow(
+      ConflictError,
+    );
+    expect(cas.current.scoringPass?.passId).toBe("pass-A");
+    expect(cas.current.scoringPass?.epoch).toBe(1);
+  });
+
+  it("refuses a superseded pass's late write-back — the interleaving the read guard cannot see", async () => {
+    // The winner has SETTLED: marker cleared, revision closed. Nothing is left to refuse the loser except
+    // the fence, which is the entire point (with the marker gone, `requireSucceeded` reads the plane happily).
+    const settled = recordWith([result("c1", [])], null);
+    const cas = casStore(settled);
+    const written: string[] = [];
+    const runStore = {
+      async create() {
+        throw new Error("unused");
+      },
+      async get() {
+        return undefined;
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async liveSessions() {
+        return [];
+      },
+      async list() {
+        return [{ id: "child-c1", caseId: "c1", result: { caseId: "c1", scores: [] } } as never];
+      },
+      async update(_id: string, _patch: unknown, _events?: unknown, fence?: { passId: string }) {
+        // The real store evaluates this as a cross-row condition IN the write statement; the fake mirrors it.
+        if (fence && settled.scoringPass?.passId !== fence.passId) return undefined;
+        written.push(_id);
+        return {} as never;
+      },
+    } as unknown as RunStore;
+    const svc = new ScorecardScoreService(
+      { ...deps, store: cas.store, runStore },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => ({ ...cas.current, runIds: ["child-c1"] }),
+        pinJudges: async (_t, j) => j,
+      },
+    );
+    // The loser wakes up and tries to judge a case. It cannot even start: no marker names it.
+    await expect(
+      svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-LOSER"),
+    ).rejects.toThrow(ConflictError);
+    expect(written).toEqual([]);
+  });
+
+  it("refuses to RE-ARM a marker on a settled plane — the strip would destroy a closed revision", async () => {
+    // prepareScore used to mint a marker whenever none existed. A superseded pass's late activity would then
+    // re-open the revision boundary a settle had just closed, and strip the plane that revision certifies.
+    const cas = casStore(recordWith([result("c1", [measuredVerdict])], null));
+    const svc = svcOver(cas, () => "id-1");
+    await expect(svc.prepareScore("sc-1", [{ id: "j", version: "1.0.0" }], "pass-LOSER")).rejects.toThrow(
+      ConflictError,
+    );
+    expect(cas.current.scoringPass).toBeUndefined(); // nothing was armed
+  });
+
+  it("does not take over a HEALTHY long pass just because it is old (a lease, not an age)", async () => {
+    // Two hours in — twice the old takeover window — but the owner renewed its lease four minutes ago.
+    // The age rule shot exactly this pass: a 1000-case batch behind a rate-limited provider.
+    const working = livePass({
+      startedAt: "2026-08-07T00:00:00.000Z",
+      heartbeatAt: "2026-08-07T01:56:00.000Z",
+      leaseUntil: "2026-08-07T02:01:00.000Z",
+    });
+    const cas = casStore(recordWith([result("c1", [])], working));
+    const svc = svcOver(cas, () => "pass-B", "2026-08-07T02:00:00.000Z");
+    await expect(svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] })).rejects.toThrow(
+      ConflictError,
+    );
+    expect(cas.current.scoringPass?.passId).toBe("pass-1");
+  });
+
+  it("DOES take over once the lease expires — crash residue must never wedge a record forever", async () => {
+    const abandoned = livePass({ leaseUntil: "2026-08-07T00:05:00.000Z" });
+    const cas = casStore(recordWith([result("c1", [])], abandoned));
+    const svc = svcOver(cas, () => "pass-B", "2026-08-07T00:06:00.000Z");
+    await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "j", version: "1.0.0" }] });
+    expect(cas.current.scoringPass?.passId).toBe("pass-B");
+    // The epoch MOVES on takeover — that is what makes every write the old owner still has in flight miss.
+    expect(cas.current.scoringPass?.epoch).toBe(2);
   });
 });

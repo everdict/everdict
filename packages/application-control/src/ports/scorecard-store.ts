@@ -38,6 +38,14 @@ export interface ScorecardListFilter {
 export interface ScorecardUpdateGuard {
   expectScoringCount?: number;
   expectGatesCount?: number;
+  // The scoring-pass CLAIM's compare-and-swap (arch-review 8 P0). Claiming used to be read-check-write:
+  // two replicas both read an absent marker, both decided they owned the pass, and the second write silently
+  // replaced the first — a marker is not a lock. The claimant now states the epoch it OBSERVED and the store
+  // commits only if the persisted marker still carries it, so exactly one claimant wins whatever the timing.
+  //  · a number → "the marker I read had this epoch" (renewal, takeover of a reclaimable pass, settle)
+  //  · null     → "there was no marker, or a legacy one with no epoch" (a fresh claim)
+  // A miss returns undefined like a missing id — the caller just read the record, so it IS the conflict.
+  expectScoringPassEpoch?: number | null;
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

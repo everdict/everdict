@@ -306,10 +306,17 @@ export async function makePersistence(): Promise<Persistence> {
     const inMemoryIssues = new InMemoryIssueStore();
     const inMemoryIssueLabels = new InMemoryIssueLabelStore();
     inMemoryIssueLabels.attachIssues(inMemoryIssues);
+    // The scoring FENCE is a cross-row condition (a child write commits only while the named pass still owns
+    // its parent's marker). Postgres evaluates it with a sub-select in the write statement; in memory the two
+    // stores are separate objects, so the composition hands the run store a reader for the scorecard's marker
+    // — otherwise the dev binding would be the one place a superseded pass could still write.
+    const inMemoryScorecards = new InMemoryScorecardStore(platformEventStore);
+    const inMemoryRuns = new InMemoryRunStore(platformEventStore);
+    inMemoryRuns.attachScorecards(inMemoryScorecards);
     return {
-      store: new InMemoryRunStore(platformEventStore),
+      store: inMemoryRuns,
       recordingStore: new InMemoryRecordingStore(),
-      scorecardStore: new InMemoryScorecardStore(platformEventStore),
+      scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
       harnessInstanceRegistry: new InMemoryHarnessInstanceRegistry(harnessTemplateRegistry),

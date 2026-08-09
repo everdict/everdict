@@ -144,12 +144,27 @@ export async function scoreGroupWorkflow(input: {
   groupId: string;
   judges: Array<{ id: string; version: string }>;
   submittedBy?: string;
+  // The pass this workflow OWNS (arch-review 8 P0), minted by the claim that started it. Carried through
+  // continue-as-new, so a rotated workflow is still the same pass — and presented on every activity, so the
+  // control plane can refuse the activities of a pass that was superseded while this history was rotating.
+  // Absent = a workflow started before passes had identity: it adopts the live marker (its deterministic
+  // workflow id made it the only starter) but may never mint one.
+  passId?: string;
   prepared?: boolean; // set by continue-as-new — the strip already ran for this pass
   continueEvery?: number;
   rotateAtHistoryLength?: number;
 }): Promise<void> {
-  if (!input.prepared) await batchActivities.prepareScore({ groupId: input.groupId, judges: input.judges });
-  const plan = await batchActivities.planScore({ groupId: input.groupId, judges: input.judges });
+  if (!input.prepared)
+    await batchActivities.prepareScore({
+      groupId: input.groupId,
+      judges: input.judges,
+      ...(input.passId !== undefined ? { passId: input.passId } : {}),
+    });
+  const plan = await batchActivities.planScore({
+    groupId: input.groupId,
+    judges: input.judges,
+    ...(input.passId !== undefined ? { passId: input.passId } : {}),
+  });
   const limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
   const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
   const keys = plan.keys.slice(0, limit);
@@ -170,6 +185,7 @@ export async function scoreGroupWorkflow(input: {
         key,
         judges: input.judges,
         ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+        ...(input.passId !== undefined ? { passId: input.passId } : {}),
       });
     }
   };
@@ -183,6 +199,7 @@ export async function scoreGroupWorkflow(input: {
     groupId: input.groupId,
     judges: input.judges,
     ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+    ...(input.passId !== undefined ? { passId: input.passId } : {}),
   });
 }
 

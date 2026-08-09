@@ -5,9 +5,11 @@ import {
   type Dataset,
   type EvalCase,
   NotFoundError,
-  SCORING_PASS_STALE_MS,
+  SCORING_PASS_LEASE_MS,
+  SCORING_PASS_RENEW_BEFORE_MS,
   type ScorecardRecord,
   type ScoringPass,
+  scoringPassReclaimable,
 } from "@everdict/contracts";
 import {
   ScorecardBatch,
@@ -69,6 +71,59 @@ export class ScorecardScoreService {
     this.pinJudges = shared.pinJudges;
   }
 
+  // The lease a claim/renewal grants. The owner extends it while it works, so the window bounds "how long
+  // since this pass last proved it was alive" — never "how long a pass may legitimately run".
+  private leaseUntil(): string {
+    return new Date(Date.parse(this.now()) + SCORING_PASS_LEASE_MS).toISOString();
+  }
+
+  // Renew while working (per case / per activity). Guarded by the epoch: a pass that was TAKEN OVER cannot
+  // extend a lease it no longer holds — the renewal simply misses, which is also how the owner finds out.
+  // Returns false when this pass no longer owns the marker; callers stop rather than keep writing.
+  private async renewLease(id: string, pass: ScoringPass): Promise<boolean> {
+    if (pass.epoch === undefined) return true; // legacy marker: nothing to renew against, nothing to fence
+    // Still comfortably held → no write. Renewing on every case would cost a write per judgment for no
+    // added safety; the fence on the write itself is what actually refuses a superseded pass.
+    if (
+      pass.leaseUntil !== undefined &&
+      Date.parse(pass.leaseUntil) - Date.parse(this.now()) > SCORING_PASS_RENEW_BEFORE_MS
+    )
+      return true;
+    // The CAS is the authority — no pre-read to disagree with it. A miss means the epoch moved, i.e. this
+    // pass was taken over, which is exactly what the caller needs to know.
+    const renewed = await this.deps.store.update(
+      id,
+      { scoringPass: { ...pass, leaseUntil: this.leaseUntil(), heartbeatAt: this.now() }, updatedAt: this.now() },
+      undefined,
+      { expectScoringPassEpoch: pass.epoch },
+    );
+    return renewed !== undefined;
+  }
+
+  // The pass an activity is allowed to act as. The cheap early-out before doing work — NOT the guarantee
+  // (between this read and a write the winner can settle, which is why every write also carries the fence).
+  //  · marker absent  → refuse. The pass settled or was taken over; acting now would mutate finished evidence.
+  //  · passId given   → it must BE the owner, else this activity belongs to a superseded pass.
+  //  · passId absent  → a workflow started before passes carried identity. It adopts the live marker (its own
+  //                     deterministic workflow id is what made it the only starter), so an in-flight pass
+  //                     survives the deploy; what it may NOT do is mint a marker where none exists.
+  private async owningPass(record: ScorecardRecord, passId: string | undefined): Promise<ScoringPass> {
+    const live = record.scoringPass ?? undefined;
+    if (!live)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id, passId },
+        "no scoring pass owns this group's score plane — it settled or was taken over; refusing to mutate a completed revision.",
+      );
+    if (passId !== undefined && live.passId !== passId)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id, passId, owner: live.passId },
+        "this scoring pass no longer owns the group's score plane — a newer pass took it over.",
+      );
+    return live;
+  }
+
   // Validate + kick the async scoring; returns the (still unchanged) record — poll get until summary/judgeModels
   // move and the scorecard.scored fact lands. Guards: workspace scope (404), phase-1 completed (409 via the
   // domain guard), results present (400), judges non-empty (400), one scoring at a time per group (409).
@@ -96,17 +151,23 @@ export class ScorecardScoreService {
     // pass-start judge closure the finalized revision will record. A live fresh pass refuses; a failed or
     // stale one is TAKEN OVER — crash residue must never wedge the record forever.
     const existing = record.scoringPass ?? undefined;
-    if (
-      existing !== undefined &&
-      existing.status === "running" &&
-      Date.parse(this.now()) - Date.parse(existing.startedAt) < SCORING_PASS_STALE_MS
-    )
+    // A LIVE pass owns the plane — however long it has been running. Staleness is a LEASE question, not an
+    // age question: a 1000-case pass behind a rate-limited provider legitimately outlives any fixed window,
+    // and taking it over because it is "old" shoots a working pass and puts two writers on one plane.
+    if (existing !== undefined && !scoringPassReclaimable(existing, this.now()))
       throw new ConflictError(
         "CONFLICT",
         { scorecard: record.id, startedAt: existing.startedAt, targetRevision: existing.targetRevision },
         "A scoring pass is already in flight on this group — retry after it settles.",
       );
     const pass: ScoringPass = {
+      // Ownership, not a flag: `passId` is what every later write carries so the storage layer can refuse a
+      // superseded writer, and `epoch` is what the claim below compare-and-swaps on so exactly one claimant
+      // can ever hold it. Read-check-write was not a lock — two replicas both read an absent marker.
+      passId: this.newId(),
+      epoch: (existing?.epoch ?? 0) + 1,
+      leaseUntil: this.leaseUntil(),
+      heartbeatAt: this.now(),
       targetRevision: (record.scoring?.at(-1)?.revision ?? 0) + 1,
       baseRevision: record.scoring?.at(-1)?.revision ?? 0,
       judges: await sealJudgeClosure(this.deps, input.tenant, pinned),
@@ -117,7 +178,18 @@ export class ScorecardScoreService {
         : {}),
       status: "running",
     };
-    await this.deps.store.update(record.id, { scoringPass: pass, updatedAt: this.now() });
+    // THE CLAIM (arch-review 8 P0). Commits only if the marker still carries the epoch this caller read —
+    // so a rival that claimed in between wins and this one is told, instead of silently overwriting its
+    // marker and running a second pass over the same plane under the loser's sealed closure.
+    const claimed = await this.deps.store.update(record.id, { scoringPass: pass, updatedAt: this.now() }, undefined, {
+      expectScoringPassEpoch: existing?.epoch ?? null,
+    });
+    if (claimed === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id },
+        "another replica claimed the scoring pass for this group first — retry after it settles.",
+      );
     // Score-on-Temporal (T-c): a durable score:<groupId> workflow owns the pass — re-scoring a large group
     // survives a CP restart with zero duplicate judging. Only runIds-backed groups route here (per-case
     // write-back is what makes the activities idempotent; an embed group has no per-case store, so it takes
@@ -129,6 +201,7 @@ export class ScorecardScoreService {
           groupId: record.id,
           judges: pinned,
           ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+          ...(pass.passId !== undefined ? { passId: pass.passId } : {}),
         });
         return record;
       } catch (err) {
@@ -137,7 +210,9 @@ export class ScorecardScoreService {
       }
     }
     this.inFlight.add(record.id);
-    void this.track(record, record.scorecard, pinned, input.submittedBy).finally(() => this.inFlight.delete(record.id));
+    void this.track(record, record.scorecard, pinned, input.submittedBy, pass).finally(() =>
+      this.inFlight.delete(record.id),
+    );
     return record;
   }
 
@@ -154,7 +229,11 @@ export class ScorecardScoreService {
   // retry is safe; the ONCE-per-pass discipline is the workflow's (the `prepared` flag threads through
   // continue-as-new — re-running this after cases were re-judged would erase this pass's own work). Only
   // gradeable results strip — a classified failure's placeholder rows are starvation evidence, not judgment.
-  async prepareScore(id: string, judges: Array<{ id: string; version: string }>): Promise<{ stripped: number }> {
+  async prepareScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+    passId?: string,
+  ): Promise<{ stripped: number }> {
     const record = await this.getRecord(id);
     if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
     if (!ScorecardBatch.from(record).canScore())
@@ -163,21 +242,13 @@ export class ScorecardScoreService {
         { scorecard: id, status: record.status },
         `only a succeeded group can be scored (status: ${record.status})`,
       );
-    // Ensure the persisted pass marker exists BEFORE the strip (normally score() wrote it; a resumed
-    // workflow whose marker was lost re-arms it here) — the strip is the moment the plane stops belonging
-    // to a completed revision, and readers must be able to see that.
-    if ((record.scoringPass ?? undefined) === undefined) {
-      await this.deps.store.update(id, {
-        scoringPass: {
-          targetRevision: (record.scoring?.at(-1)?.revision ?? 0) + 1,
-          baseRevision: record.scoring?.at(-1)?.revision ?? 0,
-          judges: await sealJudgeClosure(this.deps, record.tenant, judges),
-          startedAt: this.now(),
-          status: "running",
-        },
-        updatedAt: this.now(),
-      });
-    }
+    // The marker must ALREADY exist and belong to this pass. It used to be RE-ARMED here when absent, which
+    // is the worst interleaving in the whole path: a superseded pass's late activity would mint a marker for
+    // a pass nobody is running, re-open the revision boundary a settle had just closed, and then strip the
+    // plane that the settled revision certifies. An absent marker means the pass settled or was taken over —
+    // there is nothing left for this activity to do, and stripping would destroy finished evidence.
+    const pass = await this.owningPass(record, passId);
+    await this.renewLease(id, pass);
     const results = record.scorecard?.results ?? [];
     const changed: CaseResult[] = [];
     for (const r of results) {
@@ -185,7 +256,7 @@ export class ScorecardScoreService {
       const scores = stripJudgeScores(r.scores, judges);
       if (scores.length !== r.scores.length) changed.push({ ...r, scores });
     }
-    if (changed.length > 0) await this.writeBackScores(record, changed);
+    if (changed.length > 0) await this.writeBackScores(record, changed, pass);
     return { stripped: changed.length };
   }
 
@@ -224,9 +295,20 @@ export class ScorecardScoreService {
     key: string,
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
+    passId?: string,
   ): Promise<{ scored: boolean; skipped?: boolean }> {
     const record = await this.getRecord(id);
     if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
+    // Ownership first: a judgment produced by a superseded pass is work nobody asked for, and writing it
+    // back would corrupt the live pass's plane. Renewing here is also what keeps a long, healthy pass alive
+    // — the lease advances per case, so "still working" and "still owner" are the same statement.
+    const pass = await this.owningPass(record, passId);
+    if (!(await this.renewLease(id, pass)))
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: id, passId: pass.passId },
+        "this scoring pass lost its lease — a newer pass owns the group's score plane.",
+      );
     const result = (record.scorecard?.results ?? []).find((r) => childKey(r.caseId, r.trial) === key);
     if (!result) return { scored: false, skipped: true };
     // Same predicate as planScore: a measured verdict per selected judge = done; an unmeasured placeholder
@@ -249,19 +331,27 @@ export class ScorecardScoreService {
       record.runtime,
       submittedBy,
       runIdOf,
-      record.scoringPass?.judges,
+      pass.judges,
     );
-    await this.writeBackScores(record, [single]);
+    await this.writeBackScores(record, [single], pass);
     return { scored: true };
   }
 
   // Re-aggregate from the (now re-scored) children and settle through the rescore transition — the terminal
   // step of the workflow pass. Reloads hydrated state, so it sees exactly what the scoreCase activities wrote.
-  async finalizeScore(id: string, judges: Array<{ id: string; version: string }>, submittedBy?: string): Promise<void> {
+  async finalizeScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+    submittedBy?: string,
+    passId?: string,
+  ): Promise<void> {
     const record = await this.getRecord(id);
     const base = record?.scorecard;
     if (!record || !base) return;
-    await this.aggregate(record, base, base.results, judges, submittedBy);
+    // Settling is a write like any other: it must belong to the pass that owns the marker, or a superseded
+    // pass could clear a live one's marker and append its revision on top.
+    const pass = await this.owningPass(record, passId);
+    await this.aggregate(record, base, base.results, judges, submittedBy, pass);
   }
 
   private async track(
@@ -269,6 +359,7 @@ export class ScorecardScoreService {
     scorecard: NonNullable<ScorecardRecord["scorecard"]>,
     judges: Array<{ id: string; version: string }>,
     submittedBy: string | undefined,
+    pass: ScoringPass,
   ): Promise<void> {
     try {
       // Re-scoring a judge REPLACES its previous output (idempotent by the judge:<id> prefix family — the
@@ -291,8 +382,8 @@ export class ScorecardScoreService {
         runIdOf,
         (fresh ?? record).scoringPass?.judges,
       );
-      await this.writeBackScores(record, results);
-      await this.aggregate(record, scorecard, results, judges, submittedBy);
+      await this.writeBackScores(record, results, pass);
+      await this.aggregate(record, scorecard, results, judges, submittedBy, pass);
     } catch (err) {
       // Best-effort visibility: a failed scoring pass never flips the (already settled) group — it leaves a step.
       const fresh = await this.deps.store.get(record.id).catch(() => undefined);
@@ -301,14 +392,22 @@ export class ScorecardScoreService {
       // The pass marker flips to FAILED and STAYS — the strip already mutated the plane, so readers must
       // keep refusing it (broken evidence is not a readable revision). A later pass takes the marker over.
       const failedPass = fresh.scoringPass ?? undefined;
+      // Only MY pass may be marked failed. If a takeover already replaced the marker, flipping it here would
+      // declare someone else's live pass dead — the epoch guard makes that write miss instead.
+      const mine = failedPass !== undefined && failedPass.passId === pass.passId;
       await this.deps.store
-        .update(record.id, {
-          ...(failedPass !== undefined
-            ? { scoringPass: { ...failedPass, status: "failed" as const, failedAt: this.now(), failure: message } }
-            : {}),
-          steps: [...(fresh.steps ?? []), { ts: this.now(), phase: "judges", status: "failed", message }],
-          updatedAt: this.now(),
-        })
+        .update(
+          record.id,
+          {
+            ...(mine && failedPass !== undefined
+              ? { scoringPass: { ...failedPass, status: "failed" as const, failedAt: this.now(), failure: message } }
+              : {}),
+            steps: [...(fresh.steps ?? []), { ts: this.now(), phase: "judges", status: "failed", message }],
+            updatedAt: this.now(),
+          },
+          undefined,
+          mine && pass.epoch !== undefined ? { expectScoringPassEpoch: pass.epoch } : undefined,
+        )
         .catch(() => undefined);
     }
   }
@@ -327,6 +426,7 @@ export class ScorecardScoreService {
     results: CaseResult[],
     judges: Array<{ id: string; version: string }>,
     submittedBy: string | undefined,
+    pass?: ScoringPass,
   ): Promise<void> {
     const summary = summarizeScorecard({ ...base, results });
     const fresh = await this.deps.store.get(record.id);
@@ -366,7 +466,7 @@ export class ScorecardScoreService {
               results,
               resolution.policy,
             ),
-            targetRevision,
+            pass?.passId ?? fresh.scoringPass?.passId,
           );
     const scoring = appendScoringRevision(fresh.scoring, {
       kind: "rescore",
@@ -375,6 +475,9 @@ export class ScorecardScoreService {
       // The revision entry points at its own FROZEN artifact — never the mutable current key a later pass
       // rewrites (I7): historical judgment stays re-derivable, not merely detectable via the plane digest.
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+      // …and remembers its durable KEY: the ref expires, and a pass-scoped key is not derivable from the
+      // revision number, so without this a historical read has only a dead URL.
+      ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });
@@ -409,7 +512,12 @@ export class ScorecardScoreService {
       record.id,
       transition.patch,
       stamped.map((f) => f.record),
-      { expectScoringCount: fresh.scoring?.length ?? 0 },
+      {
+        expectScoringCount: fresh.scoring?.length ?? 0,
+        // …and the settle belongs to the pass that OWNS the marker. Without this a superseded pass whose
+        // ledger length happened to still match could clear a live pass's marker and append its revision.
+        ...(pass?.epoch !== undefined ? { expectScoringPassEpoch: pass.epoch } : {}),
+      },
     );
     if (settled === undefined)
       throw new ConflictError(
@@ -466,9 +574,15 @@ export class ScorecardScoreService {
     }
   }
 
-  private async writeBackScores(record: ScorecardRecord, results: CaseResult[]): Promise<void> {
+  // Every child write is FENCED by the owning pass (arch-review 8 P0): the store commits only while that
+  // pass still owns the parent's marker, evaluated in the same statement as the write. Checking ownership
+  // here instead would leave the window it exists to close — the winner settles between the check and the
+  // write, and the late write then lands on a SETTLED plane where the marker (the read guard) is already
+  // gone, so the plane silently stops matching the revision digest that certifies it.
+  private async writeBackScores(record: ScorecardRecord, results: CaseResult[], pass?: ScoringPass): Promise<void> {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
+    const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
     const children = await store.list(record.tenant, { scorecardId: record.id });
     // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
     // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW
@@ -479,10 +593,20 @@ export class ScorecardScoreService {
     for (const r of results) {
       const child = byKey.get(childKey(r.caseId, r.trial));
       if (!child?.result) continue;
-      await store.update(child.id, {
-        result: { ...child.result, scores: r.scores },
-        updatedAt: this.now(),
-      });
+      const written = await store.update(
+        child.id,
+        { result: { ...child.result, scores: r.scores }, updatedAt: this.now() },
+        undefined,
+        fence,
+      );
+      // A fenced miss means this pass was superseded MID-WRITE. Stop immediately: continuing would scatter
+      // half of a dead pass's judgments across a plane another pass is certifying.
+      if (written === undefined && fence !== undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: record.id, passId: fence.passId },
+          "this scoring pass was superseded while writing back scores — its remaining writes are refused.",
+        );
     }
   }
 }
