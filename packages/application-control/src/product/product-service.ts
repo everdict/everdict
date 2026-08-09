@@ -1,6 +1,8 @@
 import {
   BadRequestError,
+  ConflictError,
   ForbiddenError,
+  type GateScoringPin,
   ISSUE_STATUSES,
   ISSUE_STATUS_CATEGORY,
   type IssueRecord,
@@ -31,7 +33,9 @@ import {
   type ReleaseTransition,
   type SeriesGateReading,
   type SeriesScorecardPoint,
+  currentScoringPin,
   decisionPassRate,
+  productPolicyDigest,
   releaseReadiness,
   watchedSeries,
 } from "@everdict/domain";
@@ -345,6 +349,7 @@ export class ProductService {
   ): Promise<ReleaseRecord> {
     const record = await this.getRelease(tenant, id);
     const readiness = await this.readiness(tenant, record);
+    const product = await this.get(tenant, record.productId);
     const transition = Release.from(record).setStatus(
       {
         to: input.status,
@@ -352,7 +357,32 @@ export class ProductService {
         regressedSeries: readiness.regressedSeries,
         // The ship-time evidence snapshot — the history entry records WHAT the gate saw (per-series
         // verdicts); the live readiness keeps moving after the decision.
-        seriesVerdicts: readiness.series.map((s) => ({ key: s.key, verdict: s.verdict })),
+        // The evidence this ship stood on — both sides with their scoring pins, so the decision is
+        // reproducible and the NEXT release can anchor on this exact candidate instead of re-searching by
+        // time (a post-ship re-score would otherwise change what "last time's baseline" means).
+        seriesDecisions: readiness.series.map((s) => ({
+          key: s.key,
+          verdict: s.verdict,
+          required: product.series.find((entry: ProductSeries) => entry.key === s.key)?.requiredForRelease !== false,
+          ...(s.reasons?.length ? { reasons: s.reasons } : {}),
+          ...(s.baseline
+            ? {
+                baseline: {
+                  scorecardId: s.baseline.scorecardId,
+                  ...(s.baseline.scoring ? { scoring: s.baseline.scoring } : {}),
+                },
+              }
+            : {}),
+          ...(s.latest
+            ? {
+                candidate: {
+                  scorecardId: s.latest.scorecardId,
+                  ...(s.latest.scoring ? { scoring: s.latest.scoring } : {}),
+                },
+              }
+            : {}),
+        })),
+        productPolicyDigest: productPolicyDigest(product),
         ...(input.force !== undefined ? { force: input.force } : {}),
       },
       actor.subject,
@@ -387,7 +417,8 @@ export class ProductService {
               statuses: OPEN_ISSUE_STATUSES,
             })
           ).length;
-    const anchor = await this.baselineAnchor(tenant, release);
+    const previous = await this.previousShip(tenant, release);
+    const anchor = previous?.releasedAt;
     const latestBySeries = new Map<string, SeriesScorecardPoint>();
     const baselineBySeries = new Map<string, SeriesScorecardPoint>();
     const gateBySeries = new Map<string, SeriesGateReading>();
@@ -405,9 +436,20 @@ export class ProductService {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const latest = rows[0];
         if (latest !== undefined) latestBySeries.set(series.key, seriesPoint(latest));
-        if (anchor !== undefined) {
-          const baseline = rows.find((row) => row.createdAt <= anchor);
-          if (baseline !== undefined) baselineBySeries.set(series.key, seriesPoint(baseline));
+        // The PREVIOUS SHIP'S OWN CANDIDATE is the baseline — the exact evidence that ship stood on, pin
+        // included. Only when it recorded none (a release from before decisions were recorded) does the
+        // time search stand in, and then the comparison is honestly anchored on a re-derived guess.
+        const pinned = this.baselineFromDecision(previous, series.key);
+        const fromDecision = pinned ? rows.find((row) => row.id === pinned.scorecardId) : undefined;
+        if (pinned !== undefined || anchor !== undefined) {
+          const baseline =
+            fromDecision ?? (anchor !== undefined ? rows.find((row) => row.createdAt <= anchor) : undefined);
+          if (baseline !== undefined) {
+            const point = seriesPoint(baseline);
+            // The pin the SHIP recorded wins over the record's current pin: if the scorecard was re-scored
+            // since, "what we compared against last time" is the older judgment, and saying so is the point.
+            baselineBySeries.set(series.key, pinned?.scoring ? { ...point, scoring: pinned.scoring } : point);
+          }
           // The gate reading — only where a comparable pair exists; the domain owns every other state
           // (not_evaluated / no_baseline / seam-absent not_comparable).
           if (latest !== undefined && baseline !== undefined && this.deps.seriesGate !== undefined) {
@@ -436,13 +478,38 @@ export class ProductService {
   // that is the ship before its own; for a planned one, the newest ship so far. `<=` because the release
   // itself is already excluded by id — a previous ship landing on this exact instant must still anchor.
   private async baselineAnchor(tenant: string, release: ReleaseRecord): Promise<string | undefined> {
+    const previous = await this.previousShip(tenant, release);
+    return previous?.releasedAt;
+  }
+
+  // The ship this release compares against — the whole record, because its DECISION is the anchor, not just
+  // its timestamp (see baselineFromDecision).
+  private async previousShip(tenant: string, release: ReleaseRecord): Promise<ReleaseRecord | undefined> {
     const released = await this.deps.releases.list(tenant, { productId: release.productId, status: "released" });
     const ceiling = release.releasedAt ?? this.now();
     return released
       .filter((row) => row.id !== release.id && row.releasedAt !== undefined && row.releasedAt <= ceiling)
-      .map((row) => row.releasedAt as string)
-      .sort()
+      .sort((a, b) => (a.releasedAt ?? "").localeCompare(b.releasedAt ?? ""))
       .at(-1);
+  }
+
+  // The baseline the LAST SHIP actually stood on for this series (arch-review 8 P1). Resolving it by time
+  // re-searches "the newest scorecard created before that instant" and then reads it AS IT IS NOW — so a
+  // post-ship re-score silently changed what "the thing we shipped against" means, and a comparison could
+  // be drawn against a judgment no release ever saw. The previous decision recorded its candidate with a
+  // scoring pin; that reference is the anchor. Absent (a ship from before decisions were recorded) → the
+  // caller falls back to the time search, honestly degraded rather than pretending to a pin it never had.
+  private baselineFromDecision(
+    previous: ReleaseRecord | undefined,
+    seriesKey: string,
+  ): { scorecardId: string; scoring?: GateScoringPin } | undefined {
+    const shipped = previous?.history?.filter((h) => h.event === "released").at(-1);
+    const decisions = (
+      shipped?.detail as
+        | { seriesDecisions?: Array<{ key: string; candidate?: { scorecardId: string; scoring?: GateScoringPin } }> }
+        | undefined
+    )?.seriesDecisions;
+    return decisions?.find((d) => d.key === seriesKey)?.candidate;
   }
 
   private async assertSeriesRefs(tenant: string, series: readonly ProductSeries[]): Promise<void> {
@@ -486,12 +553,26 @@ export class ProductService {
 
   private async applyReleaseTransition(current: ReleaseRecord, transition: ReleaseTransition): Promise<ReleaseRecord> {
     const stamped = stampFacts(current.tenant, transition.facts, { newId: this.newId, now: this.now });
+    // The domain judged this transition legal FROM the status in `current`, so the write commits only from
+    // that status (arch-review 8 P1). Without it two replicas could both read `planned`, legally decide
+    // `released` and `cancelled`, and let the last write win — leaving a `released` fact in the outbox over
+    // a cancelled row. A guard miss is a concurrent decision, not a missing record, and says so.
     const updated = await this.deps.releases.update(
       current.tenant,
       current.id,
       transition.patch,
       stamped.map((s) => s.record),
+      { expectStatus: current.status },
     );
+    if (updated === undefined) {
+      const live = await this.deps.releases.get(current.tenant, current.id);
+      if (live !== undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { release: current.id, expected: current.status, actual: live.status },
+          `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`,
+        );
+    }
     if (!updated) throw new NotFoundError("NOT_FOUND", { id: current.id }, `release '${current.id}' not found.`);
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     return updated;
@@ -503,10 +584,14 @@ function seriesPoint(record: ScorecardRecord): SeriesScorecardPoint {
   // The stamped-policy verdict aggregate when the record carries one (arch-review 7 §4) — the release
   // decision and the case dialog must never rank a metric differently; headline is the legacy fallback.
   const rate = decisionPassRate(record);
+  // WHICH judgment this point is — the same pin a gate decision records. Without it a release decision
+  // names a scorecard id, and an id stops identifying a judgment the moment a re-score lands.
+  const scoring = currentScoringPin(record.scoring);
   return {
     scorecardId: record.id,
     ...(rate !== null ? { passRate: rate } : {}),
     createdAt: record.createdAt,
     ...(record.origin?.serviceVersion !== undefined ? { serviceVersion: record.origin.serviceVersion } : {}),
+    ...(scoring ? { scoring } : {}),
   };
 }

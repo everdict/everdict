@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GateScoringPinSchema } from "./gate.js";
 import { TrackerHistoryEntrySchema } from "./tracker.js";
 
 // The PRODUCT TIMELINE — Product ⊃ Release, over a ledger of imported service versions
@@ -78,6 +79,9 @@ export const ProductSeriesSchema = z.object({
   // is an EXPLICIT product choice recorded here, never something inferred from the absence of evidence
   // ("it never ran, so it cannot have regressed" is exactly the false green this field exists to kill).
   requiredForRelease: z.boolean().optional(),
+  // Ship this series' FIRST evaluation without a comparison. Explicit, per series, and recorded in the
+  // release decision — a bootstrap is a governance call, not an inference from missing history.
+  allowNoBaseline: z.boolean().optional(),
 });
 export type ProductSeries = z.infer<typeof ProductSeriesSchema>;
 
@@ -179,6 +183,11 @@ export type ProductServiceVersionRecord = z.infer<typeof ProductServiceVersionRe
 export const SeriesVerdictSchema = z.enum([
   "pass",
   "no_baseline",
+  // A required series' FIRST ship: evidence exists but nothing anchors a regression question. Blocking by
+  // default (arch-review 8 P1) — "no comparison is possible" and "shipping is fine" are different sentences,
+  // and the old conflation let a batch with zero verdicts ship green. Cleared by the series policy's
+  // `allowNoBaseline`, which is what makes the first ship a recorded decision instead of a silent default.
+  "bootstrap_required",
   "block",
   "blocked_missing",
   "not_comparable",
@@ -197,6 +206,9 @@ export const ReleaseSeriesStateSchema = z.object({
       passRate: z.number().optional(),
       createdAt: z.string(),
       serviceVersion: z.string().optional(),
+      // WHICH judgment of that scorecard (arch-review 8 P1) — an id is not an evidence reference once a
+      // re-score can change what the id means.
+      scoring: GateScoringPinSchema.optional(),
     })
     .optional(),
   baseline: z
@@ -204,9 +216,14 @@ export const ReleaseSeriesStateSchema = z.object({
       scorecardId: z.string(),
       passRate: z.number().optional(),
       createdAt: z.string(),
+      scoring: GateScoringPinSchema.optional(),
     })
     .optional(),
   verdict: SeriesVerdictSchema,
+  // Whether this series GATED the decision. Recorded because product policy is editable: a release decided
+  // while `requiredForRelease` was false reads identically afterwards to one decided while it was true,
+  // and "was this series required when we shipped?" is not answerable from a live re-read.
+  required: z.boolean().optional(),
   // The gate's refusal details when the verdict is not a pass — verbatim GateReason.detail strings, so the
   // release card can say WHY without re-deriving the comparison.
   reasons: z.array(z.string()).optional(),

@@ -472,6 +472,17 @@ export class ScorecardAnalyticsService {
         { id, status: record.status },
         `scorecard '${id}' is not complete yet (status=${record.status}).`,
       );
+    // …and it must have SUCCEEDED (arch-review 8 P1). The method's name always claimed this; the check did
+    // not exist. A failed batch persists partial ScorecardOutcomeExtras, and a cancelled/superseded one keeps
+    // a partial scorecard through settleAborted — so a record with enough payload to look complete could
+    // enter a comparison and be weighed as evidence, while its status says the run never finished. Product
+    // release filters by status at list time, which hid this from that path; the gate's own contract did not.
+    if (record.status !== "succeeded")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { id, status: record.status },
+        `scorecard '${id}' did not succeed (status=${record.status}) — a ${record.status} batch's partial results are not comparable evidence.`,
+      );
     // The revision boundary (arch-review 7 P0): while a scoring pass is live the persisted plane belongs to
     // NO completed revision, and a failed/abandoned pass left it BROKEN (judgments stripped, aggregate still
     // advertising them) — a comparison over either is a number nobody has the right to derive. Refuse

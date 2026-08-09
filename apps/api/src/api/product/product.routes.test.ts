@@ -227,11 +227,14 @@ describe("product routes", () => {
     await scorecardStore.create(
       seriesBatch("sc-baseline", 0.9, "2026-07-01T00:00:00.000Z", { productId: product.id, seriesKey: "quality" }),
     );
+    // The FIRST ship of a required series has nothing to compare against, which now blocks until someone
+    // approves the bootstrap (arch-review 8 P1) — forcing it is that approval, and the decision still records
+    // the candidate this ship stood on, which is what the next release anchors its baseline to.
     await app.inject({
       method: "POST",
       url: `/releases/${first.id}/status`,
       headers: H,
-      payload: { status: "released" },
+      payload: { status: "released", force: true },
     });
     // And a later batch that fell to 0.6
     await scorecardStore.create(
@@ -298,10 +301,13 @@ describe("product routes", () => {
       payload: { status: "released", force: true },
     });
     expect(forced.statusCode).toBe(200);
+    // The ship-time DECISION, not a verdict word: which series, whether it gated, and (when a comparison
+    // existed) the evidence each side stood on — the reference the next release anchors its baseline to.
     expect(forced.json().history.at(-1)?.detail).toMatchObject({
       forced: true,
-      seriesVerdicts: [{ key: "quality", verdict: "not_evaluated" }],
+      seriesDecisions: [{ key: "quality", verdict: "not_evaluated", required: true }],
     });
+    expect(forced.json().history.at(-1)?.detail?.productPolicyDigest).toEqual(expect.any(String));
   });
 
   it("syncs the tracked services and lands the imported versions on the detail", async () => {

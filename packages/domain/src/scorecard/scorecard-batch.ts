@@ -10,7 +10,7 @@ import type {
   VerdictPolicyRef,
 } from "@everdict/contracts";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
-import { headlinePassRate } from "./headline.js";
+import { decisionPassRate, headlinePassRate } from "./headline.js";
 import { summarizeTrials } from "./trials.js";
 import { resolvePolicyResolution, verdictPolicyRef } from "./verdict-policy.js";
 
@@ -119,10 +119,20 @@ function batchTerminalFact(
   const { dataset, harness } = batchLabels(record);
   // passRate from the summary this terminal write persists (extras wins; a bare failure keeps the record's) —
   // the pointer an agent trigger can filter on (`passRate < 1`) without re-reading the full results.
-  // Authority-ranked (headlinePassRate), NOT first-metric-with-a-passRate: summary order is not authority,
-  // and a trigger acting on `custom_check`'s rate while `tests_pass` disagrees acts on the wrong number.
+  // DECISION-shaped (arch-review 8 P1): the stamped VerdictPolicy's aggregate when the record carries one,
+  // and only then the authority-ranked headline. A workspace with a composed policy had UI and release
+  // reading the verdict aggregate while the EVENT carried a metric-ranked rate the policy ranks differently
+  // — and an owner-agent takes the event as fact. "scorecard.completed passRate=1" while the stamped verdict
+  // says the batch failed is the exact shape of a wrong autonomous decision. One number, one authority.
   const summary = extras.summary ?? record.summary;
-  const passRate = headlinePassRate({ ...(summary ? { summary } : {}) }) ?? undefined;
+  const verdictSummary = extras.verdictSummary ?? record.verdictSummary;
+  const trialSummary = record.trialSummary;
+  const passRate =
+    decisionPassRate({
+      ...(verdictSummary ? { verdictSummary } : {}),
+      ...(trialSummary ? { trialSummary } : {}),
+      ...(summary ? { summary } : {}),
+    }) ?? undefined;
   return [
     {
       kind: status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
@@ -452,8 +462,17 @@ export class ScorecardBatch {
     const { dataset, harness } = batchLabels(this.record);
     const promoted = this.record.kind === "experiment";
     const summary = extras.summary ?? this.record.summary;
-    // Authority-ranked, not first-in-summary — same rule as batchTerminalFact (summary order is not authority).
-    const passRate = headlinePassRate({ ...(summary ? { summary } : {}) }) ?? undefined;
+    // Decision-shaped, same rule as batchTerminalFact: a re-score REWRITES the verdict aggregate, so the fact
+    // announcing it must carry the new aggregate's rate — not a metric ranking the stamped policy may order
+    // differently. This is the number an owner-agent reacts to.
+    const verdictSummary = extras.verdictSummary ?? this.record.verdictSummary;
+    const trialSummary = this.record.trialSummary;
+    const passRate =
+      decisionPassRate({
+        ...(verdictSummary ? { verdictSummary } : {}),
+        ...(trialSummary ? { trialSummary } : {}),
+        ...(summary ? { summary } : {}),
+      }) ?? undefined;
     // The scoring revision this pass appended (when the service supplied the ledger) — the fact names WHICH
     // judgment era begins here, so a consumer can correlate it with gate pins without re-reading the record.
     const revision = extras.scoring?.at(-1)?.revision;

@@ -249,6 +249,7 @@ export {
   type ReleaseTransition,
 } from "./product/release.js";
 export {
+  productPolicyDigest,
   releaseReadiness,
   type SeriesGateReading,
   type SeriesScorecardPoint,

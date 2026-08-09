@@ -112,7 +112,10 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.ready).toBe(true);
   });
 
-  it("the first ship has no baseline — evidence exists, nothing to regress from, and it does not block", () => {
+  // arch-review 8 P1: "no comparison is possible" is not "shipping is fine". The first ship of a REQUIRED
+  // series blocks until someone approves it, because the alternative let a batch with nothing verdicted
+  // through — the same absence-read-as-green shape the verdict work existed to close.
+  it("the first ship of a required series BLOCKS until the bootstrap is approved", () => {
     const readiness = releaseReadiness(
       release(["quality"]),
       product(),
@@ -121,8 +124,36 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
       new Map(),
       0,
     );
+    expect(readiness.series[0]).toMatchObject({ verdict: "bootstrap_required", regressed: true });
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("ships the first evaluation once the series policy allows it — a recorded decision, not a default", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", point("sc-1", 0.9)]]),
+      new Map(),
+      new Map(),
+      0,
+    );
     expect(readiness.series[0]).toMatchObject({ verdict: "no_baseline", regressed: false });
     expect(readiness.ready).toBe(true);
+  });
+
+  it("still refuses an approved bootstrap whose only evidence carries NO verdict", () => {
+    // A pipeline-level `succeeded` batch where every case infra-failed: a record exists, a pass rate does
+    // not. Approving a bootstrap approves shipping on absolute evidence — not on the absence of any.
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", { scorecardId: "sc-1", createdAt: "2026-01-01T00:00:00.000Z" }]]),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "bootstrap_required", regressed: true });
+    expect(readiness.ready).toBe(false);
   });
 
   it("a comparable pair with NO gate reading refuses — the seam being unconfigured is never a pass", () => {

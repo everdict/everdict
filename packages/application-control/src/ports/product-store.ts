@@ -34,11 +34,18 @@ export interface ReleaseStore {
   create(record: ReleaseRecord, events?: OutboxEvent[]): Promise<void>;
   get(tenant: string, id: string): Promise<ReleaseRecord | undefined>;
   list(tenant: string, filter?: ReleaseListFilter): Promise<ReleaseRecord[]>;
+  // `guard`: commit only from the status the caller read (arch-review 8 P1). A release is a terminal trust
+  // claim, and its aggregate law ("released is history — no reopening") was enforced in the domain over a
+  // record that had already been read: two replicas could both read `planned`, one legally decide `released`
+  // and the other `cancelled`, and the last write to land would win. The outbox then carried a `released`
+  // fact while the row said `cancelled` — a contradiction between what the platform announced and what it
+  // holds. A guard miss returns undefined, exactly like a missing id.
   update(
     tenant: string,
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
+    guard?: { expectStatus: ReleaseStatus },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
 }

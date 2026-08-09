@@ -1,5 +1,5 @@
 import type { OutboxEvent, ReleaseListFilter, ReleaseStore } from "@everdict/application-control";
-import { type ReleaseRecord, ReleaseRecordSchema } from "@everdict/contracts";
+import { type ReleaseRecord, ReleaseRecordSchema, type ReleaseStatus } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row.js";
@@ -37,9 +37,14 @@ export class InMemoryReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
+    guard?: { expectStatus: ReleaseStatus },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
     if (!current || current.tenant !== tenant) return undefined;
+    // Terminal-race guard: the aggregate decided from the status it READ, so the write commits only from
+    // that status. Otherwise two legal decisions (released / cancelled) both pass the domain and the last
+    // writer wins — with the loser's fact already in the outbox.
+    if (guard !== undefined && current.status !== guard.expectStatus) return undefined;
     const next: ReleaseRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
     this.byId.set(id, next);
     if (events) this.events.push(...events);
@@ -161,6 +166,7 @@ export class PgReleaseStore implements ReleaseStore {
     id: string,
     patch: Partial<ReleaseRecord>,
     events?: OutboxEvent[],
+    guard?: { expectStatus: ReleaseStatus },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
@@ -179,10 +185,17 @@ export class PgReleaseStore implements ReleaseStore {
       JSON.stringify(next.history),
       next.updatedAt,
     ];
+    // …and the status the caller decided FROM, as a WHERE condition — the read above is not the guarantee,
+    // this is. A miss matches zero rows and the facts (WHERE EXISTS on the updating CTE) never land either.
+    let guardSql = "";
+    if (guard !== undefined) {
+      params.push(guard.expectStatus);
+      guardSql = ` AND status=$${params.length}`;
+    }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);
       const { rows } = await this.client.query<ReleaseRow>(
-        `WITH upd AS (UPDATE everdict_product_releases SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *),
+        `WITH upd AS (UPDATE everdict_product_releases SET ${sets} WHERE tenant=$1 AND id=$2${guardSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
                 WHERE EXISTS (SELECT 1 FROM upd))
@@ -192,7 +205,7 @@ export class PgReleaseStore implements ReleaseStore {
       return rows[0] ? rowToRecord(rows[0]) : undefined;
     }
     const { rows } = await this.client.query<ReleaseRow>(
-      `UPDATE everdict_product_releases SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *`,
+      `UPDATE everdict_product_releases SET ${sets} WHERE tenant=$1 AND id=$2${guardSql} RETURNING *`,
       params,
     );
     return rows[0] ? rowToRecord(rows[0]) : undefined;
