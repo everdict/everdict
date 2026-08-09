@@ -12,11 +12,20 @@ import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 // HISTORICAL JUDGMENT IS RE-DERIVABLE, NOT MERELY DETECTABLE. The scoring ledger made a rewritten plane
 // detectable (digests disagree), but every pass overwrote the ONE analysis artifact — so revision 1's
 // analysisRef pointed at a file holding revision 3's content: the ledger said "this judgment existed" while
-// serving a different judgment as its evidence. Each pass now freezes its bundle under an immutable
-// per-revision key. Certified through the production pipeline (submit → settle → score → score again):
-// every revision's frozen artifact is DISTINCT, an earlier revision's bytes survive later passes unchanged,
-// the read path serves exactly the requested revision, and a revision that never existed reads 404 — the
-// current bundle is never dressed up as history.
+// serving a different judgment as its evidence. Each pass now freezes its bundle under an immutable key of
+// its own. Certified through the production pipeline (submit → settle → score → score again): every
+// revision's frozen artifact is DISTINCT, an earlier revision's bytes survive later passes unchanged, the
+// read path serves exactly the requested revision, and a revision that never existed reads 404 — the current
+// bundle is never dressed up as history.
+//
+// The certificate asserts the LEDGER'S OWN key, never a key shape it derives itself. This is the correction
+// arch-review 10 forced: the artifact key moved from revision-scoped to PASS-scoped (two passes legitimately
+// target the same revision number and freeze before the CAS decides which settles, and an object store has
+// no compare-and-swap — a revision-keyed write let the loser's bytes land under the winner's revision). The
+// invariant never changed; only the addressing did. A certificate that re-derives an address is certifying
+// the scheme rather than the guarantee, and it went red on a change that strengthened the very property it
+// exists to protect. `ScoringRevision.analysisKey` is where the ledger records where its own bundle lives,
+// so that is what a reader — and this certificate — must follow.
 const describeTrust = TRUST_SUITE_ENABLED ? describe : describe.skip;
 
 describeTrust("TRUST-41 — per-revision analysis artifacts are distinct, immutable, and honestly addressed", () => {
@@ -82,11 +91,19 @@ describeTrust("TRUST-41 — per-revision analysis artifacts are distinct, immuta
     await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
     const final = await waitRevisions(3);
 
-    // Every revision entry points at its OWN frozen key, and all three artifacts exist side by side.
+    // Every revision entry points at its OWN frozen key, and all three artifacts exist side by side. Read
+    // from the LEDGER (`analysisKey`) rather than re-derived: the ledger is the only thing that knows where a
+    // revision's bundle lives, which is exactly why it records it.
     expect(final?.scoring?.map((rev) => rev.revision)).toEqual([1, 2, 3]);
-    for (const rev of [1, 2, 3]) {
-      expect(final?.scoring?.[rev - 1]?.analysisRef).toContain(analysisRevisionKey(record.id, rev));
-      expect(artifacts.objects.has(analysisRevisionKey(record.id, rev))).toBe(true);
+    const keys = (final?.scoring ?? []).map((rev) => rev.analysisKey);
+    expect(keys.filter((k) => typeof k === "string")).toHaveLength(3); // no revision left unaddressed
+    expect(new Set(keys).size).toBe(3); // …and no two revisions share an address
+    for (const [i, key] of keys.entries()) {
+      expect(key).toBeDefined();
+      expect(artifacts.objects.has(key as string)).toBe(true);
+      // The ref the entry serves resolves to that same object — a ref pointing somewhere else is precisely
+      // the "ledger says X, evidence is Y" failure this certificate exists to refuse.
+      expect(final?.scoring?.[i]?.analysisRef).toContain(key as string);
     }
 
     // The frozen planes are DISTINCT and each one is the judgment of ITS pass — read back through the

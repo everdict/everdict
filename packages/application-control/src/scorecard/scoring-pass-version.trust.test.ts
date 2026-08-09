@@ -19,6 +19,9 @@ import { ScorecardScoreService } from "./scorecard-score-service.js";
 // certified here over the exact prepare → plan → judge sequence the workflow drives.
 const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : describe.skip;
 
+// The pass these activities act as — ownership is presented on every one of them (see `hydrated`).
+const PASS = "pass-36";
+
 const v1Verdict: Score = { graderId: "quality", metric: "judge:quality", value: 0, pass: false, detail: "v1 said no" };
 
 const result = (scores: Score[]): CaseResult => ({
@@ -119,6 +122,10 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
         return [{ graderId: "quality", metric: "judge:quality", value: 1, pass: true, detail: "v2 says yes" }];
       },
     };
+    // The record carries the LIVE PASS its activities run under. Every scoring activity now presents the
+    // passId its claim minted and is refused without one (arch-review 9 P0) — an anonymous writer cannot be
+    // fenced, so it may not act. A fixture with no marker was certifying a sequence production no longer
+    // permits; the invariant under test is unchanged, the caller's obligation is not.
     const hydrated = (): ScorecardRecord => ({
       id: "sc-1",
       tenant: "acme",
@@ -127,6 +134,17 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       status: "succeeded",
       scorecard: { suiteId: "d", harness: "h@1", results: child.result ? [child.result] : [] },
       runIds: ["child-c1"],
+      scoringPass: {
+        passId: PASS,
+        epoch: 1,
+        leaseUntil: "2026-08-09T00:05:00.000Z",
+        heartbeatAt: "2026-08-09T00:00:00.000Z",
+        targetRevision: 1,
+        baseRevision: 0,
+        judges: [],
+        startedAt: "2026-08-09T00:00:00.000Z",
+        status: "running",
+      },
       createdAt: "2026-08-08T00:00:00.000Z",
       updatedAt: "2026-08-08T00:00:00.000Z",
     });
@@ -201,16 +219,16 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
     const v2 = [{ id: "quality", version: "2.0.0" }];
 
     // The named trap, pinned first: WITHOUT the strip, the id-only predicate reads v1's verdict as done.
-    expect((await svc.planScore("sc-1", v2)).keys).toEqual([]);
+    expect((await svc.planScore("sc-1", v2, PASS)).keys).toEqual([]);
 
     // The production sequence: prepare (strip, persisted) → plan (full worklist) → judge (v2's verdict lands).
-    expect(await svc.prepareScore("sc-1", v2)).toEqual({ stripped: 1 });
-    expect((await svc.planScore("sc-1", v2)).keys).toEqual(["c1#0"]);
-    expect(await svc.scoreCase("sc-1", "c1#0", v2)).toEqual({ scored: true });
+    expect(await svc.prepareScore("sc-1", v2, PASS)).toEqual({ stripped: 1 });
+    expect((await svc.planScore("sc-1", v2, PASS)).keys).toEqual(["c1#0"]);
+    expect(await svc.scoreCase("sc-1", "c1#0", v2, undefined, PASS)).toEqual({ scored: true });
     const verdicts = (child.result?.scores ?? []).filter((s) => s.metric === "judge:quality");
     expect(verdicts).toHaveLength(1); // replaced, never accreted
     expect(verdicts[0]).toMatchObject({ value: 1, pass: true, detail: "v2 says yes" }); // the NEW version's judgment
     // And the pass is now idempotently DONE — a resumed workflow re-plans to an empty remainder.
-    expect((await svc.planScore("sc-1", v2)).keys).toEqual([]);
+    expect((await svc.planScore("sc-1", v2, PASS)).keys).toEqual([]);
   });
 });
