@@ -96,6 +96,9 @@ export const releaseStatusSchema = z.enum(RELEASE_STATUSES)
 export const releaseComponentSchema = z.object({
   service: z.string(),
   version: z.string().optional(),
+  // 피커가 고른 원장 행 그 자체 — 같은 이름의 서비스가 저장소를 옮기면 스트림이 갈라지고, 두 스트림이
+  // 같은 v1.0.0 을 발행할 수 있다. 버전 문자열만 보내면 출시 시점에 어느 행이었는지 아무도 답할 수 없다.
+  versionRecordId: z.string().optional(),
 })
 
 export const releaseSchema = z.object({

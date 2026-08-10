@@ -36,8 +36,20 @@ export function ReleaseComponentsEditor({
 }) {
   const t = useTranslations('releasePage')
   const refresh = useRefresh()
-  const [rows, setRows] = useState<Record<string, string | undefined>>(() =>
-    Object.fromEntries((components ?? []).map((row) => [row.service, row.version]))
+  // 값이 아니라 고른 행을 들고 있는다 — 저장할 때 versionRecordId 를 같이 보내야 "어느 v1.0.0 이었나"가
+  // 나중에 답이 되기 때문이다(같은 서비스 이름이 두 스트림을 가리킬 수 있다).
+  const [rows, setRows] = useState<
+    Record<string, { version?: string; versionRecordId?: string } | undefined>
+  >(() =>
+    Object.fromEntries(
+      (components ?? []).map((row) => [
+        row.service,
+        {
+          ...(row.version !== undefined ? { version: row.version } : {}),
+          ...(row.versionRecordId !== undefined ? { versionRecordId: row.versionRecordId } : {}),
+        },
+      ])
+    )
   )
   const [pending, setPending] = useState(false)
 
@@ -55,21 +67,27 @@ export function ReleaseComponentsEditor({
 
   const included = (service: string): boolean => Object.hasOwn(rows, service)
 
+  // 고른 행 → 저장할 형태. 버전 문자열은 사람이 읽는 값이고, 행 id 가 정체성이다.
+  const pick = (
+    row?: ProductVersion
+  ): { version?: string; versionRecordId?: string } | undefined =>
+    row === undefined ? undefined : { version: row.version, versionRecordId: row.id }
+
   function toggle(service: string) {
     setRows((current) => {
       if (Object.hasOwn(current, service)) {
         const { [service]: _removed, ...rest } = current
         return rest
       }
-      // 포함시키는 순간 원장 최신값으로 채운다 — 없으면 "미정"으로 남는다(아직 안 나온 서비스).
-      return { ...current, [service]: byService.get(service)?.[0]?.version }
+      // 포함시키는 순간 원장 최신 행으로 채운다 — 없으면 "미정"으로 남는다(아직 안 나온 서비스).
+      return { ...current, [service]: pick(byService.get(service)?.[0]) }
     })
   }
 
   function fillLatest() {
     setRows(
       Object.fromEntries(
-        services.map((service) => [service.name, byService.get(service.name)?.[0]?.version])
+        services.map((service) => [service.name, pick(byService.get(service.name)?.[0])])
       )
     )
   }
@@ -82,7 +100,12 @@ export function ReleaseComponentsEditor({
           .filter((service) => included(service.name))
           .map((service) => ({
             service: service.name,
-            ...(rows[service.name] !== undefined ? { version: rows[service.name] as string } : {}),
+            ...(rows[service.name]?.version !== undefined
+              ? { version: rows[service.name]?.version }
+              : {}),
+            ...(rows[service.name]?.versionRecordId !== undefined
+              ? { versionRecordId: rows[service.name]?.versionRecordId }
+              : {}),
           }))
         const r = await updateReleaseAction(releaseId, { components })
         if (!r.ok) {
@@ -136,17 +159,20 @@ export function ReleaseComponentsEditor({
               <Combobox
                 options={[
                   { value: '', label: t('componentUndecided') },
+                  // 값은 행 id — 같은 버전 문자열이 두 스트림에 있을 수 있으므로, 고른 것이 무엇인지
+                  // 애초에 유일하게 식별되는 값으로 다룬다.
                   ...options.map((version) => ({
-                    value: version.version,
+                    value: version.id,
                     label: version.version,
                     hint: version.publishedAt.slice(0, 10),
                   })),
                 ]}
-                value={rows[service.name] ?? ''}
+                value={rows[service.name]?.versionRecordId ?? ''}
                 onChange={(value) =>
                   setRows((current) => ({
                     ...current,
-                    [service.name]: value === '' ? undefined : value,
+                    [service.name]:
+                      value === '' ? undefined : pick(options.find((row) => row.id === value)),
                   }))
                 }
                 disabled={!canEdit || !on}
