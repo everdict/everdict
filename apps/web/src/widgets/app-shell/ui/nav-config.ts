@@ -58,7 +58,7 @@ export interface NavSection {
 // the way you navigate to work, which is what made the team axis invisible before.
 // The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
 // order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
-// The second group is the AGENT — what it is, what it can use, and what it knows. Tools · skills · knowledge were
+// The second group is the AGENT — what it can use and what it knows. Tools · skills · knowledge were
 // Settings pages, which made them read as one-time configuration; they are none of that, they are the working
 // material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
 // product still has exactly one Skills page and one Tools page.
@@ -188,12 +188,6 @@ export const NAV_SECTIONS: NavSection[] = [
     headingKey: 'agent',
     items: [
       {
-        href: '/agents',
-        labelKey: 'agents',
-        icon: Bot,
-        keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
-      },
-      {
         href: '/tools',
         labelKey: 'tools',
         icon: Wrench,
@@ -263,10 +257,23 @@ const WORKSPACE_ISSUES_ITEM: NavItem = {
   keywords: 'issue bug regression triage tracker all teams 이슈 회귀 트래커 전체',
 }
 
+// The agent fleet has no sidebar row for now: a permanent row is a promise that there is a day's work behind it,
+// and authoring an agent is still a thin surface. It keeps its palette entry and its route — whoever already
+// works with agents loses nothing — and the row comes back to the `agent` group when the authoring flow can
+// carry it. Its working material (tools · skills · knowledge) stays in the sidebar either way, because those are
+// what the agent uses no matter where it was created.
+const AGENTS_ITEM: NavItem = {
+  href: '/agents',
+  labelKey: 'agents',
+  icon: Bot,
+  keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
+}
+
 export const ALL_NAV_ITEMS: NavItem[] = [
   // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
   WORKSPACE_ISSUES_ITEM,
+  AGENTS_ITEM,
 ]
 
 // Every row rendered in the app nav, flattened — the sidebar's `More` children included. The active-state

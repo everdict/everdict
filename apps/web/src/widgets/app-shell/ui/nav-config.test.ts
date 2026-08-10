@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { TEAM_SECTIONS, teamHref, teamSectionHref } from '@/entities/team'
 
-import { ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
+import { ALL_NAV_ITEMS, ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
 
 // 사이드바가 지금 어디인지 말하는 방법은 활성 행 하나다. 두 행이 동시에 켜지면 그 말은 거짓이 된다 —
 // 이 파일은 그 불변식을 나브 설정 전체에 대해 진술한다(항목이 늘어나도 같이 검사된다).
@@ -63,6 +63,13 @@ describe('sidebar active state — at most one row owns a path', () => {
     }
     // 상세 화면도 그 섹션의 것이다. 주소는 빌더로 만든다 — 팀 세그먼트 철자가 바뀌어도 이 진술은 살아남는다.
     expect(activeRows(`${teamSectionHref('acme', 'ENG', 'issues')}/ENG-12`)).toEqual([])
+  })
+
+  // 에이전트 저작 표면이 아직 얇아서 사이드바 행을 내리기로 했다 — 그렇다고 주소가 사라진 것은 아니다.
+  // 행은 없고 팔레트에는 남는다는 이 두 진술이 같이 서 있어야, 다음 사람이 한쪽만 되돌리지 않는다.
+  it('keeps the agent fleet out of the sidebar while leaving it reachable from the palette', () => {
+    expect(activeRows('/acme/agents')).toEqual([])
+    expect(ALL_NAV_ITEMS.map((item) => item.href)).toContain('/agents')
   })
 
   it('scopes the answer to the workspace in the URL', () => {
