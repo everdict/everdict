@@ -4,6 +4,7 @@ import {
   CURRENT_EVIDENCE_VERSION,
   type CaseJob,
   type CaseResult,
+  ConflictError,
   type Dataset,
   type EvalCase,
   type HarnessSpec,
@@ -43,8 +44,10 @@ import {
   applyGradingPlan,
   caseReason,
   childKey,
+  sealedExecutionMessage,
   selectSubsetCases,
   verdictSummaryOf,
+  verifySealedExecution,
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
@@ -245,16 +248,29 @@ export class ScorecardBatchService {
       const harnesses = this.deps.harnesses;
       // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
       // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
-      harnessSpec = pinHarnessSpecToClosure(
-        await embedHarnessSpec(
-          () =>
-            pins && Object.keys(pins).length > 0
-              ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-              : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
-          { id: rec.harness.id, version: rec.harness.version },
-        ),
-        rec.manifest?.harness,
+      const resolvedSpec = await embedHarnessSpec(
+        () =>
+          pins && Object.keys(pins).length > 0
+            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+        { id: rec.harness.id, version: rec.harness.version },
       );
+      // The harness DOCUMENT, checked against the seal before the pin rewrites its bindings — the manifest
+      // sealed the registry document, and `pinHarnessSpecToClosure` is applied on top of it. A shadowed
+      // harness can change its script, environment or service topology while its model closure coincides
+      // exactly, so the closure pin below cannot stand in for this check.
+      //
+      // A PIN OVERRIDE is exempt: `origin.pinOverrides` is a deliberate submit-time image swap this batch
+      // recorded, so the resolved spec is expected to differ from the registry document by exactly that.
+      if (!pins || Object.keys(pins).length === 0) {
+        const specMismatches = verifySealedExecution(rec.manifest, {
+          harnessSpec: resolvedSpec,
+          harnessRef: `${rec.harness.id}@${rec.harness.version}`,
+        });
+        if (specMismatches.length > 0)
+          throw new ConflictError("CONFLICT", { scorecard: id }, sealedExecutionMessage(specMismatches));
+      }
+      harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
     }
     const remaining = dataset.cases.length - seed.length;
     void this.track(
@@ -329,6 +345,18 @@ export class ScorecardBatchService {
       resolved,
       rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
     );
+    // …AND THE RE-READ DOCUMENTS MUST BE THE ONES THIS BATCH SEALED (arch-review 17 P0-1). A registry version
+    // is immutable inside ONE namespace, and lookup is owner-first with a `_shared` fallback — so a workspace
+    // registering its own `support@1` after submit shadows the shared document this manifest certified, and
+    // every re-resolution (Temporal plan, resume, retry) silently gets different bytes under the same name.
+    // Resume makes it worse than a reproducibility loss: finished cases are kept and only the unfinished ones
+    // re-run, so one scorecard can hold cases evaluated under two different datasets, certified as one.
+    //
+    // Verified BEFORE the grading plan is applied — the plan is a batch document, and applying it first would
+    // mask a change to the case's own default graders.
+    const selectedMismatches = verifySealedExecution(rec.manifest, { cases: selected });
+    if (selectedMismatches.length > 0)
+      throw new ConflictError("CONFLICT", { scorecard: id }, sealedExecutionMessage(selectedMismatches));
     // Re-apply the recorded grading plan — a workflow-driven case must score exactly like the original submit.
     const cases = applyGradingPlan(selected, orch.graders);
     // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after

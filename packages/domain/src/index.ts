@@ -57,6 +57,11 @@ export {
   selectSubsetCases,
   stripJudgeScores,
 } from "./scorecard/scoring-plan.js";
+export {
+  type SealedDocumentMismatch,
+  sealedExecutionMessage,
+  verifySealedExecution,
+} from "./scorecard/sealed-execution.js";
 export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {
   appendScoringRevision,
