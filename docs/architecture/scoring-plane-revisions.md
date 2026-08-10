@@ -81,6 +81,27 @@ promotion could not say which judge in a row a given pass produced, and a per-ju
 nowhere to live. Re-keyed during the expand phase deliberately — nothing reads the stage to decide anything,
 so the change is free now and a reshape of authoritative data later.
 
+**The stage's two authorities are different things, and only one is still shadow.** After the claim work the
+same table answers two questions, and conflating them is how a fail-open survived a round:
+
+```
+Stage DATA authority         still SHADOW — carriers remain the source of truth until the contract step
+Stage WRITE-CLAIM authority  already PRODUCTION — it decides which invocation may write at all
+```
+
+While it was purely shadow, swallowing a stage failure and writing anyway was the rollback-safe choice. It
+stopped being that the moment it became the arbiter: an arbiter that cannot answer must never be read as "you
+won", or the race it settles is restored at exactly the moment it is least observable. The claim call is
+therefore fail-closed — the activity fails, Temporal retries, the carrier is untouched.
+
+**The claim spans the PASS, not one activity execution.** The first version used Temporal's `attempt` alone,
+reasoning that it is monotonic. It is — per ACTIVITY EXECUTION, while a stage row lives for the whole pass.
+After a continue-as-new the workflow re-plans and schedules the still-pending case as a NEW execution starting
+at attempt 1, so a legitimate fresh judgment was refused by a number the previous execution left behind and
+the case could never finish. The claim is the pair `(generation, attempt)`: `generation` is the workflow's
+rotation ordinal, carried in its INPUT so it stays deterministic. An authority token has to have exactly the
+scope and lifetime of the mutation it governs.
+
 **The stage ARBITRATES; the carrier follows** (arch-review 14 §11, mig 0158). The pass marker decides who may
 write a group's plane and decides it correctly — and it cannot decide between two writes of the SAME pass.
 Temporal produces exactly that: an activity whose attempt timed out while its provider call kept running,
@@ -93,6 +114,11 @@ superseded; "last wins" is the mirror. The question was never first-or-last but 
 TO WRITE, and Temporal already answers it: `attempt` is monotonic per activity execution, so the highest
 attempt is the current one. `stage()` is therefore a CLAIM that returns what it accepted, and the carrier
 write proceeds only for those — one decider, one follower, one winner.
+
+And it follows PER JUDGE. The first version collapsed the claim's per-(case, judge) answer back into a
+case-level boolean, so one accepted judge let the whole case plane through and a REJECTED judge's bytes rode
+along on its neighbour's win — deciding in one unit and mutating in another, reintroduced by the fix for it.
+The write strips and replaces only the accepted families, onto the child's CURRENT scores.
 
 **A staged row means "THIS PASS JUDGED THIS CASE" — nothing else.** The alternative reading (*the full
 desired score plane*) is the one the expand step accidentally shipped: `prepareScore`'s strip also went

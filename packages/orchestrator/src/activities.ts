@@ -178,16 +178,20 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
       passId?: string;
+      generation?: number;
     }): Promise<{ scored: boolean; skipped?: boolean }> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
-      // WHICH ATTEMPT this is (arch-review 14 §11). The pass fence cannot arbitrate two attempts of the SAME
-      // pass — Temporal retries an activity inside one pass, so a timed-out attempt whose provider call is
-      // still running and its replacement both present the same passId and both pass every guard. The attempt
-      // number is the only thing that distinguishes them, and it is monotonic per activity execution, so
-      // "highest attempt wins" IS "the current attempt wins". Read from the activity context rather than
-      // threaded through the workflow: a workflow that passed it would have to be deterministic about a
-      // retry count it does not own.
+      // THE CLAIM this invocation holds (mig 0158/0159). The pass fence cannot arbitrate two invocations of
+      // the SAME pass — Temporal retries an activity inside one pass, so a timed-out attempt whose provider
+      // call is still running and its replacement both present the same passId and clear every guard.
+      //
+      // It takes BOTH halves. `attempt` is monotonic only within one activity execution, and a
+      // continue-as-new re-schedules a still-pending case as a NEW execution starting at 1 — so an
+      // attempt-only claim refused the fresh judgment as stale and the case could never finish.
+      // `generation` is the workflow's rotation ordinal, carried in its input (deterministic); `attempt`
+      // comes from this context, where the workflow could not read it deterministically anyway.
       const attempt = attemptOf();
+      const claim = attempt === undefined ? undefined : { generation: input.generation ?? 0, attempt };
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-case`,
         {
@@ -198,7 +202,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
             judges: input.judges,
             submittedBy: input.submittedBy,
             ...(input.passId !== undefined ? { passId: input.passId } : {}),
-            ...(attempt !== undefined ? { attempt } : {}),
+            ...(claim !== undefined ? { claim } : {}),
           }),
         },
       );

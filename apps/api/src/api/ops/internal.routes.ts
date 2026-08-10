@@ -450,10 +450,18 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const provided = req.headers["x-internal-token"];
       if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
         return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-      // `attempt` is the Temporal activity attempt (mig 0158) — the token that arbitrates two writes of one
-      // pass. Optional: an in-process pass has no retries to tell apart.
+      // The judgment CLAIM (mig 0158/0159) — the pass-global ordinal that arbitrates two invocations of one
+      // pass. Optional: an in-process pass has neither rotations nor retries to tell apart.
       const body = scoreJudges
-        .extend({ key: z.string().min(1), attempt: z.number().int().positive().optional() })
+        .extend({
+          key: z.string().min(1),
+          claim: z
+            .object({
+              generation: z.number().int().nonnegative(),
+              attempt: z.number().int().positive(),
+            })
+            .optional(),
+        })
         .safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
@@ -464,7 +472,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
             body.data.judges,
             body.data.submittedBy,
             body.data.passId,
-            body.data.attempt,
+            body.data.claim,
           ),
         );
       } catch (err) {

@@ -1,5 +1,23 @@
 import type { Score } from "@everdict/contracts";
 
+// WHICH INVOCATION of "judge this case with this judge" a judgment came from — the authority token the
+// stage arbitrates on. Ordered lexicographically: a later generation beats any attempt of an earlier one.
+export interface JudgmentClaim {
+  generation: number; // the workflow's continue-as-new ordinal — pass-global
+  attempt: number; // Temporal's activity retry counter — within one execution
+}
+
+// Is `next` at least as current as `prior`? Written ONCE, so the two store impls and any future promotion
+// cannot each invent their own ordering — the mistake that put an attempt-scoped number in charge of a
+// pass-scoped row in the first place.
+export function claimSupersedes(prior: JudgmentClaim | undefined, next: JudgmentClaim): boolean {
+  if (prior === undefined) return true;
+  return prior.generation !== next.generation ? prior.generation < next.generation : prior.attempt <= next.attempt;
+}
+
+// The claim an invocation with no rotations and no retries holds — the in-process pass.
+export const INITIAL_CLAIM: JudgmentClaim = { generation: 0, attempt: 1 };
+
 // ONE JUDGE'S judgment of ONE CASE, as a PASS staged it, before anyone can read it.
 //
 // Keyed per JUDGE, not per case (arch-review 12, mig 0153). Every other property of a judgment is per judge —
@@ -10,11 +28,18 @@ import type { Score } from "@everdict/contracts";
 export interface StagedJudgment {
   caseKey: string; // caseId#trial — the key the score plane is addressed by
   judgeId: string; // the judge whose family these rows belong to
-  // WHICH ATTEMPT produced it (mig 0158). Temporal retries an activity inside one pass, so two writes can
-  // legitimately hold the same passId; the attempt number is what tells them apart, and it is monotonic per
-  // activity execution — so the highest attempt IS the current one. Absent = 1 (the in-process pass, which
-  // has no retry vocabulary).
-  attempt?: number;
+  // THE CLAIM this judgment was produced under (mig 0158/0159) — the token that says which invocation of
+  // "judge this case with this judge" currently holds the right to write.
+  //
+  // It is a PAIR because one number cannot span the mutation it governs. `attempt` is Temporal's activity
+  // retry counter, monotonic only WITHIN one activity execution; a stage row lives for the whole PASS, and
+  // after a continue-as-new the same case is scheduled as a new execution starting at attempt 1 again — so
+  // an attempt-only token refused a legitimate new judgment as stale and the pass could never finish that
+  // case. `generation` is the workflow's continue-as-new ordinal, carried in its INPUT so it stays
+  // deterministic, which makes (generation, attempt) monotonic across the pass.
+  //
+  // Absent = the in-process pass, which has neither retries nor rotations to tell apart: (0, 1).
+  claim?: JudgmentClaim;
   // This judge's rows for this case: the verdict plus its criterion children. Never another judge's, and
   // never an inherited grader's — that is what makes the promotion's merge explicit.
   scores: Score[];

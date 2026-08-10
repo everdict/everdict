@@ -15,6 +15,7 @@ import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import type { ScoringStageStore } from "../ports/scoring-stage-store.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 
@@ -926,5 +927,122 @@ describe("scoring-pass ownership (arch-review 8 P0)", () => {
     const svc2 = svcOver(takenOver, () => "unused");
     await expect(svc2.failScore("sc-1", "pass-A", "superseded")).resolves.toEqual({ marked: false });
     expect(takenOver.current.scoringPass?.status).toBe("running");
+  });
+});
+
+// arch-review 15 P0-1/P0-3. TRUST-52 proved the DB primitive arbitrates correctly; these prove the
+// production composition PRESERVES that answer. It did not: `writeBackScores` collapsed a per-(case, judge)
+// verdict back into a case-level boolean, so one accepted judge let the whole case plane through — a
+// REJECTED judge's bytes riding on its neighbour's win. Deciding in one unit and mutating in another is the
+// shape this codebase keeps removing, reintroduced by the fix for it.
+describe("writeBackScores — the carrier obeys the stage's per-JUDGE arbitration", () => {
+  const measured = (judge: string, value: number): Score => ({
+    graderId: judge,
+    metric: `judge:${judge}`,
+    value,
+    pass: value === 1,
+  });
+
+  // A child whose plane already holds BOTH judges — what the winning attempt left there.
+  function harness(opts: { accept: string[]; failStage?: boolean }) {
+    const child: RunRecord = {
+      id: "child-c1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: { ...result("c1", [measured("a", 1), measured("b", 1)]) },
+      createdAt: "2026-08-07T00:00:00.000Z",
+      updatedAt: "2026-08-07T00:00:00.000Z",
+    } as unknown as RunRecord;
+    const writes: Score[][] = [];
+    const runStore = {
+      async list() {
+        return [child];
+      },
+      async update(_id: string, patch: Partial<RunRecord>) {
+        if (patch.result) {
+          writes.push(patch.result.scores);
+          child.result = patch.result;
+        }
+        return child;
+      },
+      async get() {
+        return child;
+      },
+    } as unknown as RunStore;
+    const stage: ScoringStageStore = {
+      async stage(_s, _p, entries) {
+        if (opts.failStage) throw new Error("stage unavailable");
+        return entries.filter((e) => opts.accept.includes(e.judgeId));
+      },
+      async staged() {
+        return [];
+      },
+      async clear() {
+        return 0;
+      },
+    };
+    const record = { ...recordWith([result("c1", [])], livePass()), runIds: ["child-c1"] };
+    const svc = new ScorecardScoreService(
+      { ...deps, runStore, scoringStage: stage },
+      {
+        newId: () => "id",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => record,
+        pinJudges: async (_t: string, j: Array<{ id: string; version: string }>) => j,
+      },
+    );
+    return { svc, record, child, writes };
+  }
+
+  // This attempt re-judged BOTH a and b; the stage accepts only a.
+  const thisAttempt = [{ ...result("c1", [measured("a", 0), measured("b", 0)]), caseId: "c1" } as CaseResult];
+
+  it("writes the ACCEPTED judge's rows and leaves the REJECTED judge's untouched", async () => {
+    const { svc, record, writes } = harness({ accept: ["a"] });
+    // biome-ignore lint/complexity/useLiteralKeys: exercising the private write path directly is the point
+    await (svc as unknown as { writeBackScores: (...args: unknown[]) => Promise<void> })["writeBackScores"](
+      record,
+      thisAttempt,
+      livePass(),
+      { judges: [{ id: "a" }, { id: "b" }], claim: { generation: 0, attempt: 2 } },
+    );
+    expect(writes).toHaveLength(1);
+    const written = writes[0] as Score[];
+    // a: THIS attempt's judgment (it won)
+    expect(written.find((s) => s.metric === "judge:a")).toMatchObject({ value: 0 });
+    // b: the WINNER's judgment, still on the plane — this attempt lost it and must not have touched it
+    expect(written.find((s) => s.metric === "judge:b")).toMatchObject({ value: 1 });
+  });
+
+  it("writes NOTHING when every judge on the case was superseded", async () => {
+    const { svc, record, writes } = harness({ accept: [] });
+    // biome-ignore lint/complexity/useLiteralKeys: same reason
+    await (svc as unknown as { writeBackScores: (...args: unknown[]) => Promise<void> })["writeBackScores"](
+      record,
+      thisAttempt,
+      livePass(),
+      { judges: [{ id: "a" }, { id: "b" }], claim: { generation: 0, attempt: 1 } },
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it("REFUSES to write at all when the arbiter cannot answer — fail-closed", async () => {
+    // While the stage was shadow telemetry, swallowing its failure and writing anyway was rollback-safe. It
+    // stopped being shadow the moment it became the arbiter: "the arbiter is down" must never read as "you
+    // won", or the race it settles is restored exactly when it is least observable.
+    const { svc, record, writes } = harness({ accept: ["a"], failStage: true });
+    await expect(
+      // biome-ignore lint/complexity/useLiteralKeys: same reason
+      (svc as unknown as { writeBackScores: (...args: unknown[]) => Promise<void> })["writeBackScores"](
+        record,
+        thisAttempt,
+        livePass(),
+        { judges: [{ id: "a" }], claim: { generation: 0, attempt: 1 } },
+      ),
+    ).rejects.toThrow(/stage unavailable/);
+    expect(writes).toEqual([]);
   });
 });

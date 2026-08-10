@@ -188,30 +188,30 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-52 — the current attempt owns the ju
   });
   afterAll(async () => pg?.close());
 
-  const judgment = (value: number, attempt: number) => ({
+  const judgment = (value: number, generation: number, attempt: number) => ({
     caseKey: "c1#0",
     judgeId: "quality",
     scores: [{ graderId: "q", metric: "judge:quality", value, pass: value === 1 }],
-    attempt,
+    claim: { generation, attempt },
   });
 
   it("a LATE completion from a replaced attempt is refused, and the current judgment stands", async () => {
     const id = trustId("sc-attempt");
     // Attempt 2 answered first (attempt 1 timed out and is still running somewhere).
-    await expect(stage.stage(id, "pass-A", [judgment(1, 2)])).resolves.toHaveLength(1);
+    await expect(stage.stage(id, "pass-A", [judgment(1, 0, 2)])).resolves.toHaveLength(1);
     // …and now attempt 1 comes back with the opposite verdict. Both are legal; both hold the same passId.
-    await expect(stage.stage(id, "pass-A", [judgment(0, 1)])).resolves.toEqual([]);
+    await expect(stage.stage(id, "pass-A", [judgment(0, 0, 1)])).resolves.toEqual([]);
     const staged = await stage.staged(id, "pass-A");
     expect(staged).toHaveLength(1);
-    expect(staged[0]?.attempt).toBe(2);
+    expect(staged[0]?.claim?.attempt).toBe(2);
     expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1); // the current attempt's judgment
     await stage.clear(id, "pass-A");
   });
 
   it("a RETRY supersedes — the replacement holds the right to write, and says so", async () => {
     const id = trustId("sc-retry");
-    await expect(stage.stage(id, "pass-A", [judgment(0, 1)])).resolves.toHaveLength(1);
-    const accepted = await stage.stage(id, "pass-A", [judgment(1, 2)]);
+    await expect(stage.stage(id, "pass-A", [judgment(0, 0, 1)])).resolves.toHaveLength(1);
+    const accepted = await stage.stage(id, "pass-A", [judgment(1, 0, 2)]);
     expect(accepted).toHaveLength(1); // returned, because the CARRIER write follows exactly this answer
     const staged = await stage.staged(id, "pass-A");
     expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1);
@@ -221,19 +221,65 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-52 — the current attempt owns the ju
   it("arbitrates per (case, JUDGE) — a retry of one judge leaves its neighbour's row untouched", async () => {
     const id = trustId("sc-judge");
     await stage.stage(id, "pass-A", [
-      judgment(1, 1),
+      judgment(1, 0, 1),
       {
         caseKey: "c1#0",
         judgeId: "safety",
         scores: [{ graderId: "s", metric: "judge:safety", value: 1, pass: true }],
-        attempt: 1,
+        claim: { generation: 0, attempt: 1 },
       },
     ]);
-    await stage.stage(id, "pass-A", [judgment(0, 2)]);
+    await stage.stage(id, "pass-A", [judgment(0, 0, 2)]);
     const staged = await stage.staged(id, "pass-A");
     expect(staged).toHaveLength(2);
-    expect(staged.find((e) => e.judgeId === "safety")?.attempt).toBe(1);
-    expect(staged.find((e) => e.judgeId === "quality")?.attempt).toBe(2);
+    expect(staged.find((e) => e.judgeId === "safety")?.claim?.attempt).toBe(1);
+    expect(staged.find((e) => e.judgeId === "quality")?.claim?.attempt).toBe(2);
+    await stage.clear(id, "pass-A");
+  });
+});
+
+// Trust suite — TRUST-54.
+//
+// A CONTINUE-AS-NEW MUST NOT MAKE A PASS'S OWN NEXT JUDGMENT LOOK STALE. This is the lifetime half of
+// "an authority token has the scope and lifetime of the mutation it governs": Temporal's `attempt` is
+// monotonic per ACTIVITY EXECUTION, while a stage row lives for the whole PASS. After a rotation the
+// workflow re-plans and schedules the still-pending case as a NEW execution starting at attempt 1 — so an
+// attempt-only claim refused the fresh judgment as stale and the case could never finish. Certified against
+// real Postgres because the ordering is a row-wise comparison inside a conditional upsert.
+describe.skipIf(!TRUST_PG_ENABLED)("TRUST-54 — the claim spans the pass, not one execution (real Postgres)", () => {
+  let pg: TrustPg;
+  let stage: PgScoringStageStore;
+
+  beforeAll(async () => {
+    pg = await openTrustPg();
+    stage = new PgScoringStageStore(pg.client);
+  });
+  afterAll(async () => pg?.close());
+
+  const row = (value: number, generation: number, attempt: number) => ({
+    caseKey: "c1#0",
+    judgeId: "quality",
+    scores: [{ graderId: "q", metric: "judge:quality", value, pass: value === 1 }],
+    claim: { generation, attempt },
+  });
+
+  it("a rotation's attempt 1 supersedes the previous execution's attempt 2", async () => {
+    const id = trustId("sc-gen");
+    await expect(stage.stage(id, "pass-A", [row(0, 0, 2)])).resolves.toHaveLength(1);
+    // continue-as-new → generation 1, Temporal's attempt counter starts over at 1.
+    await expect(stage.stage(id, "pass-A", [row(1, 1, 1)])).resolves.toHaveLength(1);
+    const staged = await stage.staged(id, "pass-A");
+    expect(staged[0]?.claim).toEqual({ generation: 1, attempt: 1 });
+    expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1);
+    await stage.clear(id, "pass-A");
+  });
+
+  it("and no attempt of an earlier generation can ever come back over it", async () => {
+    const id = trustId("sc-gen-late");
+    await stage.stage(id, "pass-A", [row(1, 1, 1)]);
+    await expect(stage.stage(id, "pass-A", [row(0, 0, 9)])).resolves.toEqual([]);
+    const staged = await stage.staged(id, "pass-A");
+    expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1);
     await stage.clear(id, "pass-A");
   });
 });

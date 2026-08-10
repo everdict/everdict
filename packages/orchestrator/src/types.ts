@@ -46,6 +46,9 @@ export interface Activities {
     key: string;
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
+    // The workflow's continue-as-new ordinal (mig 0159) — the pass-global half of the judgment claim. The
+    // activity supplies the other half (its retry attempt) from its own context.
+    generation?: number;
     // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
     // activity is refused instead of mutating the plane a newer pass is certifying.
     passId?: string;

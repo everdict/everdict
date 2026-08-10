@@ -44,6 +44,7 @@ import { stampFacts } from "../platform-event/outbox.js";
 import { refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
+import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
@@ -561,9 +562,9 @@ export class ScorecardService {
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
     passId?: string,
-    attempt?: number,
+    claim?: JudgmentClaim,
   ): Promise<{ scored: boolean; skipped?: boolean }> {
-    return this.scoreService.scoreCase(id, key, judges, submittedBy, passId, attempt);
+    return this.scoreService.scoreCase(id, key, judges, submittedBy, passId, claim);
   }
 
   async finalizeScore(

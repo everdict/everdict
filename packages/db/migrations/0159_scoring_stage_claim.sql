@@ -1,0 +1,23 @@
+-- The judgment claim gains the half it was missing: a PASS-GLOBAL ordinal (arch-review 15 P0-2).
+--
+-- Mig 0158 used the Temporal activity `attempt` as the authority token, on the reasoning that it is
+-- monotonic and therefore "highest attempt = current attempt". That reasoning is true and its scope is
+-- wrong: `attempt` is monotonic PER ACTIVITY EXECUTION, while a stage row lives for the whole PASS. After a
+-- continue-as-new the workflow re-plans, schedules the still-pending case as a NEW activity execution, and
+-- that execution starts at attempt 1 again — so a legitimate new judgment was refused as stale by a number
+-- left behind by the previous execution's retry:
+--
+--   execution X, attempt 1  timeout
+--   execution X, attempt 2  → unmeasured        stage.attempt = 2
+--   continueAsNew
+--   execution Y, attempt 1  → measured verdict  REFUSED (1 <= 2)   ← the pass can never finish this case
+--
+-- An authority token has to have exactly the scope and lifetime of the mutation it governs. `generation` is
+-- the workflow's continue-as-new ordinal — pass-global, monotonic, and carried in the workflow INPUT so it
+-- stays deterministic (deriving it from workflow state would not be). The claim is the pair, compared
+-- row-wise: (generation, attempt).
+--
+-- Existing rows take generation 0, which is the honest reading of "claimed before the ordinal existed" and
+-- puts them below every future claim — the safe direction.
+ALTER TABLE everdict_scoring_stage
+  ADD COLUMN IF NOT EXISTS generation INTEGER NOT NULL DEFAULT 0;

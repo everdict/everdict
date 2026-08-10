@@ -151,6 +151,11 @@ export async function scoreGroupWorkflow(input: {
   // workflow id made it the only starter) but may never mint one.
   passId?: string;
   prepared?: boolean; // set by continue-as-new — the strip already ran for this pass
+  // The pass-global ROTATION ORDINAL (mig 0159). Temporal's activity `attempt` is monotonic only within one
+  // activity execution, and a continue-as-new re-schedules a still-pending case as a NEW execution starting
+  // at attempt 1 — so an attempt-only claim refused the fresh judgment as stale and the case could never
+  // finish. Carried in the INPUT so it stays deterministic: deriving it from workflow state would not be.
+  generation?: number;
   continueEvery?: number;
   rotateAtHistoryLength?: number;
 }): Promise<void> {
@@ -204,6 +209,7 @@ export async function scoreGroupWorkflow(input: {
           judges: input.judges,
           ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
           ...(input.passId !== undefined ? { passId: input.passId } : {}),
+          generation: input.generation ?? 0,
         });
       }
     };
@@ -214,7 +220,12 @@ export async function scoreGroupWorkflow(input: {
     throw err;
   }
   if (rotatedEarly || plan.keys.length > limit) {
-    await continueAsNew<typeof scoreGroupWorkflow>({ ...input, prepared: true });
+    // The rotation ordinal advances with the rotation — that is what makes the claim pass-global.
+    await continueAsNew<typeof scoreGroupWorkflow>({
+      ...input,
+      prepared: true,
+      generation: (input.generation ?? 0) + 1,
+    });
     return;
   }
   try {
