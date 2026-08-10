@@ -1,60 +1,92 @@
 # Workspace
 
-A **workspace is a tenant is a trust zone.** Everdict does not treat these as three ideas that happen
-to line up — they are one boundary with three names, and collapsing them is deliberate: the unit you
-share work in is the unit you are isolated by.
+A **workspace is a tenant is a trust zone.** Not three ideas that happen to line up — one boundary with
+three names. The unit you share work in is the unit you are isolated by.
 
-Everything else in the product is scoped to a workspace: harnesses, datasets, judges, runtimes,
-secrets, scorecards, issues, files.
+Every call carries it. On the `dev` profile that is a header:
+
+```bash
+curl localhost:8787/me -H 'x-everdict-tenant: default'
+```
+
+Anywhere else it comes from your credential:
+
+```bash
+curl https://everdict.internal/me -H 'authorization: Bearer ak_…'
+```
+
+```json
+{ "subject": "user:jimin", "workspace": "acme", "roles": ["member"], "via": "api-key" }
+```
+
+That `Principal` is the same object whether it came from an OIDC token (people, through Keycloak) or an
+API key (`ak_…`, for agents and CI). `via` records which. Everything downstream — reads, writes, budget,
+isolation — is scoped by `workspace`.
 
 ## What the boundary actually enforces
 
-| Layer | What the workspace decides |
-| --- | --- |
-| **Reads** | every list and get is workspace-scoped; a principal never sees another tenant's records |
-| **Registry** | documents are keyed `(workspace, id, version)`, with a `_shared` fallback for seeded content |
-| **Secrets** | model and provider keys are per-workspace, encrypted at rest, injected per-run |
-| **Isolation** | the trust-zone policy pins a hardened runtime, a namespace, and warm-pool keying per tenant |
-| **Budget** | cost and run budgets are tracked per workspace |
-| **Object storage** | the workspace filesystem gives each tenant **its own bucket** — the bucket *is* the isolation boundary |
+Reads are scoped: no list or get ever crosses tenants. Registry documents are keyed
+`(workspace, id, version)`. Secrets are per-workspace, encrypted at rest, injected per run. Cost and run
+budgets are tracked per workspace.
 
-## Who is inside it
+Two enforcement points are worth knowing precisely because they are structural rather than careful:
 
-Authentication resolves to a `Principal { subject, workspace, roles, via }` — whether it came from an
-OIDC token (Keycloak, for people) or an API key `ak_…` (for agents, CI, and headless clients). The
-`via` field records which one.
+**Isolation** — the trust-zone policy pins a hardened runtime, a namespace, and warm-pool keying per
+tenant, so two tenants never share a sandbox.
 
-Authorization is a **role → action matrix**, not a scattering of `if` statements. Actions are named
-pairs (`scorecards:read` / `scorecards:run`, `issues:read` / `issues:write`, `settings:write`, …), and
-a new resource is expected to reuse an existing pair rather than invent one — saved Views reuse the
-scorecard actions; subscriptions reuse the agent actions.
+**Object storage** — the workspace filesystem gives each tenant **its own bucket**, not a prefix inside
+a shared one. The bucket *is* the boundary, so a path-traversal bug cannot reach another tenant's data
+even if the path guard fails. See [the workspace filesystem](../workspace/filesystem.md).
 
-The control plane enforces this. The web app role-gates its UI too, but that is a courtesy: the answer
+## Roles are a matrix, not scattered `if`s
+
+Authorization is a role → action matrix. Actions are named pairs:
+
+```
+scorecards:read / scorecards:run
+issues:read     / issues:write
+agents:read     / agents:write
+settings:write  ·  images:push
+```
+
+A new resource is expected to **reuse** an existing pair rather than invent one — saved Views reuse the
+scorecard actions, subscriptions reuse the agent actions. That is why the permission model has stayed
+comprehensible while the product grew.
+
+The control plane enforces this. The web app role-gates its UI too, but that is a courtesy; the answer
 that matters is the server's.
 
 ## `_shared` — the seeded fallback
 
-Some content ships with the product rather than belonging to a tenant: reference datasets, example
-harness templates, first-party judges. Those live under the pseudo-workspace `_shared`, and a lookup
-that misses in your workspace falls back to it.
+Reference datasets, example harness templates and first-party judges ship with the product rather than
+belonging to a tenant. They live under the pseudo-workspace `_shared`, and a lookup that misses in your
+workspace falls back to it.
 
-Two consequences worth knowing:
+```bash
+curl localhost:8787/datasets -H 'x-everdict-tenant: acme'
+# → your datasets, plus the _shared ones you did not have to create
+```
 
-- A workspace can **shadow** a `_shared` id by registering its own document with the same id. That is
-  intended, and the resolution is recorded so a result can always be traced to the document that
-  actually produced it.
-- `_shared` writes never emit platform events — boot seeding is not workspace news.
+A workspace can **shadow** a `_shared` id by registering its own document with the same id. That is
+intended, and the resolution is recorded, so a result can always be traced to the document that
+actually produced it.
 
-## Members, and the machines acting for them
+:::tip
+Shadowing is the supported way to customize a bundled dataset: register your own under the same id,
+and everything that referenced it now resolves to yours — with the scorecard recording which one ran.
+:::
 
-A workspace has human members with roles. It also has **agents**, and an agent acting inside a
-workspace acts *for* a member: writes to the workspace filesystem record who published them — member
-**or** agent (agent id + conversation + the member it acted for). Attribution does not become vague
-just because a machine did the typing.
+## Machines are members too
 
-## Where this shows up next
+A workspace has human members with roles. It also has [agents](../workspace/agents.md), and an agent
+acting inside a workspace acts **for** a member.
 
-- [`../../auth.md`](../../auth.md) — the auth core: OIDC + API keys → `Principal`, the authz matrix
-- [`../../tenancy.md`](../../tenancy.md) — the tenant access layer and scoped reads
-- [`../../secrets.md`](../../secrets.md) — workspace secrets and per-run injection
-- [`../../architecture/workspace-filesystem.md`](../../architecture/workspace-filesystem.md) — one file tree per workspace
+That shows up wherever attribution does. A file written to the workspace filesystem records who
+published it — member *or* agent, with the agent's id, the conversation, and the member it acted for.
+Attribution does not go vague just because a machine did the typing.
+
+## See also
+
+- [Workspace agents](../workspace/agents.md) · [Filesystem](../workspace/filesystem.md)
+- [`../../auth.md`](../../auth.md) — OIDC + API keys → `Principal`, the authz matrix
+- [`../../tenancy.md`](../../tenancy.md) · [`../../secrets.md`](../../secrets.md)

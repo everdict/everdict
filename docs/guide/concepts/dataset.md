@@ -1,65 +1,125 @@
 # Dataset
 
-A **dataset is a bundle of eval cases** — the fixed set of problems you measure an agent against.
+A dataset is the fixed set of problems you measure an agent against. Here is one with a single case:
 
-Its defining property is what it does *not* contain: **a dataset is harness-agnostic.** A case
-describes the task and the world it happens in, never the agent that will attempt it. That is what lets
-you run the same dataset against Claude Code, a Codex harness, and your own CLI agent, and compare the
-three honestly.
+```json
+{
+  "id": "retrieval-smoke",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "add-retry",
+      "env": {
+        "kind": "repo",
+        "source": { "files": {
+          "client.py": "import requests\n\ndef fetch(u):\n    return requests.get(u)\n",
+          "test_client.py": "from client import fetch\n\ndef test_retries(monkeypatch):\n    ...\n"
+        } }
+      },
+      "task": "Add exponential-backoff retry to fetch(), max 3 attempts. Keep the signature.",
+      "graders": [{ "id": "tests-pass", "config": { "cmd": "pytest -q" } }],
+      "timeoutSec": 300,
+      "tags": ["python", "smoke"]
+    }
+  ]
+}
+```
 
-## What a case carries
+```bash
+curl -XPOST localhost:8787/datasets \
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d @retrieval-smoke.json
+```
 
-An `EvalCase` is the unit:
+Notice what the case does **not** contain: any mention of the agent. That is the defining property — a
+dataset is **harness-agnostic**, which is what lets you run it against Claude Code, Codex and your own
+CLI agent and compare the three honestly.
 
-| Field | What it is |
-| --- | --- |
-| `id` | stable identity — this is what a diff matches on across scorecards |
-| `env` | the world: a repo (files + git), a browser, an OS session |
-| `task` | the instruction handed to the agent |
-| `expected` | optional expected result, for graders that need ground truth |
-| `milestones` | intermediate checkpoints, for partial credit |
-| `graders` | how this case is scored (`GraderSpec[]`) |
-| `image` | the environment image the case runs in, when it needs a specific one |
-| `fixtures` | files or data seeded before the agent starts |
-| `timeoutSec` | the wall-clock ceiling |
-| `tags` | labels — also the selector for running a subset |
-| `placement` | a hint about where this case needs to run (e.g. an OS target) |
+## The fields that matter
 
-`id` deserves emphasis. Case ids are how `GET /scorecards/diff` decides that this run's `write-file` is
-the same problem as last run's `write-file`. Renaming a case silently breaks the trend for that case.
+`id`, `env`, `task`, `graders` and `timeoutSec` are the working set. The rest earn their place when you
+need them:
 
-## Versioning
+- **`expected`** — ground truth, for graders that compare against it.
+- **`milestones`** — intermediate checkpoints, for partial credit on long tasks.
+- **`image`** — the environment image, when the case needs a specific one.
+- **`fixtures`** — files or data seeded before the agent starts.
+- **`placement`** — a hint about where the case must run (an OS target, say).
+- **`tags`** — labels, and the selector for running a subset.
 
-Datasets are registry documents: `(workspace, id, version)`, immutable versions, `latest` by semver,
-`_shared` fallback for the bundled reference sets. A scorecard records the dataset version it
-evaluated, so "the benchmark changed" and "the agent changed" never get confused with each other.
-
-## Bringing an existing benchmark
-
-You do not have to author cases by hand. Everdict has an on-ramp for standard agent-benchmark formats —
-import the tasks, keep their identities, run them managed. See
-[`../../architecture/standard-task-formats.md`](../../architecture/standard-task-formats.md).
-
-Reference bundles ship in `examples/datasets/`.
-
-## Graders belong to the case — usually
-
-A case names its graders, so the dataset defines what "solved" means for each problem. Two escape
-hatches exist:
-
-- A **submit-time `graders[]` override** replaces them for one batch — useful when you want to score an
-  existing dataset a different way without forking it.
-- **Judges** are applied on top, per trace, and are chosen at submit rather than baked into the
-  dataset. See [Grader & Judge](grader-and-judge.md).
+:::warning
+`id` is load-bearing. `GET /scorecards/diff` matches cases across scorecards **by id** — renaming a case
+silently breaks its trend line, and nothing looks broken while it happens. Treat case ids the way you
+treat database keys.
+:::
 
 ## Running only part of it
 
-A scorecard submit can take a `subset`: explicit `ids`, matching `tags`, or a `limit`. The scorecard
-records that it was a subset run, which matters — a pass rate over 10 of 400 cases is not the same
-claim as a pass rate over 400.
+```bash
+curl -XPOST localhost:8787/scorecards \
+  -H 'content-type: application/json' -d '{
+  "dataset": { "id": "retrieval-smoke", "version": "latest" },
+  "harness": { "id": "my-agent", "version": "latest" },
+  "subset":  { "tags": ["smoke"], "limit": 20 }
+}'
+```
 
-## Where this shows up next
+The scorecard records that it was a subset run. That matters: a pass rate over 20 of 400 cases is not
+the same claim as a pass rate over 400, and a chart that mixes the two is lying quietly.
 
-- [`../../datasets.md`](../../datasets.md) — the full reference: import, provenance, recipes
-- [`../../registry.md`](../../registry.md) — versioning and `_shared` resolution
+## Graders belong to the case — usually
+
+The dataset defines what "solved" means per problem, which is why graders live on the case. Two escape
+hatches exist:
+
+**Override for one batch** — score an existing dataset a different way without forking it:
+
+```json
+{ "dataset": { "id": "retrieval-smoke", "version": "latest" },
+  "harness": { "id": "my-agent", "version": "latest" },
+  "graders": [{ "id": "script", "config": { "cmd": "./stricter-check.sh" } }] }
+```
+
+**Judges** — applied on top, per trace, chosen at submit rather than baked into the data. See
+[Grader & Judge](grader-and-judge.md).
+
+## Versions
+
+Datasets are registry documents: `(workspace, id, version)`, immutable versions, `latest` by semver,
+`_shared` fallback for the bundled reference sets. A scorecard records the dataset version it
+evaluated, so "the benchmark changed" and "the agent changed" never get mistaken for each other.
+
+Adding cases means a new version. Editing a case in place would rewrite history for every scorecard
+that ever ran it, which is why you cannot.
+
+## Bringing an existing benchmark
+
+You do not have to author cases by hand. A benchmark recipe maps an existing format — jsonl, a repo of
+task directories — onto cases, keeping their identities:
+
+```bash
+cat examples/bundles/codex-pinch/bundle.json   # harness + dataset + recipe, as data
+curl -XPOST localhost:8787/bundles/apply \
+  -H 'content-type: application/json' -d @examples/bundles/codex-pinch/bundle.json
+```
+
+Reference bundles live in `examples/datasets/` and `examples/bundles/`. See
+[`../../architecture/standard-task-formats.md`](../../architecture/standard-task-formats.md).
+
+## Designing cases that mean something
+
+A few things that are learned expensively:
+
+- **A case must be able to fail.** If every agent passes it, it is measuring nothing. Keep it and add
+  a harder one, or drop it.
+- **Prefer deterministic grading.** A judge adds its own variance to every number it produces. Use one
+  when the output has no checkable shape, not by default.
+- **Match the environment to the task.** A `prompt` case that should have been a `repo` case will pass
+  agents that cannot actually write working code. See [Environments](../workspace/environments.md).
+- **Size the timeout to the task, not the agent.** A timeout that a good agent hits is a grader for
+  speed, whether you meant it that way or not.
+
+## See also
+
+- [Environments](../workspace/environments.md) — what `env` can be
 - [Scorecard](scorecard.md) — what happens when a dataset meets a harness
+- [`../../datasets.md`](../../datasets.md) — import, provenance, recipes

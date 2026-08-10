@@ -1,78 +1,121 @@
 # Grader & Judge
 
-A run produces evidence. A **grader** turns evidence into a **measurement**. That measurement is a
-`Score`, and the rules around it are stricter than they first look — deliberately, because a number
-nobody can defend is worse than no number.
+A run produces evidence. A grader turns evidence into a **measurement**:
 
-## Grader
+```json
+{ "id": "tests-pass", "config": { "cmd": "pytest -q" } }
+```
 
-A grader reads the run's trace, its environment snapshot, and the case, and emits scores. Everdict
-ships several families:
+That runs in the finished environment and emits a score:
 
-| Family | What it measures |
-| --- | --- |
-| **outcome** | did it work — `tests-pass` runs a command in the finished environment |
-| **cost / steps / latency** | efficiency, from the harness's own trace |
-| **trace** | properties of how it worked (tool sequences, milestones) |
-| **browser / OS** | the state of the world at the end |
-| **model** | an LLM/VLM judgment — see below |
+```json
+{ "graderId": "tests-pass", "metric": "tests_pass", "value": 1, "pass": true }
+```
 
-Graders are named by a `GraderSpec` — `{ id, config }` — so a case declares scoring without depending
-on grader code. `id` selects the implementation; `config` parameterizes it (`tests-pass` takes a `cmd`).
+A judge does the same job for output that has no checkable shape — chosen at submit time, not baked
+into the dataset:
 
-Crucially, the grader is **not part of the harness**. Two different agents solving the same case are
-scored by the same code, which is the only reason their results are comparable at all.
+```bash
+curl -XPOST localhost:8787/scorecards \
+  -H 'content-type: application/json' -d '{
+  "dataset": { "id": "support-replies", "version": "latest" },
+  "harness": { "id": "my-agent", "version": "latest" },
+  "judges":  [{ "id": "tone-rubric", "version": "latest" }]
+}'
+```
 
-## Judge
+Each judge contributes scores under `judge:<id>`.
 
-An **Agent Judge** is a registered, versioned judgment applied to a trace *after* the run. Two kinds:
+## Which one to reach for
 
-- **`model`** — call an LLM or VLM with a rubric and read back a verdict, using the workspace's own
-  provider key.
-- **`harness`** — delegate to an actual agent and take the verdict from *its* trace.
+Deterministic first, always. `tests-pass` running your real test suite is worth more than any rubric,
+because it has one right answer and adds no variance of its own.
 
-Judges are chosen at submit time (`judges[]`), not baked into the dataset, and each one contributes
-scores under `judge:<id>`. Because they are registry documents, the exact judge version — and the model
-closure it ran under — is sealed into the scorecard. "We re-ran the judge and got a different answer"
-is therefore a detectable event rather than a mystery.
+```json
+[
+  { "id": "tests-pass", "config": { "cmd": "pytest -q" } },
+  { "id": "cost" },
+  { "id": "steps" }
+]
+```
+
+Use a judge when the thing you care about genuinely cannot be checked — prose quality, whether a plan
+is sound, whether a screenshot shows the right screen. A `model` judge calls an LLM or VLM with a
+rubric using your workspace's own provider key; a `harness` judge delegates to an actual agent and
+takes the verdict from *its* trace.
+
+:::warning
+Every judge you add is another source of variance in the number you are about to compare week over
+week. Two judges disagreeing is information; five judges averaged is noise with a decimal point.
+:::
 
 ## A Score is not a number with optional fields
 
-This is the part worth reading twice. `Score` is a **discriminated union on `status`**:
+This is the part worth reading twice, because it is where most eval tooling quietly lies.
 
-- A **measured** score carries a `value` (and `pass`).
-- An **unmeasured** score carries **no value at all** — only a reason.
+`Score` is a **discriminated union on `status`**. A measured score carries a value:
 
-The reasons are a closed vocabulary:
+```json
+{ "graderId": "tests-pass", "metric": "tests_pass", "value": 1, "pass": true }
+```
 
-| Reason | Meaning |
-| --- | --- |
-| `grader_error` | the grader threw while scoring |
-| `missing_evidence` | the trace or snapshot it needed was never captured |
-| `missing_secret` | a required credential was absent — re-scorable once configured |
-| `unsupported` | this deployment cannot run that grader |
-| `policy_skip` | deliberately skipped by configuration — not an error |
-| `contract_violation` | the grader returned something illegal (NaN, empty ids) — a grader bug, never retried |
+A non-measurement carries **no value at all** — only a reason:
 
-The shape is the enforcement. When a non-measurement has no `value` field, a dead grader has no `0` to
-leak into a mean, and code that reads `.value` without narrowing **fails to compile**. Before this, the
-flat shape let a broken grader quietly average in as a zero — which reads as "the agent scored badly"
-when the truth is "we did not measure."
+```json
+{ "graderId": "judge:tone-rubric", "metric": "tone",
+  "status": "unmeasured", "reason": "missing_secret" }
+```
 
-## Who is allowed to define "passing"
+The reasons are closed: `grader_error`, `missing_evidence`, `missing_secret`, `unsupported`,
+`policy_skip`, `contract_violation`.
 
-A grader can *declare* the semantics of the metric it produces — including that its metric is
-**ground truth**, the thing a verdict ultimately rests on. That declaration is
-**constitution-gated: admin-only at submit.** Whoever can name new ground truth can decide what passing
-means, and that power is reviewed rather than ambient.
+The shape *is* the enforcement. When a non-measurement has no `value` field, a dead grader has no `0`
+to leak into a mean, and code that reads `.value` without narrowing **fails to compile**. Before this,
+the flat shape let a broken grader average in as a zero — which reads as "the agent scored badly" when
+the truth was "we did not measure."
 
-A grader also declares its metrics separately from its identity. `id: "script"` with
-`config.id: "business-check"` emitting `metric: "quality"` is three different names; the spec's
-`metrics[]` says which ones the declared semantics actually apply to, so a policy is never composed for
-a metric nothing emits.
+So when you see an unmeasured score, the question is never "why did it score low". It is "why was
+nothing measured", and the reason tells you: `missing_secret` is re-scorable once you configure the
+key; `contract_violation` is a bug in the grader and is never retried.
 
-## Where this shows up next
+## Writing your own
 
+A grader is named by a spec, so a case declares scoring without depending on grader code:
+
+```json
+{ "id": "script", "config": { "id": "business-check", "cmd": "./check.sh" } }
+```
+
+The script prints a score line; the id in `config` names *which* check this is. Note that three
+different names are in play — the implementation (`script`), the check (`business-check`) and the
+metric it emits (`quality`). Say the last one explicitly:
+
+```json
+{ "id": "script",
+  "config": { "id": "business-check", "cmd": "./check.sh" },
+  "metrics": [{ "id": "quality", "direction": "higher_is_better" }] }
+```
+
+Without `metrics`, a declaration made under the id `script` composes policy for a metric nothing ever
+emits, while the score that actually lands carries no declared semantics at all. The declaration and
+the measurement end up being about different names.
+
+## Who gets to define "passing"
+
+A grader can declare that its metric is **ground truth** — the thing a verdict ultimately rests on:
+
+```json
+{ "id": "script", "config": { "cmd": "./check.sh" },
+  "metrics": [{ "id": "quality", "authority": "ground_truth" }] }
+```
+
+That declaration is **admin-only at submit**. Whoever can name new ground truth can decide what passing
+means, and that power is reviewed rather than ambient. A custom grader gains authority by *declaring*
+it, never by an edit to domain code — which is what makes a grader ecosystem possible without making
+the verdict meaningless.
+
+## See also
+
+- [Verdict](verdict.md) — how scores become pass or fail
 - [`../../judges.md`](../../judges.md) — registering and versioning Agent Judges
-- [Verdict](verdict.md) — how scores become a pass/fail
 - [`../../architecture/judge-input-contract.md`](../../architecture/judge-input-contract.md) — declare, preview, dry-run
