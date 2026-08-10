@@ -129,8 +129,16 @@ export function proposeServices(input: ProposeServicesInput): ProductServiceSugg
 
   // The repo-wide stream, if there is one — what an unmatched package attaches to. A monorepo tagged
   // `v2026.3` releases every one of its packages at once, and that is a real composition, not an approximation.
+  //
+  // …under the SAME rule the loop above applies (arch-review 21 P2). A bare-numeric stream is excluded from
+  // direct suggestions when other streams exist, because `tagPrefix: undefined` matches every tag and would
+  // swallow theirs — and then this line went looking for it again. The wizard refused an unsafe row on one
+  // line and offered it on the next; `recommended: false` softens the pitch, not the sync behaviour it would
+  // produce. An unmatched package attaches to a repo-wide stream only where that stream is safe to declare.
   const wide = streams.find(
-    (stream) => streamLabel(stream.tagPrefix, input.repository) === streamLabel("", input.repository),
+    (stream) =>
+      !(stream.tagPrefix === "" && streams.length > 1) &&
+      streamLabel(stream.tagPrefix, input.repository) === streamLabel("", input.repository),
   );
   for (const pkg of input.packages) {
     if (claimed.has(pkg.path)) continue;

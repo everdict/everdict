@@ -43,6 +43,20 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
 - **Coverage is not identity.** A cohort records how much of a batch reported it (`observed`/`total`) and keeps
   that out of its comparison key — a batch that lost a case to a dead dispatch did not move to another world
   (arch-review 20 P2).
+- **A declaration is not part of the constitution until the decision function that consumes the measurement
+  also consumes that declaration.** The verdict policy composes from the EFFECTIVE graders (`applyGradingPlan`
+  has already put a run-time plan on every case), never from the request field that overrode them — a dataset
+  declaring a metric observational must reach `evaluateVerdict`, or the fallback lets the metric it declared
+  inert decide the case. Two cases declaring different semantics for one metric is a malformed evaluation
+  definition, refused rather than resolved by declaration order (arch-review 21 P0-2).
+- **History is not immutable if deleting the anchor changes what the next decision believes was "last time".**
+  A released release refuses deletion AND content edits: the next release's baseline is resolved from the
+  released rows that still exist, so removing one manufactures a bootstrap rather than failing a comparison
+  (arch-review 21 P0-3).
+- **Compare a persisted stamp under the stamp's OWN algorithm** (`digestsMatch` / `seriesContractStampHolds`),
+  never `contentDigest(doc) === stamped`. Legacy stamps are FNV and history has to keep verifying; a direct
+  comparison is fail-CLOSED, which is worse than it sounds — the guard does not miss, it accuses (arch-review
+  21 P1).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

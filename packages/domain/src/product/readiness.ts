@@ -7,7 +7,7 @@ import type {
   ReleaseSeriesState,
   SeriesVerdict,
 } from "@everdict/contracts";
-import { contentDigest } from "../provenance/content-digest.js";
+import { contentDigest, digestsMatch } from "../provenance/content-digest.js";
 import { type WorldCohort, crossWorldReason } from "../scorecard/world-cohort.js";
 
 // Release readiness is PURE arithmetic over what the caller already fetched — no store, no I/O (the tracker's
@@ -265,10 +265,15 @@ export function seriesContractFromManifest(manifest: {
   };
 }
 
-export function seriesContractDigest(contract: ResolvedSeriesContract): string {
+// The canonical IDENTITY object a contract digests to — separated from the hashing so a stamp written under
+// an older algorithm can be re-hashed under its own (arch-review 21 P1). Comparing two DIGEST STRINGS cannot
+// do that: an FNV stamp and a sha256 recomputation of the same contract disagree on every character, so a
+// series whose decision predates the migration read `contract_stale` forever and asked for a re-run that
+// would produce the same answer.
+function seriesContractIdentity(contract: ResolvedSeriesContract): Record<string, unknown> {
   const byId = <T extends { id: string; version: string }>(rows: readonly T[]): T[] =>
     [...rows].sort((a, b) => a.id.localeCompare(b.id) || a.version.localeCompare(b.version));
-  return contentDigest({
+  return {
     dataset: contract.dataset,
     harness: contract.harness,
     // Judge SELECTION is a set, not a sequence — the order a caller happens to list them in is not a
@@ -299,7 +304,18 @@ export function seriesContractDigest(contract: ResolvedSeriesContract): string {
     ...(contract.judgeClosure !== undefined ? { judgeClosure: byId(contract.judgeClosure) } : {}),
     ...(contract.judgeRun !== undefined ? { judgeRun: contract.judgeRun } : {}),
     ...(contract.judgeRunModelDigest !== undefined ? { judgeRunModelDigest: contract.judgeRunModelDigest } : {}),
-  });
+  };
+}
+
+export function seriesContractDigest(contract: ResolvedSeriesContract): string {
+  return contentDigest(seriesContractIdentity(contract));
+}
+
+// Whether a STAMPED contract digest still describes this contract — the comparison every freshness reader
+// wants, and the only one that survives the digest-algorithm migration. Absent stamp = a batch that never
+// carried one, which is a different fact its caller decides about.
+export function seriesContractStampHolds(stamped: string, contract: ResolvedSeriesContract): boolean {
+  return digestsMatch(stamped, seriesContractIdentity(contract));
 }
 
 // One scorecard's contribution to a series trend — the caller resolves which record is "latest" and which is
@@ -396,7 +412,18 @@ function seriesVerdict(
   // different question; a scorecard whose contract is unstamped cannot say which question it answered at
   // all. Neither is evidence for the series as it stands, and reading either as current is how an edit to
   // the dataset silently kept yesterday's green.
-  if (contract.status === "resolved" && latest.contractDigest !== contract.digest) {
+  // The CARRIED decision first — a resolution states its own digest, and re-deriving what was handed to us is
+  // the very thing `SeriesContractResolution` exists to stop (arch-review 14 P0). The second reading is a
+  // MIGRATION rescue, not a second opinion: a stamp written before sha256 is FNV, so it disagrees with a
+  // sha256 recomputation on every character even when it describes this exact contract. Re-hashing under the
+  // stamp's own algorithm is the policy `content-digest.ts` states, and freshness was the loudest reader not
+  // following it — an old series would read `contract_stale` forever and ask for a re-run that changes
+  // nothing (arch-review 21 P1).
+  const stampHolds =
+    latest.contractDigest !== undefined &&
+    contract.status === "resolved" &&
+    (latest.contractDigest === contract.digest || seriesContractStampHolds(latest.contractDigest, contract.contract));
+  if (contract.status === "resolved" && !stampHolds) {
     return {
       verdict: "contract_stale",
       reasons: [

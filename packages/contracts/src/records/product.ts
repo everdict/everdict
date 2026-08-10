@@ -200,6 +200,27 @@ export const ReleaseComponentSchema = z.object({
 });
 export type ReleaseComponent = z.infer<typeof ReleaseComponentSchema>;
 
+// WHAT ACTUALLY WENT OUT — the plan RESOLVED against the version ledger at ship time (arch-review 21 P1).
+//
+// `{service, version}` stopped being sufficient historical identity the moment the ledger became
+// stream-aware: a service repointed from repo-A to repo-B tracks a different stream under the same name, and
+// both streams can publish `v1.0.0`. A frozen plan row therefore cannot answer "which v1.0.0 did 2026.3
+// ship?" — the exact question a release exists to answer later. The ship resolves the row and freezes its
+// identity; the UI's picker enforced this and the API did not, so any REST/MCP caller could write an
+// arbitrary string into a shipped composition.
+//
+// `resolution` is explicit rather than inferred from absence: a release may legitimately ship with a
+// component whose version was never decided, and "we did not decide" must not read the same as "we could not
+// find it in the ledger".
+export const ShippedComponentSchema = z.object({
+  service: z.string().min(1),
+  version: z.string().min(1).optional(),
+  versionRecordId: z.string().optional(), // the ledger row this component IS
+  streamKey: z.string().optional(), // …and which stream that row came from
+  resolution: z.enum(["ledger", "unresolved", "unplanned"]),
+});
+export type ShippedComponent = z.infer<typeof ShippedComponentSchema>;
+
 export const RELEASE_STATUSES = ["planned", "released", "cancelled"] as const;
 export const ReleaseStatusSchema = z.enum(RELEASE_STATUSES);
 export type ReleaseStatus = z.infer<typeof ReleaseStatusSchema>;

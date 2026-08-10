@@ -17,6 +17,7 @@ import {
   type ReleaseRecord,
   type ReleaseStatus,
   type ScorecardRecord,
+  type ShippedComponent,
 } from "@everdict/contracts";
 import type {
   ProductDetailResponse,
@@ -414,6 +415,39 @@ export class ProductService {
   }
 
   // The release gate. The service counts (it owns the stores); the domain decides what the counts mean.
+  // The plan's components, each resolved to the exact ledger row it names. A `{service, version}` pair is not
+  // historical identity once the ledger is stream-aware: repointing a service at another repository means the
+  // same name tracks a different stream, and both streams can publish `v1.0.0`. What a shipped release must
+  // stay able to answer is WHICH one — so the row's id and its stream travel with the frozen composition.
+  //
+  // A version nobody decided freezes as `unplanned`; a version that names no ledger row freezes as
+  // `unresolved`. Neither is refused: a release may legitimately ship a component whose version was set by
+  // hand, and refusing at the ship would turn a bookkeeping gap into a blocked release. Recording WHICH of
+  // the three it was is what keeps the history honest.
+  private async resolveShippedComponents(tenant: string, record: ReleaseRecord): Promise<ShippedComponent[]> {
+    const planned = record.components ?? [];
+    if (planned.length === 0) return [];
+    const out: ShippedComponent[] = [];
+    for (const component of planned) {
+      if (component.version === undefined) {
+        out.push({ service: component.service, resolution: "unplanned" });
+        continue;
+      }
+      const rows = await this.deps.versions
+        .list(tenant, { productId: record.productId, service: component.service })
+        .catch(() => []);
+      const row = rows.find((r) => r.version === component.version);
+      out.push({
+        service: component.service,
+        version: component.version,
+        ...(row !== undefined ? { versionRecordId: row.id } : {}),
+        ...(row?.streamKey !== undefined ? { streamKey: row.streamKey } : {}),
+        resolution: row !== undefined ? "ledger" : "unresolved",
+      });
+    }
+    return out;
+  }
+
   async setReleaseStatus(
     tenant: string,
     id: string,
@@ -434,6 +468,12 @@ export class ProductService {
         to: input.status,
         openIssues: readiness.openIssues,
         regressedSeries: readiness.regressedSeries,
+        // WHAT WENT OUT, as ledger rows rather than as strings somebody typed (arch-review 21 P1). Resolved
+        // here because only this layer can read the version ledger, and resolved AT SHIP because that is the
+        // moment the composition stops being a plan.
+        ...(input.status === "released"
+          ? { shippedComponents: await this.resolveShippedComponents(tenant, record) }
+          : {}),
         // The ship-time evidence snapshot — the history entry records WHAT the gate saw (per-series
         // verdicts); the live readiness keeps moving after the decision.
         // The evidence this ship stood on — both sides with their scoring pins, so the decision is

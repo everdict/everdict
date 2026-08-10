@@ -298,6 +298,7 @@ export {
   type ResolvedSeriesContract,
   type SeriesContractResolution,
   seriesContractDigest,
+  seriesContractStampHolds,
   seriesContractFromManifest,
   resolveWatchedSeries,
   type SeriesGateReading,

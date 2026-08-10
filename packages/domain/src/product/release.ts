@@ -1,4 +1,10 @@
-import type { PlatformFact, ReleaseComponent, ReleaseRecord, ReleaseStatus } from "@everdict/contracts";
+import type {
+  PlatformFact,
+  ReleaseComponent,
+  ReleaseRecord,
+  ReleaseStatus,
+  ShippedComponent,
+} from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "../tracker/history.js";
 import type { ResolvedSeriesContract } from "./readiness.js";
@@ -55,6 +61,11 @@ export interface ReleaseStatusChangeInput {
   // The ship-time decision per watched series — evidence references, not verdict words. Both sides carry
   // the scoring pin that says WHICH judgment was read, which is what makes the next release able to anchor
   // on this exact decision instead of re-searching by time (and reading a plane a re-score has since moved).
+  // WHAT WENT OUT, resolved against the version ledger by the caller that owns it (arch-review 21 P1). The
+  // domain freezes what it is handed: the plan's `{service, version}` is not historical identity once a
+  // service can be repointed at another repository, and only the application layer can read the ledger.
+  // Absent = the caller has no ledger wired, in which case the plan is frozen as before and says so.
+  shippedComponents?: readonly ShippedComponent[];
   seriesDecisions?: ReadonlyArray<{
     key: string;
     verdict: string;
@@ -345,8 +356,15 @@ export class Release {
       // touching it. The ship freezes the composition it shipped into its own history entry, for the same
       // reason the series decisions are frozen there: "which versions did 2026.3 actually contain" must stay
       // answerable from the release, not from whatever the plan says today.
-      ...(to === "released" && this.record.components?.length
-        ? { components: this.record.components.map((component) => ({ ...component })) }
+      ...(to === "released" && (input.shippedComponents?.length || this.record.components?.length)
+        ? {
+            components:
+              input.shippedComponents !== undefined
+                ? input.shippedComponents.map((component) => ({ ...component }))
+                : // No ledger reader wired — freeze the plan as before. It is a weaker record and the
+                  // absence of `resolution` is what says so.
+                  (this.record.components ?? []).map((component) => ({ ...component })),
+          }
         : {}),
       ...(onTime !== undefined ? { onTime } : {}),
       ...(forced ? { forced: true } : {}),

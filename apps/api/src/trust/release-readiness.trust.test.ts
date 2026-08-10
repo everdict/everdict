@@ -79,6 +79,7 @@ const seriesBatch = (
 // points at, so two scenarios minting the same ids would read each other's rows out of the real table.
 function build(store?: ScorecardStore, idPrefix = "t37") {
   const scorecardStore = store ?? new InMemoryScorecardStore();
+  const versions = new InMemoryProductVersionStore();
   const scorecardService = new ScorecardService({
     dispatcher: unusedDispatcher,
     store: scorecardStore,
@@ -88,7 +89,7 @@ function build(store?: ScorecardStore, idPrefix = "t37") {
   const productService = new ProductService({
     store: new InMemoryProductStore(),
     releases: new InMemoryReleaseStore(),
-    versions: new InMemoryProductVersionStore(),
+    versions,
     issues: new InMemoryIssueStore(),
     scorecards: scorecardStore,
     // The PRODUCTION seam, byte-for-byte the main.ts wiring — the point of this certification. Including
@@ -108,7 +109,7 @@ function build(store?: ScorecardStore, idPrefix = "t37") {
     newId: () => `${idPrefix}-${n++}`,
     now: () => "2026-08-04T00:00:00.000Z",
   });
-  return { scorecardStore, productService };
+  return { scorecardStore, productService, versions };
 }
 
 // The series a product ships against. `allowNoBaseline` is DECLARED, because the first ship of a required
@@ -418,6 +419,76 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
 // been one, and a series declaring `allowNoBaseline` shipped green on a bootstrap the delete manufactured.
 // The neighbouring case was already right — a released release whose candidate SCORECARD was deleted resolves
 // to `missing_historical_evidence` and refuses — so the protection existed and the anchor under it did not.
+// Trust suite — TRUST-118.
+//
+// WHAT SHIPPED IS A LEDGER ROW, NOT A STRING SOMEBODY TYPED.
+//
+// `{service, version}` stopped being sufficient historical identity when the version ledger became
+// stream-aware: repointing a service from repo-A to repo-B means the same name tracks a different stream, and
+// both can publish `v1.0.0`. A release that froze only the pair could not answer "which v1.0.0 did 2026.3
+// ship?" — which is the question a release exists to answer later. The picker in the UI already refused to
+// invent versions; the API accepted any non-empty string, and the ship froze it verbatim.
+describeTrust("TRUST-118 — the shipped composition resolves to the ledger row it names", () => {
+  async function shipWith(component: { service: string; version?: string }, seedLedger: boolean) {
+    const { productService, versions } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [{ ...SERIES, requiredForRelease: false }],
+    });
+    if (seedLedger)
+      await versions.create({
+        id: "ver-row-1",
+        tenant: "acme",
+        productId: product.id,
+        service: "api",
+        streamKey: "github|acme/copilot-api|releases|",
+        version: "v1.0.0",
+        kind: "release",
+        prerelease: false,
+        publishedAt: "2026-07-01T00:00:00.000Z",
+        importedAt: "2026-07-01T00:01:00.000Z",
+      });
+    const release = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+      components: [component],
+    });
+    await productService.setReleaseStatus("acme", release.id, { status: "released" }, { subject: "release-captain" });
+    const shipped = await productService.getRelease("acme", release.id);
+    const entry = shipped.history.find((h) => h.event === "released");
+    return (entry?.detail as { components?: Array<Record<string, unknown>> } | undefined)?.components?.[0];
+  }
+
+  it("a planned version that exists in the ledger freezes with the ROW's identity — id and stream", async () => {
+    expect(await shipWith({ service: "api", version: "v1.0.0" }, true)).toMatchObject({
+      service: "api",
+      version: "v1.0.0",
+      versionRecordId: "ver-row-1",
+      streamKey: "github|acme/copilot-api|releases|",
+      resolution: "ledger",
+    });
+  });
+
+  it("a version no ledger row backs still ships — and says it was never resolved", async () => {
+    // Refusing here would turn a bookkeeping gap into a blocked release. Recording WHICH of the three cases
+    // it was is what keeps the history honest instead of quietly equating them.
+    expect(await shipWith({ service: "api", version: "v9.9.9" }, true)).toMatchObject({
+      service: "api",
+      version: "v9.9.9",
+      resolution: "unresolved",
+    });
+  });
+
+  it("a component whose version was never decided is UNPLANNED, not an empty version", async () => {
+    expect(await shipWith({ service: "api" }, false)).toMatchObject({ service: "api", resolution: "unplanned" });
+  });
+});
+
 describeTrust("TRUST-115 — a released release cannot be deleted or edited out from under the next decision", () => {
   async function shipped() {
     const { scorecardStore, productService } = build();

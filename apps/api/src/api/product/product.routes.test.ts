@@ -438,7 +438,12 @@ describe("product routes", () => {
       payload: { status: "released", force: true },
     });
     expect(shipped.statusCode).toBe(200);
-    expect(shipped.json().history.at(-1)?.detail?.components).toEqual([{ service: "api", version: "v1.0.0" }]);
+    // The ship RESOLVES the plan against the version ledger (arch-review 21 P1). Nothing was imported in this
+    // test, so the honest answer is `unresolved` — recorded rather than refused, and distinct from a
+    // component whose version nobody decided.
+    expect(shipped.json().history.at(-1)?.detail?.components).toEqual([
+      { service: "api", version: "v1.0.0", resolution: "unresolved" },
+    ]);
   });
 
   it("refuses a release watching a series the product never declared", async () => {

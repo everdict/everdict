@@ -1,5 +1,5 @@
 import type { EvalCase, HarnessSpec, ScorecardManifest } from "@everdict/contracts";
-import { contentDigest } from "../provenance/content-digest.js";
+import { contentDigest, digestsMatch } from "../provenance/content-digest.js";
 
 // THE DOCUMENT A BATCH RE-READS MUST BE THE DOCUMENT IT SEALED (arch-review 17 P0-1).
 //
@@ -48,17 +48,20 @@ function caseMismatches(
   for (const c of cases) {
     const sealed = manifest.cases?.[c.id];
     if (sealed !== undefined) {
-      const current = contentDigest({ ...c, graders: undefined });
-      if (current !== sealed) out.push({ subject: "dataset_case", id: c.id, sealed, current });
+      // ALGORITHM-NEUTRAL (arch-review 21 P1). Stamps written before sha256 are FNV, and a raw
+      // `contentDigest(doc) !== stamped` comparison calls every one of them drift — so a batch sealed in that
+      // era would refuse to resume, re-score or re-verify against ITS OWN unchanged documents, and report a
+      // registry shadow as the reason. `digestsMatch` re-hashes under the stamp's own algorithm, which is the
+      // policy `content-digest.ts` already states and only one reader was following.
+      if (!digestsMatch(sealed, { ...c, graders: undefined }))
+        out.push({ subject: "dataset_case", id: c.id, sealed, current: contentDigest({ ...c, graders: undefined }) });
     }
     // …and the DEFAULT GRADERS, on their own axis. A shadow that changes only what a case is graded by would
     // otherwise pass the content check while changing what "passed" means. Present only on defaults runs — a
     // run-time grading plan is a batch document no registry lookup can move.
     const sealedGraders = manifest.gradingCases?.[c.id];
-    if (sealedGraders !== undefined) {
-      const current = contentDigest(c.graders);
-      if (current !== sealedGraders) out.push({ subject: "grading", id: c.id, sealed: sealedGraders, current });
-    }
+    if (sealedGraders !== undefined && !digestsMatch(sealedGraders, c.graders))
+      out.push({ subject: "grading", id: c.id, sealed: sealedGraders, current: contentDigest(c.graders) });
   }
   return out;
 }
@@ -70,8 +73,8 @@ function harnessMismatch(
 ): SealedDocumentMismatch[] {
   const sealed = manifest.harness.specDigest;
   if (sealed === undefined || spec === undefined) return [];
+  if (digestsMatch(sealed, spec)) return [];
   const current = contentDigest(spec);
-  if (current === sealed) return [];
   return [{ subject: "harness", id: ref ?? `${manifest.harness.id}@${manifest.harness.version}`, sealed, current }];
 }
 
@@ -179,7 +182,10 @@ export function pinnedDocumentMismatch(
   what: { kind: string; ref: string },
 ): string | undefined {
   if (sealedDigest === undefined) return undefined;
+  // Compared under the STAMP's own algorithm — a pin written before sha256 must keep verifying against its
+  // own document (arch-review 21 P1), or the migration itself becomes an invisible shadow that refuses every
+  // legacy evaluation with a message blaming the registry.
+  if (digestsMatch(sealedDigest, document)) return undefined;
   const current = contentDigest(document);
-  if (current === sealedDigest) return undefined;
   return `the ${what.kind} '${what.ref}' this evaluation pinned is not what that reference resolves to now (sealed ${sealedDigest}, current ${current}) — a workspace-local version shadowing a shared one does exactly this, and the reference alone cannot tell them apart`;
 }
