@@ -9,6 +9,7 @@ the two map onto the site.
 - [What is Everdict](start/what-is-everdict.md) — what it does, what it refuses to do, and who it is for
 - [Quickstart](start/quickstart.md) — the whole stack on your machine in one command
 - [Your first scorecard](start/first-scorecard.md) — dataset × harness → a verdict you can defend
+- [Bring your own agent](start/bring-your-agent.md) — the on-ramp per agent kind, ending at a registered harness
 - [Connect an agent](start/connect-an-agent.md) — MCP, API keys, and the Claude Code plugin
 
 ## Core concepts

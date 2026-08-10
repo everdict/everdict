@@ -1,0 +1,23 @@
+{
+  "id": "demo-smoke",
+  "version": "1.0.0",
+  "description": "Two deterministic repo cases — no model, no API key, no judge.",
+  "cases": [
+    {
+      "id": "write-ok-file",
+      "env": { "kind": "repo", "source": { "files": {} } },
+      "task": "Create ok.txt containing the text done",
+      "graders": [{ "id": "tests-pass", "config": { "cmd": "grep -q done ok.txt" } }],
+      "timeoutSec": 120,
+      "tags": ["smoke"]
+    },
+    {
+      "id": "write-out-file",
+      "env": { "kind": "repo", "source": { "files": {} } },
+      "task": "Create out.txt containing the text ok",
+      "graders": [{ "id": "tests-pass", "config": { "cmd": "grep -q ok out.txt" } }],
+      "timeoutSec": 120,
+      "tags": ["smoke"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "command",
+  "category": "cli-agent",
+  "id": "demo-agent",
+  "version": "1.0.0",
+  "setup": [],
+  "command": "sh -c 'printf done > ok.txt; printf ok > out.txt'",
+  "env": {},
+  "trace": { "kind": "none" }
+}
