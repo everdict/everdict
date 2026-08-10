@@ -43,8 +43,12 @@ class FakeProductStore implements ProductStore {
   async listAll(): Promise<ProductRecord[]> {
     return this.reads.slice(0, 1);
   }
-  async update(): Promise<ProductRecord | undefined> {
-    return this.reads[this.reads.length - 1];
+  // The DURABLE row after the sync — what a sweep or a later reader would see, as opposed to the response
+  // the caller happened to be holding (arch-review 17 P1-6).
+  saved?: Partial<ProductRecord>;
+  async update(_tenant: string, _id: string, patch: Partial<ProductRecord>): Promise<ProductRecord | undefined> {
+    this.saved = patch;
+    return { ...(this.reads[this.reads.length - 1] as ProductRecord), ...patch };
   }
   async remove(): Promise<void> {}
   async removeAggregate(): Promise<{ releases: number; versions: number }> {
@@ -120,10 +124,11 @@ const productAt = (repository: string, synced: boolean): ProductRecord =>
   });
 
 function build(reads: ProductRecord[], reader: GithubVersionReader) {
+  const products = new FakeProductStore(reads);
   const versions = new FakeVersionStore();
   const submitted: Array<Parameters<SeriesRunSubmitter>[0]> = [];
   const sync = new ProductVersionSync({
-    products: new FakeProductStore(reads),
+    products,
     releases: new FakeReleaseStore(),
     versions,
     tokens: {
@@ -138,7 +143,7 @@ function build(reads: ProductRecord[], reader: GithubVersionReader) {
     },
     now: () => NOW,
   });
-  return { sync, versions, submitted };
+  return { sync, versions, submitted, products };
 }
 
 describeTrust("TRUST-59 — an arrival on a stream the product no longer watches is not a cause", () => {
@@ -224,9 +229,17 @@ describeTrust("TRUST-60/68 — a bounded read says so, and its side effects are 
     // its own fact rather than as a throw. Committing the side effects and THEN throwing left the version in
     // the ledger, its fact delivered, and nothing evaluating it, permanently: the next sync sees the row as
     // already known, so the evaluation it skipped never happens at all.
-    const { sync, versions, submitted } = build([productAt("acme/copilot-api", true)], reader);
+    const { sync, versions, submitted, products } = build([productAt("acme/copilot-api", true)], reader);
     const result = await sync.sync("acme", "prod-1", { subject: "dana" });
     expect(result.services[0]?.incomplete).toBe(true);
+    // TRUST-88 — and the observation is DURABLE, not only in this response. A background sweep, a later
+    // reader or an owner-agent has no other way to learn that this service's timeline is a prefix; a row
+    // that just says "synced" has lost that truth for everyone who was not holding the response.
+    expect(products.saved?.services?.[0]?.sync).toMatchObject({ completeness: "partial" });
+    // TRUST-88 — and the observation is DURABLE, not only in this response. A background sweep, a later
+    // reader or an owner-agent has no other way to learn that this service's timeline is a prefix; a row
+    // that just says "synced" has lost that truth for everyone who was not holding the response.
+    expect(versions.rows).toHaveLength(1);
     expect(result.services[0]?.error).toBeUndefined(); // coverage is not failure
     expect(versions.rows).toHaveLength(1);
     expect(result.triggered).toHaveLength(1); // ledger, fact and evaluation agree — all three, or none

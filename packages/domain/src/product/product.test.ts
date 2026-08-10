@@ -115,7 +115,7 @@ describe("Product — the released thing several services compose", () => {
     expect(transition.facts).toEqual([]);
     expect(transition.patch.history).toBeUndefined();
     expect(transition.patch.updatedAt).toBeUndefined();
-    expect(transition.patch.services?.[0]?.sync).toEqual({ syncedAt: LATER });
+    expect(transition.patch.services?.[0]?.sync).toEqual({ completeness: "complete", syncedAt: LATER });
   });
 
   it("mints the version-import fact with filterable top-level payload fields", () => {

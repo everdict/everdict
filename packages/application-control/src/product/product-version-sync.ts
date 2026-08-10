@@ -148,7 +148,8 @@ export class ProductVersionSync {
         // post-watermark arrivals reach the auto-eval below.
         if (!backfill) inserted.push(...rows);
         outcomes.push({ name: service.name, imported: rows.length, ...(complete ? {} : { incomplete: true }) });
-        record = { ...record, ...Product.from(record).markServiceSynced(service.name, this.now()).patch };
+        // …and the observation is DURABLE, not only in this response (arch-review 17 P1-6).
+        record = { ...record, ...Product.from(record).markServiceSynced(service.name, this.now(), complete).patch };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         outcomes.push({ name: service.name, imported: 0, error: message });

@@ -216,27 +216,9 @@ export class ScorecardService {
       );
     }
 
-    // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
-    // headroom is checked here (402 past the cap, 429 past the depth guard, NEVER silently) before any
-    // case exists; the children stamp the envelope at creation and settle real cost against it per case.
-    // The batch id is minted BEFORE the gate and doubles as the admission's request identity (H6) — a
+    // The batch id is minted here and doubles as the admission's request identity below (H6) — a
     // re-admission of this same submission is the same right, never a second charge against the envelope.
     const batchId = this.newId();
-    if (input.origin?.causedByRunId && this.deps.runStore) {
-      const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
-      await admitCausedWork(
-        {
-          runStore: this.deps.runStore,
-          ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
-          ...(this.deps.events ? { events: this.deps.events } : {}),
-          ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
-        },
-        input.tenant,
-        input.origin.causedByRunId,
-        selectedCases.length * trialsForCount,
-        { requestId: `adm:scorecard:${batchId}` },
-      );
-    }
 
     // Resolve the harness version (latest→concrete) + embed the declarative spec. Built-ins (scripted/claude-code) aren't in the registry → as-given.
     // If submit-time ephemeral pins are present, use resolveWithPins with no fallback — evaluation must not pass while silently ignoring the pins.
@@ -389,6 +371,31 @@ export class ScorecardService {
           { expected: input.expectedContractDigest, sealed },
           "the evaluation contract moved between resolution and submit — a registry reference this batch depends on resolved differently. Re-resolve and submit again.",
         );
+    }
+
+    // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
+    // headroom is checked before any case exists (402 past the cap, 429 past the depth guard, NEVER
+    // silently); the children stamp the envelope at creation and settle real cost against it per case.
+    //
+    // AFTER the seal and its verification, deliberately (arch-review 17 P1-9). `capRuns` is a durable,
+    // conserved right — an agent's autonomy budget — and the ordering used to spend it before the batch was
+    // known to be runnable at all, so a submission refused for a moved evaluation contract had already
+    // consumed a delegation the caller never got any execution for. An autonomy budget should be claimed by
+    // requests that can actually run, and every refusal above this line is one the caller must fix and retry.
+    if (input.origin?.causedByRunId && this.deps.runStore) {
+      const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
+      await admitCausedWork(
+        {
+          runStore: this.deps.runStore,
+          ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+          ...(this.deps.events ? { events: this.deps.events } : {}),
+          ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
+        },
+        input.tenant,
+        input.origin.causedByRunId,
+        selectedCases.length * trialsForCount,
+        { requestId: `adm:scorecard:${batchId}` },
+      );
     }
 
     // E0 outbox: the creation fact (scorecard.submitted, domain-computed) persists in the SAME transaction

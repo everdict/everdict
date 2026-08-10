@@ -226,11 +226,26 @@ export class Product {
 
   // The sync's bookkeeping write. Deliberately NOT a history entry and NOT an updatedAt bump: a sweep touching
   // the watermark every few minutes must not read as somebody editing the product.
-  markServiceSynced(name: string, syncedAt: string): ProductTransition {
+  // `complete` says whether the remote read saw the whole history (arch-review 17 P1-6). It is recorded on
+  // the row, not only returned in the sync response: a sweep, a later reader or an owner-agent has no other
+  // way to learn that this service's timeline is a prefix. The whole sync state is replaced, so a stream that
+  // reads completely today clears a `partial` it carried yesterday — which is the point of recording an
+  // OBSERVATION rather than a sticky flag.
+  markServiceSynced(name: string, syncedAt: string, complete = true): ProductTransition {
     return {
       patch: {
         services: this.record.services.map((service) =>
-          service.name === name ? { ...service, sync: { syncedAt } } : service,
+          service.name === name
+            ? {
+                ...service,
+                sync: {
+                  syncedAt,
+                  ...(complete
+                    ? { completeness: "complete" as const }
+                    : { completeness: "partial" as const, partialAt: syncedAt }),
+                },
+              }
+            : service,
         ),
       },
       facts: [],

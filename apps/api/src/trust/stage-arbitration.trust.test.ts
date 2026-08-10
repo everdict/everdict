@@ -235,6 +235,30 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
     expect(await stage.staged(id, passId)).toEqual([]);
   });
 
+  it("TRUST-89 — a DISAGREEING pass records which units disagreed, not merely how many", async () => {
+    // The counts make the promotion decision; the unit ids make it diagnosable. Since the stage rows are
+    // collected immediately after this observation is written, a `promotionSafe: false` investigated a week
+    // later would otherwise know that N judgments disagreed and have no way left to learn which — the
+    // evidence is gone by construction, so the answer has to be captured at the one moment it exists.
+    const passId = trustId("pass-diverged");
+    const { id } = await seed(passId, [verdict("alpha", 1), verdict("beta", 1)]);
+    await stage.stage(id, passId, [
+      // alpha agrees; beta staged a DIFFERENT verdict than the plane settled with; gamma is staged for a
+      // judge the plane has no row for at all (a promotion would invent one).
+      { caseKey: KEY, judgeId: "alpha", scores: [verdict("alpha", 1)], claim: { generation: 1, attempt: 1 } },
+      { caseKey: KEY, judgeId: "beta", scores: [verdict("beta", 0)], claim: { generation: 1, attempt: 1 } },
+      { caseKey: KEY, judgeId: "gamma", scores: [verdict("gamma", 1)], claim: { generation: 1, attempt: 1 } },
+    ]);
+    await service({ stage }).finalizeScore(id, JUDGES, "dana", passId);
+
+    const parity = (await cards.get(id))?.scoring?.at(-1)?.stageParity;
+    expect(parity).toMatchObject({ promotionSafe: false, mismatched: 1, orphaned: 1 });
+    expect(parity?.units?.mismatched).toEqual([JSON.stringify([KEY, "beta"])]);
+    expect(parity?.units?.orphaned).toEqual([JSON.stringify([KEY, "gamma"])]);
+    expect(parity?.units?.truncated).toBe(false); // a bounded sample is never mistaken for the whole set
+    expect(await stage.staged(id, passId)).toEqual([]);
+  });
+
   it("TRUST-55 — an arbiter that cannot answer stops the write entirely: not one byte moves", async () => {
     const passId = trustId("pass-closed");
     const { id, runId } = await seed(passId);

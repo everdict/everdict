@@ -267,6 +267,22 @@ export const ScoringRevisionSchema = z.object({
       mismatched: z.number().int().nonnegative(),
       orphaned: z.number().int().nonnegative(),
       promotionSafe: z.boolean(),
+      // WHICH units disagreed, not just how many (arch-review 17 P1-7). The counts make the promotion
+      // decision; these make it DIAGNOSABLE. The stage rows are collected immediately after this observation
+      // is written, so a `promotionSafe: false` investigated later would otherwise know that three judgments
+      // disagreed and have no way left to learn which three — the evidence is gone by construction.
+      //
+      // Bounded on purpose: a pass that disagrees on thousands of units has a systemic fault, and the first
+      // few name it as well as all of them would. `truncated` says the list was cut, so a reader never
+      // mistakes a bounded sample for the whole set.
+      units: z
+        .object({
+          missingFromStage: z.array(z.string()),
+          mismatched: z.array(z.string()),
+          orphaned: z.array(z.string()),
+          truncated: z.boolean(),
+        })
+        .optional(),
     })
     .optional(),
   createdAt: z.string(),

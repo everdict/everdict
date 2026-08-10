@@ -88,6 +88,28 @@ describeTrust("TRUST-71 — a duplicate judge id is refused before anything runs
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 
+  it("TRUST-87 — a judge id may not contain ':', so no two judges' families can overlap", async () => {
+    // The subtler half of the same invariant. A judge owns `judge:<id>` plus its `judge:<id>:<criterion>`
+    // children, and membership is decided on that serialized name — so ids `foo` and `foo:bar` are distinct
+    // identities whose families OVERLAP: `judge:foo:bar` is at once a criterion of `foo` and the top-level
+    // verdict of `foo:bar`. Re-scoring `foo` would then strip `foo:bar`'s verdict. Same shape as the
+    // per-judge/per-case arbitration bug, one level down: the logical identity unit and the serialized
+    // namespace unit disagreeing.
+    const { JudgeSpecSchema } = await import("@everdict/contracts");
+    const spec = (id: string) => ({
+      kind: "model" as const,
+      id,
+      version: "1.0.0",
+      provider: "anthropic" as const,
+      model: "m",
+      rubric: "good?",
+      inputs: ["trace" as const],
+      tags: [],
+    });
+    expect(JudgeSpecSchema.safeParse(spec("foo")).success).toBe(true);
+    expect(JudgeSpecSchema.safeParse(spec("foo:bar")).success).toBe(false);
+  });
+
   it("…and DISTINCT judges pass — the guard is about the family, not about arity", () => {
     expect(duplicateJudgeIds([{ id: "quality" }, { id: "safety" }])).toEqual([]);
     expect(duplicateJudgeIds([{ id: "quality" }, { id: "quality" }, { id: "safety" }, { id: "safety" }])).toEqual([

@@ -118,6 +118,43 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
     ).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("TRUST-90 — a refused submit spends no autonomy budget: the right survives the rejection", async () => {
+    // `capRuns` is a durable, conserved right — an agent's delegation. It used to be claimed BEFORE the batch
+    // was known to be runnable, so a submission refused for a moved evaluation contract had already consumed
+    // a delegation the caller got no execution for. An autonomy budget should be claimed by requests that can
+    // actually run; every refusal above the admission line is one the caller must fix and retry.
+    const at3 = await world("3.0.0");
+    const resolution = await resolveSeriesContract(at3.deps, "acme", series);
+    if (resolution.status !== "resolved") throw new Error(resolution.status);
+    const at4 = await world("4.0.0");
+    let admitted = 0;
+    const service = new ScorecardService({
+      dispatcher: neverDispatches,
+      store: new InMemoryScorecardStore(),
+      datasets: at4.datasets,
+      harnesses: at4.harnesses,
+      resolveModelBinding: at4.resolveModelBinding,
+      // Any read of the causer's envelope means the admission ran; the contract refusal must precede it.
+      runStore: {
+        async get() {
+          admitted += 1;
+          return undefined;
+        },
+      } as never,
+      newId: () => "sc-budget",
+    });
+    await expect(
+      service.submit({
+        tenant: "acme",
+        dataset: { id: "d", version: "1.0.0" },
+        harness: { id: "cli", version: "1.0.0" },
+        origin: { source: "agent", causedByRunId: "run-parent" } as never,
+        expectedContractDigest: resolution.digest,
+      }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(admitted).toBe(0);
+  });
+
   it("holds with a JUDGE and a workspace judge default in play — the guard must not 409 every real series", async () => {
     // The equality is now load-bearing for every product auto-eval, so it has to hold on the shape those
     // actually have: a selected judge with its own floating model, plus the workspace default that governs

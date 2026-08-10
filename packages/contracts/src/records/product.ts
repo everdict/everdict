@@ -35,6 +35,17 @@ export const ProductServiceSyncSchema = z.object({
       message: z.string(),
     })
     .optional(),
+  // WHETHER THIS SERVICE'S HISTORY WAS FULLY OBSERVED (arch-review 17 P1-6). A read that hits its page
+  // ceiling imports the newest pages and reports `incomplete` in the sync RESPONSE — which the person who
+  // pressed Sync can see, and which a background sweep, a later reader or an owner-agent cannot recover
+  // afterwards: the durable row just said "synced". That is not a false green, it is a loss of operational
+  // truth about a system of record, and the two are only one inference apart.
+  //
+  // `partial` is the fact, `partialAt` is when it was observed. Absent = never observed as partial (a legacy
+  // row, or a stream that has only ever read completely) — which is honestly UNKNOWN for the legacy case, and
+  // is why the field records the positive observation rather than a "complete" claim nobody made.
+  completeness: z.enum(["complete", "partial"]).optional(),
+  partialAt: z.string().optional(),
 });
 export type ProductServiceSync = z.infer<typeof ProductServiceSyncSchema>;
 

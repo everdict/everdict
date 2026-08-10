@@ -115,6 +115,10 @@ export function pendingJudgesFor<J extends { id: string }>(
 // not a richer request, it is a state the plane cannot represent: they would write the same metric family,
 // claim the same stage row, and a Postgres upsert whose statement carries the same conflict key twice fails
 // outright. Uniqueness is by ID, never by (id, version), because the id is what owns the family.
+// …and the family predicate is only unambiguous because a judge id may not contain `:` (arch-review 17 P1-4,
+// enforced on JudgeSpec). With ids `foo` and `foo:bar` both legal, `judge:foo:bar` would be at once a
+// criterion of `foo` and the top-level verdict of `foo:bar` — so re-scoring `foo` would strip `foo:bar`'s
+// verdict. The separator is reserved at the boundary precisely so this predicate can stay simple.
 export function duplicateJudgeIds(judges: ReadonlyArray<{ id: string }>): string[] {
   const seen = new Set<string>();
   const duplicates = new Set<string>();

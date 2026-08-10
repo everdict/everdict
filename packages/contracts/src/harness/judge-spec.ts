@@ -13,6 +13,20 @@ import {
   VERDICT_INSTRUCTION_PLACEHOLDER,
 } from "./rubric-spec.js";
 
+// A judge id may not contain `:` (arch-review 17 P1-4). A judge OWNS the metric family `judge:<id>` plus its
+// `judge:<id>:<criterion>` children, and family membership is decided on that serialized name — so ids `foo`
+// and `foo:bar` are distinct identities whose families OVERLAP: `judge:foo:bar` is simultaneously a criterion
+// of `foo` and the top-level verdict of `foo:bar`. Re-scoring `foo` then strips `foo:bar`'s verdict, which is
+// the same "logical identity unit ≠ serialized namespace unit" shape as the per-judge/per-case arbitration
+// bug — one level down, in the name itself. Structured score identity would dissolve it; until then the
+// separator is reserved.
+const JudgeIdSchema = z
+  .string()
+  .min(1)
+  .refine((id) => !id.includes(":"), {
+    message: "A judge id may not contain ':' — it separates a judge's metric family from its criteria.",
+  });
+
 // Verdict input modality — what the verdict is based on (trace=execution record, dom/screenshot=browser result → VLM).
 export const JudgeInputSchema = z.enum(["trace", "dom", "screenshot"]);
 export type JudgeInput = z.infer<typeof JudgeInputSchema>;
@@ -31,7 +45,7 @@ const judgePromptFields = {
 // model judge: calls an LLM/VLM directly. Renders a verdict from the rubric (criteria) + input modality → {pass, score, reason}.
 export const ModelJudgeSpecSchema = z.object({
   kind: z.literal("model"),
-  id: z.string(),
+  id: JudgeIdSchema,
   version: VersionSchema,
   description: z.string().optional(),
   provider: z.enum(["anthropic", "openai"]).default("anthropic"), // fallback provider for a RAW-STRING model; a registered-model ref derives it from the ModelSpec
@@ -56,7 +70,7 @@ export type ModelJudgeSpec = z.infer<typeof ModelJudgeSpecSchema>;
 // model/harness judges remain ENGINE-INTERNAL for already-registered specs; new registration surfaces expose code only.
 export const CodeJudgeSpecSchema = z.object({
   kind: z.literal("code"),
-  id: z.string(),
+  id: JudgeIdSchema,
   version: VersionSchema,
   description: z.string().optional(),
   language: z.enum(["python", "node"]),
@@ -76,7 +90,7 @@ export type CodeJudgeSpec = z.infer<typeof CodeJudgeSpecSchema>;
 // harness judge: delegates the verdict to a registered harness (agent). version is resolved at run time (latest allowed).
 export const HarnessJudgeSpecSchema = z.object({
   kind: z.literal("harness"),
-  id: z.string(),
+  id: JudgeIdSchema,
   version: VersionSchema,
   description: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
