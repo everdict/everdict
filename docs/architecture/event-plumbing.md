@@ -294,7 +294,7 @@ resume from their own cursor/history.
   `reaction` is in `DRIVER_WORKFLOW_FAMILIES` from day one. **Gate hardening SHIPPED**: every activation
   launch path (spec triggers, subscription rules, reaction-workflow steps) now asks the tenant budget
   BEFORE the run exists (`POST /internal/activations/admit` — 402 skips visibly; a chain step answers
-  {skipped} so an exhausted budget stops the chain), and the gate's causal leg gained O7's third knob (the
+  `{skipped}` so an exhausted budget stops the chain), and the gate's causal leg gained O7's third knob (the
   per-envelope in-flight cap, counted live from the run ledger — born-queued stands, the cap is the
   runaway-flood backstop). Remaining rung: relocating the agent-spec trigger fields onto subscriptions —
   deliberately AFTER the Settings › Subscriptions surface (shipped) has proven the replacement (additive

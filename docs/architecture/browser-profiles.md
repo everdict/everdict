@@ -69,7 +69,7 @@ Browser-sessions settings tab), but proxies now have their own **Settings › Br
 - **A WS-relay-to-the-web precedent already exists.** The sandbox web terminal: `Shellable.execStream` →
   `ExecStreamHandle` (`packages/backends/src/backend.ts:111`) relayed over a `noServer` `WebSocketServer`
   (`apps/api/src/server.ts:3583`), authed by a short-lived single-use **ticket** (`TerminalTicketStore`,
-  `apps/api/src/lib/terminal-ticket.ts`) because a browser can't set an `Authorization` header on a WebSocket. The
+  `apps/api/src/common/terminal-ticket.ts`) because a browser can't set an `Authorization` header on a WebSocket. The
   browser session route is the same shape with CDP frames/input instead of PTY bytes.
 - **Object storage + encryption for the cookie blob.** `packages/storage` (artifact-store + s3) for the
   `storageState` blob; `db` `secret-cipher` for encryption at rest (cookies = login credentials).

@@ -54,7 +54,7 @@ At dispatch (`ModelResolvingDispatcher`, `apps/api`) the resolved model injects,
 
 `ModelRef.env` overrides any of these names for a CLI/agent server that reads different ones
 (`{ apiKey: "LLM_KEY", baseUrl: "LLM_URL", model: "LLM_MODEL" }`). The injected connection **wins** over a literal
-the harness `env` already set for the same var. Semantics (`packages/domain/src/harness/model-binding.ts`):
+the harness `env` already set for the same var. Semantics (`packages/domain/src/model/model-binding.ts`):
 `modelConnectionEnv` / `modelApiKeySecretName` / `normalizeModelBinding`.
 
 Missing-key rule: an **explicitly named** `apiKeySecret` that is set in no tier is a fail-fast `400`; relying on the

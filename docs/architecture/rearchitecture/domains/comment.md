@@ -1,7 +1,10 @@
 # Comment — collaboration model
 
 > Threaded discussion on workspace resources. Companion to `../00-target-architecture.md` (§4
-> `domain/comment`, §9). Status: PROPOSED — review artifact, no code moves.
+> `domain/comment`, §9). Status: HISTORICAL — a review artifact from the re-architecture review, never updated after it landed.
+> The umbrella migration SHIPPED on 2026-07-10 (`../00-target-architecture.md`), so every
+> `packages/{core,suite,run-case,billing}` and `apps/api/src/core/**` path cited below names the
+> **pre-migration** layout, not today's. Read it for the reasoning, not for the addresses.
 
 ## Purpose & language
 

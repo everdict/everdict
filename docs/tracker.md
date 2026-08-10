@@ -617,7 +617,7 @@ calling that active made every idea look like work in flight. Moving to `active`
 (`POST /initiatives/:id/status`), like completing is. It also carries the rest of what a goal has — an `icon`
 (one emoji, so it is recognizable in a list before its name is read; emoji rather than a colour, because a
 colour needs a closed theme-mapped vocabulary and a nine-swatch palette says less than 🎯 does), `memberIds`
-(who is on it, a statement about THIS goal rather than a second directory) and `resources` ({label, url}, the
+(who is on it, a statement about THIS goal rather than a second directory) and `resources` (`{label, url}`, the
 design doc / dashboard / thread you open to understand it) — mig `0122`.
 
 **Both carry the human half too**: a `lead` (who is answerable) and a `health` — the flag on the LATEST posted

@@ -18,7 +18,7 @@ carries only `harness: {id, version}` — a *reference*; the registry turns that
 ## Declarative SSOT (files / GitOps)
 `loadHarnessDir(dir)` builds a registry from a directory of `*.json` `HarnessSpec` files (each validated by
 `HarnessSpecSchema`). Version-controlled files are the authoritative source — reviewable, immutable, diffable.
-See `examples/harnesses/` (`bu-1.0.0.json`, `bu-1.1.0.json`).
+See `examples/harness-templates/` (`bu-1.0.0.json`, `bu-1.1.0.json`).
 
 ```jsonc
 // examples/harnesses/bu-1.1.0.json
@@ -28,7 +28,7 @@ See `examples/harnesses/` (`bu-1.0.0.json`, `bu-1.1.0.json`).
 ## How it plugs in
 `ServiceTopologyBackend` takes `specFor: (id, ref) => ServiceHarnessSpec` — wire it straight to the registry:
 ```ts
-const registry = loadHarnessDir("examples/harnesses");
+const registry = loadHarnessDir("examples/harness-templates");
 new ServiceTopologyBackend({ runtime, traceSource, specFor: (id, ref) => registry.getService(id, ref), ... });
 ```
 A job that references `version: "latest"` is resolved to the concrete version at dispatch; `CaseResult.harness`

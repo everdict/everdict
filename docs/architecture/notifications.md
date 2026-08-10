@@ -164,5 +164,5 @@ turn into its deny-on-expiry. The kind `agent_approval_requested` brings the ask
   event log, per the O1 narrowing).
 
 ## See also
-[connections.md](../connections.md) (Mattermost notify) · [desktop-app.md](./desktop-app.md) (D1/D4) ·
+[workspace-scoped-integrations.md](./workspace-scoped-integrations.md) (Mattermost notify) · [desktop-app.md](./desktop-app.md) (D1/D4) ·
 [scheduled-evals.md](./scheduled-evals.md) (schedule fire/finalize).

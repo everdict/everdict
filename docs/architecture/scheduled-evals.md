@@ -49,7 +49,7 @@ automated regression monitoring with near-zero new analytics code.
 
 ## Current state — verified
 
-- **Trigger is one call** — `ScorecardService.submit(RunScorecardInput)` (`apps/api/src/execution/scorecard-service.ts`)
+- **Trigger is one call** — `ScorecardService.submit(RunScorecardInput)` (`packages/application-control/src/scorecard/scorecard-service.ts`)
   → `queued` record → async batch via the in-process **`dispatcher`** (Scheduler/Router).
 - **Scorecards do NOT go through Temporal today.** `scorecardService` holds a `Dispatcher` and never touches the
   `Orchestrator`. (Single runs via `RunService` *can* use the Orchestrator; scorecards don't.)
@@ -162,7 +162,7 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
   `handle.describe().info.nextActionTimes`, one connection for the whole list; best-effort — failure/absence just
   omits the field). Non-persisted, attached at read time; internal reads (`update`/`remove`/`fire`/`finalize`)
   use a private `getRecord` that skips the Temporal round-trip. When Temporal is not deployed (no driver) the web
-  falls back to a dependency-free cron computation (`apps/web/.../shared/lib/cron.ts`, Intl-based, IANA-tz/DST
+  falls back to a dependency-free cron computation (`apps/web/src/shared/lib/cron.ts`, Intl-based, IANA-tz/DST
   safe) and marks those rows **(estimated)**.
 - **Internal** — `POST /internal/schedules/:id/fire`, `GET /internal/schedules/:id/last-status` (`x-internal-token`).
 - **Roles** — new `schedules:read` (viewer+) / `schedules:write` (member+) in the authz matrix; gate mutating

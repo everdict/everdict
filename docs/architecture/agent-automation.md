@@ -30,7 +30,7 @@
 
 ## Why chat-only is limiting (the gaps)
 
-1. **Teammates are volatile and invisible.** The roster is an in-memory `Map` in `apps/agent/server.ts` —
+1. **Teammates are volatile and invisible.** The roster is an in-memory `Map` in `apps/agent/src/server.ts` —
    an agent-service restart silently kills every standing agent; nothing but the spawner's chat header
    shows they exist. "Many agents running all over the platform" cannot be built on this.
 2. **Events are thin and unreliable.** Four completion facts, fire-and-forget HTTP, no persistence — no

@@ -2,7 +2,7 @@
 
 > **Status:** design (S0). SSOT for the migration from **personal Connected accounts** to
 > **workspace-owned integrations**. Supersedes the outbound-OAuth connection model in
-> `docs/connections.md` for GitHub/GHE/Mattermost (that doc is retired in S6).
+> `docs/architecture/workspace-scoped-integrations.md` for GitHub/GHE/Mattermost (that doc is retired in S6).
 
 ## Why
 
@@ -133,7 +133,7 @@ simply no longer read/written (old rows parse and are rewritten without them).
 
 ## Token minting (the core)
 
-`apps/api/src/oauth/github-app.ts` (new), host-aware like `github.ts`:
+`apps/api/src/infrastructure/oauth/github-app.ts` (new), host-aware like `github.ts`:
 
 1. **App JWT** — sign `{ iss: appId, iat, exp<=10m }` with RS256 using the App private key.
 2. **Installation token** — `POST {apiBase}/app/installations/{id}/access_tokens` with
@@ -160,7 +160,7 @@ against the submitter. New: reference the **workspace installation** instead. Th
 env.source = { git: "https://github.com/acme/api", ref: "main", via: "workspace-github-app" }
 ```
 
-`apps/api/src/execution/execute-case.ts` gains one branch: if the source is a workspace-github-app source, mint
+`packages/application-control/src/execution/execute-case.ts` gains one branch: if the source is a workspace-github-app source, mint
 an installation token (by workspace) instead of pulling a personal connection token. The CI-link repo
 picker (`ci-link-service.ts listRepos`) switches from the personal token to the installation's
 `GET {apiBase}/installation/repositories`.
@@ -287,7 +287,7 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
   OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
   MCP tools/web `manage-connections` + `entities/connection` + account "Connected accounts" tab +
   applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `everdict_connections` **drop
-  migration** (expand→contract; preflight note). Retire `docs/connections.md`. Keep
+  migration** (expand→contract; preflight note). Retire `docs/architecture/workspace-scoped-integrations.md`. Keep
   `API_PUBLIC_URL`/`WEB_BASE_URL` (the App install callback + Mattermost inbound URLs use them).
 - **S7–S8 — Mattermost inbound (slash commands + button actions) — SHIPPED.** Public routes
   `POST /integrations/mattermost/{command,action}` — workspace routed by `?ws=<slug>` (slug not

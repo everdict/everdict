@@ -45,8 +45,8 @@ not formulas"). That is not a proper harness; the environment contract leaked.
 ## Current state — verified (file:line)
 
 - **The environment contract already exists as data:** `EvalCase.image` (+ `placement`) — a case names the
-  container image that carries its toolchain (`packages/core/src/execution/eval-case.ts`). `runCase` passes it straight to
-  the driver: `driver.provision({ os, needs, image: evalCase.image })` (`packages/run-case/src/run-case.ts:25`).
+  container image that carries its toolchain (`packages/contracts/src/execution/eval-case.ts`). `runCase` passes it straight to
+  the driver: `driver.provision({ os, needs, image: evalCase.image })` (`packages/application-execution/src/run-case.ts:25`).
 - **A container driver already exists and is proven:** `DockerDriver` (`packages/drivers/src/docker.ts`) provisions
   `spec.image ?? defaultImage` as a container `ComputeHandle` (`docker run` keep-alive + `docker exec`). The managed
   **`DockerBackend`** runs cases in their image via exactly this: `runCaseJob(job, { driver: new DockerDriver(...) })`

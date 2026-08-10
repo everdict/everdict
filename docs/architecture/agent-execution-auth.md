@@ -3,7 +3,7 @@
 > **Status: doc-first SSOT (2026-07-24).** The crux dependency of
 > [agent-teams.md](./agent-teams.md) S3 (teammates) / S4 (event bridge) / S5 (proactive): a teammate or a
 > proactively-woken agent runs **without a live HTTP request**, so there is no forwarded user bearer for the
-> control-plane MCP tools it calls. It needs its own credential. Builds on [auth.md](./auth.md) (the control
+> control-plane MCP tools it calls. It needs its own credential. Builds on [auth.md](../auth.md) (the control
 > plane owns all auth; every credential resolves to a `Principal`).
 
 ## Problem

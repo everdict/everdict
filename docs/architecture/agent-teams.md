@@ -147,7 +147,7 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   permission modes/rules; wire file-mutating eval work through the dispatch/isolation path (+ worktree
   isolation for local file work). The agent runs, not just discusses, evals.
 
-  **Design (ready to drop in).** `apps/agent/mcp-tools.ts` already gates the base surface with an allowlist:
+  **Design (ready to drop in).** `apps/agent/src/mcp-tools.ts` already gates the base surface with an allowlist:
   read verbs (skip the HITL gate) + a curated `INTEGRATION_ACTIONS` set (Mattermost/CI/registry actions,
   bridged `isReadOnly:false` so the HITL gate approves each). S6 adds a sibling **`EVAL_ACTIONS`** curated
   allowlist — the eval-driving verbs — exposed **opt-in** (`AGENT_ALLOW_EVAL_DRIVE`, default off; the default

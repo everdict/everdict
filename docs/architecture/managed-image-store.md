@@ -197,7 +197,7 @@ grant at an arbitrary repository in someone else's namespace is not a request we
     runs at all — a bind mount with a missing source is created by the docker DAEMON, i.e. owned by root,
     and `full.sh` can then never write the key pair into it. `full.sh` therefore creates it unconditionally
     as the invoking user, and refuses with a `chown` instruction when it finds one it cannot write.
-  - The exchange logic lives in `@everdict/images` (`ImageTokenService`), not in `apps/api/core`:
+  - The exchange logic lives in `@everdict/images` (`ImageTokenService`), not in `apps/api/src/core`:
     nothing in it knows about HTTP frameworks, and keeping it beside the issuer is what lets the live
     check exercise the real code path instead of a re-implementation of it.
 - **M4 — dispatch.** ✅ `buildImagePullAuths` is the ONE answer to "what does this job need to pull its

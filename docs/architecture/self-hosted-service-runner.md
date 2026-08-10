@@ -154,10 +154,10 @@ its retry adopts); a true cross-process lock stays a non-goal on a personal host
 
 - `packages/topology/src/deploy/docker-runtime.ts` — **new**: `DockerTopologyRuntime` + injectable `Docker` adapter
   (slice 1); barrel export in `index.ts`.
-- `packages/topology/src/docker-topology.ts` — **new (if needed)**: pure docker-arg builders (deterministic-tested),
+- `packages/topology/src/deploy/docker.ts` — **new (if needed)**: pure docker-arg builders (deterministic-tested),
   mirroring `nomad-topology.ts`/`k8s-topology.ts`.
 - `apps/cli/src/main.ts` — `runLeasedJob` kind-branch (slice 2); `apps/cli/package.json` deps (`@everdict/topology`,
   `@everdict/trace`).
-- `apps/api/src/runners/runner-hub.ts` / `mcp.ts` — `lease_job` capability gating for service jobs (slice 3).
+- `packages/application-control/src/runner/runner-hub.ts` / `mcp.ts` — `lease_job` capability gating for service jobs (slice 3).
 - Docs/skill: `docs/architecture/self-hosted-runner.md` (link this extension) + the `topology` skill reference
   (the third `TopologyRuntime`) travel with the change.

@@ -1009,5 +1009,5 @@ flowchart LR
 - Backend vs Driver, scheduling, trust zones — [`../execution-backends.md`](../execution-backends.md)
 - Service harnesses & trace ingestion — [`../service-harness.md`](../service-harness.md)
 - HTTP API & MCP — [`../api.md`](../api.md) · [`../mcp.md`](../mcp.md)
-- Conventions (SSOT) — [`../../CLAUDE.md`](../../CLAUDE.md) + `../../.claude/`
+- Conventions (SSOT) — [`CLAUDE.md`](https://github.com/everdict/everdict/blob/main/CLAUDE.md) + `../../.claude/`
 </content>

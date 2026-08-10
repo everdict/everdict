@@ -1,0 +1,21 @@
+# Guide — the product documentation
+
+Written for someone using Everdict, not maintaining it. This is the tree the public docs site
+publishes as `/docs`; the design records under [`../architecture/`](../architecture/overview.md) are a separate,
+maintainer-facing section. See [`../architecture/docs-site.md`](../architecture/docs-site.md) for how
+the two map onto the site.
+
+## Get started
+- [What is Everdict](start/what-is-everdict.md) — what it does, what it refuses to do, and who it is for
+- [Quickstart](start/quickstart.md) — the whole stack on your machine in one command
+- [Your first scorecard](start/first-scorecard.md) — dataset × harness → a verdict you can defend
+- [Connect an agent](start/connect-an-agent.md) — MCP, API keys, and the Claude Code plugin
+
+## Core concepts
+- [Overview](concepts/README.md) — the seven nouns, and how one run flows through them
+- [Run](concepts/run.md) · [Harness](concepts/harness.md) · [Dataset](concepts/dataset.md) ·
+  [Grader & Judge](concepts/grader-and-judge.md) · [Scorecard](concepts/scorecard.md) ·
+  [Verdict](concepts/verdict.md) · [Workspace](concepts/workspace.md)
+
+## Self-hosting
+- [Overview](self-host/overview.md) — deployment shapes, what each one needs, and what to decide first

@@ -89,7 +89,7 @@ the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. T
   structure + pins → validate against `HarnessSpecSchema` → return the resolved spec. `latest` on the id = latest
   instance (semver, else last-registered — unchanged).
 - **No legacy path.** `register()` accepts a template or an instance — never a raw full `HarnessSpec`. The
-  `_shared` example harnesses (`examples/harnesses/bu-1.0.0.json` etc.), `loadHarnessDir`, `RunService`'s
+  `_shared` example harnesses (`examples/harness-templates/bu-1.1.0.instance.json` etc.), `loadHarnessDir`, `RunService`'s
   `resolveHarness`, `ServiceTopologyBackend.specFor`, and the In-memory/Pg registries are all converted to the
   template/instance shape in the same change set.
 
@@ -154,7 +154,7 @@ All Track A phases land together as the clean break (no dual path is ever shippe
 
 1. **Core**: `TemplateSpec` + instance schema; `resolve(template, pins) → HarnessSpec`; demote `HarnessSpecSchema`
    to resolved-only (remove it as a registration input).
-2. **Registry**: template store (in-memory + Pg, migration) + instance resolution; **convert** `examples/harnesses`
+2. **Registry**: template store (in-memory + Pg, migration) + instance resolution; **convert** `examples/harness-templates`
    + `loadHarnessDir` + seeds to template/instance; delete the flat full-spec registration path.
 3. **Auth**: `templates:write` (admin) vs instance `harnesses:register` (member).
 4. **API + MCP**: template routes/tools + instance register (pins) + grouped list; update every caller
@@ -165,7 +165,7 @@ All Track A phases land together as the clean break (no dual path is ever shippe
 
 > Blast radius (single change set): `@everdict/contracts` harness-spec, `@everdict/registry` (in-memory + Pg + loaders +
 > migration), `@everdict/auth` authz matrix, `apps/api` (server + mcp + run-service), `apps/web` register-harness +
-> harnesses pages, `examples/harnesses/*`, and the tests across all of them.
+> harnesses pages, `examples/harness-templates/*`, and the tests across all of them.
 
 ## Cutover map (current state → target) — surveyed Phase 1/2 done
 
@@ -174,10 +174,10 @@ The in-memory + Pg `HarnessInstanceRegistry` (Phase 2) already exposes `get()/ge
 **resolved** `HarnessSpec`, so the read bucket is a **zero-signature drop-in**.
 
 **Bucket A — read-only `.get()/.getService()` → swap the injected registry to `HarnessInstanceRegistry` (no code change at the call site):**
-- `apps/api/src/execution/run-service.ts` `resolveHarness(tenant,id,version)` — wired in `main.ts:165` to `registry.get`.
-- `apps/api/src/execution/scorecard-service.ts:127,431` — `this.deps.harnesses.get(...)` (`harnesses: HarnessRegistry`).
-- `apps/api/src/execution/topology-backend.ts` `ServiceTopologyBackend.specFor` — `deps.harnesses.get(...)` → must be `kind:service`.
-- `apps/api/src/execution/judge-runner.ts` — harness-judge resolution via the injected harness registry.
+- `packages/application-control/src/run/run-service.ts` `resolveHarness(tenant,id,version)` — wired in `main.ts:165` to `registry.get`.
+- `packages/application-control/src/scorecard/scorecard-service.ts:127,431` — `this.deps.harnesses.get(...)` (`harnesses: HarnessRegistry`).
+- `apps/api/src/core/execution/topology-backend.ts` `ServiceTopologyBackend.specFor` — `deps.harnesses.get(...)` → must be `kind:service`.
+- `apps/api/src/core/execution/judge-runner.ts` — harness-judge resolution via the injected harness registry.
   (RuntimeDispatcher reaches topology via `buildTopologyBackend({harnesses})`.)
 
 **Bucket B — write/list/validate surface → re-shaped (this is the real work + the auth change):**
@@ -190,10 +190,10 @@ The in-memory + Pg `HarnessInstanceRegistry` (Phase 2) already exposes `get()/ge
   `register_template`/`list_templates`. (BFF↔MCP parity — same service core.)
 
 **Wiring (`apps/api/src/main.ts`):** replace the single `registry` with `templateRegistry` + `instanceRegistry`
-(InMemory or Pg by `DATABASE_URL`); `seedSharedHarnesses` → `loadHarnessTaxonomyDir(examples/harnesses)`; pass
+(InMemory or Pg by `DATABASE_URL`); `seedSharedHarnesses` → `loadHarnessTaxonomyDir(examples/harness-templates)`; pass
 `instanceRegistry` to Bucket-A consumers, both to `buildServer`/MCP.
 
-**Examples to convert** (`examples/harnesses/*`, flat → `*.template.json` + `*.instance.json`): `bu-1.0.0`,
+**Examples to convert** (`examples/harness-templates/*`, flat → `*.template.json` + `*.instance.json`): `bu-1.0.0`,
 `bu-1.1.0` (one `bu.template` + two instances), `aider-0.74.0`, `aider-litellm`, `desktop-osworld-agent`,
 `desktop-ssh-agent`, `desktop-ssh-settings-agent`.
 
@@ -201,8 +201,8 @@ The in-memory + Pg `HarnessInstanceRegistry` (Phase 2) already exposes `get()/ge
 `loadHarnessDir` (+ their tests) once Bucket A is on the instance registry — nothing registers a raw `HarnessSpec`
 anymore. Keep shared helpers (`asService`, `compareVersions`, `resolveRef`, `SHARED_TENANT`, `LATEST`).
 
-**Collision note:** Bucket B + wiring + examples touch `apps/api/server.ts`/`mcp.ts`/`scorecard-service.ts`/
-`main.ts` + `apps/web` harness pages + `packages/auth/authz.ts` — all in the **active concurrent-edit zone**
+**Collision note:** Bucket B + wiring + examples touch `apps/api/src/server.ts`/`mcp.ts`/`scorecard-service.ts`/
+`main.ts` + `apps/web` harness pages + `packages/domain/src/auth/authz.ts` — all in the **active concurrent-edit zone**
 (member-management + models, which currently leaves the tree RED). Cutover is one atomic change set; run
 it when that work has landed and the tree is green. Bucket A swaps are mechanical once the wiring flips.
 

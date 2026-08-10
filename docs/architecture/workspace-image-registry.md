@@ -104,7 +104,7 @@ No new table, no migration: additive JSONB on `everdict_workspace_settings` + va
 
 ## Classification — `classifyImageRef`
 
-`packages/core/src/infra/image-ref.ts`. Follows the Docker reference grammar: the first path
+`packages/domain/src/image/image-ref.ts`. Follows the Docker reference grammar: the first path
 component is a **registry host iff** it contains `.` or `:` or equals `localhost`.
 
 | Class | Meaning | Examples (registry = `ghcr.io/acme`) |
@@ -127,7 +127,7 @@ instance/harness registration responses gain `imageWarnings` listing pins whose 
 
 ## Surface (BFF↔MCP parity, one service core)
 
-`apps/api/src/integrations/image-registry-service.ts` (`ImageRegistryService`), routes in `server.ts`,
+`packages/application-control/src/image-registry/image-registry-service.ts` (`ImageRegistryService`), routes in `server.ts`,
 tool twins in `mcp.ts`:
 
 | HTTP | MCP tool | Gate |

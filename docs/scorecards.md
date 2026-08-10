@@ -82,7 +82,7 @@ run-time grader's `authority`/`direction` declaration built — rides IN FULL in
 
 `unresolvable` is the whole point. Falling back to the default there rewrites history silently: a composed
 policy's custom ground truth disappears and the built-in ladder re-decides every case. Concretely:
-- **Serving** (`apps/api/.../serve.ts`): the detail response carries `policyResolution`, and on `unresolvable`
+- **Serving** (`apps/api/src/api/scorecard/serve.ts`): the detail response carries `policyResolution`, and on `unresolvable`
   the per-case `verdict`/`verdictBasis`, `casePass` and `outcomes` are **absent** (`evidenceStatus` still
   rides — it reads the result alone). The web shows a callout instead of a rollup; it never renders a 0%.
 - **Comparing** (`GET /scorecards/diff`): each side resolves its OWN policy, and each side's trials are

@@ -29,7 +29,7 @@
   digo `permissions` subsystem is ported then, not now.
 - **D3 — workspace model↔secret binding.** The agent's LLM uses the workspace's own registered model + key,
   via the existing `ModelSpec` registry + `SecretStore` (`modelConnectionEnv` / `modelApiKeySecretName` in
-  `packages/domain/src/harness/model-binding.ts`). The tenant's key is used and cost is attributed to them.
+  `packages/domain/src/model/model-binding.ts`). The tenant's key is used and cost is attributed to them.
 - **D4 — web surface = a right-panel tab.** Agent conversations appear as a new **`agent` tab in the infra
   split-view panel** (`apps/web/src/widgets/infra-panel`), next to schedules/runtimes/runs/work — an embedded
   component (like `WorkTab`), not an iframe-hosted page. History is a session list; a session is a streaming
@@ -53,7 +53,7 @@ apps/api /mcp  (existing 121-tool surface; agent reuses it — dogfooding)
 ### `packages/agent-runtime` — the ported kernel (domain-agnostic)
 
 Depends only on `@everdict/contracts` + `openai` + `@modelcontextprotocol/sdk` + `zod`. Reinterpreted from
-`digo-agent/src/runtime/*` ([kernel map is faithful to Claude Code](../../../digo-data/apps/digo-agent/.claude/skills/claude-code-follow/SKILL.md)):
+`digo-agent/src/runtime/*` (its kernel map is faithful to Claude Code):
 
 | area | ported from | purpose |
 |---|---|---|

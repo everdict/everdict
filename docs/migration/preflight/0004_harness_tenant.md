@@ -13,6 +13,6 @@
   block and dedupe first. Not applicable to the empty/initial table.
 
 **Invariant:** `(tenant, id, version)` is unique + immutable; tenant resolution prefers the tenant, else
-`_shared` (`packages/registry/src/registry.test.ts`; live `apps/api`).
+`_shared` (`packages/registry/src/registry-contract.test.ts`; live `apps/api`).
 
 **Rollback (contract):** repoint PK back to `(id, version)` then `DROP COLUMN tenant` — only after no code uses it.

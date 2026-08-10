@@ -103,7 +103,7 @@ image/install versions.
   **gpt-5.4-mini** served by workclaw's LiteLLM (`--model openai/chatgpt/gpt-5.4-mini` + `OPENAI_API_BASE`/
   `OPENAI_API_KEY`), and Everdict graded it **tests-pass = PASS** — end-to-end, zero adapter code. Gotchas for a
   LiteLLM responses-bridged model: aider needs **`--no-stream`** (streaming garbles the bridged output → no edit
-  applied) and **`--edit-format whole`** (robust for weaker models). See `examples/harnesses/aider-litellm.json`.
+  applied) and **`--edit-format whole`** (robust for weaker models). See `examples/harness-templates/aider-litellm.template.json`.
 - **aider live on Nomad** (`scripts/live/aider-nomad.mjs`): the same aider+gpt-5.4-mini eval run **inside a real
   Nomad alloc** (docker driver) → `tests-pass = PASS` in ~10s. `NomadBackend` injects the LiteLLM key via
   `secretEnv` (→ alloc env → inherited by aider); the base **`everdict-job-runner` image bakes in `python3` + `aider`**

@@ -28,8 +28,8 @@ axes**:
 Everything except **model** already exists (`Scorecard = dataset@v × harness@v`, `diffScorecards` for A-vs-B,
 `trendSeries` for experiment-over-time, `summarizeScorecard` for per-metric pass rate). The one gap is that
 **`model` is captured nowhere**: it lives only inside each trace as per-call `llm_call.model`
-(`packages/core/src/execution/trace.ts:18`) and as a spec input (`CommandHarnessSpec.model`,
-`packages/core/src/harness/harness-spec.ts:222`; judge `model`), neither of which survives into the aggregated record.
+(`packages/contracts/src/execution/trace.ts:18`) and as a spec input (`CommandHarnessSpec.model`,
+`packages/contracts/src/harness/harness-spec.ts:222`; judge `model`), neither of which survives into the aggregated record.
 
 **Key insight — model is per-run, not per-harness-version.** The same `command` harness version can be re-pinned
 to a different `model`; a `process` harness (Claude Code) uses the machine login and pins **no** model at all
@@ -45,11 +45,11 @@ derived from the harness spec. This is why model is a run-derived tag, **not** a
   even synthesizes it from `spec.model` when proxying usage. This is the observed-model source of truth.
 - **Declared model** — only `CommandHarnessSpec.model` (`harness-spec.ts:222`); `process`/`service` specs have
   none. Judge model is `ModelJudgeSpec.model` (separate axis — the *scorer*, not the harness-under-test).
-- **Aggregation already lightweight-driven** — `trendSeries` (`packages/suite/src/trend.ts`) consumes a
+- **Aggregation already lightweight-driven** — `trendSeries` (`packages/domain/src/scorecard/trend.ts`) consumes a
   `TrendCard` that `ScorecardRecord` **structurally satisfies** (suite has no `db` dep). A leaderboard is the same
   pattern: rank instead of time-order.
 - **Analytics that exist** — `summarizeScorecard` / `diffScorecards` / `trendSeries` / `scorecardPassRate`
-  (`packages/suite/src/scorecard.ts` + `trend.ts`); web pages list / detail / **compare** / **trend**
+  (`packages/domain/src/scorecard/scorecard.ts` + `trend.ts`); web pages list / detail / **compare** / **trend**
   (`apps/web/.../scorecards/*`). **No** ranking/leaderboard view and **no** model column anywhere today.
 - **Store filtering** — `ScorecardStore.list(tenant?)` filters by tenant only; trend/diff filter in the service.
   The leaderboard follows suit (filter+group in the service over `list`), no new store query in v1.

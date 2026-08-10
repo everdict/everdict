@@ -17,7 +17,7 @@ generalization; `codex`+`pinch` is the bundle that plugs into it.
 
 ## Current state — verified (audit)
 
-- **Declarative harness** — `CommandHarnessSpec` (`packages/core/src/harness/harness-spec.ts`) expresses any CLI agent
+- **Declarative harness** — `CommandHarnessSpec` (`packages/contracts/src/harness/harness-spec.ts`) expresses any CLI agent
   (setup + `command` with `{{task}}`/`{{model}}`/`{{run_id}}`/`{{param}}` + `trace: none|otel|mlflow`) with **no
   code**. codex fits directly (`packages/harnesses/src/command.ts`). Trace/model/cost come from OTel/MLflow pull or
   the usage-proxy fallback.
@@ -100,7 +100,7 @@ Applied via `POST /bundles/apply` (tenant self-serve) OR seeded to `_shared` via
 ## Slices
 
 1. ✅ **Bundle apply core + surface** — `BundleSchema` + `BundleService.apply` (idempotent fan-out,
-   per-item `ok|conflict|error|skipped`) + `requiredActionsForBundle` (`apps/api/bundle-service.ts`) +
+   per-item `ok|conflict|error|skipped`) + `requiredActionsForBundle` (`apps/api/src/core/bundle/bundle-service.ts`) +
    `POST /bundles/apply` + MCP `apply_bundle` (per-piece gates composed from bundle contents, no new authz
    action) + wired in `main.ts` (all registries) + `examples/bundles/codex-pinch/{bundle.json,README.md}`. Tests:
    `bundle-service.test.ts` (fan-out ok/conflict/skipped + required-actions + **real-artifact guard**: the shipped

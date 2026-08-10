@@ -1,8 +1,10 @@
 # View — collaboration model
 
 > Saved scorecard-analysis lenses. Companion to `../00-target-architecture.md` (§4, §9). Design
-> SSOT today: `docs/architecture/scorecard-analysis-views.md`. Status: PROPOSED — review
-> artifact, no code moves.
+> SSOT today: `docs/architecture/scorecard-analysis-views.md`. Status: HISTORICAL — a review artifact from the re-architecture review, never updated after it landed.
+> The umbrella migration SHIPPED on 2026-07-10 (`../00-target-architecture.md`), so every
+> `packages/{core,suite,run-case,billing}` and `apps/api/src/core/**` path cited below names the
+> **pre-migration** layout, not today's. Read it for the reasoning, not for the addresses.
 
 ## Purpose & language
 

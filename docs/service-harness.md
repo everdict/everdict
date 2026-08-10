@@ -771,7 +771,7 @@ data** and dispatches it through the **real HTTP control plane** — what a SaaS
 - `examples/datasets/hermes-desktop-ssh.json` — a `Dataset` whose single `EvalCase` is the os-use SSH task (env
   `os-use` + setup, `graders:[judge useScreenshot]`, `placement.target:"docker"`); seeded to `_shared`, served at
   `GET /datasets`.
-- `examples/harnesses/desktop-ssh-agent.json` — the `command` desktop agent (`workDir:"/tmp"`); served at
+- `examples/harness-templates/desktop-ssh-agent.instance.json` — the `command` desktop agent (`workDir:"/tmp"`); served at
   `GET /harnesses`.
 - Execution runtime — the os-use case's `image` runs in a local container. When this section first shipped, a
   registerable `docker` `RuntimeSpec` (`examples/runtimes/docker-1.0.0.json`) resolved `placement.target:"docker"` →
@@ -1066,17 +1066,17 @@ dev agent stopped + stub image removed afterward.)
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
-{{run_id}}` command + trace none/otel/mlflow) — no code adapter. But the first-party presets in `examples/harnesses`
+{{run_id}}` command + trace none/otel/mlflow) — no code adapter. But the first-party presets in `examples/harness-templates`
 (aider, aider-litellm, the `bu` service topology) were **not seeded** at startup (unlike datasets/judges/runtimes),
 so they weren't available to tenants out of the box. `main.ts` now calls `seedSharedHarnesses` (`loadHarnessDir` from
-`EVERDICT_HARNESSES_DIR`, default `examples/harnesses`) alongside the other seeders, so first-party harnesses load into
+`EVERDICT_HARNESSES_DIR`, default `examples/harness-templates`) alongside the other seeders, so first-party harnesses load into
 `_shared` and every tenant can evaluate with them immediately (or register their own, which coexist).
 
-**Verified live** (real API): startup logs `▶ shared harnesses seeded from …/examples/harnesses`, and
+**Verified live** (real API): startup logs `▶ shared harnesses seeded from …/examples/harness-templates`, and
 `GET /harnesses` for a fresh tenant returns `aider(_shared)`, `aider-litellm(_shared)`, `bu(_shared)`; after the
 tenant registers `my-agent`, the list is `[aider(_shared), aider-litellm(_shared), bu(_shared), my-agent(acme)]` —
 first-party + tenant harnesses side by side. A guard test (`harness-seed.test.ts`) parses every
-`examples/harnesses/*.json` against `HarnessSpecSchema` (both `command` and `service` kinds) so a malformed preset
+`examples/harness-templates/*.json` against `HarnessSpecSchema` (both `command` and `service` kinds) so a malformed preset
 can't regress the catalog. (Adding a new first-party agent is now just dropping a `command` spec JSON in the dir.)
 
 #### Judge threaded through the normal dispatch path ✅
@@ -1114,7 +1114,7 @@ alloc end-to-end, with the credential kept on the separate secret channel.
 **Per-job key resolution (`CaseJob.judgeAuth`) + dispatch preflight.** The backend-level `secretEnv` channel carries
 only the WORKSPACE secret tier (it is baked into the cached backend), so a submitter whose provider key was a
 *personal* secret used to get a working harness but a silently skipped judge on managed runtimes. `JudgeAuthDispatcher`
-(`apps/api/core/execution`, wrapping the shared dispatcher OUTSIDE `RuntimeDispatcher`) now resolves the credential
+(`apps/api/src/core/execution`, wrapping the shared dispatcher OUTSIDE `RuntimeDispatcher`) now resolves the credential
 per job at dispatch — **workspace tier first, the submitter's personal key as fallback** — onto the transient
 `CaseJob.judgeAuth {apiKey, baseUrl?}` (never persisted, same discipline as `repoToken`/`registryAuth`); both
 backends spread `judgeAuthEnv(job.judge, job.judgeAuth)` AFTER `secretEnv` so the job-level credential wins. When a

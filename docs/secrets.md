@@ -70,7 +70,7 @@ fresh access token on demand — a consumer referencing the secret never deals w
 ## Injection into runs
 At dispatch, a store-backed `SecretProvider` gives the backend **only that tenant's** secrets, which are injected
 into the job env (Nomad alloc / K8s Job) — never crossing tenants. So a harness (e.g. aider) sees
-`OPENAI_API_KEY` etc. as env. Wired in `apps/api/main.ts` (`secretsFor: (t) => secretStore.entries(t)`), reusing
+`OPENAI_API_KEY` etc. as env. Wired in `apps/api/src/main.ts` (`secretsFor: (t) => secretStore.entries(t)`), reusing
 the existing per-tenant `SecretProvider` path (now async).
 
 ## Referencing a secret from harness `env` (`{secretRef}`)
@@ -108,12 +108,12 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
   "Secret" row picks a workspace secret name from a dropdown (loaded from `GET /secrets`, names-only) or creates one
   **inline** (`createWorkspaceSecretAction` → `PUT /secrets/:name`). So a first-time user never pastes a raw key into
   a spec. Detail views show a secret-backed var as `NAME · secret` (`envValueText`), never the value.
-- Verified: `packages/core/src/harness-secrets.test.ts` (literal passthrough, ref resolution, missing-secret throw,
+- Verified: `packages/domain/src/harness/harness-secrets.test.ts` (literal passthrough, ref resolution, missing-secret throw,
   per-service resolution, process no-op).
 
 ## Example: aider on a LiteLLM-served model
 aider uses LiteLLM internally, so any LiteLLM-served model works — including a **LiteLLM proxy**
-(OpenAI-compatible). Register `examples/harnesses/aider-litellm.json`:
+(OpenAI-compatible). Register `examples/harness-templates/aider-litellm.template.json`:
 ```jsonc
 { "kind": "command", "id": "aider-litellm", "version": "0.74.0",
   "setup": ["pip install --quiet aider-chat==0.74.0"],
@@ -133,7 +133,7 @@ Caveats: the proxy must be reachable from the sandbox (trust-zone egress / Netwo
 have LiteLLM emit OTel and use the harness `trace: otel`.
 
 ## Verified
-- Deterministic (`packages/db/src/secret-store.test.ts`): AES-GCM round-trip + ciphertext≠plaintext;
+- Deterministic (`packages/db/src/workspace/secret-store.test.ts`): AES-GCM round-trip + ciphertext≠plaintext;
   set/list(names-only)/entries(decrypted)/delete + cross-workspace isolation + upsert.
 - API (`apps/api/src/server.test.ts`): admin set/list/delete, **value never returned**, bad name → 400,
   member → 403.

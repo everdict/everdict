@@ -291,7 +291,7 @@ None is committed; the point is that each one is a branch in one switch, not a n
 - **Images.** Annotation and image-to-image diff — screenshot regression across runs is an eval-native use, not
   a generic viewer feature.
 - **Media.** Trace-aligned playback: a browser run's recording scrubbed against its trace events (see
-  `docs/replay.md`).
+  `docs/architecture/replay.md`).
 - **Diffs/patches.** A side-by-side view now has a natural home next to the revision history.
 - **Archives / columnar data.** Listing a `.zip`'s entries without extracting, or a schema + head for
   `.parquet`/`.sqlite`, both want a runtime probe rather than in-browser parsing.

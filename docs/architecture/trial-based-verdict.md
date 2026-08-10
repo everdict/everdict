@@ -25,7 +25,7 @@ Everdict = eval **+ verdict**; trials are what make the verdict defensible.
 ## Data model — trials are just repeated CaseResults
 
 A trial is one execution of a case. We do **not** introduce a new aggregate wire type; instead a
-`CaseResult` carries an optional **`trial`** index (`packages/core/src/execution/eval-case.ts`):
+`CaseResult` carries an optional **`trial`** index (`packages/contracts/src/execution/eval-case.ts`):
 
 ```
 CaseResult { caseId, harness, trial?, trace, snapshot, scores, failure?, … }
@@ -40,7 +40,7 @@ CaseResult { caseId, harness, trial?, trace, snapshot, scores, failure?, … }
 Aggregation groups results by `caseId`; the per-trial verdict reuses the existing authority-ranked
 `caseVerdict` (ground-truth > objective > judge). Nothing about how a *single* trial is judged changes.
 
-## Pure math (`packages/suite/src/trials.ts`) — slice 1
+## Pure math (`packages/domain/src/scorecard/trials.ts`) — slice 1
 
 All pure, dependency-free, no I/O — same discipline as `scorecard.ts`/`leaderboard.ts`.
 

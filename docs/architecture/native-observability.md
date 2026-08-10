@@ -43,7 +43,7 @@ collector and the store**.
 
 | Piece | Where | Today | Becomes |
 |---|---|---|---|
-| OTLP span parsing + GenAI-convention normalization | `packages/trace/sources/otel.ts` | pull mode (query their API) | the receiver's core, unchanged |
+| OTLP span parsing + GenAI-convention normalization | `packages/trace/src/sources/otel.ts` | pull mode (query their API) | the receiver's core, unchanged |
 | `everdict.run_id` correlation tag | stamped at execution (`application-execution/run-case.ts`) | lets pull find our runs | native correlation on arrival |
 | `TraceProvenance` extraction | `sources/trace-source.ts` | uniform "Everdict origin" across kinds | ingest-time provenance |
 | Span waterfall + browse/inspect | `spans-to-nodes`, Settings › Traces | renders *their* store | renders *our* store first |

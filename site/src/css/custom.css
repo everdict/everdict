@@ -1,0 +1,38 @@
+/* Everdict docs theme — the product's Linear-style indigo, shared with the static homepage. */
+
+:root {
+  --ifm-color-primary: #4d59c4;
+  --ifm-color-primary-dark: #4550b0;
+  --ifm-color-primary-darker: #414ca6;
+  --ifm-color-primary-darkest: #363f89;
+  --ifm-color-primary-light: #5e6ad2;
+  --ifm-color-primary-lighter: #6b76d6;
+  --ifm-color-primary-lightest: #8b93e0;
+  --ifm-code-font-size: 92%;
+  --ifm-font-family-monospace: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #8b93f0;
+  --ifm-color-primary-dark: #6f79eb;
+  --ifm-color-primary-darker: #616ce9;
+  --ifm-color-primary-darkest: #3945e1;
+  --ifm-color-primary-light: #a7adf5;
+  --ifm-color-primary-lighter: #b5baf7;
+  --ifm-color-primary-lightest: #dfe1fc;
+  --ifm-background-color: #0f1116;
+  --ifm-background-surface-color: #14171d;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.08);
+}
+
+/* These pages carry dense reference tables; let them breathe and scroll on their own. */
+.markdown table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.markdown blockquote {
+  border-left-color: var(--ifm-color-primary);
+}

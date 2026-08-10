@@ -54,6 +54,7 @@ run("pnpm cone", "pnpm", ["cone"]);
 run("pnpm web-imports", "pnpm", ["web-imports"]);
 run("pnpm migrations", "pnpm", ["migrations"]);
 run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
+run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 
 // Job 2 — web (self-contained; contracts d.ts already exists via the root build above).

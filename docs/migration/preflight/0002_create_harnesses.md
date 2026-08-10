@@ -8,7 +8,7 @@
 - `ALREADY_APPLIED` — recorded; the migrator skips it.
 - `BLOCKED` — n/a.
 
-**Post-migration invariant** (pinned by `packages/registry/src/registry.test.ts` + live
+**Post-migration invariant** (pinned by `packages/registry/src/registry-contract.test.ts` + live
 `scripts/live/pg-harness-registry.mjs`): a `HarnessSpec` round-trips through `everdict_harnesses`; `(id, version)`
 is immutable (re-register with a different spec → `ConflictError`); `latest` resolves by semver; the spec
 survives a fresh connection.

@@ -1,9 +1,13 @@
 # Runtimes (tenant-defined execution infrastructure)
 
 A **Runtime** is a tenant's **execution infrastructure** — *where* their evals run. It's a user-registerable
-first-class entity (same ownership/lifecycle as harnesses/datasets/judges), one of five kinds matching the
-backends we built: **`local`** | **`docker`** | **`nomad`** | **`k8s`** | **`topology`**. Tenants register their
+first-class entity (same ownership/lifecycle as harnesses/datasets/judges), one of three kinds matching the
+backends we built: **`local`** | **`nomad`** | **`k8s`**. Tenants register their
 own runtimes ("bring your own compute") and select one per scorecard run; the control plane routes dispatch there.
+
+> The `docker` and `topology` kinds were **removed in slice 5b**. A single docker host is superseded by the
+> self-hosted runner pulling and executing via local docker (container execution is the `docker` *capability*,
+> not a runtime kind); a topology runtime is now just a nomad/k8s runtime that carries a `traceSource`.
 
 > **Run on *your own* machine → use a [self-hosted runner](architecture/self-hosted-runner.md), not `local`.**
 > `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, on the account
@@ -16,8 +20,6 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
   self-hosted runner callout above).
-- **docker** — the control-plane host's docker daemon; runs each case in its own env image (`EvalCase.image`,
-  e.g. a SWE-bench prebuilt). `{ image? }` (default image when a case carries none).
 - **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret?, gpu?, constraints? }`.
 - **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret?, kubeconfigSecret?, gpu?, nodeSelector?, tolerations? }`.
 - shared admission envelope (nomad/k8s) — `maxConcurrent?` (slot cap the Scheduler admits; absent → backend
@@ -41,9 +43,9 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   declare `resources.gpu` (a portable per-eval GPU ask, like `resources.cpu`/`memoryMb`): it derives the `gpu`
   capability so the run auto-routes to a gpu-capable runtime (fail-fast on a non-gpu one) and reserves the device —
   the harness count wins over the runtime binding's blanket default.
-- **topology** — for a `kind:"service"` topology harness (e.g. browser-use): a warm service pool + per-case
-  browser on `orchestrator` (nomad|k8s), trace pulled from `traceSource`.
-  `{ orchestrator, addr?|context?, namespace?, browserImage?, traceSource, authSecret? }`.
+- **topology-capable (nomad/k8s + `traceSource`)** — not a kind of its own: a nomad or k8s runtime that also
+  carries `{ traceSource, browserImage? }` hosts `kind:"service"` topology harnesses (e.g. browser-use) —
+  a warm service pool + per-case browser on that orchestrator, trace pulled from `traceSource`.
 
 ⚠️ **No secrets in the spec** (it's an immutable, readable SSOT). Credentials and the agent's model keys come from
 the tenant's **SecretStore**, injected at dispatch time. `authSecret` is the *name* of the SecretStore entry that
@@ -121,7 +123,7 @@ kinds — that is a boot failure).
 actually respond?" — it builds the live `Backend` from the spec (resolving `authSecret`/`kubeconfigSecret` from the
 tenant SecretStore exactly as dispatch does) and calls `Backend.probe()` **without running a job**: nomad → `GET
 /v1/agent/self` (reports 401/403 as an ACL-token hint), k8s → API server `/version` (via context/token/kubeconfig),
-local → in-process, docker → daemon version. Returns `{ kind, reachable, detail }`; a 10s cap avoids hanging on an
+local → in-process. Returns `{ kind, reachable, detail }`; a 10s cap avoids hanging on an
 unreachable address. The credential is used only for the probe's auth header (never reaches the agent). `apps/api`
 `makeRuntimeProber` is the single service core behind both transports.
 
@@ -165,4 +167,4 @@ A 100+-case batch leaves that many dead jobs/allocs behind per run. Two operatio
 **slim agent** (`packages/job-runner/Dockerfile.slim`, ~330MB — node+git, no claude/aider batteries) — 3× faster alloc
 start than the batteries-included default and small enough to `kind load` into a local cluster.
 
-See `docs/backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.
+See `docs/execution-backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.

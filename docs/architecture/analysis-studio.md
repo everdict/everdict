@@ -26,7 +26,7 @@
 
 Nothing here is a rewrite — every pillar exists and this feature is their composition:
 
-- **The pivot engine** (`apps/web/.../analyze-scorecards/model/analysis.ts` — `AnalysisConfig` →
+- **The pivot engine** (`apps/web/src/features/analyze-scorecards/model/analysis.ts` — `AnalysisConfig` →
   `computeAnalysis` → grid/line): four lenses (leaderboard/by-harness/trend/compare) as configurations of
   one model; Views persist the config (`everdict_views`, opaque jsonb) and re-run live on open. Deferred
   S4 (server-side pivot) becomes load-bearing here.
@@ -101,7 +101,7 @@ The gap is precisely: (a) the agent has **no artifact-emission path** (`ToolResu
 
 `POST /scorecards/query` + MCP `query_scorecards`: execute an `AnalysisConfig` server-side →
 `GridResult | LineResult` JSON. The pure pivot moves/is mirrored from
-`apps/web/.../model/analysis.ts` into `@everdict/domain` (pure fns over the light `ScorecardRecord`
+`apps/web/src/features/analyze-scorecards/model/analysis.ts` into `@everdict/domain` (pure fns over the light `ScorecardRecord`
 shape, next to `summarizeScorecard`/`trendSeries` — no I/O), so web (large workspaces) and agent share one
 engine. Companion `get_scorecard_analysis(id)` returns the offloaded `AnalysisBundle` (per-case
 verdicts/scores via `analysisRef`) for case-level deep dives without re-reading every run. Both are read
@@ -277,7 +277,7 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   config-failure auto-disable / transient-rethrow discipline; the apps/api adapter (composition/schedule)
   posts to the agent service's `POST /internal/report` (x-internal-token, the agent-event-sink env pair)
   and fans out `notifyReport` (feed kind `report_completed` linking `{resourceType: view, artifactId}` +
-  Mattermost + agent event `report.completed`) best-effort. The agent side (`apps/agent/report-turn.ts`)
+  Mattermost + agent event `report.completed`) best-effort. The agent side (`apps/agent/src/report-turn.ts`)
   runs ONE budgeted headless turn (16-turn cap) as the creator via a minted read-scoped one-shot `agt_`
   token (revoked in a finally): the prompt walks get_view → query_scorecards (+ the shifted previous
   window when `compare`) → `write_report`; the newest report artifact is then attached + pinned to the

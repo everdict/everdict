@@ -6,6 +6,6 @@ plaintext; plaintext is never stored) + a `tenant` index. No destructive operati
 **Preflight:** `preflight(client, "0003_create_tenant_keys.sql")` → `OK_TO_APPLY` / `ALREADY_APPLIED`.
 
 **Invariant:** an issued key authenticates back to its tenant; only the hash is persisted
-(`packages/db/src/tenant-auth.test.ts`; live `scripts/live`/`apps/api`).
+(`packages/db/src/workspace/tenant-auth.test.ts`; live `scripts/live`/`apps/api`).
 
 **Rollback (contract):** `DROP TABLE everdict_tenant_keys;` after no code reads it.

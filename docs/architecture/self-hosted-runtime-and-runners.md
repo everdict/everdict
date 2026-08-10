@@ -11,7 +11,7 @@ Two concepts, one axis each. **There is no "device" layer** — the machine *is*
 
 | Layer | What it is | Scales by | Examples |
 |---|---|---|---|
-| **Runtime** | **Where** execution happens — the environment / placement a job targets. | (fixed per environment) | `self-hosted` (localhost / your own infra), `docker`, `nomad`, `k8s`, `topology` |
+| **Runtime** | **Where** execution happens — the environment / placement a job targets. | (fixed per environment) | `self-hosted` (localhost / your own infra), `local`, `nomad`, `k8s` (`docker`/`topology` were removed in slice 5b) |
 | **Runner** | **Who** executes — a **worker process**, the execution subject. Joins a runtime, leases one job at a time, runs it, reports back. | **more runners = more concurrent jobs** | an `everdict runner` worker · a GitHub Actions runner |
 
 - A **runtime** is the *pool / placement*. A job's `runtime` field (→ `placement.target`) picks it.
@@ -40,10 +40,10 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
 
 ## Current state — verified (`docs/architecture/self-hosted-runner.md`)
 
-- **Placement** — `runtime` selector → `placement.target`; `RuntimeDispatcher` (`apps/api/src/execution/runtime-dispatcher.ts`)
+- **Placement** — `runtime` selector → `placement.target`; `RuntimeDispatcher` (`apps/api/src/core/execution/runtime-dispatcher.ts`)
   branches on `target.startsWith("self:")` → owner-checked lease queue; else resolves a workspace `RuntimeSpec` →
   `buildRuntimeBackend` → push via `Scheduler`.
-- **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runners/runner-hub.ts`): lease queue keyed
+- **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`packages/application-control/src/runner/runner-hub.ts`): lease queue keyed
   `(owner, runnerId)` = `self:<owner>:<runnerId>` (cross-workspace). `RunnerHub.lease` is single-thread-atomic
   (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
 - **Worker** — `everdict runner --pair <rnr_…>` (`apps/cli` → `@everdict/self-hosted-runner` `runLeaseWorkers`): one process,

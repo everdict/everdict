@@ -5,7 +5,10 @@
 > `infrastructure/integrations` + `domain/image`/`domain/trace`, §9). Design SSOTs today:
 > `docs/architecture/workspace-scoped-integrations.md`, `docs/architecture/trace-sink.md`,
 > `docs/architecture/workspace-image-registry.md`, `docs/architecture/github-actions-trigger.md`.
-> Status: PROPOSED — review artifact, no code moves.
+> Status: HISTORICAL — a review artifact from the re-architecture review, never updated after it landed.
+> The umbrella migration SHIPPED on 2026-07-10 (`../00-target-architecture.md`), so every
+> `packages/{core,suite,run-case,billing}` and `apps/api/src/core/**` path cited below names the
+> **pre-migration** layout, not today's. Read it for the reasoning, not for the addresses.
 
 ## Purpose & language
 

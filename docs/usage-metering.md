@@ -62,7 +62,7 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
 - Deterministic (`packages/harnesses/src/command.test.ts`): `meterUsage` rewrites the base to the proxy, emits
   the synthetic `llm_call` with the captured tokens **and `usd`**, and closes the proxy; **not** metered when
   `trace` ≠ `none`.
-- Deterministic (`apps/api/src/run-service.test.ts`): resolution order — per-run override > per-workspace policy
+- Deterministic (`packages/application-control/src/run/run-service.test.ts`): resolution order — per-run override > per-workspace policy
   > off — and the decided value is carried on `CaseJob.meterUsage`.
 - Live proxy (`scripts/live/usage-proxy.mjs`) vs real workclaw LiteLLM `gpt-5.4-mini`: `run-A` = 2 calls / 3276
   tokens, `run-B` = 1 call / 1642 tokens — captured while responses pass through intact.

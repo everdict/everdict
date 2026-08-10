@@ -2,7 +2,7 @@
 
 > **Status:** DESIGN — arch-review 8 P2. The ownership work (P0, `fc6e4a19`) made concurrent scoring SAFE;
 > this makes it SIMPLE. Nothing here is a fix: it removes the machinery the fix needed.
-> Prerequisite reading: `docs/architecture/trust-certification.md` (the scoring revision ledger).
+> Prerequisite reading: `docs/trust-certification.md` (the scoring revision ledger).
 
 ## Why this is P2 and not P0
 
@@ -10,7 +10,7 @@ The review that asked for fencing also asked for this, and was right to rank the
 reason is worth stating precisely, because "we already fenced it" is not by itself an argument for stopping.
 
 Fencing answers *who may write*. Revisions answer *where they write*. With fencing landed and certified
-against real Postgres (`packages/db/src/results/scoring-pass-ownership.scenario.test.ts`), a superseded pass
+against real Postgres (`apps/api/src/trust/pass-ownership.trust.test.ts`), a superseded pass
 cannot mutate the plane — so the remaining problem is not correctness, it is that **reader and writer share
 one mutable structure**, and every guarantee about that structure has to be defended by a guard:
 

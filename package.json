@@ -16,6 +16,7 @@
     "web-imports": "node scripts/check-web-imports.mjs",
     "migrations": "node scripts/check-migrations.mjs",
     "artifact-frame": "node scripts/check-artifact-frame.mjs",
+    "docs-check": "node scripts/check-docs.mjs",
     "ci:local": "node scripts/ci-local.mjs",
     "everdict": "node --env-file-if-exists=.env apps/cli/dist/main.js",
     "api": "node --env-file-if-exists=apps/api/.env apps/api/dist/main.js",

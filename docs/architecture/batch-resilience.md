@@ -260,4 +260,4 @@ Per-batch `concurrency` used to cap at 64. On a real cluster the **Scheduler** i
 governor (capacity-aware placement + tenant-fair WFQ + queue backpressure), and Nomad/K8s spread
 allocs across nodes natively — so the submit-side cap is now 512 and mostly means "how many cases
 this batch is willing to have in flight"; actual placement is still admission-controlled per
-backend capacity. Verified live: see `scripts/live/orchestration-resilience.mjs`.
+backend capacity. Verified live: see `scripts/live/chaos-orchestration.mjs`.

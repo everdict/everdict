@@ -32,7 +32,7 @@ than *extracted from text*.
 | `edge_mention` — a `(subject, predicate, object)` triple | **`EdgeMention`** — same, with the same two reference styles (by mention id XOR by node id) |
 | per-type entity mart — the canonical entity | **`KnowledgeNode`** — a lightweight canonical *projection* of an existing record (one type-agnostic table, since everdict entities already have identity) |
 
-The contracts live in [`packages/contracts/src/knowledge/`](../../packages/contracts/src/knowledge/).
+The contracts live in [`packages/contracts/src/knowledge/`](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/).
 
 ## The three layers
 
@@ -79,7 +79,7 @@ a new harvester/extractor adapter with the spine unchanged — the digo lock.
 Two type-agnostic tables, mirroring digo-data. **This is what "define the node and the mention/edge_mention" means**,
 and it is what step 1 lands as Zod contracts.
 
-**`Mention`** ([mention.ts](../../packages/contracts/src/knowledge/mention.ts)) — one observed reference to a node:
+**`Mention`** ([mention.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/mention.ts)) — one observed reference to a node:
 
 - `nodeType` + `nodeRef` + `nodeAttrs` (jsonb) — *type-agnostic*: one shape carries every node type; type-specific
   hints go in `nodeAttrs`, never per-type columns. Adding a node type never touches this schema.
@@ -88,7 +88,7 @@ and it is what step 1 lands as Zod contracts.
 - `evidencePath` (harvest) / `evidenceQuote` + offsets (extraction) — the **audit lock**, enforced in the schema.
 - `resolution` (`resolved` | `pending` | `unresolved`) + `resolvedNodeId` — surface → canonical.
 
-**`EdgeMention`** ([edge-mention.ts](../../packages/contracts/src/knowledge/edge-mention.ts)) — one observed
+**`EdgeMention`** ([edge-mention.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/edge-mention.ts)) — one observed
 relationship:
 
 - `predicate` + `subject*` + `object*` + `edgeAttrs` (jsonb) + `polarity` (promoted first-class).
@@ -108,7 +108,7 @@ Invariants inherited from digo-data and enforced or documented here:
 
 ### Layer 2 — Nodes
 
-**`KnowledgeNode`** ([knowledge-node.ts](../../packages/contracts/src/knowledge/knowledge-node.ts)) is the canonical
+**`KnowledgeNode`** ([knowledge-node.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/knowledge-node.ts)) is the canonical
 projection of a domain entity — digo's per-type entity mart, collapsed into **one** type-agnostic table because
 everdict entities already own identity. It is a *derived read-model*: the reduce layer rebuilds it from the mentions
 that resolve to it, aggregating evidence. It never duplicates a record's body — only a display `label` and a small
@@ -118,13 +118,13 @@ that resolve to it, aggregating evidence. It never duplicates a record's body �
   `web@1.0.0` and `web@2.0.0` are **distinct nodes** joined by a `succeeds` edge; the version-agnostic `key` groups a
   family. The derivation helper is pure and lives in `@everdict/domain` (contracts stay logic-free).
 - **`NodeRef`** (`{type, key, version?}`) is the structural handle — the generalization of the existing
-  [`AgentReference`](../../packages/contracts/src/records/agent-session.ts) (`{type,id,version,label}`) that user
+  [`AgentReference`](https://github.com/everdict/everdict/blob/main/packages/contracts/src/records/agent-session.ts) (`{type,id,version,label}`) that user
   turns already carry. `AgentMessageRecord.references[]` is therefore a **ready-made harvest source** for the
   `references` predicate.
 
 ## Node vocabulary (closed, PR-gated)
 
-`NODE_TYPES` ([node-type.ts](../../packages/contracts/src/knowledge/node-type.ts)) — 32 types by axis. The vocabulary
+`NODE_TYPES` ([node-type.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/node-type.ts)) — 32 types by axis. The vocabulary
 is **closed**: inventing a type is a code change, never a runtime value. Because the spine is type-agnostic, adding one
 is a one-line enum extension plus a harvester — the same cheap axis digo grew 14 → 17 on.
 
@@ -144,7 +144,7 @@ metering, downstream of the graph), `workspace_settings` (a source whose sub-obj
 
 ## Predicate vocabulary (closed, PR-gated)
 
-`PREDICATES` ([predicate.ts](../../packages/contracts/src/knowledge/predicate.ts)) — 41 predicates by axis. **Direction
+`PREDICATES` ([predicate.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/predicate.ts)) — 41 predicates by axis. **Direction
 is fixed**: an edge points FROM the dependent/referencing node TO the referenced node. The `typical (subject → object)`
 shapes are conventions the harvesters emit, not wire enforcement — per-predicate validation is a downstream (reduce)
 concern, keeping the vocabulary the single extension axis.
@@ -176,7 +176,7 @@ problem, what closed it, why did it come back").
 Three strata, with a deliberate tiering:
 
 1. **Intent (WHY)** — `issue` / `project` / `initiative` (+ `team` / `cycle` as organisational scoping). Harvested
-   whole from the tracker stores ([harvest-tracker.ts](../../packages/domain/src/knowledge/harvest-tracker.ts)):
+   whole from the tracker stores ([harvest-tracker.ts](https://github.com/everdict/everdict/blob/main/packages/domain/src/knowledge/harvest-tracker.ts)):
    an issue's links become `verified_by` edges (version pin + note preserved), its resolution `resolved_by` (the
    regression baseline), its plan coordinates `part_of` (project/cycle) + `child_of` (parent issue) +
    `belongs_to` (team) + `assigned_to` (assignee; project/initiative leads carry `edgeAttrs.role: "lead"`).
@@ -226,7 +226,7 @@ knowledge:"login cases flaky on k8s"
 
 ### Knowledge entries
 
-A **`KnowledgeEntryRecord`** ([knowledge-entry.ts](../../packages/contracts/src/records/knowledge-entry.ts)) is the
+A **`KnowledgeEntryRecord`** ([knowledge-entry.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/records/knowledge-entry.ts)) is the
 record behind a `knowledge` node — the promoted successor of an `annotate` note (which stays as the lightweight margin
 note). It is workspace-general, high-level knowledge NOT bound to one task: `kind` (`finding` | `decision` |
 `convention` | `context` — a thin classifier, not a workflow), a one-line `title` (the node label — the claim itself),
@@ -251,7 +251,7 @@ ABOUT 2.1.0 forever — the open question is whether its validity *extends* to a
 recorded fact.
 
 The pin is therefore an INTERVAL, not a point: **`KnowledgePin = NodeRef + { verifiedVersion? }`**
-([knowledge-node.ts](../../packages/contracts/src/knowledge/knowledge-node.ts)) — the known-valid interval
+([knowledge-node.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/knowledge/knowledge-node.ts)) — the known-valid interval
 `[version, verifiedVersion]`. `version` is the subject-time point the knowledge was observed at (immutable — the
 origin is history, never overwritten); `verify` EXTENDS `verifiedVersion` to each pinned family's current latest (a
 coordinate extension along subject time, plus the wall-clock `verifiedAt`; `updatedAt` untouched — verification is not
@@ -261,7 +261,7 @@ field: a superseding entry **pinned at the version where the behavior changed** 
 derivation — and the `supersedes` chain is the workspace's knowledge *trajectory*, not noise. The `about` edges carry
 the interval in `edgeAttrs` (`{asOf, verifiedVersion}`), so it is readable from the graph without fetching the record.
 
-Both vocabularies live in the pure kernel ([freshness.ts](../../packages/domain/src/knowledge/freshness.ts)) and are
+Both vocabularies live in the pure kernel ([freshness.ts](https://github.com/everdict/everdict/blob/main/packages/domain/src/knowledge/freshness.ts)) and are
 deliberately NOT merged — they answer different questions:
 
 - **Coverage** (record vs the entity's PRESENT, for listings/badges): `current | behind | unverified` —
@@ -272,7 +272,7 @@ deliberately NOT merged — they answer different questions:
 - **Anchor relation** (record vs an ANCHOR coordinate, for context assembly): `covers | earlier | later | general` —
   `anchorRelation` positions the interval against a projection coordinate (below).
 
-Skills join the same model: a **Skill** ([skill.ts](../../packages/contracts/src/records/skill.ts)) is the
+Skills join the same model: a **Skill** ([skill.ts](https://github.com/everdict/everdict/blob/main/packages/contracts/src/records/skill.ts)) is the
 task-oriented complement ("how do I do this" vs an entry's "what is true / why we decided"), its `refs` are the same
 `KnowledgePin[]`, and the skill listing/`use_skill` banner surface its coverage as *as-of coordinates*
 ("documented @2.1.0, verified through 2.2.0 · current 2.3.0"), steering the agent to the three responses. Skill
@@ -403,4 +403,4 @@ Following everdict's one-way spine (no new package — schemas belong at the con
 - Reference system: `workspaces/digo-data` — `platform/digo_data/core/travel_knowledge/contracts/{mention_v1,edge_mention_v1}.py`
   and the `digo-travel-knowledge` skill.
 - Existing proto-mention: `AgentReference` / `AgentMessageRecord.references[]` in
-  [`packages/contracts/src/records/agent-session.ts`](../../packages/contracts/src/records/agent-session.ts).
+  [`packages/contracts/src/records/agent-session.ts`](https://github.com/everdict/everdict/blob/main/packages/contracts/src/records/agent-session.ts).

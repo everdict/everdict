@@ -1,5 +1,12 @@
 # Preflight — 0023_connections_owner
 
+> **Status: SUPERSEDED.** The whole personally-owned Connected accounts feature was removed by
+> `packages/db/migrations/0046_drop_connections.sql` (`DROP TABLE everdict_connections`), replaced by
+> workspace-owned GitHub App + Mattermost integrations — see
+> [`../../architecture/workspace-scoped-integrations.md`](../../architecture/workspace-scoped-integrations.md).
+> This page is kept as the record of what 0023 did; the stores and tests it names no longer exist.
+> `everdict_oauth_states` survived the drop and is now the state table for workspace GitHub App installs.
+
 **Change:** expand — re-key `everdict_connections` from **workspace-owned** to **user(subject)-owned** (personal
 Connected accounts), *keeping* a `workspace` column for the workspace-applications roster. Adds an `owner` column
 (= `principal.subject`, backfilled from `workspace`), repoints the primary key `(workspace, id)` → `(owner, id)`,

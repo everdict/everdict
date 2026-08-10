@@ -53,8 +53,8 @@ An agent (Claude Code) reaching for Everdict via MCP thinks in one verb: **"run 
 That is a `run`. A scorecard is just that verb applied over a dataset (`run × N`). So the natural dependency is
 `run ⊂ scorecard`. Today it is inverted in two ways:
 
-1. **Execution lifecycle is duplicated across two parallel services.** `RunService` (`apps/api/src/execution/run-service.ts`)
-   and `ScorecardService` (`apps/api/src/execution/scorecard-service.ts`) each independently wire budget admit/settle,
+1. **Execution lifecycle is duplicated across two parallel services.** `RunService` (`packages/application-control/src/run/run-service.ts`)
+   and `ScorecardService` (`packages/application-control/src/scorecard/scorecard-service.ts`) each independently wire budget admit/settle,
    repo-token resolution, artifact offload, judge-model injection, completion notification, and provenance. The
    scorecard fan-out (`ScorecardService.track`'s inline `dispatch` closure, ~line 318) is a near-verbatim copy of
    `RunService.submit`'s dispatch path. Scorecard does **not** go through `RunService` and does **not** create
@@ -66,7 +66,7 @@ That is a `run`. A scorecard is just that verb applied over a dataset (`run × N
    primitive (run)** — the primitive can't do the one thing a primitive should own.
 
 Consequences observed elsewhere:
-- The web **Runs** list (`apps/web/.../runs`) has no clear reason to exist — it reads as a worse copy of the
+- The web **Runs** list (`apps/web/src/app/[workspace]/runs`) has no clear reason to exist — it reads as a worse copy of the
   scorecard list (per-run scores are statistical noise), because run is framed as an eval-result surface instead
   of the operational/activity substrate it actually is.
 - Two services drift: any lifecycle fix (a new budget rule, a new provenance field) must be applied twice.
@@ -85,7 +85,7 @@ const cases = runtime
 `RuntimeDispatcher` then routes on `placement.target`. Both `RunService` and `ScorecardService` are injected the
 **same** dispatcher — `ModelResolvingDispatcher(RuntimeDispatcher(scheduler, …))` (`main.ts` ~line 211, comment:
 *"run/judge/scorecard share this one dispatcher"*). `EvalCase.placement.target` is already in the core schema
-(`PlacementSchema`, `packages/core/src/execution/eval-case.ts`).
+(`PlacementSchema`, `packages/contracts/src/execution/eval-case.ts`).
 
 **So run can already hit any runtime today** — the caller just has to set `case.placement.target`. The gap is
 purely ergonomic surface: no top-level `runtime` convenience on the run API, and `submit_run` never sets it.
@@ -133,7 +133,7 @@ specific runtime") is first-class without waiting for Steps 1–2.
 
 ## Step 1 — extract a shared `execute-case` lifecycle core
 
-Factor the per-case execution lifecycle out of both services into one unit (proposed `apps/api/src/execution/execute-case.ts`,
+Factor the per-case execution lifecycle out of both services into one unit (proposed `packages/application-control/src/execution/execute-case.ts`,
 or a small class `CaseExecutor`). Responsibilities (the currently-duplicated concerns):
 
 ```

@@ -193,7 +193,7 @@ requirement structurally: parity is not a feature to build, it's a property of r
   token in a server-only httpOnly cookie; `control-plane.ts` forwards `Bearer` to `@everdict/api`; identity
   from `GET /me`. Pure HTTP client, **no `@everdict/*` deps**. Nothing about it assumes a browser tab — a
   webview holding the same cookies behaves identically.
-- **Runner loop is already transport-clean** — `apps/cli/src/runner-loop.ts` (`runLeaseWorkers`, N lease
+- **Runner loop is already transport-clean** — `packages/self-hosted-runner/src/runner-loop.ts` (`runLeaseWorkers`, N lease
   workers over one MCP session) + `runner-session.ts` (`ResilientMcpSession` — reconnect-on-stale-session)
   + `run-leased-job.ts`, driving `runCaseJob` (`@everdict/job-runner`). It depends on flags + a token, not on
   being a CLI — extraction to a package is mechanical.
@@ -385,4 +385,4 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
 ## See also
 
 [self-hosted-runner](./self-hosted-runner.md) · [self-hosted-service-runner](./self-hosted-service-runner.md) ·
-`docs/web.md` · `docs/auth.md` · `docs/connections.md` · `docs/mcp.md` · skills `foundation`, `api-layer`.
+`docs/web.md` · `docs/auth.md` · `docs/architecture/workspace-scoped-integrations.md` · `docs/mcp.md` · skills `foundation`, `api-layer`.
