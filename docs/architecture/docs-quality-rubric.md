@@ -1,0 +1,110 @@
+# Documentation quality rubric — scoring against Mastra
+
+> The docs site shipped. It is not good. This page is the instrument that says *how* not-good, in
+> numbers that move, so improvement is a measured activity rather than a feeling. The benchmark is
+> [mastra.ai/docs](https://mastra.ai/docs), chosen by the maintainer.
+>
+> **Target: close the gap to ≤ 5 points.** Re-score after every round; a round that does not move a
+> number did not happen.
+
+## 1. How scoring works
+
+Seven dimensions, each scored 0–10 against written anchors, weighted to 100. Where a dimension can be
+counted, it is counted — a score that rests on taste alone is a score nobody can argue with, and this
+document exists to be argued with.
+
+| # | Dimension | Weight | What it measures |
+| --- | --- | ---: | --- |
+| D1 | **Executable content** | 20 | Can a reader run what they just read? |
+| D2 | **Surface coverage** | 15 | Does every capability a user meets have a page? |
+| D3 | **Onboarding path** | 15 | How long from landing to first working result? |
+| D4 | **Page craft** | 15 | Progressive disclosure, callouts, diagrams, tabs |
+| D5 | **Voice** | 15 | Written *for a reader*, or extracted *from code*? |
+| D6 | **Navigation & findability** | 10 | Search, cross-links, "where am I" |
+| D7 | **Visual design** | 10 | Homepage and docs theme as a product surface |
+
+## 2. Anchors
+
+Each dimension's 2 / 5 / 8 / 10 anchors, so two people scoring separately land within a point.
+
+**D1 — Executable content**
+- 2: concepts explained in prose and tables; code appears only in a quickstart.
+- 5: most task pages carry one example; concept pages carry none.
+- 8: every concept page opens with a runnable example; ≥3 examples per page; copy-paste works.
+- 10: examples are complete files with paths, multiple package managers, and an expected output.
+
+**D2 — Surface coverage**
+- 2: the primitives are documented; whole product areas are absent.
+- 5: most areas have a page; several user-visible surfaces are missing.
+- 8: every surface a user can click or call has a page.
+- 10: plus integration pages per external tool, and an explicit "not supported" list.
+
+**D3 — Onboarding path**
+- 2: reader must assemble the path themselves.
+- 5: a quickstart exists but first success needs several manual steps.
+- 8: one command to a running system; a second to a first result; both verified in the page.
+- 10: plus templates/examples to clone, and framework-specific on-ramps.
+
+**D4 — Page craft**
+- 2: flat prose plus dense tables; no callouts, no diagrams.
+- 5: occasional callouts; structure is uniform regardless of content.
+- 8: progressive disclosure, admonitions used semantically, diagrams where structure matters.
+- 10: plus tabs for alternatives, collapsible depth, and inline navigation between related pages.
+
+**D5 — Voice**
+- 2: reads as a summary of the implementation; assumes the reader already knows the domain.
+- 5: correct and readable, but every page is the same shape and nothing is motivated.
+- 8: each page answers a question a real user has, in their words, and says when *not* to use a thing.
+- 10: plus worked scenarios end-to-end and honest limitations.
+
+**D6 — Navigation & findability**
+- 2: one index page; no search.
+- 5: sidebars and cross-links; no search.
+- 8: full-text search, sensible grouping, related-page links.
+- 10: plus AI-assisted search and per-section landing pages.
+
+**D7 — Visual design**
+- 2: default theme, no product identity.
+- 5: themed colors; homepage is a wall of text.
+- 8: coherent identity across homepage and docs, real product imagery, responsive.
+- 10: plus motion/interaction that carries meaning, and a homepage that converts.
+
+## 3. Baseline — 2026-08-11
+
+Measured on `docs/guide/**` (14 pages) and <https://everdict.github.io/everdict/> against
+<https://mastra.ai/docs>.
+
+| Dim | Mastra | Everdict | Evidence |
+| --- | ---: | ---: | --- |
+| D1 Executable | 9 | **2** | Mastra's `agents/overview` carries **8** runnable TypeScript examples in ~1,900 words. Ours: **7 of 8 concept pages have 0 code blocks**; the whole guide has 13 blocks across 14 pages, most of them `curl`. |
+| D2 Coverage | 9 | **3** | No page for: workspace agents · workspace filesystem · image registry · environments · MCP (guide-level) · Claude Code plugin · Codex plugin. All seven exist as product surfaces. |
+| D3 Onboarding | 9 | **5** | Mastra: one `create` command scaffolds a project, then a framework on-ramp. Ours: compose up, then hand-write a `curl` with a nested JSON body. No template to clone. |
+| D4 Craft | 8 | **2** | Ours: **0 diagrams**, callouts on 2 of 14 pages, and up to **15 tables on a single page** — tables used as a substitute for explanation. |
+| D5 Voice | 8 | **3** | Ours reads as extracted-from-code: definitions and property lists, no scenario, no "when not to". |
+| D6 Findability | 9 | **4** | Mastra: Algolia + an Ask-AI assistant. Ours: three sidebars, no search at all. |
+| D7 Design | 9 | **4** | Mastra: a designed homepage and docs theme. Ours: a single hand-written HTML page and a recolored default Docusaurus theme. |
+| **Weighted total** | **87.0** | **31.5** | **gap 55.5** |
+
+Weighted total = Σ(weight × score ÷ 10).
+
+## 4. What the numbers say to do first
+
+Ordered by points available, not by effort:
+
+| Round | Work | Dimensions | Points |
+| --- | --- | --- | ---: |
+| **R1** | The seven missing pages, written example-first | D2, D1 | ~15 |
+| **R2** | A runnable example in every concept page; replace tables that are standing in for explanation | D1, D4 | ~14 |
+| **R3** | Onboarding: a template to clone, a verified "first result in N minutes" path, per-tool on-ramps | D3, D5 | ~9 |
+| **R4** | Search (Algolia DocSearch), section landing pages, related-page links | D6 | ~5 |
+| **R5** | Homepage rewrite and docs theme as a designed surface | D7 | ~5 |
+| **R6** | Voice pass over everything: scenarios, "when not to use", limitations | D5 | ~7 |
+
+Reaching ≤5 requires ~50 points, so every round lands and then some — R1–R6 as scoped are roughly 55.
+None of them is a rewrite of the site; all of them are content and craft.
+
+## 5. Log
+
+| Date | Round | Everdict | Gap | Note |
+| --- | --- | ---: | ---: | --- |
+| 2026-08-11 | baseline | 31.5 | 55.5 | The site shipped; quality measured for the first time. |

@@ -12,6 +12,8 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [guide/README.md](guide/README.md) — the section index
 - **Get started** — [What is Everdict](guide/start/what-is-everdict.md) · [Quickstart](guide/start/quickstart.md) · [Your first scorecard](guide/start/first-scorecard.md) · [Connect an agent](guide/start/connect-an-agent.md)
 - **Core concepts** — [overview](guide/concepts/README.md) · [Run](guide/concepts/run.md) · [Harness](guide/concepts/harness.md) · [Dataset](guide/concepts/dataset.md) · [Grader & Judge](guide/concepts/grader-and-judge.md) · [Scorecard](guide/concepts/scorecard.md) · [Verdict](guide/concepts/verdict.md) · [Workspace](guide/concepts/workspace.md)
+- **Your workspace** — [Workspace agents](guide/workspace/agents.md) · [Filesystem](guide/workspace/filesystem.md) · [Environments](guide/workspace/environments.md) · [Image registry](guide/workspace/image-registry.md)
+- **Integrations** — [MCP](guide/integrations/mcp.md) · [Claude Code plugin](guide/integrations/claude-code-plugin.md) · [Running Codex](guide/integrations/codex.md)
 - **Self-hosting** — [overview](guide/self-host/overview.md)
 
 ## Start here (maintainers)
@@ -136,6 +138,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 ## The public docs site
 - [architecture/docs-site.md](architecture/docs-site.md) — information architecture for the Docusaurus site published from this tree
+- [architecture/docs-quality-rubric.md](architecture/docs-quality-rubric.md) — the scoring instrument used to close the gap to Mastra
 
 ## Internals — historical design records
 > Written during the re-architecture review and **not maintained since**. The umbrella migration
