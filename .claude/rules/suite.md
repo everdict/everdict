@@ -26,6 +26,23 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   constructs one directly; a trusted builder that constructs a judge-shaped grader (the code-judge wrapper)
   declares it on the spec. A violation becomes an `invalid` row — visible, aggregated nowhere, unable to
   decide a case — never a silent rename.
+- **Verification belongs at the read that produces the bytes actually used.** A pin checked where a document
+  was RESOLVED says nothing about the read that materializes it later — the judge runner re-reads the rubric,
+  the model and the delegated harness at use, and `JudgeAuthDispatcher` re-reads the runtime judge model at
+  dispatch. Carry the pins to those seams and call the one decision function (`pinnedDocumentMismatch`) there;
+  a check performed by another read is a check on a document nobody executed (arch-review 20 P0-4).
+- **A constitutional name may not be granted by a declaration.** `isConstitutionalMetric` (contracts) owns the
+  vocabulary the built-in ladder decides — the reserved authority metrics and the whole `judge:` family. A
+  `GraderSpec` naming one is refused at submit with the alternative named, and `makeGraders` filters those
+  names out of what a spec can hand a producer: declaring a name must never be the act that acquires the right
+  to emit it (arch-review 20 P0-1).
+- **A semantic capability must survive serialization unchanged.** One shape, one schema, wherever a document
+  appears: the manifest, the pass and the revision share `SealedJudgeEntrySchema`, because a closure spelled
+  three times grows its next field in two of them and the third reloads with nothing to verify against. A
+  feature is not shipped until its production round trip carries it (arch-review 20 P0-3).
+- **Coverage is not identity.** A cohort records how much of a batch reported it (`observed`/`total`) and keeps
+  that out of its comparison key — a batch that lost a case to a dead dispatch did not move to another world
+  (arch-review 20 P2).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a
