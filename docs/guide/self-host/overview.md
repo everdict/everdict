@@ -103,6 +103,23 @@ More than one API replica is supported; the constraints (leader-elected sweepers
 safe to duplicate) are documented in
 [`../../architecture/multi-replica.md`](../../architecture/multi-replica.md).
 
+## What self-hosting costs you
+
+Stated plainly, because finding these out in week three is worse:
+
+- **Postgres is yours to operate.** Backups, upgrades, and the disk it fills. The `dev` profile's
+  in-memory stores are not an alternative — they lose everything on restart.
+- **Auth is a decision you must make.** The `prod` profile does not enforce it. There is no default
+  that is both convenient and safe, so the stack refuses to pretend otherwise.
+- **Cluster runtimes need a cluster.** Nomad or Kubernetes, reachable from the control plane, with a
+  credential you are willing to store. A self-hosted runner on one machine is the cheap way in, and it
+  scales exactly as far as that machine does.
+- **Evaluation is bursty.** A 400-case scorecard at concurrency 16 will find the smallest resource
+  limit you set. The admission envelope exists so the control plane declines rather than the cluster
+  thrashing, but the ceiling is still yours to pick.
+- **Model spend is real spend.** Judges call providers with your key. Budgets are per workspace and
+  meter-only — they record, they do not refuse — so set them and watch them.
+
 ## Operational reading
 
 - [`../../architecture/work-queue.md`](../../architecture/work-queue.md) — what is running, queued, and scheduled per lane

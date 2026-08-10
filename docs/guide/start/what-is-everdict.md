@@ -1,74 +1,80 @@
 # What is Everdict
 
-Everdict runs your agent against your data and gives you a **defensible verdict** — a pass/fail you can
-show someone, with the trace, the scores, and the exact versions behind it.
+You changed the retrieval prompt on Tuesday. On Thursday someone says the agent feels worse. You run it
+on four examples, three look fine, and now there are two opinions and no way to settle them.
+
+Everdict is the thing that settles it. It runs your agent against a fixed set of problems, scores every
+case the same way, and produces a **verdict** — with the trace, the scores, and the exact versions
+behind it.
 
 The name is the job: **eval + verdict**.
 
-## The problem it solves
+## What you actually get
 
-You changed a prompt, swapped a model, upgraded a framework. Is the agent better or worse? The usual
-answer is somebody ran it on a few examples and read the output. That does not survive a disagreement,
-it does not catch a regression three weeks later, and it cannot gate a pull request.
-
-Everdict makes that answer mechanical: run the agent on a fixed dataset, score every case the same way,
-and compare the result against the previous one. When the number moves, the trace that produced it is
-still there.
+- **A number that moves for a reason.** Run a dataset, get a scorecard, diff it against last week's.
+  Regressions are named case by case rather than averaged into a percentage.
+- **A gate.** That diff is an API call, so a pull request that breaks a case can be blocked before it
+  lands.
+- **A record you can show someone.** Every scorecard seals the dataset version, the harness version,
+  the resolved image pins and the verdict policy that decided pass and fail.
 
 ## What it evaluates
 
 **Any agent, over a process boundary.** Everdict does not ask you to rewrite your agent inside a
-framework — it drives whatever you already built:
+framework — it starts whatever you already built and observes it:
 
-- **Claude Code, Codex, or any CLI agent** — declared, not coded. A `command` harness is a JSON
-  `HarnessSpec` naming the executable and how to read its output. See
-  [`../../command-harness.md`](../../command-harness.md).
-- **Multi-service systems** — an agent that is really a stack (API + worker + browser + vector store)
-  runs as a `service` topology harness on Nomad or Kubernetes. See
-  [`../../service-harness.md`](../../service-harness.md).
-- **Traces you already have** — if the run happened elsewhere, push or pull its trace from OTel, MLflow,
-  Langfuse, LangSmith, or Phoenix and score it with no harness run at all.
+- **Claude Code, Codex, or any CLI agent** — declared as JSON, not coded. See
+  [Bring your own agent](bring-your-agent.md).
+- **Multi-service systems** — an agent that is really a stack runs as a `service` topology on Nomad or
+  Kubernetes.
+- **Runs that already happened** — push or pull a trace from OTel, MLflow, Langfuse, LangSmith or
+  Phoenix and score it with no harness run at all.
 
-**On your infrastructure.** Runs are placed on a runtime you register — a Nomad cluster, a Kubernetes
-cluster, or your own laptop through a self-hosted runner. There is no vendor sandbox in the path, and
-the agent's model keys are yours.
+**On your infrastructure.** Runs land on a runtime you registered — your Nomad, your Kubernetes, or
+your own laptop through a self-hosted runner. No vendor sandbox, and the model keys stay yours.
 
-## What it deliberately is not
+## When *not* to use it
 
-- **Not an agent framework.** Everdict has an agent runtime, but that is a *consumer* of the evaluation
-  harness, not the product. If you are looking for a library to build an agent with, this is the wrong
-  tool.
-- **Not a hosted-only service.** Everything in this repository is Apache-2.0 and runs self-hosted; the
-  control plane is a Fastify server and a Postgres database.
-- **Not an opinion about your stack.** Harnesses, datasets, judges, and runtimes are all pluggable
-  adapters behind interfaces. That is the one place this codebase deliberately inverts the usual
-  "no interfaces for a single implementation" rule — see [`CLAUDE.md`](https://github.com/everdict/everdict/blob/main/CLAUDE.md).
+Being honest about this saves everyone time:
+
+- **You want a framework to build an agent with.** This is the wrong tool. Everdict has an agent
+  runtime, but it exists to *consume* the evaluation harness, not to be the product.
+- **You have no repeatable task.** Evaluation needs problems with a stable identity. If every request
+  is one-of-a-kind and there is no notion of "solved", there is nothing to compare across versions.
+- **You want a leaderboard without a dataset.** Public benchmark scores are cheap and mean little
+  about *your* workload. The value here comes from cases that look like your traffic.
+- **You need it hosted for you today.** Everything here is self-hosted and Apache-2.0.
+
+## What it will not do for you
+
+- **It will not tell you the task was worth doing.** A rising pass rate on a bad dataset is a rising
+  number, nothing more. Case design is on you, and it is the hard part.
+- **It will not make an LLM judge objective.** A judge introduces its own variance to every score it
+  produces. Prefer deterministic grading whenever the output has a checkable shape.
+- **It will not hide uncertainty.** When a grader dies, the case reads `not evaluated` — never a zero,
+  never a pass. Some dashboards get quieter numbers by lying; this one gets noisier ones by not.
 
 ## How a run is shaped
 
-A run separates four concerns inside the sandbox, plus one outside it:
+Four concerns inside the sandbox, plus one outside it. Keeping them apart is what makes the same case
+portable across agents and infrastructure.
 
-| Concern | What it is | Where it lives |
-| --- | --- | --- |
-| **Harness** | the agent under test | `@everdict/harnesses` |
-| **Environment** | the world it acts on — repo, browser, OS | `@everdict/environments` |
-| **Driver** | in-sandbox compute that actually starts the process | `@everdict/drivers` |
-| **Grader / Judge** | how the result is scored | `@everdict/graders` |
-| **Backend** | *placement* — where the job runs | `@everdict/backends` |
+The **harness** is the agent under test. The **environment** is the world it acts on — a repo, a
+prompt, a browser, an OS. The **driver** is in-sandbox compute that starts the process. The
+**grader** turns the result into a measurement. And the **backend** decides *where* the job runs at
+all.
 
-Keeping the grader out of the harness is what makes the score comparable across agents: two different
-agents solving the same case are scored by the same code.
+Grading sits outside the harness on purpose: two different agents solving the same case are scored by
+the same code, which is the only reason their numbers can be compared.
 
 ## Who drives it
 
-Two audiences, one platform, the same permissions:
+**People** use the web app — Keycloak login, a workspace dashboard, scorecards and trends.
+**Agents and CI** use the MCP server and API keys. Both surfaces expose the same capabilities, at
+parity by construction: a tool exists on both or on neither.
 
-- **People** use the web app — Keycloak login, a workspace dashboard, scorecards and trends.
-- **Agents and CI** use the MCP server and API keys — the same tools as the HTTP API, role-gated and
-  workspace-scoped, with full parity between the two surfaces.
+## Next
 
-## Where to go next
-
-- [Quickstart](quickstart.md) — bring the stack up
-- [Your first scorecard](first-scorecard.md) — the shortest path to a real verdict
+- [Quickstart](quickstart.md) — the stack, in one command
+- [Your first scorecard](first-scorecard.md) — clone a working evaluation
 - [Core concepts](../concepts/README.md) — the vocabulary the rest of the docs assumes
