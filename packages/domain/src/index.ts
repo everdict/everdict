@@ -272,6 +272,18 @@ export {
   type ReleaseStatusChangeInput,
   type ReleaseTransition,
 } from "./product/release.js";
+// …and the pure derivation a repository's own facts feed the creation wizard: which version streams it
+// publishes, which deployable units live in its tree, and the service rows those two together propose.
+export {
+  detectPackages,
+  type DetectedVersionStream,
+  detectVersionStreams,
+  PACKAGE_MANIFESTS,
+  type PackageManifest,
+  proposeServices,
+  type ProposeServicesInput,
+  versionTagPrefix,
+} from "./product/discovery.js";
 export {
   type BaselineResolution,
   productPolicyDigest,

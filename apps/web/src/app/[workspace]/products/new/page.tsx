@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
-import { ProductForm, type RepoOption } from '@/features/manage-product'
+import { ProductWizard, type RepoOption } from '@/features/manage-product'
 import { repoOptionsSchema } from '@/entities/product'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -9,9 +9,14 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 프로덕트 등록 — 폼의 선택지는 서버가 좁혀 온다(피커 규칙): 시리즈의 데이터셋/하네스/저지는 워크스페이스가
-// 실제로 등록한 것들이고, 없는 id 는 컨트롤 플레인이 400 으로 거절한다.
-export default async function NewProductPage({ params }: { params: Promise<{ workspace: string }> }) {
+// 프로덕트 등록 — 단계형 위자드다. 선택지는 서버가 좁혀 온다(피커 규칙): 시리즈의 데이터셋/하네스/저지는
+// 워크스페이스가 실제로 등록한 것들이고, 레포는 GitHub App 설치 집합(= 싱크가 토큰을 받을 수 있는 그 집합)
+// 이며, 서비스 행 자체는 레포를 읽어 제안받는다. 없는 id 는 컨트롤 플레인이 400 으로 거절한다.
+export default async function NewProductPage({
+  params,
+}: {
+  params: Promise<{ workspace: string }>
+}) {
   const { workspace } = await params
   const t = await getTranslations('productsPage')
   const { ctx } = await currentPrincipal()
@@ -21,7 +26,11 @@ export default async function NewProductPage({ params }: { params: Promise<{ wor
     try {
       const rows = (await fetchIds) as Array<{ id?: unknown }>
       return Array.isArray(rows)
-        ? [...new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === 'string'))]
+        ? [
+            ...new Set(
+              rows.map((row) => row.id).filter((id): id is string => typeof id === 'string')
+            ),
+          ]
         : []
     } catch {
       return []
@@ -42,7 +51,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ wor
     <div className="space-y-6">
       <PageHeader title={t('newTitle')} description={t('newDescription')} />
       <Card className="max-w-3xl p-5">
-        <ProductForm
+        <ProductWizard
           workspace={workspace}
           datasetOptions={datasetOptions}
           harnessOptions={harnessOptions}

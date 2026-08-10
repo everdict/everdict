@@ -145,3 +145,21 @@ export interface GithubVersionReader {
 export interface GithubVersionReaderFactory {
   for(token: string, host?: string): GithubVersionReader;
 }
+
+// The COMPOSITION half of the read surface — what a repository contains, as opposed to what it published.
+// The product wizard needs it to answer "which deployable units live in this monorepo" from the repository
+// itself instead of from a text field somebody fills in (a mistyped subpath or tag prefix fails SILENTLY: the
+// sync imports zero versions and the timeline stays empty with no error anywhere).
+//
+// Separate from GithubVersionReader on purpose — a repository's tree and its version streams are different
+// questions, only the wizard asks both, and every existing fake of the version reader keeps compiling.
+export interface GithubRepoTreeReader {
+  // The repository's file paths on a ref (default branch when omitted), recursively. `truncated` is GitHub's
+  // own flag for a tree too large to return whole: a bounded read that reports its bound, because a partial
+  // tree read as complete would present "we found three services" for a repository that has thirty.
+  listTree(repository: string, opts?: { ref?: string }): Promise<{ paths: string[]; truncated: boolean }>;
+}
+
+export interface GithubRepoTreeReaderFactory {
+  for(token: string, host?: string): GithubRepoTreeReader;
+}

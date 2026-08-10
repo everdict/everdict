@@ -2,6 +2,7 @@ import {
   PRODUCT_SERIES_LIMIT,
   ProductAutoEvalSchema,
   ProductSeriesSchema,
+  ReleaseComponentSchema,
   ReleaseStatusSchema,
 } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -102,6 +103,34 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
         } catch {
           return ok([]);
         }
+      }),
+  );
+
+  server.registerTool(
+    "discover_product_repo",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "Read a repository and propose the services it composes — the answer to 'what should this product's " +
+        "services be' taken from the repository itself instead of guessed. Returns the version streams it " +
+        "publishes (releases first, tags as the fallback, with tag prefixes derived from the real tag names), " +
+        "the deployable units in its tree (a monorepo composes one product out of several subpaths), and " +
+        "suggested service rows — `recommended` ones are backed by an existing stream. Persists nothing; use " +
+        "it before create_product so a declared tagPrefix matches tags that actually exist.",
+      inputSchema: {
+        repository: z.string().min(1).max(200).describe("owner/name"),
+        host: z.string().min(1).max(200).optional().describe("GitHub Enterprise host; absent = github.com"),
+      },
+    },
+    (a) =>
+      run(principal, "issues:write", async () => {
+        if (!deps.productDiscovery) throw new Error("product discovery not configured");
+        return ok(
+          await deps.productDiscovery.discover(ws, {
+            repository: a.repository,
+            ...(a.host !== undefined ? { host: a.host } : {}),
+          }),
+        );
       }),
   );
 
@@ -216,15 +245,23 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
     {
       annotations: { readOnlyHint: false },
       description:
-        "Plan a release — a checkpoint on the product's axis with a name, a target date, and which watch " +
-        "series it is judged by (absent = every series). It starts `planned`; shipping goes through " +
-        "set_release_status, which gates on open linked issues and non-passing required series verdicts.",
+        "Plan a release — a checkpoint on the product's axis with a name, a target date, which watch series " +
+        "it is judged by (absent = every series) and which service versions it ships (`components`). It " +
+        "starts `planned`; shipping goes through set_release_status, which gates on open linked issues and " +
+        "non-passing required series verdicts — the composition is recorded, never gated on.",
       inputSchema: {
         productId: z.string(),
         name: z.string().min(1).max(200),
         description: z.string().max(10_000).optional(),
         targetDate: CalendarDate.optional(),
         seriesKeys: z.array(z.string().min(1)).max(50).optional(),
+        components: z
+          .array(ReleaseComponentSchema)
+          .max(50)
+          .optional()
+          .describe(
+            "the versions going out together, one row per tracked service; omit a row's version while it is undecided",
+          ),
       },
     },
     (a) =>
@@ -238,6 +275,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.targetDate !== undefined ? { targetDate: a.targetDate } : {}),
             ...(a.seriesKeys !== undefined ? { seriesKeys: a.seriesKeys } : {}),
+            ...(a.components !== undefined ? { components: a.components } : {}),
           }),
         ),
       ),
@@ -274,14 +312,16 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
     {
       annotations: { readOnlyHint: false },
       description:
-        "Edit a release's content (name, description, target date, watched series). `seriesKeys: null` clears " +
-        "the selection back to every series.",
+        "Edit a release's content (name, description, target date, watched series, shipped composition). " +
+        "`seriesKeys: null` clears the selection back to every series; `components: null` clears the " +
+        "composition back to 'never declared' (distinct from [], which says it ships no tracked service).",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(200).optional(),
         description: z.string().max(10_000).nullable().optional(),
         targetDate: CalendarDate.nullable().optional(),
         seriesKeys: z.array(z.string().min(1)).max(50).nullable().optional(),
+        components: z.array(ReleaseComponentSchema).max(50).nullable().optional(),
       },
     },
     ({ id, ...fields }) =>

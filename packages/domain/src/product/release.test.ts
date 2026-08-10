@@ -116,4 +116,68 @@ describe("Release — a gated checkpoint on the product's axis", () => {
     );
     expect(() => release.update({ name: "2026.3" }, "dana", LATER, [...SERIES])).toThrow(BadRequestError);
   });
+
+  describe("the composition it ships", () => {
+    it("carries a version-less component — a plan may name a service whose version is not cut yet", () => {
+      const record = Release.newRelease({
+        id: "rel-3",
+        tenant: "acme",
+        productId: "prod-1",
+        name: "2026.5",
+        components: [{ service: "api", version: "v1.4.0" }, { service: "core" }],
+        productSeriesKeys: [...SERIES],
+        productServiceNames: ["api", "web", "core"],
+        createdBy: "dana",
+        now: NOW,
+      });
+      expect(record.components).toEqual([{ service: "api", version: "v1.4.0" }, { service: "core" }]);
+    });
+
+    it("refuses a service its product does not track, and refuses naming one twice", () => {
+      const base = {
+        id: "rel-4",
+        tenant: "acme",
+        productId: "prod-1",
+        name: "2026.6",
+        productSeriesKeys: [...SERIES],
+        productServiceNames: ["api"],
+        createdBy: "dana",
+        now: NOW,
+      };
+      expect(() => Release.newRelease({ ...base, components: [{ service: "ghost", version: "v1" }] })).toThrow(
+        BadRequestError,
+      );
+      expect(() =>
+        Release.newRelease({
+          ...base,
+          components: [
+            { service: "api", version: "v1" },
+            { service: "api", version: "v2" },
+          ],
+        }),
+      ).toThrow(BadRequestError);
+    });
+
+    it("clears the declaration with null, which is not the same as shipping nothing", () => {
+      const planned = { ...newRelease(), components: [{ service: "api", version: "v1.4.0" }] };
+      expect(
+        Release.from(planned).update({ components: [] }, "dana", LATER, [...SERIES], ["api"]).patch.components,
+      ).toEqual([]);
+      expect(
+        Release.from(planned).update({ components: null }, "dana", LATER, [...SERIES], ["api"]).patch.components,
+      ).toBeUndefined();
+    });
+
+    it("freezes what it shipped into the ship's own history entry", () => {
+      const planned = { ...newRelease(), components: [{ service: "api", version: "v1.4.0" }] };
+      const transition = Release.from(planned).setStatus(
+        { to: "released", openIssues: 0, regressedSeries: [] },
+        "dana",
+        LATER,
+      );
+      const entry = transition.patch.history?.at(-1);
+      expect(entry?.event).toBe("released");
+      expect((entry?.detail as { components?: unknown }).components).toEqual([{ service: "api", version: "v1.4.0" }]);
+    });
+  });
 });

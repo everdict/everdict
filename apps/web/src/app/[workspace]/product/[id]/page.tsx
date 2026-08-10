@@ -2,7 +2,13 @@ import { notFound } from 'next/navigation'
 import { GitBranch } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
-import { TrackerHistory } from '@/entities/tracker-history'
+import { ProductTimelineView } from '@/widgets/product-timeline'
+import {
+  AutoEvalToggle,
+  PlanReleaseButton,
+  ProductActionsMenu,
+  SyncProductButton,
+} from '@/features/manage-product'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
 import {
   productDetailSchema,
@@ -12,13 +18,7 @@ import {
   type ProductDetail,
   type ProductTimeline,
 } from '@/entities/product'
-import {
-  AutoEvalToggle,
-  PlanReleaseButton,
-  ProductActionsMenu,
-  SyncProductButton,
-} from '@/features/manage-product'
-import { ProductTimelineView } from '@/widgets/product-timeline'
+import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -80,7 +80,9 @@ export default async function ProductPage({
               <AutoEvalToggle
                 productId={product.id}
                 enabled={product.autoEval.enabled}
-                {...(product.autoEval.runtime !== undefined ? { runtime: product.autoEval.runtime } : {})}
+                {...(product.autoEval.runtime !== undefined
+                  ? { runtime: product.autoEval.runtime }
+                  : {})}
               />
               <SyncProductButton productId={product.id} />
               <PlanReleaseButton
@@ -106,9 +108,18 @@ export default async function ProductPage({
                   <Badge tone="outline">{t(`source.${service.source}`)}</Badge>
                   {service.tagPrefix && <Badge tone="neutral">{service.tagPrefix}*</Badge>}
                 </p>
-                <p className="truncate font-mono text-xs text-muted-foreground">{service.repository}</p>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {service.repository}
+                  {/* 모노레포에서 이 서비스가 사는 자리 — 같은 레포의 형제 서비스들과 구분되는 지점. */}
+                  {service.path !== undefined && (
+                    <span className="text-muted-foreground/70">/{service.path}</span>
+                  )}
+                </p>
                 {service.sync?.lastError ? (
-                  <p className="truncate text-xs text-destructive" title={service.sync.lastError.message}>
+                  <p
+                    className="truncate text-xs text-destructive"
+                    title={service.sync.lastError.message}
+                  >
                     {t('syncFailed', { message: service.sync.lastError.message })}
                   </p>
                 ) : service.sync?.syncedAt ? (
@@ -143,9 +154,21 @@ export default async function ProductPage({
                 href={releaseHref(workspace, release.id)}
                 className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
-                <span className="min-w-0 flex-1 truncate text-[13px] font-[510]">{release.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-[510]">
+                  {release.name}
+                </span>
+                {/* 이 릴리즈가 내보내는 구성 — 서비스 여럿이 함께 나가는 제품에서 "무엇이 나갔나"의 답. */}
+                {release.components !== undefined && release.components.length > 0 && (
+                  <span className="hidden truncate font-mono text-[11px] text-muted-foreground @2xl:inline">
+                    {release.components
+                      .map((component) => `${component.service} ${component.version ?? '—'}`)
+                      .join(' · ')}
+                  </span>
+                )}
                 {release.targetDate && (
-                  <span className="font-mono text-[11px] text-muted-foreground">{release.targetDate}</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {release.targetDate}
+                  </span>
                 )}
                 <ReleaseStatusBadge status={release.status} />
               </Link>

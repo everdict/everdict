@@ -1,5 +1,7 @@
 import type {
   GithubIssue,
+  GithubRepoTreeReader,
+  GithubRepoTreeReaderFactory,
   GithubRepoWriter,
   GithubRepoWriterFactory,
   GithubVersionReader,
@@ -298,6 +300,52 @@ const TAG_ROW = z.object({ name: z.string(), commit: z.object({ sha: z.string() 
 // than any product timeline needs and still a bound rather than an open crawl — a limit that is DECLARED,
 // because a limit that merely happens reads as completeness to whoever comes next.
 const DEFAULT_MAX_PAGES = 50;
+
+// The repository's file list on its default branch — one recursive tree call, which is why the product
+// wizard can propose a monorepo's services without walking directories. GitHub answers with its OWN
+// `truncated` flag for a tree it would not return whole; the caller propagates it rather than presenting a
+// partial tree as the repository's full composition.
+const TREE_ROW = z.object({
+  tree: z.array(z.object({ path: z.string(), type: z.string() })).default([]),
+  truncated: z.boolean().default(false),
+});
+
+export function githubRepoTreeReaderFactory(fetchImpl?: typeof fetch): GithubRepoTreeReaderFactory {
+  return {
+    for(token, host): GithubRepoTreeReader {
+      const base = apiBase(host);
+      const doFetch = fetchImpl ?? fetch;
+      return {
+        async listTree(repository, opts) {
+          let ref = opts?.ref;
+          if (ref === undefined) {
+            // The default branch is the honest "current composition" — a tree read against a stale ref would
+            // propose services the repository has since removed.
+            const head = await doFetch(`${base}/repos/${repository}`, { headers: headers(token) });
+            if (!head.ok) throw await upstream(head, "GitHub repository read failed");
+            const parsed = z.object({ default_branch: z.string() }).safeParse(await head.json());
+            if (!parsed.success)
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { repository },
+                `GitHub did not name a default branch for ${repository}.`,
+              );
+            ref = parsed.data.default_branch;
+          }
+          const res = await doFetch(`${base}/repos/${repository}/git/trees/${encodeURIComponent(ref)}?recursive=1`, {
+            headers: headers(token),
+          });
+          if (!res.ok) throw await upstream(res, "GitHub tree read failed");
+          const parsed = TREE_ROW.parse(await res.json());
+          return {
+            paths: parsed.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path),
+            truncated: parsed.truncated,
+          };
+        },
+      };
+    },
+  };
+}
 
 export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVersionReaderFactory {
   return {

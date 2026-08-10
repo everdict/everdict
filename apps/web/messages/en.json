@@ -5962,7 +5962,30 @@
     "updateError": "Failed to save the product.",
     "noAppHint": "Connect the workspace GitHub App to pick repositories instead of typing them.",
     "noAppLink": "Open integrations",
-    "serviceRepositoryPick": "Pick a repository…"
+    "serviceRepositoryPick": "Pick a repository…",
+    "wizardStep_basics": "Basics",
+    "wizardStep_services": "Services",
+    "wizardStep_series": "Watch series",
+    "wizardStep_review": "Review",
+    "wizardBack": "Back",
+    "wizardNext": "Next",
+    "wizardServicesHint": "Pick a repository and everdict reads it for you — the version streams it publishes (tag prefixes come from the real tags) and the deployable units in its tree. A monorepo yields several services from one repository.",
+    "wizardPickRepo": "Repository",
+    "wizardReadRepo": "Read repository",
+    "wizardReadError": "Could not read the repository.",
+    "wizardFound": "{source} · {versions} versions · {packages} packages",
+    "wizardPartialRead": "partial read (counts are a floor)",
+    "wizardStream": "{count} versions",
+    "wizardStreamWithDate": "{count} versions · latest {at}",
+    "wizardSelectedServices": "Selected services",
+    "wizardNoServices": "None yet. Read a repository above and pick from its suggestions, or add a row by hand.",
+    "wizardPreviewCount": "{count, plural, =0 {this prefix matches no versions — check it} other {matches # versions}}",
+    "wizardPreviewRange": "{count} versions · {from} → {to}",
+    "wizardSeriesOptional": "You can leave this empty — series can be added later from the product's edit screen.",
+    "wizardSyncAfter": "Sync right after creating",
+    "wizardSyncAfterHint": "The first sync is a backfill: the release history arrives quietly to form the time axis, and nothing is evaluated.",
+    "servicePath": "Path in repository",
+    "servicePathPlaceholder": "apps/api (optional)"
   },
   "productPage": {
     "servicesHeading": "Tracked services",
@@ -6053,6 +6076,13 @@
     "deleteBody": "Issues stay — only their link to this release goes with it.",
     "deleteKeep": "Keep it",
     "deleteConfirm": "Delete release",
-    "deleteError": "Failed to delete the release."
+    "deleteError": "Failed to delete the release.",
+    "componentsHeading": "What ships",
+    "componentsHint": "The service versions going out together. Versions are picked from the imported ledger; leave one undecided while it is not cut yet. This is a record, not a gate input — the ship freezes it as it stands.",
+    "componentUndecided": "Undecided",
+    "componentVersionFor": "Version for {service}",
+    "componentsFillLatest": "Fill with latest",
+    "componentsSave": "Save composition",
+    "componentsError": "Could not save the composition."
   }
 }

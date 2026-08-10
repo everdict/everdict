@@ -223,6 +223,7 @@ export {
   type ProductSyncServiceOutcome,
   type SeriesRunSubmitter,
 } from "./product/product-version-sync.js";
+export { ProductDiscovery, type ProductDiscoveryDeps } from "./product/product-discovery.js";
 export { type SeriesContractDeps, resolveSeriesContract } from "./product/series-contract.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
@@ -411,6 +412,8 @@ export type {
   GithubIssue,
   GithubIssueComment,
   GithubRelease,
+  GithubRepoTreeReader,
+  GithubRepoTreeReaderFactory,
   GithubRepoWriter,
   GithubRepoWriterFactory,
   GithubTag,

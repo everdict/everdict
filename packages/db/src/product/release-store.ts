@@ -136,12 +136,13 @@ interface ReleaseRow extends TrackerRow {
   series_keys: unknown;
   planned_series_keys: unknown;
   series_selection: string | null;
+  components?: unknown;
 }
 
 const RELEASE_COLUMNS =
-  "(id, tenant, product_id, name, description, status, target_date, released_at, series_keys, planned_series_keys, series_selection, history, created_by, created_at, updated_at)";
+  "(id, tenant, product_id, name, description, status, target_date, released_at, series_keys, planned_series_keys, series_selection, history, created_by, created_at, updated_at, components)";
 const RELEASE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14::timestamptz,$15::timestamptz)";
+  "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14::timestamptz,$15::timestamptz,$16::jsonb)";
 
 function insertParams(record: ReleaseRecord): unknown[] {
   return [
@@ -162,6 +163,9 @@ function insertParams(record: ReleaseRecord): unknown[] {
     record.createdBy,
     record.createdAt,
     record.updatedAt,
+    // The declared composition (mig 0162). NULL = never declared, which is a different fact from `[]` ("this
+    // release ships no tracked service") — a column that collapsed the two would make the plan unreadable.
+    record.components !== undefined ? JSON.stringify(record.components) : null,
   ];
 }
 
@@ -184,6 +188,9 @@ function rowToRecord(row: ReleaseRow): ReleaseRecord {
     ...(row.series_selection !== null && row.series_selection !== undefined
       ? { seriesSelection: row.series_selection }
       : {}),
+    // NULL/absent = never declared (a row written before mig 0162, or a release nobody scoped). The schema
+    // validates the elements; a non-array is dropped rather than handed to the domain half-formed.
+    ...(Array.isArray(row.components) ? { components: row.components } : {}),
     history: trackerHistory(row.history),
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -263,7 +270,7 @@ export class PgReleaseStore implements ReleaseStore {
     // that omitted it would let an edit change `seriesKeys` while the release kept demanding the old gates.
     const sets = `name=$3, description=$4, status=$5, target_date=$6, released_at=$7::timestamptz,
        series_keys=$8::jsonb, planned_series_keys=$9::jsonb, series_selection=$10,
-       history=$11::jsonb, updated_at=$12::timestamptz, version=$13`;
+       history=$11::jsonb, updated_at=$12::timestamptz, version=$13, components=$14::jsonb`;
     const params: unknown[] = [
       tenant,
       id,
@@ -278,6 +285,7 @@ export class PgReleaseStore implements ReleaseStore {
       JSON.stringify(next.history),
       next.updatedAt,
       next.version ?? 0,
+      next.components !== undefined ? JSON.stringify(next.components) : null,
     ];
     // …and the status the caller decided FROM, as a WHERE condition — the read above is not the guarantee,
     // this is. A miss matches zero rows and the facts (WHERE EXISTS on the updating CTE) never land either.

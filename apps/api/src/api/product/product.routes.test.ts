@@ -1,4 +1,4 @@
-import { ProductService, ProductVersionSync, RunService } from "@everdict/application-control";
+import { ProductDiscovery, ProductService, ProductVersionSync, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { IssueRecord, ScorecardRecord } from "@everdict/contracts";
 import {
@@ -86,10 +86,64 @@ function build() {
       }),
     },
   });
+  // The wizard's evidence read, over a repository that tags a monorepo per component. The tree half and the
+  // version half are separate fakes because they are separate ports — a deployment can have one without the
+  // other, and the route must degrade rather than fail.
+  const productDiscovery = new ProductDiscovery({
+    tokens: {
+      async tokenForRepository() {
+        return { token: "ghs_test" };
+      },
+    },
+    readers: {
+      for: () => ({
+        async listReleases() {
+          return {
+            complete: true,
+            rows: [
+              {
+                tagName: "api-v1.2.0",
+                url: "https://github.com/acme/platform/releases/api-v1.2.0",
+                draft: false,
+                prerelease: false,
+                publishedAt: "2026-08-01T00:00:00.000Z",
+              },
+              {
+                tagName: "web-v3.1.0",
+                url: "https://github.com/acme/platform/releases/web-v3.1.0",
+                draft: false,
+                prerelease: false,
+                publishedAt: "2026-07-01T00:00:00.000Z",
+              },
+              // A draft has not made the "released" claim — the preview must count what an import would bring.
+              { tagName: "api-v1.3.0", url: "https://x", draft: true, prerelease: false },
+            ],
+          };
+        },
+        async listTags() {
+          return { rows: [], complete: true };
+        },
+        async commitDate() {
+          return undefined;
+        },
+      }),
+    },
+    trees: {
+      for: () => ({
+        async listTree() {
+          return {
+            paths: ["package.json", "apps/api/package.json", "apps/web/package.json", "docs/readme.md"],
+            truncated: false,
+          };
+        },
+      }),
+    },
+  });
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     productService,
     productVersionSync,
+    productDiscovery,
   });
   return { app, issueStore, scorecardStore };
 }
@@ -322,6 +376,69 @@ describe("product routes", () => {
     const versions = await app.inject({ method: "GET", url: `/products/${product.id}/versions`, headers: H });
     expect(versions.json()).toHaveLength(1);
     expect(versions.json()[0]).toMatchObject({ service: "api", version: "v1.0.0", kind: "release" });
+  });
+
+  it("proposes a monorepo's services from what the repository publishes and what its tree holds", async () => {
+    const { app } = build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/products/discover",
+      headers: H,
+      payload: { repository: "acme/platform" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.source).toBe("releases");
+    // A draft never reaches the sample — the preview counts what an import would actually bring.
+    expect(body.versions.map((v: { name: string }) => v.name)).toEqual(["api-v1.2.0", "web-v3.1.0"]);
+    expect(body.packages.map((p: { path: string }) => p.path)).toEqual(["apps/api", "apps/web"]);
+    expect(body.suggestions).toEqual([
+      expect.objectContaining({ name: "api", path: "apps/api", tagPrefix: "api-v", recommended: true }),
+      expect.objectContaining({ name: "web", path: "apps/web", tagPrefix: "web-v", recommended: true }),
+    ]);
+  });
+
+  it("records the composition a release ships, and refuses one naming a service the product does not track", async () => {
+    const { app } = build();
+    const product = await createProduct(app);
+    const ghost = await app.inject({
+      method: "POST",
+      url: `/products/${product.id}/releases`,
+      headers: H,
+      payload: { name: "2026.3", components: [{ service: "ghost", version: "v1.0.0" }] },
+    });
+    expect(ghost.statusCode).toBe(400);
+
+    const planned = await app.inject({
+      method: "POST",
+      url: `/products/${product.id}/releases`,
+      headers: H,
+      // A version-less row is a real plan state: the service ships, its version is not cut yet.
+      payload: { name: "2026.3", components: [{ service: "api" }] },
+    });
+    expect(planned.statusCode).toBe(201);
+    expect(planned.json().components).toEqual([{ service: "api" }]);
+
+    const filled = await app.inject({
+      method: "PATCH",
+      url: `/releases/${planned.json().id}`,
+      headers: H,
+      payload: { components: [{ service: "api", version: "v1.0.0" }] },
+    });
+    expect(filled.statusCode).toBe(200);
+    expect(filled.json().components).toEqual([{ service: "api", version: "v1.0.0" }]);
+
+    // …and the ship freezes it: "which versions did 2026.3 contain" stays answerable from the release itself.
+    // Forced, because this product's series has never been evaluated and not evaluated is never green — the
+    // composition is recorded either way, which is exactly the point: it is a record, not a gate input.
+    const shipped = await app.inject({
+      method: "POST",
+      url: `/releases/${planned.json().id}/status`,
+      headers: H,
+      payload: { status: "released", force: true },
+    });
+    expect(shipped.statusCode).toBe(200);
+    expect(shipped.json().history.at(-1)?.detail?.components).toEqual([{ service: "api", version: "v1.0.0" }]);
   });
 
   it("refuses a release watching a series the product never declared", async () => {

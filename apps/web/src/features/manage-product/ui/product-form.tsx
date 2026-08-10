@@ -21,6 +21,8 @@ interface ServiceRow {
   host: string
   source: 'releases' | 'tags'
   tagPrefix: string
+  // 모노레포에서 이 서비스가 사는 경로 — 스트림 정체성이 아니라 구성 정보라, 바꿔도 워터마크는 살아 있다.
+  path: string
 }
 
 interface SeriesRow {
@@ -63,6 +65,7 @@ export interface ProductFormInitial {
     host?: string
     source: 'releases' | 'tags'
     tagPrefix?: string
+    path?: string
   }[]
   series: {
     key: string
@@ -103,6 +106,7 @@ export function ProductForm({
       host: row.host ?? '',
       source: row.source,
       tagPrefix: row.tagPrefix ?? '',
+      path: row.path ?? '',
     }))
   )
   const [series, setSeries] = useState<SeriesRow[]>(
@@ -134,6 +138,7 @@ export function ProductForm({
         ...(row.host.trim().length > 0 ? { host: row.host.trim() } : {}),
         source: row.source,
         ...(row.tagPrefix.trim().length > 0 ? { tagPrefix: row.tagPrefix.trim() } : {}),
+        ...(row.path.trim().length > 0 ? { path: row.path.trim() } : {}),
       }))
     const payloadSeries: ProductSeries[] = series
       .filter((row) => row.key.length > 0 && row.datasetId.length > 0 && row.harnessId.length > 0)
@@ -215,7 +220,10 @@ export function ProductForm({
             variant="outline"
             size="sm"
             onClick={() =>
-              setServices((rows) => [...rows, { name: '', repository: '', host: '', source: 'releases', tagPrefix: '' }])
+              setServices((rows) => [
+                ...rows,
+                { name: '', repository: '', host: '', source: 'releases', tagPrefix: '', path: '' },
+              ])
             }
           >
             <Plus className="size-3.5" />
@@ -226,14 +234,20 @@ export function ProductForm({
         {repoOptions.length === 0 && (
           <p className="text-xs text-muted-foreground">
             {t('noAppHint')}{' '}
-            <Link href={`/${workspace}/settings/integrations`} className="underline hover:text-foreground">
+            <Link
+              href={`/${workspace}/settings/integrations`}
+              className="underline hover:text-foreground"
+            >
               {t('noAppLink')}
             </Link>
           </p>
         )}
         {services.map((row, index) => (
           // 이름이 정체성이지만 편집 중에는 비어 있을 수 있어 index 로 그린다(제출 시 빈 행은 걸러진다).
-          <div key={index} className="grid gap-2 @md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_8rem_8rem_auto]">
+          <div
+            key={index}
+            className="grid gap-2 @md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_7rem_7rem_7rem_auto]"
+          >
             <Input
               value={row.name}
               onChange={(e) => patchService(index, { name: e.target.value })}
@@ -246,7 +260,8 @@ export function ProductForm({
               <Combobox
                 options={repoOptions.map((repo) => ({
                   value: repoValueOf(repo),
-                  label: repo.host !== undefined ? `${repo.fullName} · ${repo.host}` : repo.fullName,
+                  label:
+                    repo.host !== undefined ? `${repo.fullName} · ${repo.host}` : repo.fullName,
                 }))}
                 value={repoValueOf({
                   fullName: row.repository,
@@ -288,6 +303,12 @@ export function ProductForm({
               placeholder={t('serviceTagPrefix')}
               aria-label={t('serviceTagPrefix')}
             />
+            <Input
+              value={row.path}
+              onChange={(e) => patchService(index, { path: e.target.value })}
+              placeholder={t('servicePathPlaceholder')}
+              aria-label={t('servicePath')}
+            />
             <Button
               variant="ghost"
               size="icon"
@@ -307,7 +328,10 @@ export function ProductForm({
             variant="outline"
             size="sm"
             onClick={() =>
-              setSeries((rows) => [...rows, { key: '', label: '', datasetId: '', harnessId: '', judgeIds: [] }])
+              setSeries((rows) => [
+                ...rows,
+                { key: '', label: '', datasetId: '', harnessId: '', judgeIds: [] },
+              ])
             }
           >
             <Plus className="size-3.5" />
@@ -326,7 +350,9 @@ export function ProductForm({
                     patchSeries(index, {
                       label: e.target.value,
                       // key 를 손대기 전까지는 라벨을 따라간다 — 저장 뒤에는 라벨을 바꿔도 key 는 남는다.
-                      ...(row.key === slugOf(row.label) || row.key === '' ? { key: slugOf(e.target.value) } : {}),
+                      ...(row.key === slugOf(row.label) || row.key === ''
+                        ? { key: slugOf(e.target.value) }
+                        : {}),
                     })
                   }
                   placeholder={t('seriesLabelPlaceholder')}

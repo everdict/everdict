@@ -16,9 +16,13 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
 - **Product** (`records/product.ts`, aggregate in `@everdict/domain` `product/product.ts`) — mutable state,
   tracker-shaped (NOT a registry entity: it has no immutable versions of its own).
   - `services[]` — the tracked composition. Each names a GitHub repository (`host` for GHE), a `source`
-    (`releases` | `tags`), and an optional `tagPrefix` (monorepos release several services from one repo).
-    The NAME is the timeline's key; changing a service's source coordinates resets its sync watermark — the
-    name now tracks a different stream, and the next sync is a fresh backfill.
+    (`releases` | `tags`), an optional `tagPrefix` (monorepos release several services from one repo) and an
+    optional `path` (where the service lives inside the repository). The NAME is the timeline's key; changing
+    a service's source coordinates resets its sync watermark — the name now tracks a different stream, and the
+    next sync is a fresh backfill. `path` is deliberately NOT part of `serviceStreamKey`: what a service READS
+    is (host, repository, source, tagPrefix), and two services under one repo-wide tag stream genuinely move
+    together, so folding the path into the stream identity would declare one stream to be two and would reset
+    a watermark for an edit that changed nothing about what is read. Composition, not provenance.
   - `series[]` — the watch series: one question asked repeatedly (`dataset × harness × judges`). The `key`
     is the trend's durable identity (scorecards stamp it; relabeling never re-keys history). Capability refs
     default to `latest` — a standing series evaluates whatever is current, which is how it composes with the
@@ -28,7 +32,8 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
   - `autoEval` — `{enabled, runtime?}`; on by default.
   - `history[]` — the tracker's record-embedded audit trail (`appendHistory`, 200 cap).
 - **Release** (`product/release.ts`) — a checkpoint: `planned → released | cancelled`, `targetDate`
-  (calendar date), optional `seriesKeys` selection (absent = every series). **`released` is a gate**: the
+  (calendar date), optional `seriesKeys` selection (absent = every series), optional `components[]` — the
+  composition it ships (mig 0162; see §"What a release ships" below). **`released` is a gate**: the
   transition takes `{openIssues, regressedSeries, force}` (counts supplied by the caller — the tracker's
   rule) and refuses with a 409 naming both while anything blocks; `force: true` ships anyway and is recorded
   on the fact and in the history (event `released`, `forced: true`). A released release is history — it
@@ -38,6 +43,64 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
   (`ON CONFLICT DO NOTHING` feeding the outbox CTE), so a re-sync or two racing sweeps can never make one
   version news twice — the dedup is structural, not bookkept. `publishedAt` is the REMOTE clock (tags borrow
   their commit's committer date); the timeline orders by it.
+
+## Declaring a product by CHOOSING, not by typing
+
+A service row used to be four text fields, and one of them punishes a mistake silently. `tagPrefix: "api-"`
+against a repository whose tags read `api/v1.2.0` matches nothing: the sync reports `imported: 0`, no error is
+raised anywhere, and the product's timeline stays empty forever. Every other field fails loudly (a wrong
+repository 404s at the first pull); this one fails as *silence*, which is the failure mode this codebase spends
+most of its guards removing.
+
+The repository already holds the answer, so `POST /products/discover` (MCP `discover_product_repo`) reads it —
+read-only, persisting nothing — and answers the two questions a service row needs:
+
+```
+which streams does it PUBLISH   releases first (a published release is the stronger claim), tags as the
+                                fallback; prefixes are derived from the real tag names (`versionTagPrefix`)
+what does it CONTAIN            the recursive tree filtered to package manifests at component depth
+                                (`detectPackages`) — the monorepo half: one product, several subpaths
+```
+
+`proposeServices` (pure, in `@everdict/domain`) joins them into the rows the wizard renders as checkboxes.
+The distinction that carries the design is `recommended`: a STREAM is evidence (this repository demonstrably
+publishes under this prefix, so a service declared on it will import something) and is pre-checked; a PACKAGE
+is a candidate (this directory looks deployable) and is offered unchecked *under a repo-wide stream*, or not at
+all when there is nothing for it to read — proposing a service with no stream would be inventing one. A
+bare-numeric stream is never proposed beside prefixed ones for the same reason in reverse: `tagPrefix:
+undefined` means "every tag", so that row would silently swallow the other streams' versions.
+
+The response also carries the version SAMPLE, not just per-prefix counts. That is what lets the wizard re-count
+client-side the moment somebody edits a prefix — the preview ("matches 14 versions · 2025-03-01 → 2026-08-01",
+or a warning at zero) costs no further GitHub round trip, and uses the sync's own matching rule (`startsWith`,
+absent = all) so the number shown is the number that will import. Bounds are declared and reported
+(`complete: false` = a read hit its ceiling, making every count a floor); tag dates cost a commit read each, so
+only the newest few are resolved.
+
+Creating with "sync now" runs the first sync immediately, which is a BACKFILL: the release history lands
+quietly to form the time axis, and nothing is evaluated.
+
+## What a release ships
+
+The product declares WHAT composes it and the ledger records that each service moved; neither answers the
+question a release is for — *which versions went out together as 2026.3*. Three services on three streams
+produce three independent version rows, and the decision to ship a particular triple is a person's. Deriving
+it instead ("the newest import before the ship") invents a composition nobody chose, and keeps re-inventing a
+different one as the ledger grows.
+
+`ReleaseRecord.components[]` is `{service, version?}`, validated against the product's tracked services (once
+each — two rows for one service are two answers to one question). The version is OPTIONAL: a planned release
+legitimately names a service whose version is not cut yet, and "we have not decided" is a different statement
+from "v1.2.3". The web picks versions from the imported ledger only (a typed version is a string that joins to
+no row), defaulting to the newest import at the moment a service is *included* — including it is the human
+decision, the default is a convenience on top.
+
+It is deliberately NOT a gate input. The release gate decides on evidence (open linked issues, watched-series
+verdicts); making a half-filled plan un-shippable would be a second, weaker release constitution beside the one
+that already exists. The SHIP freezes the composition into its history entry, the same treatment the per-series
+decisions get: "which versions did 2026.3 contain" stays answerable from the release itself after the plan has
+moved on. Renaming or dropping a service later does not rewrite a shipped release — the record says what
+shipped, which is the point of a record.
 
 ## Sync — everdict stays the client
 
@@ -280,14 +343,19 @@ regression watch's, and an issue it reopened blocks the release through the link
 - HTTP + MCP full parity in the `api/product` slice; authz reuses the ISSUE pair (`issues:read`/`issues:write`
   — the timeline is the same planning workflow, one axis over); delete = creator-or-admin in the service;
   product deletion cascades releases + ledger (they exist only under their product).
-- Web: `/products` (+`/products/new`), `/product/[id]` (services + sync state, release strip, one `LineChart`
-  per series — points click through to their scorecard — version table, history), `/release/[id]` (readiness
-  card + gate UI: a 409 becomes an explicit forced-ship confirmation). `entities/product` carries the zod
-  mirrors + drift guards; the tracker history renderer gained the `released` event.
+- Web: `/products` (+`/products/new`, a four-step WIZARD: basics → services (read a repository, tick the
+  proposals, live prefix preview) → series → review+sync), `/product/[id]` (services + subpaths + sync state,
+  release strip with each release's composition, one `LineChart` per series — points click through to their
+  scorecard — version table, history), `/product/[id]/edit` (the flat form, for editing an existing
+  declaration), `/release/[id]` (readiness card + gate UI: a 409 becomes an explicit forced-ship confirmation;
+  plus the composition editor, versions picked from the ledger). `entities/product` carries the zod mirrors +
+  drift guards; the tracker history renderer gained the `released` event.
 
 ## Where the code lives
 
-contracts `records/product.ts` + `wire/product/product.ts` · domain `product/{product,release,readiness}.ts` ·
-application-control `product/{product-service,product-version-sync}.ts` + `ports/product-store.ts` +
-`ports/github-repo-writer.ts` (version reader) · db `product/*` + mig `0138` · api `api/product/*` ·
-web `entities/product` + `features/manage-product` + `widgets/product-timeline` + the four routes.
+contracts `records/product.ts` + `wire/product/product.ts` · domain
+`product/{product,release,readiness,discovery}.ts` · application-control
+`product/{product-service,product-version-sync,product-discovery}.ts` + `ports/product-store.ts` +
+`ports/github-repo-writer.ts` (version reader + tree reader) · db `product/*` + mig `0138`/`0162` ·
+api `api/product/*` + `infrastructure/github/repo-writer.ts` · web `entities/product` +
+`features/manage-product` (wizard + composition editor) + `widgets/product-timeline` + the routes.

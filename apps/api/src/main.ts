@@ -6,6 +6,7 @@ import {
   IssueService,
   KnowledgeEntryService,
   KnowledgeService,
+  ProductDiscovery,
   ProductService,
   ProductVersionSync,
   ProjectService,
@@ -114,7 +115,11 @@ import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-
 import { PooledBrowserProvisioner } from "./infrastructure/browser-session/pooled-browser-provisioner.js";
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
-import { githubRepoWriterFactory, githubVersionReaderFactory } from "./infrastructure/github/repo-writer.js";
+import {
+  githubRepoTreeReaderFactory,
+  githubRepoWriterFactory,
+  githubVersionReaderFactory,
+} from "./infrastructure/github/repo-writer.js";
 import { installProxyDispatcher } from "./infrastructure/http/proxy-dispatcher.js";
 import { probeMcpServer } from "./infrastructure/mcp/probe-mcp.js";
 import { buildServer } from "./server.js";
@@ -981,6 +986,14 @@ async function main(): Promise<void> {
       }),
     events: platformEventService,
   });
+  // The creation wizard's evidence read (docs/architecture/product-timeline.md §declaring by choosing): the
+  // repository's own version streams + the deployable units in its tree, through the SAME App token the sync
+  // uses — so a proposed service is one the sync can actually reach, not a suggestion that 404s on first pull.
+  const productDiscovery = new ProductDiscovery({
+    tokens: githubAppService,
+    readers: githubVersionReaderFactory(),
+    trees: githubRepoTreeReaderFactory(),
+  });
   // The background pull (docs/architecture/product-timeline.md): everdict stays the client, so a sweep — not
   // a webhook — keeps the version ledger close to GitHub. The watermark keeps a quiet pass at one or two
   // GitHub reads per tracked service; a product with no services costs nothing. Not leader-gated: the ledger
@@ -1316,6 +1329,7 @@ async function main(): Promise<void> {
     initiativeService,
     productService,
     productVersionSync,
+    productDiscovery,
     workspacePulseService,
     subscriptionService,
     // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant

@@ -2,6 +2,7 @@ import { ProductRecordSchema, ProductServiceVersionRecordSchema, ReleaseRecordSc
 import {
   ProductDetailResponseSchema,
   ProductListResponseSchema,
+  ProductRepoDiscoveryResponseSchema,
   ProductSyncResponseSchema,
   ProductTimelineResponseSchema,
   ReleaseDetailResponseSchema,
@@ -11,6 +12,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateProductBodySchema } from "./request/create-product.js";
 import { CreateReleaseBodySchema, UpdateReleaseBodySchema } from "./request/create-release.js";
+import { DiscoverRepoBodySchema } from "./request/discover-repo.js";
 import { SetReleaseStatusBodySchema } from "./request/set-release-status.js";
 import { UpdateProductBodySchema } from "./request/update-product.js";
 
@@ -25,6 +27,7 @@ export const productDocs: Record<
   | "list"
   | "get"
   | "repoOptions"
+  | "discover"
   | "listVersions"
   | "timeline"
   | "update"
@@ -87,6 +90,24 @@ export const productDocs: Record<
         ...toJsonSchema(z.array(z.object({ fullName: z.string(), host: z.string().optional(), private: z.boolean() }))),
       },
       ...errorResponses(401, 403),
+    },
+  },
+  discover: {
+    summary: "Read a repository and propose the services it composes",
+    description:
+      "Read-only, persists nothing. Reads the repository through the workspace GitHub App and answers the " +
+      "two questions a service row needs: which version streams it publishes (releases first, tags as the " +
+      "fallback — with the tag prefixes derived from the real tag names) and which deployable units live in " +
+      "its tree (a monorepo composes one product out of several subpaths). `suggestions` are the rows a " +
+      "wizard renders: `recommended` ones are backed by an existing version stream, the rest are packages " +
+      "offered under a repo-wide stream. `versions` is the sample the caller re-filters when a member edits " +
+      "a prefix, so a preview costs no extra round trip. `complete: false` = a read hit its ceiling, which " +
+      "makes every count a floor. Requires issues:write.",
+    tags: ["product"],
+    body: toJsonSchema(DiscoverRepoBodySchema),
+    response: {
+      200: { description: "What the repository says it composes", ...toJsonSchema(ProductRepoDiscoveryResponseSchema) },
+      ...errorResponses(400, 401, 403, 404, 502),
     },
   },
   listVersions: {
@@ -162,9 +183,11 @@ export const productDocs: Record<
   createRelease: {
     summary: "Plan a release",
     description:
-      "A checkpoint on the product's axis — a name, a target date, and which watch series it is judged by " +
-      "(absent = every series). It starts `planned`; shipping goes through POST /releases/:id/status, which " +
-      "is a gate. Emits release.created. Requires issues:write.",
+      "A checkpoint on the product's axis — a name, a target date, which watch series it is judged by " +
+      "(absent = every series) and which service versions it ships (`components`, one row per tracked " +
+      "service; a version may be omitted while the plan is still open). It starts `planned`; shipping goes " +
+      "through POST /releases/:id/status, which is a gate — the composition is recorded, never gated on. " +
+      "Emits release.created. Requires issues:write.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     body: toJsonSchema(CreateReleaseBodySchema),
@@ -204,7 +227,8 @@ export const productDocs: Record<
     summary: "Edit a release",
     description:
       "Content editing — audit-trail history, no lifecycle facts. `seriesKeys: null` clears the selection " +
-      "back to every series. Requires issues:write.",
+      "back to every series; `components: null` clears the declared composition back to 'never declared' " +
+      "(distinct from an empty list, which says this release ships no tracked service). Requires issues:write.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     body: toJsonSchema(UpdateReleaseBodySchema),

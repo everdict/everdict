@@ -4,6 +4,7 @@ import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-con
 import { productDocs } from "./product.docs.js";
 import { CreateProductBodySchema } from "./request/create-product.js";
 import { CreateReleaseBodySchema, UpdateReleaseBodySchema } from "./request/create-release.js";
+import { DiscoverRepoBodySchema } from "./request/discover-repo.js";
 import { SetReleaseStatusBodySchema } from "./request/set-release-status.js";
 import { UpdateProductBodySchema } from "./request/update-product.js";
 
@@ -87,6 +88,37 @@ export function registerProductRoutes(app: FastifyInstance, deps: ServerDeps): v
     } catch {
       // Best-effort: an unreachable GitHub degrades the wizard to manual entry, never a broken screen.
       return reply.send([]);
+    }
+  });
+
+  // What a repository says it composes — the wizard's evidence read (no writes, no product involved yet).
+  // Member-gated on the action that creates products, the same reasoning the repo picker uses: reading a
+  // repository the workspace already installed the App on is product authoring, not administration.
+  app.post("/products/discover", { schema: productDocs.discover }, async (req, reply) => {
+    if (!deps.productDiscovery)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "product discovery not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof DiscoverRepoBodySchema>;
+    try {
+      body = DiscoverRepoBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.send(
+        await deps.productDiscovery.discover(principal.workspace, {
+          repository: body.repository,
+          ...(body.host !== undefined ? { host: body.host } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // an unreachable repository is the adapter's UpstreamError, verbatim
     }
   });
 
@@ -254,6 +286,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: ServerDeps): v
             ...(body.description !== undefined ? { description: body.description } : {}),
             ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
             ...(body.seriesKeys !== undefined ? { seriesKeys: body.seriesKeys } : {}),
+            ...(body.components !== undefined ? { components: body.components } : {}),
           }),
         );
       } catch (err) {

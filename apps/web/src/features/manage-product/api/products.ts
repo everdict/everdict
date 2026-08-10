@@ -3,14 +3,17 @@
 import { z } from 'zod'
 
 import {
+  productRepoDiscoverySchema,
   productSchema,
   productSyncResultSchema,
   releaseSchema,
   type Product,
+  type ProductRepoDiscovery,
   type ProductSeries,
   type ProductService,
   type ProductSyncResult,
   type Release,
+  type ReleaseComponent,
   type ReleaseStatus,
 } from '@/entities/product'
 import { authContext } from '@/shared/auth/principal'
@@ -70,6 +73,23 @@ export async function updateProductAction(
   }
 }
 
+// 레포 하나를 읽어 서비스 구성을 제안받는다 — 위자드가 "치는 폼"이 아니라 "고르는 화면"이 되는 근거.
+// 아무것도 저장하지 않으므로 실패해도 위자드는 수동 입력으로 내려간다(에러는 그대로 보여 준다).
+export async function discoverRepoAction(input: {
+  repository: string
+  host?: string
+}): Promise<{ ok: boolean; discovery?: ProductRepoDiscovery; error?: string }> {
+  const ctx = await authContext()
+  try {
+    const discovery = productRepoDiscoverySchema.parse(
+      await controlPlane.discoverProductRepo(ctx, input)
+    )
+    return { ok: true, discovery }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function deleteProductAction(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {
@@ -95,7 +115,13 @@ export async function syncProductAction(
 
 export async function createReleaseAction(
   productId: string,
-  input: { name: string; description?: string; targetDate?: string; seriesKeys?: string[] }
+  input: {
+    name: string
+    description?: string
+    targetDate?: string
+    seriesKeys?: string[]
+    components?: ReleaseComponent[]
+  }
 ): Promise<ReleaseActionResult> {
   const ctx = await authContext()
   try {
@@ -113,6 +139,8 @@ export async function updateReleaseAction(
     description?: string | null
     targetDate?: string | null
     seriesKeys?: string[] | null
+    // null = "구성 선언 안 함"으로 되돌린다(빈 배열 = 추적 서비스가 하나도 안 나감 — 다른 사실이다).
+    components?: ReleaseComponent[] | null
   }
 ): Promise<ReleaseActionResult> {
   const ctx = await authContext()

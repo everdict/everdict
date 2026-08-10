@@ -1,4 +1,4 @@
-import type { PlatformFact, ReleaseRecord, ReleaseStatus } from "@everdict/contracts";
+import type { PlatformFact, ReleaseComponent, ReleaseRecord, ReleaseStatus } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "../tracker/history.js";
 import type { ResolvedSeriesContract } from "./readiness.js";
@@ -19,9 +19,15 @@ export interface NewReleaseInput {
   description?: string;
   targetDate?: string;
   seriesKeys?: string[];
+  // Which service versions this release ships (a monorepo product's composition). Validated against the
+  // product's declared services for the same reason the series selection is: a release naming a service the
+  // product does not track records a composition nobody can read afterwards.
+  components?: ReleaseComponent[];
   // The product's declared series keys — the aggregate refuses a selection naming a series that does not
   // exist, because a release watching nothing it thinks it watches is a gate that silently always passes.
   productSeriesKeys: readonly string[];
+  // The product's declared service names — the same rule, one axis over.
+  productServiceNames?: readonly string[];
   createdBy: string;
   now: string;
 }
@@ -32,6 +38,9 @@ export interface ReleaseEditInput {
   targetDate?: string | null;
   // `null` clears the selection back to "every series".
   seriesKeys?: string[] | null;
+  // `null` clears the declared composition back to "never declared" — which is a different fact from an
+  // empty list ("this release ships no tracked service"), and both are expressible on purpose.
+  components?: ReleaseComponent[] | null;
 }
 
 export interface ReleaseStatusChangeInput {
@@ -85,6 +94,34 @@ function assertSeriesSelection(keys: readonly string[], productSeriesKeys: reado
   }
 }
 
+// A declared composition names services the product actually tracks, once each. The duplicate check is not
+// tidiness: two rows for one service are two different answers to "which version of it shipped", and the
+// record would keep both while every reader takes whichever it finds first.
+function assertComponents(
+  components: readonly ReleaseComponent[],
+  productServiceNames: readonly string[] | undefined,
+  releaseId: string,
+): void {
+  const seen = new Set<string>();
+  for (const component of components) {
+    if (seen.has(component.service))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { release: releaseId, service: component.service },
+        `This release names "${component.service}" twice — one service ships one version, so the composition must name it once.`,
+      );
+    seen.add(component.service);
+    // Absent list = the caller could not supply the product's services (a unit path). Validating against
+    // nothing would be a check that pretends; skipping it says so.
+    if (productServiceNames !== undefined && !productServiceNames.includes(component.service))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { release: releaseId, service: component.service },
+        `The product tracks no service "${component.service}" — a release can only ship services its product composes.`,
+      );
+  }
+}
+
 function releasedOnTime(targetDate: string | undefined, now: string): boolean | undefined {
   if (targetDate === undefined) return undefined;
   return now.slice(0, 10) <= targetDate;
@@ -99,6 +136,7 @@ export class Release {
 
   static newRelease(input: NewReleaseInput): ReleaseRecord {
     if (input.seriesKeys !== undefined) assertSeriesSelection(input.seriesKeys, input.productSeriesKeys, input.id);
+    if (input.components !== undefined) assertComponents(input.components, input.productServiceNames, input.id);
     return {
       id: input.id,
       tenant: input.tenant,
@@ -109,6 +147,7 @@ export class Release {
       status: "planned",
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       ...(input.seriesKeys !== undefined ? { seriesKeys: input.seriesKeys } : {}),
+      ...(input.components !== undefined ? { components: input.components } : {}),
       // FREEZE the scope this release commits to (arch-review 12 P0). A release is "a date and a scope
       // somebody committed to" and the scope was re-derived from the product's current series on every
       // read — so deleting a series removed the gate instead of failing it. What is promised here is what
@@ -149,7 +188,13 @@ export class Release {
     return this.record.status;
   }
 
-  update(fields: ReleaseEditInput, by: string, now: string, productSeriesKeys: readonly string[]): ReleaseTransition {
+  update(
+    fields: ReleaseEditInput,
+    by: string,
+    now: string,
+    productSeriesKeys: readonly string[],
+    productServiceNames?: readonly string[],
+  ): ReleaseTransition {
     const changed: string[] = [];
     const patch: Partial<ReleaseRecord> = {};
     if (fields.name !== undefined && fields.name !== this.record.name) {
@@ -182,6 +227,14 @@ export class Release {
         patch.seriesSelection = next !== undefined ? "explicit" : "all";
         patch.plannedSeriesKeys = next !== undefined ? [...next] : [...productSeriesKeys];
         changed.push("seriesKeys");
+      }
+    }
+    if (fields.components !== undefined) {
+      const next = fields.components === null ? undefined : fields.components;
+      if (next !== undefined) assertComponents(next, productServiceNames, this.record.id);
+      if (JSON.stringify(next ?? null) !== JSON.stringify(this.record.components ?? null)) {
+        patch.components = next;
+        changed.push("components");
       }
     }
     if (changed.length === 0)
@@ -251,6 +304,14 @@ export class Release {
         : {}),
       ...(to === "released" && input.productPolicyDigest !== undefined
         ? { productPolicyDigest: input.productPolicyDigest }
+        : {}),
+      // WHAT WENT OUT. The record's own `components` is a PLAN — editable while the release is planned, and
+      // it keeps being editable in the sense that nothing stops a later `cancelled → planned` cycle from
+      // touching it. The ship freezes the composition it shipped into its own history entry, for the same
+      // reason the series decisions are frozen there: "which versions did 2026.3 actually contain" must stay
+      // answerable from the release, not from whatever the plan says today.
+      ...(to === "released" && this.record.components?.length
+        ? { components: this.record.components.map((component) => ({ ...component })) }
         : {}),
       ...(onTime !== undefined ? { onTime } : {}),
       ...(forced ? { forced: true } : {}),

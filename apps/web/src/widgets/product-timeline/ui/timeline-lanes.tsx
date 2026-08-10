@@ -5,9 +5,9 @@ import { useLocale, useTranslations } from 'next-intl'
 
 import { issueHref } from '@/entities/issue'
 import { releaseHref, type ProductTimeline } from '@/entities/product'
-import { Link } from '@/shared/ui/link'
-import { seriesColorAt } from '@/shared/ui/charts'
 import { cn } from '@/shared/lib/utils'
+import { seriesColorAt } from '@/shared/ui/charts'
+import { Link } from '@/shared/ui/link'
 
 // 비례 시간축 멀티레인 — 릴리즈(마커) · 서비스별 버전(점) · 이슈(수명 스팬)를 한 축에 눕힌다.
 // SpanWaterfall 의 방식 그대로 %-포지셔닝 div 로 그린다(차트 패밀리는 범주축이라 시간 비례를 못 그린다);
@@ -27,10 +27,15 @@ export function TimelineLanes({
   const to = Date.parse(timeline.window.to)
   const span = Math.max(1, to - from)
   // 창 밖의 사건(미래의 목표일 등)도 가장자리에 눌러서 보여 준다 — 사라지는 것보다 낫다.
-  const pct = (iso: string): number => Math.min(100, Math.max(0, ((Date.parse(iso) - from) / span) * 100))
+  const pct = (iso: string): number =>
+    Math.min(100, Math.max(0, ((Date.parse(iso) - from) / span) * 100))
 
   const dayLabel = useMemo(() => {
-    const format = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+    const format = new Intl.DateTimeFormat(locale, {
+      month: 'numeric',
+      day: 'numeric',
+      timeZone: 'UTC',
+    })
     return (ms: number) => format.format(new Date(ms))
   }, [locale])
 
@@ -65,7 +70,13 @@ export function TimelineLanes({
                   <Link
                     key={release.id}
                     href={releaseHref(workspace, release.id)}
-                    title={`${release.name} · ${at.slice(0, 10)}`}
+                    // 구성까지 붙인다 — 릴리즈 마커의 질문은 "언제"이고, 바로 다음 질문이 "무엇이 나갔나"다.
+                    title={[
+                      `${release.name} · ${at.slice(0, 10)}`,
+                      ...(release.components ?? []).map(
+                        (component) => `${component.service} ${component.version ?? '—'}`
+                      ),
+                    ].join('\n')}
                     className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
                     style={{ left: `${pct(at.length === 10 ? `${at}T00:00:00.000Z` : at)}%` }}
                   >
@@ -104,7 +115,10 @@ export function TimelineLanes({
                     key={version.id}
                     title={`${version.version} · ${version.publishedAt.slice(0, 10)}`}
                     className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                    style={{ left: `${pct(version.publishedAt)}%`, background: seriesColorAt(index) }}
+                    style={{
+                      left: `${pct(version.publishedAt)}%`,
+                      background: seriesColorAt(index),
+                    }}
                   />
                 ))}
             </div>
@@ -157,7 +171,10 @@ export function TimelineLanes({
                   ? { left: '0%' }
                   : index === ticks.length - 1
                     ? { right: '0%' }
-                    : { left: `${(index / (ticks.length - 1)) * 100}%`, transform: 'translateX(-50%)' }
+                    : {
+                        left: `${(index / (ticks.length - 1)) * 100}%`,
+                        transform: 'translateX(-50%)',
+                      }
               }
             >
               {dayLabel(tick)}

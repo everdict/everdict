@@ -4,15 +4,20 @@ import type {
   ProductSeries as WireProductSeries,
   ProductService as WireProductService,
   ProductServiceVersionRecord as WireProductServiceVersionRecord,
+  ReleaseComponent as WireReleaseComponent,
   ReleaseReadiness as WireReleaseReadiness,
   ReleaseRecord as WireReleaseRecord,
   ReleaseStatus as WireReleaseStatus,
 } from '@everdict/contracts'
 import type {
   ProductDetailResponse as WireProductDetailResponse,
+  ProductRepoDiscoveryResponse as WireProductRepoDiscoveryResponse,
+  ProductServiceSuggestion as WireProductServiceSuggestion,
   ProductSyncResponse as WireProductSyncResponse,
   ProductTimelineResponse as WireProductTimelineResponse,
   ReleaseDetailResponse as WireReleaseDetailResponse,
+  RepoPackage as WireRepoPackage,
+  RepoVersionSample as WireRepoVersionSample,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
@@ -40,6 +45,8 @@ export const productServiceSchema = z.object({
   repository: z.string(),
   source: productServiceSourceSchema,
   tagPrefix: z.string().optional(),
+  // 레포 안에서 이 서비스가 사는 경로(모노레포) — 스트림 정체성이 아니라 구성 정보다.
+  path: z.string().optional(),
   sync: productServiceSyncSchema.optional(),
 })
 
@@ -84,6 +91,13 @@ export const productsSchema = z.array(productSchema)
 export const RELEASE_STATUSES = ['planned', 'released', 'cancelled'] as const
 export const releaseStatusSchema = z.enum(RELEASE_STATUSES)
 
+// 이 릴리즈가 내보내는 구성 한 줄 — 서비스 하나와 그 버전. version 없음 = "아직 안 정해짐"(계획 단계의
+// 진짜 상태다. 원장 최신값으로 채워 버리면 아무도 고르지 않은 버전이 계획에 박힌다).
+export const releaseComponentSchema = z.object({
+  service: z.string(),
+  version: z.string().optional(),
+})
+
 export const releaseSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -95,6 +109,8 @@ export const releaseSchema = z.object({
   releasedAt: z.string().optional(),
   // 이 릴리즈가 판정받는 시리즈 선택. 없음 = 프로덕트의 모든 시리즈.
   seriesKeys: z.array(z.string()).optional(),
+  // 어떤 서비스 버전들이 함께 나가는가. 없음 = 구성을 선언한 적 없음(빈 배열 = 추적 서비스가 하나도 안 나감).
+  components: z.array(releaseComponentSchema).optional(),
   history: z.array(trackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
   createdAt: z.string(),
@@ -231,6 +247,47 @@ export const repoOptionsSchema = z.array(
   })
 )
 
+// POST /products/discover — 레포가 스스로 말하는 구성. 위자드는 이 응답만으로 서비스 행을 "고르게" 한다
+// (프리픽스를 손으로 치면 오타가 조용히 0건 임포트로 끝난다). versions 는 클라이언트가 프리픽스를 바꿀 때
+// 다시 세는 표본이라, 프리뷰가 GitHub 왕복을 더 만들지 않는다.
+export const repoVersionSampleSchema = z.object({
+  name: z.string(),
+  kind: productVersionKindSchema,
+  prerelease: z.boolean(),
+  publishedAt: z.string().optional(),
+  url: z.string().optional(),
+})
+
+export const repoPackageSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  manifest: z.string(),
+})
+
+export const productServiceSuggestionSchema = z.object({
+  name: z.string(),
+  path: z.string().optional(),
+  source: productServiceSourceSchema,
+  tagPrefix: z.string().optional(),
+  // 실제 스트림이 뒷받침하는 제안만 기본 선택 — 나머지는 "배포 단위처럼 보이는 디렉터리"다.
+  recommended: z.boolean(),
+  matched: z.number(),
+  latestVersion: z.string().optional(),
+  latestPublishedAt: z.string().optional(),
+  firstPublishedAt: z.string().optional(),
+})
+
+export const productRepoDiscoverySchema = z.object({
+  repository: z.string(),
+  host: z.string().optional(),
+  source: productServiceSourceSchema,
+  versions: z.array(repoVersionSampleSchema),
+  packages: z.array(repoPackageSchema),
+  suggestions: z.array(productServiceSuggestionSchema),
+  // false = 읽기가 천장에 닿았다 → 모든 카운트는 하한이다.
+  complete: z.boolean(),
+})
+
 export const productSyncResultSchema = z.object({
   services: z.array(
     z.object({
@@ -278,6 +335,16 @@ type _releaseDetailBack = AssertAssignable<
   WireReleaseDetailResponse,
   z.infer<typeof releaseDetailSchema>
 >
+type _componentFwd = AssertAssignable<z.infer<typeof releaseComponentSchema>, WireReleaseComponent>
+type _componentBack = AssertAssignable<WireReleaseComponent, z.infer<typeof releaseComponentSchema>>
+type _discoveryFwd = AssertAssignable<
+  z.infer<typeof productRepoDiscoverySchema>,
+  WireProductRepoDiscoveryResponse
+>
+type _discoveryBack = AssertAssignable<
+  WireProductRepoDiscoveryResponse,
+  z.infer<typeof productRepoDiscoverySchema>
+>
 type _syncFwd = AssertAssignable<z.infer<typeof productSyncResultSchema>, WireProductSyncResponse>
 type _syncBack = AssertAssignable<WireProductSyncResponse, z.infer<typeof productSyncResultSchema>>
 type _timelineFwd = AssertAssignable<
@@ -292,7 +359,12 @@ export type ProductDetail = WireProductDetailResponse
 export type ProductTimeline = WireProductTimelineResponse
 export type ProductVersion = WireProductServiceVersionRecord
 export type ProductSyncResult = WireProductSyncResponse
+export type ProductRepoDiscovery = WireProductRepoDiscoveryResponse
+export type ProductServiceSuggestion = WireProductServiceSuggestion
+export type RepoPackage = WireRepoPackage
+export type RepoVersionSample = WireRepoVersionSample
 export type Release = WireReleaseRecord
+export type ReleaseComponent = WireReleaseComponent
 export type ReleaseDetail = WireReleaseDetailResponse
 export type ReleaseReadiness = WireReleaseReadiness
 export type ReleaseStatus = WireReleaseStatus

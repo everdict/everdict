@@ -1,9 +1,8 @@
 import { notFound } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
-import { productSchema, type Product } from '@/entities/product'
 import { ProductForm, type RepoOption } from '@/features/manage-product'
-import { repoOptionsSchema } from '@/entities/product'
+import { productSchema, repoOptionsSchema, type Product } from '@/entities/product'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
@@ -33,7 +32,11 @@ export default async function EditProductPage({
     try {
       const rows = (await fetchIds) as Array<{ id?: unknown }>
       return Array.isArray(rows)
-        ? [...new Set(rows.map((row) => row.id).filter((rid): rid is string => typeof rid === 'string'))]
+        ? [
+            ...new Set(
+              rows.map((row) => row.id).filter((rid): rid is string => typeof rid === 'string')
+            ),
+          ]
         : []
     } catch {
       return []
@@ -51,7 +54,10 @@ export default async function EditProductPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t('editTitle', { name: product.name })} description={t('editDescription')} />
+      <PageHeader
+        title={t('editTitle', { name: product.name })}
+        description={t('editDescription')}
+      />
       <Card className="max-w-3xl p-5">
         <ProductForm
           workspace={workspace}
@@ -70,6 +76,7 @@ export default async function EditProductPage({
               ...(service.host !== undefined ? { host: service.host } : {}),
               source: service.source,
               ...(service.tagPrefix !== undefined ? { tagPrefix: service.tagPrefix } : {}),
+              ...(service.path !== undefined ? { path: service.path } : {}),
             })),
             series: product.series,
           }}

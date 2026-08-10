@@ -5962,7 +5962,30 @@
     "updateError": "프로덕트를 저장하지 못했습니다.",
     "noAppHint": "워크스페이스 GitHub App 을 연결하면 저장소를 입력하는 대신 골라 담을 수 있습니다.",
     "noAppLink": "통합 설정 열기",
-    "serviceRepositoryPick": "저장소 선택…"
+    "serviceRepositoryPick": "저장소 선택…",
+    "wizardStep_basics": "기본",
+    "wizardStep_services": "서비스",
+    "wizardStep_series": "워치 시리즈",
+    "wizardStep_review": "확인",
+    "wizardBack": "이전",
+    "wizardNext": "다음",
+    "wizardServicesHint": "레포를 고르면 everdict 가 그 레포를 읽어 서비스를 제안합니다 — 발행 중인 버전 스트림(태그 프리픽스는 실제 태그에서 뽑습니다)과 트리 안의 배포 단위. 모노레포는 한 레포에서 여러 서비스가 나옵니다.",
+    "wizardPickRepo": "저장소",
+    "wizardReadRepo": "레포 읽기",
+    "wizardReadError": "저장소를 읽지 못했습니다.",
+    "wizardFound": "{source} · 버전 {versions}개 · 패키지 {packages}개",
+    "wizardPartialRead": "일부만 읽음(카운트는 하한)",
+    "wizardStream": "버전 {count}개",
+    "wizardStreamWithDate": "버전 {count}개 · 최근 {at}",
+    "wizardSelectedServices": "담은 서비스",
+    "wizardNoServices": "아직 없습니다. 위에서 레포를 읽어 제안을 고르거나, 직접 한 줄 추가하세요.",
+    "wizardPreviewCount": "{count, plural, =0 {이 프리픽스로는 잡히는 버전이 없습니다 — 프리픽스를 확인하세요} other {버전 #개가 잡힙니다}}",
+    "wizardPreviewRange": "버전 {count}개 · {from} ~ {to}",
+    "wizardSeriesOptional": "지금 비워 둬도 됩니다 — 나중에 프로덕트 편집에서 추가할 수 있습니다.",
+    "wizardSyncAfter": "만든 뒤 바로 동기화",
+    "wizardSyncAfterHint": "첫 싱크는 백필입니다: 릴리즈 이력이 조용히 들어와 시간축이 생기고, 아무 평가도 돌지 않습니다.",
+    "servicePath": "레포 내 경로",
+    "servicePathPlaceholder": "apps/api (선택)"
   },
   "productPage": {
     "servicesHeading": "추적 서비스",
@@ -6053,6 +6076,13 @@
     "deleteBody": "이슈는 남습니다 — 이 릴리즈로의 링크만 함께 사라집니다.",
     "deleteKeep": "유지",
     "deleteConfirm": "릴리즈 삭제",
-    "deleteError": "릴리즈를 삭제하지 못했습니다."
+    "deleteError": "릴리즈를 삭제하지 못했습니다.",
+    "componentsHeading": "나가는 구성",
+    "componentsHint": "이 릴리즈로 함께 나가는 서비스 버전들. 버전은 임포트된 원장에서 고르고, 아직 안 정해졌으면 미정으로 둡니다. 게이트 입력이 아니라 기록입니다 — 출하 시점에 그대로 동결됩니다.",
+    "componentUndecided": "미정",
+    "componentVersionFor": "{service} 의 버전",
+    "componentsFillLatest": "전부 최신으로",
+    "componentsSave": "구성 저장",
+    "componentsError": "구성을 저장하지 못했습니다."
   }
 }

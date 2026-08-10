@@ -12,6 +12,7 @@ import {
   type ProductSeries,
   type ProductService as ProductServiceEntry,
   type ProductServiceVersionRecord,
+  type ReleaseComponent,
   type ReleaseReadiness,
   type ReleaseRecord,
   type ReleaseStatus,
@@ -92,6 +93,8 @@ export interface CreateReleaseInput {
   description?: string;
   targetDate?: string;
   seriesKeys?: string[];
+  // The composition this release ships — validated against the product's tracked services by the aggregate.
+  components?: ReleaseComponent[];
 }
 
 // What the series-ref validation needs from the registries — narrow functions, not the registry classes, so
@@ -357,7 +360,9 @@ export class ProductService {
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       ...(input.seriesKeys !== undefined ? { seriesKeys: input.seriesKeys } : {}),
+      ...(input.components !== undefined ? { components: input.components } : {}),
       productSeriesKeys: product.series.map((series) => series.key),
+      productServiceNames: product.services.map((service) => service.name),
       createdBy: input.createdBy,
       now: this.now(),
     });
@@ -403,6 +408,7 @@ export class ProductService {
         actor.subject,
         this.now(),
         product.series.map((series) => series.key),
+        product.services.map((service) => service.name),
       ),
     );
   }

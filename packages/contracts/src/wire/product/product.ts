@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
   ProductRecordSchema,
+  ProductServiceSourceSchema,
   ProductServiceVersionRecordSchema,
+  ProductVersionKindSchema,
   ReleaseReadinessSchema,
   ReleaseRecordSchema,
 } from "../../records/product.js";
@@ -68,6 +70,66 @@ export const ProductTimelineResponseSchema = z.object({
   issues: z.array(ProductTimelineIssueSchema),
 });
 export type ProductTimelineResponse = z.infer<typeof ProductTimelineResponseSchema>;
+
+// POST /products/discover — ONE read of a repository, so declaring a product's composition is a CHOICE
+// instead of a form. Everything a service row needs (its name, its subpath, which tags are its stream, when
+// that stream last moved) is derivable from what the repository already says, and typing it by hand is how a
+// tagPrefix ends up matching nothing and a service silently imports zero versions forever.
+//
+// Read-only and PERSISTS NOTHING: it is the wizard's evidence, not a registration. The same read backs the
+// edit form's preview, which is why it returns the version NAMES rather than a per-prefix count — the client
+// re-filters as the user tweaks a prefix, so a preview never costs another round trip to GitHub.
+export const RepoVersionSampleSchema = z.object({
+  name: z.string(), // the tag name verbatim — prefix matching is the caller's, on the same bytes the sync uses
+  kind: ProductVersionKindSchema,
+  prerelease: z.boolean(),
+  // The remote's own instant. Releases always carry one; TAGS do not, so the reader resolves commit dates for
+  // the newest few only (a bounded, declared cost) and the rest arrive dateless — absent means "not resolved
+  // here", never "no date".
+  publishedAt: z.string().optional(),
+  url: z.string().optional(),
+});
+export type RepoVersionSample = z.infer<typeof RepoVersionSampleSchema>;
+
+// One deployable unit found in the repository tree — the monorepo half of the answer.
+export const RepoPackageSchema = z.object({
+  path: z.string(), // "apps/api" — the repo-relative directory, which becomes ProductService.path
+  name: z.string(), // the manifest's own name, else the directory tail
+  manifest: z.string(), // "package.json" | "go.mod" | "pyproject.toml" | "Cargo.toml" | "Dockerfile"
+});
+export type RepoPackage = z.infer<typeof RepoPackageSchema>;
+
+// A PROPOSED service row — the thing the wizard renders as a checkbox. `recommended` is the difference
+// between "this repository demonstrably releases this" (a tag stream exists) and "this directory looks
+// deployable" (a package with no stream of its own, which under a repo-wide tag stream is a real service and
+// under nothing at all is a guess); only the first is pre-checked.
+export const ProductServiceSuggestionSchema = z.object({
+  name: z.string(),
+  path: z.string().optional(),
+  source: ProductServiceSourceSchema,
+  tagPrefix: z.string().optional(),
+  recommended: z.boolean(),
+  matched: z.number().int().nonnegative(), // versions in the sample this stream claims
+  latestVersion: z.string().optional(),
+  latestPublishedAt: z.string().optional(),
+  firstPublishedAt: z.string().optional(),
+});
+export type ProductServiceSuggestion = z.infer<typeof ProductServiceSuggestionSchema>;
+
+export const ProductRepoDiscoveryResponseSchema = z.object({
+  repository: z.string(),
+  host: z.string().optional(),
+  // WHICH stream the samples came from. Releases are read first because a published release is the stronger
+  // claim; a repository that publishes none falls back to tags, and the wizard's rows inherit that choice.
+  source: ProductServiceSourceSchema,
+  versions: z.array(RepoVersionSampleSchema),
+  packages: z.array(RepoPackageSchema),
+  suggestions: z.array(ProductServiceSuggestionSchema),
+  // Whether the reads saw the whole history / the whole tree. A bound that is reported rather than one that
+  // merely happens — a truncated sample makes a prefix's count a floor, and the wizard says so.
+  complete: z.boolean(),
+});
+export type ProductRepoDiscoveryResponse = z.infer<typeof ProductRepoDiscoveryResponseSchema>;
 
 // POST /products/:id/sync — what the pull did, per service, and what it fanned out.
 export const ProductSyncResponseSchema = z.object({

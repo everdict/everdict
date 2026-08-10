@@ -1,15 +1,19 @@
 import { notFound } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
-import { ReleaseActionsMenu, ReleaseStatusControl } from '@/features/manage-product'
+import {
+  ReleaseActionsMenu,
+  ReleaseComponentsEditor,
+  ReleaseStatusControl,
+} from '@/features/manage-product'
 import { issueHref, issuePageSchema, IssueStatusBadge } from '@/entities/issue'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
 import {
+  productDetailSchema,
   productHref,
-  productSchema,
   releaseDetailSchema,
   ReleaseStatusBadge,
-  type Product,
+  type ProductDetail,
   type ReleaseDetail,
 } from '@/entities/product'
 import { TrackerHistory } from '@/entities/tracker-history'
@@ -56,10 +60,11 @@ export default async function ReleasePage({
   } catch {
     notFound()
   }
-  // 편집 다이얼로그의 시리즈 선택지 — 프로덕트가 선언한 것만(없는 키는 400 이다). 실패해도 화면은 뜬다.
-  let product: Product | undefined
+  // 편집 다이얼로그의 시리즈 선택지 + 구성 편집기의 서비스/버전 선택지 — 프로덕트가 선언한 것만(없는 키는
+  // 400 이고, 원장에 없는 버전은 어느 행과도 이어지지 않는다). 실패해도 화면은 뜬다.
+  let product: ProductDetail | undefined
   try {
-    product = productSchema.parse(await controlPlane.getProduct(ctx, release.productId))
+    product = productDetailSchema.parse(await controlPlane.getProduct(ctx, release.productId))
   } catch {
     product = undefined
   }
@@ -203,6 +208,20 @@ export default async function ReleasePage({
           </div>
         )}
       </Card>
+
+      {product !== undefined && product.services.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('componentsHeading')} />
+          <p className="text-xs text-muted-foreground">{t('componentsHint')}</p>
+          <ReleaseComponentsEditor
+            releaseId={release.id}
+            services={product.services}
+            versions={product.versions}
+            {...(release.components !== undefined ? { components: release.components } : {})}
+            canEdit={canWrite && release.status === 'planned'}
+          />
+        </section>
+      )}
 
       {linkedIssues.length > 0 && (
         <section className="space-y-2.5">

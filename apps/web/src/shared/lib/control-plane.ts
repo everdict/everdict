@@ -919,9 +919,14 @@ export const controlPlane = {
     callVoid(auth, `/initiatives/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // 프로덕트 타임라인(docs/architecture/product-timeline.md) — "무엇을 배포하는가"의 축.
   listProducts: <T>(auth: AuthContext) => call<T>(auth, '/products'),
-  getProduct: <T>(auth: AuthContext, id: string) => call<T>(auth, `/products/${encodeURIComponent(id)}`),
+  getProduct: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/products/${encodeURIComponent(id)}`),
   // 서버가 스토어를 합성해 주는 타임라인 한 방 read — 릴리즈 + 버전 원장 + 시리즈 포인트 + 이슈 마커.
-  getProductTimeline: <T>(auth: AuthContext, id: string, window?: { from?: string; to?: string }) => {
+  getProductTimeline: <T>(
+    auth: AuthContext,
+    id: string,
+    window?: { from?: string; to?: string }
+  ) => {
     const q = new URLSearchParams()
     if (window?.from) q.set('from', window.from)
     if (window?.to) q.set('to', window.to)
@@ -930,7 +935,7 @@ export const controlPlane = {
       auth,
       qs
         ? `/products/${encodeURIComponent(id)}/timeline?${qs}`
-        : `/products/${encodeURIComponent(id)}/timeline`,
+        : `/products/${encodeURIComponent(id)}/timeline`
     )
   },
   createProduct: <T>(auth: AuthContext, body: unknown) =>
@@ -953,10 +958,15 @@ export const controlPlane = {
   // 추적 서비스가 가리킬 수 있는 레포들 — 워크스페이스 GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는
   // 정확히 그 집합). 비어 있으면 App 미설치.
   listProductRepoOptions: <T>(auth: AuthContext) => call<T>(auth, '/products/repo-options'),
+  // 레포 하나를 읽어 "이 제품은 무엇으로 구성되는가"를 답한다 — 발행 중인 버전 스트림 + 트리의 배포 단위 +
+  // 그걸 합친 서비스 제안. 아무것도 저장하지 않는다(위자드가 고르게 하는 근거 read).
+  discoverProductRepo: <T>(auth: AuthContext, body: { repository: string; host?: string }) =>
+    call<T>(auth, '/products/discover', { method: 'POST', body: JSON.stringify(body) }),
   // 워크스페이스 전체 릴리즈(피커의 read) — ?product= 로 한 프로덕트로 좁힐 수 있다.
   listReleases: <T>(auth: AuthContext, product?: string) =>
     call<T>(auth, product ? `/releases?product=${encodeURIComponent(product)}` : '/releases'),
-  getRelease: <T>(auth: AuthContext, id: string) => call<T>(auth, `/releases/${encodeURIComponent(id)}`),
+  getRelease: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/releases/${encodeURIComponent(id)}`),
   updateRelease: <T>(auth: AuthContext, id: string, patch: unknown) =>
     call<T>(auth, `/releases/${encodeURIComponent(id)}`, {
       method: 'PATCH',

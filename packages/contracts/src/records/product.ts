@@ -74,6 +74,14 @@ export const ProductServiceSchema = z.object({
   // Only tags starting with this prefix belong to the service — a monorepo releases several services from one
   // repository ("api-v1.2.0" vs "web-v3.1.0"), and without the filter every service would claim every tag.
   tagPrefix: z.string().max(100).optional(),
+  // WHERE the service lives inside the repository ("apps/api", "packages/core") — a monorepo composes one
+  // product out of several subpaths, and this is what lets a reader walk from a timeline row back to the code.
+  //
+  // DELIBERATELY NOT part of `serviceStreamKey`. What a service READS is (host, repository, source, tagPrefix);
+  // the path says where its code sits. Two services under one repo-wide tag stream genuinely move together —
+  // folding the path into the stream identity would declare one stream to be two, and would reset an import
+  // watermark for an edit that changed nothing about what is read. Composition, not provenance.
+  path: z.string().max(200).optional(),
   sync: ProductServiceSyncSchema.optional(),
 });
 export type ProductService = z.infer<typeof ProductServiceSchema>;
@@ -176,6 +184,22 @@ export type ProductRecord = z.infer<typeof ProductRecordSchema>;
 // `planned` is where a release starts — a date and a scope somebody committed to. Moving to `released` is a
 // GATE (the domain refuses while linked issues are open or a watched series regressed; `force` is recorded),
 // because "we shipped" with open regressions should be a deliberate override, never a default.
+// WHICH COMPOSITION this release ships — one row per tracked service, naming the version that goes out. The
+// product declares WHAT composes it; the release says WHICH versions of that composition shipped together,
+// which is the question a monorepo product cannot answer from the version ledger alone (three services move
+// on their own streams, and "these three went out as 2026.3" is a decision somebody makes, not a fact the
+// ledger derives).
+//
+// `version` is OPTIONAL on purpose: a planned release legitimately names a service whose version is not cut
+// yet. "We have not decided" and "v1.2.3" are different statements, and defaulting the hole to the newest
+// import would put a version into the plan that nobody chose. The picker fills it from the ledger at ship
+// time; the ship then freezes the resolved composition into the release's history entry.
+export const ReleaseComponentSchema = z.object({
+  service: z.string().min(1), // ProductService.name — the timeline's key, validated against the product
+  version: z.string().min(1).optional(),
+});
+export type ReleaseComponent = z.infer<typeof ReleaseComponentSchema>;
+
 export const RELEASE_STATUSES = ["planned", "released", "cancelled"] as const;
 export const ReleaseStatusSchema = z.enum(RELEASE_STATUSES);
 export type ReleaseStatus = z.infer<typeof ReleaseStatusSchema>;
@@ -213,6 +237,12 @@ export const ReleaseRecordSchema = z.object({
   // How the scope was chosen, so a reader can tell "watch everything" from "watch exactly these" after the
   // fact — the two behave differently when the product gains a series.
   seriesSelection: z.enum(["all", "explicit"]).optional(),
+  // The service versions this release ships (mig 0162). Absent = the composition was never declared, which
+  // is a different fact from an empty list ("this release ships no tracked service") and reads that way.
+  // Deliberately NOT a gate input: the gate decides on evidence (open issues, series verdicts), and making a
+  // half-filled plan un-shippable would be a second, weaker release constitution beside the one that already
+  // exists. It is the RECORD of what went out — frozen into the ship's history entry, drawn on the axis.
+  components: z.array(ReleaseComponentSchema).optional(),
   history: z.array(TrackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
   createdAt: z.string(),

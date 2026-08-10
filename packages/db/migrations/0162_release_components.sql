@@ -1,0 +1,24 @@
+-- WHICH COMPOSITION a release ships — the monorepo half of the product timeline.
+--
+-- A product declares the services that compose it; the version ledger records that each of them moved. What
+-- neither could answer is the question a release is FOR: "which versions of these services went out
+-- together as 2026.3". Three services on three streams produce three independent version rows, and the
+-- decision to ship a particular triple is made by a person — it is not derivable from timestamps, and
+-- deriving it anyway ("the newest import before the ship") quietly invents a composition nobody chose and
+-- keeps re-inventing a different one as the ledger grows.
+--
+-- Rows are `{service, version?}`. The version is OPTIONAL because a planned release legitimately names a
+-- service whose version is not cut yet: "we have not decided" and "v1.2.3" are different statements, and a
+-- default would erase the first one. NULL on the column itself means the composition was never declared at
+-- all, which is a third fact distinct from an empty array ("this release ships no tracked service") — the
+-- reason this is a nullable jsonb rather than a `DEFAULT '[]'`.
+--
+-- Deliberately NOT a gate input. The release gate decides on evidence (open linked issues, watched-series
+-- verdicts); making a half-filled plan un-shippable would be a second, weaker release constitution beside
+-- the one that already exists. The ship freezes what it shipped into the release's history entry, the same
+-- treatment the per-series decisions get.
+--
+-- Additive and nullable: every existing release reads as "composition never declared", which is exactly
+-- what is true of them.
+ALTER TABLE everdict_product_releases
+  ADD COLUMN IF NOT EXISTS components jsonb;
