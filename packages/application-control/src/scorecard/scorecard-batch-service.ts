@@ -48,6 +48,7 @@ import {
   selectSubsetCases,
   verdictSummaryOf,
   verifySealedSelection,
+  worldCohortOf,
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
@@ -887,6 +888,9 @@ export class ScorecardBatchService {
         // The stamped-policy verdict aggregate (arch-review 7 §4) — the number release-shaped surfaces read,
         // so the headline's hardcoded authority ladder can never contradict the actual case verdicts.
         verdictSummary: verdictSummaryOf(results, ctx.verdictPolicy),
+        // THE WORLD IT RAN IN (arch-review 19 P2) — derived from the cases' own execution manifests, so this
+        // reports rather than declares, and a batch where nothing recorded a world carries none.
+        ...(worldCohortOf(results) ? { world: worldCohortOf(results) } : {}),
         models: scorecardModels(scorecard, declared),
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
@@ -1672,6 +1676,7 @@ export class ScorecardBatchService {
         summary,
         // The stamped-policy verdict aggregate (arch-review 7 §4) — same derivation as the Temporal finalize.
         verdictSummary: verdictSummaryOf(scorecard.results, opts.verdictPolicy),
+        ...(worldCohortOf(scorecard.results) ? { world: worldCohortOf(scorecard.results) } : {}),
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),

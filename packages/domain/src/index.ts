@@ -58,6 +58,12 @@ export {
   stripJudgeScores,
 } from "./scorecard/scoring-plan.js";
 export {
+  type WorldCohort,
+  crossWorldReason,
+  worldCohortDigest,
+  worldCohortOf,
+} from "./scorecard/world-cohort.js";
+export {
   type SealedDocumentMismatch,
   pinnedDocumentMismatch,
   sealedExecutionMessage,

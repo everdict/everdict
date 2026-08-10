@@ -327,6 +327,11 @@ export const ReleaseSeriesStateSchema = z.object({
   // The gate's refusal details when the verdict is not a pass — verbatim GateReason.detail strings, so the
   // release card can say WHY without re-deriving the comparison.
   reasons: z.array(z.string()).optional(),
+  // The two sides of this comparison ran in DIFFERENT execution worlds (arch-review 19 P2). Not a refusal —
+  // the world is a comparison axis, not part of the evaluation contract, and blocking on it would make every
+  // infrastructure move un-shippable until each baseline is re-run. It is the sentence that stops a
+  // regression and a migration from being indistinguishable in the record afterwards.
+  crossWorld: z.string().optional(),
   // Does this series BLOCK the release? true iff it is required (requiredForRelease !== false) and its
   // verdict is neither pass nor no_baseline. Kept as the boolean the ship gate and history always read —
   // pre-verdict rows called it "regressed", and the old meaning (a bare pass-rate drop) is exactly the

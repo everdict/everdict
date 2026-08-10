@@ -8,6 +8,7 @@ import type {
   SeriesVerdict,
 } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
+import { type WorldCohort, crossWorldReason } from "../scorecard/world-cohort.js";
 
 // Release readiness is PURE arithmetic over what the caller already fetched — no store, no I/O (the tracker's
 // readiness rule). The caller picks the scorecard points; the domain decides what they mean.
@@ -269,6 +270,9 @@ export interface SeriesScorecardPoint {
   // The contract this batch evaluated under (`origin.seriesContractDigest`). Absent = it predates the stamp
   // or its contract could not be resolved — evidence whose question cannot be named.
   contractDigest?: string;
+  // The WORLD this evaluation ran in (arch-review 19 P2) — a comparison axis, never part of the contract.
+  // Absent = no case reported one, which is "not recorded" rather than a difference.
+  world?: WorldCohort;
   // WHICH judgment this point is (arch-review 8 P1). A scorecard id alone is not an evidence reference: the
   // same id means different judgments after a re-score, so a decision recorded against the bare id cannot be
   // reproduced — and the next release's baseline, resolved by id, silently reads whatever the plane says now.
@@ -440,7 +444,7 @@ export function releaseReadiness(
     const resolution = baselineBySeries.get(entry.key) ?? { kind: "none_first_ship" as const };
     const gate = gateBySeries.get(entry.key);
     const baseline = resolution.kind === "resolved" ? resolution.point : undefined;
-    const { verdict, reasons } = seriesVerdict(
+    const { verdict, reasons: baseReasons } = seriesVerdict(
       latest,
       resolution,
       gate,
@@ -457,6 +461,16 @@ export function releaseReadiness(
     // product policy, never an inference.
     const required = entry.requiredForRelease !== false;
     const blocks = required && verdict !== "pass" && verdict !== "no_baseline";
+    // WAS THIS A WITHIN-WORLD COMPARISON? (arch-review 19 P2) The world is a comparison axis, not part of the
+    // contract — putting it in the contract would make every infrastructure move invalidate a product's whole
+    // evidence base, which is how a signal gets trained out of people. But a difference measured ACROSS two
+    // worlds cannot be attributed to the change alone, and until now the two cases were indistinguishable in
+    // the record: same trend line, same verdict, no way to ask afterwards.
+    //
+    // It ATTACHES rather than blocks, deliberately. Refusing would make an infra migration un-shippable until
+    // every baseline is re-run, which is the too-broad guard this decomposition exists to avoid; saying it is
+    // what lets a reader see that a regression and a migration coincided.
+    const crossWorld = crossWorldReason(baseline?.world, latest?.world);
     return {
       key: entry.key,
       label: entry.label,
@@ -464,6 +478,7 @@ export function releaseReadiness(
       // it afterwards — the field existed but nothing filled it, which made the recorded decision silent
       // about the one thing that decides whether a non-pass verdict mattered.
       required,
+      ...(crossWorld !== undefined ? { crossWorld } : {}),
       ...(latest !== undefined
         ? {
             latest: {
@@ -488,7 +503,13 @@ export function releaseReadiness(
           }
         : {}),
       verdict,
-      ...(reasons?.length ? { reasons } : {}),
+      // The cross-world fact rides the REASONS as well as its own field: a reader looking at why a series
+      // says what it says should not have to know to look somewhere else for the one condition that makes
+      // the comparison weaker than it appears.
+      ...(() => {
+        const reasons = [...(baseReasons ?? []), ...(crossWorld !== undefined ? [crossWorld] : [])];
+        return reasons.length > 0 ? { reasons } : {};
+      })(),
       regressed: blocks,
     };
   });

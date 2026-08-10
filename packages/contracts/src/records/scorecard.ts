@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
-import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
+import { GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
 import { GateDecisionSchema } from "./gate.js";
 
@@ -566,6 +566,22 @@ export const ScorecardRecordSchema = z.object({
   // restored withholds the verdict instead of falling back. Absent on batches settled before
   // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
   verdictPolicy: VerdictPolicyRefSchema.optional(),
+  // THE WORLD THIS BATCH RAN IN (arch-review 19 P2) — derived at settle from the cases' own execution
+  // manifests, so it reports rather than declares. Deliberately NOT part of the evaluation contract: the
+  // contract seals what is being asked, and folding the world into it would make every infrastructure move
+  // invalidate a product's whole evidence base. It is a COMPARISON axis — two runs of one contract in
+  // different worlds answered the same question under different conditions, and a difference between them
+  // cannot be attributed to the change alone. Absent = no case reported a world (a dispatch that died, an
+  // ingested trace), which reads as "not recorded", never as a default.
+  world: z
+    .object({
+      os: PlacementOsSchema.optional(),
+      drivers: z.array(z.string()).optional(),
+      images: z.array(z.string()).optional(),
+      mixed: z.boolean(),
+      observed: z.number().int().nonnegative(),
+    })
+    .optional(),
   manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)
   // Release-gate decisions recorded AGAINST this candidate (A1/B1) — append-only; the audit report scans
   // these instead of a separate store (ledger-derivation principle). mig 0128.

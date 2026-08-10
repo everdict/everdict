@@ -187,11 +187,19 @@ different worlds are the same question answered under different conditions, and 
 stratify rather than to declare them incomparable. That machinery does not exist yet — everdict has no world
 cohort axis, which is a real gap (the adoption-metrics work names it, and arch-review 15 §17 re-confirmed both
 the gap and this decomposition) — and the decision recorded here is that when it arrives it arrives as a
-cohort, not as another field in the contract digest. It stays unbuilt DELIBERATELY rather than partially: a
-`WorldFingerprint` with no cohort comparison consuming it is a field with no caller, and one assembled from
-the facets that happen to be recorded today (runtime id, image ref) while defaulting the OS would claim
-sameness it cannot establish — the absence-reads-as-sameness trap this document exists to keep closing. The
-whole layer, or none of it. Writing it down
+cohort, not as another field in the contract digest. **Built (arch-review 19 P2).** The material was already there and honest: every case's `ExecutionManifest`
+records the world it actually ran in (os + how the os was resolved, driver, image, runtime) and is ABSENT
+where no world existed. `worldCohortOf` derives a batch's cohort from those at settle — so it reports rather
+than declares, a batch spread over two operating systems is `mixed` rather than a majority, and a batch where
+nothing reported a world carries no cohort at all.
+
+The consumer is the release comparison, and what it does is deliberately proportionate: a comparison whose two
+sides ran in different cohorts carries `crossWorld` on the recorded series state and in its reasons. It does
+NOT refuse. Refusing would make an infrastructure migration un-shippable until every baseline is re-run —
+precisely the too-broad guard this decomposition exists to avoid — while saying it is what stops a regression
+and a migration from being indistinguishable in the record afterwards. An unrecorded world is not a known
+difference either: a legacy batch compares silently, or every comparison against history would carry the
+warning and the signal would be trained out within a week. Writing it down
 because leaving it ambiguous is how "same series contract, different world" quietly ends up averaged into one
 regression series.
 

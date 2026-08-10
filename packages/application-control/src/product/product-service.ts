@@ -870,5 +870,8 @@ function seriesPoint(record: ScorecardRecord): SeriesScorecardPoint {
       ? { contractDigest: record.origin.seriesContractDigest }
       : {}),
     ...(scoring ? { scoring } : {}),
+    // WHICH WORLD it ran in (arch-review 19 P2) — carried so a comparison can say whether it stayed inside
+    // one. Not part of the question the batch answered; part of the conditions under which it answered it.
+    ...(record.world ? { world: record.world } : {}),
   };
 }
