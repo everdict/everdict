@@ -92,6 +92,12 @@ export interface ReleaseStore {
 export interface ProductVersionListFilter {
   productId: string;
   service?: string;
+  // WHICH STREAM (arch-review 14 P1). The store became stream-aware in mig 0155 and the sync planner stayed
+  // name-aware, which broke it in both directions: `known` collected repo-A's versions, so repo-B's v1.0.0
+  // never reached the store to be recognised as a new stream's row at all; and the backfill probe saw
+  // repo-A's rows, so repo-B's genuinely historical releases were announced as news. Identity has to be the
+  // same all the way through, or the layer that resolves it last decides.
+  streamKey?: string;
   limit?: number;
 }
 

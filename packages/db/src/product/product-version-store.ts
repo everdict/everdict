@@ -16,7 +16,9 @@ import { iso } from "../tracker/row.js";
 function naturalKey(
   record: Pick<ProductServiceVersionRecord, "tenant" | "productId" | "service" | "version" | "streamKey">,
 ): string {
-  return [record.tenant, record.productId, record.service, record.streamKey ?? "", record.version].join(" ");
+  // A canonical tuple, not a delimiter join: these are user-supplied strings, and joining them on any
+  // character invents a collision vocabulary the caller never agreed to.
+  return JSON.stringify([record.tenant, record.productId, record.service, record.streamKey ?? "", record.version]);
 }
 
 export class InMemoryProductVersionStore implements ProductVersionStore {
@@ -48,7 +50,8 @@ export class InMemoryProductVersionStore implements ProductVersionStore {
         (record) =>
           record.tenant === tenant &&
           record.productId === filter.productId &&
-          (filter.service === undefined || record.service === filter.service),
+          (filter.service === undefined || record.service === filter.service) &&
+          (filter.streamKey === undefined || (record.streamKey ?? "") === filter.streamKey),
       )
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
     return filter.limit !== undefined ? rows.slice(0, filter.limit) : rows;
@@ -96,8 +99,17 @@ interface ProductVersionRow {
 const VERSION_COLUMNS =
   "(id, tenant, product_id, service, version, stream_key, kind, prerelease, sha, url, notes, published_at, imported_at)";
 const VERSION_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::timestamptz,$13::timestamptz)";
-// Insert-once on the STREAM-scoped key (mig 0155).
-const ON_CONFLICT_TARGET = "(tenant, product_id, service, stream_key, version)";
+// Insert-once WITHOUT naming a target (arch-review 14 P0). Naming the stream-scoped index made the writer
+// depend on a uniqueness that is not yet the only one in force: mig 0138's original
+// UNIQUE (tenant, product_id, service, version) is still present for rollback safety, so a second stream's
+// same version violates THAT constraint — which a targeted ON CONFLICT does not absorb, so the insert raised
+// instead of being skipped.
+//
+// Target-less DO NOTHING is correct under BOTH schemas, which is what makes a rolling deploy safe: while the
+// legacy constraint stands, a second stream's same version is quietly treated as already-known (exactly the
+// pre-0155 behaviour); once mig 0157 drops it, only the stream-scoped index applies and the row lands. The
+// writer needs no flag and no coordination — it is compatible in both directions, which is the property an
+// expand/contract rollout actually requires.
 
 function insertParams(record: ProductServiceVersionRecord): unknown[] {
   return [
@@ -135,7 +147,7 @@ function rowToRecord(row: ProductVersionRow): ProductServiceVersionRecord {
   });
 }
 
-const ON_CONFLICT = `ON CONFLICT ${ON_CONFLICT_TARGET} DO NOTHING`;
+const ON_CONFLICT = "ON CONFLICT DO NOTHING";
 
 export class PgProductVersionStore implements ProductVersionStore {
   constructor(private readonly client: SqlClient) {}
@@ -182,6 +194,10 @@ export class PgProductVersionStore implements ProductVersionStore {
     const conds = ["tenant = $1", "product_id = $2"];
     const params: unknown[] = [tenant, filter.productId];
     let i = 3;
+    if (filter.streamKey !== undefined) {
+      conds.push(`coalesce(stream_key, '') = $${i++}`);
+      params.push(filter.streamKey);
+    }
     if (filter.service !== undefined) {
       conds.push(`service = $${i++}`);
       params.push(filter.service);

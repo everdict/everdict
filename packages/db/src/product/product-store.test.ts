@@ -96,10 +96,12 @@ describe("PgProductVersionStore — insert-once decided by SQL, not a racy read"
     const { client, calls } = fakeClient(() => ({ rows: [{ id: "ver-1" }] }));
     const inserted = await new PgProductVersionStore(client).create(version({}), [fact("ev-1")]);
     expect(inserted).toBe(true);
-    // The STREAM-scoped key (mig 0155): repointing a service at a different repository makes its versions a
-    // different stream, and keying on the display name alone made the new stream's v1.0.0 collide with the
-    // old one's and vanish as "already known".
-    expect(calls[0]?.text).toMatch(/ON CONFLICT \(tenant, product_id, service, stream_key, version\) DO NOTHING/);
+    // TARGET-LESS (arch-review 14 P0). Naming the stream-scoped index made the writer depend on a
+    // uniqueness that is not yet the only one in force: mig 0138's original constraint stands until 0157
+    // drops it, and a targeted ON CONFLICT does not absorb a violation of a DIFFERENT constraint — so a
+    // cross-stream duplicate raised instead of being skipped. Target-less is correct under both schemas,
+    // which is what makes the rolling window safe.
+    expect(calls[0]?.text).toMatch(/ON CONFLICT DO NOTHING/);
     expect(calls[0]?.text).toMatch(/WHERE EXISTS \(SELECT 1 FROM ins\)/);
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
   });

@@ -8,9 +8,8 @@ import {
 } from "@everdict/contracts";
 import {
   Product,
-  type ResolvedSeriesContract,
+  type SeriesContractResolution,
   sameSourceCoordinates,
-  seriesContractDigest,
   serviceStreamKey,
   watchedSeries,
 } from "@everdict/domain";
@@ -77,7 +76,7 @@ export interface ProductVersionSyncDeps {
   // uses at readiness, so the stamp a batch carries and the contract a release compares it against are
   // produced by one function. Absent = batches ship unstamped, which readiness reads as evidence whose
   // question cannot be named.
-  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<ResolvedSeriesContract | undefined>;
+  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<SeriesContractResolution>;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -123,7 +122,8 @@ export class ProductVersionSync {
         // the safe direction: the worst case is announcing a version that was arguably history, which is a
         // reader's judgement to make — versus silently swallowing a release, which nobody can recover.
         const backfill =
-          service.sync?.syncedAt === undefined && !(await this.hasImportedHistory(tenant, productId, service.name));
+          service.sync?.syncedAt === undefined &&
+          !(await this.hasImportedHistory(tenant, productId, service.name, serviceStreamKey(service)));
         const rows = await this.importService(tenant, record, service, actor, backfill);
         // A backfilled row counts as imported (it is on the timeline now) but is never news — only
         // post-watermark arrivals reach the auto-eval below.
@@ -177,8 +177,16 @@ export class ProductVersionSync {
 
   // Has this service ever landed a row? The DURABLE half of the backfill discriminator — see `sync`. One row
   // is enough to answer it, so the read is bounded regardless of how much history a product carries.
-  private async hasImportedHistory(tenant: string, productId: string, service: string): Promise<boolean> {
-    const rows = await this.deps.versions.list(tenant, { productId, service, limit: 1 });
+  private async hasImportedHistory(
+    tenant: string,
+    productId: string,
+    service: string,
+    streamKey: string,
+  ): Promise<boolean> {
+    // Scoped to the STREAM (arch-review 14 P1). Asked by name, this saw repo-A's rows after a repoint and
+    // declared repo-B's first sync "not a backfill" — so repo-B's entire back catalogue was announced as
+    // news. A new stream has no history until it imports some.
+    const rows = await this.deps.versions.list(tenant, { productId, service, streamKey, limit: 1 });
     return rows.length > 0;
   }
 
@@ -226,10 +234,17 @@ export class ProductVersionSync {
       service.host,
     );
     const reader = this.deps.readers.for(token, host);
+    // KNOWN within this STREAM (arch-review 14 P1). Collected by name, repo-A's v1.0.0 made repo-B's v1.0.0
+    // look already-imported and it never even reached the store — so the stream-scoped key the store had
+    // just learned to honour was never given the chance to.
     const known = new Set(
-      (await this.deps.versions.list(tenant, { productId: product.id, service: service.name })).map(
-        (row) => row.version,
-      ),
+      (
+        await this.deps.versions.list(tenant, {
+          productId: product.id,
+          service: service.name,
+          streamKey: serviceStreamKey(service),
+        })
+      ).map((row) => row.version),
     );
     const prefixed = (name: string): boolean => service.tagPrefix === undefined || name.startsWith(service.tagPrefix);
     const candidates: Array<Omit<ProductServiceVersionRecord, "id" | "tenant" | "productId" | "service">> = [];
@@ -324,23 +339,40 @@ export class ProductVersionSync {
         // last month's under the same series key. Unresolvable → no stamp, which readiness treats as
         // evidence whose question cannot be named (blocking, not silently current).
         const contract = this.deps.resolveSeriesContract
-          ? await this.deps.resolveSeriesContract(tenant, entry).catch(() => undefined)
-          : undefined;
+          ? await this.deps
+              .resolveSeriesContract(tenant, entry)
+              .catch((): SeriesContractResolution => ({ status: "unresolvable", reason: "resolver threw" }))
+          : ({ status: "unknown" } as SeriesContractResolution);
+        // A series whose current definition cannot be resolved must not be RUN either — an evaluation we
+        // cannot describe produces evidence nobody can place. The readiness side already blocks on this; the
+        // producer refusing keeps the two halves saying one thing.
+        if (contract.status === "unresolvable") {
+          failedSeries.push({ key: entry.key, error: `series definition unresolvable: ${contract.reason}` });
+          continue;
+        }
+        // `unknown` = this deployment has no resolver, so there is no plan to carry and the series runs from
+        // its declaration exactly as it always did — honestly unstamped, which readiness reads as evidence
+        // whose question cannot be named.
+        const plan = contract.status === "resolved" ? contract.contract : undefined;
         const submitted = await this.deps.submitSeriesRun({
           tenant,
           // The schedule precedent: a machine-fired batch is submitted as the product's creator — the person
           // who declared the standing evaluation, not whoever happened to press Sync.
           submittedBy: product.createdBy,
-          dataset: entry.dataset,
-          harness: entry.harness,
-          judges: entry.judges,
+          // The RESOLVED plan, not the declaration (arch-review 14 P0). Submitting `entry.*` sent
+          // version-less refs that submit re-resolved — so a `latest` that moved between the stamp and the
+          // dispatch produced a scorecard whose recorded question and executed question were different
+          // versions. The digest above and these refs now come from ONE resolution.
+          dataset: plan?.dataset ?? entry.dataset,
+          harness: plan?.harness ?? entry.harness,
+          judges: plan?.judges ?? entry.judges,
           ...(product.autoEval.runtime !== undefined ? { runtime: product.autoEval.runtime } : {}),
           origin: {
             source: "product",
             productId: product.id,
             ...(planned !== undefined ? { releaseId: planned.id } : {}),
             seriesKey: entry.key,
-            ...(contract !== undefined ? { seriesContractDigest: seriesContractDigest(contract) } : {}),
+            ...(contract.status === "resolved" ? { seriesContractDigest: contract.digest } : {}),
             ...(serviceVersion !== undefined ? { serviceVersion } : {}),
           },
         });

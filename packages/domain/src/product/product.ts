@@ -86,10 +86,16 @@ function assertSeries(series: readonly ProductSeries[], productId: string): void
 export function serviceStreamKey(
   service: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
 ): string {
-  // Deliberately readable rather than hashed: it lands in a database column and in error messages, and an
-  // operator asking "why did this re-import" deserves an answer they can read. The separator is a character
-  // no coordinate can contain.
-  return [service.host ?? "", service.repository, service.source, service.tagPrefix ?? ""].join("\u0000");
+  // A CANONICAL TUPLE, not a delimiter-joined string. The first version joined on U+0000 "because no
+  // coordinate can contain it" — true, and it made the value unstorable: this lands in a Postgres `text`
+  // column, and Postgres rejects NUL outright (`invalid byte sequence for encoding "UTF8": 0x00`). Every
+  // version import would have failed at the driver. A separator chosen for what it excludes is a separator
+  // chosen without asking where the value goes.
+  //
+  // JSON.stringify of a fixed-arity array is unambiguous by construction — no separator to collide with, no
+  // escaping rules to get wrong — and stays readable, which is what the original comment actually wanted: an
+  // operator asking "why did this re-import" gets an answer they can read.
+  return JSON.stringify([service.host ?? "", service.repository, service.source, service.tagPrefix ?? ""]);
 }
 
 export function sameSourceCoordinates(
