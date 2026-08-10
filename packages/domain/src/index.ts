@@ -270,6 +270,7 @@ export {
   type ResolvedSeriesContract,
   type SeriesContractResolution,
   seriesContractDigest,
+  seriesContractFromManifest,
   resolveWatchedSeries,
   type SeriesGateReading,
   type SeriesScorecardPoint,

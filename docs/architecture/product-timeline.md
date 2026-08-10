@@ -116,9 +116,27 @@ neither the row version nor the policy digest could ever see it. A series is the
 identities: `key` (the trend) and `seriesContractDigest` (the CONTRACT). The contract is the resolved
 TRANSITIVE closure, not the top documents: `harness@1` is a document that may name `model: {ref}` with no
 version, so the same declaration can execute under a different model with every id/version above reading
-held. It seals what the scorecard manifest seals — harness model, service models, judge model/rubric — because
-a Product-side identity that stopped at the top would be a second, weaker answer to a question the platform
-had already answered properly. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
+held. It seals what the scorecard manifest seals — and seals it with the manifest's OWN FUNCTIONS
+(`resolveSeriesContract` over `sealHarnessModelClosure`/`sealJudgeClosure`, arch-review 15 P1-5), because a
+hand-rolled second resolver is not merely a duplicate: it drifts into a SUBSET, and a subset that reads
+"held" is a false assurance at the one moment a release decides to ship. The one it replaced had already
+drifted — no service models (so every service-topology product's model closure resolved to nothing), no
+delegated harness for a harness judge (so the entire agent rendering the verdict could be swapped), no spec
+digest (so a tenant-local `x@1` shadowing the `_shared` `x@1` read as the same document), no `judgeRun` (so a
+workspace switching its default judge model changed what every inline score means, invisibly).
+
+The seam is ONE RESOLUTION with TWO POLICIES over a hole, which is the part worth remembering:
+
+```
+manifest   records a fact about an execution that HAPPENED — a hole is recorded honestly ("unresolved")
+           and the batch still runs, because refusing there would lose the run entirely
+gate       asks whether the current question's identity is ESTABLISHED — a hole is not an answer, so any
+           "unresolved" sentinel (or an unreadable spec) makes the whole contract `unresolvable`
+```
+
+So a new closure facet reaches the release gate the moment it reaches the manifest. `seriesContractFromManifest`
+projects a manifest back onto the contract shape and TRUST-63 requires the two digests to agree, so the
+correspondence is certified rather than remembered. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
 compares against, so the two can never drift into different answers); a newest batch whose stamp differs — or
 is absent, meaning it cannot say which question it answered — is `contract_stale` and blocks a required
 series. An unresolvable contract is its own verdict — `contract_unverifiable`, which BLOCKS a required series.
@@ -152,8 +170,13 @@ Execution World       where it ran          → cohort/stratum; a change means c
 So a world difference is a COMPARISON constraint, not an identity change: two runs of the same contract in
 different worlds are the same question answered under different conditions, and the honest handling is to
 stratify rather than to declare them incomparable. That machinery does not exist yet — everdict has no world
-cohort axis, which is a real gap (the adoption-metrics work names it) — and the decision recorded here is
-that when it arrives it arrives as a cohort, not as another field in the contract digest. Writing it down
+cohort axis, which is a real gap (the adoption-metrics work names it, and arch-review 15 §17 re-confirmed both
+the gap and this decomposition) — and the decision recorded here is that when it arrives it arrives as a
+cohort, not as another field in the contract digest. It stays unbuilt DELIBERATELY rather than partially: a
+`WorldFingerprint` with no cohort comparison consuming it is a field with no caller, and one assembled from
+the facets that happen to be recorded today (runtime id, image ref) while defaulting the OS would claim
+sameness it cannot establish — the absence-reads-as-sameness trap this document exists to keep closing. The
+whole layer, or none of it. Writing it down
 because leaving it ambiguous is how "same series contract, different world" quietly ends up averaged into one
 regression series.
 

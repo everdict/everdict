@@ -1,6 +1,11 @@
 import type { ProductSeries } from "@everdict/contracts";
 import { InMemoryProductVersionStore, PgProductVersionStore } from "@everdict/db";
-import { type ResolvedSeriesContract, type SeriesContractResolution, seriesContractDigest } from "@everdict/domain";
+import {
+  type ResolvedSeriesContract,
+  type SeriesContractResolution,
+  seriesContractDigest,
+  seriesContractFromManifest,
+} from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
@@ -190,5 +195,101 @@ describeTrust("TRUST-43 — an unresolvable series contract is never green", () 
     await expect(
       service.setReleaseStatus("acme", release.id, { status: "released" }, { subject: "release-captain" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+});
+
+describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written plan", () => {
+  // TRUST-45/46 above certify the digest FUNCTION over hand-written plans. That is a weaker statement than it
+  // looks: it proves the identity moves when the plan moves, and says nothing about whether the resolver
+  // actually puts the moving facet INTO the plan. The resolver this replaced passed TRUST-45 while being
+  // blind to service models and delegated judge harnesses entirely — the fixture supplied by hand exactly the
+  // facet production never filled in. These drive `resolveSeriesContract` itself.
+  const series: ProductSeries = {
+    key: "quality",
+    dataset: { id: "support" },
+    harness: { id: "copilot" },
+    judges: [{ id: "grader" }],
+  } as unknown as ProductSeries;
+
+  // A registry pair whose `latest` can be moved between resolutions, which is the whole failure mode: no id
+  // and no version above the binding changes at all.
+  const world = (over: { serviceModel?: string; delegate?: string; shadowed?: boolean } = {}) => ({
+    datasets: { versions: async () => ["1.0.0"] },
+    harnesses: {
+      versions: async () => ["1.0.0"],
+      get: async (_t: string, id: string) =>
+        id === "grader-agent"
+          ? { version: over.delegate ?? "4.0.0" }
+          : {
+              kind: "service",
+              id: "copilot",
+              version: "1.0.0",
+              services: [{ name: "api", image: "img", model: { ref: "agent-model" } }],
+            },
+    },
+    judges: {
+      versions: async () => ["1.0.0"],
+      // The SHADOW: a tenant-local `grader@1.0.0` registered over the `_shared` one. Same id, same version
+      // string — a DIFFERENT document, which the owner-first registry fallback resolves to instead.
+      get: async (_t: string, _id: string, version: string) => ({
+        kind: "harness",
+        id: "grader",
+        version,
+        harness: { id: "grader-agent", version: "latest" },
+        tags: over.shadowed ? ["tenant-local"] : [],
+      }),
+    },
+    resolveModelBinding: async (_t: string, b: { ref: string }) => `${b.ref}@${over.serviceModel ?? "7.0.0"}`,
+  });
+
+  const resolve = async (over?: Parameters<typeof world>[0]): Promise<SeriesContractResolution> => {
+    const { resolveSeriesContract } = await import("@everdict/application-control");
+    // biome-ignore lint/suspicious/noExplicitAny: a trust fixture stands in for four registries at once
+    return resolveSeriesContract(world(over) as any, "acme", series);
+  };
+
+  const digestOf = async (over?: Parameters<typeof world>[0]): Promise<string> => {
+    const r = await resolve(over);
+    if (r.status !== "resolved") throw new Error(`expected resolved, got ${r.status}`);
+    return r.digest;
+  };
+
+  it("TRUST-56 — a SERVICE harness's nested model `latest` moving changes the contract identity", async () => {
+    expect(await digestOf({ serviceModel: "8.0.0" })).not.toBe(await digestOf());
+  });
+
+  it("TRUST-57 — a harness judge's DELEGATED agent moving changes it too", async () => {
+    // The entire agent rendering the verdict is swapped, and `judge@1.0.0` reads held throughout.
+    expect(await digestOf({ delegate: "5.0.0" })).not.toBe(await digestOf());
+  });
+
+  it("TRUST-58 — a tenant-local `x@1` shadowing the `_shared` `x@1` changes the evaluation identity", async () => {
+    // The hard case, and the reason the closure carries `specDigest`: the registry resolves owner-first with a
+    // `_shared` fallback, so registering a LOCAL judge at the very same version substitutes a different
+    // document with the id AND the version string both reading held. Nothing above the bytes moves. An
+    // identity that stopped at id+version would call this the same question and let a workspace silently
+    // replace the judge behind a green trend.
+    expect(await digestOf({ shadowed: true })).not.toBe(await digestOf());
+  });
+
+  it("TRUST-63 — the resolver's contract IS the manifest's, projected: one vocabulary, certified equal", async () => {
+    // The strongest form of "one answer": take what the resolver produced, seal an execution manifest with the
+    // same facts, project the manifest back, and require the digests to be identical. If either side ever
+    // grows a facet the other lacks, this fails — which is the only way the two can be kept from drifting
+    // apart again by anything other than someone remembering.
+    const resolution = await resolve();
+    if (resolution.status !== "resolved") throw new Error(resolution.status);
+    const c = resolution.contract;
+    const manifest = {
+      dataset: { ...c.dataset, digest: "sha256:whatever" }, // the manifest's own bundle digest is not identity here
+      harness: {
+        ...c.harness,
+        ...(c.harnessModel !== undefined ? { model: c.harnessModel } : {}),
+        ...(c.serviceModels !== undefined ? { serviceModels: c.serviceModels } : {}),
+      },
+      judges: c.judgeClosure,
+      ...(c.judgeRun !== undefined ? { judgeRun: c.judgeRun } : {}),
+    };
+    expect(seriesContractDigest(seriesContractFromManifest(manifest))).toBe(resolution.digest);
   });
 });

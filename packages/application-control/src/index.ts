@@ -223,6 +223,7 @@ export {
   type ProductSyncServiceOutcome,
   type SeriesRunSubmitter,
 } from "./product/product-version-sync.js";
+export { type SeriesContractDeps, resolveSeriesContract } from "./product/series-contract.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
   type CaptureViewSnapshotInput,

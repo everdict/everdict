@@ -102,7 +102,26 @@ export interface ResolvedSeriesContract {
   // digesting a hole.
   harnessModel?: string;
   serviceModels?: Record<string, string>;
-  judgeClosure?: Array<{ id: string; version: string; model?: string; rubric?: string; harness?: string }>;
+  judgeClosure?: Array<{
+    id: string;
+    version: string;
+    // The judge document's BYTES. A version is immutable, so this is redundant with `version` for a healthy
+    // registry — and it is what makes the release gate's vocabulary literally the manifest's, which is the
+    // point (arch-review 15 P1-5): the contract is sealed by the same functions that seal a batch, so a
+    // facet added there reaches the gate without anyone remembering to add it twice.
+    specDigest?: string;
+    model?: string;
+    rubric?: string;
+    // A harness judge's DELEGATED agent. Absent from the hand-rolled resolver this replaced, which meant the
+    // entire agent doing the judging could be swapped with every id/version above reading held.
+    harness?: string;
+  }>;
+  // The RUNTIME judge configuration — the workspace's default judge model, which governs the inline judge
+  // grader. A series names no judge override, so this facet moves whenever the workspace changes its default,
+  // with every id/version in the declaration reading held: an identical judge list judged by a different model
+  // is a different judging apparatus. The manifest has sealed it since the batch's own identity was widened;
+  // the release gate was still comparing without it.
+  judgeRun?: { provider?: string; model: string };
 }
 
 // WHETHER the current contract could be established, as data (arch-review 14 P0). The first version passed
@@ -122,6 +141,50 @@ export type SeriesContractResolution =
   | { status: "resolved"; digest: string; contract: ResolvedSeriesContract }
   | { status: "unresolvable"; reason: string }
   | { status: "unknown" };
+
+// THE SAME QUESTION, READ OFF A BATCH THAT ALREADY ANSWERED IT (arch-review 15, TRUST-63).
+//
+// A watch series' contract is resolved from the registries; a scorecard's manifest is sealed at submit from
+// the same registries. Both name the identity of one evaluation, so a scorecard's manifest must PROJECT onto
+// a `ResolvedSeriesContract` — field for field, with nothing left over on the manifest side that identity
+// cares about. That correspondence is what makes `origin.seriesContractDigest` comparable to the batch that
+// carries it; without it the release gate is comparing a digest of one vocabulary against evidence sealed in
+// another, and the agreement would be a coincidence that holds until someone widens one side.
+//
+// The projection is deliberately TOTAL and mechanical: no defaults, no inference. A manifest facet that is
+// absent projects as absent, because the manifest's own absence rules (the identity era) already say what
+// that means. It exists so the two vocabularies can be certified equal rather than assumed equal.
+export function seriesContractFromManifest(manifest: {
+  dataset: { id: string; version: string };
+  harness: { id: string; version: string; specDigest?: string; model?: string; serviceModels?: Record<string, string> };
+  judges?: Array<{
+    id: string;
+    version: string;
+    specDigest?: string;
+    model?: string;
+    rubric?: string;
+    harness?: string;
+  }>;
+  judgeRun?: { provider?: string; model: string };
+}): ResolvedSeriesContract {
+  const judges = manifest.judges ?? [];
+  return {
+    dataset: { id: manifest.dataset.id, version: manifest.dataset.version },
+    harness: { id: manifest.harness.id, version: manifest.harness.version },
+    judges: judges.map((j) => ({ id: j.id, version: j.version })),
+    ...(manifest.harness.model !== undefined ? { harnessModel: manifest.harness.model } : {}),
+    ...(manifest.harness.serviceModels !== undefined ? { serviceModels: manifest.harness.serviceModels } : {}),
+    judgeClosure: judges.map((j) => ({
+      id: j.id,
+      version: j.version,
+      ...(j.specDigest !== undefined ? { specDigest: j.specDigest } : {}),
+      ...(j.model !== undefined ? { model: j.model } : {}),
+      ...(j.rubric !== undefined ? { rubric: j.rubric } : {}),
+      ...(j.harness !== undefined ? { harness: j.harness } : {}),
+    })),
+    ...(manifest.judgeRun !== undefined ? { judgeRun: manifest.judgeRun } : {}),
+  };
+}
 
 export function seriesContractDigest(contract: ResolvedSeriesContract): string {
   const byId = <T extends { id: string; version: string }>(rows: readonly T[]): T[] =>
@@ -143,6 +206,7 @@ export function seriesContractDigest(contract: ResolvedSeriesContract): string {
         }
       : {}),
     ...(contract.judgeClosure !== undefined ? { judgeClosure: byId(contract.judgeClosure) } : {}),
+    ...(contract.judgeRun !== undefined ? { judgeRun: contract.judgeRun } : {}),
   });
 }
 

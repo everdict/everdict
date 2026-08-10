@@ -39,19 +39,14 @@ import {
 import {
   CapabilityService,
   EnvironmentAdoptionService,
+  type SeriesContractDeps,
   adoptedImageReach,
   firstPartyCatalogExtras,
   firstPartyDefaults,
+  resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
-import type { ModelBinding, ProductSeries, RegistryAuth } from "@everdict/contracts";
-import {
-  type ResolvedSeriesContract,
-  type SeriesContractResolution,
-  evaluateGate,
-  perTenantTrustZones,
-  resolveRef,
-  seriesContractDigest,
-} from "@everdict/domain";
+import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
+import { type SeriesContractResolution, evaluateGate, perTenantTrustZones } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -84,7 +79,7 @@ import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-ac
 import { buildRuntimeCompute } from "./composition/runtime-compute.js";
 import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
-import { buildScorecard } from "./composition/scorecard.js";
+import { buildScorecard, modelBindingResolver } from "./composition/scorecard.js";
 import {
   buildBrowserProfile,
   buildCatalog,
@@ -914,124 +909,24 @@ async function main(): Promise<void> {
   // series' scorecards, stamped with product/series/version provenance (the trend's x-axis key).
   // WHAT A WATCH SERIES ASKS TODAY, concretely (arch-review 13 P0). A series' refs may omit the version,
   // which means "latest at run time" — so the contract underneath a series can move with the product row
-  // untouched, and neither the row's version nor its policy digest can see it. Resolving here, at the one
-  // place that knows the registries, keeps the SUBMIT stamp and the READINESS comparison on one function.
+  // untouched, and neither the row's version nor its policy digest can see it. Wiring the registries here,
+  // at the one place that knows them, keeps the SUBMIT stamp and the READINESS comparison on one function.
   //
-  // Any unresolvable ref answers `undefined`: a series naming a deleted dataset has no contract to compare
-  // against, and inventing one would be worse than abstaining.
-  const resolveSeriesContract = async (tenant: string, series: ProductSeries): Promise<SeriesContractResolution> => {
-    // Every failure answers `unresolvable` WITH ITS REASON — never `undefined`, which used to travel to
-    // "skip the freshness check" and let stale evidence pass a release (arch-review 14 P0).
-    const concrete = async (
-      registry: { versions(tenant: string, id: string): Promise<string[]> },
-      kind: string,
-      ref: { id: string; version?: string },
-    ): Promise<{ id: string; version: string } | string> => {
-      try {
-        const versions = await registry.versions(tenant, ref.id);
-        if (versions.length === 0) return `${kind} '${ref.id}' has no versions in this workspace`;
-        return { id: ref.id, version: resolveRef(ref.id, ref.version ?? "latest", versions) };
-      } catch (err) {
-        return `${kind} '${ref.id}' could not be resolved: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    };
-    const dataset = await concrete(datasetRegistry, "dataset", series.dataset);
-    if (typeof dataset === "string") return { status: "unresolvable", reason: dataset };
-    const harness = await concrete(harnessInstanceRegistry, "harness", series.harness);
-    if (typeof harness === "string") return { status: "unresolvable", reason: harness };
-    const judges: Array<{ id: string; version: string }> = [];
-    for (const judge of series.judges) {
-      const resolved = await concrete(judgeRegistry, "judge", judge);
-      if (typeof resolved === "string") return { status: "unresolvable", reason: resolved };
-      judges.push(resolved);
-    }
-    // …and the CLOSURE beneath the top documents (arch-review 14 P0). `harness@1` is a document, and that
-    // document may name `model: {ref}` with no version — so the same contract can execute under a different
-    // model with every id/version above reading held. The scorecard manifest seals exactly this; a
-    // Product-side identity that stopped at the top would be a second, weaker answer to a question the
-    // platform had already answered properly. Resolved with the SAME functions the manifest uses, so the two
-    // vocabularies cannot drift.
-    const bindingIdentity = async (binding: ModelBinding | undefined): Promise<string | undefined> => {
-      if (binding === undefined) return undefined;
-      if (typeof binding === "string") return binding; // already concrete
-      try {
-        const spec = await modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
-        return `${binding.ref}@${spec.version}`;
-      } catch {
-        // The MANIFEST may record "unresolved" — it states a fact about an execution that already happened.
-        // A release GATE asks a different question ("is the current question's identity established?"), and
-        // an unsealed closure is not an answer to it (arch-review 15 §9). Signalled here; the caller turns it
-        // into `unresolvable` rather than digesting a hole and calling the result resolved.
-        return undefined;
-      }
-    };
-    let harnessModel: string | undefined;
-    try {
-      const spec = await harnessInstanceRegistry.get(tenant, harness.id, harness.version);
-      const binding = (spec as { model?: ModelBinding }).model;
-      harnessModel = await bindingIdentity(binding);
-      if (binding !== undefined && harnessModel === undefined)
-        return {
-          status: "unresolvable",
-          reason: `harness '${harness.id}@${harness.version}' names a model binding that could not be resolved`,
-        };
-    } catch (err) {
-      return {
-        status: "unresolvable",
-        reason: `harness '${harness.id}@${harness.version}' could not be read: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-    const judgeClosure: Array<{ id: string; version: string; model?: string; rubric?: string }> = [];
-    for (const judge of judges) {
-      try {
-        const spec = (await judgeRegistry.get(tenant, judge.id, judge.version)) as {
-          model?: ModelBinding;
-          rubric?: unknown;
-        };
-        const model = await bindingIdentity(spec.model);
-        if (spec.model !== undefined && model === undefined)
-          return {
-            status: "unresolvable",
-            reason: `judge '${judge.id}@${judge.version}' names a model binding that could not be resolved`,
-          };
-        // A rubric REF resolves at run time too — the same moving-target shape as a model binding.
-        const rubricRef = spec.rubric;
-        let rubric: string | undefined;
-        if (rubricRef !== null && typeof rubricRef === "object" && "id" in rubricRef) {
-          const r = rubricRef as { id: string; version?: string };
-          try {
-            const versions = await rubricRegistry.versions(tenant, r.id);
-            rubric = versions.length > 0 ? `${r.id}@${resolveRef(r.id, r.version ?? "latest", versions)}` : undefined;
-          } catch {
-            rubric = undefined;
-          }
-          if (rubric === undefined)
-            return {
-              status: "unresolvable" as const,
-              reason: `judge '${judge.id}@${judge.version}' names a rubric that could not be resolved`,
-            };
-        }
-        judgeClosure.push({
-          ...judge,
-          ...(model !== undefined ? { model } : {}),
-          ...(rubric !== undefined ? { rubric } : {}),
-        });
-      } catch (err) {
-        return {
-          status: "unresolvable",
-          reason: `judge '${judge.id}@${judge.version}' could not be read: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-    }
-    const contract: ResolvedSeriesContract = {
-      dataset,
-      harness,
-      judges,
-      ...(harnessModel !== undefined ? { harnessModel } : {}),
-      judgeClosure,
-    };
-    return { status: "resolved", digest: seriesContractDigest(contract), contract };
+  // Resolved by the SAME sealers a scorecard manifest uses (arch-review 15 P1-5) — this was a second,
+  // hand-rolled resolver that had already drifted into a weaker answer (no service models, no delegated judge
+  // harness, no spec digest), so a release could ship against a "held" contract the manifest already knew had
+  // moved. One resolution, two policies: the manifest records a hole honestly, the gate refuses on one.
+  const seriesContractDeps: SeriesContractDeps = {
+    datasets: datasetRegistry,
+    harnesses: harnessInstanceRegistry,
+    judges: judgeRegistry,
+    rubrics: rubricRegistry,
+    resolveModelBinding: modelBindingResolver(modelRegistry),
+    // The workspace default judge model — the same source submit seals into `manifest.judgeRun`.
+    judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
   };
+  const resolveSeriesContract = (tenant: string, series: ProductSeries): Promise<SeriesContractResolution> =>
+    resolveSeriesContractFor(seriesContractDeps, tenant, series);
   const productService = new ProductService({
     store: productStore,
     releases: releaseStore,

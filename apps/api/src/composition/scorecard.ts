@@ -38,6 +38,20 @@ export interface ScorecardRuntimeAccess {
   killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
 }
 
+// The manifest's model-binding resolution, as ONE function (arch-review 15 P1-5). A judge or harness spec
+// pinning `{ref: "main-model"}` with no version is a byte-identical document over a moving target; resolving
+// it to `ref@version` is what makes "same spec digest" mean "same model". The product's series-contract
+// resolver seals with the very same helper, so the release gate and the batch manifest cannot answer the
+// identity question two different ways — which is exactly what they were doing.
+export function modelBindingResolver(
+  modelRegistry: ModelRegistry,
+): (tenant: string, binding: { ref: string; version?: string }) => Promise<string | undefined> {
+  return async (tenant, binding) => {
+    const spec = await modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
+    return `${binding.ref}@${spec.version}`;
+  };
+}
+
 // Batch eval: run a dataset (bundle of cases) against a harness@version, aggregate into a scorecard + apply the selected judges to each trace.
 export function buildScorecard(deps: {
   scorecardStore: ScorecardStore;
@@ -280,10 +294,7 @@ export function buildScorecard(deps: {
     rubrics: rubricRegistry,
     // The manifest's dependency-closure seal: a judge's `{ref}` binding resolves to its concrete version at
     // submit, so "same spec digest, different actual model" stops reading as an identical judge.
-    resolveModelBinding: async (tenant, binding) => {
-      const spec = await deps.modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
-      return `${binding.ref}@${spec.version}`;
-    },
+    resolveModelBinding: modelBindingResolver(deps.modelRegistry),
     judgeRunner,
     budget,
     usage: usageMeter,
