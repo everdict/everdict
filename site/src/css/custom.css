@@ -71,7 +71,7 @@
   box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.55);
 }
 
-[data-theme='dark'] .theme-code-block {
+[data-theme="dark"] .theme-code-block {
   border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
