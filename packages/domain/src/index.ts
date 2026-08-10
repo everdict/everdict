@@ -60,7 +60,8 @@ export {
 export {
   type SealedDocumentMismatch,
   sealedExecutionMessage,
-  verifySealedExecution,
+  verifySealedCaseDocuments,
+  verifySealedSelection,
 } from "./scorecard/sealed-execution.js";
 export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {

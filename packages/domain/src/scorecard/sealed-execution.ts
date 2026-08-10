@@ -30,68 +30,119 @@ import { contentDigest } from "../provenance/content-digest.js";
 // what makes the current one safe, and it stays useful afterwards: it is the check that a pin was honoured.
 
 export interface SealedDocumentMismatch {
-  subject: "dataset_case" | "grading" | "harness";
-  // The case id, or the harness ref — what moved.
+  subject: "dataset_case" | "grading" | "harness" | "selection";
+  // The case id, the harness ref, or — for `selection` — the case that appeared or vanished.
   id: string;
   sealed: string;
   current: string;
 }
 
-// Compare the documents a re-resolution just produced against what the manifest sealed.
+// The per-case comparisons both callers share. The SEMANTIC case digest strips `graders` — the case contract
+// calls that field a runtime-replaced default, so it is sealed on its own axis and hashing it here would make
+// a grading change read as a content change.
+function caseMismatches(
+  manifest: ScorecardManifest,
+  cases: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
+): SealedDocumentMismatch[] {
+  const out: SealedDocumentMismatch[] = [];
+  for (const c of cases) {
+    const sealed = manifest.cases?.[c.id];
+    if (sealed !== undefined) {
+      const current = contentDigest({ ...c, graders: undefined });
+      if (current !== sealed) out.push({ subject: "dataset_case", id: c.id, sealed, current });
+    }
+    // …and the DEFAULT GRADERS, on their own axis. A shadow that changes only what a case is graded by would
+    // otherwise pass the content check while changing what "passed" means. Present only on defaults runs — a
+    // run-time grading plan is a batch document no registry lookup can move.
+    const sealedGraders = manifest.gradingCases?.[c.id];
+    if (sealedGraders !== undefined) {
+      const current = contentDigest(c.graders);
+      if (current !== sealedGraders) out.push({ subject: "grading", id: c.id, sealed: sealedGraders, current });
+    }
+  }
+  return out;
+}
+
+function harnessMismatch(
+  manifest: ScorecardManifest,
+  spec: HarnessSpec | undefined,
+  ref: string | undefined,
+): SealedDocumentMismatch[] {
+  const sealed = manifest.harness.specDigest;
+  if (sealed === undefined || spec === undefined) return [];
+  const current = contentDigest(spec);
+  if (current === sealed) return [];
+  return [{ subject: "harness", id: ref ?? `${manifest.harness.id}@${manifest.harness.version}`, sealed, current }];
+}
+
+// THE BATCH PATHS — Temporal's plan and the in-process resume, which re-resolve the whole selection.
 //
-// PER CASE, not over a composite: a batch re-plans a SUBSET of its cases (resume runs only the unfinished
-// ones), so a whole-bundle digest could not be compared at all without re-deriving the exact selection. The
-// per-case seals were introduced for the orthogonal identity axes and answer this question directly.
+// EXACT SET, not "the members that survived" (arch-review 18 P0-3). The first version walked the ACTUAL cases
+// and compared any that the manifest also had, so a shadow that ADDED a case slipped through (nothing to
+// compare it to) and one that REMOVED a case slipped through too (the loop never met it). Either way the
+// batch would run a different selection than the manifest certifies — with the record's `requested` count
+// still describing the old one. The sealed selection is part of the document, not merely the bytes of the
+// members that happen to still be there.
 //
-// A manifest with no `cases` map predates the split seal (identityVersion absent/legacy) — there is nothing
-// to verify against, and inventing a comparison would report drift that the seal never claimed to exclude.
-export function verifySealedExecution(
+// A manifest with no `cases` map predates the split seal — nothing to verify against, and inventing a
+// comparison would report drift the seal never claimed to exclude.
+export function verifySealedSelection(
   manifest: ScorecardManifest | undefined,
   actual: {
-    // The cases this execution is about to run, AFTER subset selection and BEFORE the grading plan is applied
-    // (the plan is a batch-level document, sealed as `grading`, and applying it would mask a default-grader
-    // change on the case itself).
-    cases?: ReadonlyArray<Pick<EvalCase, "id" | "graders">>;
-    // The resolved harness spec, BEFORE `pinHarnessSpecToClosure` rewrites its bindings — the manifest sealed
-    // the registry document, and the pin is applied on top of it at dispatch.
+    // AFTER subset selection and BEFORE the grading plan is applied (the plan is a batch-level document, and
+    // applying it first would mask a default-grader change on the case itself).
+    cases: ReadonlyArray<Pick<EvalCase, "id" | "graders">>;
+    // BEFORE `pinHarnessSpecToClosure` rewrites its bindings — the manifest sealed the registry document, and
+    // the pin is applied on top of it.
     harnessSpec?: HarnessSpec | undefined;
     harnessRef?: string;
   },
 ): SealedDocumentMismatch[] {
   if (manifest === undefined) return [];
-  const mismatches: SealedDocumentMismatch[] = [];
-  const sealedCases = manifest.cases;
-  const sealedGrading = manifest.gradingCases;
-  for (const c of actual.cases ?? []) {
-    // The SEMANTIC case digest strips `graders` — the case contract calls that field a runtime-replaced
-    // default, so it is sealed on its own axis (below) and hashing it here would make a grading change read
-    // as a content change.
-    const sealed = sealedCases?.[c.id];
-    if (sealed !== undefined) {
-      const current = contentDigest({ ...c, graders: undefined });
-      if (current !== sealed) mismatches.push({ subject: "dataset_case", id: c.id, sealed, current });
-    }
-    // …and the DEFAULT GRADERS, on their own axis. A shadow that changes only what a case is graded by would
-    // otherwise pass the content check while changing what "passed" means. Present only on defaults runs — a
-    // run-time grading plan is a batch document that no registry lookup can move.
-    const sealedGraders = sealedGrading?.[c.id];
-    if (sealedGraders !== undefined) {
-      const current = contentDigest(c.graders);
-      if (current !== sealedGraders) mismatches.push({ subject: "grading", id: c.id, sealed: sealedGraders, current });
-    }
-  }
-  const sealedSpec = manifest.harness.specDigest;
-  if (sealedSpec !== undefined && actual.harnessSpec !== undefined) {
-    const current = contentDigest(actual.harnessSpec);
-    if (current !== sealedSpec)
-      mismatches.push({
-        subject: "harness",
-        id: actual.harnessRef ?? `${manifest.harness.id}@${manifest.harness.version}`,
-        sealed: sealedSpec,
-        current,
-      });
+  const mismatches = [
+    ...caseMismatches(manifest, actual.cases),
+    ...harnessMismatch(manifest, actual.harnessSpec, actual.harnessRef),
+  ];
+  const sealedIds = manifest.cases === undefined ? undefined : new Set(Object.keys(manifest.cases));
+  if (sealedIds !== undefined) {
+    const actualIds = new Set(actual.cases.map((c) => c.id));
+    for (const id of actualIds)
+      if (!sealedIds.has(id)) mismatches.push({ subject: "selection", id, sealed: "absent", current: "present" });
+    for (const id of sealedIds)
+      if (!actualIds.has(id)) mismatches.push({ subject: "selection", id, sealed: "present", current: "absent" });
   }
   return mismatches;
+}
+
+// THE RE-SCORE PATH, whose question is different: a detached pass judges the cases that already have RESULTS,
+// so the current dataset may legitimately be larger. What it may not be is missing one of them.
+//
+// The hole this closes (arch-review 18 P0-3): the check filtered the resolved dataset down to the judged case
+// ids, so a case the shadow DELETED simply never appeared — verification passed, the shadowed dataset was
+// returned, and the judge stream then skipped that case for having no `EvalCase`. By then the pass had already
+// stripped the selected judges' rows, so the case ended the pass with its verdict removed and nothing written
+// in its place: a silent deletion of evidence, produced by a check that was looking straight at it.
+export function verifySealedCaseDocuments(
+  manifest: ScorecardManifest | undefined,
+  judgedCaseIds: readonly string[],
+  resolved: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
+): SealedDocumentMismatch[] {
+  if (manifest === undefined) return [];
+  const byId = new Map(resolved.map((c) => [c.id, c]));
+  const mismatches: SealedDocumentMismatch[] = [];
+  for (const id of judgedCaseIds) {
+    if (manifest.cases !== undefined && manifest.cases[id] === undefined)
+      // A result whose case the manifest never sealed cannot be re-judged against anything.
+      mismatches.push({ subject: "selection", id, sealed: "absent", current: "present" });
+    else if (!byId.has(id)) mismatches.push({ subject: "selection", id, sealed: "present", current: "absent" });
+  }
+  return [
+    ...mismatches,
+    ...caseMismatches(
+      manifest,
+      resolved.filter((c) => judgedCaseIds.includes(c.id)),
+    ),
+  ];
 }
 
 // The one sentence an operator needs: which documents moved under a held name, and what to do about it.
@@ -101,5 +152,5 @@ export function sealedExecutionMessage(mismatches: readonly SealedDocumentMismat
     .map((m) => `${m.subject}:${m.id}`)
     .join(", ");
   const more = mismatches.length > 5 ? ` (+${mismatches.length - 5} more)` : "";
-  return `the documents this batch sealed are no longer what '${named}'${more} resolves to — a registry entry with the same id and version now returns different content (a workspace-local version shadowing a shared one does exactly this). Refusing to execute a document this batch did not certify; remove the shadowing version or submit a new batch.`;
+  return `the documents this batch sealed are no longer what '${named}'${more} resolves to — a registry entry with the same id and version now returns different content, or the selection itself changed (a workspace-local version shadowing a shared one does exactly this). Refusing to execute a document this batch did not certify; remove the shadowing version or submit a new batch.`;
 }

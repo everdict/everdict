@@ -8,7 +8,7 @@ import type {
   Placement,
   Score,
 } from "@everdict/contracts";
-import { judgeGradeable, modelBindingLabel } from "@everdict/domain";
+import { contentDigest, judgeGradeable, modelBindingLabel } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
@@ -40,6 +40,12 @@ export interface ScoringServiceDeps {
 export interface SealedJudgeClosure {
   id: string;
   version: string;
+  // The judge DOCUMENT this pass sealed (arch-review 18 P0-4). It was sealed and never consumed: every pass
+  // re-read `judges.get(tenant, id, version)`, and that lookup is owner-first over a `_shared` fallback — so a
+  // workspace registering its own `quality@1` after the pass claimed hands the executor a different document
+  // under a held name, while the ScoringRevision keeps recording the closure of the one it sealed. The
+  // top-level batch documents got this check first; the judges are the same shape one level in.
+  specDigest?: string;
   model?: string;
   rubric?: string;
   harness?: string;
@@ -107,6 +113,21 @@ export class ScoringService {
         // Sealed entries are keyed by the SELECTION (id + selected version, "latest" included) — the same
         // key sealJudgeClosure recorded — not by the resolved spec's concrete version.
         const hint = sealed?.find((s) => s.id === sel.id && s.version === sel.version);
+        // …AND THE DOCUMENT MUST BE THE ONE THE PASS SEALED (arch-review 18 P0-4). Refused BEFORE the
+        // provider is called, and refused as an UNRESOLVED selection rather than as a thrown pass: the
+        // stream turns each unresolved judge into a visible per-case unmeasured row, so the batch settles
+        // with no verdict from a judge whose document moved — which is the honest outcome — instead of
+        // silently judging under a document this pass never certified.
+        if (hint?.specDigest !== undefined) {
+          const current = contentDigest(raw);
+          if (current !== hint.specDigest) {
+            unresolved.push({
+              ...sel,
+              message: `the judge document sealed by this pass (${hint.specDigest}) is not what '${sel.id}@${sel.version}' resolves to now (${current}) — a workspace-local version shadowing a shared one does exactly this`,
+            });
+            continue;
+          }
+        }
         specs.push(await this.concretize(tenant, raw, hint));
       } catch (err) {
         unresolved.push({ ...sel, message: err instanceof Error ? err.message : String(err) });

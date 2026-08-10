@@ -24,7 +24,7 @@ import {
   stagePromotionSafe,
   summarizeScorecard,
   verdictSummaryOf,
-  verifySealedExecution,
+  verifySealedCaseDocuments,
 } from "@everdict/domain";
 import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
 import {
@@ -429,7 +429,12 @@ export class ScorecardScoreService {
     // A superseded workflow must not keep planning the NEW owner's worklist and spawning activity retries
     // against it. Read-only, so this cannot corrupt a plane — it is refused because work nobody asked for
     // costs judge calls and hides the takeover from whoever is watching.
-    await this.owningPass(record, passId);
+    const planPass = await this.owningPass(record, passId);
+    // …and the SELECTION is the pass's too (arch-review 18 P1). This was the one of the four scoring entry
+    // points left out: a mistaken caller could build a worklist for judges the pass never sealed, and
+    // Temporal would then schedule activities that each conflict at `scoreCase` — refused eventually, and
+    // only after the fan-out was paid for in scheduling and retries.
+    this.assertPassSelection(record, planPass, judges);
     const results = record.scorecard?.results ?? [];
     // Pending = judge-gradeable (a classified failure starves the judge — its recovery is retry/re-collect,
     // not a scoring pass) AND at least one selected judge still has work to do here.
@@ -652,18 +657,24 @@ export class ScorecardScoreService {
       // Only MY pass may be marked failed. If a takeover already replaced the marker, flipping it here would
       // declare someone else's live pass dead — the epoch guard makes that write miss instead.
       const mine = failedPass !== undefined && failedPass.passId === pass.passId;
+      // A STALE pass writes NOTHING (arch-review 18 P1). The guard was applied only when the marker was still
+      // mine, so the one case it was meant to cover — a successor has taken over — fell through to an
+      // UNGUARDED write: the dead pass appended "I failed" to the successor's history, and because `steps` is
+      // a whole-array read-modify-write it could drop a step the successor wrote in between. The narration is
+      // worth having; a stale writer's narration on someone else's record is not.
+      if (!mine || pass.passId === undefined) return;
       await this.deps.store
         .update(
           record.id,
           {
-            ...(mine && failedPass !== undefined
+            ...(failedPass !== undefined
               ? { scoringPass: { ...failedPass, status: "failed" as const, failedAt: this.now(), failure: message } }
               : {}),
             steps: [...(fresh.steps ?? []), { ts: this.now(), phase: "judges", status: "failed", message }],
             updatedAt: this.now(),
           },
           undefined,
-          mine && pass.passId !== undefined ? { expectScoringPassId: pass.passId } : undefined,
+          { expectScoringPassId: pass.passId },
         )
         .catch(() => undefined);
     } finally {
@@ -937,12 +948,14 @@ export class ScorecardScoreService {
       // judge would re-judge a stored trace against a task, expectation or milestone the run never saw. That
       // is a wrong VERDICT over right evidence, which is the worst shape this system can produce.
       //
-      // Restricted to the cases actually being judged: a re-score reads the whole bundle but only the cases
-      // with results matter, and a dataset that legitimately grew new cases is not a change to any of them.
-      const judged = new Set(results.map((r) => r.caseId));
-      const mismatches = verifySealedExecution(record.manifest, {
-        cases: resolved.cases.filter((c) => judged.has(c.id)),
-      });
+      // The judged cases must each still EXIST in the current resolution, not merely match where they do
+      // (arch-review 18 P0-3). The first version filtered the resolved dataset down to the judged ids, so a
+      // case the shadow DELETED simply never appeared: verification passed, the shadowed dataset was
+      // returned, and the judge stream then skipped that case for having no `EvalCase` — after the pass had
+      // already stripped its judge rows. The case ended the pass with its verdict removed and nothing written
+      // in its place, produced by a check that was looking straight at it.
+      const judged = [...new Set(results.map((r) => r.caseId))];
+      const mismatches = verifySealedCaseDocuments(record.manifest, judged, resolved.cases);
       if (mismatches.length > 0)
         throw new ConflictError("CONFLICT", { scorecard: record.id }, sealedExecutionMessage(mismatches));
       return resolved;

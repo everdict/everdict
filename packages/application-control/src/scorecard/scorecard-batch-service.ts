@@ -47,7 +47,7 @@ import {
   sealedExecutionMessage,
   selectSubsetCases,
   verdictSummaryOf,
-  verifySealedExecution,
+  verifySealedSelection,
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
@@ -198,6 +198,13 @@ export class ScorecardBatchService {
         resolved,
         rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
       );
+      // …and the SEALED SELECTION AND DOCUMENTS, on the same terms as every other execution path
+      // (arch-review 18 P0-2). Resume verified the harness and not the dataset while the Temporal plan
+      // verified the dataset and not the harness — each covering the half the other missed, which is worse
+      // than either alone because both looked like they had been handled. Resume is also the path where a
+      // shadow does the most damage: finished cases are kept, so one scorecard would carry cases evaluated
+      // under two different datasets.
+      this.assertSealedResolution(rec, cases);
       // Re-apply the recorded grading plan — resume must score exactly like the original submit.
       dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
       if (this.deps.runStore) {
@@ -255,21 +262,7 @@ export class ScorecardBatchService {
             : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
         { id: rec.harness.id, version: rec.harness.version },
       );
-      // The harness DOCUMENT, checked against the seal before the pin rewrites its bindings — the manifest
-      // sealed the registry document, and `pinHarnessSpecToClosure` is applied on top of it. A shadowed
-      // harness can change its script, environment or service topology while its model closure coincides
-      // exactly, so the closure pin below cannot stand in for this check.
-      //
-      // A PIN OVERRIDE is exempt: `origin.pinOverrides` is a deliberate submit-time image swap this batch
-      // recorded, so the resolved spec is expected to differ from the registry document by exactly that.
-      if (!pins || Object.keys(pins).length === 0) {
-        const specMismatches = verifySealedExecution(rec.manifest, {
-          harnessSpec: resolvedSpec,
-          harnessRef: `${rec.harness.id}@${rec.harness.version}`,
-        });
-        if (specMismatches.length > 0)
-          throw new ConflictError("CONFLICT", { scorecard: id }, sealedExecutionMessage(specMismatches));
-      }
+      this.assertSealedResolution(rec, undefined, resolvedSpec);
       harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
     }
     const remaining = dataset.cases.length - seed.length;
@@ -335,6 +328,31 @@ export class ScorecardBatchService {
     }
   >();
 
+  // ONE verification, called by every path that re-resolves (arch-review 18 P0-2). It exists as a method
+  // rather than as two call sites because the asymmetry it replaces was invisible: resume verified the harness
+  // and not the dataset, the Temporal plan verified the dataset and not the harness, and each looked handled.
+  //
+  // A PIN OVERRIDE exempts the harness: `origin.pinOverrides` is a deliberate submit-time image swap this
+  // batch recorded, so the resolved spec is expected to differ from the registry document by exactly that.
+  private assertSealedResolution(
+    rec: ScorecardRecord,
+    cases?: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
+    harnessSpec?: HarnessSpec,
+  ): void {
+    const pins = rec.origin?.pinOverrides;
+    const mismatches = verifySealedSelection(rec.manifest, {
+      cases: cases ?? [],
+      ...(harnessSpec !== undefined && (!pins || Object.keys(pins).length === 0)
+        ? { harnessSpec, harnessRef: `${rec.harness.id}@${rec.harness.version}` }
+        : {}),
+    });
+    // With no cases supplied this is a harness-only check, so the selection half must not fire on an empty
+    // list — that would refuse every harness verification for "removing" every case.
+    const relevant = cases === undefined ? mismatches.filter((m) => m.subject === "harness") : mismatches;
+    if (relevant.length > 0)
+      throw new ConflictError("CONFLICT", { scorecard: rec.id }, sealedExecutionMessage(relevant));
+  }
+
   private async buildBatchContext(id: string): Promise<NonNullable<ReturnType<typeof this.batchContexts.get>>> {
     const rec = await this.deps.store.get(id);
     if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
@@ -354,9 +372,7 @@ export class ScorecardBatchService {
     //
     // Verified BEFORE the grading plan is applied — the plan is a batch document, and applying it first would
     // mask a change to the case's own default graders.
-    const selectedMismatches = verifySealedExecution(rec.manifest, { cases: selected });
-    if (selectedMismatches.length > 0)
-      throw new ConflictError("CONFLICT", { scorecard: id }, sealedExecutionMessage(selectedMismatches));
+    this.assertSealedResolution(rec, selected);
     // Re-apply the recorded grading plan — a workflow-driven case must score exactly like the original submit.
     const cases = applyGradingPlan(selected, orch.graders);
     // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after
@@ -383,18 +399,19 @@ export class ScorecardBatchService {
       const harnesses = this.deps.harnesses;
       // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit). A
       // registered-but-invalid spec throws rather than re-dispatching specless (resume's caller absorbs the throw).
-      // Re-resolution re-applies the manifest pin (I6): the registry document is identical bytes (immutable
-      // version), but its `{ref}` bindings must execute the SUBMIT-time resolution, not today's `latest`.
-      harnessSpec = pinHarnessSpecToClosure(
-        await embedHarnessSpec(
-          () =>
-            pins && Object.keys(pins).length > 0
-              ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
-              : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
-          { id: rec.harness.id, version: rec.harness.version },
-        ),
-        rec.manifest?.harness,
+      // Re-resolution re-applies the manifest pin (I6): the `{ref}` bindings must execute the SUBMIT-time
+      // resolution, not today's `latest` — and the DOCUMENT the pin is applied to is verified first, because
+      // "the registry document is identical bytes (immutable version)" is true of the version and false of the
+      // lookup, which resolves owner-first over `_shared` (arch-review 18 P0-2).
+      const resolvedSpec = await embedHarnessSpec(
+        () =>
+          pins && Object.keys(pins).length > 0
+            ? harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
+        { id: rec.harness.id, version: rec.harness.version },
       );
+      this.assertSealedResolution(rec, undefined, resolvedSpec);
+      harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
     }
     const owner = rec.createdBy ?? rec.tenant;
     const secretMap =
