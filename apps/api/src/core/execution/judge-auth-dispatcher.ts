@@ -1,6 +1,6 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import { BadRequestError, type CaseJob, type CaseResult, type ModelSpec } from "@everdict/contracts";
-import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
+import { BadRequestError, type CaseJob, type CaseResult, ConflictError, type ModelSpec } from "@everdict/contracts";
+import { modelApiKeySecretName, normalizeModelBinding, pinnedDocumentMismatch } from "@everdict/domain";
 import type { ModelRegistry } from "@everdict/registry";
 
 // The two secret tiers the control plane can resolve for a submitter (SecretStore.scopedEntries).
@@ -60,6 +60,17 @@ export class JudgeAuthDispatcher implements Dispatcher {
       }
     }
     if (resolved) {
+      // THE DOCUMENT, not just the ref (arch-review 20 P0-4). This is the last materialization point of the
+      // runtime judge model: what this read returns decides the provider, the underlying model, the base URL
+      // and which secret pays for it. Under owner-first resolution `model-x@1` names whichever namespace
+      // answers, so a workspace registering its own after submit judges every inline judge grader in the
+      // batch under a model the manifest never sealed. Refused rather than downgraded — the batch can be
+      // re-submitted; a verdict produced by an uncertified judge cannot be un-published.
+      const moved = pinnedDocumentMismatch(job.modelPins?.judgeRun, resolved, {
+        kind: "judge model",
+        ref: `${ref}@${resolved.version}`,
+      });
+      if (moved) throw new ConflictError("CONFLICT", { judgeModel: ref }, moved);
       provider = resolved.provider;
       model = resolved.model;
       modelBaseUrl = resolved.baseUrl;

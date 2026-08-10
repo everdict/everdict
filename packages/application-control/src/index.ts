@@ -475,7 +475,7 @@ export { type ArtifactStore, DOM_INLINE_MAX, offloadSnapshot, refreshSnapshotRef
 // Control-plane execution machinery (re-architecture P2 S3) — the pure execution unit, out-of-job trace
 // collection, and trace-based scoring. defaultJudgeRunner (the graders-transport adapter) stays in apps/api
 // behind the JudgeRunner port (it composes @everdict/graders values the application layer must not import).
-export type { JudgeRunner } from "./ports/judge-runner.js";
+export type { JudgeRunner, NestedDocumentPins } from "./ports/judge-runner.js";
 export { type ExecuteCaseDeps, executeCase, jobImages } from "./execution/execute-case.js";
 export { type CollectTraceDeps, collectDeferredTrace } from "./execution/collect-trace.js";
 export { type JudgeStream, ScoringService, type ScoringServiceDeps } from "./execution/scoring-service.js";

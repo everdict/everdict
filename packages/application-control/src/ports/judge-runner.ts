@@ -1,5 +1,16 @@
 import type { GradeContext, JudgeSpec, Placement, Score } from "@everdict/contracts";
 
+// The digests a pass pinned for the documents THIS judge names — its rubric, its delegated harness, its model.
+// They travel to the runner because VERIFICATION BELONGS AT THE READ THAT PRODUCES THE BYTES ACTUALLY USED
+// (arch-review 20 P0-4): `ScoringService` verified copies it read while resolving, and then the runner read
+// each document AGAIN at use. A shadow landing between the two reads was verified in one and consumed in the
+// other, which is the check looking at a document nobody executed.
+export interface NestedDocumentPins {
+  rubricDigest?: string;
+  harnessDigest?: string;
+  modelDigest?: string;
+}
+
 // Judge runner PORT — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.
 // The default impl (defaultJudgeRunner) wires the graders transports (anthropic/openai/harness) and lives in apps/api
 // infrastructure — it composes @everdict/graders values, which application-control must not import. ScoringService
@@ -20,5 +31,8 @@ export interface JudgeRunner {
     placement?: Placement,
     submittedBy?: string,
     runId?: string,
+    // What this pass pinned beneath the judge document. Absent = nothing was pinned (a pass sealed before
+    // digests existed, or a facet with no document behind it) — the runner reads as it always did.
+    pins?: NestedDocumentPins,
   ): Promise<Score[]>;
 }

@@ -60,6 +60,10 @@ export const CaseJobSchema = z.object({
     .object({
       model: z.string().optional(), // the command harness's own binding
       serviceModels: z.record(z.string(), z.string()).optional(), // per service name, for a topology harness
+      // The RUNTIME judge configuration's model document (arch-review 20 P0-4). `judge.model` is the same
+      // owner-first binding as any other, and it materializes at `JudgeAuthDispatcher` — a different seam
+      // from the harness models above, and until now the only nested document with no digest behind it.
+      judgeRun: z.string().optional(),
     })
     .optional(),
   tenant: z.string().optional(),

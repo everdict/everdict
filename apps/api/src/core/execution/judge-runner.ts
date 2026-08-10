@@ -17,7 +17,13 @@ import type {
   UsageCost,
 } from "@everdict/contracts";
 import { type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
-import { billingCharges, modelApiKeySecretName, normalizeModelBinding, priceUsd } from "@everdict/domain";
+import {
+  billingCharges,
+  modelApiKeySecretName,
+  normalizeModelBinding,
+  pinnedDocumentMismatch,
+  priceUsd,
+} from "@everdict/domain";
 import {
   JUDGE_OVERALL_METRIC,
   type JudgeCompletion,
@@ -211,6 +217,9 @@ export async function resolveRubric(
   rubrics: RubricRegistry | undefined,
   tenant: string,
   spec: JudgeSpec,
+  // The digest the pass pinned for THIS rubric document, when it pinned one. Verified here rather than by the
+  // caller that resolved the judge, because this read is the one whose bytes become the question asked.
+  pin?: string,
 ): Promise<{ effective: EffectiveRubric } | { skipReason: string }> {
   if (spec.kind === "code") return { effective: {} }; // a code judge has no rubric/criteria/template — code IS the rubric
   const ref = spec.rubric;
@@ -224,6 +233,8 @@ export async function resolveRubric(
   if (!rubrics) return { skipReason: `rubric registry not configured (rubric ref '${ref.id}@${version}')` };
   try {
     const resolved = await rubrics.get(tenant, ref.id, version);
+    const moved = pinnedDocumentMismatch(pin, resolved, { kind: "rubric", ref: `${ref.id}@${version}` });
+    if (moved) return { skipReason: moved };
     return {
       effective: {
         ...(resolved.text ? { rubricText: resolved.text } : {}),
@@ -251,11 +262,15 @@ async function resolveJudgeHarness(
   harnesses: HarnessInstanceRegistry | undefined,
   tenant: string,
   ref: { id: string; version: string },
-): Promise<{ version: string; spec?: HarnessSpec }> {
+  pin?: string,
+): Promise<{ version: string; spec?: HarnessSpec; moved?: string }> {
   if (!harnesses) return { version: ref.version || "latest" };
   try {
     const spec = await harnesses.get(tenant, ref.id, ref.version || "latest");
-    return { version: spec.version, spec };
+    // The delegated harness IS the judge for a harness judge — a different document under the same ref is a
+    // different agent rendering the verdict, and this read is the one that supplies it.
+    const moved = pinnedDocumentMismatch(pin, spec, { kind: "delegated harness", ref: `${ref.id}@${spec.version}` });
+    return { version: spec.version, spec, ...(moved ? { moved } : {}) };
   } catch {
     return { version: ref.version || "latest" };
   }
@@ -417,7 +432,7 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, rawCtx, placement, submittedBy, runId) {
+    async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins) {
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
@@ -428,7 +443,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
-      const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
+      const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
       if ("skipReason" in rubricResolution) return skip(spec, "unsupported", rubricResolution.skipReason);
       const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
 
@@ -444,7 +459,8 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         if (!deps.dispatch) return skip(spec, "unsupported", "harness judge dispatch not configured");
         const dispatch = deps.dispatch;
         const ref = spec.harness;
-        const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref);
+        const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref, pins?.harnessDigest);
+        if (resolved.moved) return skip(spec, "unsupported", resolved.moved);
         // Placement decision: spec.runtime (explicit) first → else inherit the source run's placement (co-locate, judge next to the observations).
         // If neither, no placement (default backend). An unregistered runtime makes the dispatcher throw → the try/catch below handles it as skip.
         const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
@@ -507,6 +523,14 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           }
         }
         if (resolvedModel) {
+          // The model document decides the provider, the underlying model, the base URL and which key is used
+          // — everything about who answers the question. Verified at THIS read: the pass verified a copy while
+          // resolving the judge, and a shadow landing since then would be consumed here unseen.
+          const moved = pinnedDocumentMismatch(pins?.modelDigest, resolvedModel, {
+            kind: "model",
+            ref: `${ref}@${resolvedModel.version}`,
+          });
+          if (moved) return skip(spec, "unsupported", moved);
           provider = resolvedModel.provider;
           model = resolvedModel.model;
           modelBaseUrl = resolvedModel.baseUrl;

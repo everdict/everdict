@@ -12,7 +12,7 @@ import { contentDigest, judgeGradeable, modelBindingLabel, pinnedDocumentMismatc
 import { createLimiter } from "../concurrency/limiter.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
-import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { JudgeRunner, NestedDocumentPins } from "../ports/judge-runner.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 
@@ -100,6 +100,16 @@ const NOOP_STREAM: JudgeStream = {
   stats: () => ({ pushed: 0, gradeable: 0, skipped: 0 }),
 };
 
+// A judge that resolved, WITH the pins for the documents beneath it. The pins travel with the spec because
+// the runner reads those documents again at use (arch-review 20 P0-4): a verification performed here and a
+// read performed there are two different documents whenever a shadow lands between them, and the one that
+// decides the verdict is the second. Carrying them keeps ONE decision function (`pinnedDocumentMismatch`)
+// answering at every read rather than one read answering for another.
+export interface ResolvedJudge {
+  spec: JudgeSpec;
+  pins?: NestedDocumentPins;
+}
+
 // The sentinel for "the registry could not answer" — distinct from a document that is genuinely absent,
 // because with a pin in hand both are refusals but only one of them is a bug worth naming differently later.
 const UNREADABLE = Symbol("unreadable");
@@ -115,9 +125,9 @@ export class ScoringService {
     tenant: string,
     judges: Array<{ id: string; version: string }>,
     sealed?: SealedJudgeClosure[],
-  ): Promise<{ specs: JudgeSpec[]; unresolved: Array<{ id: string; version: string; message: string }> }> {
+  ): Promise<{ specs: ResolvedJudge[]; unresolved: Array<{ id: string; version: string; message: string }> }> {
     if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return { specs: [], unresolved: [] };
-    const specs: JudgeSpec[] = [];
+    const specs: ResolvedJudge[] = [];
     const unresolved: Array<{ id: string; version: string; message: string }> = [];
     for (const sel of judges) {
       try {
@@ -151,7 +161,15 @@ export class ScoringService {
           unresolved.push({ ...sel, message: nested });
           continue;
         }
-        specs.push(await this.concretize(tenant, raw, hint));
+        const pins: NestedDocumentPins = {
+          ...(hint?.rubricDigest !== undefined ? { rubricDigest: hint.rubricDigest } : {}),
+          ...(hint?.harnessDigest !== undefined ? { harnessDigest: hint.harnessDigest } : {}),
+          ...(hint?.modelDigest !== undefined ? { modelDigest: hint.modelDigest } : {}),
+        };
+        specs.push({
+          spec: await this.concretize(tenant, raw, hint),
+          ...(Object.keys(pins).length > 0 ? { pins } : {}),
+        });
       } catch (err) {
         unresolved.push({ ...sel, message: err instanceof Error ? err.message : String(err) });
       }
@@ -259,7 +277,7 @@ export class ScoringService {
   async applyJudgesToCase(
     tenant: string,
     evalCase: EvalCase,
-    specs: JudgeSpec[],
+    specs: ResolvedJudge[],
     result: CaseResult,
     runtime?: string, // the producing run's runtime (for co-locate). The ingest path has no producing run, so undefined.
     submittedBy?: string, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
@@ -282,8 +300,8 @@ export class ScoringService {
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
-    for (const spec of specs) {
-      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement, submittedBy, runId)));
+    for (const judge of specs) {
+      result.scores.push(...(await runner.run(judge.spec, tenant, ctx, runPlacement, submittedBy, runId, judge.pins)));
     }
   }
 

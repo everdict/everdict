@@ -24,13 +24,22 @@ export interface WorldCohort {
   // Present only when every case that reported a world agrees. A batch spread over two operating systems is
   // not "linux with exceptions" — it is a batch whose world is MIXED, which is a fact a comparison must see.
   os?: PlacementOs;
-  drivers?: string[]; // Driver.id / TopologyRuntime.id — sorted, deduped
+  // The TWO execution layers, kept apart (arch-review 20 P2). `Driver` is in-sandbox compute and
+  // `TopologyRuntime` is placement — a shared name across them is a coincidence, and merging the lists made
+  // one dedupe the other away. The whole point of a cohort is that its conditions are enumerable.
+  drivers?: string[]; // Driver.id — sorted, deduped
+  runtimes?: string[]; // TopologyRuntime.id — sorted, deduped
   images?: string[];
   // True when the reporting cases did not agree on the os. A mixed batch is comparable to nothing cleanly,
   // and saying so is more useful than picking a majority.
   mixed: boolean;
-  // How many cases reported a world at all — the denominator for "is this cohort well-observed".
+  // How many cases reported a world at all…
   observed: number;
+  // …out of how many there were. A cohort observed by 2 of 100 cases and one observed by 100 of 100 carry
+  // the same `os` and nothing else in common, and a reader deciding how much to trust a cross-world label
+  // needs the ratio, not the numerator. Optional because a cohort derived before this existed genuinely does
+  // not know its denominator.
+  total?: number;
 }
 
 const uniqueSorted = (values: Array<string | undefined>): string[] =>
@@ -42,15 +51,18 @@ export function worldCohortOf(results: readonly CaseResult[]): WorldCohort | und
     .filter((m): m is NonNullable<CaseResult["execution"]> => m !== undefined);
   if (manifests.length === 0) return undefined; // nothing ran in a world we recorded — no cohort to claim
   const oses = [...new Set(manifests.map((m) => m.os))];
-  const drivers = uniqueSorted(manifests.flatMap((m) => [m.driver, m.runtime]));
+  const drivers = uniqueSorted(manifests.map((m) => m.driver));
+  const runtimes = uniqueSorted(manifests.map((m) => m.runtime));
   const images = uniqueSorted(manifests.map((m) => m.image));
   const single = oses.length === 1 ? oses[0] : undefined;
   return {
     ...(single !== undefined ? { os: single } : {}),
     ...(drivers.length > 0 ? { drivers } : {}),
+    ...(runtimes.length > 0 ? { runtimes } : {}),
     ...(images.length > 0 ? { images } : {}),
     mixed: oses.length > 1,
     observed: manifests.length,
+    total: results.length,
   };
 }
 
@@ -62,8 +74,12 @@ export function worldCohortDigest(cohort: WorldCohort | undefined): string | und
   return contentDigest({
     ...(cohort.os !== undefined ? { os: cohort.os } : {}),
     ...(cohort.drivers !== undefined ? { drivers: cohort.drivers } : {}),
+    ...(cohort.runtimes !== undefined ? { runtimes: cohort.runtimes } : {}),
     ...(cohort.images !== undefined ? { images: cohort.images } : {}),
     mixed: cohort.mixed,
+    // Coverage is deliberately NOT in the key: how much of a batch reported its world says how well observed
+    // the cohort is, not which world it was. Two batches under identical conditions must compare as one
+    // world even when one of them lost a case to a dead dispatch.
   });
 }
 
@@ -78,7 +94,9 @@ export function crossWorldReason(
   const b = worldCohortDigest(candidate);
   if (a === undefined || b === undefined || a === b) return undefined;
   const describe = (c: WorldCohort): string =>
-    c.mixed ? "several worlds" : [c.os, ...(c.drivers ?? [])].filter(Boolean).join("/") || "an unnamed world";
+    c.mixed
+      ? "several worlds"
+      : [c.os, ...(c.drivers ?? []), ...(c.runtimes ?? [])].filter(Boolean).join("/") || "an unnamed world";
   return `these two evaluations ran in different execution worlds (${describe(baseline as WorldCohort)} → ${describe(
     candidate as WorldCohort,
   )}) — a difference between them cannot be attributed to the change alone; re-run the baseline in the candidate's world to compare within one`;

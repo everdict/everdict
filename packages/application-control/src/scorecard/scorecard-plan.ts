@@ -56,7 +56,7 @@ export interface SealedJudgeEntry {
 //
 // The rubric and delegated-harness helpers already had this shape — one read, both facets off the same object.
 // The model path now matches them.
-async function resolveModelPin(
+export async function resolveModelPin(
   deps: Pick<ScorecardServiceDeps, "models" | "resolveModelBinding">,
   tenant: string,
   binding: ModelBinding,

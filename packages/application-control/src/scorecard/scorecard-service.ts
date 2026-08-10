@@ -59,6 +59,7 @@ import { ScorecardIngestService } from "./scorecard-ingest-service.js";
 import {
   embedHarnessSpec,
   pinHarnessSpecToClosure,
+  resolveModelPin,
   sealHarnessModelClosure,
   sealJudgeClosure,
   sealedModelIdentity,
@@ -308,10 +309,15 @@ export class ScorecardService {
     // knew which model judged; identity must too (an inline judge grader under model A vs B is a different
     // judging apparatus behind an identical judge list). "unresolved" is an honest sentinel — identity reads
     // it as unverifiable, never as sameness.
+    // The ref AND the document beneath it, from ONE read — the same shape every other nested binding uses.
+    // The digest is what makes `JudgeAuthDispatcher`'s resolution verifiable: that dispatcher is where this
+    // binding becomes a provider, a base URL and a key, and it was the last materialization point with
+    // nothing to check against.
+    const judgeRunPin = judge ? await resolveModelPin(this.deps, input.tenant, judge.model) : undefined;
     const judgeRunSeal = judge
       ? {
           ...(judge.provider ? { provider: judge.provider } : {}),
-          model: (await sealedModelIdentity(this.deps, input.tenant, judge.model)) ?? "unresolved",
+          model: judgeRunPin?.ref ?? "unresolved",
         }
       : undefined;
     const concurrency = input.concurrency ?? this.concurrency;
@@ -386,6 +392,7 @@ export class ScorecardService {
         },
         ...(await this.judgeManifest(input.tenant, pinnedJudges)),
         ...(judgeRunSeal ? { judgeRun: judgeRunSeal } : {}),
+        ...(judgeRunPin?.digest ? { judgeRunModelDigest: judgeRunPin.digest } : {}),
         // The composed policy in FULL — it lives nowhere else, and a stamp without its document is a verdict
         // nobody can re-derive.
         ...(composed ? { verdictPolicy: composedPolicy } : {}),
@@ -536,19 +543,20 @@ export class ScorecardService {
         // …and the model DOCUMENT pins, so the in-process driver carries the same guarantee the Temporal one
         // does (arch-review 20 P0-2). Whichever driver a deployment happens to use is not something a user
         // chooses, so it must not be something the trust semantics depend on.
-        ...(record.manifest?.harness.modelDigest !== undefined ||
-        record.manifest?.harness.serviceModelDigests !== undefined
-          ? {
-              modelPins: {
-                ...(record.manifest.harness.modelDigest !== undefined
-                  ? { model: record.manifest.harness.modelDigest }
-                  : {}),
-                ...(record.manifest.harness.serviceModelDigests !== undefined
-                  ? { serviceModels: record.manifest.harness.serviceModelDigests }
-                  : {}),
-              },
-            }
-          : {}),
+        ...(() => {
+          const pins = {
+            ...(record.manifest?.harness.modelDigest !== undefined
+              ? { model: record.manifest.harness.modelDigest }
+              : {}),
+            ...(record.manifest?.harness.serviceModelDigests !== undefined
+              ? { serviceModels: record.manifest.harness.serviceModelDigests }
+              : {}),
+            ...(record.manifest?.judgeRunModelDigest !== undefined
+              ? { judgeRun: record.manifest.judgeRunModelDigest }
+              : {}),
+          };
+          return Object.keys(pins).length > 0 ? { modelPins: pins } : {};
+        })(),
       },
     );
     return record;

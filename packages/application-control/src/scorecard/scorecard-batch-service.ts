@@ -13,6 +13,7 @@ import {
   OOM_KILLED,
   type RunRecord,
   type Scorecard,
+  type ScorecardManifest,
   type ScorecardOrigin,
   type ScorecardRecord,
   type ScorecardStep,
@@ -81,13 +82,15 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
-function modelPinsOf(
-  harness: { modelDigest?: string; serviceModelDigests?: Record<string, string> } | undefined,
-): { model?: string; serviceModels?: Record<string, string> } | undefined {
-  if (harness === undefined) return undefined;
+function modelPinsOf(manifest: ScorecardManifest | undefined): CaseJob["modelPins"] {
+  if (manifest === undefined) return undefined;
+  const harness = manifest.harness;
   const pins = {
     ...(harness.modelDigest !== undefined ? { model: harness.modelDigest } : {}),
     ...(harness.serviceModelDigests !== undefined ? { serviceModels: harness.serviceModelDigests } : {}),
+    // The RUNTIME judge model — a different dispatcher seam (JudgeAuthDispatcher) resolves it, and it rides
+    // the same pins object because a job carries one set of "documents this batch certified".
+    ...(manifest.judgeRunModelDigest !== undefined ? { judgeRun: manifest.judgeRunModelDigest } : {}),
   };
   return Object.keys(pins).length > 0 ? pins : undefined;
 }
@@ -308,7 +311,7 @@ export class ScorecardBatchService {
         seedRunIds,
         retries: orch.retries,
         ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
-        ...(modelPinsOf(rec.manifest?.harness) ? { modelPins: modelPinsOf(rec.manifest?.harness) } : {}),
+        ...(modelPinsOf(rec.manifest) ? { modelPins: modelPinsOf(rec.manifest) } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
         ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
@@ -332,7 +335,7 @@ export class ScorecardBatchService {
       harnessSpec?: HarnessSpec;
       // The model DOCUMENTS the manifest pinned for that spec (arch-review 19 P0-4) — carried to the job so
       // the dispatcher, where a `{ref}` finally becomes a provider and a key, can verify what it resolved.
-      modelPins?: { model?: string; serviceModels?: Record<string, string> };
+      modelPins?: CaseJob["modelPins"];
       judges: Array<{ id: string; version: string }>;
       sealedJudges?: SealedJudgeClosure[]; // manifest.judges — the submit-time closure the per-case judging pins to (I6)
       judge?: JudgeRunConfig;
@@ -465,7 +468,7 @@ export class ScorecardBatchService {
       harnessId: rec.harness.id,
       harnessVersion: rec.harness.version,
       ...(harnessSpec ? { harnessSpec } : {}),
-      ...(modelPinsOf(rec.manifest?.harness) ? { modelPins: modelPinsOf(rec.manifest?.harness) } : {}),
+      ...(modelPinsOf(rec.manifest) ? { modelPins: modelPinsOf(rec.manifest) } : {}),
       judges: orch.judges,
       ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
       ...(orch.judge ? { judge: orch.judge } : {}),
@@ -1146,7 +1149,7 @@ export class ScorecardBatchService {
           seed: [...seed, ...recovered],
           retries: orch.retries,
           ...(src.manifest?.judges ? { sealedJudges: src.manifest.judges } : {}),
-          ...(modelPinsOf(src.manifest?.harness) ? { modelPins: modelPinsOf(src.manifest?.harness) } : {}),
+          ...(modelPinsOf(src.manifest) ? { modelPins: modelPinsOf(src.manifest) } : {}),
           ...(boosted > 0 ? { memoryBoostMb } : {}),
           ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
           resumeNote,
@@ -1265,7 +1268,7 @@ export class ScorecardBatchService {
       // THIS resolution, so the seal is the pin instead of a second resolution's observation (I6).
       sealedJudges?: SealedJudgeClosure[];
       // The manifest's model DOCUMENT pins, carried onto every job this loop dispatches (arch-review 20 P0-2).
-      modelPins?: { model?: string; serviceModels?: Record<string, string> };
+      modelPins?: CaseJob["modelPins"];
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;

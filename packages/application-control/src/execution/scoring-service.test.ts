@@ -47,7 +47,7 @@ describe("ScoringService — applyJudgesToCase", () => {
       snapshot: { kind: "prompt", output: "" },
       scores: [],
     };
-    await service.applyJudgesToCase("acme", CASE, [JUDGE], result);
+    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.trace.map((e) => e.kind)).toEqual(["message", "log"]);
     // The verdict still lands on the result.

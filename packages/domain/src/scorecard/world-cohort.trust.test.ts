@@ -16,14 +16,19 @@ import { crossWorldReason, worldCohortDigest, worldCohortOf } from "./world-coho
 // within a cohort, and when a comparison crosses one, SAY so.
 const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : describe.skip;
 
-const ran = (os: "linux" | "windows" | "macos", driver?: string): CaseResult =>
+const ran = (os: "linux" | "windows" | "macos", driver?: string, runtime?: string): CaseResult =>
   ({
     caseId: "c1",
     harness: "h@1",
     trace: [],
     snapshot: { kind: "prompt", output: "" },
     scores: [],
-    execution: { os, osResolved: "declared", ...(driver ? { driver } : {}) },
+    execution: {
+      os,
+      osResolved: "declared",
+      ...(driver ? { driver } : {}),
+      ...(runtime ? { runtime } : {}),
+    },
   }) as unknown as CaseResult;
 
 const ranNowhere = (): CaseResult =>
@@ -66,6 +71,29 @@ describeTrust("TRUST-102 — a cross-world comparison says so, and a same-world 
     expect(reason).toContain("different execution worlds");
     expect(reason).toContain("linux");
     expect(reason).toContain("windows");
+  });
+
+  it("the two execution layers stay separate — a driver and a runtime sharing a name are two conditions", () => {
+    // `Driver` is in-sandbox compute; `TopologyRuntime` is placement. Merged into one list they deduped
+    // against each other, so a batch running the docker DRIVER and one placed on the docker RUNTIME produced
+    // an identical cohort — the enumerable conditions a cohort exists to enumerate, silently collapsed.
+    const inSandbox = worldCohortOf([ran("linux", "docker")]);
+    const placed = worldCohortOf([ran("linux", undefined, "docker")]);
+    expect(inSandbox).toMatchObject({ drivers: ["docker"] });
+    expect(placed).toMatchObject({ runtimes: ["docker"] });
+    expect(worldCohortDigest(inSandbox)).not.toBe(worldCohortDigest(placed));
+    expect(crossWorldReason(inSandbox, placed)).toContain("different execution worlds");
+  });
+
+  it("coverage is recorded but is NOT part of the world's identity", () => {
+    // How much of a batch reported its world says how well OBSERVED the cohort is, not which world it was.
+    const full = worldCohortOf([ran("linux", "docker"), ran("linux", "docker")]);
+    const partial = worldCohortOf([ran("linux", "docker"), ranNowhere()]);
+    expect(full).toMatchObject({ observed: 2, total: 2 });
+    expect(partial).toMatchObject({ observed: 1, total: 2 }); // the denominator counts every case
+    // …and the two still compare as ONE world: a batch that lost a case to a dead dispatch did not move.
+    expect(worldCohortDigest(full)).toBe(worldCohortDigest(partial));
+    expect(crossWorldReason(full, partial)).toBeUndefined();
   });
 
   it("an UNRECORDED world is not a known difference — legacy evidence does not read as suspect", () => {

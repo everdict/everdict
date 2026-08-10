@@ -146,6 +146,12 @@ export const ScorecardManifestSchema = z.object({
   // binding resolved the same way. It applies to INLINE judge graders too, so an identical judge list can
   // still be judged by a different model — orchestration always knew this; identity now does.
   judgeRun: z.object({ provider: z.string().optional(), model: z.string() }).optional(),
+  // …and the DOCUMENT that ref named at seal time (arch-review 20 P0-4), kept beside `judgeRun` rather than
+  // inside it: the series contract projects `judgeRun` verbatim into a comparison digest, so a facet the
+  // resolved contract cannot know about would make every batch with a judge model read as a definition
+  // change. The digest answers "is this the document we sealed?", which is a different question from "is
+  // this the same experiment?" — and only the first one belongs at the dispatcher.
+  judgeRunModelDigest: z.string().optional(),
   // The COMPOSED verdict policy this batch judges under, embedded IN FULL when it differs from the built-in
   // ladder: a composed document lives nowhere else, and a stamp whose document cannot be found is a verdict
   // that cannot be re-derived. Absent = the default ladder.
@@ -568,10 +574,19 @@ export const ScorecardRecordSchema = z.object({
   world: z
     .object({
       os: PlacementOsSchema.optional(),
+      // In-sandbox compute (`Driver.id`) and PLACEMENT (`TopologyRuntime.id`) are separate namespaces — the
+      // two execution layers this system is built around. Merged into one list they deduped against each
+      // other, so "docker the driver" and "docker the runtime" read as one condition (arch-review 20 P2).
       drivers: z.array(z.string()).optional(),
+      runtimes: z.array(z.string()).optional(),
       images: z.array(z.string()).optional(),
       mixed: z.boolean(),
       observed: z.number().int().nonnegative(),
+      // …out of how many cases. `observed` alone cannot distinguish a world every case agreed on from one
+      // two cases out of a hundred happened to report — the same number, very different confidence. Optional:
+      // a cohort derived before this field existed knows its numerator and not its denominator, and inventing
+      // one would be a claim about coverage nobody measured.
+      total: z.number().int().nonnegative().optional(),
     })
     .optional(),
   manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)
