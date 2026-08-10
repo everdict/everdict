@@ -48,6 +48,9 @@ export interface SealedJudgeClosure {
   modelDigest?: string;
   rubricDigest?: string;
   harnessDigest?: string;
+  // The delegated harness's own model closure — the level beneath the harness document itself.
+  harnessModelDigest?: string;
+  harnessServiceModelDigests?: Record<string, string>;
   // The judge DOCUMENT this pass sealed (arch-review 18 P0-4). It was sealed and never consumed: every pass
   // re-read `judges.get(tenant, id, version)`, and that lookup is owner-first over a `_shared` fallback — so a
   // workspace registering its own `quality@1` after the pass claimed hands the executor a different document
@@ -165,6 +168,10 @@ export class ScoringService {
           ...(hint?.rubricDigest !== undefined ? { rubricDigest: hint.rubricDigest } : {}),
           ...(hint?.harnessDigest !== undefined ? { harnessDigest: hint.harnessDigest } : {}),
           ...(hint?.modelDigest !== undefined ? { modelDigest: hint.modelDigest } : {}),
+          ...(hint?.harnessModelDigest !== undefined ? { harnessModelDigest: hint.harnessModelDigest } : {}),
+          ...(hint?.harnessServiceModelDigests !== undefined
+            ? { harnessServiceModelDigests: hint.harnessServiceModelDigests }
+            : {}),
         };
         specs.push({
           spec: await this.concretize(tenant, raw, hint),

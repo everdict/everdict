@@ -135,6 +135,83 @@ describeTrust("TRUST-96/97 — a shadowed NESTED document is refused before the 
   });
 });
 
+describeTrust("TRUST-111 — the delegated agent's OWN model closure is sealed, one level further down", () => {
+  // A harness judge delegates the verdict to an agent. Pinning that agent's DOCUMENT says which agent judges;
+  // the document then names its own `{ref}` model binding, which resolves at the judge's dispatch through the
+  // same owner-first lookup that made every level above verifiable. Without this the agent is certified and
+  // the model it thinks with is not — the last unpinned edge of the closure.
+  const harnessJudge = (): JudgeSpec =>
+    ({
+      kind: "harness",
+      id: "reviewer",
+      version: "1.0.0",
+      harness: { id: "grader-agent", version: "1.0.0" },
+      rubric: "review it",
+      tags: [],
+    }) as unknown as JudgeSpec;
+
+  const agentWithModel = (): HarnessSpec =>
+    ({
+      kind: "command",
+      id: "grader-agent",
+      version: "1.0.0",
+      command: "review",
+      model: { ref: "model-x", version: "1.0.0" },
+      trace: { kind: "none" },
+      setup: [],
+      params: {},
+    }) as unknown as HarnessSpec;
+
+  const delegatingWorld = (over: { model?: string } = {}) => ({
+    judges: {
+      async get() {
+        return harnessJudge();
+      },
+    } as unknown as JudgeRegistry,
+    harnesses: {
+      async get() {
+        return agentWithModel();
+      },
+    } as unknown as HarnessInstanceRegistry,
+    models: {
+      async get() {
+        return modelDoc(over.model ?? "claude-opus-4-8");
+      },
+    } as unknown as ModelRegistry,
+    resolveModelBinding: async (_t: string, b: { ref: string }) => `${b.ref}@1.0.0`,
+  });
+
+  it("seals the agent document AND the model document beneath it", async () => {
+    const [sealed] = await sealJudgeClosure(delegatingWorld(), "acme", [{ id: "reviewer", version: "1.0.0" }]);
+    expect(sealed?.harness).toBe("grader-agent@1.0.0");
+    expect(sealed?.harnessDigest).toBe(contentDigest(agentWithModel()));
+    // The level the closure used to stop one short of.
+    expect(sealed?.harnessModelDigest).toBe(contentDigest(modelDoc("claude-opus-4-8")));
+  });
+
+  it("the pins reach the judge as the dispatched job's model pins — detection needs a carrier", async () => {
+    const sealed = await sealJudgeClosure(delegatingWorld(), "acme", [{ id: "reviewer", version: "1.0.0" }]);
+    let carried: CaseJob["modelPins"];
+    const service = new ScoringService({
+      ...delegatingWorld(),
+      judgeRunner: {
+        async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, pins): Promise<Score[]> {
+          carried = pins?.harnessModelDigest !== undefined ? { model: pins.harnessModelDigest } : undefined;
+          return [];
+        },
+      },
+    });
+    const { specs } = await service.resolveJudges("acme", [{ id: "reviewer", version: "1.0.0" }], sealed);
+    await service.applyJudgesToCase(
+      "acme",
+      { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] } as never,
+      specs,
+      { caseId: "c1", harness: "h@1", trace: [], snapshot: { kind: "prompt", output: "" }, scores: [] } as never,
+    );
+    expect(carried?.model).toBe(contentDigest(modelDoc("claude-opus-4-8")));
+  });
+});
+
 describeTrust("TRUST-98 — the harness's per-service model documents are pinned the same way", () => {
   const topology = (): HarnessSpec =>
     ({

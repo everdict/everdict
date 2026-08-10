@@ -9,6 +9,10 @@ export interface NestedDocumentPins {
   rubricDigest?: string;
   harnessDigest?: string;
   modelDigest?: string;
+  // The delegated harness's OWN model documents — carried onto the job the harness judge dispatches, so the
+  // dispatcher that materializes those bindings verifies them exactly as it does a batch's own harness.
+  harnessModelDigest?: string;
+  harnessServiceModelDigests?: Record<string, string>;
 }
 
 // Judge runner PORT — JudgeSpec + tenant + GradeContext (trace) → Score[]. The control plane judges from the trace.

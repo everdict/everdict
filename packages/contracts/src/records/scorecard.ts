@@ -79,6 +79,10 @@ export const SealedJudgeEntrySchema = z.object({
   modelDigest: z.string().optional(),
   rubricDigest: z.string().optional(),
   harnessDigest: z.string().optional(),
+  // …and the delegated harness's OWN model closure, one level further down: pinning the agent document
+  // proves which agent judges, not which model it thinks with.
+  harnessModelDigest: z.string().optional(),
+  harnessServiceModelDigests: z.record(z.string(), z.string()).optional(),
 });
 export type SealedJudgeEntry = z.infer<typeof SealedJudgeEntrySchema>;
 

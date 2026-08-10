@@ -131,6 +131,8 @@ half the other missed, and both looked handled.
 
 | TRUST-109/110 | **Verification belongs at the read that produces the bytes actually used**: the judge runner refuses a rubric or model shadowed BETWEEN the pass's resolution and its own read — it re-reads every one of those documents at use, so a check performed earlier was looking at a document nobody executed — and the runtime judge model is verified at `JudgeAuthDispatcher`, the seam where it becomes a provider, a base URL and a key. Neither reaches the provider; an unpinned job dispatches exactly as before | `apps/api/src/trust/judge-use-seam.trust.test.ts` |
 
+| TRUST-111 | **Identity recurses to the bottom**: a harness judge's DELEGATED agent is pinned by document digest, and so is that agent's own model closure — pinning the agent says which agent judges, not which model it thinks with. The pins ride the job the judge dispatches, so the dispatcher that materializes those bindings verifies them exactly as it does a batch's own harness | `packages/application-control/src/execution/nested-pin.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.

@@ -137,6 +137,13 @@ export interface ResolvedSeriesContract {
     // A harness judge's DELEGATED agent. Absent from the hand-rolled resolver this replaced, which meant the
     // entire agent doing the judging could be swapped with every id/version above reading held.
     harness?: string;
+    modelDigest?: string;
+    rubricDigest?: string;
+    harnessDigest?: string;
+    // …and that delegated agent's own model closure — pinning the agent says which agent, not which model it
+    // thinks with (arch-review 20 P0-4).
+    harnessModelDigest?: string;
+    harnessServiceModelDigests?: Record<string, string>;
   }>;
   // The RUNTIME judge configuration — the workspace's default judge model, which governs the inline judge
   // grader. A series names no judge override, so this facet moves whenever the workspace changes its default,
@@ -197,6 +204,8 @@ export function seriesContractFromManifest(manifest: {
     modelDigest?: string;
     rubricDigest?: string;
     harnessDigest?: string;
+    harnessModelDigest?: string;
+    harnessServiceModelDigests?: Record<string, string>;
   }>;
   judgeRun?: { provider?: string; model: string };
 }): ResolvedSeriesContract {
@@ -231,6 +240,10 @@ export function seriesContractFromManifest(manifest: {
       ...(j.modelDigest !== undefined ? { modelDigest: j.modelDigest } : {}),
       ...(j.rubricDigest !== undefined ? { rubricDigest: j.rubricDigest } : {}),
       ...(j.harnessDigest !== undefined ? { harnessDigest: j.harnessDigest } : {}),
+      ...(j.harnessModelDigest !== undefined ? { harnessModelDigest: j.harnessModelDigest } : {}),
+      ...(j.harnessServiceModelDigests !== undefined
+        ? { harnessServiceModelDigests: j.harnessServiceModelDigests }
+        : {}),
     })),
     ...(manifest.judgeRun !== undefined ? { judgeRun: manifest.judgeRun } : {}),
   };

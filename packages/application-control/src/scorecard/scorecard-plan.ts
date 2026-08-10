@@ -121,6 +121,12 @@ export async function sealJudgeClosure(
       const rubric = rubricRef === undefined ? undefined : await sealVersionedRef(rubricRef, deps.rubrics, tenant);
       const harnessRef = spec !== undefined && spec.kind === "harness" ? spec.harness : undefined;
       const harness = harnessRef === undefined ? undefined : await sealVersionedRef(harnessRef, deps.harnesses, tenant);
+      // …AND THE DELEGATED HARNESS'S OWN MODEL CLOSURE (arch-review 20 P0-4, the last level of the
+      // recursion). Pinning the harness document proves the agent is the one we sealed; that document then
+      // names its own `{ref}` model bindings, which resolve at the judge's dispatch through the same
+      // owner-first lookup. Without this the delegated agent is verified and the model it thinks with is not.
+      const delegatedClosure =
+        harness?.document === undefined ? undefined : await sealHarnessModelClosure(deps, tenant, harness.document);
       out.push({
         id: j.id,
         version: j.version,
@@ -131,6 +137,10 @@ export async function sealJudgeClosure(
         ...(rubric?.digest ? { rubricDigest: rubric.digest } : {}),
         ...(harness?.ref ? { harness: harness.ref } : {}),
         ...(harness?.digest ? { harnessDigest: harness.digest } : {}),
+        ...(delegatedClosure?.modelDigest ? { harnessModelDigest: delegatedClosure.modelDigest } : {}),
+        ...(delegatedClosure?.serviceModelDigests
+          ? { harnessServiceModelDigests: delegatedClosure.serviceModelDigests }
+          : {}),
       });
     } catch {
       out.push({ id: j.id, version: j.version });
@@ -225,16 +235,19 @@ function pinModelBinding(binding: ModelBinding | undefined, sealed: string | und
 //
 // So the document is fetched even for an explicit pin (that read is exactly what makes the pin verifiable)
 // and its digest is sealed beside the ref. `unresolved` keeps its meaning: nothing to pin, honestly said.
-async function sealVersionedRef(
+// The DOCUMENT comes back too, so a caller that needs to look INSIDE it (a delegated harness has its own
+// model bindings) does not pay for a second read — and, more to the point, does not seal a digest from one
+// read beside a closure derived from another (arch-review 20 P1).
+async function sealVersionedRef<T extends { version: string }>(
   ref: { id: string; version?: string },
-  registry: { get(tenant: string, id: string, version: string): Promise<{ version: string }> } | undefined,
+  registry: { get(tenant: string, id: string, version: string): Promise<T> } | undefined,
   tenant: string,
-): Promise<{ ref: string; digest?: string }> {
+): Promise<{ ref: string; digest?: string; document?: T }> {
   const version = ref.version || "latest";
   if (!registry) return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}` };
   try {
     const resolved = await registry.get(tenant, ref.id, version);
-    return { ref: `${ref.id}@${resolved.version}`, digest: contentDigest(resolved) };
+    return { ref: `${ref.id}@${resolved.version}`, digest: contentDigest(resolved), document: resolved };
   } catch {
     // A ref that names a document nobody can read pins nothing. For an explicit version the REF still states
     // what was asked for — the missing digest is what tells a later reader it was never verified.

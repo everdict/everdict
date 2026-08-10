@@ -482,6 +482,19 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               // Same co-locate ownership contract as the code judge — a self:<runnerId> judge placement needs the submitter.
               ...(submittedBy ? { submittedBy } : {}),
               ...(resolved.spec ? { harnessSpec: resolved.spec } : {}),
+              // The delegated agent's OWN model documents ride along, so the dispatcher that turns its
+              // bindings into a provider and a key verifies them exactly as it does a batch's own harness.
+              // Pinning the agent document says WHICH agent judges; this says which model it thinks with.
+              ...(pins?.harnessModelDigest !== undefined || pins?.harnessServiceModelDigests !== undefined
+                ? {
+                    modelPins: {
+                      ...(pins.harnessModelDigest !== undefined ? { model: pins.harnessModelDigest } : {}),
+                      ...(pins.harnessServiceModelDigests !== undefined
+                        ? { serviceModels: pins.harnessServiceModelDigests }
+                        : {}),
+                    },
+                  }
+                : {}),
             };
             const result = await dispatch(job);
             dispatchedJudge = result; // the judge agent's own run — this judge's execution evidence
