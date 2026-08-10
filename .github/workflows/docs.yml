@@ -25,6 +25,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # configure-pages needs these to CREATE the Pages site on the first run.
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,10 +53,23 @@ jobs:
         working-directory: site
         run: pnpm install --frozen-lockfile --ignore-workspace
 
-      # Change these two when a custom domain is configured: DOCS_URL=https://<domain>, DOCS_BASE_URL=/
+      # Creates the Pages site on the first run (enablement: true) instead of requiring someone to
+      # click through repository settings, and reports back the URL it will actually be served from —
+      # so a custom domain configured later needs no edit here.
+      - name: Configure Pages
+        id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Build
         working-directory: site
         env:
+          # Explicit rather than derived from the configure-pages outputs: `base_path` is empty for a
+          # custom domain, so a `||` fallback would silently rebuild the whole site under the wrong
+          # prefix. Change these two lines when a domain is added (DOCS_URL=https://<domain>,
+          # DOCS_BASE_URL=/) and commit a site/static/CNAME.
           DOCS_URL: https://everdict.github.io
           DOCS_BASE_URL: /everdict/
         run: pnpm build
