@@ -88,11 +88,33 @@ add, all member+ (`datasets:write`), all immutable-on-register:
     collapsed **"Advanced · Need to run it differently?"** disclosure, each with an InfoTip. The full expressive power
     (env-kind isomorphism above) is unchanged — it's just no longer a mandatory quiz for the common QA case.
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
-  osworld); `POST /benchmarks/import {benchmark}` pulls it. Mind the **env kind** each entry maps to: the
+  osworld + the travel family below); `POST /benchmarks/import {benchmark}` pulls it. Mind the **env kind** each entry maps to: the
   browser-category entries (webvoyager/mind2web) produce `browser`-env cases, which only a **service-topology**
   harness can run (Everdict provisions the browser). A **self-browsing command agent** (browser-use etc., which
   drives its own Chromium) needs the same benchmark mapped with `promptEnv: true` + the start URL embedded via
   `taskTemplate` — register that as a recipe instead (working example: `examples/bundles/browser-use`).
+  - **Travel-planning family** (`packages/datasets/src/travel.ts`) — `travelplanner` · `flex-travelplanner` · `trek` ·
+    `travelbench` · `traveleval`. All map to `prompt`-env planning cases. Only **travelplanner** has a HuggingFace
+    mirror (`osunlp/TravelPlanner`, `validation` config/split — `test` withholds the constraints and the gold plan, so
+    it is scoreable only via the authors' email leaderboard); the other four ship data **in-repo**, so importing them
+    means uploading a **jsonl** (TravelBench's `datas/*.jsonl` are already jsonl; TREK's `trek_queries.csv`,
+    Flex-TravelPlanner's JSON array and TravelEval's `queries`-wrapped JSON need converting first).
+  - ⚠️ **Their scores are approximations, not official metrics.** Each of these benchmarks officially scores with a
+    repo-local constraint checker over its own sandbox database, which cannot run harness-agnostically here. Everdict
+    scores the same constraints with a **judge seeded from the row's own constraint fields** (the adaptation `osworld`
+    already makes for its per-task Python evaluator). Two entries deliberately **invert** on a flag, because the
+    benchmark is measuring refusal: TREK's `impossible` rows (267 of 800) and TravelBench's
+    `no_actionable`/`missing_tool`/`missing_info` rows pass only on a reasoned refusal — grading those on "did it
+    produce a plan" would reward the exact failure they exist to catch. Use these for regression tracking; to publish a
+    citable number, run the benchmark's own evaluator (a `command` grader in a case image bundling its database).
+  - **Licenses differ and two are restrictive**: TravelPlanner CC-BY-4.0 (code MIT), TREK CC-BY-4.0 (code MIT),
+    **TravelBench CC-BY-NC-4.0 — noncommercial**, and **Flex-TravelPlanner / TravelEval declare NO license**, so no
+    usage rights are granted by default. TravelBench is Chinese-language over China geography; TravelEval's official
+    pipeline additionally needs a Gaode/AMAP API key.
+  - Not shipped, for lack of anything to ingest: **GroupTravelBench** (arXiv 2605.25200 — self-declared "work in
+    process", no repo), **TRIP-Bench** (arXiv 2602.01675 — release promised, none found) and **BookingArena**
+    (arXiv 2602.12544 — in-paper benchmark over 20 live booking sites, no task file released). Each would also need a
+    live-browser or multi-turn surface these prompt-env adapters do not provide.
 - **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +
   `_shared`); `POST /benchmarks/import {recipe}` imports from it. A recipe is a **first-class entity** in the web
   (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset

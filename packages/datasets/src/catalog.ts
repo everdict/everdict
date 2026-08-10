@@ -4,6 +4,7 @@ import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contract
 // shipped as a catalog (to seed _shared); users add their own adapter to register a private/new benchmark in their workspace.
 import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowToCase, rowsToDataset } from "./mapping.js";
 import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
+import { TRAVEL_BENCHMARKS } from "./travel.js";
 
 // Where the benchmark lives. huggingface = HF Hub (most new benchmarks), jsonl = inline/local text (caller-provided).
 export type BenchmarkSource =
@@ -260,6 +261,9 @@ export const BENCHMARK_CATALOG = {
       return graders;
     },
   },
+  // Travel-planning benchmarks (travel.ts) — each carries a per-row rubric builder, so they are defined there and
+  // spread in here. Spreading a const object literal preserves the literal keys, so BENCHMARK_CATALOG.trek stays typed.
+  ...TRAVEL_BENCHMARKS,
 } satisfies Record<string, BenchmarkAdapter>;
 
 // Look up an adapter by id (CLI/dynamic access). Throws if absent.

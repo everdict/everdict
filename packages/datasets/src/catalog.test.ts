@@ -69,9 +69,24 @@ describe("BenchmarkAdapter catalog", () => {
     const ids = listBenchmarks()
       .map((b) => b.id)
       .sort();
-    expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "osworld", "swe-bench-lite", "webvoyager"]);
+    expect(ids).toEqual([
+      "flex-travelplanner",
+      "gaia",
+      "gsm8k",
+      "mind2web",
+      "osworld",
+      "swe-bench-lite",
+      "travelbench",
+      "traveleval",
+      "travelplanner",
+      "trek",
+      "webvoyager",
+    ]);
     expect(listBenchmarks().find((b) => b.id === "gaia")?.gated).toBe(true); // GAIA gated flag
     expect(listBenchmarks().find((b) => b.id === "osworld")?.category).toBe("desktop"); // os-use desktop
+    // Only TravelPlanner has a HuggingFace mirror; the other travel benchmarks ship data in-repo (jsonl upload).
+    expect(listBenchmarks().find((b) => b.id === "travelplanner")?.source).toBe("huggingface");
+    expect(listBenchmarks().find((b) => b.id === "trek")?.source).toBe("jsonl");
   });
 
   it("imports the osworld multi-task sample (examples/benchmarks) → os-use cases + verify→command grader (dual scoring)", async () => {
