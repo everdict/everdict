@@ -320,6 +320,8 @@ describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written
         ...c.harness,
         ...(c.harnessModel !== undefined ? { model: c.harnessModel } : {}),
         ...(c.serviceModels !== undefined ? { serviceModels: c.serviceModels } : {}),
+        ...(c.harnessModelDigest !== undefined ? { modelDigest: c.harnessModelDigest } : {}),
+        ...(c.serviceModelDigests !== undefined ? { serviceModelDigests: c.serviceModelDigests } : {}),
       },
       judges: c.judgeClosure,
       ...(c.judgeRun !== undefined ? { judgeRun: c.judgeRun } : {}),

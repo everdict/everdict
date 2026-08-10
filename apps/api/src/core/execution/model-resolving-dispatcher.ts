@@ -3,11 +3,17 @@ import {
   BadRequestError,
   type CaseJob,
   type CaseResult,
+  ConflictError,
   type HarnessSpec,
   type ModelBinding,
   type ModelSpec,
 } from "@everdict/contracts";
-import { modelApiKeySecretName, modelConnectionEnv, normalizeModelBinding } from "@everdict/domain";
+import {
+  modelApiKeySecretName,
+  modelConnectionEnv,
+  normalizeModelBinding,
+  pinnedDocumentMismatch,
+} from "@everdict/domain";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "./judge-auth-dispatcher.js";
 
@@ -100,11 +106,23 @@ async function resolveSpec(
   submittedBy: string | undefined,
   spec: HarnessSpec,
   secretsFor?: SecretsFor,
+  // The model DOCUMENTS this batch pinned (arch-review 19 P0-4). This function is the LAST HOP: a `{ref}`
+  // binding becomes a provider, an underlying model name, a base URL and a key here, and every one of those
+  // lives in the document rather than in the ref. The pinned version travels in the binding already, and a
+  // version is not an identity under owner-first resolution — so the digest travels beside it and is checked
+  // before the job goes out. A mismatch is a hard refusal: dispatching would execute a model this batch never
+  // certified, and the manifest would keep naming the one it did.
+  pins?: { model?: string; serviceModels?: Record<string, string> },
 ): Promise<{ spec: HarnessSpec; billed: BilledModel[] }> {
+  const verify = (sealed: string | undefined, doc: unknown, ref: string): void => {
+    const bad = pinnedDocumentMismatch(sealed, doc, { kind: "model", ref });
+    if (bad) throw new ConflictError("CONFLICT", { model: ref }, bad);
+  };
   if (spec.kind === "command") {
     if (spec.model === undefined) return { spec, billed: [] };
     const resolved = await resolveBinding(models, tenant, submittedBy, spec.model, secretsFor);
     if (!resolved) return { spec, billed: [] }; // unregistered raw string — leave the spec untouched.
+    verify(pins?.model, resolved.model, normalizeModelBinding(spec.model).ref);
     const billed = resolved.billed ? [resolved.billed] : [];
     const env = secretsFor ? { ...spec.env, ...resolved.env } : spec.env; // model env wins for the keys it sets
     if (resolved.model.model === spec.model && env === spec.env) return { spec, billed };
@@ -119,6 +137,7 @@ async function resolveSpec(
         if (s.model === undefined) return { service: s };
         const resolved = await resolveBinding(models, tenant, submittedBy, s.model, secretsFor);
         if (!resolved) return { service: s };
+        verify(pins?.serviceModels?.[s.name], resolved.model, normalizeModelBinding(s.model).ref);
         return { service: { ...s, env: { ...s.env, ...resolved.env } }, billed: resolved.billed };
       }),
     );
@@ -152,7 +171,7 @@ async function resolveJob(
   const spec = job.harnessSpec;
   if (!spec) return { job, billed: [] };
   const tenant = job.tenant ?? "default";
-  const resolved = await resolveSpec(models, tenant, job.submittedBy, spec, secretsFor);
+  const resolved = await resolveSpec(models, tenant, job.submittedBy, spec, secretsFor, job.modelPins);
   return {
     job: resolved.spec === spec ? job : { ...job, harnessSpec: resolved.spec },
     billed: resolved.billed,

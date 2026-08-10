@@ -59,6 +59,7 @@ export {
 } from "./scorecard/scoring-plan.js";
 export {
   type SealedDocumentMismatch,
+  pinnedDocumentMismatch,
   sealedExecutionMessage,
   verifySealedCaseDocuments,
   verifySealedSelection,

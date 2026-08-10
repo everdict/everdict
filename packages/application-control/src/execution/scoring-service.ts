@@ -8,11 +8,12 @@ import type {
   Placement,
   Score,
 } from "@everdict/contracts";
-import { contentDigest, judgeGradeable, modelBindingLabel } from "@everdict/domain";
+import { contentDigest, judgeGradeable, modelBindingLabel, pinnedDocumentMismatch } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { ModelRegistry } from "../ports/model-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 
 // Scoring concern — pure evaluation over results (traces): apply judges · collect judge models.
@@ -33,6 +34,9 @@ export interface ScoringServiceDeps {
   rubrics?: Pick<RubricRegistry, "get">;
   harnesses?: Pick<HarnessInstanceRegistry, "get">;
   resolveModelBinding?: (tenant: string, binding: { ref: string; version?: string }) => Promise<string | undefined>;
+  // The model DOCUMENT reader — what makes a model pin verifiable rather than merely stated (arch-review 19
+  // P0-4). Absent = the nested model pin is unverifiable here, which reads as "never pinned".
+  models?: Pick<ModelRegistry, "get">;
 }
 
 // The sealed closure a pass carries (manifest.judges at submit; ScoringPass.judges on a re-score) — the
@@ -40,6 +44,10 @@ export interface ScoringServiceDeps {
 export interface SealedJudgeClosure {
   id: string;
   version: string;
+  // The nested DOCUMENTS this pass pinned (arch-review 19 P0-4) — what makes each ref below verifiable.
+  modelDigest?: string;
+  rubricDigest?: string;
+  harnessDigest?: string;
   // The judge DOCUMENT this pass sealed (arch-review 18 P0-4). It was sealed and never consumed: every pass
   // re-read `judges.get(tenant, id, version)`, and that lookup is owner-first over a `_shared` fallback — so a
   // workspace registering its own `quality@1` after the pass claimed hands the executor a different document
@@ -128,12 +136,65 @@ export class ScoringService {
             continue;
           }
         }
+        // …and the NESTED documents beneath it (arch-review 19 P0-4). The judge document check above proves
+        // `quality@1` is the same judge; its rubric, its model and its delegated harness are separate
+        // owner-first refs that can each be shadowed under a held name, and each of them changes the verdict:
+        // the rubric IS the question, the model decides who answers it, the delegated harness is the whole
+        // agent. Refused the same way — an unresolved SELECTION before any provider call, so the batch
+        // settles with a visible unmeasured row rather than a verdict nobody can attribute.
+        const nested = await this.verifyNestedPins(tenant, raw, hint);
+        if (nested !== undefined) {
+          unresolved.push({ ...sel, message: nested });
+          continue;
+        }
         specs.push(await this.concretize(tenant, raw, hint));
       } catch (err) {
         unresolved.push({ ...sel, message: err instanceof Error ? err.message : String(err) });
       }
     }
     return { specs, unresolved };
+  }
+
+  // Every nested document this judge names, checked against the digest the pass pinned. One function, so the
+  // four places that resolve these at execution cannot each hold a different opinion about which of them is
+  // verified — the failure mode this area has produced three times.
+  private async verifyNestedPins(
+    tenant: string,
+    spec: JudgeSpec,
+    sealed: SealedJudgeClosure | undefined,
+  ): Promise<string | undefined> {
+    if (sealed === undefined) return undefined;
+    const read = async <T>(fn: () => Promise<T>): Promise<T | undefined> => await fn().catch(() => undefined);
+    if ("rubric" in spec && spec.rubric !== undefined && typeof spec.rubric !== "string" && this.deps.rubrics) {
+      const ref = spec.rubric;
+      const doc = await read(() => this.deps.rubrics?.get(tenant, ref.id, ref.version || "latest") as Promise<unknown>);
+      const bad =
+        doc === undefined
+          ? undefined
+          : pinnedDocumentMismatch(sealed.rubricDigest, doc, { kind: "rubric", ref: ref.id });
+      if (bad) return bad;
+    }
+    if (spec.kind === "harness" && this.deps.harnesses) {
+      const ref = spec.harness;
+      const doc = await read(
+        () => this.deps.harnesses?.get(tenant, ref.id, ref.version || "latest") as Promise<unknown>,
+      );
+      const bad =
+        doc === undefined
+          ? undefined
+          : pinnedDocumentMismatch(sealed.harnessDigest, doc, { kind: "delegated harness", ref: ref.id });
+      if (bad) return bad;
+    }
+    if ("model" in spec && spec.model !== undefined && typeof spec.model !== "string" && this.deps.models) {
+      const ref = spec.model;
+      const doc = await read(() => this.deps.models?.get(tenant, ref.ref, ref.version ?? "latest") as Promise<unknown>);
+      const bad =
+        doc === undefined
+          ? undefined
+          : pinnedDocumentMismatch(sealed.modelDigest, doc, { kind: "model", ref: ref.ref });
+      if (bad) return bad;
+    }
+    return undefined;
   }
 
   // PIN the spec's moving refs once per pass (I6): the sealed closure wins (the seal IS the pin — the

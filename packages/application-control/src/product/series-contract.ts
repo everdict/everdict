@@ -164,6 +164,13 @@ export async function resolveSeriesContract(
     judges,
     ...(harnessClosure.model !== undefined ? { harnessModel: harnessClosure.model } : {}),
     ...(harnessClosure.serviceModels !== undefined ? { serviceModels: harnessClosure.serviceModels } : {}),
+    // …and the model DOCUMENTS (arch-review 19 P0-4): a ref cannot distinguish a `_shared` model from a
+    // workspace-local one wearing its name, so a release gate comparing refs alone would read a swapped model
+    // as held. Sealed by the same function the manifest uses, so the two stay one vocabulary.
+    ...(harnessClosure.modelDigest !== undefined ? { harnessModelDigest: harnessClosure.modelDigest } : {}),
+    ...(harnessClosure.serviceModelDigests !== undefined
+      ? { serviceModelDigests: harnessClosure.serviceModelDigests }
+      : {}),
     judgeClosure,
     ...(judgeRun !== undefined ? { judgeRun } : {}),
   };

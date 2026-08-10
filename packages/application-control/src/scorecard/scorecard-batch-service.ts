@@ -77,6 +77,20 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // R2-b): the live batch lifecycle — the in-process track loop, the Batch-on-Temporal internals (plan/run/finalize),
 // restart resume, and retry-failed. Composed only by the facade; shared plumbing (ids/clock/scoring/breaker/inFlight)
 // is handed in so behavior is identical to the pre-split single class.
+// The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
+// when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
+// the dispatcher reads as "unverifiable", never as agreement.
+function modelPinsOf(
+  harness: { modelDigest?: string; serviceModelDigests?: Record<string, string> } | undefined,
+): { model?: string; serviceModels?: Record<string, string> } | undefined {
+  if (harness === undefined) return undefined;
+  const pins = {
+    ...(harness.modelDigest !== undefined ? { model: harness.modelDigest } : {}),
+    ...(harness.serviceModelDigests !== undefined ? { serviceModels: harness.serviceModelDigests } : {}),
+  };
+  return Object.keys(pins).length > 0 ? pins : undefined;
+}
+
 export class ScorecardBatchService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -314,6 +328,9 @@ export class ScorecardBatchService {
       harnessId: string;
       harnessVersion: string;
       harnessSpec?: HarnessSpec;
+      // The model DOCUMENTS the manifest pinned for that spec (arch-review 19 P0-4) — carried to the job so
+      // the dispatcher, where a `{ref}` finally becomes a provider and a key, can verify what it resolved.
+      modelPins?: { model?: string; serviceModels?: Record<string, string> };
       judges: Array<{ id: string; version: string }>;
       sealedJudges?: SealedJudgeClosure[]; // manifest.judges — the submit-time closure the per-case judging pins to (I6)
       judge?: JudgeRunConfig;
@@ -446,6 +463,7 @@ export class ScorecardBatchService {
       harnessId: rec.harness.id,
       harnessVersion: rec.harness.version,
       ...(harnessSpec ? { harnessSpec } : {}),
+      ...(modelPinsOf(rec.manifest?.harness) ? { modelPins: modelPinsOf(rec.manifest?.harness) } : {}),
       judges: orch.judges,
       ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
       ...(orch.judge ? { judge: orch.judge } : {}),
@@ -643,6 +661,10 @@ export class ScorecardBatchService {
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
         ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
+        // The model DOCUMENTS this batch pinned, carried to the dispatcher (arch-review 19 P0-4). The spec's
+        // bindings already carry the pinned VERSION; a version is not an identity under owner-first
+        // resolution, so the digest has to travel with it or the last hop cannot tell which document it got.
+        ...(ctx.modelPins ? { modelPins: ctx.modelPins } : {}),
         ...(ctx.judge ? { judge: ctx.judge } : {}),
       };
       let result: CaseResult | undefined;

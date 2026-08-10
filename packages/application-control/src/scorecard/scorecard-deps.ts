@@ -26,6 +26,7 @@ import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { ModelRegistry } from "../ports/model-registry.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
@@ -58,6 +59,11 @@ export interface ScorecardServiceDeps {
   // judged under whatever that ref resolves to at RUN time — the seal pins the latest-resolution at
   // submit/re-score so identity can compare it. Absent = latest rubric refs seal "unresolved" (honest).
   rubrics?: RubricRegistry;
+  // The model DOCUMENT registry, for the recursive closure seal (arch-review 19 P0-4). `resolveModelBinding`
+  // answers "which ref@version" and that string cannot distinguish a `_shared` model from a workspace-local
+  // one wearing its name — the document's digest can, and only a read of the document produces it. Absent =
+  // nested model documents seal no digest, which a verifier reads as "never pinned", never as agreement.
+  models?: Pick<ModelRegistry, "get">;
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;

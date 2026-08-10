@@ -50,6 +50,18 @@ export const CaseJobSchema = z.object({
   evalCase: EvalCaseSchema,
   harness: z.object({ id: z.string(), version: z.string() }),
   harnessSpec: HarnessSpecSchema.optional(),
+  // The model DOCUMENTS this batch pinned for that spec (arch-review 19 P0-4) — carried ON THE JOB because the
+  // dispatcher is where a `{ref}` binding finally materializes into a provider, a base URL and a key, and it
+  // has no other way to know what the batch certified. `pinHarnessSpecToClosure` already pins the VERSION
+  // into the binding; a version is not an identity under owner-first resolution, so the digest travels with
+  // it. Absent = nothing was pinned (a raw string binding, an unregistered model, a pre-pin batch), which the
+  // dispatcher reads as "unverifiable", never as agreement.
+  modelPins: z
+    .object({
+      model: z.string().optional(), // the command harness's own binding
+      serviceModels: z.record(z.string(), z.string()).optional(), // per service name, for a topology harness
+    })
+    .optional(),
   tenant: z.string().optional(),
   // Submitter identifier (principal.subject) — for self-hosted runner dispatch. When placement.target is self:<runnerId>,
   // the RuntimeDispatcher checks the runner owner against this value and uses it in the lease queue key (tenant,submittedBy,runnerId).

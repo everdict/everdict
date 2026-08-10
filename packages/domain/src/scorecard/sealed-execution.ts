@@ -154,3 +154,32 @@ export function sealedExecutionMessage(mismatches: readonly SealedDocumentMismat
   const more = mismatches.length > 5 ? ` (+${mismatches.length - 5} more)` : "";
   return `the documents this batch sealed are no longer what '${named}'${more} resolves to — a registry entry with the same id and version now returns different content, or the selection itself changed (a workspace-local version shadowing a shared one does exactly this). Refusing to execute a document this batch did not certify; remove the shadowing version or submit a new batch.`;
 }
+
+// A NESTED CAPABILITY DOCUMENT, verified against the digest its pin sealed (arch-review 19 P0-4).
+//
+// The top-level documents (dataset, harness, judge) each got this check as their own defect was found. Their
+// DEPENDENCIES did not, and they are the same shape one level in: a judge's model, its rubric, its delegated
+// harness, and a harness's per-service models are all `{ref}` bindings resolved through the same owner-first
+// lookup. `model-x@1` names whichever namespace answers, and the model document carries the provider, the
+// underlying model, the base URL and the key secret — everything that decides what the model IS lives in the
+// document, none of it in the ref. A ref-only pin therefore cannot detect a shadow at all: the string it
+// compares is identical on both sides.
+//
+// Four resolution points read these at execution (the judge concretizer, the judge transport's auth lookup,
+// the judge runner's model read, the harness dispatcher's binding resolution) and every one of them calls
+// this. That is the point of it being a function rather than four checks: this area's last three defects were
+// all one path verifying what another did not.
+//
+// `undefined` sealed digest = the document could not be read when the pin was made. Absence is "never
+// pinned", never agreement — the caller keeps going, exactly as it did before pins existed, because refusing
+// on it would strand every batch sealed before this generation.
+export function pinnedDocumentMismatch(
+  sealedDigest: string | undefined,
+  document: unknown,
+  what: { kind: string; ref: string },
+): string | undefined {
+  if (sealedDigest === undefined) return undefined;
+  const current = contentDigest(document);
+  if (current === sealedDigest) return undefined;
+  return `the ${what.kind} '${what.ref}' this evaluation pinned is not what that reference resolves to now (sealed ${sealedDigest}, current ${current}) — a workspace-local version shadowing a shared one does exactly this, and the reference alone cannot tell them apart`;
+}

@@ -111,7 +111,15 @@ describe("sealJudgeClosure — the whole closure, one sealer (H8)", () => {
       },
     }) as unknown as RubricRegistry;
 
-  it("pins a latest rubric ref to its concrete version; an explicit pin seals verbatim without a registry hit", async () => {
+  it("pins a latest rubric ref to its concrete version — and READS the document, even for an explicit pin", async () => {
+    // The second half of this used to assert "an explicit pin seals verbatim without a registry hit", on the
+    // reasoning that registry versions are immutable so the pin IS the identity. That is true inside ONE
+    // namespace and false of the lookup: resolution is owner-first over `_shared`, so `style@1.0.0` names
+    // whichever namespace answers, and a workspace registering its own `style@1.0.0` later hands execution a
+    // different rubric under a held ref (arch-review 19 P0-4). The ref cannot tell — the string is identical.
+    //
+    // So the document is read for an explicit pin too. That read is not overhead; it is the entire reason the
+    // pin can be verified later, and skipping it was the blind spot.
     let hits = 0;
     const rubrics = rubricsAt("2.0.0", () => hits++);
     const latest = await sealJudgeClosure(
@@ -120,14 +128,16 @@ describe("sealJudgeClosure — the whole closure, one sealer (H8)", () => {
       [{ id: "quality", version: "3.0.0" }],
     );
     expect(latest[0]?.rubric).toBe("style@2.0.0");
+    expect(latest[0]?.rubricDigest).toEqual(expect.any(String));
     expect(hits).toBe(1);
     const pinned = await sealJudgeClosure(
       { judges: judgesOf(modelJudge({ id: "style", version: "1.0.0" })), rubrics },
       "acme",
       [{ id: "quality", version: "3.0.0" }],
     );
-    expect(pinned[0]?.rubric).toBe("style@1.0.0"); // registry versions are immutable — the pin IS the identity
-    expect(hits).toBe(1); // no second hit
+    expect(pinned[0]?.rubric).toBe("style@2.0.0"); // the fake answers one document whatever version is asked
+    expect(pinned[0]?.rubricDigest).toEqual(expect.any(String));
+    expect(hits).toBe(2); // the explicit pin reads too — that read is what makes it verifiable
   });
 
   it("seals the honest 'unresolved' sentinel when no registry can answer a latest ref — and nothing for inline text", async () => {

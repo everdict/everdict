@@ -33,6 +33,36 @@ export async function embedHarnessSpec(
   }
 }
 
+// One judge's sealed closure — the ref strings a reader compares, and the DOCUMENT digests that make each ref
+// verifiable (arch-review 19 P0-4). Digests are optional: absent means the document could not be read at seal
+// time, which a verifier treats as "never pinned", never as agreement.
+export interface SealedJudgeEntry {
+  id: string;
+  version: string;
+  specDigest?: string;
+  model?: string;
+  modelDigest?: string;
+  rubric?: string;
+  rubricDigest?: string;
+  harness?: string;
+  harnessDigest?: string;
+}
+
+// The model DOCUMENT a `{ref}` binding names — fetched, not inferred from the ref string, because the ref is
+// exactly the part that cannot distinguish a `_shared` document from a workspace-local one wearing its name.
+async function modelDocumentDigest(
+  deps: Pick<ScorecardServiceDeps, "models">,
+  tenant: string,
+  binding: Exclude<ModelBinding, string>,
+): Promise<string | undefined> {
+  if (!deps.models) return undefined;
+  try {
+    return contentDigest(await deps.models.get(tenant, binding.ref, binding.version ?? "latest"));
+  } catch {
+    return undefined;
+  }
+}
+
 // A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
 // concrete version at seal time). undefined = no resolver wired or the resolution failed.
 export async function sealedModelIdentity(
@@ -58,26 +88,24 @@ export async function sealedModelIdentity(
 //   `harness` — a harness judge's delegated agent, same vocabulary ("id@version" | "unresolved")
 // Best-effort per judge: an unresolvable spec keeps its id/version bare rather than failing the pass.
 export async function sealJudgeClosure(
-  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses">,
+  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses" | "models">,
   tenant: string,
   judges: Array<{ id: string; version: string }>,
-): Promise<
-  Array<{ id: string; version: string; specDigest?: string; model?: string; rubric?: string; harness?: string }>
-> {
-  const out: Array<{
-    id: string;
-    version: string;
-    specDigest?: string;
-    model?: string;
-    rubric?: string;
-    harness?: string;
-  }> = [];
+): Promise<Array<SealedJudgeEntry>> {
+  const out: Array<SealedJudgeEntry> = [];
   for (const j of judges) {
     try {
       const spec = await deps.judges?.get(tenant, j.id, j.version);
       const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
       const model =
         binding === undefined ? undefined : ((await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved");
+      // …and the model DOCUMENT beneath the ref (arch-review 19 P0-4). `model-x@1` names whichever namespace
+      // answers, and the model spec carries the provider, the underlying model name, the base URL and the
+      // key secret — every one of which changes what the judge actually is.
+      const modelDigest =
+        binding === undefined || typeof binding === "string"
+          ? undefined
+          : await modelDocumentDigest(deps, tenant, binding);
       const rubricRef =
         spec !== undefined && "rubric" in spec && spec.rubric !== undefined && typeof spec.rubric !== "string"
           ? spec.rubric
@@ -90,8 +118,11 @@ export async function sealJudgeClosure(
         version: j.version,
         ...(spec ? { specDigest: contentDigest(spec) } : {}),
         ...(model ? { model } : {}),
-        ...(rubric ? { rubric } : {}),
-        ...(harness ? { harness } : {}),
+        ...(modelDigest ? { modelDigest } : {}),
+        ...(rubric?.ref ? { rubric: rubric.ref } : {}),
+        ...(rubric?.digest ? { rubricDigest: rubric.digest } : {}),
+        ...(harness?.ref ? { harness: harness.ref } : {}),
+        ...(harness?.digest ? { harnessDigest: harness.digest } : {}),
       });
     } catch {
       out.push({ id: j.id, version: j.version });
@@ -107,22 +138,39 @@ export async function sealJudgeClosure(
 // so this seal confounds only under a held harness identity (experimentIdentity harness_model axis).
 // A process-kind harness carries no binding; absent fields = nothing to seal, never a claim of sameness.
 export async function sealHarnessModelClosure(
-  deps: Pick<ScorecardServiceDeps, "resolveModelBinding">,
+  deps: Pick<ScorecardServiceDeps, "resolveModelBinding" | "models">,
   tenant: string,
   spec: HarnessSpec | undefined,
-): Promise<{ model?: string; serviceModels?: Record<string, string> }> {
+): Promise<{
+  model?: string;
+  serviceModels?: Record<string, string>;
+  modelDigest?: string;
+  serviceModelDigests?: Record<string, string>;
+}> {
   if (spec === undefined) return {};
   if (spec.kind === "command") {
     if (spec.model === undefined) return {};
-    return { model: (await sealedModelIdentity(deps, tenant, spec.model)) ?? "unresolved" };
+    const digest = typeof spec.model === "string" ? undefined : await modelDocumentDigest(deps, tenant, spec.model);
+    return {
+      model: (await sealedModelIdentity(deps, tenant, spec.model)) ?? "unresolved",
+      ...(digest ? { modelDigest: digest } : {}),
+    };
   }
   if (spec.kind === "service") {
     const serviceModels: Record<string, string> = {};
+    const serviceModelDigests: Record<string, string> = {};
     for (const s of spec.services) {
       if (s.model === undefined) continue;
       serviceModels[s.name] = (await sealedModelIdentity(deps, tenant, s.model)) ?? "unresolved";
+      // …and the DOCUMENT (arch-review 19 P0-4), per service: a topology's per-service binding is the same
+      // owner-first ref as any other, and the service that judges the run is whichever document answers.
+      const digest = typeof s.model === "string" ? undefined : await modelDocumentDigest(deps, tenant, s.model);
+      if (digest) serviceModelDigests[s.name] = digest;
     }
-    return Object.keys(serviceModels).length > 0 ? { serviceModels } : {};
+    return {
+      ...(Object.keys(serviceModels).length > 0 ? { serviceModels } : {}),
+      ...(Object.keys(serviceModelDigests).length > 0 ? { serviceModelDigests } : {}),
+    };
   }
   return {};
 }
@@ -163,21 +211,28 @@ function pinModelBinding(binding: ModelBinding | undefined, sealed: string | und
   return { ...binding, version: sealed.slice(at + 1) };
 }
 
-// Seal one versioned reference: an explicit pin is already concrete (registry versions are immutable — the
-// pin names one document forever); a "latest" ref resolves to the concrete version NOW, or seals the honest
-// "unresolved" sentinel when no registry (or no such entry) can answer.
+// Seal one versioned reference — its REF and its DOCUMENT (arch-review 19 P0-4).
+//
+// "An explicit pin is already concrete, because registry versions are immutable" was true of a version inside
+// ONE namespace and false of the lookup: resolution is owner-first over a `_shared` fallback, so `rubric-x@1`
+// names whichever namespace answers today. A workspace registering its own `rubric-x@1` after the seal hands
+// execution a different rubric under a held ref, and a ref-only pin cannot tell — the string is identical.
+//
+// So the document is fetched even for an explicit pin (that read is exactly what makes the pin verifiable)
+// and its digest is sealed beside the ref. `unresolved` keeps its meaning: nothing to pin, honestly said.
 async function sealVersionedRef(
   ref: { id: string; version?: string },
   registry: { get(tenant: string, id: string, version: string): Promise<{ version: string }> } | undefined,
   tenant: string,
-): Promise<string> {
+): Promise<{ ref: string; digest?: string }> {
   const version = ref.version || "latest";
-  if (version !== "latest") return `${ref.id}@${version}`;
-  if (!registry) return "unresolved";
+  if (!registry) return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}` };
   try {
     const resolved = await registry.get(tenant, ref.id, version);
-    return `${ref.id}@${resolved.version}`;
+    return { ref: `${ref.id}@${resolved.version}`, digest: contentDigest(resolved) };
   } catch {
-    return "unresolved";
+    // A ref that names a document nobody can read pins nothing. For an explicit version the REF still states
+    // what was asked for — the missing digest is what tells a later reader it was never verified.
+    return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}` };
   }
 }

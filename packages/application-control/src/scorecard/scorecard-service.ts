@@ -138,6 +138,8 @@ export class ScorecardService {
       // The pass-pinning resolvers (I6) — the spec's moving refs concretize ONCE per pass instead of per case.
       ...(deps.rubrics ? { rubrics: deps.rubrics } : {}),
       ...(deps.harnesses ? { harnesses: deps.harnesses } : {}),
+      // The model DOCUMENT reader — what turns the nested model pin from a statement into a check.
+      ...(deps.models ? { models: deps.models } : {}),
       ...(deps.resolveModelBinding
         ? {
             resolveModelBinding: (tenant, binding) =>

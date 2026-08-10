@@ -86,6 +86,11 @@ export const ScorecardManifestSchema = z.object({
     specDigest: z.string().optional(),
     model: z.string().optional(),
     serviceModels: z.record(z.string(), z.string()).optional(),
+    // The model DOCUMENTS behind those refs (arch-review 19 P0-4) — same reason as the judge closure's: a
+    // `{ref}` names whichever namespace answers, and everything that decides what the model IS lives in the
+    // document, not in the ref.
+    modelDigest: z.string().optional(),
+    serviceModelDigests: z.record(z.string(), z.string()).optional(),
   }),
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
   // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just
@@ -101,6 +106,12 @@ export const ScorecardManifestSchema = z.object({
   // version at seal time; an explicit pin verbatim — registry versions are immutable) or the honest
   // "unresolved" sentinel. Absent rubric = inline text or none (both live inside specDigest); absent
   // harness = not a harness-delegating judge.
+  // …and each nested ref's DOCUMENT digest beside it (arch-review 19 P0-4). A ref is `id@version`, and
+  // resolution is owner-first over a `_shared` fallback — so the same ref names a different document once a
+  // workspace registers its own, and a ref-only pin cannot tell: the string is identical. The model document
+  // carries the provider, the underlying model, the base URL and the key secret; the rubric IS the question;
+  // the delegated harness is the whole agent. Absent digest = the document could not be read at seal time,
+  // which a verifier treats as "never pinned", never as agreement.
   judges: z
     .array(
       z.object({
@@ -108,8 +119,11 @@ export const ScorecardManifestSchema = z.object({
         version: z.string(),
         specDigest: z.string().optional(),
         model: z.string().optional(),
+        modelDigest: z.string().optional(),
         rubric: z.string().optional(),
+        rubricDigest: z.string().optional(),
         harness: z.string().optional(),
+        harnessDigest: z.string().optional(),
       }),
     )
     .optional(),
@@ -226,6 +240,11 @@ export const ScoringRevisionSchema = z.object({
       model: z.string().optional(), // the sealed model closure ("ref@version" | raw | "unresolved")
       rubric: z.string().optional(), // the sealed rubric-ref closure ("id@version" | "unresolved"; absent = inline/none)
       harness: z.string().optional(), // the sealed delegated-harness closure ("id@version" | "unresolved")
+      // The nested DOCUMENTS those refs named at seal time (arch-review 19 P0-4) — what makes each ref
+      // verifiable, since owner-first resolution can hand execution a different document under a held ref.
+      modelDigest: z.string().optional(),
+      rubricDigest: z.string().optional(),
+      harnessDigest: z.string().optional(),
     }),
   ),
   // The runtime judge configuration in effect for the pass — rides the INITIAL pass only (it governs inline

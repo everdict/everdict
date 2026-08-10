@@ -119,6 +119,10 @@ export interface ResolvedSeriesContract {
   // digesting a hole.
   harnessModel?: string;
   serviceModels?: Record<string, string>;
+  // The harness's model DOCUMENTS (arch-review 19 P0-4) — a ref cannot distinguish a `_shared` model from a
+  // workspace-local one wearing its name, so a gate comparing refs alone reads a swapped model as held.
+  harnessModelDigest?: string;
+  serviceModelDigests?: Record<string, string>;
   judgeClosure?: Array<{
     id: string;
     version: string;
@@ -173,7 +177,15 @@ export type SeriesContractResolution =
 // that means. It exists so the two vocabularies can be certified equal rather than assumed equal.
 export function seriesContractFromManifest(manifest: {
   dataset: { id: string; version: string; digest?: string };
-  harness: { id: string; version: string; specDigest?: string; model?: string; serviceModels?: Record<string, string> };
+  harness: {
+    id: string;
+    version: string;
+    specDigest?: string;
+    model?: string;
+    serviceModels?: Record<string, string>;
+    modelDigest?: string;
+    serviceModelDigests?: Record<string, string>;
+  };
   judges?: Array<{
     id: string;
     version: string;
@@ -181,6 +193,9 @@ export function seriesContractFromManifest(manifest: {
     model?: string;
     rubric?: string;
     harness?: string;
+    modelDigest?: string;
+    rubricDigest?: string;
+    harnessDigest?: string;
   }>;
   judgeRun?: { provider?: string; model: string };
 }): ResolvedSeriesContract {
@@ -209,6 +224,12 @@ export function seriesContractFromManifest(manifest: {
       ...(j.model !== undefined ? { model: j.model } : {}),
       ...(j.rubric !== undefined ? { rubric: j.rubric } : {}),
       ...(j.harness !== undefined ? { harness: j.harness } : {}),
+      // The nested DOCUMENTS (arch-review 19 P0-4). Dropping a field here is how the last projection defect
+      // survived a certification: TRUST-63 builds the manifest FROM the contract, so a facet neither side
+      // carries compares equal to itself.
+      ...(j.modelDigest !== undefined ? { modelDigest: j.modelDigest } : {}),
+      ...(j.rubricDigest !== undefined ? { rubricDigest: j.rubricDigest } : {}),
+      ...(j.harnessDigest !== undefined ? { harnessDigest: j.harnessDigest } : {}),
     })),
     ...(manifest.judgeRun !== undefined ? { judgeRun: manifest.judgeRun } : {}),
   };

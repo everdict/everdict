@@ -295,6 +295,9 @@ export function buildScorecard(deps: {
     // The manifest's dependency-closure seal: a judge's `{ref}` binding resolves to its concrete version at
     // submit, so "same spec digest, different actual model" stops reading as an identical judge.
     resolveModelBinding: modelBindingResolver(deps.modelRegistry),
+    // …and the model DOCUMENT reader the recursive pin needs (arch-review 19 P0-4): a ref string cannot tell
+    // a `_shared` model from a workspace-local one wearing its name, and only reading the document can.
+    models: deps.modelRegistry,
     judgeRunner,
     budget,
     usage: usageMeter,
