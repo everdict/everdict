@@ -36,3 +36,66 @@
 .markdown blockquote {
   border-left-color: var(--ifm-color-primary);
 }
+
+/* ── Docs surface craft ──────────────────────────────────────────────────────────────────────
+   The default theme reads like a default theme. These are the few rules that make a dense
+   technical tree scannable: a calmer measure, code that looks like the product's terminal, and
+   sidebar/anchor treatment that says where you are. */
+
+.markdown {
+  --ifm-h2-vertical-rhythm-top: 2.4;
+  --ifm-heading-vertical-rhythm-bottom: 0.85;
+}
+
+/* Long-form pages get a readable measure; tables and code still span the column. */
+.markdown > p,
+.markdown > ul,
+.markdown > ol {
+  max-width: 74ch;
+}
+
+.markdown h2 {
+  font-size: 1.55rem;
+  letter-spacing: -0.02em;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.markdown h3 {
+  font-size: 1.16rem;
+  letter-spacing: -0.015em;
+}
+
+/* Code is the point of these pages — give it the product's terminal weight. */
+.theme-code-block {
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='dark'] .theme-code-block {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+code {
+  border-radius: 5px;
+}
+
+/* Admonitions carry meaning here (a warning is usually about a silent wrong number), so let them
+   read as an interruption rather than a tinted paragraph. */
+.theme-admonition {
+  border-radius: 10px;
+  border-left-width: 3px;
+}
+
+/* The sidebar is three sections deep; make the active trail obvious. */
+.menu__link--active:not(.menu__link--sublist) {
+  font-weight: 600;
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+}
+
+/* Section landing pages lead with a bullet list of links — give those room to breathe. */
+.markdown > ul > li {
+  margin-top: 0.35rem;
+}
