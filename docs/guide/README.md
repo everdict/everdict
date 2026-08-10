@@ -32,5 +32,12 @@ the two map onto the site.
 - [Claude Code plugin](integrations/claude-code-plugin.md) — two commands, tools plus domain context
 - [Running Codex](integrations/codex.md) — Codex as the agent under test, via a declarative harness
 
+## Operate
+- [Section index](operate/README.md)
+- [Track the work](operate/tracker.md) — issues that close citing the scorecard that proved it
+- [Schedules & monitoring](operate/schedules.md) — a scorecard on a cron, and durable resume
+- [Analysis & views](operate/views.md) — save the question, not the answer
+- [Notifications](operate/notifications.md) — being told instead of checking
+
 ## Self-hosting
 - [Overview](self-host/overview.md) — deployment shapes, what each one needs, and what to decide first

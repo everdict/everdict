@@ -63,6 +63,22 @@ compute that actually starts the process. **Grader** — how the result becomes 
 A **Backend** answers *where does this job run* — a Nomad cluster, a Kubernetes cluster, your laptop. A
 **Driver** answers *how is the process started once it is there*.
 
+```
+POST /runs
+    │
+    ▼
+Runtime            local · nomad · k8s · self:<id>
+    │
+    ▼
+Backend   ── WHERE ──▶  dispatches a job-runner job
+    │                    isolation is the orchestrator's
+    ▼
+Driver    ── HOW   ──▶  starts the process in-sandbox
+    │
+    ▼
+Harness   ── the agent under test
+```
+
 A Backend never runs the harness itself. It dispatches the `@everdict/job-runner` image and parses that
 job's result off a stdout sentinel. Isolation is the orchestrator's — a Kubernetes `runtimeClassName`,
 a Nomad task driver — not something Everdict re-implements badly.

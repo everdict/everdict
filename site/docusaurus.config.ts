@@ -20,12 +20,15 @@ const config: Config = {
   // A dead link is a documentation bug, so it fails the build rather than shipping.
   onBrokenLinks: "throw",
   onBrokenAnchors: "warn",
-  // The docs tree is plain CommonMark written for GitHub, not MDX. Without this, MDX v3 reads a literal
-  // `<total>` or `{...}` in prose as JSX and fails the build — the content is the constraint here, not
-  // the renderer.
-  markdown: { format: "md", hooks: { onBrokenMarkdownLinks: "throw" } },
 
   i18n: { defaultLocale: "en", locales: ["en"] },
+
+  // The docs tree is plain CommonMark written for GitHub, not MDX. Without this, MDX v3 reads a literal
+  // `<total>` or `{...}` in prose as JSX and fails the build — the content is the constraint here, not
+  // the renderer. It also rules Mermaid out: theme-mermaid rewrites a ```mermaid fence into an MDX JSX
+  // element, which a CommonMark AST cannot hold, and the block vanishes from the page without an error.
+  // Diagrams here are ASCII in plain fences, which render identically on the site and on github.com.
+  markdown: { format: "md", hooks: { onBrokenMarkdownLinks: "throw" } },
 
   themes: [
     // Offline full-text search. Algolia DocSearch would mean a third-party index and credentials in

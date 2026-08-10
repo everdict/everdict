@@ -14,6 +14,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - **Core concepts** — [overview](guide/concepts/README.md) · [Run](guide/concepts/run.md) · [Harness](guide/concepts/harness.md) · [Dataset](guide/concepts/dataset.md) · [Grader & Judge](guide/concepts/grader-and-judge.md) · [Scorecard](guide/concepts/scorecard.md) · [Verdict](guide/concepts/verdict.md) · [Workspace](guide/concepts/workspace.md)
 - **Your workspace** ([index](guide/workspace/README.md)) — [Workspace agents](guide/workspace/agents.md) · [Filesystem](guide/workspace/filesystem.md) · [Environments](guide/workspace/environments.md) · [Image registry](guide/workspace/image-registry.md)
 - **Integrations** ([index](guide/integrations/README.md)) — [MCP](guide/integrations/mcp.md) · [Claude Code plugin](guide/integrations/claude-code-plugin.md) · [Running Codex](guide/integrations/codex.md)
+- **Operate** ([index](guide/operate/README.md)) — [Tracker](guide/operate/tracker.md) · [Schedules](guide/operate/schedules.md) · [Views](guide/operate/views.md) · [Notifications](guide/operate/notifications.md)
 - **Self-hosting** — [overview](guide/self-host/overview.md)
 
 ## Start here (maintainers)

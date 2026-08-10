@@ -13,6 +13,23 @@ caseVerdict(result, policy)  // → true | false | undefined
 - **`false`** — evaluated, and it failed.
 - **`undefined`** — **not evaluated.** Nothing measured the thing the verdict would rest on.
 
+```
+          scores for a case
+                 │
+        did anything measure it?
+         ┌───────┴────────┐
+        no                yes
+         │                 │
+    undefined      meets the stamped policy?
+  "not evaluated"    ┌─────┴─────┐
+         │          yes          no
+         │           │            │
+         │         true         false
+         │        passed        failed
+         ▼
+  gates · charts · releases → NOT green
+```
+
 ## The third state is the whole point
 
 A case whose grader threw, whose evidence was never captured, or whose required secret was missing did
