@@ -100,6 +100,10 @@ const NOOP_STREAM: JudgeStream = {
   stats: () => ({ pushed: 0, gradeable: 0, skipped: 0 }),
 };
 
+// The sentinel for "the registry could not answer" — distinct from a document that is genuinely absent,
+// because with a pin in hand both are refusals but only one of them is a bug worth naming differently later.
+const UNREADABLE = Symbol("unreadable");
+
 export class ScoringService {
   constructor(private readonly deps: ScoringServiceDeps) {}
 
@@ -164,14 +168,22 @@ export class ScoringService {
     sealed: SealedJudgeClosure | undefined,
   ): Promise<string | undefined> {
     if (sealed === undefined) return undefined;
-    const read = async <T>(fn: () => Promise<T>): Promise<T | undefined> => await fn().catch(() => undefined);
+    // A READ THAT FAILS IS NOT A VERIFICATION THAT PASSED (arch-review 20 P0-4). The first version turned a
+    // registry error into `undefined` and then SKIPPED the comparison — so with a sealed pin in hand and the
+    // registry unreachable, execution continued as though the document had matched. That is the same
+    // unknown→absence→safe collapse this codebase keeps removing, sitting inside the check written to close
+    // it. Where a pin exists, an unreadable document is a refusal.
+    const read = async (fn: () => Promise<unknown>): Promise<unknown> => await fn().catch(() => UNREADABLE);
+    const verify = (pin: string | undefined, doc: unknown, what: { kind: string; ref: string }): string | undefined => {
+      if (pin === undefined) return undefined; // nothing was pinned — nothing to verify against
+      if (doc === UNREADABLE || doc === undefined)
+        return `the ${what.kind} '${what.ref}' this evaluation pinned could not be read, so the pin cannot be checked — refusing rather than judging under a document nobody verified`;
+      return pinnedDocumentMismatch(pin, doc, what);
+    };
     if ("rubric" in spec && spec.rubric !== undefined && typeof spec.rubric !== "string" && this.deps.rubrics) {
       const ref = spec.rubric;
       const doc = await read(() => this.deps.rubrics?.get(tenant, ref.id, ref.version || "latest") as Promise<unknown>);
-      const bad =
-        doc === undefined
-          ? undefined
-          : pinnedDocumentMismatch(sealed.rubricDigest, doc, { kind: "rubric", ref: ref.id });
+      const bad = verify(sealed.rubricDigest, doc, { kind: "rubric", ref: ref.id });
       if (bad) return bad;
     }
     if (spec.kind === "harness" && this.deps.harnesses) {
@@ -179,19 +191,13 @@ export class ScoringService {
       const doc = await read(
         () => this.deps.harnesses?.get(tenant, ref.id, ref.version || "latest") as Promise<unknown>,
       );
-      const bad =
-        doc === undefined
-          ? undefined
-          : pinnedDocumentMismatch(sealed.harnessDigest, doc, { kind: "delegated harness", ref: ref.id });
+      const bad = verify(sealed.harnessDigest, doc, { kind: "delegated harness", ref: ref.id });
       if (bad) return bad;
     }
     if ("model" in spec && spec.model !== undefined && typeof spec.model !== "string" && this.deps.models) {
       const ref = spec.model;
       const doc = await read(() => this.deps.models?.get(tenant, ref.ref, ref.version ?? "latest") as Promise<unknown>);
-      const bad =
-        doc === undefined
-          ? undefined
-          : pinnedDocumentMismatch(sealed.modelDigest, doc, { kind: "model", ref: ref.ref });
+      const bad = verify(sealed.modelDigest, doc, { kind: "model", ref: ref.ref });
       if (bad) return bad;
     }
     return undefined;

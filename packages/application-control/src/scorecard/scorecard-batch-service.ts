@@ -308,6 +308,7 @@ export class ScorecardBatchService {
         seedRunIds,
         retries: orch.retries,
         ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
+        ...(modelPinsOf(rec.manifest?.harness) ? { modelPins: modelPinsOf(rec.manifest?.harness) } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
         ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
@@ -1145,6 +1146,7 @@ export class ScorecardBatchService {
           seed: [...seed, ...recovered],
           retries: orch.retries,
           ...(src.manifest?.judges ? { sealedJudges: src.manifest.judges } : {}),
+          ...(modelPinsOf(src.manifest?.harness) ? { modelPins: modelPinsOf(src.manifest?.harness) } : {}),
           ...(boosted > 0 ? { memoryBoostMb } : {}),
           ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
           resumeNote,
@@ -1262,6 +1264,8 @@ export class ScorecardBatchService {
       // The submit-time judge closure (manifest.judges) — the judge stream concretizes its moving refs to
       // THIS resolution, so the seal is the pin instead of a second resolution's observation (I6).
       sealedJudges?: SealedJudgeClosure[];
+      // The manifest's model DOCUMENT pins, carried onto every job this loop dispatches (arch-review 20 P0-2).
+      modelPins?: { model?: string; serviceModels?: Record<string, string> };
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1335,6 +1339,12 @@ export class ScorecardBatchService {
         // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),
         ...(harnessSpec ? { harnessSpec } : {}),
+        // THE SAME PINS THE TEMPORAL PATH CARRIES (arch-review 20 P0-2). This one was left out, so the
+        // guarantee depended on which driver a deployment happened to use: Temporal-driven batches refused a
+        // shadowed model at dispatch and in-process ones — Temporal unconfigured, a failed workflow start, a
+        // multi-trial batch, an inline dataset, some resumes — carried no pin for the dispatcher to check.
+        // A guarantee is only as strong as its thinnest production adapter.
+        ...(opts.modelPins ? { modelPins: opts.modelPins } : {}),
         ...(judge ? { judge } : {}),
       };
       const runStore = this.deps.runStore;

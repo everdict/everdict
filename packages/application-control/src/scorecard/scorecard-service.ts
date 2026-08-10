@@ -15,6 +15,7 @@ import {
   NotFoundError,
   type ScorecardOrigin,
   type ScorecardRecord,
+  isConstitutionalMetric,
 } from "@everdict/contracts";
 import { JudgeIdSchema } from "@everdict/contracts";
 import {
@@ -222,6 +223,21 @@ export class ScorecardService {
       ...(input.criticalCases ? { criticalCases: input.criticalCases } : {}),
     });
     const composed = composedPolicy.id === "composed";
+    // A CONSTITUTIONAL NAME IS NOT DECLARABLE (arch-review 20 P0-1). Silently ignoring such a declaration
+    // would leave the author believing they had defined `state`'s semantics for this batch while the built-in
+    // ladder kept deciding it — and it was worse than that before: declaring the name GRANTED the producer
+    // the right to emit it, with no `authority` field for the admin gate to see. Refused where it is written,
+    // with the alternative named, because custom ground truth is available and always was: a new name plus an
+    // `authority` declaration, through the gate below.
+    const constitutional = (input.graders ?? []).flatMap((g) =>
+      (g.metrics ?? []).map((m) => m.id).filter((id) => isConstitutionalMetric(id)),
+    );
+    if (constitutional.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { metrics: [...new Set(constitutional)] },
+        `A grader may not declare ${[...new Set(constitutional)].join(", ")} — the built-in verdict policy already assigns those names their meaning. Declare your own metric name with the authority it should carry instead.`,
+      );
     // …and the gate reads BOTH declaration forms (arch-review 19 P1). `metrics[].authority` is the same
     // constitutional act as the spec-level one — naming new ground truth — so a gate that only saw the older
     // spelling would have been bypassable by using the newer one, which is the shape of every authority
@@ -517,6 +533,22 @@ export class ScorecardService {
         ...(composed ? { verdictPolicy: composedPolicy } : {}),
         // The submit-time judge closure — the stream's concretization source, so judging executes the seal (I6).
         ...(record.manifest?.judges ? { sealedJudges: record.manifest.judges } : {}),
+        // …and the model DOCUMENT pins, so the in-process driver carries the same guarantee the Temporal one
+        // does (arch-review 20 P0-2). Whichever driver a deployment happens to use is not something a user
+        // chooses, so it must not be something the trust semantics depend on.
+        ...(record.manifest?.harness.modelDigest !== undefined ||
+        record.manifest?.harness.serviceModelDigests !== undefined
+          ? {
+              modelPins: {
+                ...(record.manifest.harness.modelDigest !== undefined
+                  ? { model: record.manifest.harness.modelDigest }
+                  : {}),
+                ...(record.manifest.harness.serviceModelDigests !== undefined
+                  ? { serviceModels: record.manifest.harness.serviceModelDigests }
+                  : {}),
+              },
+            }
+          : {}),
       },
     );
     return record;

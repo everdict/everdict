@@ -47,6 +47,20 @@ export const RESERVED_AUTHORITY_METRICS: readonly string[] = [
 // strips and replaces, so the row would survive every later pass of the judge whose name it wears.
 export const JUDGE_METRIC_ROOT = "judge";
 
+// Is this a name the CONSTITUTION already owns? (arch-review 20 P0-1)
+//
+// The reserved authority metrics and the whole judge family. A user declaration may describe the semantics of
+// a name it introduces; it may not take over one the built-in ladder already assigns meaning to — otherwise
+// "declaring" a metric is a way to be READ as ground truth without ever asking for ground truth, which is the
+// admin gate's whole subject.
+export function isConstitutionalMetric(metric: string): boolean {
+  return (
+    RESERVED_AUTHORITY_METRICS.includes(metric) ||
+    metric === JUDGE_METRIC_ROOT ||
+    metric.startsWith(`${JUDGE_METRIC_ROOT}:`)
+  );
+}
+
 // WHO produced a score — supplied by the collection boundary, never by the producer. This is the whole point:
 // authority must be stamped by something the producer cannot speak for.
 //

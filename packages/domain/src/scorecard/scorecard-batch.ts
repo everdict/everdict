@@ -49,6 +49,9 @@ export type ScorecardOutcomeExtras = Partial<
     ScorecardRecord,
     | "summary"
     | "verdictSummary"
+    // The execution WORLD this batch ran in (arch-review 20 P1) — named here so the settle transition carries
+    // it as a first-class outcome field rather than as a value that happens to survive an object spread.
+    | "world"
     | "models"
     | "judgeModels"
     | "export"

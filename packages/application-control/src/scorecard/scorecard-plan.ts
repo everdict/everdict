@@ -48,19 +48,30 @@ export interface SealedJudgeEntry {
   harnessDigest?: string;
 }
 
-// The model DOCUMENT a `{ref}` binding names — fetched, not inferred from the ref string, because the ref is
-// exactly the part that cannot distinguish a `_shared` document from a workspace-local one wearing its name.
-async function modelDocumentDigest(
-  deps: Pick<ScorecardServiceDeps, "models">,
+// ONE READ, ONE DECISION (arch-review 20 P1). A model pin is a ref AND the digest of the document that ref
+// named, and the first version produced them from two separate registry reads — `resolveModelBinding` for the
+// version, then a second `get` for the bytes. Between them the registry can move, so the seal could record an
+// IMPOSSIBLE PAIR: `model-x@1` beside the digest of `model-x@2`. Nothing downstream could ever satisfy it, and
+// the refusal it produced would name a drift that never happened.
+//
+// The rubric and delegated-harness helpers already had this shape — one read, both facets off the same object.
+// The model path now matches them.
+async function resolveModelPin(
+  deps: Pick<ScorecardServiceDeps, "models" | "resolveModelBinding">,
   tenant: string,
-  binding: Exclude<ModelBinding, string>,
-): Promise<string | undefined> {
-  if (!deps.models) return undefined;
-  try {
-    return contentDigest(await deps.models.get(tenant, binding.ref, binding.version ?? "latest"));
-  } catch {
-    return undefined;
+  binding: ModelBinding,
+): Promise<{ ref: string; digest?: string }> {
+  if (typeof binding === "string") return { ref: binding }; // already concrete — no document behind it
+  if (deps.models) {
+    try {
+      const spec = await deps.models.get(tenant, binding.ref, binding.version ?? "latest");
+      return { ref: `${binding.ref}@${spec.version}`, digest: contentDigest(spec) };
+    } catch {
+      // Fall through: a deployment with no document reader may still answer the ref through the resolver
+      // below, and a ref with no digest is the honest "pinned, never verified" state.
+    }
   }
+  return { ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved" };
 }
 
 // A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
@@ -97,15 +108,12 @@ export async function sealJudgeClosure(
     try {
       const spec = await deps.judges?.get(tenant, j.id, j.version);
       const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
-      const model =
-        binding === undefined ? undefined : ((await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved");
-      // …and the model DOCUMENT beneath the ref (arch-review 19 P0-4). `model-x@1` names whichever namespace
-      // answers, and the model spec carries the provider, the underlying model name, the base URL and the
-      // key secret — every one of which changes what the judge actually is.
-      const modelDigest =
-        binding === undefined || typeof binding === "string"
-          ? undefined
-          : await modelDocumentDigest(deps, tenant, binding);
+      // The ref AND the DOCUMENT beneath it, from ONE read (arch-review 19 P0-4, 20 P1). `model-x@1` names
+      // whichever namespace answers, and the model spec carries the provider, the underlying model name, the
+      // base URL and the key secret — every one of which changes what the judge actually is.
+      const modelPin = binding === undefined ? undefined : await resolveModelPin(deps, tenant, binding);
+      const model = modelPin?.ref;
+      const modelDigest = modelPin?.digest;
       const rubricRef =
         spec !== undefined && "rubric" in spec && spec.rubric !== undefined && typeof spec.rubric !== "string"
           ? spec.rubric
@@ -150,22 +158,19 @@ export async function sealHarnessModelClosure(
   if (spec === undefined) return {};
   if (spec.kind === "command") {
     if (spec.model === undefined) return {};
-    const digest = typeof spec.model === "string" ? undefined : await modelDocumentDigest(deps, tenant, spec.model);
-    return {
-      model: (await sealedModelIdentity(deps, tenant, spec.model)) ?? "unresolved",
-      ...(digest ? { modelDigest: digest } : {}),
-    };
+    const pin = await resolveModelPin(deps, tenant, spec.model);
+    return { model: pin.ref, ...(pin.digest ? { modelDigest: pin.digest } : {}) };
   }
   if (spec.kind === "service") {
     const serviceModels: Record<string, string> = {};
     const serviceModelDigests: Record<string, string> = {};
     for (const s of spec.services) {
       if (s.model === undefined) continue;
-      serviceModels[s.name] = (await sealedModelIdentity(deps, tenant, s.model)) ?? "unresolved";
-      // …and the DOCUMENT (arch-review 19 P0-4), per service: a topology's per-service binding is the same
-      // owner-first ref as any other, and the service that judges the run is whichever document answers.
-      const digest = typeof s.model === "string" ? undefined : await modelDocumentDigest(deps, tenant, s.model);
-      if (digest) serviceModelDigests[s.name] = digest;
+      // Per service, from ONE read each: a topology's binding is the same owner-first ref as any other, and
+      // the service that runs the case is whichever document answers.
+      const pin = await resolveModelPin(deps, tenant, s.model);
+      serviceModels[s.name] = pin.ref;
+      if (pin.digest) serviceModelDigests[s.name] = pin.digest;
     }
     return {
       ...(Object.keys(serviceModels).length > 0 ? { serviceModels } : {}),

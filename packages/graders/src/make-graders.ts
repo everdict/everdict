@@ -1,4 +1,10 @@
-import { BadRequestError, type Grader, type GraderSpec, JudgeCriterionSchema } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type Grader,
+  type GraderSpec,
+  JudgeCriterionSchema,
+  isConstitutionalMetric,
+} from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";
@@ -39,11 +45,19 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
 // construction (declared on the implementation), because treating "declared something" as the permit made
 // every declaration a wildcard: `authority: "observational"` needs no admin and would have bought `state`.
 function withDeclaredAuthority(grader: Grader, spec: GraderSpec): Grader {
-  // A spec that NAMES its metrics owns those names (arch-review 19 P1) — that IS the declaration, made by the
-  // dataset author and gated at submit for ground truth. Without it a grader declaring `metrics: [{id:"state",
-  // authority:"ground_truth"}]` would compose a policy entry for `state` and then have its own score
-  // invalidated for emitting it, which is the two halves of one declaration disagreeing.
-  const owned = (spec.metrics ?? []).map((m) => m.id);
+  // A spec that NAMES its metrics owns those names — EXCEPT the constitutional ones (arch-review 20 P0-1).
+  //
+  // The previous version granted every declared id, which re-opened the wildcard the sentence above had just
+  // closed, by a shorter route: `metrics: [{ id: "state" }]` needs no `authority` at all, so the admin gate
+  // (which looks for `authority === "ground_truth"`) never sees it — and the BASE policy reads the name
+  // `state` as ground truth regardless of what the declaration said about it. Declaring
+  // `authority: "observational"` did not even downgrade it: base matchers are consulted first, so the
+  // constitutional reading wins and the producer now owns the name.
+  //
+  // A declaration describes the semantics of a name; it does not mint ownership of a name the constitution
+  // already owns. Custom ground truth is available and always was — under a NEW name, through the admin gate.
+  // Filtered here as well as refused at the boundary, because this is the function whose output is trusted.
+  const owned = (spec.metrics ?? []).map((m) => m.id).filter((id) => !isConstitutionalMetric(id));
   const patch = {
     ...(owned.length > 0 ? { ownsMetrics: owned } : {}),
     ...(spec.authority === "judge" ? { ownsJudgeVerdict: true } : {}),

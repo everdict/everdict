@@ -40,6 +40,7 @@ interface ScorecardRow {
   run_ids: unknown;
   owner_replica: string | null; // which control-plane replica drives this batch (mig 0135)
   verdict_summary: unknown; // stamped-policy verdict aggregate (mig 0146) — what release-shaped surfaces read
+  world: unknown; // the execution world cohort (mig 0161) — a comparison axis, NULL = no case reported one
   scoring_pass: unknown; // the LIVE scoring pass (mig 0147) — trust readers refuse while present
   created_at: string | Date;
   updated_at: string | Date;
@@ -93,6 +94,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     ownerReplica: row.owner_replica ?? undefined,
     // Lightweight — product readiness/timeline read the LIST, and this is the number they stand on.
     verdictSummary: (row.verdict_summary as ScorecardRecord["verdictSummary"]) ?? undefined,
+    ...(row.world !== null && row.world !== undefined ? { world: row.world as ScorecardRecord["world"] } : {}),
     // Lightweight — trust readers deciding on list/get rows must SEE a live pass to refuse it.
     ...(row.scoring_pass !== null && row.scoring_pass !== undefined
       ? { scoringPass: row.scoring_pass as ScorecardRecord["scoringPass"] }
@@ -104,9 +106,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)";
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -148,6 +150,7 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.updatedAt,
     r.verdictSummary ? JSON.stringify(r.verdictSummary) : null,
     r.scoringPass ? JSON.stringify(r.scoringPass) : null,
+    r.world ? JSON.stringify(r.world) : null,
   ];
 }
 
@@ -256,6 +259,13 @@ export class PgScorecardStore implements ScorecardStore {
       // append-path (settle/rescore) — the scoring-identity ledger; the service writes the whole array back.
       sets.push(`scoring = $${i++}`);
       vals.push(JSON.stringify(patch.scoring));
+    }
+    if (patch.world !== undefined) {
+      // settle — the execution world cohort (mig 0161). The column was missing when the axis shipped, so
+      // every derived cohort was dropped here: green in memory, absent in production. A patch lane that
+      // silently omits a field the record carries is the write-side twin of a list() that omits a column.
+      sets.push(`world = $${i++}`);
+      vals.push(JSON.stringify(patch.world));
     }
     if (patch.verdictSummary !== undefined) {
       // settle/rescore — the stamped-policy verdict aggregate (mig 0146); dropping it would leave release
@@ -468,7 +478,7 @@ export class PgScorecardStore implements ScorecardStore {
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
       // batches a live replica is still driving. It is one text column, not a heavy one.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

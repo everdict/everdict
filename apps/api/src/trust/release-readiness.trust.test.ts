@@ -1,4 +1,4 @@
-import { ProductService, ScorecardService } from "@everdict/application-control";
+import { ProductService, ScorecardService, type ScorecardStore } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { CaseResult, ProductSeries, ScorecardRecord } from "@everdict/contracts";
 import { MANIFEST_IDENTITY_VERSION } from "@everdict/contracts";
@@ -47,7 +47,9 @@ const seriesBatch = (
   results: CaseResult[],
   createdAt: string,
   origin: Record<string, string>,
+  world?: ScorecardRecord["world"],
 ): ScorecardRecord => ({
+  ...(world ? { world } : {}),
   id,
   tenant: "acme",
   dataset: { id: "support-cases", version: "1.0.0" },
@@ -73,8 +75,10 @@ const seriesBatch = (
   updatedAt: createdAt,
 });
 
-function build() {
-  const scorecardStore = new InMemoryScorecardStore();
+// `idPrefix` matters for the shared-Postgres scenarios: the product id is what a series batch's `origin`
+// points at, so two scenarios minting the same ids would read each other's rows out of the real table.
+function build(store?: ScorecardStore, idPrefix = "t37") {
+  const scorecardStore = store ?? new InMemoryScorecardStore();
   const scorecardService = new ScorecardService({
     dispatcher: unusedDispatcher,
     store: scorecardStore,
@@ -101,7 +105,7 @@ function build() {
         ...(snapshot.candidate.pin !== undefined ? { candidateScoring: snapshot.candidate.pin } : {}),
       };
     },
-    newId: () => `t37-${n++}`,
+    newId: () => `${idPrefix}-${n++}`,
     now: () => "2026-08-04T00:00:00.000Z",
   });
   return { scorecardStore, productService };
@@ -492,6 +496,91 @@ describeTrust("TRUST-62 — editing a series' definition mid-decision refuses th
 //
 // Certified against real Postgres because the guard is a correlated EXISTS inside the UPDATE; the two twins
 // are asserted to agree, since an in-memory pair that drifts here would hide the whole class.
+// Trust suite — TRUST-106.
+//
+// THE WORLD CROSSES THE DATABASE, OR IT DOES NOT EXIST. The cohort a batch ran in is derived at settle and
+// consumed by the release decision, and everything between those two points is Postgres. A domain-level
+// certificate proves `crossWorldReason` means the right thing; it cannot prove the release path ever sees a
+// world, and the first cut of this feature had no column at all — every comparison would have read as
+// within-world, which is the reassuring answer rather than the true one. Product readiness reads scorecards
+// through `list`, so this drives the PRODUCTION seam end to end: PgScorecardStore → ProductService →
+// ReleaseSeriesState.
+describe.skipIf(!TRUST_PG_ENABLED)(
+  "TRUST-106 — a cross-world comparison is visible in the release decision (real Postgres)",
+  () => {
+    let pg: TrustPg;
+    beforeAll(async () => {
+      pg = await openTrustPg();
+    });
+    afterAll(async () => pg?.close());
+
+    async function shipOverWorlds(baselineWorld: ScorecardRecord["world"], candidateWorld: ScorecardRecord["world"]) {
+      const { PgScorecardStore } = await import("@everdict/db");
+      const store = new PgScorecardStore(pg.client);
+      const { scorecardStore, productService } = build(store, trustId("t106"));
+      const product = await productService.create({
+        tenant: "acme",
+        createdBy: "release-captain",
+        name: "Support Copilot",
+        services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+        series: [SERIES],
+      });
+      const first = await productService.createRelease({
+        tenant: "acme",
+        createdBy: "release-captain",
+        productId: product.id,
+        name: "2026.2",
+      });
+      await scorecardStore.create(
+        seriesBatch(
+          trustId("t106-base"),
+          [scored("a", true), scored("b", true)],
+          "2026-07-01T00:00:00.000Z",
+          { productId: product.id, seriesKey: "quality" },
+          baselineWorld,
+        ),
+      );
+      await productService.setReleaseStatus("acme", first.id, { status: "released" }, { subject: "release-captain" });
+      await scorecardStore.create(
+        seriesBatch(
+          trustId("t106-cand"),
+          [scored("a", true), scored("b", true)],
+          "2026-08-05T00:00:00.000Z",
+          { productId: product.id, seriesKey: "quality" },
+          candidateWorld,
+        ),
+      );
+      const next = await productService.createRelease({
+        tenant: "acme",
+        createdBy: "release-captain",
+        productId: product.id,
+        name: "2026.3",
+      });
+      await productService.setReleaseStatus("acme", next.id, { status: "released" }, { subject: "release-captain" });
+      return (await productService.releaseDetail("acme", next.id)).readiness.series[0];
+    }
+
+    it("a baseline measured on linux and a candidate on windows ship, and say so", async () => {
+      const entry = await shipOverWorlds(
+        { os: "linux", drivers: ["docker"], mixed: false, observed: 2 },
+        { os: "windows", drivers: ["docker"], mixed: false, observed: 2 },
+      );
+      // It SHIPS — attaching, never blocking, is the whole design: refusing would make an infrastructure move
+      // un-shippable until every baseline is re-run.
+      expect(entry).toMatchObject({ key: "quality", verdict: "pass", regressed: false });
+      expect(entry?.crossWorld).toBeDefined();
+      // …and it rides the reasons too, so a reader seeing the verdict sees the caveat without knowing to look.
+      expect(entry?.reasons?.some((r) => r.includes("linux") && r.includes("windows"))).toBe(true);
+    });
+
+    it("the same world on both sides attaches nothing — the signal stays rare enough to mean something", async () => {
+      const world = { os: "linux" as const, drivers: ["docker"], mixed: false, observed: 2 };
+      const entry = await shipOverWorlds(world, world);
+      expect(entry?.crossWorld).toBeUndefined();
+    });
+  },
+);
+
 describe.skipIf(!TRUST_PG_ENABLED)("TRUST-69 — each CAS dimension falls back on its own (real Postgres)", () => {
   let pg: TrustPg;
   beforeAll(async () => {

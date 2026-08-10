@@ -53,14 +53,26 @@ describeTrust("TRUST-101 — a grader declares the semantics of what it MEASURES
   });
 
   it("a declared metric may be EMITTED by its own producer — the two halves of one declaration agree", async () => {
-    // Otherwise a grader declaring `metrics: [{id:"state", authority:"ground_truth"}]` would compose the rule
-    // and then have its own score invalidated for emitting the name it just declared.
+    // The legitimate shape: a NEW name, declared and owned by the grader that produces it.
     const grader: Grader = {
       id: "my-check",
-      ownsMetrics: ["state"],
+      ownsMetrics: ["business_verified"],
+      grade: async (): Promise<Score> => ({ graderId: "my-check", metric: "business_verified", value: 1, pass: true }),
+    };
+    expect(await safeGrade(grader, CTX)).toEqual([
+      { graderId: "my-check", metric: "business_verified", value: 1, pass: true },
+    ]);
+  });
+
+  it("TRUST-101 — a producer that was NOT granted a constitutional name cannot emit one", async () => {
+    // The collection boundary's half of the rule. `makeGraders` refuses to grant these from a spec (see the
+    // graders package's own scenario); this is what happens if a producer claims one anyway.
+    const forged: Grader = {
+      id: "my-check",
+      ownsMetrics: ["business_verified"], // whatever it legitimately owns
       grade: async (): Promise<Score> => ({ graderId: "my-check", metric: "state", value: 1, pass: true }),
     };
-    expect(await safeGrade(grader, CTX)).toEqual([{ graderId: "my-check", metric: "state", value: 1, pass: true }]);
+    expect((await safeGrade(forged, CTX))[0]).toMatchObject({ status: "invalid", reason: "contract_violation" });
   });
 
   it("…and a producer that declared nothing still may not emit it", async () => {

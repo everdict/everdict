@@ -53,6 +53,35 @@ export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 // keep inferring for those, honestly downgraded. Bump the constant whenever a new facet joins the seal.
 export const MANIFEST_IDENTITY_VERSION = 1;
 
+// ONE JUDGE'S SEALED CLOSURE — defined ONCE (arch-review 20 P0-3).
+//
+// The manifest, the live scoring pass and the scoring revision all record the same thing: which judge document
+// scored this, and what its own nested references resolved to. They had three separate literal definitions,
+// and the moment the closure grew document digests only two of them were updated. The pass's was the one
+// missed — and the pass is the AUTHORITY TOKEN an activity carries, so the loss was not cosmetic:
+//
+//   claim pass  → judges[].modelDigest present in memory
+//   → Postgres  → reload → ScorecardRecordSchema.parse() drops what this schema does not name
+//   → Temporal activity / reloaded re-score reads pass.judges as its sealed closure
+//   → the nested verification has nothing to verify against
+//
+// A semantic capability that changes shape after serialization was never carried across the boundary. Sharing
+// the schema is what makes that impossible to do by accident, which is the only way it stops happening.
+export const SealedJudgeEntrySchema = z.object({
+  id: z.string(),
+  version: z.string(),
+  specDigest: z.string().optional(), // the judge DOCUMENT this pass ran
+  model: z.string().optional(), // "ref@version" | a raw binding verbatim | the honest "unresolved" sentinel
+  rubric: z.string().optional(), // "id@version" | "unresolved"; absent = inline text or none
+  harness: z.string().optional(), // a harness judge's delegated agent, same vocabulary
+  // The nested DOCUMENTS those refs named at seal time (arch-review 19 P0-4) — what makes each ref verifiable,
+  // since owner-first resolution can hand execution a different document under a held ref.
+  modelDigest: z.string().optional(),
+  rubricDigest: z.string().optional(),
+  harnessDigest: z.string().optional(),
+});
+export type SealedJudgeEntry = z.infer<typeof SealedJudgeEntrySchema>;
+
 export const ScorecardManifestSchema = z.object({
   identityVersion: z.number().int().positive().optional(), // declared seal era — absent = legacy (inferred)
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
@@ -112,21 +141,7 @@ export const ScorecardManifestSchema = z.object({
   // carries the provider, the underlying model, the base URL and the key secret; the rubric IS the question;
   // the delegated harness is the whole agent. Absent digest = the document could not be read at seal time,
   // which a verifier treats as "never pinned", never as agreement.
-  judges: z
-    .array(
-      z.object({
-        id: z.string(),
-        version: z.string(),
-        specDigest: z.string().optional(),
-        model: z.string().optional(),
-        modelDigest: z.string().optional(),
-        rubric: z.string().optional(),
-        rubricDigest: z.string().optional(),
-        harness: z.string().optional(),
-        harnessDigest: z.string().optional(),
-      }),
-    )
-    .optional(),
+  judges: z.array(SealedJudgeEntrySchema).optional(),
   // The runtime judge configuration this batch scored under (request override → workspace default), with its
   // binding resolved the same way. It applies to INLINE judge graders too, so an identical judge list can
   // still be judged by a different model — orchestration always knew this; identity now does.
@@ -177,16 +192,7 @@ export const ScoringPassSchema = z.object({
   targetRevision: z.number().int().positive(), // the revision this pass will append when it settles
   baseRevision: z.number().int().nonnegative(), // the completed revision the pass started from (0 = pre-ledger)
   // The selected judges' closure sealed at pass START (the same sealJudgeClosure submit uses).
-  judges: z.array(
-    z.object({
-      id: z.string(),
-      version: z.string(),
-      specDigest: z.string().optional(),
-      model: z.string().optional(),
-      rubric: z.string().optional(),
-      harness: z.string().optional(),
-    }),
-  ),
+  judges: z.array(SealedJudgeEntrySchema),
   startedAt: z.string(),
   startedBy: z.string().optional(),
   workflowId: z.string().optional(), // the Temporal score workflow driving it (absent = in-process)
@@ -232,21 +238,7 @@ export function scoringPassReclaimable(
 export const ScoringRevisionSchema = z.object({
   revision: z.number().int().positive(), // 1-based, strictly increasing per record
   kind: z.enum(["initial", "rescore"]),
-  judges: z.array(
-    z.object({
-      id: z.string(),
-      version: z.string(),
-      specDigest: z.string().optional(), // the judge DOCUMENT this pass ran (same seal as manifest.judges)
-      model: z.string().optional(), // the sealed model closure ("ref@version" | raw | "unresolved")
-      rubric: z.string().optional(), // the sealed rubric-ref closure ("id@version" | "unresolved"; absent = inline/none)
-      harness: z.string().optional(), // the sealed delegated-harness closure ("id@version" | "unresolved")
-      // The nested DOCUMENTS those refs named at seal time (arch-review 19 P0-4) — what makes each ref
-      // verifiable, since owner-first resolution can hand execution a different document under a held ref.
-      modelDigest: z.string().optional(),
-      rubricDigest: z.string().optional(),
-      harnessDigest: z.string().optional(),
-    }),
-  ),
+  judges: z.array(SealedJudgeEntrySchema),
   // The runtime judge configuration in effect for the pass — rides the INITIAL pass only (it governs inline
   // judge graders, which a detached re-score never touches).
   judgeRun: z.object({ provider: z.string().optional(), model: z.string() }).optional(),
