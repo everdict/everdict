@@ -111,8 +111,24 @@ describe("trek: infeasible tasks invert the grading polarity", () => {
     expect(rubric).toContain("is a FAIL");
   });
 
+  // Regression: trek_queries.csv writes `impossible` as the floats "0.0"/"1.0", not "True"/"False". A string-only
+  // `!== "0"` test read "0.0" as set and gave all 533 feasible tasks the refusal rubric — inverting the grading for
+  // two thirds of the benchmark. These two spellings are the ones the released file actually contains.
+  it("reads TREK's real float flag spelling: 0.0 is feasible, 1.0 is infeasible", () => {
+    const rubricFor = (impossible: string): string => {
+      const ds = adapterToDataset(BENCHMARK_CATALOG.trek, [{ ...solvable, impossible }], {
+        id: "trek",
+        version: "1.0.0",
+      });
+      return rubricOf(ds.cases[0]?.graders ?? []);
+    };
+    expect(rubricFor("0.0")).not.toContain("INFEASIBLE");
+    expect(rubricFor("0.0")).toContain("Stated hard constraints");
+    expect(rubricFor("1.0")).toContain("INFEASIBLE");
+  });
+
   it("flag spellings that mean 'not impossible' never select the refusal rubric", () => {
-    for (const flag of ["", "0", "false", "False", "None", "nan"]) {
+    for (const flag of ["", "0", "0.0", "0.00", "false", "False", "None", "nan", false]) {
       const ds = adapterToDataset(BENCHMARK_CATALOG.trek, [{ ...solvable, impossible: flag }], {
         id: "trek",
         version: "1.0.0",
@@ -120,7 +136,7 @@ describe("trek: infeasible tasks invert the grading polarity", () => {
       expect(rubricOf(ds.cases[0]?.graders ?? [])).not.toContain("INFEASIBLE");
     }
     // Truthy spellings the released CSV and a JSON conversion can both produce.
-    for (const flag of ["True", "true", "1", 1, true]) {
+    for (const flag of ["True", "true", "1", "1.0", 1, true]) {
       const ds = adapterToDataset(BENCHMARK_CATALOG.trek, [{ ...solvable, impossible: flag }], {
         id: "trek",
         version: "1.0.0",

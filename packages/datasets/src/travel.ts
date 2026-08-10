@@ -19,11 +19,17 @@ function text(v: unknown): string {
   return v === undefined || v === null ? "" : String(v);
 }
 
-// Benchmark flag columns arrive as CSV/JSON scalars with no shared convention ("True"/"true"/1/true). Treat the
-// documented falsy spellings as false so an infeasible task is never silently graded as a solvable one.
+// Benchmark flag columns arrive as CSV/JSON scalars with no shared convention: TREK's trek_queries.csv writes
+// `impossible` as the FLOATS "0.0"/"1.0" while TravelBench writes Python bools as "True"/"False". Numeric spellings are
+// therefore compared as numbers — a plain `s !== "0"` string test reads "0.0" as set, which silently flips all 533
+// feasible TREK tasks into refusal grading (the failure this whole polarity switch exists to avoid).
 function isFlagSet(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
   const s = text(v).trim().toLowerCase();
-  return s !== "" && s !== "0" && s !== "false" && s !== "none" && s !== "nan";
+  if (s === "") return false;
+  const n = Number(s);
+  if (!Number.isNaN(n)) return n !== 0;
+  return s !== "false" && s !== "none" && s !== "nan";
 }
 
 // Shared preamble: the judge reads a plan, not a short answer, so it needs the "reject on any violation" instruction
