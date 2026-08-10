@@ -52,6 +52,7 @@ import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
+import { ExecutionPlan } from "./execution-plan.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
@@ -541,6 +542,9 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         });
       }
     }
+    // The plan this batch will execute under — built once from what submit just sealed, and consumed by the
+    // track call below exactly as the resume, Temporal and retry paths consume it from the stored record.
+    const plan = ExecutionPlan.of(record);
     void this.batch.track(
       record.id,
       input.tenant,
@@ -563,25 +567,12 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         // the case-completed fact an agent reacts to) is decided by the same document the settled record
         // stamps. Without it a composed policy's custom ground truth only appeared after the batch finished.
         ...(composed ? { verdictPolicy: composedPolicy } : {}),
-        // The submit-time judge closure — the stream's concretization source, so judging executes the seal (I6).
-        ...(record.manifest?.judges ? { sealedJudges: record.manifest.judges } : {}),
-        // …and the model DOCUMENT pins, so the in-process driver carries the same guarantee the Temporal one
-        // does (arch-review 20 P0-2). Whichever driver a deployment happens to use is not something a user
-        // chooses, so it must not be something the trust semantics depend on.
-        ...(() => {
-          const pins = {
-            ...(record.manifest?.harness.modelDigest !== undefined
-              ? { model: record.manifest.harness.modelDigest }
-              : {}),
-            ...(record.manifest?.harness.serviceModelDigests !== undefined
-              ? { serviceModels: record.manifest.harness.serviceModelDigests }
-              : {}),
-            ...(record.manifest?.judgeRunModelDigest !== undefined
-              ? { judgeRun: record.manifest.judgeRunModelDigest }
-              : {}),
-          };
-          return Object.keys(pins).length > 0 ? { modelPins: pins } : {};
-        })(),
+        // …and what the batch SEALED, asked of the plan rather than assembled here (arch-review 21). This was
+        // a hand-built copy of the same three pins the execution paths build, which is the shape of the
+        // defect the plan exists to end: the in-process driver had to be taught each facet separately, and
+        // whichever driver a deployment happens to use is not something a submitter chooses.
+        ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
+        ...(plan.modelPins ? { modelPins: plan.modelPins } : {}),
       },
     );
     return record;

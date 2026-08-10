@@ -57,6 +57,11 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   never `contentDigest(doc) === stamped`. Legacy stamps are FNV and history has to keep verifying; a direct
   comparison is fail-CLOSED, which is worse than it sounds — the guard does not miss, it accuses (arch-review
   21 P1).
+- **One plan, consumed many times.** What a batch SEALED is read through `ExecutionPlan` (application-control)
+  — the selection/harness verification, the model-document pins, the judge closure, the sealed-closure spec
+  pin. An execution path asks the plan; it never re-reads `manifest.*` to rebuild the same thing. A facet with
+  four hand-copied readers grows its next field in three of them, which is four of this review series' P0s;
+  the ownership is certified by a source scan (TRUST-120), because reconstruction is not a type error.
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

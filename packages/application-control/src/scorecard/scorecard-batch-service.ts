@@ -64,6 +64,7 @@ import type { DispatchOptions } from "../ports/dispatcher.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
+import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
   INITIAL_PASS_ID,
@@ -82,18 +83,6 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
-function modelPinsOf(manifest: ScorecardManifest | undefined): CaseJob["modelPins"] {
-  if (manifest === undefined) return undefined;
-  const harness = manifest.harness;
-  const pins = {
-    ...(harness.modelDigest !== undefined ? { model: harness.modelDigest } : {}),
-    ...(harness.serviceModelDigests !== undefined ? { serviceModels: harness.serviceModelDigests } : {}),
-    // The RUNTIME judge model — a different dispatcher seam (JudgeAuthDispatcher) resolves it, and it rides
-    // the same pins object because a job carries one set of "documents this batch certified".
-    ...(manifest.judgeRunModelDigest !== undefined ? { judgeRun: manifest.judgeRunModelDigest } : {}),
-  };
-  return Object.keys(pins).length > 0 ? pins : undefined;
-}
 
 export class ScorecardBatchService {
   private readonly newId: () => string;
@@ -205,6 +194,10 @@ export class ScorecardBatchService {
     // A multi-trial batch keys child runs by (case, trial); the seed path below dedups by caseId, so a faithful
     // resume needs (case, trial) seeding — not yet supported. Fall back to the INTERRUPTED tombstone. docs/architecture/trial-based-verdict.md
     if (batch.isMultiTrial()) return false;
+    // ONE plan, consumed many times (arch-review 21). Every facet this batch sealed is asked of the plan
+    // rather than re-read off the manifest per call site — which is how a sealed facet used to reach one
+    // execution path and not the other.
+    const plan = ExecutionPlan.of(rec);
     let dataset: Dataset;
     let seed: CaseResult[] = [];
     const seedRunIds: string[] = [];
@@ -222,7 +215,7 @@ export class ScorecardBatchService {
       // than either alone because both looked like they had been handled. Resume is also the path where a
       // shadow does the most damage: finished cases are kept, so one scorecard would carry cases evaluated
       // under two different datasets.
-      this.assertSealedResolution(rec, cases);
+      plan.assertSelection(cases);
       // Re-apply the recorded grading plan — resume must score exactly like the original submit.
       dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
       if (this.deps.runStore) {
@@ -286,12 +279,12 @@ export class ScorecardBatchService {
       // depending on which document was shadowed. That is the asymmetry class this area keeps producing, in
       // miniature. Recovery treats both as "cannot resume", and the marker stays for an operator.
       try {
-        this.assertSealedResolution(rec, undefined, resolvedSpec);
+        plan.assertHarness(resolvedSpec);
       } catch (err) {
         if (err instanceof ConflictError) return false;
         throw err;
       }
-      harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
+      harnessSpec = plan.pinSpec(resolvedSpec);
     }
     const remaining = dataset.cases.length - seed.length;
     void this.track(
@@ -310,8 +303,8 @@ export class ScorecardBatchService {
         seed,
         seedRunIds,
         retries: orch.retries,
-        ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
-        ...(modelPinsOf(rec.manifest) ? { modelPins: modelPinsOf(rec.manifest) } : {}),
+        ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
+        ...(plan.modelPins ? { modelPins: plan.modelPins } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
         ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
@@ -376,27 +369,12 @@ export class ScorecardBatchService {
   //   resume  resolveWithPins(B, P) = B'   →  verification SKIPPED because pins exist  →  B' executes
   //
   // A model closure cannot see that difference either, so nothing else was covering it.
-  private assertSealedResolution(
-    rec: ScorecardRecord,
-    cases?: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
-    harnessSpec?: HarnessSpec,
-  ): void {
-    const mismatches = verifySealedSelection(rec.manifest, {
-      cases: cases ?? [],
-      ...(harnessSpec !== undefined ? { harnessSpec, harnessRef: `${rec.harness.id}@${rec.harness.version}` } : {}),
-    });
-    // With no cases supplied this is a harness-only check, so the selection half must not fire on an empty
-    // list — that would refuse every harness verification for "removing" every case.
-    const relevant = cases === undefined ? mismatches.filter((m) => m.subject === "harness") : mismatches;
-    if (relevant.length > 0)
-      throw new ConflictError("CONFLICT", { scorecard: rec.id }, sealedExecutionMessage(relevant));
-  }
-
   private async buildBatchContext(id: string): Promise<NonNullable<ReturnType<typeof this.batchContexts.get>>> {
     const rec = await this.deps.store.get(id);
     if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
     const orch = rec.orchestration;
     if (!orch) throw new BadRequestError("BAD_REQUEST", { scorecard: id }, "This batch has no orchestration inputs.");
+    const plan = ExecutionPlan.of(rec); // the same one artifact the resume path consumes
     const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
     const { cases: selected } = selectSubsetCases(
       resolved,
@@ -411,7 +389,7 @@ export class ScorecardBatchService {
     //
     // Verified BEFORE the grading plan is applied — the plan is a batch document, and applying it first would
     // mask a change to the case's own default graders.
-    this.assertSealedResolution(rec, selected);
+    plan.assertSelection(selected);
     // Re-apply the recorded grading plan — a workflow-driven case must score exactly like the original submit.
     const cases = applyGradingPlan(selected, orch.graders);
     // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after
@@ -449,8 +427,8 @@ export class ScorecardBatchService {
             : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
         { id: rec.harness.id, version: rec.harness.version },
       );
-      this.assertSealedResolution(rec, undefined, resolvedSpec);
-      harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
+      plan.assertHarness(resolvedSpec);
+      harnessSpec = plan.pinSpec(resolvedSpec);
     }
     const owner = rec.createdBy ?? rec.tenant;
     const secretMap =
@@ -468,9 +446,9 @@ export class ScorecardBatchService {
       harnessId: rec.harness.id,
       harnessVersion: rec.harness.version,
       ...(harnessSpec ? { harnessSpec } : {}),
-      ...(modelPinsOf(rec.manifest) ? { modelPins: modelPinsOf(rec.manifest) } : {}),
+      ...(plan.modelPins ? { modelPins: plan.modelPins } : {}),
       judges: orch.judges,
-      ...(rec.manifest?.judges ? { sealedJudges: rec.manifest.judges } : {}),
+      ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
       ...(orch.judge ? { judge: orch.judge } : {}),
       retries: orch.retries,
       concurrency: orch.concurrency,
@@ -991,6 +969,9 @@ export class ScorecardBatchService {
     const retryIds = new Set(redispatch.map((r) => r.caseId));
     const seed = results.filter((r) => !retryIds.has(r.caseId) && !recollectIds.has(r.caseId));
 
+    // The SOURCE batch's plan — a retry re-runs that experiment, so every sealed facet it carries is the
+    // source's, asked once (arch-review 21).
+    const sourcePlan = ExecutionPlan.of(src);
     const resolved = await this.deps.datasets.get(input.tenant, src.dataset.id, src.dataset.version);
     const { cases } = selectSubsetCases(
       resolved,
@@ -1007,7 +988,7 @@ export class ScorecardBatchService {
       // registered-but-invalid spec fails the retry with a clear 400 rather than re-dispatching a malformed job.
       // The retry re-runs the SOURCE batch's experiment — its manifest closure pins the re-resolved spec's
       // moving bindings, so a moved `latest` model cannot silently change what the retry executes (I6).
-      harnessSpec = pinHarnessSpecToClosure(
+      harnessSpec = sourcePlan.pinSpec(
         await embedHarnessSpec(
           () =>
             pins && Object.keys(pins).length > 0
@@ -1015,7 +996,6 @@ export class ScorecardBatchService {
               : harnesses.get(input.tenant, src.harness.id, src.harness.version),
           { id: src.harness.id, version: src.harness.version },
         ),
-        src.manifest?.harness,
       );
     }
 
@@ -1082,7 +1062,7 @@ export class ScorecardBatchService {
                 src.runtime,
                 input.submittedBy,
                 undefined,
-                src.manifest?.judges,
+                sourcePlan.sealedJudges,
               )
               .catch(() => {});
         }
@@ -1148,8 +1128,8 @@ export class ScorecardBatchService {
         {
           seed: [...seed, ...recovered],
           retries: orch.retries,
-          ...(src.manifest?.judges ? { sealedJudges: src.manifest.judges } : {}),
-          ...(modelPinsOf(src.manifest) ? { modelPins: modelPinsOf(src.manifest) } : {}),
+          ...(sourcePlan.sealedJudges ? { sealedJudges: sourcePlan.sealedJudges } : {}),
+          ...(sourcePlan.modelPins ? { modelPins: sourcePlan.modelPins } : {}),
           ...(boosted > 0 ? { memoryBoostMb } : {}),
           ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
           resumeNote,
