@@ -212,9 +212,26 @@ describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written
   } as unknown as ProductSeries;
 
   // A registry pair whose `latest` can be moved between resolutions, which is the whole failure mode: no id
-  // and no version above the binding changes at all.
-  const world = (over: { serviceModel?: string; delegate?: string; shadowed?: boolean } = {}) => ({
-    datasets: { versions: async () => ["1.0.0"] },
+  // and no version above the binding changes at all. `shadowedDataset`/`shadowedHarness` model the OTHER
+  // shape — a tenant-local registration over a `_shared` one at the SAME version, where not even a nested
+  // ref moves and the only thing that differs is the document.
+  const world = (
+    over: {
+      serviceModel?: string;
+      delegate?: string;
+      shadowed?: boolean;
+      shadowedDataset?: boolean;
+      shadowedHarness?: boolean;
+    } = {},
+  ) => ({
+    datasets: {
+      versions: async () => ["1.0.0"],
+      get: async () => ({
+        id: "support",
+        version: "1.0.0",
+        cases: [{ id: "c1", task: over.shadowedDataset ? "do the OTHER thing" : "do the thing" }],
+      }),
+    },
     harnesses: {
       versions: async () => ["1.0.0"],
       get: async (_t: string, id: string) =>
@@ -224,6 +241,9 @@ describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written
               kind: "service",
               id: "copilot",
               version: "1.0.0",
+              // The script differs; the model closure is byte-identical either way. That combination is
+              // exactly what a contract stopping at id + version + closure could not see.
+              command: over.shadowedHarness ? "run --v2 {{task}}" : "run {{task}}",
               services: [{ name: "api", image: "img", model: { ref: "agent-model" } }],
             },
     },
@@ -272,6 +292,20 @@ describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written
     expect(await digestOf({ shadowed: true })).not.toBe(await digestOf());
   });
 
+  it("TRUST-65 — a shadowed HARNESS document changes it, even with an identical model closure", async () => {
+    // `agent@1` is a NAME. The registry resolves it owner-first over `_shared`, so a workspace registering its
+    // own `agent@1` substitutes different bytes — different script, environment, service topology — while the
+    // id, the version string AND (here, deliberately) the whole resolved model closure all read held.
+    expect(await digestOf({ shadowedHarness: true })).not.toBe(await digestOf());
+  });
+
+  it("TRUST-66 — a shadowed DATASET changes it: the tasks are the question", async () => {
+    // The sharper half. A shadowed dataset can change every case's task, environment, timeout and default
+    // graders, and until the contract carried the case bundle's digest `support@1 == support@1` was a
+    // structural blind spot in the comparison that decides whether a release ships.
+    expect(await digestOf({ shadowedDataset: true })).not.toBe(await digestOf());
+  });
+
   it("TRUST-63 — the resolver's contract IS the manifest's, projected: one vocabulary, certified equal", async () => {
     // The strongest form of "one answer": take what the resolver produced, seal an execution manifest with the
     // same facts, project the manifest back, and require the digests to be identical. If either side ever
@@ -281,7 +315,7 @@ describeTrust("TRUST-56/57/58/63 — the PRODUCTION resolver, not a hand-written
     if (resolution.status !== "resolved") throw new Error(resolution.status);
     const c = resolution.contract;
     const manifest = {
-      dataset: { ...c.dataset, digest: "sha256:whatever" }, // the manifest's own bundle digest is not identity here
+      dataset: c.dataset, // digest included — the projection must carry it, which is what P0-2 fixed
       harness: {
         ...c.harness,
         ...(c.harnessModel !== undefined ? { model: c.harnessModel } : {}),

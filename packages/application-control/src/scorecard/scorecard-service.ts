@@ -33,9 +33,12 @@ import {
   composeVerdictPolicy,
   contentDigest,
   digestUnder,
+  duplicateJudgeIds,
   evaluateGate,
   gatePolicyDigest,
   retryableUnmeasured,
+  seriesContractDigest,
+  seriesContractFromManifest,
 } from "@everdict/domain";
 import { applyGradingPlan, sealGrading, selectSubsetCases } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -83,6 +86,18 @@ export type { ScoreGroupInput } from "./scorecard-score-service.js";
 // Unit-testable independently of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
 // Facade over three lifecycle collaborators (docs/architecture/api-route-modularization.md R2-b): batch
 // orchestration / ingest / analytics — the external surface (deps, both transports, tests) is unchanged.
+// A judge appears at most once in a selection — see `duplicateJudgeIds` for why the plane cannot hold two.
+// Thrown as a 400 from the ONE service both transports call, so BFF and MCP cannot diverge on it.
+function assertUniqueJudges(judges: ReadonlyArray<{ id: string }> | undefined): void {
+  const duplicates = duplicateJudgeIds(judges ?? []);
+  if (duplicates.length === 0) return;
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    { judges: duplicates },
+    `A judge may be selected once — ${duplicates.join(", ")} appears more than once. A judge owns one metric family, so two versions of it cannot both score a case.`,
+  );
+}
+
 export class ScorecardService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -256,6 +271,11 @@ export class ScorecardService {
     // harness/dataset above. Without this, orchestration.judges records "latest", so a re-run or a scheduled re-eval
     // would score with whatever "latest" resolves to THEN — a different judge version, a different verdict. A judge id
     // that doesn't resolve is kept as-given (the scoring path skips a missing judge exactly as it does today).
+    // A judge owns a metric family, so it may appear once (arch-review 16 P1-7). Refused HERE, in the service
+    // both transports call, before a single provider call is paid for or a stage row is claimed — the plane
+    // below has no way to represent two versions of one judge, so this is a malformed request rather than an
+    // ambitious one.
+    assertUniqueJudges(input.judges);
     const pinnedJudges = await this.pinJudgeVersions(input.tenant, input.judges ?? []);
 
     // provenance: overlay the ephemeral-pin record onto the caller-provided origin. Even if only pins exist (no origin), still record them (reproducibility evidence).
@@ -354,6 +374,22 @@ export class ScorecardService {
       },
       now: this.now(),
     });
+
+    // THE CALLER'S RESOLUTION MUST BE THE ONE THAT EXECUTES (arch-review 16 P0-3). A caller that resolved an
+    // evaluation contract before calling presents its digest; submit has now sealed its OWN, from the same
+    // functions but at a later instant. Sharing the resolver removes implementation drift, not temporal
+    // drift — `latest` can move between the two calls, and the record would then carry an origin naming one
+    // question and a manifest answering another. Refused here: before the record is created, before anything
+    // dispatches, so a mismatch costs the caller a retry rather than producing evidence that misstates itself.
+    if (input.expectedContractDigest !== undefined && record.manifest !== undefined) {
+      const sealed = seriesContractDigest(seriesContractFromManifest(record.manifest));
+      if (sealed !== input.expectedContractDigest)
+        throw new ConflictError(
+          "CONFLICT",
+          { expected: input.expectedContractDigest, sealed },
+          "the evaluation contract moved between resolution and submit — a registry reference this batch depends on resolved differently. Re-resolve and submit again.",
+        );
+    }
 
     // E0 outbox: the creation fact (scorecard.submitted, domain-computed) persists in the SAME transaction
     // as the record; the push afterwards is a latency nudge carrying the same id (consumer dedup holds).
@@ -481,6 +517,9 @@ export class ScorecardService {
   // Phase 2 detached (P2) — apply judges over an existing group's runs and re-aggregate; also the "promote
   // experiment → scorecard" move (scoring an experiment flips its kind). Delegated to the score collaborator.
   async scoreGroup(input: ScoreGroupInput): Promise<ScorecardRecord> {
+    // Same rule at the re-score door (arch-review 16 P1-7): the selection a pass runs under is the unit the
+    // stage claims and the strip mutates, and neither can hold a judge twice.
+    assertUniqueJudges(input.judges);
     return this.scoreService.score(input);
   }
 

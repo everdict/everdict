@@ -975,6 +975,8 @@ async function main(): Promise<void> {
         harness: { id: input.harness.id, version: input.harness.version ?? "latest" },
         judges: input.judges.map((judge) => ({ id: judge.id, version: judge.version ?? "latest" })),
         ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+        // The caller's resolution, held over submit's own seal (arch-review 16 P0-3).
+        ...(input.expectedContractDigest !== undefined ? { expectedContractDigest: input.expectedContractDigest } : {}),
         origin: input.origin,
       }),
     events: platformEventService,

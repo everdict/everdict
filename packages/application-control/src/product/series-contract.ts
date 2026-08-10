@@ -2,6 +2,7 @@ import type { HarnessSpec, ProductSeries } from "@everdict/contracts";
 import {
   type ResolvedSeriesContract,
   type SeriesContractResolution,
+  contentDigest,
   resolveRef,
   seriesContractDigest,
 } from "@everdict/domain";
@@ -77,8 +78,26 @@ export async function resolveSeriesContract(
     judges.push(resolved);
   }
 
+  // THE DATASET'S BYTES (arch-review 16 P0-2). `support@1` is a NAME, and the registry resolves it owner-first
+  // over a `_shared` fallback — so a workspace registering its own `support@1` substitutes a different
+  // document, with every case's task, environment, timeout and default graders free to differ, while the id
+  // and the version string both read held. Digested with the same function the manifest uses.
+  let datasetDigest: string;
+  try {
+    datasetDigest = contentDigest((await deps.datasets.get(tenant, dataset.id, dataset.version)).cases);
+  } catch (err) {
+    return {
+      status: "unresolvable",
+      reason: `dataset '${dataset.id}@${dataset.version}' could not be read: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+
   // The TREATMENT's closure. Reading the spec is itself part of the question: a harness whose document cannot
-  // be read has no identity to state, which is a different sentence from "it has no model binding".
+  // be read has no identity to state, which is a different sentence from "it has no model binding". Its BYTES
+  // travel too, for the same shadowing reason as the dataset — and because two harness documents can differ
+  // in script, environment or service topology while their model closures coincide exactly.
   let spec: HarnessSpec;
   try {
     spec = await deps.harnesses.get(tenant, harness.id, harness.version);
@@ -140,8 +159,8 @@ export async function resolveSeriesContract(
     }
   }
   const contract: ResolvedSeriesContract = {
-    dataset,
-    harness,
+    dataset: { ...dataset, digest: datasetDigest },
+    harness: { ...harness, specDigest: contentDigest(spec) },
     judges,
     ...(harnessClosure.model !== undefined ? { harnessModel: harnessClosure.model } : {}),
     ...(harnessClosure.serviceModels !== undefined ? { serviceModels: harnessClosure.serviceModels } : {}),

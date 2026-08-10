@@ -136,7 +136,22 @@ gate       asks whether the current question's identity is ESTABLISHED — a hol
 
 So a new closure facet reaches the release gate the moment it reaches the manifest. `seriesContractFromManifest`
 projects a manifest back onto the contract shape and TRUST-63 requires the two digests to agree, so the
-correspondence is certified rather than remembered. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
+correspondence is certified rather than remembered.
+
+The contract names the DOCUMENTS, not just their references (arch-review 16 P0-2): `dataset.digest` and
+`harness.specDigest` ride it, for the same reason the judge closure already carried `specDigest`. The registry
+resolves owner-first over a `_shared` fallback, so a workspace registering its own `support@1` or `agent@1`
+substitutes different bytes with the id AND the version string both reading held — a shadowed dataset can
+change every case's task, environment, timeout and default graders, and a shadowed harness can change its
+script and topology while its model closure coincidentally matches. `support@1 == support@1` was a structural
+blind spot in the one comparison that decides whether a release ships.
+
+And SHARING THE RESOLVER IS NOT CARRYING THE RESOLUTION (arch-review 16 P0-3). The last unification removed
+implementation drift; temporal drift is a different animal. The product resolves a series' floating model to
+`M@3` and stamps that digest; `latest` moves; submit re-resolves to `M@4` and seals it — nothing errors, and
+the record then states in its own two fields that it answered a question it did not answer. The auto-eval
+therefore presents `expectedContractDigest`, and submit re-seals and REFUSES on a mismatch before it creates
+or dispatches anything. A mismatch costs a retry; the alternative costs evidence that misstates itself. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
 compares against, so the two can never drift into different answers); a newest batch whose stamp differs — or
 is absent, meaning it cannot say which question it answered — is `contract_stale` and blocks a required
 series. An unresolvable contract is its own verdict — `contract_unverifiable`, which BLOCKS a required series.

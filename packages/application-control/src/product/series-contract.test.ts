@@ -39,7 +39,10 @@ const harnessJudge = (): JudgeSpec => ({
 
 function deps(over: Partial<SeriesContractDeps> = {}): SeriesContractDeps {
   return {
-    datasets: { versions: async () => ["1.0.0"] } as unknown as DatasetRegistry,
+    datasets: {
+      versions: async () => ["1.0.0"],
+      get: async () => ({ id: "support", version: "1.0.0", cases: [{ id: "c1", task: "do the thing" }] }),
+    } as unknown as DatasetRegistry,
     harnesses: {
       versions: async () => ["1.0.0"],
       // The delegated judge agent resolves through the SAME registry — `latest` lands on 4.0.0.

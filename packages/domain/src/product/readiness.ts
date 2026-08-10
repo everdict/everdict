@@ -86,8 +86,25 @@ export function resolveWatchedSeries(product: ProductRecord, release?: ReleaseSc
 // digest could ever catch this. The caller resolves (it owns the registries); this function only says what
 // identity means, so the submit side and the readiness side cannot drift into two answers.
 export interface ResolvedSeriesContract {
-  dataset: { id: string; version: string };
-  harness: { id: string; version: string };
+  // THE DOCUMENT, not just its name (arch-review 16 P0-2). The registry resolves owner-first with a `_shared`
+  // fallback, so a tenant registering its own `support@1` over the shared `support@1` substitutes different
+  // BYTES with the id and the version string both reading held — the same shadowing the judge closure already
+  // carries `specDigest` for. Without these two, `support@1 == support@1` and `agent@1 == agent@1` were
+  // structural blind spots in the one comparison that decides whether a release ships: a shadowed dataset can
+  // change every case's task, environment, timeout and default graders, and a shadowed harness can change its
+  // script and topology while its model closure coincidentally matches.
+  //
+  // `dataset.digest` is `contentDigest(cases)` and `harness.specDigest` is `contentDigest(spec)` — the SAME
+  // values, from the same functions, the scorecard manifest seals. A series always runs the whole dataset with
+  // its default graders, so the manifest's composite digest and this one are the same function of the same
+  // input; a series that ever gains a subset or a grading plan needs the orthogonal axes (`cases`/`grading`)
+  // here too, and that is the moment to add them rather than to widen this one.
+  //
+  // Optional because a decision recorded before this existed has neither; such a contract simply digests
+  // differently, which reads as `contract_stale` and asks for a re-run. The resolver always fills both — a
+  // document it cannot read is `unresolvable`, never a contract with a hole in it.
+  dataset: { id: string; version: string; digest?: string };
+  harness: { id: string; version: string; specDigest?: string };
   judges: Array<{ id: string; version: string }>;
   // The TRANSITIVE closure, not just the top documents (arch-review 14 P0). Pinning `harness@1` pins a
   // document, and that document can name `model: {ref: "main-model"}` with no version — so two runs of the
@@ -155,7 +172,7 @@ export type SeriesContractResolution =
 // absent projects as absent, because the manifest's own absence rules (the identity era) already say what
 // that means. It exists so the two vocabularies can be certified equal rather than assumed equal.
 export function seriesContractFromManifest(manifest: {
-  dataset: { id: string; version: string };
+  dataset: { id: string; version: string; digest?: string };
   harness: { id: string; version: string; specDigest?: string; model?: string; serviceModels?: Record<string, string> };
   judges?: Array<{
     id: string;
@@ -169,8 +186,19 @@ export function seriesContractFromManifest(manifest: {
 }): ResolvedSeriesContract {
   const judges = manifest.judges ?? [];
   return {
-    dataset: { id: manifest.dataset.id, version: manifest.dataset.version },
-    harness: { id: manifest.harness.id, version: manifest.harness.version },
+    // The DOCUMENT digests travel (arch-review 16 P0-2). This projection took them as input and dropped them,
+    // which is precisely how a gap survives a certification: TRUST-63 rebuilt the manifest FROM the contract,
+    // so a field neither side carried compared equal to itself.
+    dataset: {
+      id: manifest.dataset.id,
+      version: manifest.dataset.version,
+      ...(manifest.dataset.digest !== undefined ? { digest: manifest.dataset.digest } : {}),
+    },
+    harness: {
+      id: manifest.harness.id,
+      version: manifest.harness.version,
+      ...(manifest.harness.specDigest !== undefined ? { specDigest: manifest.harness.specDigest } : {}),
+    },
     judges: judges.map((j) => ({ id: j.id, version: j.version })),
     ...(manifest.harness.model !== undefined ? { harnessModel: manifest.harness.model } : {}),
     ...(manifest.harness.serviceModels !== undefined ? { serviceModels: manifest.harness.serviceModels } : {}),

@@ -31,6 +31,10 @@ export interface ProductSyncServiceOutcome {
   name: string;
   imported: number;
   error?: string;
+  // The read reached its page ceiling, so this service's OLDER history is not all here (arch-review 16 P1-4).
+  // Distinct from `error`: the rows that did land are real and their downstream effects ran. It is a fact
+  // about coverage, and a caller that needs a complete history must act on it.
+  incomplete?: boolean;
 }
 
 export interface ProductSyncResult {
@@ -53,6 +57,10 @@ export type SeriesRunSubmitter = (input: {
   harness: { id: string; version?: string };
   judges: Array<{ id: string; version?: string }>;
   runtime?: string;
+  // The contract digest this caller resolved — submit re-seals and REFUSES on a mismatch (arch-review 16
+  // P0-3), so a `latest` moving between resolution and seal costs a retry rather than a record whose origin
+  // and manifest name different questions.
+  expectedContractDigest?: string;
   origin: {
     source: "product";
     productId: string;
@@ -135,11 +143,11 @@ export class ProductVersionSync {
         const backfill =
           service.sync?.syncedAt === undefined &&
           !(await this.hasImportedHistory(tenant, productId, service.name, serviceStreamKey(service)));
-        const rows = await this.importService(tenant, record, service, actor, backfill);
+        const { rows, complete } = await this.importService(tenant, record, service, actor, backfill);
         // A backfilled row counts as imported (it is on the timeline now) but is never news — only
         // post-watermark arrivals reach the auto-eval below.
         if (!backfill) inserted.push(...rows);
-        outcomes.push({ name: service.name, imported: rows.length });
+        outcomes.push({ name: service.name, imported: rows.length, ...(complete ? {} : { incomplete: true }) });
         record = { ...record, ...Product.from(record).markServiceSynced(service.name, this.now()).patch };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -244,7 +252,9 @@ export class ProductVersionSync {
     service: ProductServiceEntry,
     actor: { subject: string },
     backfill: boolean,
-  ): Promise<ProductServiceVersionRecord[]> {
+    // `complete` says whether the remote read saw the whole history — see the return statement for why this
+    // is a returned FACT rather than a throw (arch-review 16 P1-4).
+  ): Promise<{ rows: ProductServiceVersionRecord[]; complete: boolean }> {
     const { token, host } = await this.deps.tokens.tokenForRepository(
       tenant,
       service.repository,
@@ -341,8 +351,18 @@ export class ProductVersionSync {
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
       insertedRows.push(row);
     }
-    if (incomplete) throw new Error(ceilingMessage(service.repository, false));
-    return insertedRows;
+    // ONE POLICY, ALL THE WAY THROUGH (arch-review 16 P1-4). This used to insert the rows, emit their facts,
+    // and THEN throw — which is not fail-closed, because the caller treats a throw as "this service imported
+    // nothing" and skips the auto-eval. The result was a permanent causal split: the version is in the ledger
+    // and its `product.service_version_imported` fact went out, but nothing evaluated it and the outcome said
+    // `imported: 0`. The next sync sees the row as already known, so the evaluation never happens at all.
+    //
+    // An error AFTER committing side effects is not fail-closed when downstream effects depend on the success
+    // return. For an established stream the news IS on the pages we read — the ceiling only hides older
+    // history — so the rows, their facts and their evaluation all proceed, and the incompleteness travels as
+    // its own fact on the outcome. (The BACKFILL case is the opposite policy and stays that way: it has no
+    // baseline, so it imports nothing at all.)
+    return { rows: insertedRows, complete: !incomplete };
   }
 
   // The auto-eval choke point: one sync with N genuinely-new versions runs each watched series ONCE, stamped
@@ -399,6 +419,12 @@ export class ProductVersionSync {
           dataset: plan?.dataset ?? entry.dataset,
           harness: plan?.harness ?? entry.harness,
           judges: plan?.judges ?? entry.judges,
+          // …and submit must SEAL the same one (arch-review 16 P0-3). Passing the resolved top-level refs
+          // closes the version race; it does not close the CLOSURE race, because submit re-resolves each
+          // spec's floating `{ref}` bindings itself. If a model's `latest` moved between this resolution and
+          // that seal, the record would carry an origin naming one question and a manifest answering
+          // another — so submit compares its own seal against this digest and refuses instead.
+          ...(contract.status === "resolved" ? { expectedContractDigest: contract.digest } : {}),
           ...(product.autoEval.runtime !== undefined ? { runtime: product.autoEval.runtime } : {}),
           origin: {
             source: "product",

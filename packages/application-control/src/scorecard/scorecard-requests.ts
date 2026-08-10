@@ -152,6 +152,18 @@ export interface RunScorecardInput {
   // In-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches inside
   // the batch with doubled job-only memory up to the cap, instead of waiting for a retry-failed round-trip.
   oomAutoBoost?: boolean;
+  // THE RESOLUTION THIS SUBMIT WAS ASKED FOR (arch-review 16 P0-3). A caller that resolved an evaluation
+  // contract before calling — the product auto-eval does, and stamps its digest on the record's origin —
+  // presents it here, and submit REFUSES if its own seal comes out different.
+  //
+  // Why a check rather than trust: sharing the resolver function removes implementation drift, not TEMPORAL
+  // drift. The caller resolves `harness@1`'s floating model to `M@3` and stamps D3; `latest` moves; submit
+  // re-resolves to `M@4` and seals D4 — and the record then claims, in its own two fields, to have been run
+  // for a question it did not answer. Using the same resolver twice is not carrying one resolution.
+  //
+  // The refusal happens BEFORE anything is created or dispatched, so a mismatch costs a retry, never a
+  // mis-stamped record. Absent = no caller resolution to hold submit to (every interactive path).
+  expectedContractDigest?: string;
 }
 
 // P1 experiment submit — phase 1 alone (execution-model.md): EXACTLY ONE of `dataset` (registered cases,
