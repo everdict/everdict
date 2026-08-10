@@ -109,6 +109,12 @@ plus the replacement. Both hold the same passId, both clear every guard. The sta
 the carrier last-writer-wins, so the two disagreed by construction, the revision took the carrier's answer,
 and parity noticed afterwards — a report is not an arbitration.
 
+The claim's pass-global half is the **logical round** ordinal, not the workflow's rotation count
+(arch-review 16 P0-1). Scoping it to rotations was right while rotation was the only thing that produced a new
+activity execution; the plan→execute→replan loop made every ROUND produce one, and Temporal's `attempt`
+restarts at 1 in each — so a round's first attempt lost to the previous round's exhausted ones and the case
+could never finish. The ordinal advances on every new mutation opportunity; rotation merely carries it.
+
 Neither rule was right on its own. "First wins" hands the record to an attempt the orchestrator has already
 superseded; "last wins" is the mirror. The question was never first-or-last but WHICH ATTEMPT HOLDS THE RIGHT
 TO WRITE, and Temporal already answers it: `attempt` is monotonic per activity execution, so the highest
@@ -164,6 +170,26 @@ unreadable" to what it should have been all along: a lease saying who may promot
    before it starts, so any selected-judge row on the settled plane was produced by this pass — that set is
    "what this pass judged", independent of whether the stage write survived. `missingFromStage` is the
    difference, and it is the dimension the contract step actually depends on.
+
+   **…and the observation is DURABLE, not a counter** (arch-review 16 P1-6). It rides the settled
+   `ScoringRevision` (`stageParity`, written in the same guarded update as the revision), and the process
+   metric is a projection of that. As a metric alone it could not be re-read per pass, and a control plane
+   that died between the settle and the fire-and-forget callback left the pass with NO observation at all —
+   silently indistinguishable, in the promotion's own input, from a pass that agreed. A promotion decision
+   cannot rest on evidence that disappears exactly when the thing it observes crashes.
+
+   **The comparison is canonical.** It compared `JSON.stringify` of two objects that had travelled different
+   storage paths: the plane's rows come back through `ScoreSchema.parse` (declaration key order, defaults
+   such as `status: "measured"` applied), the staged rows come back as raw jsonb (Postgres key order, no
+   defaults). Byte-identical judgments compared UNEQUAL, so the series gating the promotion reported a
+   mismatch for essentially every pass — worse than no measurement, because it is always wrong in the
+   direction of "do not promote" and therefore never investigated. Both sides are parsed through the same
+   schema, sorted by metric, and digested canonically.
+
+   **Lifetime.** A pass's stage rows are cleared once its revision carries that durable observation, and when
+   a pass is declared dead (`failScore` — it will never write again). Never before the observation, which is
+   the evidence the promotion reads; never "eventually", since the rows are one per
+   (scorecard × pass × case × judge).
 3. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
 

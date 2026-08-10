@@ -242,6 +242,33 @@ export const ScoringRevisionSchema = z.object({
   // revision, and the object store has no CAS to decide between them) — so the entry records where its own
   // bundle lives. Absent on pre-pass-keyed revisions, which still resolve through the legacy derived key.
   analysisKey: z.string().optional(),
+  // HOW THE STAGE COMPARED TO THE PLANE THIS REVISION CERTIFIES (arch-review 16 P1-6).
+  //
+  // The stage promotion — moving the score plane's source of truth off the carriers and onto the staged rows
+  // — is gated on having watched the two agree on real traffic. That evidence was a process metric: a
+  // fire-and-forget callback after settle, turned into counters. A counter cannot be re-read per pass, and a
+  // control plane that died between the settle and the callback left the pass with NO observation at all,
+  // silently indistinguishable from an agreeing one. A promotion decision cannot rest on evidence that
+  // disappears when the thing it observes crashes.
+  //
+  // Recorded here, on the revision, because the revision IS the pass's durable statement about its plane —
+  // and it is written in the same guarded update, so a settled revision always carries its own observation.
+  // `promotionSafe` is the predicate the contract step gates on, decided at the one moment every input to it
+  // is in hand. Absent = a revision from before this existed, or a pass with no stage wired: honestly
+  // unobserved, which is exactly what it must not be confusable with.
+  stageParity: z
+    .object({
+      completed: z.boolean(), // false = the comparison itself could not run; `failure` says why
+      failure: z.string().optional(),
+      expectedJudged: z.number().int().nonnegative(), // units this pass actually judged (from the settled plane)
+      staged: z.number().int().nonnegative(),
+      matched: z.number().int().nonnegative(),
+      missingFromStage: z.number().int().nonnegative(),
+      mismatched: z.number().int().nonnegative(),
+      orphaned: z.number().int().nonnegative(),
+      promotionSafe: z.boolean(),
+    })
+    .optional(),
   createdAt: z.string(),
   createdBy: z.string().optional(),
 });

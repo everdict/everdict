@@ -7,6 +7,8 @@ import {
   NotFoundError,
   SCORING_PASS_LEASE_MS,
   SCORING_PASS_RENEW_BEFORE_MS,
+  type Score,
+  ScoreSchema,
   type ScorecardRecord,
   type ScoringPass,
   scoringPassReclaimable,
@@ -14,8 +16,11 @@ import {
 import {
   ScorecardBatch,
   type ScorecardOutcomeExtras,
+  type ScoringStageParity,
+  contentDigest,
   judgeGradeable,
   nextScoringRevision,
+  stagePromotionSafe,
   summarizeScorecard,
   verdictSummaryOf,
 } from "@everdict/domain";
@@ -35,6 +40,14 @@ import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
+
+// One judge family's rows, as a STORAGE-PATH-INDEPENDENT value (arch-review 16 P1-6). Parsing normalizes the
+// defaults a jsonb round-trip does not carry; sorting by metric removes an ordering that is not content; and
+// `contentDigest` is canonical over key order. Anything less compares the transport, not the judgment.
+function canonicalScores(scores: readonly Score[]): string {
+  const parsed = scores.map((s) => ScoreSchema.parse(s)).sort((a, b) => a.metric.localeCompare(b.metric));
+  return contentDigest(parsed);
+}
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
 // aggregate — "re-score with a different judge" and "promote experiment → scorecard" are the same operation
@@ -503,6 +516,11 @@ export class ScorecardScoreService {
       undefined,
       { expectScoringPassId: passId },
     );
+    // A pass declared dead will never write again, so its stage is garbage from this moment on — and unlike
+    // the settle path there is no revision to record an observation on, because there is no revision. Nothing
+    // is lost by collecting it (the score bytes are shadow; the claims only ever arbitrated between this
+    // pass's own invocations). Best-effort, like the notice itself.
+    if (marked !== undefined) void this.deps.scoringStage?.clear(id, passId).catch(() => undefined);
     return { marked: marked !== undefined };
   }
 
@@ -632,10 +650,32 @@ export class ScorecardScoreService {
             ),
             pass?.passId ?? fresh.scoringPass?.passId,
           );
+    // The stage observation is taken BEFORE the revision is written, so it can ride IT (arch-review 16 P1-6).
+    // It used to be a fire-and-forget callback after the settle: a control plane dying in between left the
+    // pass with no observation at all, indistinguishable from an agreeing one — and the stage promotion is
+    // gated on exactly that evidence. Non-fatal by construction (`stageParityOf` returns an incomplete
+    // observation rather than throwing): a measurement must never be able to fail the thing it measures.
+    const parity =
+      pass?.passId === undefined ? undefined : await this.stageParityOf(record.id, pass.passId, results, judges);
     const scoring = appendScoringRevision(fresh.scoring, {
       kind: "rescore",
       judges: sealed,
       results,
+      ...(parity !== undefined
+        ? {
+            stageParity: {
+              completed: parity.completed,
+              ...(parity.failure !== undefined ? { failure: parity.failure } : {}),
+              expectedJudged: parity.expectedJudged,
+              staged: parity.staged,
+              matched: parity.matched,
+              missingFromStage: parity.missingFromStage.length,
+              mismatched: parity.mismatched.length,
+              orphaned: parity.orphaned.length,
+              promotionSafe: stagePromotionSafe(parity),
+            },
+          }
+        : {}),
       // The revision entry points at its own FROZEN artifact — never the mutable current key a later pass
       // rewrites (I7): historical judgment stays re-derivable, not merely detectable via the plane digest.
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
@@ -691,12 +731,16 @@ export class ScorecardScoreService {
         "another scoring pass settled this group first — this pass's aggregate is refused (its revision would have overwritten the ledger).",
       );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    // …and REPORT how the stage compared to the plane this pass just certified (arch-review 10 P1). The
-    // contract step promotes from the stage instead of the carriers, and the basis for that swap is having
-    // watched the two agree on real traffic — dual-writing without ever comparing proves only that both
-    // writes happened. Strictly after the settle and strictly non-fatal: a measurement must never be able to
-    // fail the thing it measures.
-    if (pass?.passId !== undefined) void this.reportStageParity(record.id, pass.passId, results, judges);
+    // The same observation as a process METRIC — an operator watching a fleet wants a series, not a walk over
+    // revisions. It is now a projection of the durable record rather than the only place the fact exists.
+    if (parity !== undefined) this.deps.scoringStageParity?.(parity);
+    // …and only NOW is the stage's work finished, so its rows can go (arch-review 16 P1-6). Order matters and
+    // is the whole point: the observation is durable first, the evidence is dropped second. Clearing earlier
+    // would destroy what the promotion decision reads; never clearing leaves a row per
+    // (scorecard × pass × case × judge) forever, on a table whose score bytes nothing reads yet.
+    // Best-effort: a settled revision is not undone by a failed cleanup, and the next pass's strip is
+    // pass-scoped anyway, so a leftover row is dead weight rather than a hazard.
+    if (pass?.passId !== undefined) void this.deps.scoringStage?.clear(record.id, pass.passId).catch(() => undefined);
   }
 
   // Compare what THIS pass staged against the plane it settled — and, first, against what it actually JUDGED.
@@ -707,15 +751,16 @@ export class ScorecardScoreService {
   // comparison that walked the staged rows alone could only ever report on the writes that succeeded, which
   // is precisely the failure mode a best-effort write has. Non-gradeable cases are excluded — the strip skips
   // them, so their surviving old rows are inherited, not produced.
-  private async reportStageParity(
+  private async stageParityOf(
     scorecardId: string,
     passId: string,
     settled: CaseResult[],
     judges: ReadonlyArray<{ id: string }>,
-  ): Promise<void> {
-    const report = this.deps.scoringStageParity;
+  ): Promise<ScoringStageParity | undefined> {
     const stage = this.deps.scoringStage;
-    if (!report || !stage) return;
+    // No stage wired = nothing to observe. The revision carries no `stageParity`, which reads as "unobserved"
+    // — never as "agreed".
+    if (!stage) return undefined;
     try {
       // Compared per (case, JUDGE), matching the stage's key (mig 0153). Per case, a pass that staged one of
       // two judges on a case counted as "staged" and the missing judge was invisible — the same
@@ -750,12 +795,20 @@ export class ScorecardScoreService {
           orphaned.push(key);
           continue;
         }
-        // Structural equality over the delta rows — the promotion would write these bytes verbatim, so the
-        // comparison is the same one the promotion's correctness rests on.
-        if (JSON.stringify(live) === JSON.stringify(entry.scores)) matched += 1;
+        // Equality over the delta rows, CANONICALLY (arch-review 16 P1-6). `JSON.stringify` compared two
+        // objects that had travelled different storage paths: the plane's rows come back through
+        // `ScoreSchema.parse` (declaration key order, defaults such as `status: "measured"` applied), the
+        // staged rows come back as raw jsonb (Postgres key order, no defaults). Byte-identical judgments
+        // therefore compared UNEQUAL — so the parity series that gates the stage promotion was reporting a
+        // mismatch for essentially every pass, which is worse than no measurement: it is a measurement that
+        // is always wrong in the direction of "do not promote", so nobody would ever look for the cause.
+        //
+        // Both sides are normalized through the same schema and digested canonically (sorted keys), and the
+        // family is sorted by metric so a verdict/criterion ordering difference is not a content difference.
+        if (canonicalScores(live) === canonicalScores(entry.scores)) matched += 1;
         else mismatched.push(key);
       }
-      report({
+      return {
         scorecardId,
         passId,
         completed: true,
@@ -765,12 +818,12 @@ export class ScorecardScoreService {
         matched,
         mismatched,
         orphaned,
-      });
+      };
     } catch (err) {
       // A parity report that cannot run tells us nothing — and SAYING that is the point (arch-review 13 P1).
       // Reporting nothing made "every pass agreed" and "no pass was ever checked" the same picture, and the
       // contract step reads that picture. It still must not turn a settled pass into a failed one.
-      report({
+      return {
         scorecardId,
         passId,
         completed: false,
@@ -781,7 +834,7 @@ export class ScorecardScoreService {
         matched: 0,
         mismatched: [],
         orphaned: [],
-      });
+      };
     }
   }
 

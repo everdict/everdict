@@ -4,7 +4,7 @@ import { PgRunStore, PgScorecardStore, PgScoringStageStore } from "@everdict/db"
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
-// Trust suite (docs/trust-certification.md) — TRUST-53 · TRUST-55.
+// Trust suite (docs/trust-certification.md) — TRUST-53 · TRUST-55 · TRUST-70.
 //
 // THE CARRIER OBEYS THE ARBITER, PER JUDGE, OR IT DOES NOT WRITE AT ALL.
 //
@@ -67,7 +67,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
   // attempt finished and wrote its verdicts onto the CHILD RUN, which is the plane a write-back actually
   // merges onto. So: pending in the record, already-written on the child. Nothing here is contrived; it is
   // simply what "two attempts of one pass overlap" looks like from inside the second one.
-  async function seed(passId: string): Promise<{ id: string; runId: string }> {
+  async function seed(passId: string, planeScores: Score[] = []): Promise<{ id: string; runId: string }> {
     const id = trustId("sc-arb");
     const runId = trustId("run-arb");
     await runs.create({
@@ -104,7 +104,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
             harness: "h@1",
             trace: [{ t: 0, kind: "message", role: "assistant", text: "done" }],
             snapshot: { kind: "prompt", output: "done" },
-            scores: [], // stripped by prepareScore — both judges are pending for this attempt
+            scores: planeScores, // stripped by prepareScore by default — both judges pending for this attempt
           },
         ],
       },
@@ -193,6 +193,46 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
     expect(alpha).toMatchObject({ value: 0 }); // this attempt won alpha — its judgment stands
     expect(beta).toMatchObject({ value: 1 }); // …and lost beta, which therefore never moved
     await stage.clear(id, passId);
+  });
+
+  it("TRUST-70 — the settled revision CARRIES its stage observation, and only then is the stage collected", async () => {
+    // The promotion decision reads "did the stage and the plane agree on real traffic". That evidence used to
+    // be a fire-and-forget callback after the settle, turned into process counters: unreadable per pass, and
+    // absent entirely for any pass whose control plane died in the window between the settle and the
+    // callback — silently indistinguishable, in the promotion's own input, from a pass that agreed.
+    //
+    // It rides the revision now, written in the same guarded update. This drives the production settle and
+    // then reads the record back, which is exactly what a restarted control plane would see.
+    const passId = trustId("pass-parity");
+    // A plane that carries REAL judgments, and a stage that carries the same ones — so the observation is
+    // over actual units rather than a vacuous zero-work pass.
+    const { id } = await seed(passId, [verdict("alpha", 1), verdict("beta", 1)]);
+    await stage.stage(id, passId, [
+      { caseKey: KEY, judgeId: "alpha", scores: [verdict("alpha", 1)], claim: { generation: 1, attempt: 1 } },
+      { caseKey: KEY, judgeId: "beta", scores: [verdict("beta", 1)], claim: { generation: 1, attempt: 1 } },
+    ]);
+    await service({ stage }).finalizeScore(id, JUDGES, "dana", passId);
+
+    const settled = await cards.get(id);
+    const revision = settled?.scoring?.at(-1);
+    expect(revision?.stageParity).toBeDefined();
+    expect(revision?.stageParity).toMatchObject({
+      completed: true,
+      expectedJudged: 2, // two (case, judge) units, from the SETTLED plane — never from the stage itself
+      staged: 2,
+      matched: 2,
+      missingFromStage: 0,
+      mismatched: 0,
+      orphaned: 0,
+      promotionSafe: true,
+    });
+    // …and the predicate the contract step gates on is decided HERE, at the one moment every input to it is
+    // in hand, rather than re-derived later from evidence that has since been collected.
+    expect(typeof revision?.stageParity?.promotionSafe).toBe("boolean");
+
+    // The rows go only AFTER the observation is durable. Order is the invariant: clearing first would destroy
+    // what the promotion reads; never clearing leaves a row per (scorecard × pass × case × judge) forever.
+    expect(await stage.staged(id, passId)).toEqual([]);
   });
 
   it("TRUST-55 — an arbiter that cannot answer stops the write entirely: not one byte moves", async () => {

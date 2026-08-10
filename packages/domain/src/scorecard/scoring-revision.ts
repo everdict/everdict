@@ -45,6 +45,10 @@ export interface ScoringPassInput {
   results: CaseResult[];
   analysisRef?: string;
   analysisKey?: string; // its durable object key (the ref expires; artifacts are pass-keyed)
+  // How this pass's STAGE compared to the plane it is certifying (arch-review 16 P1-6) — the durable evidence
+  // the stage promotion is gated on. Absent = no stage wired, or a revision from before it existed; readers
+  // must treat that as UNOBSERVED, never as agreement.
+  stageParity?: NonNullable<ScoringRevision["stageParity"]>;
   createdAt: string;
   createdBy?: string;
 }
@@ -76,6 +80,10 @@ export function appendScoringRevision(
       // object is keyed by the writing PASS (two passes can target one revision), so the revision number no
       // longer names it. Dropping this here would leave every historical read holding a dead URL.
       ...(input.analysisKey !== undefined ? { analysisKey: input.analysisKey } : {}),
+      // Named EXPLICITLY, like every other field here. This builder constructs the entry field by field, so
+      // a caller spreading a new one in is silently dropped — a spread bypasses the excess-property check
+      // that would otherwise catch it, which is exactly how this field went missing on its first attempt.
+      ...(input.stageParity !== undefined ? { stageParity: input.stageParity } : {}),
       createdAt: input.createdAt,
       ...(input.createdBy !== undefined ? { createdBy: input.createdBy } : {}),
     },
