@@ -87,6 +87,17 @@ export interface ProductVersionSyncDeps {
 // the version ledger it guards is insert-once regardless.
 const SYNC_COMMIT_ATTEMPTS = 3;
 
+// A read that stopped at its page ceiling did NOT see the whole history, and saying so is the whole point
+// (arch-review 15 §13): a bare array made "5,000 rows because that is all there are" and "5,000 rows because we
+// stopped" the same answer, which is the one-page truncation the pagination replaced, only larger.
+function ceilingMessage(repository: string, backfill: boolean): string {
+  return `the version history of ${repository} exceeds the read ceiling — ${
+    backfill
+      ? "nothing was imported, because a first sync that reads only part of a history cannot establish this service's baseline: every release it failed to reach would arrive later as news"
+      : "imported the newest page(s) only"
+  }; raise maxPages or narrow the tagPrefix before treating this service's timeline as complete`;
+}
+
 export class ProductVersionSync {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -296,6 +307,12 @@ export class ProductVersionSync {
         });
       }
     }
+    // A BACKFILL CANNOT PROCEED ON A PARTIAL READ. Importing the pages we did reach puts rows in the ledger,
+    // and the ledger is half the backfill discriminator — so the very next sync would stop calling this stream
+    // a backfill, and every release beyond the ceiling would then arrive as NEWS: fan-outs and facts for
+    // versions that shipped years ago. Refusing costs an operator one `maxPages` change; proceeding costs a
+    // timeline that cannot be told apart from a real one.
+    if (incomplete && backfill) throw new Error(ceilingMessage(service.repository, true));
     const insertedRows: ProductServiceVersionRecord[] = [];
     for (const candidate of candidates) {
       const row: ProductServiceVersionRecord = {
@@ -324,10 +341,7 @@ export class ProductVersionSync {
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
       insertedRows.push(row);
     }
-    if (incomplete)
-      throw new Error(
-        `the version history of ${service.repository} exceeds the read ceiling — imported the newest page(s) only; raise maxPages or narrow the tagPrefix before treating this service's timeline as complete`,
-      );
+    if (incomplete) throw new Error(ceilingMessage(service.repository, false));
     return insertedRows;
   }
 
