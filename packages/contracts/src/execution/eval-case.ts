@@ -18,6 +18,27 @@ export const GraderSpecSchema = z.object({
   // whoever can name new ground truth can decide what passing MEANS, and that power is reviewed, not ambient.
   authority: MetricAuthoritySchema.optional(),
   direction: z.enum(["higher_is_better", "lower_is_better", "neutral"]).optional(),
+  // WHAT THIS GRADER MEASURES, named separately from what it IS (arch-review 19 P1).
+  //
+  // `id` does two jobs: it selects the implementation (`script`, `command`, `judge`…) AND, through
+  // `authority` above, it names the metric those semantics apply to. Those are the same string only for the
+  // graders whose metric happens to equal their type. A script grader is declared as `id: "script"` with
+  // `config.id: "business-check"` and prints `metric: "quality"` — so an `authority` declaration composed a
+  // policy entry for the metric `"script"`, which nothing ever emits, while the score that actually landed
+  // carried no declared semantics at all. The declaration and the measurement were about different names.
+  //
+  // `metrics` says it directly: these metric ids, with these semantics. When present it REPLACES the id-based
+  // reading — a spec that names its metrics is not also claiming its type is one. It is additive so every
+  // existing dataset keeps its meaning, and it is what a custom-grader ecosystem needs before it grows.
+  metrics: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        authority: MetricAuthoritySchema.optional(),
+        direction: z.enum(["higher_is_better", "lower_is_better", "neutral"]).optional(),
+      }),
+    )
+    .optional(),
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 

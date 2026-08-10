@@ -147,12 +147,28 @@ export function resolvePolicyResolution(ref?: StampedPolicyRef, embedded?: Verdi
 // document rather than in the gate call — a recorded gate decision must be re-derivable without the flags
 // whoever ran it happened to pass.
 export function composeVerdictPolicy(
-  specs: readonly Pick<GraderSpec, "id" | "authority" | "direction">[],
+  specs: readonly Pick<GraderSpec, "id" | "authority" | "direction" | "metrics">[],
   base: VerdictPolicy = DEFAULT_VERDICT_POLICY,
   opts: { criticalCases?: readonly CaseMatcher[] } = {},
 ): VerdictPolicy {
   const additions: MetricDefinition[] = [];
   for (const spec of specs) {
+    // A spec that NAMES its metrics is declaring semantics for those (arch-review 19 P1). The `id`-based
+    // reading below is what a grader whose metric equals its type gets, and for everything else it composed a
+    // rule about a name nothing emits — `id: "script"` declaring authority produced `match: {metric:"script"}`
+    // while the score that landed was `quality`. Explicit metrics REPLACE that reading rather than adding to
+    // it: naming them is saying the type is not one of them.
+    if (spec.metrics !== undefined && spec.metrics.length > 0) {
+      for (const m of spec.metrics) {
+        if (m.authority === undefined) continue;
+        additions.push({
+          match: { metric: m.id },
+          authority: m.authority,
+          ...(m.direction ? { direction: m.direction } : {}),
+        });
+      }
+      continue;
+    }
     if (spec.authority === undefined) continue;
     additions.push({
       match: { metric: spec.id },

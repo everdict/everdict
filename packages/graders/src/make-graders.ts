@@ -39,8 +39,17 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
 // construction (declared on the implementation), because treating "declared something" as the permit made
 // every declaration a wildcard: `authority: "observational"` needs no admin and would have bought `state`.
 function withDeclaredAuthority(grader: Grader, spec: GraderSpec): Grader {
-  if (spec.authority !== "judge") return grader;
-  return Object.assign(Object.create(Object.getPrototypeOf(grader)), grader, { ownsJudgeVerdict: true });
+  // A spec that NAMES its metrics owns those names (arch-review 19 P1) — that IS the declaration, made by the
+  // dataset author and gated at submit for ground truth. Without it a grader declaring `metrics: [{id:"state",
+  // authority:"ground_truth"}]` would compose a policy entry for `state` and then have its own score
+  // invalidated for emitting it, which is the two halves of one declaration disagreeing.
+  const owned = (spec.metrics ?? []).map((m) => m.id);
+  const patch = {
+    ...(owned.length > 0 ? { ownsMetrics: owned } : {}),
+    ...(spec.authority === "judge" ? { ownsJudgeVerdict: true } : {}),
+  };
+  if (Object.keys(patch).length === 0) return grader;
+  return Object.assign(Object.create(Object.getPrototypeOf(grader)), grader, patch);
 }
 
 function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {

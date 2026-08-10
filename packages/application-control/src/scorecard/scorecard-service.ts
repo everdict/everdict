@@ -7,6 +7,7 @@ import {
   ForbiddenError,
   type GateDecision,
   type GatePolicy,
+  type GraderSpec,
   type HarnessSpec,
   MANIFEST_IDENTITY_VERSION,
   type ManifestCheck,
@@ -221,13 +222,16 @@ export class ScorecardService {
       ...(input.criticalCases ? { criticalCases: input.criticalCases } : {}),
     });
     const composed = composedPolicy.id === "composed";
-    if (
-      (input.graders ?? []).some((g) => g.authority === "ground_truth") &&
-      !(input.submitterRoles ?? []).includes("admin")
-    ) {
+    // …and the gate reads BOTH declaration forms (arch-review 19 P1). `metrics[].authority` is the same
+    // constitutional act as the spec-level one — naming new ground truth — so a gate that only saw the older
+    // spelling would have been bypassable by using the newer one, which is the shape of every authority
+    // defect in this codebase's history.
+    const declaresGroundTruth = (g: GraderSpec): boolean =>
+      g.authority === "ground_truth" || (g.metrics ?? []).some((m) => m.authority === "ground_truth");
+    if ((input.graders ?? []).some(declaresGroundTruth) && !(input.submitterRoles ?? []).includes("admin")) {
       throw new ForbiddenError(
         "FORBIDDEN",
-        { graders: (input.graders ?? []).filter((g) => g.authority === "ground_truth").map((g) => g.id) },
+        { graders: (input.graders ?? []).filter(declaresGroundTruth).map((g) => g.id) },
         "Declaring ground_truth authority for a run-time grader requires the admin role — it changes what passing means.",
       );
     }
