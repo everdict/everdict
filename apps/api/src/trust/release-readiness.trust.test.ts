@@ -9,7 +9,7 @@ import {
   InMemoryReleaseStore,
   InMemoryScorecardStore,
 } from "@everdict/db";
-import { evaluateGate, productReleasePolicyDigest } from "@everdict/domain";
+import { evaluateGate, productEvaluationDefinitionDigest, productReleasePolicyDigest } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
@@ -315,7 +315,12 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
       expectStatus: "planned",
       expectVersion: releaseRow?.version ?? 0, // the release did NOT move — this half passes
       // …and this half refuses: the policy digest moved even though nothing about the release did.
-      expectProduct: { id: product.id, version: product.version ?? 0, policyDigest: stalePolicy },
+      expectProduct: {
+        id: product.id,
+        version: product.version ?? 0,
+        policyDigest: stalePolicy,
+        definitionDigest: productEvaluationDefinitionDigest(product),
+      },
     });
     expect(guarded).toBeUndefined();
     // …and the same write commits once it states the policy it actually read.
@@ -328,6 +333,7 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
           id: product.id,
           version: fresh?.version ?? 0,
           policyDigest: fresh === undefined ? "" : productReleasePolicyDigest(fresh),
+          definitionDigest: fresh === undefined ? "" : productEvaluationDefinitionDigest(fresh),
         },
       }),
     ).resolves.toBeDefined();
@@ -362,6 +368,7 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
       name: "2026.3",
     });
     const policyAtDecision = productReleasePolicyDigest(product);
+    const definitionAtDecision = productEvaluationDefinitionDigest(product);
 
     // A rename lands mid-decision. The row version moves; the release policy does not.
     await productService.update(
@@ -378,8 +385,94 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
       releases.update("acme", release.id, { status: "released" }, undefined, {
         expectStatus: "planned",
         expectVersion: releaseRow?.version ?? 0,
-        expectProduct: { id: product.id, version: product.version ?? 0, policyDigest: policyAtDecision },
+        expectProduct: {
+          id: product.id,
+          version: product.version ?? 0,
+          policyDigest: policyAtDecision,
+          definitionDigest: definitionAtDecision,
+        },
       }),
     ).resolves.toBeDefined();
+  });
+});
+
+// Trust suite — TRUST-62.
+//
+// A SHIP LOSES TO AN EDIT OF WHAT ITS SERIES ASK. The release CAS guarded the product's governance policy —
+// which series gate, which pre-approve a bootstrap — and that digest was narrowed on purpose so a rename
+// stops conflicting an in-flight ship. The narrowing left the OTHER half unguarded: a decision resolves each
+// series' evaluation contract (dataset × harness × judges) and nothing stopped a member replacing that
+// definition mid-decision. Widening the policy digest would have undone the narrowing; two questions get two
+// digests, and the write holds both.
+describeTrust("TRUST-62 — editing a series' definition mid-decision refuses the ship", () => {
+  it("a dataset swap invalidates an in-flight decision; a rename still does not", async () => {
+    const products = new InMemoryProductStore();
+    const releases = new InMemoryReleaseStore();
+    releases.attachProducts(products);
+    let n = 0;
+    const service = new ProductService({
+      store: products,
+      releases,
+      versions: new InMemoryProductVersionStore(),
+      newId: () => `t62-${n++}`,
+      now: () => "2026-08-04T00:00:00.000Z",
+    });
+    const product = await service.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      series: [{ ...SERIES, dataset: { id: "support-cases", version: "1.0.0" } }],
+    });
+    const release = await service.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+    });
+    const guardAt = (p: typeof product) => ({
+      id: p.id,
+      version: p.version ?? 0,
+      policyDigest: productReleasePolicyDigest(p),
+      definitionDigest: productEvaluationDefinitionDigest(p),
+    });
+    const atDecision = guardAt(product);
+
+    // A RENAME must NOT conflict — that is the whole reason the policy digest was narrowed.
+    await service.update("acme", product.id, { name: "Support Copilot (EU)" }, { subject: "cap", isAdmin: true });
+    const row = await releases.get("acme", release.id);
+    await expect(
+      releases.update("acme", release.id, { status: "released" }, undefined, {
+        expectStatus: "planned",
+        expectVersion: row?.version ?? 0,
+        expectProduct: atDecision,
+      }),
+    ).resolves.toBeDefined();
+
+    // …and a DATASET SWAP must. The governance policy is byte-identical across this edit.
+    const replanned = await service.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.4",
+    });
+    const before = await service.get("acme", product.id);
+    const beforeGuard = guardAt(before);
+    await service.update(
+      "acme",
+      product.id,
+      { series: [{ ...SERIES, dataset: { id: "support-cases", version: "2.0.0" } }] },
+      { subject: "cap", isAdmin: true },
+    );
+    const after = await service.get("acme", product.id);
+    expect(productReleasePolicyDigest(after)).toBe(productReleasePolicyDigest(before)); // governance unchanged
+    expect(productEvaluationDefinitionDigest(after)).not.toBe(productEvaluationDefinitionDigest(before));
+    const row2 = await releases.get("acme", replanned.id);
+    await expect(
+      releases.update("acme", replanned.id, { status: "released" }, undefined, {
+        expectStatus: "planned",
+        expectVersion: row2?.version ?? 0,
+        expectProduct: beforeGuard,
+      }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import type { OutboxEvent, ProductListFilter, ProductStore } from "@everdict/application-control";
 import { type ProductRecord, ProductRecordSchema } from "@everdict/contracts";
-import { productReleasePolicyDigest } from "@everdict/domain";
+import { productEvaluationDefinitionDigest, productReleasePolicyDigest } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory } from "../tracker/row.js";
@@ -12,7 +12,11 @@ export class InMemoryProductStore implements ProductStore {
   async create(record: ProductRecord, events?: OutboxEvent[]): Promise<void> {
     // Derived on write, exactly as the Pg twin does it — the release guard compares a STORED value, so an
     // in-memory pair that skipped it would let the guard pass on a policy it never actually recorded.
-    this.byId.set(record.id, { ...record, releasePolicyDigest: productReleasePolicyDigest(record) });
+    this.byId.set(record.id, {
+      ...record,
+      releasePolicyDigest: productReleasePolicyDigest(record),
+      evaluationDefinitionDigest: productEvaluationDefinitionDigest(record),
+    });
     if (events) this.events.push(...events);
   }
 
@@ -54,7 +58,11 @@ export class InMemoryProductStore implements ProductStore {
       id: current.id,
       tenant: current.tenant,
     };
-    const next: ProductRecord = { ...merged, releasePolicyDigest: productReleasePolicyDigest(merged) };
+    const next: ProductRecord = {
+      ...merged,
+      releasePolicyDigest: productReleasePolicyDigest(merged),
+      evaluationDefinitionDigest: productEvaluationDefinitionDigest(merged),
+    };
     this.byId.set(id, next);
     if (events) this.events.push(...events);
     return next;
@@ -98,6 +106,7 @@ export class InMemoryProductStore implements ProductStore {
 interface ProductRow extends TrackerRow {
   version?: string | number | null;
   release_policy_digest?: string | null;
+  evaluation_definition_digest?: string | null;
   name: string;
   description: string | null;
   icon: string | null;
@@ -107,9 +116,9 @@ interface ProductRow extends TrackerRow {
 }
 
 const PRODUCT_COLUMNS =
-  "(id, tenant, name, description, icon, services, series, auto_eval, history, created_by, created_at, updated_at, release_policy_digest)";
+  "(id, tenant, name, description, icon, services, series, auto_eval, history, created_by, created_at, updated_at, release_policy_digest, evaluation_definition_digest)";
 const PRODUCT_VALUES =
-  "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::timestamptz,$12::timestamptz,$13)";
+  "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::timestamptz,$12::timestamptz,$13,$14)";
 
 function insertParams(record: ProductRecord): unknown[] {
   return [
@@ -128,6 +137,7 @@ function insertParams(record: ProductRecord): unknown[] {
     // DERIVED here, never taken from the caller: the digest is a fact about the series being written, and a
     // record that could carry its own would let a writer disagree with what it stored.
     productReleasePolicyDigest(record),
+    productEvaluationDefinitionDigest(record),
   ];
 }
 
@@ -135,6 +145,7 @@ function rowToRecord(row: ProductRow): ProductRecord {
   return ProductRecordSchema.parse({
     version: Number(row.version ?? 0),
     ...(row.release_policy_digest ? { releasePolicyDigest: row.release_policy_digest } : {}),
+    ...(row.evaluation_definition_digest ? { evaluationDefinitionDigest: row.evaluation_definition_digest } : {}),
     id: row.id,
     tenant: row.tenant,
     name: row.name,
@@ -213,7 +224,7 @@ export class PgProductStore implements ProductStore {
     // never read-then-written, so two concurrent policy edits cannot land on the same number.
     const sets = `name=$3, description=$4, icon=$5, services=$6::jsonb, series=$7::jsonb,
        auto_eval=$8::jsonb, history=$9::jsonb, updated_at=$10::timestamptz, version = version + 1,
-       release_policy_digest=$11`;
+       release_policy_digest=$11, evaluation_definition_digest=$12`;
     const params: unknown[] = [
       tenant,
       id,
@@ -226,6 +237,7 @@ export class PgProductStore implements ProductStore {
       JSON.stringify(next.history),
       next.updatedAt,
       productReleasePolicyDigest(next),
+      productEvaluationDefinitionDigest(next),
     ];
     // …evaluated IN the write statement, like every other guard in this codebase. Checked before the UPDATE
     // it would only widen the window it exists to close.

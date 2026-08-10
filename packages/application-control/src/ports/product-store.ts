@@ -83,7 +83,11 @@ export interface ReleaseStore {
       // store uses only while a product predates the column. The version alone conflated content, policy and
       // sync-watermark revisions in one counter, so a background sweep could conflict a ship its policy had
       // nothing to do with.
-      expectProduct?: { id: string; version: number; policyDigest: string };
+      // BOTH digests (mig 0154 + 0160): the governance policy AND the evaluation definition a decision stood
+      // on. The policy digest was narrowed to governance so a rename stops conflicting a ship, which left
+      // "which dataset/harness/judges does this series ask" unguarded — and a ship resolves exactly that.
+      // `version` remains the legacy fallback for a product written before either column existed.
+      expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
     },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;

@@ -7,19 +7,28 @@ import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row
 export class InMemoryReleaseStore implements ReleaseStore {
   private readonly byId = new Map<string, ReleaseRecord>();
   private readonly events: OutboxEvent[] = [];
-  private productPolicy?: (id: string) => { version?: number; policyDigest?: string } | undefined;
+  private productPolicy?: (
+    id: string,
+  ) => { version?: number; policyDigest?: string; definitionDigest?: string } | undefined;
 
   // Bind the PRODUCT side of the cross-aggregate policy guard (mig 0150). The Pg twin evaluates it as an
   // EXISTS inside the write statement; unbound here, `expectProduct` ABSTAINS rather than refusing — an
   // in-memory pair that failed closed on an unwired link would break every unit path that never had one,
   // and the guard's whole purpose is the concurrent case a single-threaded fake cannot produce anyway.
-  attachProducts(products: { peek(id: string): { version?: number; releasePolicyDigest?: string } | undefined }): void {
+  attachProducts(products: {
+    peek(
+      id: string,
+    ): { version?: number; releasePolicyDigest?: string; evaluationDefinitionDigest?: string } | undefined;
+  }): void {
     this.productPolicy = (id) => {
       const p = products.peek(id);
       if (p === undefined) return undefined;
       return {
         version: p.version ?? 0,
         ...(p.releasePolicyDigest !== undefined ? { policyDigest: p.releasePolicyDigest } : {}),
+        // BOTH digests (mig 0160). Omitting this one is not a smaller guard — it is no guard at all for the
+        // half it covers, because the comparison reads an absent digest as "nothing to check".
+        ...(p.evaluationDefinitionDigest !== undefined ? { definitionDigest: p.evaluationDefinitionDigest } : {}),
       };
     };
   }
@@ -56,7 +65,7 @@ export class InMemoryReleaseStore implements ReleaseStore {
     guard?: {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
-      expectProduct?: { id: string; version: number; policyDigest: string };
+      expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
@@ -72,11 +81,14 @@ export class InMemoryReleaseStore implements ReleaseStore {
     if (guard?.expectProduct !== undefined && this.productPolicy !== undefined) {
       // Mirrors the Pg condition: the digest decides, the version stands in only for a legacy row.
       const live = this.productPolicy(guard.expectProduct.id);
+      // Mirrors the Pg condition: BOTH digests must hold where present; the version stands in only for a row
+      // that predates them entirely.
       const ok =
         live === undefined
           ? false
-          : live.policyDigest !== undefined
-            ? live.policyDigest === guard.expectProduct.policyDigest
+          : live.policyDigest !== undefined || live.definitionDigest !== undefined
+            ? (live.policyDigest === undefined || live.policyDigest === guard.expectProduct.policyDigest) &&
+              (live.definitionDigest === undefined || live.definitionDigest === guard.expectProduct.definitionDigest)
             : (live.version ?? 0) === guard.expectProduct.version;
       if (!ok) return undefined;
     }
@@ -233,7 +245,7 @@ export class PgReleaseStore implements ReleaseStore {
     guard?: {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
-      expectProduct?: { id: string; version: number; policyDigest: string };
+      expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
@@ -280,8 +292,9 @@ export class PgReleaseStore implements ReleaseStore {
     // as the write. Read separately it would only be a wider window — the edit lands between the read and
     // the write and the decision commits anyway, which is exactly the race being closed.
     if (guard?.expectProduct !== undefined) {
-      params.push(guard.expectProduct.policyDigest, guard.expectProduct.version);
-      const digestIdx = params.length - 1;
+      params.push(guard.expectProduct.policyDigest, guard.expectProduct.definitionDigest, guard.expectProduct.version);
+      const digestIdx = params.length - 2;
+      const defIdx = params.length - 1;
       const versionIdx = params.length;
       // CORRELATED to the row being updated, and TENANT-SCOPED (arch-review 13). The first version compared
       // `p.id = $callerSuppliedProductId` with no tenant clause — so the guard trusted the caller to restate
@@ -293,7 +306,7 @@ export class PgReleaseStore implements ReleaseStore {
       // Self-healing (mig 0154): the digest is the identity; the version is the fallback a product keeps only
       // until its next write populates the column. Never `IS NULL → pass` — that would leave every
       // un-migrated product's ship decisions unguarded, which is the fail-open this shape invites.
-      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (p.release_policy_digest=$${digestIdx} OR (p.release_policy_digest IS NULL AND coalesce(p.version, 0)=$${versionIdx})))`;
+      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (p.release_policy_digest IS NULL OR p.release_policy_digest=$${digestIdx}) AND (p.evaluation_definition_digest IS NULL OR p.evaluation_definition_digest=$${defIdx}) AND (p.release_policy_digest IS NOT NULL OR p.evaluation_definition_digest IS NOT NULL OR coalesce(p.version, 0)=$${versionIdx}))`;
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

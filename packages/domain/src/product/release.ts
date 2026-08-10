@@ -1,6 +1,7 @@
 import type { PlatformFact, ReleaseRecord, ReleaseStatus } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "../tracker/history.js";
+import type { ResolvedSeriesContract } from "./readiness.js";
 
 // The Release aggregate — a checkpoint on the product's axis. Same {patch, facts} transition contract as the
 // tracker; the released gate is the point: "we shipped" with open issues or a regressed watch series must be a
@@ -57,14 +58,11 @@ export interface ReleaseStatusChangeInput {
     // only be answered by walking to a scorecard that may since have been deleted, and the DECISION itself
     // was not self-describing. The digest identifies it; the document makes it readable without any external
     // mutable state, which is the same reason the product policy is embedded rather than digested.
-    evaluationContract?: {
-      digest: string;
-      dataset: { id: string; version: string };
-      harness: { id: string; version: string };
-      judges: ReadonlyArray<{ id: string; version: string }>;
-      harnessModel?: string;
-      judgeClosure?: ReadonlyArray<{ id: string; version: string; model?: string; rubric?: string }>;
-    };
+    // The SHARED type, not a copy of it (arch-review 15 §15). Re-declaring the shape here dropped
+    // `serviceModels` and the judge closure's delegated `harness` — and a type that omits a field tells every
+    // downstream reader the field does not exist, which is how two declarations of one concept drift apart
+    // while the runtime quietly carries both.
+    evaluationContract?: { digest: string } & ResolvedSeriesContract;
   }>;
   // The product policy this decision stood on (series membership + required/bootstrap flags) — as a
   // DOCUMENT, because a digest of a mutable record is one-way: it detects that the policy changed and can

@@ -442,6 +442,38 @@ export function productPolicyDigest(product: ProductRecord, release?: ReleaseSco
 // compare (the guard is an EXISTS on the product row — it cannot run a per-release computation), and the
 // over-block it keeps is narrow and honest: editing a series this release does not watch. Renames, icons,
 // descriptions, service edits and sync watermarks no longer conflict anything.
+// The identity of what a product's series ASK — dataset, harness and judge refs as DECLARED (arch-review 15
+// P0-4). A companion to the policy digest, not an extension of it: the two answer different questions and
+// deliberately move for different reasons.
+//
+//   releasePolicyDigest      governance — which series gate, which pre-approve a bootstrap
+//   evaluationDefinitionDigest  the question — which dataset/harness/judges each series names
+//
+// A ship decision reads the second when it resolves each series' contract, and the release CAS guarded only
+// the first — so a member editing `quality` from dataset-v1 to dataset-v2 mid-decision left the policy digest
+// untouched, the guard passed, and the ship committed against a definition the product had already replaced.
+// Widening the policy digest to cover it would have been the wrong repair: the policy identity was narrowed
+// on purpose so a rename stops conflicting a ship, and folding the definition back in would undo exactly
+// that. Two questions, two digests, both guarded.
+//
+// DECLARED refs, not resolved ones: a `latest` moving is registry drift, which the series-contract freeze
+// handles at decision time. This digest answers "did a human change what this series asks", which is the
+// thing an in-flight decision must lose to.
+export function productEvaluationDefinitionDigest(product: Pick<ProductRecord, "series">): string {
+  return contentDigest(
+    [...product.series]
+      .map((s) => ({
+        key: s.key,
+        dataset: { id: s.dataset.id, version: s.dataset.version ?? null },
+        harness: { id: s.harness.id, version: s.harness.version ?? null },
+        judges: [...s.judges]
+          .map((j) => ({ id: j.id, version: j.version ?? null }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+  );
+}
+
 export function productReleasePolicyDigest(product: Pick<ProductRecord, "series">): string {
   return contentDigest(
     [...product.series]

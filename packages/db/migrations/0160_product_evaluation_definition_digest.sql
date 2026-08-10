@@ -1,0 +1,26 @@
+-- The SECOND thing a ship decision stands on: what its series ASK (arch-review 15 P0-4).
+--
+-- Mig 0154 gave the release CAS a `release_policy_digest`, and narrowed it on purpose to governance —
+-- {key, required, allowNoBaseline} — so that renaming a product or a background sync watermark stops
+-- conflicting an in-flight ship. That narrowing was right and it left a hole: a ship resolves each series'
+-- evaluation CONTRACT (dataset × harness × judges) and commits guarded only on governance, so
+--
+--   A: ship starts, resolves quality = dataset-v1, evidence PASS
+--   B: member edits quality → dataset-v2, commits      (policy digest unchanged)
+--   A: release UPDATE → policy guard PASSES → ships against a definition already replaced
+--
+-- Widening the policy digest to cover it would undo the narrowing. Two questions, two digests:
+--
+--   release_policy_digest          governance — which series gate, which pre-approve a bootstrap
+--   evaluation_definition_digest   the question — which dataset/harness/judges each series names
+--
+-- Both are guarded on the release write, and each moves only for its own reason.
+--
+-- Over DECLARED refs, not resolved ones: a `latest` moving underneath is registry drift, which the decision's
+-- own contract freeze already handles. This answers "did a human change what this series asks", which is the
+-- thing an in-flight decision must lose to.
+--
+-- Same self-healing shape as 0154: pre-migration rows carry NULL and the guard falls back to the row version
+-- until that product's next write. Never `IS NULL → pass`, which would leave un-migrated products unguarded.
+ALTER TABLE everdict_products
+  ADD COLUMN IF NOT EXISTS evaluation_definition_digest TEXT;

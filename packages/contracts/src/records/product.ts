@@ -114,6 +114,11 @@ export const ProductRecordSchema = z.object({
   // moved. Derived, never author-supplied. Absent on rows written before the column existed; the release
   // guard then falls back to the version, which is sound and merely over-broad.
   releasePolicyDigest: z.string().optional(),
+  // The identity of what this product's series ASK — dataset/harness/judge refs as declared (mig 0160). A
+  // companion to the policy digest above, deliberately NOT folded into it: the policy digest was narrowed to
+  // governance so a rename stops conflicting an in-flight ship, and a ship also stands on the definition,
+  // which that narrowing left unguarded. Two questions, two digests. Derived by the store on write.
+  evaluationDefinitionDigest: z.string().optional(),
   id: z.string(),
   tenant: z.string(),
   name: z.string().min(1),

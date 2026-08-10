@@ -38,6 +38,7 @@ import {
   type SeriesScorecardPoint,
   currentScoringPin,
   decisionPassRate,
+  productEvaluationDefinitionDigest,
   productPolicyDigest,
   productReleasePolicyDigest,
   releasePolicyDocument,
@@ -802,6 +803,10 @@ export class ProductService {
                 id: product.id,
                 version: product.version ?? 0,
                 policyDigest: productReleasePolicyDigest(product),
+                // …and WHAT ITS SERIES ASK (arch-review 15 P0-4). The ship resolved each series' contract
+                // from this definition; an edit to it during the decision must invalidate the decision, and
+                // the governance digest — narrowed on purpose — cannot see that.
+                definitionDigest: productEvaluationDefinitionDigest(product),
               },
             }
           : {}),
@@ -815,6 +820,10 @@ export class ProductService {
           product !== undefined &&
           liveProduct !== undefined &&
           productReleasePolicyDigest(liveProduct) !== productReleasePolicyDigest(product);
+        const definitionMoved =
+          product !== undefined &&
+          liveProduct !== undefined &&
+          productEvaluationDefinitionDigest(liveProduct) !== productEvaluationDefinitionDigest(product);
         throw new ConflictError(
           "CONFLICT",
           {
@@ -827,11 +836,13 @@ export class ProductService {
               ? { productVersion: { expected: product?.version ?? 0, actual: liveProduct?.version ?? 0 } }
               : {}),
           },
-          policyMoved
-            ? "this product's release policy was edited while the decision was being made — which series gate (and whether a bootstrap is approved) may differ from the ones this readiness evaluated; re-read it and decide again."
-            : live.status !== current.status
-              ? `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`
-              : "this release was edited while the decision was being made — its watched series may differ from the ones this readiness evaluated; re-read it and decide again.",
+          definitionMoved
+            ? "this product's series definition (dataset/harness/judges) was edited while the decision was being made — the evidence this readiness accepted answers a question the product no longer asks; re-read it and decide again."
+            : policyMoved
+              ? "this product's release policy was edited while the decision was being made — which series gate (and whether a bootstrap is approved) may differ from the ones this readiness evaluated; re-read it and decide again."
+              : live.status !== current.status
+                ? `this release moved to ${live.status} while the decision was being made — re-read it and decide again.`
+                : "this release was edited while the decision was being made — its watched series may differ from the ones this readiness evaluated; re-read it and decide again.",
         );
       }
     }

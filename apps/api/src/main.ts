@@ -958,13 +958,23 @@ async function main(): Promise<void> {
         const spec = await modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
         return `${binding.ref}@${spec.version}`;
       } catch {
-        return "unresolved"; // the manifest's own sentinel — an honest hole, not a silent one
+        // The MANIFEST may record "unresolved" — it states a fact about an execution that already happened.
+        // A release GATE asks a different question ("is the current question's identity established?"), and
+        // an unsealed closure is not an answer to it (arch-review 15 §9). Signalled here; the caller turns it
+        // into `unresolvable` rather than digesting a hole and calling the result resolved.
+        return undefined;
       }
     };
     let harnessModel: string | undefined;
     try {
       const spec = await harnessInstanceRegistry.get(tenant, harness.id, harness.version);
-      harnessModel = await bindingIdentity((spec as { model?: ModelBinding }).model);
+      const binding = (spec as { model?: ModelBinding }).model;
+      harnessModel = await bindingIdentity(binding);
+      if (binding !== undefined && harnessModel === undefined)
+        return {
+          status: "unresolvable",
+          reason: `harness '${harness.id}@${harness.version}' names a model binding that could not be resolved`,
+        };
     } catch (err) {
       return {
         status: "unresolvable",
@@ -979,6 +989,11 @@ async function main(): Promise<void> {
           rubric?: unknown;
         };
         const model = await bindingIdentity(spec.model);
+        if (spec.model !== undefined && model === undefined)
+          return {
+            status: "unresolvable",
+            reason: `judge '${judge.id}@${judge.version}' names a model binding that could not be resolved`,
+          };
         // A rubric REF resolves at run time too — the same moving-target shape as a model binding.
         const rubricRef = spec.rubric;
         let rubric: string | undefined;
@@ -986,11 +1001,15 @@ async function main(): Promise<void> {
           const r = rubricRef as { id: string; version?: string };
           try {
             const versions = await rubricRegistry.versions(tenant, r.id);
-            rubric =
-              versions.length > 0 ? `${r.id}@${resolveRef(r.id, r.version ?? "latest", versions)}` : "unresolved";
+            rubric = versions.length > 0 ? `${r.id}@${resolveRef(r.id, r.version ?? "latest", versions)}` : undefined;
           } catch {
-            rubric = "unresolved";
+            rubric = undefined;
           }
+          if (rubric === undefined)
+            return {
+              status: "unresolvable" as const,
+              reason: `judge '${judge.id}@${judge.version}' names a rubric that could not be resolved`,
+            };
         }
         judgeClosure.push({
           ...judge,

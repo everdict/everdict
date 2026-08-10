@@ -261,6 +261,7 @@ export {
 export {
   type BaselineResolution,
   productPolicyDigest,
+  productEvaluationDefinitionDigest,
   productReleasePolicyDigest,
   releasePolicyDocument,
   type ReleasePolicySeries,
