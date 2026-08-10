@@ -31,16 +31,16 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # showLastUpdateTime reads git history; without it every page warns and shows no date.
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      # No `version:` — it is resolved from the root package.json "packageManager", exactly as ci.yml
+      # does. Pinning one here instead made action-setup fail on conflicting pnpm versions.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
