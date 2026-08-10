@@ -262,7 +262,17 @@ export class ScorecardBatchService {
             : harnesses.get(rec.tenant, rec.harness.id, rec.harness.version),
         { id: rec.harness.id, version: rec.harness.version },
       );
-      this.assertSealedResolution(rec, undefined, resolvedSpec);
+      // A REFUSAL IS A REFUSAL, whichever document moved (arch-review 19). The dataset half answers `false`
+      // — "not faithfully resumable" — because that is what this method returns; the harness half was added
+      // outside that try and threw instead, so the same fact left the same method two different ways
+      // depending on which document was shadowed. That is the asymmetry class this area keeps producing, in
+      // miniature. Recovery treats both as "cannot resume", and the marker stays for an operator.
+      try {
+        this.assertSealedResolution(rec, undefined, resolvedSpec);
+      } catch (err) {
+        if (err instanceof ConflictError) return false;
+        throw err;
+      }
       harnessSpec = pinHarnessSpecToClosure(resolvedSpec, rec.manifest?.harness);
     }
     const remaining = dataset.cases.length - seed.length;
@@ -332,19 +342,26 @@ export class ScorecardBatchService {
   // rather than as two call sites because the asymmetry it replaces was invisible: resume verified the harness
   // and not the dataset, the Temporal plan verified the dataset and not the harness, and each looked handled.
   //
-  // A PIN OVERRIDE exempts the harness: `origin.pinOverrides` is a deliberate submit-time image swap this
-  // batch recorded, so the resolved spec is expected to differ from the registry document by exactly that.
+  // NO PIN EXEMPTION (arch-review 19 P0-1). The first version skipped the harness comparison whenever
+  // `origin.pinOverrides` was present, reasoning that a deliberate image swap is expected to differ from the
+  // registry document. That reasoning describes a seal this batch does not have: submit seals the EFFECTIVE
+  // spec — `resolveWithPins(base, pins)` — not the base, and every re-resolution re-applies the same pins to
+  // whatever the base resolves to now. So the digests are directly comparable, the exemption bought nothing,
+  // and it turned the pinned path into the one place a shadowed harness could execute uncaught:
+  //
+  //   submit  _shared/agent@1 = A, pins P  →  seal digest(resolveWithPins(A, P))
+  //   later   tenant/agent@1  = B (same id@version, different command/env/topology)
+  //   resume  resolveWithPins(B, P) = B'   →  verification SKIPPED because pins exist  →  B' executes
+  //
+  // A model closure cannot see that difference either, so nothing else was covering it.
   private assertSealedResolution(
     rec: ScorecardRecord,
     cases?: ReadonlyArray<Pick<EvalCase, "id" | "graders">>,
     harnessSpec?: HarnessSpec,
   ): void {
-    const pins = rec.origin?.pinOverrides;
     const mismatches = verifySealedSelection(rec.manifest, {
       cases: cases ?? [],
-      ...(harnessSpec !== undefined && (!pins || Object.keys(pins).length === 0)
-        ? { harnessSpec, harnessRef: `${rec.harness.id}@${rec.harness.version}` }
-        : {}),
+      ...(harnessSpec !== undefined ? { harnessSpec, harnessRef: `${rec.harness.id}@${rec.harness.version}` } : {}),
     });
     // With no cases supplied this is a harness-only check, so the selection half must not fire on an empty
     // list — that would refuse every harness verification for "removing" every case.
