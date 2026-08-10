@@ -9,6 +9,7 @@ import {
   type VerdictAggregation,
   type VerdictPolicy,
   type VerdictPolicyRef,
+  isConstitutionalMetric,
   measuredScores,
   metricMatches,
 } from "@everdict/contracts";
@@ -161,6 +162,12 @@ export function composeVerdictPolicy(
     if (spec.metrics !== undefined && spec.metrics.length > 0) {
       for (const m of spec.metrics) {
         if (m.authority === undefined) continue;
+        // A CONSTITUTIONAL NAME IS NOT DECLARABLE (arch-review 20 P0-1), enforced here as well as at submit.
+        // Submit refuses the request that writes one, which is where an author should learn; this is the
+        // choke point every OTHER source flows through — a dataset registered before that refusal existed,
+        // an inline bundle, a seed. The built-in ladder decides those names, and a composed document that
+        // overrode them would rewrite the constitution from a data file.
+        if (isConstitutionalMetric(m.id)) continue;
         additions.push({
           match: { metric: m.id },
           authority: m.authority,

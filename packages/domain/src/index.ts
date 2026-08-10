@@ -53,6 +53,8 @@ export {
   pendingJudgesFor,
   stampJudgeAttempts,
   isJudgeMetricOf,
+  effectiveGraderDeclarations,
+  type GraderDeclarationConflict,
   sealGrading,
   selectSubsetCases,
   stripJudgeScores,

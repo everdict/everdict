@@ -151,6 +151,12 @@ export interface ResolvedSeriesContract {
   // is a different judging apparatus. The manifest has sealed it since the batch's own identity was widened;
   // the release gate was still comparing without it.
   judgeRun?: { provider?: string; model: string };
+  // …and the DOCUMENT that ref named (arch-review 21 P0-1). Keeping the ref in the contract while leaving its
+  // document out said that `model-x@1` is identity but the bytes behind it are not — which contradicts the
+  // owner-first model every other facet here is built on. A workspace registering its own `model-x@1` changes
+  // the provider, the underlying model and the credential behind an unchanged name, and an inline judge
+  // grader judged by it is a different judging apparatus.
+  judgeRunModelDigest?: string;
 }
 
 // WHETHER the current contract could be established, as data (arch-review 14 P0). The first version passed
@@ -208,6 +214,7 @@ export function seriesContractFromManifest(manifest: {
     harnessServiceModelDigests?: Record<string, string>;
   }>;
   judgeRun?: { provider?: string; model: string };
+  judgeRunModelDigest?: string;
 }): ResolvedSeriesContract {
   const judges = manifest.judges ?? [];
   return {
@@ -227,6 +234,14 @@ export function seriesContractFromManifest(manifest: {
     judges: judges.map((j) => ({ id: j.id, version: j.version })),
     ...(manifest.harness.model !== undefined ? { harnessModel: manifest.harness.model } : {}),
     ...(manifest.harness.serviceModels !== undefined ? { serviceModels: manifest.harness.serviceModels } : {}),
+    // The harness model DOCUMENTS. This projection took them as input and dropped them for a whole wave —
+    // the same defect shape as arch-review 16 P0-2, surviving for the same reason: TRUST-63 rebuilds the
+    // manifest FROM the contract, so a facet neither side carries compares equal to itself. What catches it
+    // is a metamorphic test — same ref@version, different document — never a round trip.
+    ...(manifest.harness.modelDigest !== undefined ? { harnessModelDigest: manifest.harness.modelDigest } : {}),
+    ...(manifest.harness.serviceModelDigests !== undefined
+      ? { serviceModelDigests: manifest.harness.serviceModelDigests }
+      : {}),
     judgeClosure: judges.map((j) => ({
       id: j.id,
       version: j.version,
@@ -246,6 +261,7 @@ export function seriesContractFromManifest(manifest: {
         : {}),
     })),
     ...(manifest.judgeRun !== undefined ? { judgeRun: manifest.judgeRun } : {}),
+    ...(manifest.judgeRunModelDigest !== undefined ? { judgeRunModelDigest: manifest.judgeRunModelDigest } : {}),
   };
 }
 
@@ -268,8 +284,21 @@ export function seriesContractDigest(contract: ResolvedSeriesContract): string {
           ),
         }
       : {}),
+    // …and the DOCUMENTS those refs named. Consuming the ref while ignoring its digest made two contracts
+    // whose harness model resolves to entirely different providers hash IDENTICALLY (arch-review 21 P0-1):
+    // release freshness — the one comparison deciding whether a product's evidence still answers today's
+    // question — was blind to exactly the shadow the rest of the platform refuses to execute.
+    ...(contract.harnessModelDigest !== undefined ? { harnessModelDigest: contract.harnessModelDigest } : {}),
+    ...(contract.serviceModelDigests !== undefined
+      ? {
+          serviceModelDigests: Object.fromEntries(
+            Object.entries(contract.serviceModelDigests).sort(([a], [b]) => a.localeCompare(b)),
+          ),
+        }
+      : {}),
     ...(contract.judgeClosure !== undefined ? { judgeClosure: byId(contract.judgeClosure) } : {}),
     ...(contract.judgeRun !== undefined ? { judgeRun: contract.judgeRun } : {}),
+    ...(contract.judgeRunModelDigest !== undefined ? { judgeRunModelDigest: contract.judgeRunModelDigest } : {}),
   });
 }
 

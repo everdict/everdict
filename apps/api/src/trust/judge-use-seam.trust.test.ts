@@ -1,4 +1,5 @@
 import type { CaseJob, CaseResult, GradeContext, JudgeSpec, ModelSpec, RubricSpec } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
@@ -123,6 +124,86 @@ describeTrust("TRUST-109 — the judge runner refuses a document that moved afte
     });
     expect(scores[0]).toMatchObject({ metric: "judge:quality", pass: true });
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+});
+
+describeTrust("TRUST-116 — an unreadable delegated agent is a refusal, not a reduced execution", () => {
+  const harnessJudge = (): JudgeSpec =>
+    ({
+      kind: "harness",
+      id: "reviewer",
+      version: "1.0.0",
+      harness: { id: "grader-agent", version: "1.0.0" },
+      rubric: "review it",
+      tags: [],
+    }) as unknown as JudgeSpec;
+
+  const runnerOver = (harnesses: unknown, dispatched: CaseJob[]) =>
+    defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      harnesses: harnesses as never,
+      dispatch: async (job) => {
+        dispatched.push(job);
+        return {
+          caseId: job.evalCase.id,
+          harness: "x@1",
+          trace: [],
+          snapshot: { kind: "prompt", output: '{"pass":true,"score":1,"reason":"ok"}' },
+          scores: [],
+        };
+      },
+    });
+
+  it("a registry READ FAILURE under a pin refuses — it used to dispatch a specless job under the same name", async () => {
+    // The old resolution had one `catch` for every failure, and it returned "as given": no spec, the ref's
+    // own version. So a certified registered agent silently became a different, spec-less execution — the
+    // guarantee reading `wrong document → refuse` beside `document unavailable → continue with less`.
+    const dispatched: CaseJob[] = [];
+    const runner = runnerOver(
+      {
+        async get() {
+          throw new Error("registry connection reset");
+        },
+      },
+      dispatched,
+    );
+    const scores = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
+      harnessDigest: "sha256:sealed",
+    });
+    expect(scores[0]).toMatchObject({ metric: "judge:reviewer", status: "unmeasured" });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it("a pinned agent that is no longer REGISTERED refuses too — absence is a mismatch, not a built-in", async () => {
+    const dispatched: CaseJob[] = [];
+    const runner = runnerOver(
+      {
+        async get() {
+          throw new NotFoundError("NOT_FOUND", {}, "no such harness version");
+        },
+      },
+      dispatched,
+    );
+    const scores = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
+      harnessDigest: "sha256:sealed",
+    });
+    expect(scores[0]).toMatchObject({ status: "unmeasured" });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it("…and with NO pin an unregistered agent still dispatches by id — built-in harnesses are named, not stored", async () => {
+    const dispatched: CaseJob[] = [];
+    const runner = runnerOver(
+      {
+        async get() {
+          throw new NotFoundError("NOT_FOUND", {}, "no such harness version");
+        },
+      },
+      dispatched,
+    );
+    await runner.run(harnessJudge(), "acme", ctx);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.harnessSpec).toBeUndefined();
   });
 });
 

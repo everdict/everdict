@@ -503,6 +503,10 @@ export class ProductService {
         { id, action: "releases:delete" },
         "You are not allowed to delete this release (creator or workspace admin only).",
       );
+    // …and permission is not the only question. A RELEASED release is the historical anchor the next
+    // release's baseline resolves from, so removing it does not fail that comparison — it makes it believe
+    // nothing was ever shipped (arch-review 21 P0-3). The domain owns that legality.
+    Release.from(record).assertRemovable();
     await this.deps.releases.remove(tenant, id);
   }
 

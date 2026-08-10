@@ -16,7 +16,7 @@ import type {
   UnmeasuredReason,
   UsageCost,
 } from "@everdict/contracts";
-import { type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
+import { NotFoundError, type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
 import {
   billingCharges,
   modelApiKeySecretName,
@@ -258,21 +258,57 @@ export async function resolveRubric(
 }
 
 // Resolve the referenced harness: concrete version + (declarative) spec. Built-in/unregistered are as-given.
+// UNREGISTERED AND UNREADABLE ARE NOT THE SAME ANSWER (arch-review 21 P0-4).
+//
+// One `catch` collapsed them, and the collapse was fail-OPEN in the presence of a pin: a registry error made
+// the resolution fall back to "as given" — no spec, the ref's own version — and the caller dispatched a
+// SPECLESS job under that name. So the guarantee read `wrong document → refuse` beside `document unavailable
+// → continue with less identity`, and the certified registered agent quietly became a different execution.
+//
+// The distinction is available and meaningful: NotFound is a legitimate built-in/unregistered harness, which
+// this path has always supported. Anything else is a read that failed. And where a pin EXISTS, both are
+// refusals — a digest was taken over a registry document, so an agent that is now unregistered is as much a
+// mismatch as one whose bytes changed.
+type JudgeHarnessResolution =
+  | { kind: "resolved"; version: string; spec: HarnessSpec }
+  | { kind: "unregistered"; version: string }
+  | { kind: "refused"; reason: string };
+
 async function resolveJudgeHarness(
   harnesses: HarnessInstanceRegistry | undefined,
   tenant: string,
   ref: { id: string; version: string },
   pin?: string,
-): Promise<{ version: string; spec?: HarnessSpec; moved?: string }> {
-  if (!harnesses) return { version: ref.version || "latest" };
+): Promise<JudgeHarnessResolution> {
+  const asGiven = ref.version || "latest";
+  if (!harnesses) {
+    if (pin !== undefined)
+      return {
+        kind: "refused",
+        reason: `the delegated harness '${ref.id}@${asGiven}' was pinned by this evaluation, but no harness registry is configured to read it back — refusing rather than judging with an agent nobody verified`,
+      };
+    return { kind: "unregistered", version: asGiven };
+  }
   try {
-    const spec = await harnesses.get(tenant, ref.id, ref.version || "latest");
+    const spec = await harnesses.get(tenant, ref.id, asGiven);
     // The delegated harness IS the judge for a harness judge — a different document under the same ref is a
     // different agent rendering the verdict, and this read is the one that supplies it.
     const moved = pinnedDocumentMismatch(pin, spec, { kind: "delegated harness", ref: `${ref.id}@${spec.version}` });
-    return { version: spec.version, spec, ...(moved ? { moved } : {}) };
-  } catch {
-    return { version: ref.version || "latest" };
+    return moved ? { kind: "refused", reason: moved } : { kind: "resolved", version: spec.version, spec };
+  } catch (err) {
+    if (pin !== undefined)
+      return {
+        kind: "refused",
+        reason:
+          err instanceof NotFoundError
+            ? `the delegated harness '${ref.id}@${asGiven}' this evaluation pinned is no longer registered in this workspace — the pin was taken over a registry document, so its absence is a mismatch, not a built-in`
+            : `the delegated harness '${ref.id}@${asGiven}' this evaluation pinned could not be read (${
+                err instanceof Error ? err.message : String(err)
+              }), so the pin cannot be checked — refusing rather than judging with an unverified agent`,
+      };
+    // No pin: the historical behaviour, and the only one available — a built-in or unregistered agent is
+    // named by id alone and has no document to embed.
+    return { kind: "unregistered", version: asGiven };
   }
 }
 
@@ -460,7 +496,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         const dispatch = deps.dispatch;
         const ref = spec.harness;
         const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref, pins?.harnessDigest);
-        if (resolved.moved) return skip(spec, "unsupported", resolved.moved);
+        if (resolved.kind === "refused") return skip(spec, "unsupported", resolved.reason);
         // Placement decision: spec.runtime (explicit) first → else inherit the source run's placement (co-locate, judge next to the observations).
         // If neither, no placement (default backend). An unregistered runtime makes the dispatcher throw → the try/catch below handles it as skip.
         const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
@@ -481,7 +517,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               tenant,
               // Same co-locate ownership contract as the code judge — a self:<runnerId> judge placement needs the submitter.
               ...(submittedBy ? { submittedBy } : {}),
-              ...(resolved.spec ? { harnessSpec: resolved.spec } : {}),
+              ...(resolved.kind === "resolved" ? { harnessSpec: resolved.spec } : {}),
               // The delegated agent's OWN model documents ride along, so the dispatcher that turns its
               // bindings into a provider and a key verifies them exactly as it does a batch's own harness.
               // Pinning the agent document says WHICH agent judges; this says which model it thinks with.

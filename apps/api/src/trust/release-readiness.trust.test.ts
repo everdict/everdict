@@ -408,6 +408,109 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
 // series' evaluation contract (dataset × harness × judges) and nothing stopped a member replacing that
 // definition mid-decision. Widening the policy digest would have undone the narrowing; two questions get two
 // digests, and the write holds both.
+// Trust suite — TRUST-115.
+//
+// HISTORY IS NOT IMMUTABLE IF DELETING THE ANCHOR CHANGES WHAT THE NEXT DECISION BELIEVES WAS "LAST TIME".
+//
+// `setStatus` refuses to reopen a released release, which reads as "released is history" — but that guarded
+// one FIELD. The next release's gate resolves its baseline by re-reading the released rows that still exist,
+// so deleting the previous ship did not fail the comparison: it made the comparison believe there had never
+// been one, and a series declaring `allowNoBaseline` shipped green on a bootstrap the delete manufactured.
+// The neighbouring case was already right — a released release whose candidate SCORECARD was deleted resolves
+// to `missing_historical_evidence` and refuses — so the protection existed and the anchor under it did not.
+describeTrust("TRUST-115 — a released release cannot be deleted or edited out from under the next decision", () => {
+  async function shipped() {
+    const { scorecardStore, productService } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [SERIES],
+    });
+    const first = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.2",
+    });
+    await scorecardStore.create(
+      seriesBatch("t115-baseline", [scored("a", true), scored("b", true)], "2026-07-01T00:00:00.000Z", {
+        productId: product.id,
+        seriesKey: "quality",
+      }),
+    );
+    await productService.setReleaseStatus("acme", first.id, { status: "released" }, { subject: "release-captain" });
+    return { product, first, scorecardStore, productService };
+  }
+
+  it("the delete is REFUSED — even for the creator, who may delete a planned one", async () => {
+    const { first, productService } = await shipped();
+    await expect(
+      productService.removeRelease("acme", first.id, { subject: "release-captain", isAdmin: true }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    // …and the anchor is still there for the next decision to stand on.
+    expect((await productService.getRelease("acme", first.id)).status).toBe("released");
+  });
+
+  it("…so the NEXT release still knows what last time was, instead of reading as a first ship", async () => {
+    const { product, first, scorecardStore, productService } = await shipped();
+    await productService
+      .removeRelease("acme", first.id, { subject: "release-captain", isAdmin: true })
+      .catch(() => undefined); // the refusal above; the point is what survives it
+    // A candidate that REGRESSES against the ship we are not allowed to forget.
+    await scorecardStore.create(
+      seriesBatch("t115-latest", [scored("a", true), scored("b", false)], "2026-08-05T00:00:00.000Z", {
+        productId: product.id,
+        seriesKey: "quality",
+      }),
+    );
+    const next = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.3",
+    });
+    await expect(
+      productService.setReleaseStatus("acme", next.id, { status: "released" }, { subject: "release-captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const readiness = (await productService.releaseDetail("acme", next.id)).readiness;
+    // Pre-fix, with the anchor deleted, this read `no_baseline` under `allowNoBaseline` and SHIPPED.
+    expect(readiness.series[0]).toMatchObject({ key: "quality", verdict: "block" });
+  });
+
+  it("a released release's CONTENT is frozen too — the card cannot disagree with the ship history", async () => {
+    const { first, productService } = await shipped();
+    await expect(
+      productService.updateRelease(
+        "acme",
+        first.id,
+        { name: "2026.2 (actually 2026.4)" },
+        { subject: "release-captain", isAdmin: true },
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a PLANNED release stays deletable — the guard is about history, not about releases", async () => {
+    const { productService } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [SERIES],
+    });
+    const planned = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.9",
+    });
+    await productService.removeRelease("acme", planned.id, { subject: "release-captain", isAdmin: false });
+    await expect(productService.getRelease("acme", planned.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describeTrust("TRUST-62 — editing a series' definition mid-decision refuses the ship", () => {
   it("a dataset swap invalidates an in-flight decision; a rename still does not", async () => {
     const products = new InMemoryProductStore();

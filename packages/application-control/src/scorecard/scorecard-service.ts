@@ -43,7 +43,7 @@ import {
   seriesContractDigest,
   seriesContractFromManifest,
 } from "@everdict/domain";
-import { applyGradingPlan, sealGrading, selectSubsetCases } from "@everdict/domain";
+import { applyGradingPlan, effectiveGraderDeclarations, sealGrading, selectSubsetCases } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -220,7 +220,32 @@ export class ScorecardService {
     // criticalCases composes into the SAME document: a release gate blocks on a critical case's collapse, so
     // the declaration has to be inside what the batch stamps — a gate decision must stay re-derivable from
     // the record alone, never from flags whoever ran the gate happened to pass.
-    const composedPolicy = composeVerdictPolicy(input.graders ?? [], DEFAULT_VERDICT_POLICY, {
+    //
+    // …composed from the EFFECTIVE graders, not from the request field that happened to override them
+    // (arch-review 21 P0-2). `applyGradingPlan` has already put the plan on every case when one exists, so
+    // `dataset.cases` IS what will grade — and a dataset's own `metrics[]` declaration finally reaches the
+    // decision function that consumes the measurement. It could not before: a dataset saying "toxicity is
+    // observational" produced a batch where toxicity DECIDED the case, because the policy had never heard of
+    // the metric and `evaluateVerdict` falls back to any measured score it cannot classify.
+    //
+    // Where the AUTHORIZATION for these declarations lives is a different question from the request path's,
+    // and deliberately so. A request-level plan is an OVERRIDE of the dataset's own semantics at run time —
+    // ambient member power redefining passing, which the gate below refuses without admin. A dataset's
+    // declaration is the evaluation's definition, authored under `datasets:write` and immutable from then
+    // on; re-gating it per submit would mean no schedule, CI token or product auto-eval could ever run such
+    // a dataset, and it grants nothing new: a measured metric already decided the case through the fallback.
+    const effective = effectiveGraderDeclarations(dataset.cases);
+    if (effective.conflicts.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { conflicts: effective.conflicts },
+        `This evaluation declares conflicting semantics for ${effective.conflicts
+          .map((c) => `'${c.metric}' (${c.declared.join(" vs ")})`)
+          .join(", ")} — two cases cannot disagree about what one measurement MEANS, and choosing by
+declaration order would make the batch's constitution depend on case ordering. Reconcile the declarations, or
+grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
+      );
+    const composedPolicy = composeVerdictPolicy(effective.graders, DEFAULT_VERDICT_POLICY, {
       ...(input.criticalCases ? { criticalCases: input.criticalCases } : {}),
     });
     const composed = composedPolicy.id === "composed";

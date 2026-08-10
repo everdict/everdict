@@ -927,6 +927,11 @@ async function main(): Promise<void> {
     judges: judgeRegistry,
     rubrics: rubricRegistry,
     resolveModelBinding: modelBindingResolver(modelRegistry),
+    // …and the model DOCUMENT reader, so the gate seals the same closure submit does (arch-review 21 P1).
+    // Without it the resolver produced refs with no digests while the manifest produced both, and a series
+    // naming a registered model would fail its own freshness check — the fail-closed direction, but an
+    // availability defect all the same: auto-eval on a product's own contract could never read fresh.
+    models: modelRegistry,
     // The workspace default judge model — the same source submit seals into `manifest.judgeRun`.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
   };

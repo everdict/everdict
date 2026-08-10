@@ -62,15 +62,22 @@ export async function resolveModelPin(
   deps: Pick<ScorecardServiceDeps, "models" | "resolveModelBinding">,
   tenant: string,
   binding: ModelBinding,
-): Promise<{ ref: string; digest?: string }> {
+): Promise<{ ref: string; digest?: string; unreadable?: true }> {
   if (typeof binding === "string") return { ref: binding }; // already concrete — no document behind it
   if (deps.models) {
     try {
       const spec = await deps.models.get(tenant, binding.ref, binding.version ?? "latest");
       return { ref: `${binding.ref}@${spec.version}`, digest: contentDigest(spec) };
     } catch {
-      // Fall through: a deployment with no document reader may still answer the ref through the resolver
-      // below, and a ref with no digest is the honest "pinned, never verified" state.
+      // A ref WITH a reader that could not read it is a third state, and the two consumers want opposite
+      // things from it (arch-review 21 P1). The manifest records the run that happened, so it keeps the ref
+      // and says the document was never verified; the release gate is asking whether today's identity is
+      // established, and a hole is not an answer. Saying which case this is lets each apply its own policy
+      // instead of both inheriting the weaker one.
+      return {
+        ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved",
+        unreadable: true,
+      };
     }
   }
   return { ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved" };

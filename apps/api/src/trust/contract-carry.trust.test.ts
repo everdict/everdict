@@ -368,6 +368,38 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
     expect(submitted.id).toBe("sc-judged");
   });
 
+  it("TRUST-112 — same ref, same version, DIFFERENT model document ⇒ a different contract", async () => {
+    // METAMORPHIC, deliberately: a round trip cannot see this. TRUST-63 rebuilds the manifest FROM the
+    // contract, so a facet neither side carries compares equal to itself — which is exactly how the harness
+    // model DIGESTS sat in the contract type, unread by the digest function, for a whole wave. What has to
+    // hold is that changing ONLY the document behind a held ref changes the identity.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", dataset());
+    const harnesses = new StubHarnessRegistry();
+    const resolveModelBinding = async (_t: string, b: { ref: string }) => `${b.ref}@3.0.0`;
+    const modelsServing = (model: string) =>
+      ({
+        async get() {
+          return { id: "agent-model", version: "3.0.0", provider: "anthropic", model } as never;
+        },
+      }) as never;
+    const resolve = (model: string) =>
+      resolveSeriesContract(
+        { datasets, harnesses, judges: undefined, resolveModelBinding, models: modelsServing(model) } as never,
+        "acme",
+        series,
+      );
+
+    const shared = await resolve("claude-opus-4-8");
+    const shadowed = await resolve("some-cheaper-model"); // `_shared/agent-model@3` shadowed by a local one
+    if (shared.status !== "resolved" || shadowed.status !== "resolved") throw new Error("unresolved");
+    // The refs are identical on both sides — that is the whole point of the shadow.
+    expect(shared.contract.harnessModel).toBe("agent-model@3.0.0");
+    expect(shadowed.contract.harnessModel).toBe("agent-model@3.0.0");
+    // …and the identity is not.
+    expect(shadowed.digest).not.toBe(shared.digest);
+  });
+
   it("…and proceeds untouched when nothing moved — the guard is not a blanket refusal", async () => {
     const at3 = await world("3.0.0");
     const resolution = await resolveSeriesContract(at3.deps, "acme", series);

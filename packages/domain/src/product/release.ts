@@ -188,6 +188,34 @@ export class Release {
     return this.record.status;
   }
 
+  // HISTORY IS NOT IMMUTABLE IF DELETING THE ANCHOR CHANGES WHAT THE NEXT DECISION BELIEVES WAS "LAST TIME"
+  // (arch-review 21 P0-3).
+  //
+  // `setStatus` already refuses to reopen a released release — but that only guarded the STATUS field, and a
+  // release is not merely a status. The next release's gate resolves its baseline by re-reading the released
+  // rows that still exist (`previousShip`), so a released release is the historical authority those decisions
+  // stand on. Deleting it did not fail the comparison; it made the comparison believe there had never been a
+  // ship, and a series declaring `allowNoBaseline` then shipped green on a bootstrap that was manufactured by
+  // the delete. The neighbouring case was already handled correctly — a released release whose candidate
+  // SCORECARD was deleted resolves to `missing_historical_evidence` and refuses — so the protection existed
+  // and the anchor holding it up did not.
+  //
+  // Content immutability follows from the same fact. Ship history freezes the decision detail, but the
+  // release's own name, date, scope and components stayed editable afterwards, so the card a reader sees
+  // could disagree with the composition the ship actually recorded.
+  get isHistory(): boolean {
+    return this.record.status === "released";
+  }
+
+  private assertMutable(action: string): void {
+    if (!this.isHistory) return;
+    throw new ConflictError(
+      "CONFLICT",
+      { release: this.record.id, status: this.record.status, action },
+      `A released release is history — the next release's baseline is resolved from it, so it can neither be ${action} nor removed. Plan a new release instead.`,
+    );
+  }
+
   update(
     fields: ReleaseEditInput,
     by: string,
@@ -195,6 +223,7 @@ export class Release {
     productSeriesKeys: readonly string[],
     productServiceNames?: readonly string[],
   ): ReleaseTransition {
+    this.assertMutable("edited");
     const changed: string[] = [];
     const patch: Partial<ReleaseRecord> = {};
     if (fields.name !== undefined && fields.name !== this.record.name) {
@@ -242,6 +271,12 @@ export class Release {
     patch.history = appendHistory(this.record.history, { at: now, by, event: "updated", detail: { changed } });
     patch.updatedAt = now;
     return { patch, facts: [] };
+  }
+
+  // The one place that says whether this release may be removed. A planned or cancelled release is a
+  // commitment nobody stood on; a released one is what "last time" means to every later decision.
+  assertRemovable(): void {
+    this.assertMutable("deleted");
   }
 
   // The release gate. Refusing here is the point: "did everything this release watches actually hold" gets a

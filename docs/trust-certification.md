@@ -133,6 +133,11 @@ half the other missed, and both looked handled.
 
 | TRUST-111 | **Identity recurses to the bottom**: a harness judge's DELEGATED agent is pinned by document digest, and so is that agent's own model closure — pinning the agent says which agent judges, not which model it thinks with. The pins ride the job the judge dispatches, so the dispatcher that materializes those bindings verifies them exactly as it does a batch's own harness | `packages/application-control/src/execution/nested-pin.trust.test.ts` |
 
+| TRUST-112 | **Same ref, same version, different DOCUMENT ⇒ a different contract** (metamorphic): a series' identity digest consumes the harness model documents it already carried, so a shadowed `model-x@1` is a contract change rather than a held one. A round trip could never see this — TRUST-63 rebuilds the manifest FROM the contract, so a facet neither side carries compares equal to itself, which is exactly how these digests sat unread for a wave | `apps/api/src/trust/contract-carry.trust.test.ts` |
+| TRUST-113/114 | **A declaration is not part of the constitution until the decision function that consumes the measurement also consumes it**: a dataset's `metrics[].authority` reaches the batch's stamped policy, so a metric declared observational cannot decide the case — pre-fix the policy was composed from the request's grading plan alone, and `evaluateVerdict`'s fallback then let a verdict-inert measurement decide a ship. Two cases declaring different semantics for one metric are refused rather than resolved by declaration order | `apps/api/src/trust/effective-verdict-policy.trust.test.ts` |
+| TRUST-115 | **History is not immutable if deleting the anchor changes what the next decision believes was "last time"**: a released release refuses deletion and edits, so the next release's baseline still resolves to the ship it stood on instead of reading as a bootstrap. A planned release stays deletable — the guard is about history, not about releases | `apps/api/src/trust/release-readiness.trust.test.ts` |
+| TRUST-116 | **Unregistered and unreadable are not the same answer**: with a pin in hand, a delegated judging agent that cannot be read — or is no longer registered — is a refusal, where one `catch` used to reduce it to a spec-less job dispatched under the same name. With no pin, an unregistered agent still dispatches by id, because a built-in harness is named rather than stored | `apps/api/src/trust/judge-use-seam.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
@@ -290,5 +295,5 @@ process-kill scenario that quietly degrades into an in-process one certifies not
   suite: that an out-of-scope capability is refused mid-turn while the run continues, and that a benign-named
   capability declaring external, non-idempotent effects still prompts in auto mode. Both need the agent
   runtime driven against a faked transport, which is a different harness from everything above; they belong
-  in `apps/agent/src/trust/` when that harness exists. Until then they are covered by unit tests only, which
+  in `apps/api/src/trust/` when that harness exists. Until then they are covered by unit tests only, which
   is a weaker claim than the rest of this page makes.

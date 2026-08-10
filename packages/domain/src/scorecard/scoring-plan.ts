@@ -245,6 +245,65 @@ export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCa
   return cases.map((c) => ({ ...c, graders: plan }));
 }
 
+// THE EFFECTIVE GRADING SEMANTICS — what the batch will actually be graded by (arch-review 21 P0-2).
+//
+// A DECLARATION IS NOT PART OF THE CONSTITUTION UNTIL THE DECISION FUNCTION THAT CONSUMES THE MEASUREMENT
+// ALSO CONSUMES THAT DECLARATION.
+//
+// The verdict policy was composed from the REQUEST's grading plan alone, so a `GraderSpec.metrics[]`
+// declaration living in the dataset — the normal case, and the one every product watch series runs — reached
+// `makeGraders` (which granted the grader the right to emit the metric) and never reached the policy. The
+// consequence is not cosmetic: `evaluateVerdict` excludes a metric the policy calls OBSERVATIONAL, and falls
+// back to deciding on any measured metric it has never heard of. So a dataset saying "toxicity is
+// observational" produced a batch in which toxicity DECIDED the case — the declaration inverted by being
+// ignored, in the direction of a verdict nobody asked for.
+//
+// The fix is to read the semantics off the EFFECTIVE cases rather than the transport field that happened to
+// override them. `applyGradingPlan` has already replaced each case's graders with the plan when one exists,
+// so one rule covers both paths: whatever will grade is what declares.
+//
+// Two cases declaring DIFFERENT semantics for one metric is refused rather than resolved. Picking by
+// declaration order would make a batch's constitution depend on case ordering, and there is no honest
+// tie-break: the two declarations disagree about what the measurement MEANS.
+export interface GraderDeclarationConflict {
+  metric: string;
+  declared: string[];
+}
+
+export function effectiveGraderDeclarations(cases: ReadonlyArray<Pick<EvalCase, "graders">>): {
+  graders: Array<Pick<GraderSpec, "id" | "authority" | "direction" | "metrics">>;
+  conflicts: GraderDeclarationConflict[];
+} {
+  const graders: Array<Pick<GraderSpec, "id" | "authority" | "direction" | "metrics">> = [];
+  const seen = new Set<string>();
+  // metric → the distinct semantics declared for it, in the vocabulary a conflict message can print.
+  const semantics = new Map<string, Set<string>>();
+  for (const c of cases)
+    for (const g of c.graders ?? []) {
+      const key = contentDigest(g);
+      if (!seen.has(key)) {
+        seen.add(key);
+        graders.push(g);
+      }
+      // The SAME reading composeVerdictPolicy uses: named metrics replace the id-based one.
+      const declared =
+        g.metrics !== undefined && g.metrics.length > 0
+          ? g.metrics.map((m) => ({ metric: m.id, authority: m.authority, direction: m.direction }))
+          : [{ metric: g.id, authority: g.authority, direction: g.direction }];
+      for (const d of declared) {
+        if (d.authority === undefined && d.direction === undefined) continue; // declares nothing
+        const label = `${d.authority ?? "unspecified"}/${d.direction ?? "unspecified"}`;
+        const set = semantics.get(d.metric) ?? new Set<string>();
+        set.add(label);
+        semantics.set(d.metric, set);
+      }
+    }
+  const conflicts = [...semantics.entries()]
+    .filter(([, labels]) => labels.size > 1)
+    .map(([metric, labels]) => ({ metric, declared: [...labels].sort() }));
+  return { graders, conflicts };
+}
+
 // The EFFECTIVE grading seal (identity axis inputs; arch-review 6, H5) — THE production builder, used by
 // submit and by every test that claims to exercise production identity (a hand-written fixture here is how
 // the selection-keyed composite bug hid). A runtime plan seals its own digest — selection-independent by

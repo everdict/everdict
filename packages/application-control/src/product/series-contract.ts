@@ -9,7 +9,7 @@ import {
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { ScorecardServiceDeps } from "../scorecard/scorecard-deps.js";
-import { sealHarnessModelClosure, sealJudgeClosure, sealedModelIdentity } from "../scorecard/scorecard-plan.js";
+import { resolveModelPin, sealHarnessModelClosure, sealJudgeClosure } from "../scorecard/scorecard-plan.js";
 
 // WHAT A WATCH SERIES ASKS TODAY — resolved ONCE, for both readers (arch-review 15 P1-5).
 //
@@ -38,7 +38,7 @@ import { sealHarnessModelClosure, sealJudgeClosure, sealedModelIdentity } from "
 // not a degraded mode this caller has — it is a deployment that must not resolve contracts at all.
 export type SeriesContractDeps = Pick<
   ScorecardServiceDeps,
-  "datasets" | "rubrics" | "resolveModelBinding" | "judgeFor"
+  "datasets" | "rubrics" | "resolveModelBinding" | "judgeFor" | "models"
 > & {
   harnesses: HarnessInstanceRegistry;
   judges: JudgeRegistry;
@@ -146,16 +146,21 @@ export async function resolveSeriesContract(
   // submit from the same deployment would seal. Both sides agree, so the facet is honestly absent rather than
   // a hole.
   let judgeRun: { provider?: string; model: string } | undefined;
+  let judgeRunModelDigest: string | undefined;
   if (deps.judgeFor !== undefined) {
     const judge = await deps.judgeFor(tenant);
     if (judge !== undefined) {
-      const model = await sealedModelIdentity(deps, tenant, judge.model);
-      if (model === undefined)
+      // The ref AND its document, from the sealer submit uses (arch-review 21 P0-1). A gate that compared the
+      // ref alone said `model-x@1` is identity while the bytes behind it are not, which is the shadow every
+      // other facet of this contract exists to catch.
+      const pin = await resolveModelPin(deps, tenant, judge.model);
+      if (pin.ref === "unresolved" || pin.unreadable === true)
         return {
           status: "unresolvable",
           reason: "the workspace's default judge model binding could not be resolved",
         };
-      judgeRun = { ...(judge.provider !== undefined ? { provider: judge.provider } : {}), model };
+      judgeRun = { ...(judge.provider !== undefined ? { provider: judge.provider } : {}), model: pin.ref };
+      judgeRunModelDigest = pin.digest;
     }
   }
   const contract: ResolvedSeriesContract = {
@@ -173,6 +178,7 @@ export async function resolveSeriesContract(
       : {}),
     judgeClosure,
     ...(judgeRun !== undefined ? { judgeRun } : {}),
+    ...(judgeRunModelDigest !== undefined ? { judgeRunModelDigest } : {}),
   };
   return { status: "resolved", digest: seriesContractDigest(contract), contract };
 }
