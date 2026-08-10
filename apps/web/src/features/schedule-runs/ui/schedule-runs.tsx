@@ -144,14 +144,16 @@ export function ScheduleRuns({
   return (
     <div className="space-y-3">
       <RunTrend entries={entries} />
-      <div className="space-y-2">
+      {/* 하나의 카드에 구분선으로 나뉜 행들 — 능력 상세의 "이 능력을 지켜보는 이슈" 목록과 같은 문법이다.
+          카드를 행마다 띄우면 목록이 아니라 카드 더미로 읽힌다. */}
+      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
         {shown.map((s) => {
           const siblings = s.metrics.map((m) => m.metric)
           return (
             <Link
               key={s.id}
               href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
-              className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              className="flex items-center gap-3 px-3.5 py-2.5 text-[13px] transition-colors hover:bg-elevated"
             >
               <span className="flex w-5 shrink-0 justify-center">
                 <StatusIcon status={s.status} />
@@ -206,7 +208,7 @@ export function ScheduleRuns({
           <button
             type="button"
             onClick={() => setVisible((v) => v + PAGE_SIZE)}
-            className="w-full rounded-lg border border-dashed border-border px-3.5 py-2 text-[12px] font-[510] text-muted-foreground transition-colors hover:border-border-strong hover:bg-elevated hover:text-foreground"
+            className="w-full px-3.5 py-2 text-[12px] font-[510] text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground"
           >
             {t('runsLoadMore', { count: remaining })}
           </button>
