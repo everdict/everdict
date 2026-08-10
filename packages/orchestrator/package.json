@@ -28,6 +28,7 @@
     "undici": "^6.27.0"
   },
   "devDependencies": {
+    "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*"
   }
 }

@@ -65,7 +65,7 @@ describeTrust("TRUST-61 — a one-case group really does spend its whole retry b
       result = caseResult(stampJudgeAttempts([...kept, ...produced], pending, prior));
     };
 
-    let state: ScoreRoundState = { stalled: 0 };
+    let state: ScoreRoundState = { stalled: 0, round: 0 };
     for (;;) {
       // The planner's real predicate, over the real plane.
       const planned = judgePending(result, JUDGES) ? [KEY] : [];
@@ -100,7 +100,7 @@ describeTrust("TRUST-61 — a one-case group really does spend its whole retry b
     // The pathology the guard exists for: a case whose id is absent from the effective dataset is skipped by
     // the judge stream WITHOUT leaving a row, so its progress stays `absent` forever and no attempt budget
     // ever engages. Judging is provider calls, so "re-plan until empty" would bill without end.
-    let state: ScoreRoundState = { stalled: 0 };
+    let state: ScoreRoundState = { stalled: 0, round: 0 };
     let rounds = 0;
     for (;;) {
       const decision = decideScoreRound(["ghost#0"], state, false, 500);
@@ -111,6 +111,65 @@ describeTrust("TRUST-61 — a one-case group really does spend its whole retry b
       state = decision.state;
       rounds += 1;
       expect(rounds).toBeLessThanOrEqual(MAX_STALLED_SCORE_ROUNDS + 1); // bounded, and provably so
+    }
+  });
+});
+
+// Trust suite — TRUST-64.
+//
+// A LATER ROUND'S FIRST ATTEMPT OUTRANKS AN EARLIER ROUND'S LAST ONE — INSIDE ONE WORKFLOW EXECUTION.
+//
+// TRUST-54 certifies the same sentence across a continue-as-new, which was the whole story while rotation was
+// the only thing that produced a new activity execution. The replan loop made that false: every round
+// schedules a new execution and Temporal's `attempt` restarts at 1 in each, so a claim whose ordinal only
+// moved on rotation refused its own pass's fresh judgment as stale — and the case could never finish. This
+// drives the REAL round decision against the REAL Postgres arbiter, which is the only place the two halves of
+// the claim meet.
+const describeTrustPg =
+  process.env.EVERDICT_TRUST_SUITE === "1" && (process.env.EVERDICT_TRUST_DATABASE_URL ?? process.env.DATABASE_URL)
+    ? describe
+    : describe.skip;
+
+describeTrustPg("TRUST-64 — a replan round supersedes the round before it (real Postgres)", () => {
+  it("round 0 attempt 2 is superseded by round 1 attempt 1, with no rotation in between", async () => {
+    const { PgScoringStageStore, makePool, migrate, sqlClient } = await import("@everdict/db");
+    const url = process.env.EVERDICT_TRUST_DATABASE_URL ?? process.env.DATABASE_URL;
+    if (url === undefined) throw new Error("guarded above");
+    const pool = makePool(url);
+    const client = sqlClient(pool);
+    await migrate(client);
+    const stage = new PgScoringStageStore(client);
+    const scorecardId = `sc-round-${Date.now().toString(36)}`;
+    const passId = "pass-A";
+    const row = (value: number, generation: number, attempt: number) => ({
+      caseKey: KEY,
+      judgeId: "grader",
+      scores: [{ graderId: "grader", metric: "judge:grader", value, pass: value === 1 }],
+      claim: { generation, attempt },
+    });
+
+    try {
+      // The workflow's OWN ordinal, advanced by the production decision — never a number the test picked.
+      let state: ScoreRoundState = { stalled: 0, round: 0 };
+      const first = decideScoreRound([KEY], state, false, 500);
+      if (first.kind !== "execute") throw new Error(first.kind);
+      state = first.state;
+      // Round 1's activity times out once and its retry writes a retryable unmeasured verdict.
+      expect(await stage.stage(scorecardId, passId, [row(0, state.round, 2)])).toHaveLength(1);
+
+      // No rotation. The loop simply re-plans, because the case is still pending.
+      const second = decideScoreRound([KEY], { ...state, remaining: undefined }, false, 500);
+      if (second.kind !== "execute") throw new Error(second.kind);
+      state = second.state;
+      // A NEW activity execution — Temporal starts it at attempt 1 again.
+      expect(await stage.stage(scorecardId, passId, [row(1, state.round, 1)])).toHaveLength(1);
+
+      const staged = await stage.staged(scorecardId, passId);
+      expect(staged[0]?.claim).toEqual({ generation: 2, attempt: 1 });
+      expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1); // the measured verdict stands
+      await stage.clear(scorecardId, passId);
+    } finally {
+      await pool.end();
     }
   });
 });

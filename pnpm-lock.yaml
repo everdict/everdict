@@ -563,6 +563,9 @@ importers:
         specifier: ^6.27.0
         version: 6.27.0
     devDependencies:
+      '@everdict/db':
+        specifier: workspace:*
+        version: link:../db
       '@everdict/domain':
         specifier: workspace:*
         version: link:../domain

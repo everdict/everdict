@@ -13,12 +13,28 @@
 //     2 cases, one judge times out  → the plan fit in one slice   → finalize → the case is unmeasured forever
 //
 // A pass finishes when the worklist is EMPTY. Everything else is a bound the loop owns.
+//
+// It also owns the pass's LOGICAL ROUND ORDINAL (arch-review 16 P0-1) — see `ScoreRoundState.round`. Rounds
+// and rotations were the same number until the replan loop made them different things.
 
 export interface ScoreRoundState {
   // The worklist size this pass last planned. `undefined` = no round has planned yet.
   remaining?: number;
   // Consecutive rounds that failed to shrink the worklist.
   stalled: number;
+  // THE LOGICAL ROUND ORDINAL — the pass-global half of the judgment claim (arch-review 16 P0-1).
+  //
+  // It was the workflow's continue-as-new count, which was right for the rotation boundary and wrong for
+  // everything the replan loop then added. Each round schedules a NEW activity execution, and Temporal's
+  // `attempt` restarts at 1 in a new execution — so inside ONE workflow execution:
+  //
+  //   round 0  activity X  attempt 1 timeout, attempt 2 → retryable_unmeasured   stage = (0, 2)
+  //   round 1  activity Y  attempt 1 → measured PASS                             claim = (0, 1) → REFUSED
+  //
+  // The case can then never finish, and the stall guard eventually abandons it — so the replan loop's whole
+  // benefit was cancelled for exactly the retry it exists to serve. The generation must advance on every new
+  // logical MUTATION OPPORTUNITY, not merely on workflow rotation; rotation only CARRIES it.
+  round: number;
 }
 
 export type ScoreRoundDecision =
@@ -70,6 +86,8 @@ export function decideScoreRound(
   return {
     kind: "execute",
     keys: plannedKeys.slice(0, Math.max(1, sliceLimit)),
-    state: { remaining: plannedKeys.length, stalled },
+    // The round advances HERE, with the decision to execute — one new round is one new set of activity
+    // executions, which is exactly one new mutation opportunity for every key in it.
+    state: { remaining: plannedKeys.length, stalled, round: state.round + 1 },
   };
 }

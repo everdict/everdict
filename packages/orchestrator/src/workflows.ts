@@ -152,10 +152,15 @@ export async function scoreGroupWorkflow(input: {
   // workflow id made it the only starter) but may never mint one.
   passId?: string;
   prepared?: boolean; // set by continue-as-new — the strip already ran for this pass
-  // The pass-global ROTATION ORDINAL (mig 0159). Temporal's activity `attempt` is monotonic only within one
-  // activity execution, and a continue-as-new re-schedules a still-pending case as a NEW execution starting
-  // at attempt 1 — so an attempt-only claim refused the fresh judgment as stale and the case could never
-  // finish. Carried in the INPUT so it stays deterministic: deriving it from workflow state would not be.
+  // The pass-global LOGICAL ROUND ordinal (mig 0159, corrected by arch-review 16 P0-1). Temporal's activity
+  // `attempt` is monotonic only within one activity execution, and every replan round — rotation or not —
+  // schedules a NEW execution that starts at attempt 1. So the ordinal must advance per ROUND; rotation
+  // merely carries it. Carried in the INPUT so it stays deterministic: deriving it from workflow state
+  // would not be.
+  round?: number;
+  // The pre-arch-review-16 name for the same carrier, when it meant "rotation count". Read once so a
+  // workflow that rotated under the old code keeps a MONOTONIC ordinal across the deploy — dropping to 0
+  // would make its next round lose to its own staged claims.
   generation?: number;
   // The replan loop's own termination state, carried across rotation (arch-review 15 P1-6). `remainingAtLastPlan`
   // is the worklist size this pass last planned; `stalledRounds` counts consecutive rounds that failed to
@@ -189,6 +194,7 @@ export async function scoreGroupWorkflow(input: {
   let state: ScoreRoundState = {
     ...(input.remainingAtLastPlan !== undefined ? { remaining: input.remainingAtLastPlan } : {}),
     stalled: input.stalledRounds ?? 0,
+    round: input.round ?? input.generation ?? 0,
   };
   // Cases the pass gave up re-planning (the stall guard fired) — carried to finalize so the record can say it.
   let abandoned = 0;
@@ -246,7 +252,9 @@ export async function scoreGroupWorkflow(input: {
             judges: input.judges,
             ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
             ...(input.passId !== undefined ? { passId: input.passId } : {}),
-            generation: input.generation ?? 0,
+            // THIS ROUND's ordinal — advanced by the decision above, so a fresh activity execution in a
+            // later round outranks the previous round's exhausted attempts instead of losing to them.
+            generation: state.round,
           });
         }
       };
@@ -266,12 +274,14 @@ export async function scoreGroupWorkflow(input: {
     throw err;
   }
   if (rotatedEarly) {
-    // The rotation ordinal advances with the rotation — that is what makes the claim pass-global. The stall
-    // state rides along, so rotating cannot launder a pass that is making no progress into a fresh budget.
+    // The stall state rides along, so rotating cannot launder a pass that is making no progress into a fresh
+    // budget — and so does the round ordinal, which is what keeps the claim monotonic across the boundary.
     await continueAsNew<typeof scoreGroupWorkflow>({
       ...input,
       prepared: true,
-      generation: (input.generation ?? 0) + 1,
+      // Rotation CARRIES the round; it no longer defines one. The continuation's first execute decision
+      // advances it, exactly as an in-execution replan does — one rule for both.
+      round: state.round,
       ...(state.remaining !== undefined ? { remainingAtLastPlan: state.remaining } : {}),
       stalledRounds: state.stalled,
     });

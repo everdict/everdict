@@ -3,7 +3,11 @@ import type { Score } from "@everdict/contracts";
 // WHICH INVOCATION of "judge this case with this judge" a judgment came from — the authority token the
 // stage arbitrates on. Ordered lexicographically: a later generation beats any attempt of an earlier one.
 export interface JudgmentClaim {
-  generation: number; // the workflow's continue-as-new ordinal — pass-global
+  // The pass's LOGICAL ROUND ordinal (arch-review 16 P0-1). It was the workflow's continue-as-new count,
+  // which was right while rotation was the only thing that produced a new activity execution — the replan
+  // loop made every ROUND produce one, and Temporal's `attempt` restarts at 1 in each. The ordinal advances
+  // on every new mutation opportunity; rotation merely carries it.
+  generation: number;
   attempt: number; // Temporal's activity retry counter — within one execution
 }
 
@@ -33,10 +37,11 @@ export interface StagedJudgment {
   //
   // It is a PAIR because one number cannot span the mutation it governs. `attempt` is Temporal's activity
   // retry counter, monotonic only WITHIN one activity execution; a stage row lives for the whole PASS, and
-  // after a continue-as-new the same case is scheduled as a new execution starting at attempt 1 again — so
-  // an attempt-only token refused a legitimate new judgment as stale and the pass could never finish that
-  // case. `generation` is the workflow's continue-as-new ordinal, carried in its INPUT so it stays
-  // deterministic, which makes (generation, attempt) monotonic across the pass.
+  // every new round — a replan inside one execution, or a continue-as-new — schedules the case as a NEW
+  // execution starting at attempt 1 again, so an attempt-only token refused a legitimate new judgment as
+  // stale and the pass could never finish that case. `generation` is the pass's LOGICAL ROUND ordinal,
+  // carried in the workflow's INPUT so it stays deterministic, which makes (generation, attempt) monotonic
+  // across the whole pass. Scoping it to rotations instead of rounds reopened the same hole one level down.
   //
   // Absent = the in-process pass, which has neither retries nor rotations to tell apart: (0, 1).
   claim?: JudgmentClaim;
@@ -66,15 +71,34 @@ export interface StagedJudgment {
 // delta reading also keeps the two provenances apart: what THIS pass produced vs what it inherited from the
 // previous revision, which is the distinction the promotion has to make anyway.
 //
-// EXPAND STEP: writers dual-write here and onto the carriers; nothing DECIDES on this yet. The finalize reads
-// the stage only to compare it against the carriers and report parity (see ScoringStageParity) — the evidence
-// that has to exist before a promotion can be trusted, since dual-writing for a week proves nothing if nobody
-// ever checked that the two agree. The contract step then makes the finalize promote from the stage and
-// deletes the strip. Shipping the table first means a rollback at any point loses nothing.
+// TWO AUTHORITIES, AT DIFFERENT STAGES OF THEIR LIFE (arch-review 15/16 — read this before changing anything
+// here). Conflating them is what let a fail-open survive a review round, and a stale comment describing the
+// earlier era is a specification bug waiting for the next refactor:
+//
+//   SCORE BYTES — still SHADOW. Writers dual-write here and onto the carriers, and the carriers remain the
+//     source of truth. Nothing reads these bytes to decide anything, so a rollback at any point loses
+//     nothing. The contract step promotes them and deletes the strip.
+//
+//   CLAIM ARBITRATION — already AUTHORITATIVE, and production-critical. `stage()` decides which invocation
+//     holds the right to write a given (case, judge), and the carrier write OBEYS that answer, per judge. A
+//     failure here is therefore NOT best-effort: the caller must fail closed and write nothing, because
+//     "the arbiter is unavailable" read as "you won" restores the very race this settles, at exactly the
+//     moment it is least observable.
+//
+// LIFETIME: a pass's rows are cleared once its revision has recorded a DURABLE observation of them
+// (`ScoringRevision.stageParity`, arch-review 16 P1-6) — never before, since that observation is the evidence
+// the promotion decision rests on, and never "eventually", since the rows are one per
+// (scorecard × pass × case × judge).
 // What one pass's stage looked like against the plane it actually wrote (arch-review 10 P1). The contract
 // step swaps the source of truth from the carriers to the stage, and the only honest basis for that swap is
 // having watched the two agree on real traffic — dual-writing for a week proves nothing if nobody compared
 // them. Reported per settled pass so a mismatch names the pass, not a daily aggregate nobody can trace back.
+//
+// This shape is the OBSERVATION; where it is kept is the point (arch-review 16 P1-6). It is written onto the
+// settled `ScoringRevision` in the same guarded update as the revision itself, and only projected into
+// process metrics afterwards. As a metric alone it could not be re-read per pass, and a control plane that
+// died between the settle and the callback left the pass silently unobserved — indistinguishable from an
+// agreeing one, in the evidence a promotion decision reads.
 export interface ScoringStageParity {
   scorecardId: string;
   passId: string;
@@ -113,7 +137,9 @@ export interface ScoringStageStore {
   stage(scorecardId: string, passId: string, entries: StagedJudgment[]): Promise<StagedJudgment[]>;
   // Everything this pass staged — what a promotion reads.
   staged(scorecardId: string, passId: string): Promise<StagedJudgment[]>;
-  // Drop a pass's stage. Called after a promotion and by the sweep that collects abandoned passes; returns
-  // how many rows went, so a caller can report what it collected instead of guessing.
+  // Drop a pass's stage. Called once the pass's revision carries its durable parity observation (settle) and
+  // when a pass is declared dead (`failScore` — it will never write again); returns how many rows went, so a
+  // caller can report what it collected instead of guessing. Never before the observation: clearing first
+  // destroys exactly the evidence the promotion decision reads.
   clear(scorecardId: string, passId: string): Promise<number>;
 }

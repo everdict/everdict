@@ -76,7 +76,12 @@ a pure decision unit-tested without a Temporal test environment): a case skipped
 row at all, so its attempt budget never engages and "replan until empty" would bill forever — the stall guard
 bounds it at `MAX_STALLED_SCORE_ROUNDS`, derived to dominate the retry budget rather than picked, and its
 count rides continue-as-new so rotating cannot launder a stuck pass into a fresh budget. Giving up is
-RECORDED (`finalizeScore(abandoned)`), because "we stopped retrying" is not "there was nothing left to do") ·
+RECORDED (`finalizeScore(abandoned)`), because "we stopped retrying" is not "there was nothing left to do".
+The judgment claim's ordinal is the LOGICAL ROUND, not the rotation count (arch-review 16 P0-1): every round
+schedules a new activity execution and Temporal's `attempt` restarts at 1 in each, so an ordinal that only
+moved on continue-as-new made a round's first attempt lose to the previous round's exhausted ones — the case
+could then never finish, cancelling the replan loop's purpose for exactly the retry it exists to serve.
+Rotation CARRIES the round; the execute decision advances it) ·
 `approvalWorkflow` (`everdict-approval-<id>` — Tier-1 item 1, SHIPPED in W2: the durable approval WAIT;
 decision signal or days-long timer → deny-on-expiry via the internal bridge, idempotent against a settled
 record; the agent loop stays in the agent service — the workflow owns ONLY the wait).
