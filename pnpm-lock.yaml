@@ -562,6 +562,10 @@ importers:
       undici:
         specifier: ^6.27.0
         version: 6.27.0
+    devDependencies:
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/otel:
     devDependencies:

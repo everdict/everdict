@@ -57,6 +57,10 @@ export interface Activities {
     groupId: string;
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
+    // How many cases the pass STOPPED re-planning (arch-review 15 P1-6). The replan loop ends either because
+    // the worklist emptied or because it stopped shrinking; those are different facts, and settling both as a
+    // bare finalize would leave the second one unsayable. Absent = the clean finish.
+    abandoned?: number;
     // The pass this workflow owns (arch-review 8 P0) — presented on every write so a superseded
     // activity is refused instead of mutating the plane a newer pass is certifying.
     passId?: string;

@@ -277,6 +277,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       judges: Array<{ id: string; version: string }>;
       submittedBy?: string;
       passId?: string;
+      abandoned?: number;
     }): Promise<void> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -288,6 +289,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
             judges: input.judges,
             submittedBy: input.submittedBy,
             ...(input.passId !== undefined ? { passId: input.passId } : {}),
+            ...(input.abandoned !== undefined ? { abandoned: input.abandoned } : {}),
           }),
         },
       );

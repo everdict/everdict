@@ -448,6 +448,11 @@ export class ScorecardScoreService {
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
     passId?: string,
+    // How many cases the pass STOPPED re-planning (arch-review 15 P1-6). The replan loop ends two ways — the
+    // worklist emptied, or it stopped shrinking — and settling both as a bare finalize would make the second
+    // one unsayable. The record has to be able to say "we stopped retrying", because the alternative reading
+    // ("there was nothing left to do") is exactly the wrong one.
+    abandoned?: number,
   ): Promise<void> {
     const record = await this.getRecord(id);
     const base = record?.scorecard;
@@ -455,6 +460,21 @@ export class ScorecardScoreService {
     // Settling is a write like any other: it must belong to the pass that owns the marker, or a superseded
     // pass could clear a live one's marker and append its revision on top.
     const pass = await this.owningPass(record, passId);
+    if (abandoned !== undefined && abandoned > 0)
+      await this.deps.store.update(id, {
+        steps: [
+          ...(record.steps ?? []),
+          {
+            ts: this.now(),
+            phase: "judges",
+            // `info`, not `failed`: the pass DID settle, and every abandoned case keeps reading as unjudged on
+            // every measurement surface. The step states the fact; it does not re-judge the pass.
+            status: "info",
+            message: `${abandoned} case${abandoned === 1 ? "" : "s"} stopped making progress across consecutive planning rounds — the pass stopped re-attempting them and is settling with them unjudged`,
+          },
+        ],
+        updatedAt: this.now(),
+      });
     await this.aggregate(record, base, base.results, judges, submittedBy, pass);
   }
 

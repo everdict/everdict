@@ -67,7 +67,16 @@ workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleD
 pass; prepareScore's once-per-pass strip-first [the `prepared` flag rides continue-as-new] makes the id-only
 measured predicate mean "judged in THIS pass", then planScore's unfinished-only idempotence +
 scoreGroupCase's skip-if-judged give restart-safe, zero-duplicate re-scoring; start failure degrades to the
-in-process pass) ·
+in-process pass. The loop is PLAN → EXECUTE → **REPLAN** (arch-review 15 P1-6): it used to plan once and then
+choose between finalize and rotate on `plan.keys.length > limit`, so a case's right to a retry depended on how
+many OTHER cases sat beside it — 601 cases overflowed the slice and re-planned, 2 cases finalized after a
+single attempt, and `MAX_JUDGE_ATTEMPTS_PER_PASS` described only the larger batch. A pass now finishes when
+the worklist is EMPTY, which only a fresh plan can answer. Termination is the LOOP's own (`decideScoreRound`,
+a pure decision unit-tested without a Temporal test environment): a case skipped by the judge stream leaves no
+row at all, so its attempt budget never engages and "replan until empty" would bill forever — the stall guard
+bounds it at `MAX_STALLED_SCORE_ROUNDS`, derived to dominate the retry budget rather than picked, and its
+count rides continue-as-new so rotating cannot launder a stuck pass into a fresh budget. Giving up is
+RECORDED (`finalizeScore(abandoned)`), because "we stopped retrying" is not "there was nothing left to do") ·
 `approvalWorkflow` (`everdict-approval-<id>` — Tier-1 item 1, SHIPPED in W2: the durable approval WAIT;
 decision signal or days-long timer → deny-on-expiry via the internal bridge, idempotent against a settled
 record; the agent loop stays in the agent service — the workflow owns ONLY the wait).

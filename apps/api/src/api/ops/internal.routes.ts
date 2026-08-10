@@ -405,6 +405,10 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     // passes carried identity sends none and adopts the live marker — what it can never do is mint one.
     passId: z.string().min(1).optional(),
   });
+  // Finalize carries one more fact than prepare/plan do: how many cases the pass STOPPED re-planning when its
+  // worklist refused to shrink (arch-review 15 P1-6). Its own schema, so a stall count cannot be posted to a
+  // route that has no idea what to do with it.
+  const scoreFinalize = scoreJudges.extend({ abandoned: z.number().int().nonnegative().optional() });
   app.post<{ Params: { id: string } }>(
     "/internal/groups/:id/score-prepare",
     { schema: internalDocs.scorePrepare },
@@ -489,7 +493,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const provided = req.headers["x-internal-token"];
       if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
         return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-      const body = scoreJudges.safeParse(req.body);
+      const body = scoreFinalize.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
         await deps.scorecardService.finalizeScore(
@@ -497,6 +501,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
           body.data.judges,
           body.data.submittedBy,
           body.data.passId,
+          body.data.abandoned,
         );
         return reply.send({ ok: true });
       } catch (err) {

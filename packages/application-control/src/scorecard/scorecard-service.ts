@@ -572,8 +572,10 @@ export class ScorecardService {
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
     passId?: string,
+    // How many cases the replan loop gave up on (arch-review 15 P1-6) — recorded, not silently settled.
+    abandoned?: number,
   ): Promise<void> {
-    return this.scoreService.finalizeScore(id, judges, submittedBy, passId);
+    return this.scoreService.finalizeScore(id, judges, submittedBy, passId, abandoned);
   }
 
   // A dying scoring workflow's death notice (arch-review 10 P1) — see ScorecardScoreService.failScore.

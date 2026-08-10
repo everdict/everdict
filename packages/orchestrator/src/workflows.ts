@@ -8,6 +8,7 @@ import {
   sleep,
   workflowInfo,
 } from "@temporalio/workflow";
+import { type ScoreRoundState, decideScoreRound } from "./score-round.js";
 import type { Activities } from "./types.js";
 
 // ⚠ Workflow code must be deterministic — no I/O, import types only.
@@ -156,6 +157,12 @@ export async function scoreGroupWorkflow(input: {
   // at attempt 1 — so an attempt-only claim refused the fresh judgment as stale and the case could never
   // finish. Carried in the INPUT so it stays deterministic: deriving it from workflow state would not be.
   generation?: number;
+  // The replan loop's own termination state, carried across rotation (arch-review 15 P1-6). `remainingAtLastPlan`
+  // is the worklist size this pass last planned; `stalledRounds` counts consecutive rounds that failed to
+  // shrink it. Both live in the INPUT because a rotation must not reset a stall counter — a pass that cannot
+  // make progress would otherwise loop forever by simply rotating between the two rounds of the guard.
+  remainingAtLastPlan?: number;
+  stalledRounds?: number;
   continueEvery?: number;
   rotateAtHistoryLength?: number;
 }): Promise<void> {
@@ -174,9 +181,26 @@ export async function scoreGroupWorkflow(input: {
       reason: `the scoring workflow failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   };
-  let plan: { keys: string[]; concurrency: number };
+  // PLAN → EXECUTE → REPLAN (arch-review 15 P1-6). A pass finishes when the worklist is EMPTY, which is a
+  // question only a fresh plan can answer — so every round asks it. The round's decision (finish / rotate /
+  // abandon / execute) is the pure `decideScoreRound`, so the rule that used to be implicit in a `>` against
+  // the batch size is stated once and unit-tested without a Temporal test environment.
   let rotatedEarly = false;
-  let limit: number;
+  let state: ScoreRoundState = {
+    ...(input.remainingAtLastPlan !== undefined ? { remaining: input.remainingAtLastPlan } : {}),
+    stalled: input.stalledRounds ?? 0,
+  };
+  // Cases the pass gave up re-planning (the stall guard fired) — carried to finalize so the record can say it.
+  let abandoned = 0;
+  // Cases driven by THIS execution — the slice budget, which is really a history budget.
+  let executed = 0;
+  const limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
+  const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
+  // workflowInfo() is deterministic (replay reads the recorded history), so this is replay-safe.
+  const rotationDue = (): boolean => {
+    const info = workflowInfo();
+    return info.continueAsNewSuggested || info.historyLength >= rotateAt;
+  };
   try {
     if (!input.prepared)
       await batchActivities.prepareScore({
@@ -184,47 +208,72 @@ export async function scoreGroupWorkflow(input: {
         judges: input.judges,
         ...(input.passId !== undefined ? { passId: input.passId } : {}),
       });
-    plan = await batchActivities.planScore({
-      groupId: input.groupId,
-      judges: input.judges,
-      ...(input.passId !== undefined ? { passId: input.passId } : {}),
-    });
-    limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
-    const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
-    const keys = plan.keys.slice(0, limit);
-    let next = 0;
-    const lane = async (): Promise<void> => {
-      while (next < keys.length) {
-        const info = workflowInfo();
-        if (info.continueAsNewSuggested || info.historyLength >= rotateAt) {
-          rotatedEarly = true;
-          return;
-        }
-        const i = next++;
-        const key = keys[i];
-        if (key === undefined) continue;
-        await batchActivities.scoreGroupCase({
-          groupId: input.groupId,
-          key,
-          judges: input.judges,
-          ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
-          ...(input.passId !== undefined ? { passId: input.passId } : {}),
-          generation: input.generation ?? 0,
-        });
+    let running = true;
+    while (running) {
+      const plan = await batchActivities.planScore({
+        groupId: input.groupId,
+        judges: input.judges,
+        ...(input.passId !== undefined ? { passId: input.passId } : {}),
+      });
+      const decision = decideScoreRound(plan.keys, state, rotationDue(), limit);
+      if (decision.kind === "finish") break;
+      if (decision.kind === "abandon") {
+        abandoned = decision.abandoned;
+        break;
       }
-    };
-    const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
-    await Promise.all(Array.from({ length: lanes }, () => lane()));
+      if (decision.kind === "rotate") {
+        state = decision.state;
+        rotatedEarly = true;
+        break;
+      }
+      state = decision.state;
+      const keys = decision.keys;
+      let next = 0;
+      const lane = async (): Promise<void> => {
+        while (next < keys.length) {
+          // History pressure — stop TAKING new cases and drain in-flight lanes; the continuation re-plans.
+          if (rotationDue()) {
+            rotatedEarly = true;
+            running = false;
+            return;
+          }
+          const i = next++;
+          const key = keys[i];
+          if (key === undefined) continue;
+          await batchActivities.scoreGroupCase({
+            groupId: input.groupId,
+            key,
+            judges: input.judges,
+            ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+            ...(input.passId !== undefined ? { passId: input.passId } : {}),
+            generation: input.generation ?? 0,
+          });
+        }
+      };
+      const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
+      await Promise.all(Array.from({ length: lanes }, () => lane()));
+      executed += keys.length;
+      // The slice budget is a HISTORY budget, and it stays one: an execution rotates once it has driven
+      // `limit` cases, exactly as before. What changed is only what happens NEXT — the continuation re-plans,
+      // instead of the pass deciding it is finished because the batch happened to fit in one slice.
+      if (executed >= limit) {
+        rotatedEarly = true;
+        break;
+      }
+    }
   } catch (err) {
     await announceDeath(err);
     throw err;
   }
-  if (rotatedEarly || plan.keys.length > limit) {
-    // The rotation ordinal advances with the rotation — that is what makes the claim pass-global.
+  if (rotatedEarly) {
+    // The rotation ordinal advances with the rotation — that is what makes the claim pass-global. The stall
+    // state rides along, so rotating cannot launder a pass that is making no progress into a fresh budget.
     await continueAsNew<typeof scoreGroupWorkflow>({
       ...input,
       prepared: true,
       generation: (input.generation ?? 0) + 1,
+      ...(state.remaining !== undefined ? { remainingAtLastPlan: state.remaining } : {}),
+      stalledRounds: state.stalled,
     });
     return;
   }
@@ -234,6 +283,7 @@ export async function scoreGroupWorkflow(input: {
       judges: input.judges,
       ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
       ...(input.passId !== undefined ? { passId: input.passId } : {}),
+      ...(abandoned > 0 ? { abandoned } : {}),
     });
   } catch (err) {
     await announceDeath(err);
