@@ -13,7 +13,7 @@ import type {
 import type { GithubRelease, GithubVersionReader } from "../ports/github-repo-writer.js";
 import { ProductVersionSync, type SeriesRunSubmitter } from "./product-version-sync.js";
 
-// Trust suite (docs/trust-certification.md) — TRUST-59 · TRUST-60 · TRUST-68.
+// Trust suite (docs/trust-certification.md) — TRUST-59 · TRUST-60 · TRUST-68 · TRUST-100.
 //
 // A CAUSE IS A FACT ABOUT THE WORLD THAT NOW EXISTS, AND A BOUNDED READ IS NOT A HISTORY.
 //
@@ -243,6 +243,82 @@ describeTrust("TRUST-60/68 — a bounded read says so, and its side effects are 
     expect(result.services[0]?.error).toBeUndefined(); // coverage is not failure
     expect(versions.rows).toHaveLength(1);
     expect(result.triggered).toHaveLength(1); // ledger, fact and evaluation agree — all three, or none
+    expect(submitted).toHaveLength(1);
+  });
+});
+
+// Trust suite — TRUST-100.
+//
+// A RECOVERED PAST IS NOT A NEW EVENT.
+//
+// A page-ceiling read imports the newest pages and records the service as partial. When an operator raises the
+// ceiling, everything below arrives as rows the ledger has never seen — NEW to us, and OLD facts about the
+// world. Announcing them fires an evaluation wave for releases that shipped years ago, writes a causal story
+// that never happened, and bills for it. `syncedAt` cannot separate the two: it is this control plane's clock
+// at the last sweep, not what the world had already published when we last looked.
+describeTrust("TRUST-100 — widening the read ceiling recovers history without announcing it", () => {
+  const reader = (tags: GithubRelease[]): GithubVersionReader => ({
+    async listReleases() {
+      return { rows: tags, complete: true };
+    },
+    async listTags() {
+      return { rows: [], complete: true };
+    },
+    async commitDate() {
+      return undefined;
+    },
+  });
+
+  const at = (tag: string, publishedAt: string): GithubRelease => ({
+    tagName: tag,
+    url: `https://github.com/acme/${tag}`,
+    draft: false,
+    prerelease: false,
+    publishedAt,
+  });
+
+  const synced = (head?: string): ProductRecord => {
+    const base = productAt("acme/copilot-api", true);
+    return {
+      ...base,
+      services: [
+        {
+          ...base.services[0],
+          sync: { syncedAt: "2026-08-01T00:00:00.000Z", ...(head ? { observedRemoteHead: head } : {}) },
+        },
+      ],
+    } as unknown as ProductRecord;
+  };
+
+  it("an OLDER publication recovered by a widened ceiling lands in the ledger and triggers nothing", async () => {
+    const { sync, versions, submitted, products } = build(
+      [synced("2026-08-05T00:00:00.000Z")],
+      reader([at("v0.9.0", "2024-01-01T00:00:00.000Z")]),
+    );
+    const result = await sync.sync("acme", "prod-1", { subject: "dana" });
+    expect(versions.rows).toHaveLength(1); // the timeline gains it — it really did ship
+    expect(result.services[0]?.recovered).toBe(1); // …and says so
+    expect(result.triggered).toEqual([]); // no evaluation, no causal claim
+    expect(submitted).toEqual([]);
+    // The head does not move backwards; a recovered tail must not re-open the whole catalogue as news.
+    expect(products.saved?.services?.[0]?.sync?.observedRemoteHead).toBe("2026-08-05T00:00:00.000Z");
+  });
+
+  it("…and a genuinely NEW publication past the head still triggers, and advances it", async () => {
+    const { sync, submitted, products } = build(
+      [synced("2026-08-05T00:00:00.000Z")],
+      reader([at("v2.0.0", "2026-08-09T00:00:00.000Z")]),
+    );
+    const result = await sync.sync("acme", "prod-1", { subject: "dana" });
+    expect(result.triggered).toHaveLength(1);
+    expect(submitted).toHaveLength(1);
+    expect(products.saved?.services?.[0]?.sync?.observedRemoteHead).toBe("2026-08-09T00:00:00.000Z");
+  });
+
+  it("a service with no recorded head announces as before — absence is not a claim about what was seen", async () => {
+    const { sync, submitted } = build([synced()], reader([at("v2.0.0", "2026-08-09T00:00:00.000Z")]));
+    const result = await sync.sync("acme", "prod-1", { subject: "dana" });
+    expect(result.triggered).toHaveLength(1);
     expect(submitted).toHaveLength(1);
   });
 });

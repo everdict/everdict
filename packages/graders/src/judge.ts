@@ -168,6 +168,14 @@ export class JudgeGrader implements Grader {
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
   readonly ownsJudgeVerdict = true;
+
+  // `judge:<criterion>` inline, `judge:<thisJudgeId>:<criterion>` when namespaced — see `namespaceCriteria`.
+  // The OVERALL metric is deliberately untouched: it is a deciding verdict in both wirings already, and
+  // renaming it would break the metric continuity of every existing trend for no correctness gain.
+  private criterionMetric(criterionId: string): string {
+    return this.opts.namespaceCriteria === true ? `judge:${this.id}:${criterionId}` : `judge:${criterionId}`;
+  }
+
   constructor(
     private readonly judge: Judge,
     private readonly opts: {
@@ -176,6 +184,22 @@ export class JudgeGrader implements Grader {
       useScreenshot?: boolean;
       criteria?: JudgeCriterion[];
       promptTemplate?: string;
+      // NAMESPACE THIS JUDGE'S CRITERIA under its own id (arch-review 19 P1) — opt-in, because only ONE path
+      // needs it.
+      //
+      // A registered judge's scores are rewritten by the runner into `judge:<id>` and `judge:<id>:<criterion>`,
+      // so its criteria are three segments deep and the ladder reads them as DIAGNOSTIC. The INLINE judge
+      // grader is not rewritten, so its criteria stayed at `judge:<criterion>` — two segments, which the same
+      // ladder reads as a DECIDING judge verdict. The identical logical judge therefore reached opposite
+      // conclusions depending on how it was wired: a criterion failing under an overall pass sank the case
+      // inline and was diagnostic when registered.
+      //
+      // Worse, `judge:<criterion>` IS the family of a registered judge whose id happens to match the criterion
+      // name — so re-scoring that judge would strip an inline criterion row it never owned.
+      //
+      // Set only by `makeGraders` for the inline construction; the registered runner and the code-judge
+      // wrapper apply their own rewrite, and a second namespace here would double it.
+      namespaceCriteria?: boolean;
     } = {},
   ) {
     this.id = opts.id ?? "judge";
@@ -207,14 +231,14 @@ export class JudgeGrader implements Grader {
       if (!v) {
         return {
           graderId: this.id,
-          metric: `judge:${c.id}`,
+          metric: this.criterionMetric(c.id),
           status: "unmeasured",
           reason: "unsupported", // this Judge impl cannot score criteria — configuration, not a transient error
           retryable: false,
           detail: "skipped: criterion missing from the verdict",
         };
       }
-      return { graderId: this.id, metric: `judge:${c.id}`, value: v.score, pass: v.pass, detail: v.reason };
+      return { graderId: this.id, metric: this.criterionMetric(c.id), value: v.score, pass: v.pass, detail: v.reason };
     });
     return [overall, ...perCriterion];
   }

@@ -31,6 +31,10 @@ export interface ProductSyncServiceOutcome {
   name: string;
   imported: number;
   error?: string;
+  // Rows that were imported but are NOT news — publications at or below the remote head this service had
+  // already observed, i.e. history a widened read ceiling revealed rather than releases that just happened
+  // (arch-review 19 P1). They land in the ledger and trigger nothing.
+  recovered?: number;
   // The read reached its page ceiling, so this service's OLDER history is not all here (arch-review 16 P1-4).
   // Distinct from `error`: the rows that did land are real and their downstream effects ran. It is a fact
   // about coverage, and a caller that needs a complete history must act on it.
@@ -146,10 +150,31 @@ export class ProductVersionSync {
         const { rows, complete } = await this.importService(tenant, record, service, actor, backfill);
         // A backfilled row counts as imported (it is on the timeline now) but is never news — only
         // post-watermark arrivals reach the auto-eval below.
-        if (!backfill) inserted.push(...rows);
-        outcomes.push({ name: service.name, imported: rows.length, ...(complete ? {} : { incomplete: true }) });
-        // …and the observation is DURABLE, not only in this response (arch-review 17 P1-6).
-        record = { ...record, ...Product.from(record).markServiceSynced(service.name, this.now(), complete).patch };
+        //
+        // …AND NEITHER IS A RECOVERED TAIL (arch-review 19 P1). A page-ceiling read imports the newest pages;
+        // when an operator raises the ceiling, everything below it arrives as rows the ledger has never seen —
+        // NEW to us, and OLD facts about the world. Firing an evaluation wave for releases that shipped years
+        // ago writes a causal story that never happened and bills for it. The boundary is the release's own
+        // publication instant against the newest one this service had already observed.
+        const head = service.sync?.observedRemoteHead;
+        const news = head === undefined ? rows : rows.filter((r) => r.publishedAt > head);
+        if (!backfill) inserted.push(...news);
+        outcomes.push({
+          name: service.name,
+          imported: rows.length,
+          ...(complete ? {} : { incomplete: true }),
+          ...(news.length !== rows.length ? { recovered: rows.length - news.length } : {}),
+        });
+        // …and the observation is DURABLE, not only in this response (arch-review 17 P1-6), including the
+        // remote head this sync advanced to (19 P1).
+        const newestSeen = rows.reduce<string | undefined>(
+          (max, r) => (max === undefined || r.publishedAt > max ? r.publishedAt : max),
+          head,
+        );
+        record = {
+          ...record,
+          ...Product.from(record).markServiceSynced(service.name, this.now(), complete, newestSeen).patch,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         outcomes.push({ name: service.name, imported: 0, error: message });

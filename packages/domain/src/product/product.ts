@@ -231,22 +231,29 @@ export class Product {
   // way to learn that this service's timeline is a prefix. The whole sync state is replaced, so a stream that
   // reads completely today clears a `partial` it carried yesterday — which is the point of recording an
   // OBSERVATION rather than a sticky flag.
-  markServiceSynced(name: string, syncedAt: string, complete = true): ProductTransition {
+  // `observedRemoteHead` only ever ADVANCES (arch-review 19 P1). It answers "what had we already seen", which
+  // is what separates a genuinely new release from one a widened read ceiling merely revealed — and a
+  // recovered tail is full of publications OLDER than the head, so letting it move backwards would turn the
+  // whole back catalogue into news exactly once, which is precisely the wave it exists to prevent.
+  markServiceSynced(name: string, syncedAt: string, complete = true, remoteHead?: string): ProductTransition {
     return {
       patch: {
-        services: this.record.services.map((service) =>
-          service.name === name
-            ? {
-                ...service,
-                sync: {
-                  syncedAt,
-                  ...(complete
-                    ? { completeness: "complete" as const }
-                    : { completeness: "partial" as const, partialAt: syncedAt }),
-                },
-              }
-            : service,
-        ),
+        services: this.record.services.map((service) => {
+          if (service.name !== name) return service;
+          const previous = service.sync?.observedRemoteHead;
+          const head =
+            remoteHead !== undefined && (previous === undefined || remoteHead > previous) ? remoteHead : previous;
+          return {
+            ...service,
+            sync: {
+              syncedAt,
+              ...(complete
+                ? { completeness: "complete" as const }
+                : { completeness: "partial" as const, partialAt: syncedAt }),
+              ...(head !== undefined ? { observedRemoteHead: head } : {}),
+            },
+          };
+        }),
       },
       facts: [],
     };

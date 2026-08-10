@@ -47,6 +47,19 @@ export const ProductServiceSyncSchema = z.object({
   // is why the field records the positive observation rather than a "complete" claim nobody made.
   completeness: z.enum(["complete", "partial"]).optional(),
   partialAt: z.string().optional(),
+  // THE NEWEST REMOTE PUBLICATION THIS SERVICE HAS EVER OBSERVED (arch-review 19 P1).
+  //
+  // `syncedAt` is this control plane's clock at the last sweep — useful for "when did we last look", useless
+  // for "what had we already seen". Those are different questions, and the second one is what separates news
+  // from history: after a page-ceiling read imports v100..v50 and an operator raises the ceiling, v49..v1 are
+  // NEW ROWS to the ledger and OLD FACTS about the world. Treating them as arrivals fires an evaluation wave
+  // for releases that shipped years ago and writes a causal story that never happened.
+  //
+  // A release carries its own publication instant, so the boundary is exact: `publishedAt > observedRemoteHead`
+  // is news, anything at or below it is recovered history. Absent = never recorded (a legacy row, or a stream
+  // that has only ever read completely), in which case the backfill discriminator remains the only signal —
+  // honestly, since inventing a head would be claiming an observation nobody made.
+  observedRemoteHead: z.string().optional(),
 });
 export type ProductServiceSync = z.infer<typeof ProductServiceSyncSchema>;
 

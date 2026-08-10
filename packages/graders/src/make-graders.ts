@@ -138,6 +138,10 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
       const criteria = JudgeCriterionSchema.array().min(1).safeParse(s.config?.criteria);
       return new JudgeGrader(opts.judge, {
         id: typeof s.config?.id === "string" ? s.config.id : "judge",
+        // The INLINE construction — its scores reach the plane unrewritten, so its criteria namespace
+        // themselves here (arch-review 19 P1). The registered runner and the code-judge wrapper build their
+        // own JudgeGrader and apply the runner's rewrite instead; setting it there would double it.
+        namespaceCriteria: true,
         ...(typeof s.config?.rubric === "string" ? { rubric: s.config.rubric } : {}),
         ...(criteria.success ? { criteria: criteria.data } : {}),
         ...(typeof s.config?.promptTemplate === "string" ? { promptTemplate: s.config.promptTemplate } : {}),

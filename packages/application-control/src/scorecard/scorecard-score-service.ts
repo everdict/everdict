@@ -120,6 +120,31 @@ export class ScorecardScoreService {
     this.pinJudges = shared.pinJudges;
   }
 
+  // HOW FAR THIS PROCESS'S CLOCK IS FROM THE DATABASE'S (arch-review 19 P1).
+  //
+  // The lease's END is stamped by the database and its EXPIRY is judged by the database — both correct. What
+  // was left on the application's clock is the decision of WHEN TO RENEW, and a replica running slow reads
+  // "plenty of time left" while the database considers the lease nearly gone. Nothing is corrupted (the
+  // fences refuse the stale writer), but a healthy pass gets taken over and its provider calls are paid for
+  // twice, which is the expensive kind of harmless.
+  //
+  // Every stamped renewal answers the offset for free: the database wrote `now() + lease`, so the difference
+  // between that and this process's own `now() + lease` IS the skew. Measured on each renewal and applied to
+  // the due check, which puts the producer, the judge and the scheduler of a lease in ONE clock frame.
+  private clockOffsetMs = 0;
+
+  private observeClockOffset(stampedLeaseUntil: string | undefined): void {
+    if (stampedLeaseUntil === undefined) return;
+    const stamped = Date.parse(stampedLeaseUntil);
+    if (Number.isNaN(stamped)) return;
+    this.clockOffsetMs = stamped - (Date.parse(this.now()) + SCORING_PASS_LEASE_MS);
+  }
+
+  // This process's clock, corrected into the database's frame.
+  private databaseNow(): number {
+    return Date.parse(this.now()) + this.clockOffsetMs;
+  }
+
   // The lease a claim/renewal grants. The owner extends it while it works, so the window bounds "how long
   // since this pass last proved it was alive" — never "how long a pass may legitimately run".
   private leaseUntil(): string {
@@ -139,12 +164,12 @@ export class ScorecardScoreService {
     // added safety; the fence on the write itself is what actually refuses a superseded pass.
     if (
       pass.leaseUntil !== undefined &&
-      Date.parse(pass.leaseUntil) - Date.parse(this.now()) > SCORING_PASS_RENEW_BEFORE_MS
+      Date.parse(pass.leaseUntil) - this.databaseNow() > SCORING_PASS_RENEW_BEFORE_MS
     )
       return true;
     // The CAS is the authority — no pre-read to disagree with it. A miss means the epoch moved, i.e. this
     // pass was taken over, which is exactly what the caller needs to know.
-    const renewed = await this.deps.store.update(
+    const renewed: Awaited<ReturnType<typeof this.deps.store.update>> = await this.deps.store.update(
       id,
       { scoringPass: { ...pass, leaseUntil: this.leaseUntil(), heartbeatAt: this.now() }, updatedAt: this.now() },
       undefined,
@@ -154,6 +179,7 @@ export class ScorecardScoreService {
       // considers already dead.
       { expectScoringPassId: pass.passId ?? null, stampScoringLeaseSeconds: SCORING_PASS_LEASE_MS / 1000 },
     );
+    this.observeClockOffset(renewed?.scoringPass?.leaseUntil);
     return renewed !== undefined;
   }
 
@@ -298,6 +324,8 @@ export class ScorecardScoreService {
       // the database's clock and the other half off this process's was the remaining drift.
       stampScoringLeaseSeconds: SCORING_PASS_LEASE_MS / 1000,
     });
+    // The claim stamps a lease too, so it is the first chance to learn the skew — before any renewal is due.
+    this.observeClockOffset(claimed?.scoringPass?.leaseUntil);
     if (claimed === undefined)
       throw new ConflictError(
         "CONFLICT",
