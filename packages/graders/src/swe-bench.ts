@@ -21,7 +21,7 @@ export class SweBenchGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly declaredAuthority = "ground_truth" as const;
+  readonly ownsMetrics = ["resolved"] as const;
   readonly needsCompute = true; // Applies the gold patch + runs tests in the environment — must be graded before compute is released
 
   constructor(private readonly cfg: SweBenchConfig) {}

@@ -42,11 +42,39 @@ describeTrust("TRUST-78 — an undeclared producer cannot name itself ground tru
     }
   });
 
-  it("…and the SAME metric from a producer holding the declaration is accepted verbatim", async () => {
-    // The declaration is what `makeGraders` stamps from the GraderSpec, and it is gated at submit. This is the
-    // legitimate path, and it must stay open or the guard would just be a ban on a word.
-    const [score] = await safeGrade(emitting("tests-pass", "state", { declaredAuthority: "ground_truth" }), CTX);
-    expect(score).toEqual({ graderId: "tests-pass", metric: "state", value: 1, pass: true });
+  it("…and the producer that OWNS the name by construction is accepted verbatim", async () => {
+    // The legitimate path, which must stay open or the guard is just a ban on a word. Ownership is intrinsic:
+    // the built-in whose metric is fixed in its own code owns that name, and nothing in a spec can transfer it.
+    const [score] = await safeGrade(emitting("tests-pass", "tests_pass", { ownsMetrics: ["tests_pass"] }), CTX);
+    expect(score).toEqual({ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true });
+  });
+
+  it("TRUST-79 — a DECLARATION is not a wildcard: declaring one authority does not buy another's name", async () => {
+    // The bypass this closes. `authority: "observational"` needs no admin, and the first version of the rule
+    // only asked whether SOME authority had been declared — so an observational declaration bought `state`,
+    // which the ladder reads as ground truth. A declaration authorizes the semantics of the producer's OWN
+    // metric; it says nothing about labels that already carry authority.
+    const [ground] = await safeGrade(emitting("my-script", "state", { ownsMetrics: ["my_score"] }), CTX);
+    expect(ground).toMatchObject({ status: "invalid", reason: "contract_violation" });
+    const [objective] = await safeGrade(emitting("my-script", "tests_pass", { ownsMetrics: ["my_score"] }), CTX);
+    expect(objective).toMatchObject({ status: "invalid", reason: "contract_violation" });
+  });
+
+  it("TRUST-79 — a judge-verdict grant is the ONLY thing a spec may buy, and it buys nothing else", async () => {
+    // Granting the inline judge's shapes is the code-judge wrapper's one legitimate need — the control plane
+    // builds that wrapper, and the inner collection boundary sees only a CaseJob. It does NOT extend to the
+    // reserved authority names, which is where the previous version's wildcard did its damage.
+    const [own] = await safeGrade(emitting("code-judge", "judge", { ownsJudgeVerdict: true }), CTX);
+    expect(own).toEqual({ graderId: "code-judge", metric: "judge", value: 1, pass: true });
+    // Criteria are multi-segment by design (`judge:milestone:<id>` is a real code-judge shape).
+    const [criterion] = await safeGrade(
+      emitting("code-judge", "judge:milestone:login", { ownsJudgeVerdict: true }),
+      CTX,
+    );
+    expect(criterion).toMatchObject({ metric: "judge:milestone:login", value: 1 });
+    // …and the grant stops there: it is not a licence over ground truth.
+    const [ground] = await safeGrade(emitting("code-judge", "state", { ownsJudgeVerdict: true }), CTX);
+    expect(ground).toMatchObject({ status: "invalid", reason: "contract_violation" });
   });
 
   it("a grader cannot write into a registered judge's family, where a re-score could never replace it", async () => {

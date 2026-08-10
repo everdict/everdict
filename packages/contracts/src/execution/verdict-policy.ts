@@ -49,13 +49,29 @@ export const JUDGE_METRIC_ROOT = "judge";
 
 // WHO produced a score — supplied by the collection boundary, never by the producer. This is the whole point:
 // authority must be stamped by something the producer cannot speak for.
+//
+// Ownership is INTRINSIC, not declared (arch-review 18 P0-1). The first version treated "this grader declared
+// SOME authority" as the permit, which made a declaration a wildcard: a custom grader declaring
+// `authority: "observational"` — a declaration needing no admin — could print `{"metric": "state"}` and the
+// ladder still read it as ground truth. The gate moved from "did you declare ground truth" to "did you
+// declare anything", which is not the same question and is not a gate.
+//
+// A declaration authorizes DECLARED SEMANTICS for the producer's own metric (that is exactly what
+// `GraderSpec.authority` says: the semantics of "the metric sharing its id", composed into the batch policy).
+// It authorizes nothing about labels that already carry authority. So the reserved names belong to the
+// producers that own them by construction, and no spec can hand them over.
 export type ScoreProducer =
   | {
       kind: "grader";
       id: string;
-      // What this grader's spec DECLARED (composed into the batch's verdict policy at submit, and
-      // constitution-gated there). A grader holding a declaration may emit reserved names; one without may not.
-      declaredAuthority?: MetricAuthority;
+      // Reserved metric names this grader owns BY CONSTRUCTION — declared on the implementation, whose metric
+      // is fixed in its own code rather than taken from config or from a script's stdout. Never sourced from
+      // a spec: a spec is user data, and this is the capability the rule exists to protect.
+      ownsMetrics?: readonly string[];
+      // May emit the inline judge's shapes (`judge`, `judge:<criterion>`). The JudgeGrader implementation owns
+      // it; so does the code-judge WRAPPER, whose spec the control plane builds — see `forgedMetricReason`
+      // for the exact bound and the residual it leaves.
+      ownsJudgeVerdict?: boolean;
     }
   | { kind: "judge"; id: string };
 
@@ -70,15 +86,24 @@ export function forgedMetricReason(metric: string, producer: ScoreProducer): str
     if (metric === own || metric.startsWith(`${own}:`)) return undefined;
     return `a judge may only produce its own metric family ('${own}' or '${own}:<criterion>'); '${metric}' belongs to something else`;
   }
-  // The judge family belongs to judges — including the INLINE judge grader, which is a grader by construction
-  // and a judge by declaration (`makeGraders` stamps the built-in ladder's own assignment onto it). Anything
-  // else writing here would forge a verdict, and would own rows a re-score of that judge then cannot replace:
-  // judge ownership is the `judge:<id>` family, so a forged row outlives every later pass of the judge whose
-  // name it wears.
-  if (inJudgeFamily && producer.declaredAuthority !== "judge")
-    return `'${metric}' belongs to the judge family, which only a judge may produce — a grader writing into it would forge a verdict and own rows a re-score cannot replace`;
-  if (RESERVED_AUTHORITY_METRICS.includes(metric) && producer.declaredAuthority === undefined)
-    return `'${metric}' carries built-in verdict authority, and this grader declared none — declare \`authority\` on the grader spec (ground_truth is admin-gated at submit) or use a different metric name`;
+  if (inJudgeFamily) {
+    if (producer.ownsJudgeVerdict !== true)
+      return `'${metric}' belongs to the judge family, which only a judge may produce — a grader writing into it would forge a verdict and own rows a re-score cannot replace`;
+    // Criteria are multi-segment by design (`judge:milestone:<id>` is a real code-judge shape), so no depth
+    // bound is meaningful here — and none is needed on the registered path, where the runner rewrites every
+    // metric to `judge:<thisJudgeId>…` before it reaches the plane. A forged name cannot survive that.
+    //
+    // The residual, stated rather than hidden: for the INLINE judge grader, whose scores are not rewritten,
+    // `judge:x` is syntactically a criterion named `x` and the family of a judge called `x` at the same time.
+    // A grader granted the judge verdict can therefore land a judge-RUNG row in a registered judge's family.
+    // It is bounded — the weakest deciding rung, and inside that family, so a re-score of that judge replaces
+    // it rather than leaving it stale — and it is exactly the ambiguity that structured score identity
+    // (producer, metric and criterion as FIELDS rather than as one string) removes for good. Until then this
+    // is the honest edge of a name-based namespace, not a gap anyone can widen.
+    return undefined;
+  }
+  if (RESERVED_AUTHORITY_METRICS.includes(metric) && !(producer.ownsMetrics ?? []).includes(metric))
+    return `'${metric}' carries built-in verdict authority and belongs to the grader that produces it; declaring an authority does not grant another producer's name — use this grader's own metric name and declare \`authority\` for that`;
   return undefined;
 }
 

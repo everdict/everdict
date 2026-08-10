@@ -7,7 +7,7 @@ export class DomContainsGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly declaredAuthority = "objective" as const;
+  readonly ownsMetrics = ["dom_contains"] as const;
   constructor(private readonly needle: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;
@@ -29,7 +29,7 @@ export class AnswerMatchGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly declaredAuthority = "objective" as const;
+  readonly ownsMetrics = ["answer_match"] as const;
   constructor(
     private readonly expect?: string,
     private readonly mode: "contains" | "exact" = "contains",
@@ -53,7 +53,7 @@ export class UrlMatchesGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly declaredAuthority = "objective" as const;
+  readonly ownsMetrics = ["url_matches"] as const;
   constructor(private readonly pattern: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;

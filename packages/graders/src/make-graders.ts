@@ -30,13 +30,17 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
   return specs.map((s) => withDeclaredAuthority(buildGrader(s, opts), s));
 }
 
-// Attach the SPEC's explicit declaration, which is constitution-gated at submit. The first-party graders
-// carry their intrinsic authority on the class itself (see e.g. TestsPassGrader) precisely so it cannot be
-// lost by a call site that builds one directly — this only applies what the spec ADDS, which is the path a
-// user-authored grader takes to gain authority over a reserved metric name.
+// The ONE thing a spec may grant: the code-judge WRAPPER's right to emit the inline judge's shapes
+// (arch-review 18 P0-1). A code judge executes as a `script` grader inside a job the control plane builds,
+// and that builder declares `authority: "judge"` on the spec it emits — there is no other way for the inner
+// collection boundary, which sees only a CaseJob, to tell that wrapper apart from any other user script.
+//
+// What a spec can NEVER grant is a reserved authority NAME. Those belong to the graders that produce them by
+// construction (declared on the implementation), because treating "declared something" as the permit made
+// every declaration a wildcard: `authority: "observational"` needs no admin and would have bought `state`.
 function withDeclaredAuthority(grader: Grader, spec: GraderSpec): Grader {
-  if (spec.authority === undefined) return grader;
-  return Object.assign(Object.create(Object.getPrototypeOf(grader)), grader, { declaredAuthority: spec.authority });
+  if (spec.authority !== "judge") return grader;
+  return Object.assign(Object.create(Object.getPrototypeOf(grader)), grader, { ownsJudgeVerdict: true });
 }
 
 function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {

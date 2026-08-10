@@ -4,7 +4,7 @@ import type { EnvSnapshot } from "./environment.js";
 import type { EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvidence } from "./trace-source.js";
 import type { TraceEvent } from "./trace.js";
-import { type MetricAuthority, type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
+import { type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
 
 // Why a score was NOT a measurement. Closed vocabulary — a new skip path picks an existing reason or adds one here.
 export const UNMEASURED_REASONS = [
@@ -240,11 +240,14 @@ export interface GradeContext {
 // enabling fair comparison across harnesses/versions.
 export interface Grader {
   readonly id: string;
-  // What this grader's SPEC declared (arch-review 17 P0-2) — stamped by `makeGraders`, which is the trusted
-  // construction boundary that reads the GraderSpec, and never by the grader's own output. It is what lets
-  // the collection boundary tell a grader that HOLDS authority over a reserved metric name from one that is
-  // merely printing the name: the declaration is constitution-gated at submit, the name is not gated at all.
-  readonly declaredAuthority?: MetricAuthority;
+  // Reserved metric names this grader owns BY CONSTRUCTION (arch-review 17 P0-2, narrowed by 18 P0-1) — a
+  // property of the IMPLEMENTATION, whose metric is fixed in its own code. Declared on the class rather than
+  // stamped at construction so it cannot be lost by a call site that builds the grader directly, and never
+  // sourced from a spec: a spec is user data, and treating a declaration as the permit turned it into a
+  // wildcard over every authority-bearing name.
+  readonly ownsMetrics?: readonly string[];
+  // May emit the inline judge's own shapes. See `forgedMetricReason` for the bound and its residual.
+  readonly ownsJudgeVerdict?: boolean;
   // A grader that runs commands in the environment (compute) at scoring time declares true (outcome-family: tests-pass/command etc.).
   // Undeclared = observation-only (trace/snapshot) → runCase scores it after releasing compute, minimizing sandbox occupancy to
   // the execution window (not held while waiting on the judge LLM). docs/architecture/streaming-case-pipeline.md

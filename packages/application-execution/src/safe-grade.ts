@@ -27,7 +27,8 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
     const producer: ScoreProducer = {
       kind: "grader",
       id: grader.id,
-      ...(grader.declaredAuthority !== undefined ? { declaredAuthority: grader.declaredAuthority } : {}),
+      ...(grader.ownsMetrics !== undefined ? { ownsMetrics: grader.ownsMetrics } : {}),
+      ...(grader.ownsJudgeVerdict === true ? { ownsJudgeVerdict: true } : {}),
     };
     return toScores(await grader.grade(ctx)).map((s) => sanitizeScore(s, producer));
   } catch (error) {
