@@ -429,15 +429,29 @@ export class ScorecardService {
         creation.map((c) => c.record),
       );
     } catch (err) {
-      // The work this right was claimed for never came into existence, so the right goes back (arch-review 18
-      // P1). Without this the counter stayed incremented with no scorecard and no execution, and the caller's
-      // retry mints a NEW batch id — so the same logical submission is charged twice against an autonomy
-      // budget the system otherwise treats as a conservation law. Best-effort and idempotent: a store with no
-      // release degrades to the previous behavior rather than silently double-counting.
-      if (admissionRequestId !== undefined && admittedEnvelopeId !== undefined)
-        await this.deps.envelopes
-          ?.releaseRuns?.(admittedEnvelopeId, input.tenant, admissionRequestId)
-          .catch(() => undefined);
+      // AN EXCEPTION IS NOT PROOF THAT THE COMMIT DID NOT HAPPEN (arch-review 19 P0-3).
+      //
+      // Releasing the right unconditionally fixed the previous defect — a claimed budget with no batch — and
+      // introduced a worse one, because `create` throwing does not mean the insert failed. A connection lost
+      // after Postgres committed the row and its outbox fact raises here with the scorecard PERSISTED: the
+      // caller sees a failure, the right is refunded, and startup recovery later picks the queued batch up
+      // and runs it. The old bug spent a budget on nothing (fail-closed); this one runs autonomous work with
+      // no budget behind it (fail-open), which is the direction that must never be traded for the other.
+      //
+      // So the refund needs the one thing an exception cannot supply: evidence. A read that authoritatively
+      // says the row is ABSENT releases it; a row that is present means the create actually succeeded and the
+      // grant is correctly spent; and a read that itself fails leaves the grant HELD — "unknown" is a third
+      // state, not a synonym for "failed", and holding is its fail-closed side.
+      if (admissionRequestId !== undefined && admittedEnvelopeId !== undefined) {
+        const absent = await this.deps.store
+          .get(record.id)
+          .then((row) => row === undefined)
+          .catch(() => false);
+        if (absent)
+          await this.deps.envelopes
+            ?.releaseRuns?.(admittedEnvelopeId, input.tenant, admissionRequestId)
+            .catch(() => undefined);
+      }
       throw err;
     }
     if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);

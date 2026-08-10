@@ -3,6 +3,7 @@ import {
   type CaseResult,
   ConflictError,
   type Dataset,
+  EXPERIMENT_ADHOC_REF,
   type EvalCase,
   NotFoundError,
   SCORING_PASS_LEASE_MS,
@@ -11,6 +12,7 @@ import {
   ScoreSchema,
   type ScorecardRecord,
   type ScoringPass,
+  TRACE_EVAL_REF,
   scoringPassReclaimable,
 } from "@everdict/contracts";
 import {
@@ -963,6 +965,27 @@ export class ScorecardScoreService {
       // A refusal is a decision, not a lookup failure — it must not fall through to the shell dataset, which
       // would judge against empty tasks and call that a verdict.
       if (err instanceof ConflictError) throw err;
+      // …AND NEITHER MAY A LOOKUP FAILURE, when this batch certified real case documents (arch-review 19 P0-2).
+      //
+      // The shell dataset synthesizes `task: ""`, no expected answer and no milestones. That is the honest
+      // shape for a record that never had a registry dataset — an ad-hoc experiment, a directly-evaluated
+      // trace. Applying it to a batch whose manifest SEALED case documents turns a registry outage or a
+      // deleted dataset into the most dangerous thing this system can produce: the trace and snapshot are
+      // the real execution's evidence, so a judge re-reads genuine evidence against a question that has been
+      // emptied out, and returns a measured verdict for it. Right evidence, wrong question, real score —
+      // and nothing downstream looks anomalous.
+      //
+      // A fallback is a new semantic decision; it may not silently replace an identity the system knew
+      // exactly. Losing the historical context is a reason to refuse, not a reason to continue with less.
+      const datasetless = record.dataset.id === EXPERIMENT_ADHOC_REF || record.dataset.id === TRACE_EVAL_REF;
+      if (!datasetless && record.manifest?.cases !== undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: record.id, dataset: `${record.dataset.id}@${record.dataset.version}` },
+          `this batch sealed the case documents it evaluated and they can no longer be read (${
+            err instanceof Error ? err.message : String(err)
+          }) — refusing to re-judge its evidence against an empty task, which would produce a real verdict for a question this batch never asked.`,
+        );
       const shell = (caseId: string): EvalCase => ({
         id: caseId,
         env: { kind: "prompt" },

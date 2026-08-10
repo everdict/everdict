@@ -228,6 +228,86 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
     expect(released).toBe("adm:scorecard:sc-lost");
   });
 
+  it("TRUST-95 — an exception is not proof the commit did not happen: an ambiguous create keeps the grant", async () => {
+    // The compensation added last round refunded on ANY create exception, and `create` throwing does not mean
+    // the insert failed. A connection lost after Postgres committed the row and its outbox raises here with
+    // the scorecard PERSISTED — the caller sees a failure, the right is refunded, and startup recovery later
+    // picks the queued batch up and runs it. The previous bug spent a budget on nothing (fail-closed); this
+    // one runs autonomous work with no budget behind it, which is the direction that must never be traded.
+    //
+    // So the refund needs evidence an exception cannot supply. Here the row IS present after the throw.
+    const at3 = await world("3.0.0");
+    let released: string | undefined;
+    const committed: Record<string, unknown> = {};
+    const envelopes = {
+      async tryAdmitRuns() {
+        return true;
+      },
+      async releaseRuns(_i: string, _t: string, requestId: string) {
+        released = requestId;
+      },
+      async admit() {},
+      async settle() {},
+      async spend() {
+        return { usd: 0, runs: 0 };
+      },
+    } as never;
+    const runStore = {
+      async get() {
+        return {
+          id: "run-parent",
+          tenant: "acme",
+          envelope: { id: "env-1", capRuns: 1 },
+          createdAt: "2026-01-01T00:00:00.000Z",
+        };
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async list() {
+        return [];
+      },
+    } as never;
+    const ambiguous = new ScorecardService({
+      dispatcher: neverDispatches,
+      store: {
+        async create(record: { id: string }) {
+          committed[record.id] = record; // the write LANDED…
+          throw new Error("connection reset"); // …and the acknowledgement did not
+        },
+        async get(id: string) {
+          return committed[id];
+        },
+        async update() {
+          return undefined;
+        },
+        async list() {
+          return [];
+        },
+        async delete() {
+          return false;
+        },
+      } as never,
+      datasets: at3.datasets,
+      harnesses: at3.harnesses,
+      resolveModelBinding: at3.resolveModelBinding,
+      runStore,
+      envelopes,
+      newId: () => "sc-ambiguous",
+    });
+    await expect(
+      ambiguous.submit({
+        tenant: "acme",
+        dataset: { id: "d", version: "1.0.0" },
+        harness: { id: "cli", version: "1.0.0" },
+        origin: { source: "agent", causedByRunId: "run-parent" } as never,
+      }),
+    ).rejects.toThrow(/connection reset/);
+    // The batch exists, so the right is correctly SPENT — refunding it would leave committed autonomous work
+    // with no budget behind it.
+    expect(released).toBeUndefined();
+  });
+
   it("holds with a JUDGE and a workspace judge default in play — the guard must not 409 every real series", async () => {
     // The equality is now load-bearing for every product auto-eval, so it has to hold on the shape those
     // actually have: a selected judge with its own floating model, plus the workspace default that governs

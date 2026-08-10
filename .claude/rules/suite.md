@@ -8,6 +8,15 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
 
 - **`runSuite(dataset, harness, dispatch)`** fans each case through a `Dispatch` (`CaseJob → CaseResult`) — depend
   on that interface, not a concrete Backend/Scheduler. Per-case isolation: one case failing must not sink the batch.
+- **An exception is not proof that a commit did not happen.** A store call that throws may have committed —
+  a connection lost after Postgres wrote the row raises exactly like a failed insert. Compensation therefore
+  needs evidence, not an error: read the row back, release only on authoritative ABSENCE, and HOLD on an
+  unreadable store. "Unknown" is a third state, and holding is its fail-closed side (arch-review 19 P0-3).
+- **A fallback is a new semantic decision.** It may not silently replace an identity the system previously
+  knew exactly. The re-score's shell dataset (`task: ""`) is honest for a record that never had a registry
+  dataset and catastrophic for one whose manifest sealed real case documents — the trace is genuine evidence,
+  so an emptied question yields a real verdict nothing downstream can spot. Losing historical context is a
+  reason to REFUSE, never to continue with less (arch-review 19 P0-2).
 - **Authority is STAMPED, never inferred from a producer-controlled label.** A metric NAME assigns authority
   (`state`/`tests_pass` → ground_truth, `judge:<id>` → judge), so the name is as powerful as the declaration —
   and the declaration is constitution-gated while the name is not. `sanitizeScore(score, producer)` is the one
