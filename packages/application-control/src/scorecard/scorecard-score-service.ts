@@ -703,7 +703,10 @@ export class ScorecardScoreService {
         }
       }
       const staged = await stage.staged(scorecardId, passId);
-      if (staged.length === 0 && produced.size === 0) return; // nothing happened — nothing to report
+      // A ZERO-WORK pass still reports (arch-review 14 §12). Returning early re-created the very ambiguity
+      // `completed` was added to remove: a legitimate no-op, a failed measurement and "no report at all"
+      // became indistinguishable in a denominator of settled passes. It emits `completed: true` with zeros —
+      // which is a measurement, and a passing one.
       const stagedKeys = new Set(staged.map((e) => unit(e.caseKey, e.judgeId)));
       const missingFromStage = [...produced.keys()].filter((k) => !stagedKeys.has(k));
       const mismatched: string[] = [];

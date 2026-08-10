@@ -143,6 +143,9 @@ export const seriesVerdictSchema = z.enum([
   // 증거는 있지만 지금 시리즈가 선언한 평가 계약(데이터셋/하네스/저지)과 다른 계약에서 나왔다(arch-review 13 P0).
   // 질문이 바뀌었으므로 다른 질문에 대한 답이고, 한 번도 평가하지 않은 것과 똑같이 차단한다.
   'contract_stale',
+  // 지금 시리즈가 무엇을 묻는지 자체를 해석할 수 없다 — 데이터셋 삭제, 레지스트리 장애(arch-review 14 P0).
+  // "확인할 수 없었다"는 "괜찮다"의 동의어였던 적이 없으므로 필수 시리즈에서는 차단한다.
+  'contract_unverifiable',
 ])
 export const releaseSeriesStateSchema = z.object({
   key: z.string(),

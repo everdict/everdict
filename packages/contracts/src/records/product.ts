@@ -245,6 +245,11 @@ export const SeriesVerdictSchema = z.enum([
   // version-less ref whose `latest` moved. Not a measurement outcome: the question changed, so the answer is
   // an answer to a different question. Blocking for a required series, exactly like never having run.
   "contract_stale",
+  // The series' CURRENT contract could not be resolved at all — a deleted dataset, a registry outage
+  // (arch-review 14 P0). Distinct from `contract_stale`, which means "we know what the question is now and
+  // this evidence answered a different one": here we do not know what the question is. Blocking for a
+  // required series, because "we could not check" has never been a synonym for "it holds".
+  "contract_unverifiable",
 ]);
 export type SeriesVerdict = z.infer<typeof SeriesVerdictSchema>;
 

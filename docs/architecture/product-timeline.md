@@ -113,12 +113,26 @@ identity — deliberately stable so relabeling never re-keys history — and rea
 by it, so editing a series' dataset/harness/judges left yesterday's green standing as today's evidence: same
 key, different question. Worse for version-less refs, where `latest` moves with the product row untouched, so
 neither the row version nor the policy digest could ever see it. A series is therefore two things and gets two
-identities: `key` (the trend) and `seriesContractDigest` (the CONTRACT — the resolved dataset/harness/judge
-closure). Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
+identities: `key` (the trend) and `seriesContractDigest` (the CONTRACT). The contract is the resolved
+TRANSITIVE closure, not the top documents: `harness@1` is a document that may name `model: {ref}` with no
+version, so the same declaration can execute under a different model with every id/version above reading
+held. It seals what the scorecard manifest seals — harness model, service models, judge model/rubric — because
+a Product-side identity that stopped at the top would be a second, weaker answer to a question the platform
+had already answered properly. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
 compares against, so the two can never drift into different answers); a newest batch whose stamp differs — or
 is absent, meaning it cannot say which question it answered — is `contract_stale` and blocks a required
-series. An unresolvable contract makes the check ABSTAIN rather than declaring everything stale on our own
-inability to look.
+series. An unresolvable contract is its own verdict — `contract_unverifiable`, which BLOCKS a required series.
+Returning "no answer" and letting the check skip was the unknown→absence→safe collapse this codebase has
+removed three times elsewhere, sitting in the one place that decides whether a release ships: a deleted
+dataset or a registry outage made stale evidence pass, in the direction of green. `unknown` (a deployment
+with no resolver at all) stays a genuinely different fact and abstains.
+
+And the resolution carries its PLAN, not just its digest. The auto-eval stamped a digest of `harness@10` and
+then submitted the version-less ref, which `latest` had meanwhile moved to `@11` — a record whose origin and
+whose execution named different versions. Using the same resolver twice is not the same as carrying one
+decision; state moves between the calls. The ship path freezes the resolution once and reuses it for the
+readiness evaluation AND the recorded decision (`seriesDecisions[].evaluationContract`), so what a release
+passed is answerable without walking to a scorecard that may since have been deleted.
 
 **Service identity is the STREAM, not the name.** `serviceStreamKey` (repository · source · host · tagPrefix)
 is one exported domain decision with three consumers that used to read it differently: the product edit

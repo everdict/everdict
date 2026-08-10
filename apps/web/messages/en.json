@@ -6021,6 +6021,7 @@
     "verdictBootstrapRequired": "First ship — approval needed",
     "verdictScopeInvalid": "Watched series is gone",
     "verdictContractStale": "Series definition changed",
+    "verdictContractUnverifiable": "Series definition unreadable",
     "verdictNotEvaluated": "Not evaluated",
     "linkedIssuesHeading": "Linked issues",
     "historyHeading": "History",

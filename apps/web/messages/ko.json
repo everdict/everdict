@@ -6021,6 +6021,7 @@
     "verdictBootstrapRequired": "첫 출하 — 승인 필요",
     "verdictScopeInvalid": "워치 시리즈 사라짐",
     "verdictContractStale": "시리즈 정의가 바뀜",
+    "verdictContractUnverifiable": "시리즈 정의를 읽을 수 없음",
     "verdictNotEvaluated": "평가 안 됨",
     "linkedIssuesHeading": "링크된 이슈",
     "historyHeading": "이력",

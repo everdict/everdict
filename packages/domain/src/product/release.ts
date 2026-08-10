@@ -52,6 +52,19 @@ export interface ReleaseStatusChangeInput {
     reasons?: readonly string[];
     baseline?: { scorecardId: string; scoring?: { revision: number; scorePlaneDigest: string } };
     candidate?: { scorecardId: string; scoring?: { revision: number; scorePlaneDigest: string } };
+    // WHICH QUESTION this series was judged on (arch-review 14 §9). The decision recorded which scorecards
+    // and which judgments, and not what they were asked — so "what did the last ship actually pass?" could
+    // only be answered by walking to a scorecard that may since have been deleted, and the DECISION itself
+    // was not self-describing. The digest identifies it; the document makes it readable without any external
+    // mutable state, which is the same reason the product policy is embedded rather than digested.
+    evaluationContract?: {
+      digest: string;
+      dataset: { id: string; version: string };
+      harness: { id: string; version: string };
+      judges: ReadonlyArray<{ id: string; version: string }>;
+      harnessModel?: string;
+      judgeClosure?: ReadonlyArray<{ id: string; version: string; model?: string; rubric?: string }>;
+    };
   }>;
   // The product policy this decision stood on (series membership + required/bootstrap flags) — as a
   // DOCUMENT, because a digest of a mutable record is one-way: it detects that the policy changed and can
@@ -228,6 +241,7 @@ export class Release {
               ...(d.reasons?.length ? { reasons: [...d.reasons] } : {}),
               ...(d.baseline ? { baseline: d.baseline } : {}),
               ...(d.candidate ? { candidate: d.candidate } : {}),
+              ...(d.evaluationContract ? { evaluationContract: d.evaluationContract } : {}),
             })),
           }
         : {}),

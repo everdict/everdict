@@ -277,6 +277,11 @@ export const VerificationDecisionSchema = z.object({
     .object({
       offered: z.number().int().nonnegative(),
       reviewed: z.array(CheckpointRefSchema).default([]),
+      // Reached for and FAILED — a 404, a timeout, a transport error (arch-review 14 §13). Structurally
+      // distinct from `unreachable` (no tool can address it at all) and from never-attempted, because an
+      // owner-agent reading this ledger mechanically must be able to tell "nobody looked" from "we looked and
+      // the platform could not answer". It lived only in the decision's prose, which is not a field.
+      failed: z.array(CheckpointRefSchema).default([]),
       unreachable: z.array(CheckpointRefSchema).default([]),
     })
     .optional(),

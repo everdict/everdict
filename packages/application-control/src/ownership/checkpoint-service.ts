@@ -382,7 +382,7 @@ export class CheckpointService {
       detail: affirmable ? verdict.detail : `${verdict.detail} — recorded as inconclusive: ${gaps.join("; ")}.`,
       independence,
       executorCoverage: { runRefs: coverage.runRefs, unresolvedRunIds: coverage.unresolvedRunIds },
-      evidenceCoverage: { offered: evidence.length, reviewed, unreachable },
+      evidenceCoverage: { offered: evidence.length, reviewed, failed: failedReads, unreachable },
       envelopeId,
       createdAt: this.now(),
       createdBy: input.requestedBy ?? "system",

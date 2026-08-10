@@ -89,15 +89,60 @@ export interface ResolvedSeriesContract {
   dataset: { id: string; version: string };
   harness: { id: string; version: string };
   judges: Array<{ id: string; version: string }>;
+  // The TRANSITIVE closure, not just the top documents (arch-review 14 P0). Pinning `harness@1` pins a
+  // document, and that document can name `model: {ref: "main-model"}` with no version — so two runs of the
+  // identical series contract can execute under different models while every id/version above reads held.
+  // The scorecard manifest already seals exactly this (`harness.model`, `harness.serviceModels`, the judge
+  // closure) precisely because a top-level version is not the identity; a Product-side contract that stopped
+  // at the top would be a second, weaker answer to a question the platform had already answered properly.
+  //
+  // Values are what the ref resolved to at resolution time ("ref@version", a raw binding verbatim, or the
+  // honest "unresolved" sentinel) — the same vocabulary the manifest uses, so the two can be compared.
+  // Absent = the resolver could not reach that facet, which the caller reports as `unresolvable` rather than
+  // digesting a hole.
+  harnessModel?: string;
+  serviceModels?: Record<string, string>;
+  judgeClosure?: Array<{ id: string; version: string; model?: string; rubric?: string; harness?: string }>;
 }
 
+// WHETHER the current contract could be established, as data (arch-review 14 P0). The first version passed
+// `string | undefined`, and `undefined` travelled from "we could not resolve it" to "do not run the
+// freshness check" — the unknown→absence→safe collapse this codebase has removed three times already, back in
+// the one place it decides whether a release ships. A registry outage or a deleted dataset would have made
+// stale evidence pass, silently, in the direction of green.
+//
+// `unresolvable` is a THIRD state, not a missing second one. `unknown` remains for deployments with no
+// resolver at all, which is a genuinely different fact: nobody claimed this deployment could answer.
+export type SeriesContractResolution =
+  // The digest AND the plan it was taken over. Both, because a caller that has the digest and re-derives the
+  // plan is doing exactly the thing this type exists to stop (arch-review 14 P0): the auto-eval stamped a
+  // digest of `harness@10` and then submitted the version-less ref, which `latest` had meanwhile moved to
+  // `@11` — a record whose origin and whose execution disagreed. Using the same resolver twice is not the
+  // same as carrying one decision; state moves between the calls. Submit what was resolved.
+  | { status: "resolved"; digest: string; contract: ResolvedSeriesContract }
+  | { status: "unresolvable"; reason: string }
+  | { status: "unknown" };
+
 export function seriesContractDigest(contract: ResolvedSeriesContract): string {
+  const byId = <T extends { id: string; version: string }>(rows: readonly T[]): T[] =>
+    [...rows].sort((a, b) => a.id.localeCompare(b.id) || a.version.localeCompare(b.version));
   return contentDigest({
     dataset: contract.dataset,
     harness: contract.harness,
     // Judge SELECTION is a set, not a sequence — the order a caller happens to list them in is not a
     // different question, and letting it be one would make every reorder look like a contract change.
-    judges: [...contract.judges].sort((a, b) => a.id.localeCompare(b.id) || a.version.localeCompare(b.version)),
+    judges: byId(contract.judges),
+    // …and the CLOSURE beneath them, which is where a version-less nested ref moves without any id changing.
+    ...(contract.harnessModel !== undefined ? { harnessModel: contract.harnessModel } : {}),
+    ...(contract.serviceModels !== undefined
+      ? // Key order is not identity — sort so two equal maps digest equally.
+        {
+          serviceModels: Object.fromEntries(
+            Object.entries(contract.serviceModels).sort(([a], [b]) => a.localeCompare(b)),
+          ),
+        }
+      : {}),
+    ...(contract.judgeClosure !== undefined ? { judgeClosure: byId(contract.judgeClosure) } : {}),
   });
 }
 
@@ -174,17 +219,25 @@ function seriesVerdict(
   baseline: BaselineResolution,
   gate: SeriesGateReading | undefined,
   allowNoBaseline: boolean,
-  // The contract this series declares NOW. Absent = the deployment cannot resolve it (no registry seam), in
-  // which case the check abstains rather than blocking everything — an unenforceable invariant we can name
-  // beats one we made up.
-  contract?: string,
+  // The contract this series declares NOW — resolved, unresolvable, or unknown. See SeriesContractResolution.
+  contract: SeriesContractResolution,
 ): { verdict: SeriesVerdict; reasons?: string[] } {
+  // UNRESOLVABLE comes FIRST, and before the evidence is even considered (arch-review 14 P0). A series whose
+  // dataset was deleted has no current question, so no evidence can be current for it — checking the
+  // evidence at all would be answering a question we just admitted we cannot state.
+  if (contract.status === "unresolvable")
+    return {
+      verdict: "contract_unverifiable",
+      reasons: [
+        `this series' current definition could not be resolved (${contract.reason}) — we cannot say what it asks today, and "we could not check" is not "it holds"`,
+      ],
+    };
   if (latest === undefined) return { verdict: "not_evaluated", reasons: ["this series has no succeeded evaluation"] };
   // THE QUESTION CHANGED (arch-review 13 P0). Evidence stamped with a different contract answered a
   // different question; a scorecard whose contract is unstamped cannot say which question it answered at
   // all. Neither is evidence for the series as it stands, and reading either as current is how an edit to
   // the dataset silently kept yesterday's green.
-  if (contract !== undefined && latest.contractDigest !== contract) {
+  if (contract.status === "resolved" && latest.contractDigest !== contract.digest) {
     return {
       verdict: "contract_stale",
       reasons: [
@@ -252,7 +305,7 @@ export function releaseReadiness(
   openIssues: number,
   // The CONTRACT each series declares now, resolved (arch-review 13 P0). Absent map / absent key = the
   // deployment cannot resolve it, and the freshness check abstains for that series.
-  contractBySeries?: ReadonlyMap<string, string>,
+  contractBySeries?: ReadonlyMap<string, SeriesContractResolution>,
 ): ReleaseReadiness {
   const resolution = resolveWatchedSeries(product, release);
   // A gate this release PROMISED and can no longer find blocks unconditionally (arch-review 12 P0). It is
@@ -279,7 +332,7 @@ export function releaseReadiness(
       resolution,
       gate,
       entry.allowNoBaseline === true,
-      contractBySeries?.get(entry.key),
+      contractBySeries?.get(entry.key) ?? { status: "unknown" },
     );
     // The pins RECORDED are the gate's own, never the trend list's, whenever the gate ran — see
     // SeriesGateReading. Falling back to the list pin is correct exactly where no gate ran (not_evaluated,

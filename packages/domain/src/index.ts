@@ -267,6 +267,7 @@ export {
   releaseReadiness,
   type ReleaseScope,
   type ResolvedSeriesContract,
+  type SeriesContractResolution,
   seriesContractDigest,
   resolveWatchedSeries,
   type SeriesGateReading,

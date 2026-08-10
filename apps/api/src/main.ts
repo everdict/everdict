@@ -43,8 +43,15 @@ import {
   firstPartyCatalogExtras,
   firstPartyDefaults,
 } from "@everdict/application-control";
-import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
-import { type ResolvedSeriesContract, evaluateGate, perTenantTrustZones, resolveRef } from "@everdict/domain";
+import type { ModelBinding, ProductSeries, RegistryAuth } from "@everdict/contracts";
+import {
+  type ResolvedSeriesContract,
+  type SeriesContractResolution,
+  evaluateGate,
+  perTenantTrustZones,
+  resolveRef,
+  seriesContractDigest,
+} from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -912,32 +919,99 @@ async function main(): Promise<void> {
   //
   // Any unresolvable ref answers `undefined`: a series naming a deleted dataset has no contract to compare
   // against, and inventing one would be worse than abstaining.
-  const resolveSeriesContract = async (
-    tenant: string,
-    series: ProductSeries,
-  ): Promise<ResolvedSeriesContract | undefined> => {
+  const resolveSeriesContract = async (tenant: string, series: ProductSeries): Promise<SeriesContractResolution> => {
+    // Every failure answers `unresolvable` WITH ITS REASON — never `undefined`, which used to travel to
+    // "skip the freshness check" and let stale evidence pass a release (arch-review 14 P0).
     const concrete = async (
       registry: { versions(tenant: string, id: string): Promise<string[]> },
+      kind: string,
       ref: { id: string; version?: string },
-    ): Promise<{ id: string; version: string } | undefined> => {
+    ): Promise<{ id: string; version: string } | string> => {
       try {
         const versions = await registry.versions(tenant, ref.id);
-        if (versions.length === 0) return undefined;
+        if (versions.length === 0) return `${kind} '${ref.id}' has no versions in this workspace`;
         return { id: ref.id, version: resolveRef(ref.id, ref.version ?? "latest", versions) };
-      } catch {
-        return undefined;
+      } catch (err) {
+        return `${kind} '${ref.id}' could not be resolved: ${err instanceof Error ? err.message : String(err)}`;
       }
     };
-    const dataset = await concrete(datasetRegistry, series.dataset);
-    const harness = await concrete(harnessInstanceRegistry, series.harness);
-    if (dataset === undefined || harness === undefined) return undefined;
+    const dataset = await concrete(datasetRegistry, "dataset", series.dataset);
+    if (typeof dataset === "string") return { status: "unresolvable", reason: dataset };
+    const harness = await concrete(harnessInstanceRegistry, "harness", series.harness);
+    if (typeof harness === "string") return { status: "unresolvable", reason: harness };
     const judges: Array<{ id: string; version: string }> = [];
     for (const judge of series.judges) {
-      const resolved = await concrete(judgeRegistry, judge);
-      if (resolved === undefined) return undefined; // a judge we cannot name makes the whole contract unnameable
+      const resolved = await concrete(judgeRegistry, "judge", judge);
+      if (typeof resolved === "string") return { status: "unresolvable", reason: resolved };
       judges.push(resolved);
     }
-    return { dataset, harness, judges };
+    // …and the CLOSURE beneath the top documents (arch-review 14 P0). `harness@1` is a document, and that
+    // document may name `model: {ref}` with no version — so the same contract can execute under a different
+    // model with every id/version above reading held. The scorecard manifest seals exactly this; a
+    // Product-side identity that stopped at the top would be a second, weaker answer to a question the
+    // platform had already answered properly. Resolved with the SAME functions the manifest uses, so the two
+    // vocabularies cannot drift.
+    const bindingIdentity = async (binding: ModelBinding | undefined): Promise<string | undefined> => {
+      if (binding === undefined) return undefined;
+      if (typeof binding === "string") return binding; // already concrete
+      try {
+        const spec = await modelRegistry.get(tenant, binding.ref, binding.version ?? "latest");
+        return `${binding.ref}@${spec.version}`;
+      } catch {
+        return "unresolved"; // the manifest's own sentinel — an honest hole, not a silent one
+      }
+    };
+    let harnessModel: string | undefined;
+    try {
+      const spec = await harnessInstanceRegistry.get(tenant, harness.id, harness.version);
+      harnessModel = await bindingIdentity((spec as { model?: ModelBinding }).model);
+    } catch (err) {
+      return {
+        status: "unresolvable",
+        reason: `harness '${harness.id}@${harness.version}' could not be read: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    const judgeClosure: Array<{ id: string; version: string; model?: string; rubric?: string }> = [];
+    for (const judge of judges) {
+      try {
+        const spec = (await judgeRegistry.get(tenant, judge.id, judge.version)) as {
+          model?: ModelBinding;
+          rubric?: unknown;
+        };
+        const model = await bindingIdentity(spec.model);
+        // A rubric REF resolves at run time too — the same moving-target shape as a model binding.
+        const rubricRef = spec.rubric;
+        let rubric: string | undefined;
+        if (rubricRef !== null && typeof rubricRef === "object" && "id" in rubricRef) {
+          const r = rubricRef as { id: string; version?: string };
+          try {
+            const versions = await rubricRegistry.versions(tenant, r.id);
+            rubric =
+              versions.length > 0 ? `${r.id}@${resolveRef(r.id, r.version ?? "latest", versions)}` : "unresolved";
+          } catch {
+            rubric = "unresolved";
+          }
+        }
+        judgeClosure.push({
+          ...judge,
+          ...(model !== undefined ? { model } : {}),
+          ...(rubric !== undefined ? { rubric } : {}),
+        });
+      } catch (err) {
+        return {
+          status: "unresolvable",
+          reason: `judge '${judge.id}@${judge.version}' could not be read: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+    const contract: ResolvedSeriesContract = {
+      dataset,
+      harness,
+      judges,
+      ...(harnessModel !== undefined ? { harnessModel } : {}),
+      judgeClosure,
+    };
+    return { status: "resolved", digest: seriesContractDigest(contract), contract };
   };
   const productService = new ProductService({
     store: productStore,

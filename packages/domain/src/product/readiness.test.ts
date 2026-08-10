@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Product } from "./product.js";
 import {
   type BaselineResolution,
+  type SeriesContractResolution,
   type SeriesGateReading,
   type SeriesScorecardPoint,
   releaseReadiness,
@@ -320,7 +321,14 @@ describe("release scope — a promised gate cannot be deleted into a pass", () =
 describe("series evaluation contract — evidence must answer the question the series asks NOW", () => {
   const CONTRACT = "sha256:today";
   const OLD = "sha256:yesterday";
-  const contracts = new Map([["quality", CONTRACT]]);
+  const plan = {
+    dataset: { id: "d", version: "1.0.0" },
+    harness: { id: "h", version: "1.0.0" },
+    judges: [],
+  };
+  const contracts = new Map<string, SeriesContractResolution>([
+    ["quality", { status: "resolved", digest: CONTRACT, contract: plan }],
+  ]);
 
   const pointWith = (digest?: string): SeriesScorecardPoint => ({
     scorecardId: "sc-1",
@@ -378,9 +386,27 @@ describe("series evaluation contract — evidence must answer the question the s
       new Map(),
       new Map(),
       0,
-      new Map(), // no entry for "quality" — unresolvable
+      new Map(), // no entry — this deployment has no resolver at all
     );
     expect(readiness.series[0]?.verdict).not.toBe("contract_stale");
+  });
+
+  // arch-review 14 P0: "we could not resolve the question" travelled to "do not check the answer", which is
+  // the unknown→absence→safe collapse in the one place that decides whether a release ships. A deleted
+  // dataset or a registry outage made stale evidence pass, in the direction of green.
+  it("BLOCKS when the current contract cannot be resolved — unknown is never green", () => {
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product([{ allowNoBaseline: true }]),
+      new Map([["quality", pointWith(CONTRACT)]]), // evidence that would otherwise pass
+      new Map(),
+      new Map(),
+      0,
+      new Map([["quality", { status: "unresolvable", reason: "dataset 'support' was deleted" }]]),
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "contract_unverifiable", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("deleted");
+    expect(readiness.ready).toBe(false);
   });
 });
 

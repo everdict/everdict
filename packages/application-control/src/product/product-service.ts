@@ -33,6 +33,7 @@ import {
   type ReleaseEditInput,
   type ReleaseTransition,
   type ResolvedSeriesContract,
+  type SeriesContractResolution,
   type SeriesGateReading,
   type SeriesScorecardPoint,
   currentScoringPin,
@@ -140,7 +141,7 @@ export interface ProductServiceDeps {
   // Absent = this deployment cannot answer "what does this series ask today", and the freshness check
   // ABSTAINS for every series. That is the honest degradation: an unenforceable invariant we can name beats
   // a made-up one. It is also what keeps unit paths (and any deployment without registries) working.
-  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<ResolvedSeriesContract | undefined>;
+  resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<SeriesContractResolution>;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -416,7 +417,11 @@ export class ProductService {
     // ONE product read (arch-review 10 P0) — the policy the decision is EVALUATED under and the policy it
     // RECORDS are now the same document by construction, not by two reads happening to agree.
     const product = await this.get(tenant, record.productId);
-    const readiness = await this.readinessUnder(tenant, record, product);
+    // The contracts this decision is about to stand on — resolved ONCE and carried into both the readiness
+    // evaluation and the recorded decision, so the ship cannot record a question different from the one it
+    // evaluated (arch-review 14 §9).
+    const contracts = await this.resolveContracts(tenant, product, record);
+    const readiness = await this.readinessUnder(tenant, record, product, contracts);
     const transition = Release.from(record).setStatus(
       {
         to: input.status,
@@ -450,6 +455,16 @@ export class ProductService {
                 candidate: {
                   scorecardId: s.latest.scorecardId,
                   ...(s.latest.scoring ? { scoring: s.latest.scoring } : {}),
+                },
+              }
+            : {}),
+          // WHAT THIS SERIES WAS ASKED — from the same resolution the readiness evaluated, so the recorded
+          // question and the evaluated question are one artifact rather than two lookups.
+          ...(contracts?.get(s.key)?.status === "resolved"
+            ? {
+                evaluationContract: {
+                  digest: (contracts.get(s.key) as { digest: string }).digest,
+                  ...(contracts.get(s.key) as { contract: ResolvedSeriesContract }).contract,
                 },
               }
             : {}),
@@ -501,6 +516,9 @@ export class ProductService {
     tenant: string,
     release: ReleaseRecord,
     product: ProductRecord,
+    // The already-resolved contracts, when the caller froze them (the ship path). Absent = resolve here,
+    // which is what a plain readiness READ does.
+    contracts?: Map<string, SeriesContractResolution>,
   ): Promise<ReleaseReadiness> {
     const openIssues =
       this.deps.issues === undefined
@@ -522,13 +540,20 @@ export class ProductService {
     const gateBySeries = new Map<string, SeriesGateReading>();
     // WHAT EACH SERIES ASKS TODAY. Resolved once per readiness read, so the freshness check compares the
     // stamp a batch carries against the contract now in force rather than against the series' NAME.
-    const contractBySeries = new Map<string, string>();
-    if (this.deps.resolveSeriesContract !== undefined) {
+    const contractBySeries = contracts ?? new Map<string, SeriesContractResolution>();
+    if (contracts === undefined && this.deps.resolveSeriesContract !== undefined) {
       for (const series of resolveWatchedSeries(product, release).series) {
-        const contract = await this.deps.resolveSeriesContract(tenant, series).catch(() => undefined);
-        // Unresolvable (a deleted dataset, a registry outage) → no entry, so the check abstains for this
-        // series rather than declaring every batch stale on our own inability to look.
-        if (contract !== undefined) contractBySeries.set(series.key, seriesContractDigest(contract));
+        // UNRESOLVABLE IS RECORDED, not dropped (arch-review 14 P0). Omitting the entry turned "we could not
+        // resolve this series' current definition" into "skip the freshness check" — unknown becoming
+        // absence becoming safe, in the one place that decides whether a release ships. The domain blocks a
+        // required series on it; a thrown resolver is the same fact and says so.
+        const resolution = await this.deps.resolveSeriesContract(tenant, series).catch(
+          (err): SeriesContractResolution => ({
+            status: "unresolvable",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        contractBySeries.set(series.key, resolution);
       }
     }
     if (this.deps.scorecards !== undefined) {
@@ -626,6 +651,29 @@ export class ProductService {
       openIssues,
       contractBySeries,
     );
+  }
+
+  // Resolve every watched series' current contract ONCE. The ship path freezes this and reuses it for both
+  // the evaluation and the recorded decision; a readiness read resolves inline.
+  private async resolveContracts(
+    tenant: string,
+    product: ProductRecord,
+    release: ReleaseRecord,
+  ): Promise<Map<string, SeriesContractResolution> | undefined> {
+    if (this.deps.resolveSeriesContract === undefined) return undefined;
+    const out = new Map<string, SeriesContractResolution>();
+    for (const series of resolveWatchedSeries(product, release).series) {
+      out.set(
+        series.key,
+        await this.deps.resolveSeriesContract(tenant, series).catch(
+          (err): SeriesContractResolution => ({
+            status: "unresolvable",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        ),
+      );
+    }
+    return out;
   }
 
   // The instant the product last shipped BEFORE this release — the baseline's anchor. For a released release
