@@ -10,6 +10,7 @@ import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
   type ServerDeps,
+  assertDatasetConstitution,
   gate,
   resolvePrincipal,
   resolveTeamRef,
@@ -51,6 +52,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       declaredOriginFrom(req.body),
     );
     try {
+      // The constitutional act, gated where the declaration is AUTHORED (arch-review 22 P0-2).
+      assertDatasetConstitution(principal, parsed.data);
       await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
@@ -84,6 +87,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
         },
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
+      assertDatasetConstitution(principal, dataset); // an imported task set declares like any other
       await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       return reply.code(201).send({
         workspace: principal.workspace,
@@ -120,6 +124,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
         },
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
+      assertDatasetConstitution(principal, dataset); // an imported task set declares like any other
       await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       return reply.code(201).send({
         workspace: principal.workspace,

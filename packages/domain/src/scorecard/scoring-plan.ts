@@ -265,6 +265,32 @@ export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCa
 // Two cases declaring DIFFERENT semantics for one metric is refused rather than resolved. Picking by
 // declaration order would make a batch's constitution depend on case ordering, and there is no honest
 // tie-break: the two declarations disagree about what the measurement MEANS.
+// WHICH metrics a set of cases declares GROUND TRUTH for — the constitutional act, wherever it is written
+// (arch-review 22 P0-2).
+//
+// Declaring ground truth redefines what passing means: `evaluateVerdict` ranks ground_truth above objective,
+// so a custom `business_ok: true` decides a case that a built-in `tests_pass: false` would otherwise fail.
+// That is a grant of new authority, not a description of an existing one — the earlier reading ("a measured
+// metric already decided the case through the fallback") holds only when NO higher rung is present, which is
+// exactly the situation the fallback exists for.
+//
+// So the same act is gated wherever it is authored. The submit path gates a run-time grading plan; this is
+// what lets a dataset's own declaration be gated at ITS write boundary instead — once, on an immutable
+// document, rather than on every schedule, CI trigger and product auto-eval that later runs it.
+export function groundTruthDeclarations(cases: ReadonlyArray<Pick<EvalCase, "graders">>): string[] {
+  const out = new Set<string>();
+  for (const c of cases)
+    for (const g of c.graders ?? []) {
+      // The SAME reading composeVerdictPolicy uses: named metrics replace the id-based one.
+      if (g.metrics !== undefined && g.metrics.length > 0) {
+        for (const m of g.metrics) if (m.authority === "ground_truth") out.add(m.id);
+        continue;
+      }
+      if (g.authority === "ground_truth") out.add(g.id);
+    }
+  return [...out].sort();
+}
+
 export interface GraderDeclarationConflict {
   metric: string;
   declared: string[];

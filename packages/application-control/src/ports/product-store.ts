@@ -88,6 +88,25 @@ export interface ReleaseStore {
       // "which dataset/harness/judges does this series ask" unguarded — and a ship resolves exactly that.
       // `version` remains the legacy fallback for a product written before either column existed.
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
+      // THE REST OF THE DECISION'S READ-SET (arch-review 22 P0-1).
+      //
+      // A terminal release transition must CAS the full set of mutable state its decision was computed from,
+      // not the convenient subset that happens to live on two rows. Readiness reads three things: the open
+      // issues linked to this release, the newest succeeded scorecard per watched series, and the series'
+      // current evaluation contracts. Only the last of those has no row to fence — the first two do, in the
+      // same database, so a decision that shipped "0 open issues, no newer candidate" can be made to mean it
+      // at the linearization point rather than at the moment somebody read it.
+      //
+      // Without this the record is not merely racy, it is WRONG in its own words: the history entry states
+      // `openIssues: 0, force: false` while an open issue existed before the ship committed.
+      expectDecision?: {
+        // How many OPEN issues were linked to this release when readiness ran.
+        openIssues: number;
+        // Per watched series, the candidate the decision compared — `newestAt` is its `createdAt`, and `null`
+        // means the decision saw NO evidence for that series (which is itself a decision input: a required
+        // series with no run blocks, and one that gains a run afterwards was not the thing evaluated).
+        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+      };
     },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;

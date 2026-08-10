@@ -116,6 +116,7 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
       const rec = await deps.benchmarkService.import({
         tenant: principal.workspace,
         createdBy: principal.subject,
+        roles: principal.roles, // the constitutional gate on the produced dataset's declarations
         ...parsed.data,
       });
       return reply.code(201).send(rec);

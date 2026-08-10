@@ -54,6 +54,7 @@ export {
   stampJudgeAttempts,
   isJudgeMetricOf,
   effectiveGraderDeclarations,
+  groundTruthDeclarations,
   type GraderDeclarationConflict,
   sealGrading,
   selectSubsetCases,

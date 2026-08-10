@@ -474,6 +474,95 @@ describeTrust("TRUST-118 — the shipped composition resolves to the ledger row 
     });
   });
 
+  it("TWO rows matching the plan is AMBIGUOUS — a resolver may not pick one and call it history", async () => {
+    // The ledger is stream-aware on purpose: a service repointed from repo-A to repo-B tracks a different
+    // stream under the same name, and both can publish `v1.0.0`. The store returns newest-first, so taking
+    // the first match would write "this is the exact row that shipped" on the strength of a sort order.
+    const { productService, versions } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [{ ...SERIES, requiredForRelease: false }],
+    });
+    for (const [id, stream] of [
+      ["row-a", "github|acme/copilot-api|releases|"],
+      ["row-b", "github|acme/copilot-api-v2|releases|"],
+    ] as const)
+      await versions.create({
+        id,
+        tenant: "acme",
+        productId: product.id,
+        service: "api",
+        streamKey: stream,
+        version: "v1.0.0",
+        kind: "release",
+        prerelease: false,
+        publishedAt: "2026-07-01T00:00:00.000Z",
+        importedAt: "2026-07-01T00:01:00.000Z",
+      });
+    const release = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.7",
+      components: [{ service: "api", version: "v1.0.0" }],
+    });
+    await productService.setReleaseStatus("acme", release.id, { status: "released" }, { subject: "release-captain" });
+    const shipped = await productService.getRelease("acme", release.id);
+    const entry = shipped.history.find((h) => h.event === "released");
+    const component = (entry?.detail as { components?: Array<Record<string, unknown>> } | undefined)?.components?.[0];
+    // …and `ambiguous` is its own answer: "we found two" and "we found none" are different facts, and only
+    // one of them is fixed by importing more versions.
+    expect(component).toMatchObject({ service: "api", version: "v1.0.0", resolution: "ambiguous" });
+    expect(component?.versionRecordId).toBeUndefined();
+  });
+
+  it("…and a plan that PINS the row resolves it exactly, however many share the version", async () => {
+    const { productService, versions } = build();
+    const product = await productService.create({
+      tenant: "acme",
+      createdBy: "release-captain",
+      name: "Support Copilot",
+      services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
+      series: [{ ...SERIES, requiredForRelease: false }],
+    });
+    for (const [id, stream] of [
+      ["pinned-a", "github|acme/copilot-api|releases|"],
+      ["pinned-b", "github|acme/copilot-api-v2|releases|"],
+    ] as const)
+      await versions.create({
+        id,
+        tenant: "acme",
+        productId: product.id,
+        service: "api",
+        streamKey: stream,
+        version: "v1.0.0",
+        kind: "release",
+        prerelease: false,
+        publishedAt: "2026-07-01T00:00:00.000Z",
+        importedAt: "2026-07-01T00:01:00.000Z",
+      });
+    const release = await productService.createRelease({
+      tenant: "acme",
+      createdBy: "release-captain",
+      productId: product.id,
+      name: "2026.8",
+      components: [{ service: "api", version: "v1.0.0", versionRecordId: "pinned-b" }],
+    });
+    await productService.setReleaseStatus("acme", release.id, { status: "released" }, { subject: "release-captain" });
+    const shipped = await productService.getRelease("acme", release.id);
+    const entry = shipped.history.find((h) => h.event === "released");
+    expect(
+      (entry?.detail as { components?: Array<Record<string, unknown>> } | undefined)?.components?.[0],
+    ).toMatchObject({
+      versionRecordId: "pinned-b",
+      streamKey: "github|acme/copilot-api-v2|releases|",
+      resolution: "ledger",
+    });
+  });
+
   it("a version no ledger row backs still ships — and says it was never resolved", async () => {
     // Refusing here would turn a bookkeeping gap into a blocked release. Recording WHICH of the three cases
     // it was is what keeps the history honest instead of quietly equating them.

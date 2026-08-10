@@ -3,6 +3,7 @@ import {
   type DatasetOrigin,
   type DatasetProvenance,
   type DatasetSourceRef,
+  ForbiddenError,
 } from "@everdict/contracts";
 import {
   type BenchmarkAdapterSpec,
@@ -22,6 +23,7 @@ import {
   listBenchmarks,
   searchHfDatasets,
 } from "@everdict/datasets";
+import { groundTruthDeclarations } from "@everdict/domain";
 import type { BenchmarkRegistry, DatasetRegistry } from "@everdict/registry";
 import { z } from "zod";
 
@@ -60,6 +62,9 @@ export interface BenchmarkImportInput {
   version: string;
   limit?: number;
   text?: string; // uploaded jsonl source text
+  // The submitter's roles — an import is a dataset WRITE surface, and a ground_truth declaration inside the
+  // produced cases is the same constitutional act the create route gates (arch-review 22 P0-2).
+  roles?: readonly string[];
 }
 
 export interface PreviewSourceInput {
@@ -297,6 +302,15 @@ export class BenchmarkService {
       );
     }
     const stamped = producedBy ? { ...dataset, producedBy } : dataset; // etch provenance onto the dataset (for back-reference)
+    // A catalog recipe's graders declare like any other (arch-review 22 P0-2) — an import is a dataset write
+    // surface, so the constitutional act is gated here rather than at every later execution.
+    const groundTruth = groundTruthDeclarations(stamped.cases);
+    if (groundTruth.length > 0 && !(input.roles ?? []).includes("admin"))
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { metrics: groundTruth },
+        `Importing a dataset whose graders declare ground_truth authority for ${groundTruth.join(", ")} requires the admin role — it defines what passing means for every evaluation that ever runs it.`,
+      );
     await this.deps.datasets.register(input.tenant, stamped, input.createdBy); // versions immutable (conflict 409); creator = the importing subject
     return { workspace: input.tenant, id: stamped.id, version: stamped.version, cases: stamped.cases.length };
   }

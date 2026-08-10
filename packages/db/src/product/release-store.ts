@@ -1,8 +1,21 @@
 import type { OutboxEvent, ReleaseListFilter, ReleaseStore } from "@everdict/application-control";
-import { type ReleaseRecord, ReleaseRecordSchema, type ReleaseStatus } from "@everdict/contracts";
+import {
+  ISSUE_STATUSES,
+  ISSUE_STATUS_CATEGORY,
+  type ReleaseRecord,
+  ReleaseRecordSchema,
+  type ReleaseStatus,
+} from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row.js";
+
+// The statuses readiness counts as OPEN — derived from the same category map the services use, never a
+// hand-listed copy: a new status added to one list and not the other would silently change what "blocking"
+// means at exactly the boundary this fence exists to hold.
+const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
+  (status) => ISSUE_STATUS_CATEGORY[status] !== "completed" && ISSUE_STATUS_CATEGORY[status] !== "canceled",
+);
 
 export class InMemoryReleaseStore implements ReleaseStore {
   private readonly byId = new Map<string, ReleaseRecord>();
@@ -15,6 +28,21 @@ export class InMemoryReleaseStore implements ReleaseStore {
   // EXISTS inside the write statement; unbound here, `expectProduct` ABSTAINS rather than refusing — an
   // in-memory pair that failed closed on an unwired link would break every unit path that never had one,
   // and the guard's whole purpose is the concurrent case a single-threaded fake cannot produce anyway.
+  // The rest of the decision's read-set (arch-review 22 P0-1) — the in-memory twin of the Pg subqueries.
+  // Unbound it ABSTAINS, exactly as `expectProduct` does: a single-threaded fake cannot produce the
+  // interleaving anyway, and failing closed on an unwired link would break every unit path that has none.
+  private decisionSources?: {
+    openIssues(releaseId: string): number;
+    newestCandidateAt(productId: string, seriesKey: string): string | undefined;
+  };
+
+  attachDecisionSources(sources: {
+    openIssues(releaseId: string): number;
+    newestCandidateAt(productId: string, seriesKey: string): string | undefined;
+  }): void {
+    this.decisionSources = sources;
+  }
+
   attachProducts(products: {
     peek(
       id: string,
@@ -66,6 +94,10 @@ export class InMemoryReleaseStore implements ReleaseStore {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
+      expectDecision?: {
+        openIssues: number;
+        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+      };
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
@@ -93,6 +125,18 @@ export class InMemoryReleaseStore implements ReleaseStore {
           : dimension(live.policyDigest, guard.expectProduct.policyDigest, live.version ?? 0) &&
             dimension(live.definitionDigest, guard.expectProduct.definitionDigest, live.version ?? 0);
       if (!ok) return undefined;
+    }
+    // …and the rest of the read-set: the issues this decision counted and the candidate it compared.
+    if (guard?.expectDecision !== undefined && this.decisionSources !== undefined) {
+      const sources = this.decisionSources;
+      if (sources.openIssues(id) !== guard.expectDecision.openIssues) return undefined;
+      for (const candidate of guard.expectDecision.candidates) {
+        const newest = sources.newestCandidateAt(candidate.productId, candidate.seriesKey);
+        // A candidate that appeared, or a NEWER one than the decision read, means the decision was made
+        // about evidence that is no longer the latest — which is the selection predicate the recorded
+        // scoring pin cannot express.
+        if ((newest ?? null) !== candidate.newestAt) return undefined;
+      }
     }
     const next0 = { ...current, ...patch, version: (current.version ?? 0) + 1 };
     const next: ReleaseRecord = { ...next0, id: current.id, tenant: current.tenant };
@@ -255,6 +299,10 @@ export class PgReleaseStore implements ReleaseStore {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
+      expectDecision?: {
+        openIssues: number;
+        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+      };
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
@@ -326,6 +374,38 @@ export class PgReleaseStore implements ReleaseStore {
       // the row version, which moves on every write including the edit we are guarding against. A legacy row
       // therefore conflicts slightly too eagerly — the safe direction, and self-healing on its next write.
       guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (CASE WHEN p.release_policy_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.release_policy_digest=$${digestIdx} END) AND (CASE WHEN p.evaluation_definition_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.evaluation_definition_digest=$${defIdx} END))`;
+    }
+    // THE REST OF THE DECISION'S READ-SET, in the SAME statement (arch-review 22 P0-1). A ship decision is
+    // computed from the open issues linked to this release and from the newest succeeded scorecard per
+    // watched series; both live in this database, so both can be conditions on the write rather than reads
+    // that went stale before it. Re-reading them first would only narrow the window — the same argument that
+    // put the product policy in here.
+    if (guard?.expectDecision !== undefined) {
+      params.push(guard.expectDecision.openIssues);
+      const openIdx = params.length;
+      params.push(JSON.stringify([{ type: "release", id }]));
+      const linkIdx = params.length;
+      params.push(OPEN_ISSUE_STATUSES);
+      const statusIdx = params.length;
+      // The same predicate the readiness read used (`links @> [{type:"release", id}]`, non-terminal status),
+      // evaluated at commit. A blocking issue linked between the decision and the write makes this false and
+      // the release stays planned — instead of shipping a history entry that says `openIssues: 0`.
+      guardSql += ` AND (SELECT count(*) FROM everdict_issues i WHERE i.tenant = everdict_product_releases.tenant AND i.links @> $${linkIdx}::jsonb AND i.status = ANY($${statusIdx}::text[])) = $${openIdx}`;
+      for (const candidate of guard.expectDecision.candidates) {
+        params.push(candidate.productId, candidate.seriesKey);
+        const productIdx = params.length - 1;
+        const keyIdx = params.length;
+        if (candidate.newestAt === null) {
+          // The decision saw NO evidence for this series. Any succeeded batch now is a different question.
+          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded')`;
+        } else {
+          params.push(candidate.newestAt);
+          const atIdx = params.length;
+          // A NEWER succeeded batch means the decision compared something that is no longer the latest —
+          // the selection predicate ("S10 was latest"), which the recorded scoring pin cannot express.
+          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded' AND s.created_at > $${atIdx}::timestamptz)`;
+        }
+      }
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

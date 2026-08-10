@@ -436,13 +436,20 @@ export class ProductService {
       const rows = await this.deps.versions
         .list(tenant, { productId: record.productId, service: component.service })
         .catch(() => []);
-      const row = rows.find((r) => r.version === component.version);
+      // RESOLUTION MAY REFINE AMBIGUITY ONLY WHEN THE INPUT UNIQUELY IDENTIFIES THE RESULT (arch-review 22
+      // P1). The plan may pin the row the picker offered; otherwise `{service, version}` is matched, and that
+      // pair does not uniquely name a row once a service can be repointed at another repository. Taking the
+      // first match — which the store returns newest-first — would write "this is the exact row that
+      // shipped" into history on the strength of a sort order.
+      const pinned = component.versionRecordId;
+      const matches = rows.filter((r) => (pinned !== undefined ? r.id === pinned : r.version === component.version));
+      const row = matches.length === 1 ? matches[0] : undefined;
       out.push({
         service: component.service,
         version: component.version,
         ...(row !== undefined ? { versionRecordId: row.id } : {}),
         ...(row?.streamKey !== undefined ? { streamKey: row.streamKey } : {}),
-        resolution: row !== undefined ? "ledger" : "unresolved",
+        resolution: row !== undefined ? "ledger" : matches.length > 1 ? "ambiguous" : "unresolved",
       });
     }
     return out;
@@ -532,7 +539,49 @@ export class ProductService {
     // while this decision was being made left the release row untouched, so the guard passed and a decision
     // evaluated under the old policy committed as if it had seen the new one. The guard is evaluated in the
     // write statement, the same shape as the scoring fence.
-    return this.applyReleaseTransition(record, transition, product);
+    // THE FULL READ-SET this decision stood on (arch-review 22 P0-1). The product's policy and definition
+    // were already conditions on the write; the issues and the candidate selection were not, so a decision
+    // could commit stating `openIssues: 0` after an issue was linked, or ship against S10 after S11 landed.
+    // A scoring pin says WHICH judgment was read; it cannot say "and it was still the latest".
+    //
+    // `scope_invalid` entries are excluded: a promised series whose declaration is gone has no watched
+    // definition, so "no succeeded batch exists for it" is not a claim this decision made.
+    const decision =
+      input.status === "released"
+        ? {
+            openIssues: readiness.openIssues,
+            candidates: readiness.series
+              .filter((entry) => entry.verdict !== "scope_invalid")
+              .map((entry) => ({
+                productId: product.id,
+                seriesKey: entry.key,
+                newestAt: entry.latest?.createdAt ?? null,
+              })),
+          }
+        : undefined;
+    // THE AMBIENT HALF of the read-set, which has no row to fence (arch-review 22 P0-1). Each series'
+    // evaluation contract is resolved from REGISTRIES and workspace settings — a new `latest`, a
+    // workspace-local document shadowing a `_shared` one, a changed default judge model — none of which
+    // touch the product row the CAS conditions on. There is no generation token to compare inside the write
+    // statement, so this is a RE-VERIFY rather than a CAS, and it is labelled as one: it closes the window
+    // between the decision and the commit, and cannot close the one inside the commit itself. A registry
+    // generation is what would make this a condition on the write; until then, saying which of the two this
+    // is beats implying the stronger one.
+    if (input.status === "released" && contracts !== undefined && contracts.size > 0) {
+      const now = await this.resolveContracts(tenant, product, record);
+      for (const [key, before] of contracts) {
+        const after = now?.get(key);
+        const digestOf = (r: SeriesContractResolution | undefined): string =>
+          r === undefined ? "absent" : r.status === "resolved" ? r.digest : r.status;
+        if (digestOf(before) !== digestOf(after))
+          throw new ConflictError(
+            "CONFLICT",
+            { release: record.id, series: key },
+            `the evaluation contract for series '${key}' changed while this ship was being decided — the readiness you saw was computed against a different question. Re-read the release and decide again.`,
+          );
+      }
+    }
+    return this.applyReleaseTransition(record, transition, product, decision);
   }
 
   async removeRelease(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
@@ -823,6 +872,14 @@ export class ProductService {
     // The product this decision was evaluated under, when there was one — its version becomes a cross-row
     // condition on the write (arch-review 10 P0). Absent for plain edits, which stand on no policy.
     product?: ProductRecord,
+    // …and the REST of the decision's read-set (arch-review 22 P0-1): the issues it counted and the
+    // candidate it compared per series. Passed only for the SHIP, because only the ship's legality is
+    // computed from them — a cancel is legal whatever the evidence says, so fencing it on evidence would
+    // refuse a decision nothing could invalidate.
+    decision?: {
+      openIssues: number;
+      candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+    },
   ): Promise<ReleaseRecord> {
     const stamped = stampFacts(current.tenant, transition.facts, { newId: this.newId, now: this.now });
     // The domain judged this transition legal FROM the status in `current`, so the write commits only from
@@ -860,6 +917,7 @@ export class ProductService {
               },
             }
           : {}),
+        ...(decision !== undefined ? { expectDecision: decision } : {}),
       },
     );
     if (updated === undefined) {

@@ -64,6 +64,26 @@ describeTrust("TRUST-119 — the plan is the one reader of what a batch sealed",
     expect(() => plan.assertHarness({ ...SPEC, command: "something else" } as never)).toThrow();
   });
 
+  it("refuses when the sealed harness has VANISHED — absence is not a built-in", () => {
+    // `embedHarnessSpec` turns a registry NotFound into `undefined` so an unregistered/built-in harness can
+    // still be dispatched by id, and a batch that never sealed a document arrives the same way. The manifest
+    // is what tells them apart: a `specDigest` is proof a registry document was read here.
+    expect(() => ExecutionPlan.of(sealed()).assertHarness(undefined)).toThrow(/no longer registered/);
+    // …while a batch that sealed no harness document keeps dispatching by id, exactly as at submit.
+    const builtin = sealed({
+      harness: { id: "cli", version: "1.0.0" },
+    } as never);
+    expect(() => ExecutionPlan.of(builtin).assertHarness(undefined)).not.toThrow();
+  });
+
+  it("the re-score variant asks a DIFFERENT question of the same artifact", () => {
+    const plan = ExecutionPlan.of(sealed());
+    // A larger current dataset is fine — re-score judges the cases that already have results…
+    expect(() => plan.assertJudgedCases(["c1"], [CASE, { id: "c2", graders: [] } as never])).not.toThrow();
+    // …but one of THOSE going missing is not.
+    expect(() => plan.assertJudgedCases(["c1"], [])).toThrow();
+  });
+
   it("carries every model DOCUMENT the manifest pinned, in the shape the job takes", () => {
     // The three live at two levels of the manifest and are consumed by two different dispatcher seams; a
     // consumer assembling them by hand is exactly how one of them reached a single execution path.
@@ -125,13 +145,39 @@ describeTrust("TRUST-120 — no execution path re-derives the plan", () => {
       what: "applying the sealed model closure to a spec",
       allow: ["execution-plan.ts", "scorecard-plan.ts", "scorecard-service.ts"],
     },
+    // …and the facets the claim named but the scan did not check (arch-review 22 P1). A guarantee whose name
+    // is wider than its implementation is the same defect one level up: it tells the next author the question
+    // has been asked when it has not.
+    {
+      pattern: /verifySealedCaseDocuments\s*\(/,
+      what: "re-score selection verification",
+      allow: ["execution-plan.ts"],
+    },
+    {
+      pattern: /manifest\??\.judges\b(?!\s*(\?\?|:))/,
+      what: "the sealed judge closure",
+      // The score service REWRITES the closure on a re-score (a later pass rewriting the same identity), and
+      // the settle paths read it to stamp a scoring revision — authorship and stamping, not execution.
+      allow: ["execution-plan.ts", "scorecard-score-service.ts", "scorecard-batch-service.ts"],
+    },
   ];
 
   for (const { pattern, what, allow } of OWNED)
     it(`${what} is read in one place`, () => {
+      // CODE lines only. This file's own subject matter gets discussed in prose all over the package, and a
+      // scan that reads comments reports the explanation of a rule as a violation of it — which trains
+      // people to widen the allow-list until the guard means nothing.
+      const codeOf = (file: string): string =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => {
+            const trimmed = line.trim();
+            return !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("/*");
+          })
+          .join("\n");
       const offenders = sources()
         .filter((file) => !allow.some((name) => file.endsWith(name)))
-        .filter((file) => pattern.test(readFileSync(file, "utf8")))
+        .filter((file) => pattern.test(codeOf(file)))
         .map((file) => path.relative(root, file));
       expect(offenders).toEqual([]);
     });

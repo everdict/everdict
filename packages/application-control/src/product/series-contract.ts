@@ -9,7 +9,7 @@ import {
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { ScorecardServiceDeps } from "../scorecard/scorecard-deps.js";
-import { resolveModelPin, sealHarnessModelClosure, sealJudgeClosure } from "../scorecard/scorecard-plan.js";
+import { resolveModelPin, sealHarnessModelClosure, sealJudgeClosureWithHoles } from "../scorecard/scorecard-plan.js";
 
 // WHAT A WATCH SERIES ASKS TODAY — resolved ONCE, for both readers (arch-review 15 P1-5).
 //
@@ -110,6 +110,15 @@ export async function resolveSeriesContract(
     };
   }
   const harnessClosure = await sealHarnessModelClosure(deps, tenant, spec);
+  // A HOLE IS NOT AN ANSWER (arch-review 22 P0-4). A binding whose document could not be read leaves this
+  // contract unable to say WHICH bytes the evaluation would run under — and since both the evidence's
+  // contract and the current one would carry the same hole, they would compare equal and the series would
+  // read FRESH on the strength of two unknowns agreeing.
+  if (harnessClosure.unreadable !== undefined && harnessClosure.unreadable.length > 0)
+    return {
+      status: "unresolvable",
+      reason: `harness '${harness.id}@${harness.version}' names a ${harnessClosure.unreadable.join(", ")} document that could not be read`,
+    };
   if (harnessClosure.model === "unresolved")
     return {
       status: "unresolvable",
@@ -125,7 +134,11 @@ export async function resolveSeriesContract(
   // …and the JUDGES' closure, from the same sealer the manifest uses. `specDigest` absent means the sealer
   // could not read the document at all (it catches per judge so one bad spec never fails a batch) — for the
   // gate that IS the unresolvable case, since the version was resolved a moment ago and should therefore read.
-  const judgeClosure = await sealJudgeClosure(deps, tenant, judges);
+  const { entries: judgeClosure, holes } = await sealJudgeClosureWithHoles(deps, tenant, judges);
+  // The nested holes, on the same terms: an explicit `rubric@1` the registry could not answer is a ref this
+  // gate cannot verify, and the manifest-side sealer deliberately keeps going on it.
+  if (holes.length > 0)
+    return { status: "unresolvable", reason: holes[0] ?? "a judge closure document could not be read" };
   for (const sealed of judgeClosure) {
     const at = `judge '${sealed.id}@${sealed.version}'`;
     if (sealed.specDigest === undefined) return { status: "unresolvable", reason: `${at} could not be read` };

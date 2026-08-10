@@ -107,13 +107,22 @@ export async function sealedModelIdentity(
 //               rubric — both already inside specDigest)
 //   `harness` — a harness judge's delegated agent, same vocabulary ("id@version" | "unresolved")
 // Best-effort per judge: an unresolvable spec keeps its id/version bare rather than failing the pass.
-export async function sealJudgeClosure(
+//
+// TWO POLICIES OVER ONE RESOLUTION (arch-review 22 P0-4): the entries are what the manifest records — holes
+// included, because a manifest states what HAPPENED — and `holes` is what a strict reader needs, because a
+// ref whose document could not be read is not an identity anyone can call established. They were the same
+// lossy answer before, so the release gate inherited the sealer's best-effort policy: an explicit `rubric@1`
+// that nobody could read looked exactly like a verified one, and two evaluations sharing that hole compared
+// EQUAL — unknown ≡ unknown reading as "the question has not moved".
+export async function sealJudgeClosureWithHoles(
   deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses" | "models">,
   tenant: string,
   judges: Array<{ id: string; version: string }>,
-): Promise<Array<SealedJudgeEntry>> {
+): Promise<{ entries: Array<SealedJudgeEntry>; holes: string[] }> {
   const out: Array<SealedJudgeEntry> = [];
+  const holes: string[] = [];
   for (const j of judges) {
+    const at = `judge '${j.id}@${j.version}'`;
     try {
       const spec = await deps.judges?.get(tenant, j.id, j.version);
       const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
@@ -136,6 +145,11 @@ export async function sealJudgeClosure(
       // owner-first lookup. Without this the delegated agent is verified and the model it thinks with is not.
       const delegatedClosure =
         harness?.document === undefined ? undefined : await sealHarnessModelClosure(deps, tenant, harness.document);
+      if (modelPin?.unreadable) holes.push(`${at} names a model document that could not be read`);
+      if (rubric?.unreadable) holes.push(`${at} names a rubric document that could not be read`);
+      if (harness?.unreadable) holes.push(`${at} names a delegated harness document that could not be read`);
+      for (const facet of delegatedClosure?.unreadable ?? [])
+        holes.push(`${at}'s delegated harness names a ${facet} document that could not be read`);
       out.push({
         id: j.id,
         version: j.version,
@@ -153,9 +167,20 @@ export async function sealJudgeClosure(
       });
     } catch {
       out.push({ id: j.id, version: j.version });
+      holes.push(`${at} could not be read`);
     }
   }
-  return out;
+  return { entries: out, holes };
+}
+
+// The manifest's view: entries only. A hole is recorded honestly (an absent digest) and the batch still runs,
+// because refusing to record would lose the run entirely.
+export async function sealJudgeClosure(
+  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses" | "models">,
+  tenant: string,
+  judges: Array<{ id: string; version: string }>,
+): Promise<Array<SealedJudgeEntry>> {
+  return (await sealJudgeClosureWithHoles(deps, tenant, judges)).entries;
 }
 
 // The HARNESS model closure (H13 — the judge argument, applied to the treatment): a command harness's
@@ -173,16 +198,26 @@ export async function sealHarnessModelClosure(
   serviceModels?: Record<string, string>;
   modelDigest?: string;
   serviceModelDigests?: Record<string, string>;
+  // WHICH facets named a document nobody could read (arch-review 22 P0-4). The manifest ignores this — it
+  // records what happened, holes included — and the release gate refuses on it, because a ref it cannot
+  // verify is not an identity it can call current. Dropping it here made the two policies share the
+  // sealer's weaker one.
+  unreadable?: string[];
 }> {
   if (spec === undefined) return {};
   if (spec.kind === "command") {
     if (spec.model === undefined) return {};
     const pin = await resolveModelPin(deps, tenant, spec.model);
-    return { model: pin.ref, ...(pin.digest ? { modelDigest: pin.digest } : {}) };
+    return {
+      model: pin.ref,
+      ...(pin.digest ? { modelDigest: pin.digest } : {}),
+      ...(pin.unreadable ? { unreadable: ["model"] } : {}),
+    };
   }
   if (spec.kind === "service") {
     const serviceModels: Record<string, string> = {};
     const serviceModelDigests: Record<string, string> = {};
+    const unreadable: string[] = [];
     for (const s of spec.services) {
       if (s.model === undefined) continue;
       // Per service, from ONE read each: a topology's binding is the same owner-first ref as any other, and
@@ -190,10 +225,12 @@ export async function sealHarnessModelClosure(
       const pin = await resolveModelPin(deps, tenant, s.model);
       serviceModels[s.name] = pin.ref;
       if (pin.digest) serviceModelDigests[s.name] = pin.digest;
+      if (pin.unreadable) unreadable.push(`service '${s.name}' model`);
     }
     return {
       ...(Object.keys(serviceModels).length > 0 ? { serviceModels } : {}),
       ...(Object.keys(serviceModelDigests).length > 0 ? { serviceModelDigests } : {}),
+      ...(unreadable.length > 0 ? { unreadable } : {}),
     };
   }
   return {};
@@ -251,15 +288,22 @@ async function sealVersionedRef<T extends { version: string }>(
   ref: { id: string; version?: string },
   registry: { get(tenant: string, id: string, version: string): Promise<T> } | undefined,
   tenant: string,
-): Promise<{ ref: string; digest?: string; document?: T }> {
+): Promise<{ ref: string; digest?: string; document?: T; unreadable?: true }> {
   const version = ref.version || "latest";
-  if (!registry) return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}` };
+  if (!registry) return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}`, unreadable: true };
   try {
     const resolved = await registry.get(tenant, ref.id, version);
     return { ref: `${ref.id}@${resolved.version}`, digest: contentDigest(resolved), document: resolved };
   } catch {
     // A ref that names a document nobody can read pins nothing. For an explicit version the REF still states
     // what was asked for — the missing digest is what tells a later reader it was never verified.
-    return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}` };
+    //
+    // …and `unreadable` is what tells the STRICT reader (arch-review 22 P0-4). The two consumers want
+    // opposite things from this state and used to share one lossy answer: the manifest records the run that
+    // happened, so an explicit `rubric@1` with no digest is honest history; the release gate is asking
+    // whether today's identity is ESTABLISHED, and it could not tell that ref apart from a verified one.
+    // Two evaluations with the same unverifiable hole then compared EQUAL — unknown ≡ unknown reading as
+    // "still current".
+    return { ref: version === "latest" ? "unresolved" : `${ref.id}@${version}`, unreadable: true };
   }
 }

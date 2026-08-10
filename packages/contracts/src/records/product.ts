@@ -197,6 +197,11 @@ export type ProductRecord = z.infer<typeof ProductRecordSchema>;
 export const ReleaseComponentSchema = z.object({
   service: z.string().min(1), // ProductService.name — the timeline's key, validated against the product
   version: z.string().min(1).optional(),
+  // WHICH ledger row this component means (arch-review 22 P1). `{service, version}` does not uniquely name
+  // one: a service repointed at another repository tracks a different stream under the same name, and both
+  // streams can publish `v1.0.0`. The picker knows which row it offered, so it says so — and a resolution
+  // that had to GUESS between two rows is manufacturing history, not refining it.
+  versionRecordId: z.string().optional(),
 });
 export type ReleaseComponent = z.infer<typeof ReleaseComponentSchema>;
 
@@ -217,7 +222,10 @@ export const ShippedComponentSchema = z.object({
   version: z.string().min(1).optional(),
   versionRecordId: z.string().optional(), // the ledger row this component IS
   streamKey: z.string().optional(), // …and which stream that row came from
-  resolution: z.enum(["ledger", "unresolved", "unplanned"]),
+  // `ambiguous` is its own answer, not a flavour of `unresolved` (arch-review 22 P1): "we could not find it"
+  // and "we found two and the plan does not say which" are completely different facts in a post-mortem, and
+  // only one of them is fixed by importing more versions.
+  resolution: z.enum(["ledger", "unresolved", "unplanned", "ambiguous"]),
 });
 export type ShippedComponent = z.infer<typeof ShippedComponentSchema>;
 

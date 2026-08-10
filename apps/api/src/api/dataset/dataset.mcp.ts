@@ -20,6 +20,7 @@ import {
   declaredOriginFromIssue,
 } from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { assertDatasetConstitution } from "../route-context.js";
 import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
@@ -164,6 +165,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
           );
+          assertDatasetConstitution(principal, result.data); // same door as the REST create
           await datasets.register(ws, result.data, principal.subject, teamId, origin); // creator = subject (delete permission)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
@@ -222,6 +224,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             },
             image_template ? { imageTemplate: image_template } : {},
           );
+          assertDatasetConstitution(principal, dataset);
           await datasets.register(ws, dataset, principal.subject);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
@@ -269,6 +272,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             },
             image_template ? { imageTemplate: image_template } : {},
           );
+          assertDatasetConstitution(principal, dataset);
           await datasets.register(ws, dataset, principal.subject);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),

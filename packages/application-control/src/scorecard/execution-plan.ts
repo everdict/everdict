@@ -1,6 +1,6 @@
 import type { CaseJob, EvalCase, HarnessSpec, ScorecardManifest, ScorecardRecord } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
-import { sealedExecutionMessage, verifySealedSelection } from "@everdict/domain";
+import { sealedExecutionMessage, verifySealedCaseDocuments, verifySealedSelection } from "@everdict/domain";
 import { pinHarnessSpecToClosure } from "./scorecard-plan.js";
 import type { SealedJudgeEntry } from "./scorecard-plan.js";
 
@@ -48,13 +48,37 @@ export class ExecutionPlan {
 
   // The harness half. Filtered to `harness` because an empty case list would otherwise read as "every case
   // was removed" — the two halves are checked at different moments by both callers.
+  //
+  // ONCE AN ARTIFACT PROVES STRONGER KNOWLEDGE EXISTED, A LATER ABSENCE MAY NOT BE REINTERPRETED AS A WEAKER
+  // LEGACY STATE (arch-review 22 P0-3). `undefined` here does NOT mean "this batch always ran a built-in
+  // harness": `embedHarnessSpec` turns a registry NotFound into `undefined` so an unregistered/built-in
+  // harness can still be dispatched by id. Both cases arrive as the same value, and the manifest is what
+  // tells them apart — a `specDigest` is proof that a registry DOCUMENT was read and sealed here. If that
+  // document has since vanished, continuing spec-less would execute a different, weaker thing under the
+  // certified name, which is exactly the fail-open the delegated judge harness closed one level down.
   assertHarness(spec: HarnessSpec | undefined): void {
-    if (spec === undefined) return;
+    const sealed = this.manifest?.harness.specDigest;
+    if (spec === undefined) {
+      if (sealed === undefined) return; // no document was ever sealed — built-in / unregistered, as at submit
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.ref.scorecardId, harness: this.ref.harness },
+        `the harness '${this.ref.harness}' this batch sealed (${sealed}) is no longer registered in this workspace — the seal is proof a registry document was read, so its absence is a lost identity rather than a built-in harness. Refusing to execute something this batch never certified.`,
+      );
+    }
     this.refuse(
       verifySealedSelection(this.manifest, { cases: [], harnessSpec: spec, harnessRef: this.ref.harness }).filter(
         (m) => m.subject === "harness",
       ),
     );
+  }
+
+  // THE RE-SCORE VARIANT of the selection check (arch-review 22 P1). A detached pass judges the cases that
+  // already have RESULTS, so the current dataset may legitimately be larger — what it may not be is missing
+  // one of them. Different question, same artifact: the re-score path used to call the domain verifier
+  // directly, which left a second reader of the manifest alive beside the one this class exists to be.
+  assertJudgedCases(judgedCaseIds: readonly string[], resolved: ReadonlyArray<Pick<EvalCase, "id" | "graders">>): void {
+    this.refuse(verifySealedCaseDocuments(this.manifest, judgedCaseIds, resolved));
   }
 
   private refuse(mismatches: ReturnType<typeof verifySealedSelection>): void {

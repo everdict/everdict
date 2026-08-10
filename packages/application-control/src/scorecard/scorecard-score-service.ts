@@ -41,6 +41,7 @@ import {
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
+import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
@@ -984,10 +985,11 @@ export class ScorecardScoreService {
       // returned, and the judge stream then skipped that case for having no `EvalCase` — after the pass had
       // already stripped its judge rows. The case ended the pass with its verdict removed and nothing written
       // in its place, produced by a check that was looking straight at it.
+      // …asked of the PLAN, like every other execution path (arch-review 22 P1). Re-score is a different
+      // question — the current dataset may legitimately be larger — but not a different artifact, and a
+      // second direct reader of the manifest is exactly what the plan exists to end.
       const judged = [...new Set(results.map((r) => r.caseId))];
-      const mismatches = verifySealedCaseDocuments(record.manifest, judged, resolved.cases);
-      if (mismatches.length > 0)
-        throw new ConflictError("CONFLICT", { scorecard: record.id }, sealedExecutionMessage(mismatches));
+      ExecutionPlan.of(record).assertJudgedCases(judged, resolved.cases);
       return resolved;
     } catch (err) {
       // A refusal is a decision, not a lookup failure — it must not fall through to the shell dataset, which

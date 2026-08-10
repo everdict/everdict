@@ -62,6 +62,20 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   pin. An execution path asks the plan; it never re-reads `manifest.*` to rebuild the same thing. A facet with
   four hand-copied readers grows its next field in three of them, which is four of this review series' P0s;
   the ownership is certified by a source scan (TRUST-120), because reconstruction is not a type error.
+- **absent, unreadable, unregistered, ambiguous and legacy are five different states.** Compressing them into
+  one `undefined` weakens authority every time: a sealed harness that VANISHED is not a built-in, a nested ref
+  whose document could not be read is not a verified one, and two ledger rows matching a plan is not a
+  resolution. Where an artifact proves stronger knowledge existed, a later absence may not be reinterpreted as
+  the weaker legacy state (arch-review 22).
+- **Every mutable input that composed a decision is that decision's read-set.** A terminal transition that
+  CASes only the convenient subset is an atomic WRITE, not an atomic DECISION: the release ship conditions on
+  the issues it counted and the candidate it compared as well as the product's policy. Where an input has no
+  row to fence (registry/settings-resolved contracts), the re-verify is LABELLED as a re-verify — implying
+  the stronger guarantee is worse than stating the weaker one (arch-review 22 P0-1).
+- **Constitutional authority belongs to the declaration artifact at its write boundary**, not to whichever
+  transport later executes it. `ground_truth` on a run-time grading plan is gated at submit; the same
+  declaration inside a dataset is gated at REGISTRATION, on every door (REST, MCP, bundle, benchmark import),
+  because an immutable document cannot be re-approved by the schedule that runs it (arch-review 22 P0-2).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

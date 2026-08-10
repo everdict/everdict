@@ -67,8 +67,10 @@ import {
 } from "@everdict/auth";
 import {
   AppError,
+  type Dataset,
   DatasetSchema,
   EvalCaseSchema,
+  ForbiddenError,
   HarnessInstanceSpecSchema,
   HarnessTemplateSpecSchema,
   type ImageWarning,
@@ -96,7 +98,7 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@everdict/db";
-import { canReadRun, collectHarnessImages, imageWarnings } from "@everdict/domain";
+import { canReadRun, collectHarnessImages, groundTruthDeclarations, imageWarnings } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type { ImageTokenService } from "@everdict/images";
 import type {
@@ -518,6 +520,31 @@ export { resolveTeamRef, teamForNew } from "../common/team-scope.js";
 // use `assertTeamVisible` below instead, which answers the same refusal as 404.
 export function gate(principal: Principal, action: Action, resource?: ResourceScope): void {
   authorize(principal, action, resource);
+}
+
+// CONSTITUTIONAL AUTHORITY BELONGS TO THE DECLARATION ARTIFACT AT ITS WRITE BOUNDARY, not to whichever
+// transport happens to execute it later (arch-review 22 P0-2).
+//
+// A grader declaring `ground_truth` redefines what passing means — `evaluateVerdict` ranks it above objective,
+// so a custom metric can pass a case that a built-in `tests_pass: false` would fail. Submit gates that act for
+// a RUN-TIME grading plan. A dataset case may declare exactly the same thing, and `datasets:write` is a member
+// permission, so the identical constitutional act was admin-gated through one door and open through another.
+//
+// Gating it at SUBMIT instead would be worse than the hole: a dataset is immutable, so an approved one would
+// still have to be re-approved on every schedule, CI trigger and product auto-eval that runs it — none of
+// which have an admin to ask. So it is gated HERE, once, where the declaration is authored.
+//
+// Every dataset write surface calls this (REST create/import, MCP, bundle apply, benchmark import) because
+// they are all the same door; the check itself lives in one place so they cannot drift apart.
+export function assertDatasetConstitution(principal: Principal, dataset: Pick<Dataset, "cases">): void {
+  const declared = groundTruthDeclarations(dataset.cases);
+  if (declared.length === 0) return;
+  if (principal.roles.includes("admin")) return;
+  throw new ForbiddenError(
+    "FORBIDDEN",
+    { metrics: declared },
+    `Registering a dataset whose graders declare ground_truth authority for ${declared.join(", ")} requires the admin role — it defines what passing means for every evaluation that ever runs this dataset.`,
+  );
 }
 
 // Is this run THIS caller's to read? Workspace scoping and the audience rule in one question, because the two
