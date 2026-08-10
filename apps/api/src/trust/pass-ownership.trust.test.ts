@@ -283,3 +283,123 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-54 — the claim spans the pass, not o
     await stage.clear(id, "pass-A");
   });
 });
+
+// Trust suite — TRUST-82 · TRUST-83.
+//
+// A PASS DECLARED DEAD LOSES ITS AUTHORITY, NOT JUST ITS FUTURE.
+//
+// `failScore` flips a terminally-failed pass's marker to `failed` and collects its stage, and the code beside
+// it says such a pass "will never write again". Nothing enforced that: every fence compared the passId and
+// nothing else, so a late activity of a dead pass — its provider call still in flight when the workflow died —
+// cleared each guard and wrote its judgment onto the child, and a late finalize appended a revision over a
+// plane whose owner had already been declared abandoned, clearing the marker a takeover was waiting on.
+//
+// Identity answers "who is this"; status answers "may it still act". A terminal state has to be a CAPABILITY
+// REVOCATION or the sentence is a comment. Certified against real Postgres because the enforcement is a
+// predicate inside the write statements — checking it in the service alone leaves the check→write window it
+// exists to close.
+describe.skipIf(!TRUST_PG_ENABLED)("TRUST-82/83 — a failed pass may not write again (real Postgres)", () => {
+  let pg: TrustPg;
+  let cards: PgScorecardStore;
+  let runs: PgRunStore;
+
+  beforeAll(async () => {
+    pg = await openTrustPg();
+    cards = new PgScorecardStore(pg.client);
+    runs = new PgRunStore(pg.client);
+  });
+  afterAll(async () => pg?.close());
+
+  const deadPass = (passId: string): ScoringPass => ({
+    passId,
+    epoch: 1,
+    leaseUntil: "2999-01-01T00:00:00.000Z", // a LIVE lease: it is the status, not the clock, that revokes
+    heartbeatAt: "2026-01-01T00:00:00.000Z",
+    targetRevision: 1,
+    baseRevision: 0,
+    judges: [],
+    startedAt: "2026-01-01T00:00:00.000Z",
+    status: "failed",
+    failedAt: "2026-01-01T00:00:00.000Z",
+    failure: "the scoring workflow failed",
+  });
+
+  async function seedDead(): Promise<{ id: string; passId: string }> {
+    const id = trustId("sc-dead");
+    const passId = trustId("pass-dead");
+    await cards.create({
+      id,
+      tenant: "trust",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as ScorecardRecord);
+    await cards.update(id, { scoringPass: deadPass(passId) }, undefined, { expectScoringPassId: null });
+    return { id, passId };
+  }
+
+  it("TRUST-82 — a late SETTLE of a dead pass is refused, so its revision never lands", async () => {
+    const { id, passId } = await seedDead();
+    const settled = await cards.update(id, { scoringPass: null, updatedAt: "2026-01-02T00:00:00.000Z" }, undefined, {
+      expectScoringPassId: passId,
+    });
+    expect(settled).toBeUndefined(); // pre-fix: committed, because passId still matched
+    // …and the marker is still there for a takeover to reclaim, which is what makes the refusal recoverable
+    // rather than merely obstructive.
+    expect((await cards.get(id))?.scoringPass?.status).toBe("failed");
+  });
+
+  it("TRUST-83 — a late CHILD WRITE of a dead pass is refused by the cross-row fence", async () => {
+    const { id, passId } = await seedDead();
+    const runId = trustId("run-dead");
+    await runs.create({
+      id: runId,
+      tenant: "trust",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      parentScorecardId: id,
+      status: "succeeded",
+      result: {
+        caseId: "c1",
+        harness: "h@1",
+        trace: [],
+        snapshot: { kind: "prompt", output: "done" },
+        scores: [{ graderId: "j", metric: "judge:j", value: 1, pass: true }],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as unknown as RunRecord);
+    const written = await runs.update(
+      runId,
+      {
+        result: {
+          caseId: "c1",
+          harness: "h@1",
+          trace: [],
+          snapshot: { kind: "prompt", output: "done" },
+          scores: [{ graderId: "j", metric: "judge:j", value: 0, pass: false }],
+        },
+      } as unknown as Partial<RunRecord>,
+      undefined,
+      { scorecardId: id, passId },
+    );
+    expect(written).toBeUndefined();
+    // The plane is exactly as the live pass left it.
+    const kept = (await runs.get(runId))?.result?.scores?.[0];
+    expect(kept !== undefined && "value" in kept ? kept.value : undefined).toBe(1);
+  });
+
+  it("…and a TAKEOVER still reclaims the dead marker — revocation must not also block recovery", async () => {
+    const { id, passId } = await seedDead();
+    const took = await cards.update(
+      id,
+      { scoringPass: { ...deadPass(passId), passId: "successor", status: "running", epoch: 2 } },
+      undefined,
+      { expectScoringPassId: passId, expectScoringPassReclaimable: true },
+    );
+    expect(took).toBeDefined();
+    expect((await cards.get(id))?.scoringPass?.passId).toBe("successor");
+  });
+});

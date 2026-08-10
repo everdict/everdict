@@ -342,6 +342,18 @@ export class PgScorecardStore implements ScorecardStore {
         i++;
         guardSql += ` AND scoring_pass->>'passId' = $${i}`;
         vals.push(guard.expectScoringPassId);
+        // …AND STILL LIVE (arch-review 17 P0-3). The fence answered "who is this?" and never "does it still
+        // have the right?" — so a pass whose workflow died terminally, whose marker `failScore` had flipped
+        // to `failed` and whose stage had been collected, could still land a late activity's write, and a
+        // late finalize could still append a revision and clear the marker. A terminal state has to be a
+        // CAPABILITY REVOCATION, or "declared dead" is a comment rather than a rule.
+        //
+        // `status` is required on every marker the schema can produce, so this is strict rather than
+        // absence-tolerant — the fail-closed direction, and the only one that makes the sentence true.
+        //
+        // The exception is a caller that says it is TAKING OVER a dead marker: `expectScoringPassReclaimable`
+        // is exactly that declaration, and a takeover of a failed pass is the main reason the flag exists.
+        if (guard.expectScoringPassReclaimable !== true) guardSql += " AND scoring_pass->>'status' = 'running'";
       }
     }
     // The DATABASE's clock decides reclaimability — the one clock every replica shares. `now()` is the

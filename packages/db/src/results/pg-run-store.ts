@@ -210,7 +210,11 @@ export class PgRunStore implements RunStore {
     if (fence) {
       const scorecardIdx = i + 1;
       const passIdx = i + 2;
-      fenceSql = ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx})`;
+      // …and the marker must still be LIVE, not merely still be this pass (arch-review 17 P0-3). A pass whose
+      // workflow died terminally has its marker flipped to `failed` and its stage collected, and the comment
+      // on that path says it "will never write again" — this is what enforces the sentence. Without it a late
+      // activity of a dead pass still cleared every guard and wrote its judgment onto the child.
+      fenceSql = ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx} AND s.scoring_pass->>'status' = 'running')`;
       vals.push(fence.scorecardId, fence.passId);
     }
     if (events && events.length > 0) {

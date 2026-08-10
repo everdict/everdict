@@ -47,8 +47,16 @@ export class InMemoryRunStore implements RunStore {
   // the invariant: an unpaired run store is not part of a scoring topology at all, and refusing instead
   // would break every unrelated test into attaching a stub that always says yes, which is a fence that
   // certifies nothing. The boundary this invariant protects is the Postgres one.
-  attachScorecards(owner: { peek(id: string): { scoringPass?: { passId?: string } | null } | undefined }): void {
-    this.scoringPassOwner = (scorecardId) => owner.peek(scorecardId)?.scoringPass?.passId;
+  attachScorecards(owner: {
+    peek(id: string): { scoringPass?: { passId?: string; status?: string } | null } | undefined;
+  }): void {
+    // A TERMINAL pass is not an owner (arch-review 17 P0-3) — the Pg fence adds `status = 'running'` to the
+    // same EXISTS, so the twin resolves an owner only while the marker is live. Answering the passId of a
+    // failed marker here would let the in-memory pair accept a write the database refuses.
+    this.scoringPassOwner = (scorecardId) => {
+      const live = owner.peek(scorecardId)?.scoringPass;
+      return live?.status === "running" ? live.passId : undefined;
+    };
   }
 
   private scoringPassOwner?: (scorecardId: string) => string | undefined;

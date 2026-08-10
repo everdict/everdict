@@ -40,6 +40,15 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectScoringPassId !== undefined) {
       const owner = cur.scoringPass?.passId ?? null;
       if (owner !== guard.expectScoringPassId) return undefined;
+      // …and a TERMINAL pass has no authority left (arch-review 17 P0-3) — identity answers "who is this",
+      // status answers "does it still have the right". Mirrors the Pg condition, including the takeover
+      // exception: `expectScoringPassReclaimable` is a caller explicitly claiming a dead marker.
+      if (
+        guard.expectScoringPassId !== null &&
+        guard.expectScoringPassReclaimable !== true &&
+        cur.scoringPass?.status !== "running"
+      )
+        return undefined;
     }
     // Reclaimability, mirroring the Pg condition. One process, one clock — nothing to arbitrate here.
     if (guard?.expectScoringPassReclaimable === true) {

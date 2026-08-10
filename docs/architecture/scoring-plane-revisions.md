@@ -109,6 +109,13 @@ plus the replacement. Both hold the same passId, both clear every guard. The sta
 the carrier last-writer-wins, so the two disagreed by construction, the revision took the carrier's answer,
 and parity noticed afterwards — a report is not an arbitration.
 
+A pass's authority also ENDS (arch-review 17 P0-3). `failScore` flips a terminally-failed pass's marker, and
+that is a capability revocation rather than a note: every fence — the settle CAS, the child-write EXISTS, the
+service's own `owningPass` — requires `status = 'running'` as well as the passId, so a late activity of a dead
+pass cannot land its judgment and a late finalize cannot append a revision over a plane whose owner was
+already declared abandoned. Identity answers "who is this"; status answers "may it still act". A takeover is
+the one caller that declares it is claiming a dead marker (`expectScoringPassReclaimable`), and it still can.
+
 The claim's pass-global half is the **logical round** ordinal, not the workflow's rotation count
 (arch-review 16 P0-1). Scoping it to rotations was right while rotation was the only thing that produced a new
 activity execution; the plan→execute→replan loop made every ROUND produce one, and Temporal's `attempt`
@@ -189,7 +196,14 @@ unreadable" to what it should have been all along: a lease saying who may promot
    **Lifetime.** A pass's stage rows are cleared once its revision carries that durable observation, and when
    a pass is declared dead (`failScore` — it will never write again). Never before the observation, which is
    the evidence the promotion reads; never "eventually", since the rows are one per
-   (scorecard × pass × case × judge).
+   (scorecard × pass × case × judge). The cleanup is awaited though non-fatal: the ordering is an invariant,
+   and an unawaited one is unobservable — nothing can assert it and a process exiting after the settle would
+   leave the rows behind for no reason.
+
+   **Forensics** (arch-review 17 P1-7). The revision also freezes WHICH units disagreed, bounded and labelled
+   as a sample. The counts make the promotion decision; the ids make it diagnosable — and since the rows are
+   collected immediately afterwards, a `promotionSafe: false` investigated later would otherwise know that N
+   judgments disagreed with no way left to learn which.
 3. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
 

@@ -20,9 +20,11 @@ import {
   contentDigest,
   judgeGradeable,
   nextScoringRevision,
+  sealedExecutionMessage,
   stagePromotionSafe,
   summarizeScorecard,
   verdictSummaryOf,
+  verifySealedExecution,
 } from "@everdict/domain";
 import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
 import {
@@ -40,6 +42,29 @@ import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
+
+// How many disagreeing units a revision records by name. A pass disagreeing on thousands has a systemic
+// fault the first few describe as well as all of them, and the revision is a record, not a log.
+const PARITY_UNIT_SAMPLE = 50;
+
+// The disagreeing units, bounded and honestly labelled (arch-review 17 P1-7).
+function parityUnits(parity: ScoringStageParity): {
+  missingFromStage: string[];
+  mismatched: string[];
+  orphaned: string[];
+  truncated: boolean;
+} {
+  const cut = (rows: readonly string[]) => rows.slice(0, PARITY_UNIT_SAMPLE);
+  return {
+    missingFromStage: cut(parity.missingFromStage),
+    mismatched: cut(parity.mismatched),
+    orphaned: cut(parity.orphaned),
+    truncated:
+      parity.missingFromStage.length > PARITY_UNIT_SAMPLE ||
+      parity.mismatched.length > PARITY_UNIT_SAMPLE ||
+      parity.orphaned.length > PARITY_UNIT_SAMPLE,
+  };
+}
 
 // One judge family's rows, as a STORAGE-PATH-INDEPENDENT value (arch-review 16 P1-6). Parsing normalizes the
 // defaults a jsonb round-trip does not carry; sorting by metric removes an ordering that is not content; and
@@ -130,6 +155,33 @@ export class ScorecardScoreService {
     return renewed !== undefined;
   }
 
+  // …AND THE PASS OWNS WHAT THE ACTIVITY MAY DO TO IT (arch-review 17 P1-5). Every internal scoring call
+  // carries BOTH a passId and a judge selection, so the caller re-declares the operation its token authorized
+  // — and nothing compared the two. A plumbing regression or a mistaken internal caller could present pass A's
+  // token with judge B's selection, and every guard would pass: it would strip and re-judge a family the pass
+  // never sealed, on a plane the pass owns.
+  //
+  // The marker already carries the sealed closure, so the selection has ONE owner and the activity's copy is
+  // an assertion to be checked, not a second source. Compared on (id, version) as a SET — the closure carries
+  // more (spec digests, nested pins), and order is not identity.
+  private assertPassSelection(
+    record: ScorecardRecord,
+    pass: ScoringPass,
+    judges: ReadonlyArray<{ id: string; version: string }>,
+  ): void {
+    const key = (rows: ReadonlyArray<{ id: string; version: string }>) =>
+      JSON.stringify([...rows].map((j) => [j.id, j.version]).sort());
+    // A marker sealed before closures were recorded has nothing to compare against; asserting on an empty
+    // seal would refuse every in-flight legacy pass. Absence is a generation gap, not agreement.
+    if (pass.judges === undefined || pass.judges.length === 0) return;
+    if (key(pass.judges) === key(judges)) return;
+    throw new ConflictError(
+      "CONFLICT",
+      { scorecard: record.id, passId: pass.passId },
+      "this scoring activity presented a judge selection its pass does not own — the pass sealed a different set, and a token may not authorize an operation it never described.",
+    );
+  }
+
   // The pass an activity is allowed to act as. The cheap early-out before doing work — NOT the guarantee
   // (between this read and a write the winner can settle, which is why every write also carries the fence).
   //  · marker absent  → refuse. The pass settled or was taken over; acting now would mutate finished evidence.
@@ -160,6 +212,18 @@ export class ScorecardScoreService {
         "CONFLICT",
         { scorecard: record.id, passId, owner: live.passId },
         "this scoring pass no longer owns the group's score plane — a newer pass took it over.",
+      );
+    // …and a pass that was DECLARED DEAD has no authority left (arch-review 17 P0-3). Identity says who this
+    // is; status says whether it may still act. `failScore` flips the marker precisely so a workflow that
+    // died terminally stops writing — and until now nothing enforced that: a late activity of a failed pass
+    // matched on passId alone and wrote its judgment, and a late finalize appended a revision over a plane
+    // whose owner had already been declared abandoned. The store fences enforce the same predicate, which is
+    // what actually closes the check→write window; this is the early, legible refusal.
+    if (live.status !== "running")
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: record.id, passId, status: live.status },
+        "this scoring pass was declared dead — its authority is revoked, so it may not write again. A takeover will re-score the group.",
       );
     return live;
   }
@@ -328,6 +392,7 @@ export class ScorecardScoreService {
     // plane that the settled revision certifies. An absent marker means the pass settled or was taken over —
     // there is nothing left for this activity to do, and stripping would destroy finished evidence.
     const pass = await this.owningPass(record, passId);
+    this.assertPassSelection(record, pass, judges);
     await this.renewLease(id, pass);
     const results = record.scorecard?.results ?? [];
     const changed: CaseResult[] = [];
@@ -402,6 +467,7 @@ export class ScorecardScoreService {
     // back would corrupt the live pass's plane. Renewing here is also what keeps a long, healthy pass alive
     // — the lease advances per case, so "still working" and "still owner" are the same statement.
     const pass = await this.owningPass(record, passId);
+    this.assertPassSelection(record, pass, judges);
     if (!(await this.renewLease(id, pass)))
       throw new ConflictError(
         "CONFLICT",
@@ -473,21 +539,32 @@ export class ScorecardScoreService {
     // Settling is a write like any other: it must belong to the pass that owns the marker, or a superseded
     // pass could clear a live one's marker and append its revision on top.
     const pass = await this.owningPass(record, passId);
+    this.assertPassSelection(record, pass, judges);
     if (abandoned !== undefined && abandoned > 0)
-      await this.deps.store.update(id, {
-        steps: [
-          ...(record.steps ?? []),
-          {
-            ts: this.now(),
-            phase: "judges",
-            // `info`, not `failed`: the pass DID settle, and every abandoned case keeps reading as unjudged on
-            // every measurement surface. The step states the fact; it does not re-judge the pass.
-            status: "info",
-            message: `${abandoned} case${abandoned === 1 ? "" : "s"} stopped making progress across consecutive planning rounds — the pass stopped re-attempting them and is settling with them unjudged`,
-          },
-        ],
-        updatedAt: this.now(),
-      });
+      await this.deps.store.update(
+        id,
+        {
+          steps: [
+            ...(record.steps ?? []),
+            {
+              ts: this.now(),
+              phase: "judges",
+              // `info`, not `failed`: the pass DID settle, and every abandoned case keeps reading as unjudged on
+              // every measurement surface. The step states the fact; it does not re-judge the pass.
+              status: "info",
+              message: `${abandoned} case${abandoned === 1 ? "" : "s"} stopped making progress across consecutive planning rounds — the pass stopped re-attempting them and is settling with them unjudged`,
+            },
+          ],
+          updatedAt: this.now(),
+        },
+        undefined,
+        // EVERY write a pass makes is fenced, including the ones that only narrate (arch-review 17 P1-8).
+        // This one is an audit note, so the plane is not at risk — but a stale pass waking after a successor
+        // took over would append its note to the SUCCESSOR's history, and a system with ownership semantics
+        // this strong has no reason to keep an exception for writes that are merely embarrassing rather than
+        // corrupting.
+        pass.passId !== undefined ? { expectScoringPassId: pass.passId } : undefined,
+      );
     await this.aggregate(record, base, base.results, judges, submittedBy, pass);
   }
 
@@ -673,6 +750,11 @@ export class ScorecardScoreService {
               mismatched: parity.mismatched.length,
               orphaned: parity.orphaned.length,
               promotionSafe: stagePromotionSafe(parity),
+              // …and WHICH units, bounded — the stage rows are dropped a few lines below, so this is the last
+              // moment the answer exists at all (arch-review 17 P1-7).
+              ...(parity.missingFromStage.length + parity.mismatched.length + parity.orphaned.length > 0
+                ? { units: parityUnits(parity) }
+                : {}),
             },
           }
         : {}),
@@ -740,7 +822,12 @@ export class ScorecardScoreService {
     // (scorecard × pass × case × judge) forever, on a table whose score bytes nothing reads yet.
     // Best-effort: a settled revision is not undone by a failed cleanup, and the next pass's strip is
     // pass-scoped anyway, so a leftover row is dead weight rather than a hazard.
-    if (pass?.passId !== undefined) void this.deps.scoringStage?.clear(record.id, pass.passId).catch(() => undefined);
+    // AWAITED, though non-fatal (arch-review 17 P1-7). The ordering — durable observation first, evidence
+    // dropped second — is an invariant now, and an unawaited cleanup makes it unobservable: nothing can
+    // assert it, and a process exiting right after the settle would leave the rows behind for no reason. The
+    // failure is still swallowed: a settled revision is not undone by a cleanup that could not run, and the
+    // next pass's strip is pass-scoped anyway, so a leftover row is dead weight rather than a hazard.
+    if (pass?.passId !== undefined) await this.deps.scoringStage?.clear(record.id, pass.passId).catch(() => undefined);
   }
 
   // Compare what THIS pass staged against the plane it settled — and, first, against what it actually JUDGED.
@@ -843,8 +930,26 @@ export class ScorecardScoreService {
   // the same shape the ingest path scores dataset-less traces with.
   private async effectiveDataset(record: ScorecardRecord, results: CaseResult[]): Promise<Dataset> {
     try {
-      return await this.deps.datasets.get(record.tenant, record.dataset.id, record.dataset.version);
-    } catch {
+      const resolved = await this.deps.datasets.get(record.tenant, record.dataset.id, record.dataset.version);
+      // THE JUDGE'S CONTEXT MUST BE THE ONE THIS BATCH SEALED (arch-review 17 P0-1). A re-score re-reads the
+      // dataset by (tenant, id, version), and lookup is owner-first over a `_shared` fallback — so a
+      // workspace-local version registered since submit shadows the document the manifest certified, and the
+      // judge would re-judge a stored trace against a task, expectation or milestone the run never saw. That
+      // is a wrong VERDICT over right evidence, which is the worst shape this system can produce.
+      //
+      // Restricted to the cases actually being judged: a re-score reads the whole bundle but only the cases
+      // with results matter, and a dataset that legitimately grew new cases is not a change to any of them.
+      const judged = new Set(results.map((r) => r.caseId));
+      const mismatches = verifySealedExecution(record.manifest, {
+        cases: resolved.cases.filter((c) => judged.has(c.id)),
+      });
+      if (mismatches.length > 0)
+        throw new ConflictError("CONFLICT", { scorecard: record.id }, sealedExecutionMessage(mismatches));
+      return resolved;
+    } catch (err) {
+      // A refusal is a decision, not a lookup failure — it must not fall through to the shell dataset, which
+      // would judge against empty tasks and call that a verdict.
+      if (err instanceof ConflictError) throw err;
       const shell = (caseId: string): EvalCase => ({
         id: caseId,
         env: { kind: "prompt" },
