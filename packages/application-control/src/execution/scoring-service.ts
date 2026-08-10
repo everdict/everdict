@@ -7,6 +7,7 @@ import type {
   JudgeSpec,
   Placement,
   Score,
+  SealedJudgeEntry,
 } from "@everdict/contracts";
 import { contentDigest, judgeGradeable, modelBindingLabel, pinnedDocumentMismatch } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
@@ -41,26 +42,11 @@ export interface ScoringServiceDeps {
 
 // The sealed closure a pass carries (manifest.judges at submit; ScoringPass.judges on a re-score) — the
 // concretization SOURCE when present, so the seal IS the pin instead of a second resolution's observation.
-export interface SealedJudgeClosure {
-  id: string;
-  version: string;
-  // The nested DOCUMENTS this pass pinned (arch-review 19 P0-4) — what makes each ref below verifiable.
-  modelDigest?: string;
-  rubricDigest?: string;
-  harnessDigest?: string;
-  // The delegated harness's own model closure — the level beneath the harness document itself.
-  harnessModelDigest?: string;
-  harnessServiceModelDigests?: Record<string, string>;
-  // The judge DOCUMENT this pass sealed (arch-review 18 P0-4). It was sealed and never consumed: every pass
-  // re-read `judges.get(tenant, id, version)`, and that lookup is owner-first over a `_shared` fallback — so a
-  // workspace registering its own `quality@1` after the pass claimed hands the executor a different document
-  // under a held name, while the ScoringRevision keeps recording the closure of the one it sealed. The
-  // top-level batch documents got this check first; the judges are the same shape one level in.
-  specDigest?: string;
-  model?: string;
-  rubric?: string;
-  harness?: string;
-}
+//
+// It is the RECORD's own shape (`SealedJudgeEntry`), not a restatement: a closure spelled once per consumer
+// grows its next field in some of them (arch-review 20 P0-3). The name stays because this is the role the
+// type plays here — what a PASS carries — and roles are worth naming even when shapes are shared.
+export type SealedJudgeClosure = SealedJudgeEntry;
 
 // "id@version" → its version half, when the id half matches the expected ref id. "unresolved"/raw strings
 // pin nothing.

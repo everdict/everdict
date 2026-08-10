@@ -1,4 +1,11 @@
-import { AppError, BadRequestError, type HarnessSpec, type ModelBinding, NotFoundError } from "@everdict/contracts";
+import {
+  AppError,
+  BadRequestError,
+  type HarnessSpec,
+  type ModelBinding,
+  NotFoundError,
+  type SealedJudgeEntry,
+} from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 
@@ -36,17 +43,12 @@ export async function embedHarnessSpec(
 // One judge's sealed closure — the ref strings a reader compares, and the DOCUMENT digests that make each ref
 // verifiable (arch-review 19 P0-4). Digests are optional: absent means the document could not be read at seal
 // time, which a verifier treats as "never pinned", never as agreement.
-export interface SealedJudgeEntry {
-  id: string;
-  version: string;
-  specDigest?: string;
-  model?: string;
-  modelDigest?: string;
-  rubric?: string;
-  rubricDigest?: string;
-  harness?: string;
-  harnessDigest?: string;
-}
+//
+// It is the RECORD's shape, not a local restatement of it (arch-review 20 P0-3). This interface was a third
+// spelling of the same closure, and a third spelling is a third place to forget a field: the sealer grew
+// `harnessModelDigest`, produced it, and the type it declared its own return under had never heard of it. One
+// schema, one type, one meaning — everywhere the closure travels.
+export type { SealedJudgeEntry };
 
 // ONE READ, ONE DECISION (arch-review 20 P1). A model pin is a ref AND the digest of the document that ref
 // named, and the first version produced them from two separate registry reads — `resolveModelBinding` for the
