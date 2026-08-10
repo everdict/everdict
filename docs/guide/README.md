@@ -17,7 +17,8 @@ the two map onto the site.
 - [Overview](concepts/README.md) — the seven nouns, and how one run flows through them
 - [Run](concepts/run.md) · [Harness](concepts/harness.md) · [Dataset](concepts/dataset.md) ·
   [Grader & Judge](concepts/grader-and-judge.md) · [Scorecard](concepts/scorecard.md) ·
-  [Verdict](concepts/verdict.md) · [Workspace](concepts/workspace.md)
+  [Verdict](concepts/verdict.md) · [Workspace](concepts/workspace.md) ·
+  [Runtime](concepts/runtime.md)
 
 ## Your workspace
 - [Section index](workspace/README.md)
@@ -37,6 +38,7 @@ the two map onto the site.
 - [Track the work](operate/tracker.md) — issues that close citing the scorecard that proved it
 - [Schedules & monitoring](operate/schedules.md) — a scorecard on a cron, and durable resume
 - [Analysis & views](operate/views.md) — save the question, not the answer
+- [Durability & Temporal](operate/durability.md) — resume instead of restart, and when you need it
 - [Notifications](operate/notifications.md) — being told instead of checking
 
 ## Self-hosting

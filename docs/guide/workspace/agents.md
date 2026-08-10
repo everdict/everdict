@@ -104,6 +104,36 @@ An agent's own actions emit events too. Everdict stamps agent-caused facts with
 on its own effects. Keep `cooldownSec` anyway — it is the second guard, and the one you control.
 :::
 
+## Skills and knowledge
+
+Two things shape what an agent is good at, and both live in the [workspace
+filesystem](filesystem.md) as their source of truth:
+
+**Skills** — `skills/<id>/SKILL.md`, plus references pulled in on demand. Progressive disclosure means
+a skill costs almost nothing until it is needed, so a workspace can carry many.
+
+**Knowledge** — `knowledge/<id>.md`. Facts about *your* domain that no model has: what your datasets
+mean, which regressions matter, what your team calls things.
+
+```bash
+curl -XPUT localhost:8787/fs/file \
+  -H 'content-type: application/json' -d '{
+  "path": "knowledge/retrieval-suite.md",
+  "content": "# retrieval-smoke\n\nCases tagged `long-context` are the ones customers hit.\nA regression there is P1; everything else can wait a cycle.\n"
+}'
+```
+
+Editing that file *is* editing the knowledge entry — save writes the file first, and reads prefer it.
+
+## Agents working together
+
+An agent can delegate to another, and a **team** is a set of agents with a shared conversation. This is
+useful when the work genuinely splits — one agent that triages regressions and one that writes the
+fix — and wasteful when it does not.
+
+Start with one agent and better instructions. Reach for a team when you can name what each member does
+that the other cannot.
+
 ## Where the work shows up
 
 Agent runs are [Runs](../concepts/run.md). They appear in the same list, carry the same trace, and cost

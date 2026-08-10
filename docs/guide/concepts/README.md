@@ -1,6 +1,6 @@
 # Core concepts
 
-Seven nouns carry everything else in these docs. Read them in this order the first time.
+Eight nouns carry everything else in these docs. Read them in this order the first time.
 
 - **[Workspace](workspace.md)** — the tenant, and the trust boundary everything else is scoped to
 - **[Harness](harness.md)** — the agent under test, driven over a process boundary
@@ -9,6 +9,7 @@ Seven nouns carry everything else in these docs. Read them in this order the fir
 - **[Grader & Judge](grader-and-judge.md)** — how a result becomes a measurement
 - **[Scorecard](scorecard.md)** — dataset × harness, aggregated: the unit you compare
 - **[Verdict](verdict.md)** — what "pass" means, and why absence is never green
+- **[Runtime](runtime.md)** — where your evals actually run, and how to say "my machine"
 
 ## One evaluation, end to end
 

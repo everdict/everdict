@@ -140,4 +140,20 @@ work (D7 as a system, D4 tabs) or a scaffolding tool (D3), plus the coverage tai
 | 2026-08-11 | R4 | 65.0 | 22.0 | Offline search and section landings. |
 | 2026-08-11 | R5 | 70.0 | 17.0 | Homepage and docs surface rebuilt. |
 | 2026-08-11 | R6 | 73.0 | 14.0 | When not to use it, and what it costs. |
-| 2026-08-11 | R7 | 77.0 | **10.0** | The operating loop; diagrams that survive CommonMark. |
+| 2026-08-11 | R7 | 77.0 | 10.0 | The operating loop; diagrams that survive CommonMark. |
+| 2026-08-11 | R8 | 80.0 | **7.0** | Runtime becomes the eighth concept; Temporal gets the page it never had. Found by the maintainer, not by the rubric — see below. |
+
+### What R8 exposed about the rubric
+
+The maintainer asked whether runtime, the workspace agent, schedules and Temporal were covered. Two of
+the four were not, and **the D2 score did not notice**:
+
+- **runtime** — 31 mentions across 15 guide pages and no page of its own. Every page assumed it. It is
+  the entity a user registers and selects on every batch, and it was not one of the concepts.
+- **Temporal** — 5 mentions in the whole guide, one paragraph inside `schedules.md`, for the property
+  that decides what happens to a two-hour batch when you deploy.
+
+The lesson for D2: counting *sections that exist* misses a topic that is mentioned everywhere and
+explained nowhere. A mention is not coverage. The next scoring pass should measure the inverse —
+terms with high mention counts and no page — because that is exactly the shape of a gap a writer
+cannot see from inside.
