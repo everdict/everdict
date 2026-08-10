@@ -9,11 +9,11 @@
   --ifm-color-primary-lighter: #6b76d6;
   --ifm-color-primary-lightest: #8b93e0;
   --ifm-code-font-size: 92%;
-  --ifm-font-family-monospace: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --ifm-font-family-monospace: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='dark'] {
+[data-theme="dark"] {
   --ifm-color-primary: #8b93f0;
   --ifm-color-primary-dark: #6f79eb;
   --ifm-color-primary-darker: #616ce9;

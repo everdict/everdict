@@ -10,7 +10,9 @@
       ".next",
       "apps/cli/bundle",
       "apps/desktop/bundle",
-      "apps/desktop/release"
+      "apps/desktop/release",
+      "site/build",
+      "site/.docusaurus"
     ]
   },
   "formatter": {
@@ -37,7 +39,7 @@
   },
   "overrides": [
     {
-      "include": ["*.config.ts", "**/*.config.ts"],
+      "include": ["*.config.ts", "**/*.config.ts", "site/sidebars.ts"],
       "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
     }
   ]
