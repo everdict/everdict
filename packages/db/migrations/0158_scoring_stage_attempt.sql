@@ -1,0 +1,21 @@
+-- WHICH ATTEMPT produced a staged judgment — the arbitration the pass fence cannot perform
+-- (arch-review 14 §11).
+--
+-- The pass marker decides who may write a group's plane, and it decides it correctly. It cannot decide
+-- between two writes of the SAME pass, and Temporal produces exactly that: an activity whose attempt timed
+-- out while its provider call kept running, plus the replacement attempt. Both present the same passId, both
+-- clear every guard.
+--
+-- The stage was first-writer-wins and the carrier last-writer-wins, so the two disagreed by construction and
+-- the revision took the carrier's answer. Parity noticed afterwards, which is a report, not an arbitration.
+--
+-- And "first wins" is not the right rule either — that was the trap in the obvious fix. The late completion
+-- belongs to an attempt the orchestrator has already superseded; letting it win means a judgment nobody was
+-- waiting for becomes the record. The question is not first-or-last, it is WHICH ATTEMPT HAS THE RIGHT TO
+-- WRITE, and Temporal already answers it: `attempt` is monotonic per activity execution, so the highest
+-- attempt IS the current one.
+--
+-- Rows written before this carry attempt 1, which is the honest reading of "produced by a pass that had no
+-- attempt vocabulary" — and it makes any later attempt supersede them, which is the safe direction.
+ALTER TABLE everdict_scoring_stage
+  ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;

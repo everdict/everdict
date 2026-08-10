@@ -377,6 +377,9 @@ export class ScorecardScoreService {
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
     passId?: string,
+    // WHICH ATTEMPT of this activity (mig 0158) — the arbitration token between two writes of one pass. The
+    // caller reads it from the Temporal activity context; the in-process pass has none.
+    attempt?: number,
   ): Promise<{ scored: boolean; skipped?: boolean }> {
     const record = await this.getRecord(id);
     if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
@@ -429,7 +432,10 @@ export class ScorecardScoreService {
     single.scores = stampJudgeAttempts(single.scores, pending, priorAttempts);
     // The STAGE still receives the whole selected-judge delta for this case: judges finished on an earlier
     // attempt belong in the same row as the one just re-run, because the row is what a promotion writes.
-    await this.writeBackScores(record, [single], pass, { judges });
+    await this.writeBackScores(record, [single], pass, {
+      judges,
+      ...(attempt !== undefined ? { attempt } : {}),
+    });
     return { scored: true };
   }
 
@@ -811,7 +817,9 @@ export class ScorecardScoreService {
     pass?: ScoringPass,
     // `judges` is what makes the stage a DELTA — without it there is nothing to select, so the write is
     // skipped rather than degrading into a full-plane snapshot the promotion would misread.
-    opts: { stage?: boolean; judges?: ReadonlyArray<{ id: string }> } = {},
+    // `attempt` is the Temporal activity attempt this write belongs to — the token that tells two writes of
+    // ONE pass apart (mig 0158). Absent = the in-process pass, which has no retries to distinguish.
+    opts: { stage?: boolean; judges?: ReadonlyArray<{ id: string }>; attempt?: number } = {},
   ): Promise<void> {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
@@ -829,9 +837,17 @@ export class ScorecardScoreService {
     // the pass having read the inherited rows at exactly the right moment. Staging the delta makes the
     // promotion's merge explicit — inherited evidence stays on the carrier, produced evidence comes from here.
     // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch.
-    // …one row per (case, JUDGE) — the unit everything else about a judgment already uses (mig 0153). A
-    // per-case row made two attempts that judged DIFFERENT judges collide under first-writer-wins, and left
-    // a promotion unable to say which judge in a row a given pass produced.
+    // …one row per (case, JUDGE) — the unit everything else about a judgment already uses (mig 0153) — and
+    // the stage now CLAIMS them (mig 0158, arch-review 14 §11). The claim is the arbitration between two
+    // attempts of the SAME pass, which the pass fence structurally cannot perform: Temporal retries an
+    // activity inside one pass, so a timed-out attempt whose provider call is still running and its
+    // replacement both hold the same passId and both clear every guard.
+    //
+    // The CURRENT attempt wins, and a superseded one writes NOTHING further — including to the carrier. That
+    // last part is the point: the stage said "first wins" while the carrier said "last wins", so the two
+    // disagreed by construction and the revision took the carrier's answer while parity noticed afterwards.
+    // A report is not an arbitration. One decider, and the other follows it.
+    let permitted: CaseResult[] = results;
     if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined && opts.judges) {
       const selected = opts.judges;
       const entries = results.flatMap((r) => {
@@ -840,10 +856,24 @@ export class ScorecardScoreService {
           const scores = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
           // A judge with no rows on this case produced nothing here — staging an empty row would assert a
           // judgment that does not exist, and the parity report would then count it as one.
-          return scores.length > 0 ? [{ caseKey, judgeId: j.id, scores }] : [];
+          return scores.length > 0
+            ? [{ caseKey, judgeId: j.id, scores, ...(opts.attempt !== undefined ? { attempt: opts.attempt } : {}) }]
+            : [];
         });
       });
-      await this.deps.scoringStage.stage(record.id, pass.passId, entries).catch(() => undefined);
+      // A staging FAILURE must not fail a pass that is writing its plane correctly — and must not be read as
+      // "you won" either. `undefined` means the stage could not arbitrate, and the carrier write then
+      // proceeds exactly as it did before the stage existed: honestly degraded, never silently authoritative.
+      const accepted = await this.deps.scoringStage.stage(record.id, pass.passId, entries).catch(() => undefined);
+      if (accepted !== undefined && entries.length > 0) {
+        const won = new Set(accepted.map((e) => JSON.stringify([e.caseKey, e.judgeId])));
+        const staged = new Set(entries.map((e) => e.caseKey));
+        permitted = results.filter((r) => {
+          const caseKey = childKey(r.caseId, r.trial);
+          if (!staged.has(caseKey)) return true; // nothing was claimed for it — not this arbitration's business
+          return selected.some((j) => won.has(JSON.stringify([caseKey, j.id])));
+        });
+      }
     }
     const children = await store.list(record.tenant, { scorecardId: record.id });
     // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
@@ -852,7 +882,7 @@ export class ScorecardScoreService {
     const byKey = new Map(
       children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c] as const),
     );
-    for (const r of results) {
+    for (const r of permitted) {
       const child = byKey.get(childKey(r.caseId, r.trial));
       if (!child?.result) continue;
       const written = await store.update(

@@ -81,6 +81,19 @@ promotion could not say which judge in a row a given pass produced, and a per-ju
 nowhere to live. Re-keyed during the expand phase deliberately — nothing reads the stage to decide anything,
 so the change is free now and a reshape of authoritative data later.
 
+**The stage ARBITRATES; the carrier follows** (arch-review 14 §11, mig 0158). The pass marker decides who may
+write a group's plane and decides it correctly — and it cannot decide between two writes of the SAME pass.
+Temporal produces exactly that: an activity whose attempt timed out while its provider call kept running,
+plus the replacement. Both hold the same passId, both clear every guard. The stage was first-writer-wins and
+the carrier last-writer-wins, so the two disagreed by construction, the revision took the carrier's answer,
+and parity noticed afterwards — a report is not an arbitration.
+
+Neither rule was right on its own. "First wins" hands the record to an attempt the orchestrator has already
+superseded; "last wins" is the mirror. The question was never first-or-last but WHICH ATTEMPT HOLDS THE RIGHT
+TO WRITE, and Temporal already answers it: `attempt` is monotonic per activity execution, so the highest
+attempt is the current one. `stage()` is therefore a CLAIM that returns what it accepted, and the carrier
+write proceeds only for those — one decider, one follower, one winner.
+
 **A staged row means "THIS PASS JUDGED THIS CASE" — nothing else.** The alternative reading (*the full
 desired score plane*) is the one the expand step accidentally shipped: `prepareScore`'s strip also went
 through the write-back, so a row appeared the moment a pass *touched* a case, judged or not. `stage row

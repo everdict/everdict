@@ -1,7 +1,18 @@
 import type { Dispatcher } from "@everdict/backends";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
+import { Context } from "@temporalio/activity";
 import { Agent, fetch as undiciFetch } from "undici";
 import type { Activities } from "./types.js";
+
+// The current activity attempt, when running inside one. Outside an activity (unit paths, the in-process
+// scoring fallback) there is no attempt to speak of — the caller then behaves as it always did.
+function attemptOf(): number | undefined {
+  try {
+    return Context.current().info.attempt;
+  } catch {
+    return undefined;
+  }
+}
 
 // Config for the scheduled-fire activities to call the control-plane internal routes (worker→API HTTP bridge). Without it, the fire activities are disabled.
 export interface ScheduleActivityConfig {
@@ -169,6 +180,14 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       passId?: string;
     }): Promise<{ scored: boolean; skipped?: boolean }> {
       if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      // WHICH ATTEMPT this is (arch-review 14 §11). The pass fence cannot arbitrate two attempts of the SAME
+      // pass — Temporal retries an activity inside one pass, so a timed-out attempt whose provider call is
+      // still running and its replacement both present the same passId and both pass every guard. The attempt
+      // number is the only thing that distinguishes them, and it is monotonic per activity execution, so
+      // "highest attempt wins" IS "the current attempt wins". Read from the activity context rather than
+      // threaded through the workflow: a workflow that passed it would have to be deterministic about a
+      // retry count it does not own.
+      const attempt = attemptOf();
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-case`,
         {
@@ -179,6 +198,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
             judges: input.judges,
             submittedBy: input.submittedBy,
             ...(input.passId !== undefined ? { passId: input.passId } : {}),
+            ...(attempt !== undefined ? { attempt } : {}),
           }),
         },
       );

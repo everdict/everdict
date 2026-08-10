@@ -1,5 +1,5 @@
 import type { RunRecord, ScorecardRecord, ScoringPass } from "@everdict/contracts";
-import { PgRunStore, PgScorecardStore } from "@everdict/db";
+import { PgRunStore, PgScorecardStore, PgScoringStageStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
@@ -167,5 +167,73 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-42 — a scoring pass owns the plane (
       expectScoringPassId: "A",
     });
     expect(byIdentity).toBeUndefined(); // identity is the fence
+  });
+});
+
+// Trust suite — TRUST-52.
+//
+// A SUPERSEDED ATTEMPT OF THE SAME PASS CANNOT OVERWRITE THE CURRENT ONE'S JUDGMENT. TRUST-42 certifies that
+// a superseded PASS is fenced out; this is the level below it, and the pass fence structurally cannot reach:
+// Temporal retries an activity INSIDE one pass, so a timed-out attempt whose provider call is still running
+// and its replacement both present the same passId and both clear every guard. Only a real Postgres can
+// certify the arbitration — it is a conditional upsert (`DO UPDATE … WHERE attempt <= EXCLUDED.attempt`), and
+// an in-memory fake serializes by construction.
+describe.skipIf(!TRUST_PG_ENABLED)("TRUST-52 — the current attempt owns the judgment (real Postgres)", () => {
+  let pg: TrustPg;
+  let stage: PgScoringStageStore;
+
+  beforeAll(async () => {
+    pg = await openTrustPg();
+    stage = new PgScoringStageStore(pg.client);
+  });
+  afterAll(async () => pg?.close());
+
+  const judgment = (value: number, attempt: number) => ({
+    caseKey: "c1#0",
+    judgeId: "quality",
+    scores: [{ graderId: "q", metric: "judge:quality", value, pass: value === 1 }],
+    attempt,
+  });
+
+  it("a LATE completion from a replaced attempt is refused, and the current judgment stands", async () => {
+    const id = trustId("sc-attempt");
+    // Attempt 2 answered first (attempt 1 timed out and is still running somewhere).
+    await expect(stage.stage(id, "pass-A", [judgment(1, 2)])).resolves.toHaveLength(1);
+    // …and now attempt 1 comes back with the opposite verdict. Both are legal; both hold the same passId.
+    await expect(stage.stage(id, "pass-A", [judgment(0, 1)])).resolves.toEqual([]);
+    const staged = await stage.staged(id, "pass-A");
+    expect(staged).toHaveLength(1);
+    expect(staged[0]?.attempt).toBe(2);
+    expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1); // the current attempt's judgment
+    await stage.clear(id, "pass-A");
+  });
+
+  it("a RETRY supersedes — the replacement holds the right to write, and says so", async () => {
+    const id = trustId("sc-retry");
+    await expect(stage.stage(id, "pass-A", [judgment(0, 1)])).resolves.toHaveLength(1);
+    const accepted = await stage.stage(id, "pass-A", [judgment(1, 2)]);
+    expect(accepted).toHaveLength(1); // returned, because the CARRIER write follows exactly this answer
+    const staged = await stage.staged(id, "pass-A");
+    expect((staged[0]?.scores?.[0] as { value: number }).value).toBe(1);
+    await stage.clear(id, "pass-A");
+  });
+
+  it("arbitrates per (case, JUDGE) — a retry of one judge leaves its neighbour's row untouched", async () => {
+    const id = trustId("sc-judge");
+    await stage.stage(id, "pass-A", [
+      judgment(1, 1),
+      {
+        caseKey: "c1#0",
+        judgeId: "safety",
+        scores: [{ graderId: "s", metric: "judge:safety", value: 1, pass: true }],
+        attempt: 1,
+      },
+    ]);
+    await stage.stage(id, "pass-A", [judgment(0, 2)]);
+    const staged = await stage.staged(id, "pass-A");
+    expect(staged).toHaveLength(2);
+    expect(staged.find((e) => e.judgeId === "safety")?.attempt).toBe(1);
+    expect(staged.find((e) => e.judgeId === "quality")?.attempt).toBe(2);
+    await stage.clear(id, "pass-A");
   });
 });

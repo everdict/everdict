@@ -10,6 +10,11 @@ import type { Score } from "@everdict/contracts";
 export interface StagedJudgment {
   caseKey: string; // caseId#trial — the key the score plane is addressed by
   judgeId: string; // the judge whose family these rows belong to
+  // WHICH ATTEMPT produced it (mig 0158). Temporal retries an activity inside one pass, so two writes can
+  // legitimately hold the same passId; the attempt number is what tells them apart, and it is monotonic per
+  // activity execution — so the highest attempt IS the current one. Absent = 1 (the in-process pass, which
+  // has no retry vocabulary).
+  attempt?: number;
   // This judge's rows for this case: the verdict plus its criterion children. Never another judge's, and
   // never an inherited grader's — that is what makes the promotion's merge explicit.
   scores: Score[];
@@ -67,12 +72,20 @@ export interface ScoringStageParity {
 }
 
 export interface ScoringStageStore {
-  // Stage one pass's judgments for a set of cases. FIRST WRITER WINS per (scorecard, pass, case): an
-  // activity retry re-staging the same row is a no-op, and two OVERLAPPING attempts of the same pass — which
-  // the pass fence cannot arbitrate, because both legitimately hold the same passId — resolve to the first
-  // accepted judgment rather than to whichever finished last. Which completion becomes a revision's evidence
-  // has to be a decision, not a race outcome.
-  stage(scorecardId: string, passId: string, entries: StagedJudgment[]): Promise<void>;
+  // CLAIM one pass's judgments. The CURRENT ATTEMPT WINS per (scorecard, pass, case, judge) — a later
+  // attempt supersedes an earlier one's row, and a late-completing earlier attempt is REFUSED
+  // (arch-review 14 §11).
+  //
+  // First-writer-wins was the obvious fix and the wrong one: the first completion may belong to an attempt
+  // the orchestrator has already timed out and replaced, so letting it win makes a judgment nobody was
+  // waiting for into the record. Last-writer-wins — what the carrier did — has the mirror problem. The
+  // question was never first-or-last; it is WHICH ATTEMPT HOLDS THE RIGHT TO WRITE, and Temporal's
+  // monotonic attempt number already answers it.
+  //
+  // Returns the entries it ACCEPTED, because this is the arbitration the carrier write then follows: the
+  // stage and the live plane must converge on ONE winner, and they can only do that if one of them decides
+  // and the other obeys. A refused entry means "you were superseded" — the caller writes nothing.
+  stage(scorecardId: string, passId: string, entries: StagedJudgment[]): Promise<StagedJudgment[]>;
   // Everything this pass staged — what a promotion reads.
   staged(scorecardId: string, passId: string): Promise<StagedJudgment[]>;
   // Drop a pass's stage. Called after a promotion and by the sweep that collects abandoned passes; returns

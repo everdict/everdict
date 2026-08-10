@@ -561,8 +561,9 @@ export class ScorecardService {
     judges: Array<{ id: string; version: string }>,
     submittedBy?: string,
     passId?: string,
+    attempt?: number,
   ): Promise<{ scored: boolean; skipped?: boolean }> {
-    return this.scoreService.scoreCase(id, key, judges, submittedBy, passId);
+    return this.scoreService.scoreCase(id, key, judges, submittedBy, passId, attempt);
   }
 
   async finalizeScore(
