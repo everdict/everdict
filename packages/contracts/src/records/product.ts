@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JudgeIdSchema } from "../harness/judge-spec.js";
 import { GateScoringPinSchema } from "./gate.js";
 import { TrackerHistoryEntrySchema } from "./tracker.js";
 
@@ -91,7 +92,7 @@ export const ProductSeriesSchema = z.object({
   // fails outright. A structurally impossible selection has to be refused where it is declared, not
   // discovered at judging time on the provider's bill.
   judges: z
-    .array(SeriesCapabilityRefSchema)
+    .array(SeriesCapabilityRefSchema.extend({ id: JudgeIdSchema }))
     .default([])
     .refine((rows) => new Set(rows.map((r) => r.id)).size === rows.length, {
       message:

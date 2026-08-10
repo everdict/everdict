@@ -49,7 +49,10 @@ function travelPlannerRubric(row: Record<string, unknown>): string {
     `Hard constraints — total budget ${text(row.budget)}; ${text(row.local_constraint)}.`,
     "Commonsense constraints — every flight/hotel/restaurant/attraction must be a real named option consistent with " +
       "the reference information; no repeated restaurants or attractions; the route must return to the origin; " +
-      "transportation must not mix self-driving with flights; every day must have accommodation and all three meals.",
+      "transportation must not mix self-driving with flights; every day must have all three meals; every NIGHT of " +
+      "the stay must have accommodation. A trip of N days has N-1 nights: the departure day correctly has no " +
+      "accommodation, and demanding one there is wrong. The accommodation chosen must also satisfy its own " +
+      "minimum-nights rule for the number of nights actually stayed.",
   ].join("\n");
 }
 

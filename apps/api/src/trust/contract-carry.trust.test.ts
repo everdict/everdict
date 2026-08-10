@@ -155,6 +155,79 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
     expect(admitted).toBe(0);
   });
 
+  it("TRUST-91 — a right claimed for work that never existed is given back", async () => {
+    // `capRuns` is a conserved right. The admission is durable and the create that follows it can still fail
+    // — a database error in between left the counter incremented with no scorecard, no execution, and a
+    // delegation the caller could never use. Fail-closed rather than an overspend, and still a defect: the
+    // retry mints a NEW batch id, so the same logical submission is charged twice.
+    const at3 = await world("3.0.0");
+    let released: string | undefined;
+    const service = new ScorecardService({
+      dispatcher: neverDispatches,
+      store: {
+        async create() {
+          throw new Error("the database was unavailable");
+        },
+        async update() {
+          return undefined;
+        },
+        async get() {
+          return undefined;
+        },
+        async list() {
+          return [];
+        },
+        async delete() {
+          return false;
+        },
+      } as never,
+      datasets: at3.datasets,
+      harnesses: at3.harnesses,
+      resolveModelBinding: at3.resolveModelBinding,
+      runStore: {
+        async get() {
+          return {
+            id: "run-parent",
+            tenant: "acme",
+            envelope: { id: "env-1", capRuns: 1 },
+            createdAt: "2026-01-01T00:00:00.000Z",
+          };
+        },
+        async countActiveByEnvelope() {
+          return 0;
+        },
+        async list() {
+          return [];
+        },
+      } as never,
+      envelopes: {
+        async tryAdmitRuns() {
+          return true;
+        },
+        async releaseRuns(_id: string, _tenant: string, requestId: string) {
+          released = requestId;
+        },
+        async admit() {},
+        async settle() {},
+        async spend() {
+          return { usd: 0, runs: 0 };
+        },
+      } as never,
+      newId: () => "sc-lost",
+    });
+    await expect(
+      service.submit({
+        tenant: "acme",
+        dataset: { id: "d", version: "1.0.0" },
+        harness: { id: "cli", version: "1.0.0" },
+        origin: { source: "agent", causedByRunId: "run-parent" } as never,
+      }),
+    ).rejects.toThrow(/database was unavailable/);
+    // The right went back under the SAME request identity it was claimed with — idempotent, so a duplicate
+    // release is a no-op rather than a refund.
+    expect(released).toBe("adm:scorecard:sc-lost");
+  });
+
   it("holds with a JUDGE and a workspace judge default in play — the guard must not 409 every real series", async () => {
     // The equality is now load-bearing for every product auto-eval, so it has to hold on the shape those
     // actually have: a selected judge with its own floating model, plus the workspace default that governs

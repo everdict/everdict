@@ -44,6 +44,15 @@ export class InMemoryEnvelopeStore implements EnvelopeStore {
     return true;
   }
 
+  // The inverse of the claim, idempotent by request identity — see the port for why it exists.
+  async releaseRuns(id: string, _tenant: string, requestId: string): Promise<void> {
+    const held = this.requests.get(requestId);
+    if (!held || held.envelopeId !== id) return; // nothing this request holds — a duplicate release is a no-op
+    this.requests.delete(requestId);
+    const cur = this.rows.get(id) ?? { usd: 0, runs: 0 };
+    this.rows.set(id, { ...cur, runs: Math.max(0, cur.runs - held.runs) });
+  }
+
   async settle(id: string, _tenant: string, usd: number): Promise<void> {
     const cur = this.rows.get(id) ?? { usd: 0, runs: 0 };
     this.rows.set(id, { ...cur, usd: cur.usd + usd });
@@ -134,6 +143,23 @@ export class PgEnvelopeStore implements EnvelopeStore {
       return Number(d?.granted ?? 0) > 0;
     }
     return false; // three straight decision races — fail closed rather than spin (capacity is contended anyway)
+  }
+
+  // The inverse of the claim, in ONE statement so the row removal and the decrement cannot come apart: the
+  // counter moves only for a request row this call actually deleted, which makes a duplicate release a no-op
+  // rather than a refund.
+  async releaseRuns(id: string, tenant: string, requestId: string): Promise<void> {
+    await this.client.query(
+      `WITH gone AS (
+         DELETE FROM everdict_envelope_admissions
+          WHERE request_id = $1 AND envelope_id = $2 AND admitted = true
+          RETURNING runs
+       )
+       UPDATE everdict_envelopes e
+          SET admitted_runs = greatest(0, e.admitted_runs - (SELECT runs FROM gone)), updated_at = now()
+        WHERE e.id = $2 AND e.tenant = $3 AND EXISTS (SELECT 1 FROM gone)`,
+      [requestId, id, tenant],
+    );
   }
 
   async settle(id: string, tenant: string, usd: number): Promise<void> {

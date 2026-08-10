@@ -110,6 +110,25 @@ describeTrust("TRUST-71 — a duplicate judge id is refused before anything runs
     expect(JudgeSpecSchema.safeParse(spec("foo:bar")).success).toBe(false);
   });
 
+  it("TRUST-87 — …and the grammar binds SELECTIONS too, not only registrations", async () => {
+    // Registration refused `foo:bar` while every selection surface took a bare string — and an unregistered
+    // id survives version pinning as-given, so `foo:bar` could be selected, produce the placeholder metric
+    // `judge:foo:bar`, and that row sits inside legitimate judge `foo`'s criterion family. A re-score of
+    // `foo` would then strip a row belonging to a selection nobody could resolve. A namespace grammar is an
+    // invariant of references, not only of definitions.
+    await expect(
+      service().submit({
+        tenant: "acme",
+        dataset: { id: "d", version: "1.0.0" },
+        harness: { id: "scripted", version: "0" },
+        judges: [{ id: "foo:bar", version: "1.0.0" }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    await expect(
+      service().scoreGroup({ tenant: "acme", id: "sc-1", judges: [{ id: "foo:bar", version: "1.0.0" }] }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
   it("…and DISTINCT judges pass — the guard is about the family, not about arity", () => {
     expect(duplicateJudgeIds([{ id: "quality" }, { id: "safety" }])).toEqual([]);
     expect(duplicateJudgeIds([{ id: "quality" }, { id: "quality" }, { id: "safety" }, { id: "safety" }])).toEqual([

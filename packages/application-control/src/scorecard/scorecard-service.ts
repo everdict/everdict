@@ -15,6 +15,7 @@ import {
   type ScorecardOrigin,
   type ScorecardRecord,
 } from "@everdict/contracts";
+import { JudgeIdSchema } from "@everdict/contracts";
 import {
   type AnalysisConfig,
   type AnalysisResult,
@@ -86,9 +87,22 @@ export type { ScoreGroupInput } from "./scorecard-score-service.js";
 // Unit-testable independently of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
 // Facade over three lifecycle collaborators (docs/architecture/api-route-modularization.md R2-b): batch
 // orchestration / ingest / analytics — the external surface (deps, both transports, tests) is unchanged.
-// A judge appears at most once in a selection — see `duplicateJudgeIds` for why the plane cannot hold two.
-// Thrown as a 400 from the ONE service both transports call, so BFF and MCP cannot diverge on it.
-function assertUniqueJudges(judges: ReadonlyArray<{ id: string }> | undefined): void {
+// A selection names each judge once, and names it in the grammar a judge id has. Thrown as a 400 from the ONE
+// service both transports call, so BFF and MCP cannot diverge on it.
+//
+// The GRAMMAR belongs here too (arch-review 18 P1). Registration refuses `:` in a judge id, and every
+// SELECTION surface still took a bare string — and an unregistered id survives version pinning as-given, so
+// `foo:bar` could be selected, produce the placeholder metric `judge:foo:bar`, and that row sits inside
+// legitimate judge `foo`'s criterion family. A re-score of `foo` would then strip a row belonging to a
+// selection nobody could resolve. A namespace grammar is an invariant of references, not only of definitions.
+function assertJudgeSelection(judges: ReadonlyArray<{ id: string }> | undefined): void {
+  const malformed = (judges ?? []).map((j) => j.id).filter((id) => !JudgeIdSchema.safeParse(id).success);
+  if (malformed.length > 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { judges: malformed },
+      `A judge id may not contain ':' — it separates a judge's metric family from its criteria, so '${malformed.join(", ")}' would name a row inside another judge's family.`,
+    );
   const duplicates = duplicateJudgeIds(judges ?? []);
   if (duplicates.length === 0) return;
   throw new BadRequestError(
@@ -257,7 +271,7 @@ export class ScorecardService {
     // both transports call, before a single provider call is paid for or a stage row is claimed — the plane
     // below has no way to represent two versions of one judge, so this is a malformed request rather than an
     // ambitious one.
-    assertUniqueJudges(input.judges);
+    assertJudgeSelection(input.judges);
     const pinnedJudges = await this.pinJudgeVersions(input.tenant, input.judges ?? []);
 
     // provenance: overlay the ephemeral-pin record onto the caller-provided origin. Even if only pins exist (no origin), still record them (reproducibility evidence).
@@ -373,6 +387,9 @@ export class ScorecardService {
         );
     }
 
+    // What the admission below claimed, so a failed create can give it back (arch-review 18 P1).
+    let admissionRequestId: string | undefined;
+    let admittedEnvelopeId: string | undefined;
     // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
     // headroom is checked before any case exists (402 past the cap, 429 past the depth guard, NEVER
     // silently); the children stamp the envelope at creation and settle real cost against it per case.
@@ -384,7 +401,8 @@ export class ScorecardService {
     // requests that can actually run, and every refusal above this line is one the caller must fix and retry.
     if (input.origin?.causedByRunId && this.deps.runStore) {
       const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
-      await admitCausedWork(
+      admissionRequestId = `adm:scorecard:${batchId}`;
+      const envelope = await admitCausedWork(
         {
           runStore: this.deps.runStore,
           ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
@@ -394,8 +412,9 @@ export class ScorecardService {
         input.tenant,
         input.origin.causedByRunId,
         selectedCases.length * trialsForCount,
-        { requestId: `adm:scorecard:${batchId}` },
+        { requestId: admissionRequestId },
       );
+      admittedEnvelopeId = envelope?.id;
     }
 
     // E0 outbox: the creation fact (scorecard.submitted, domain-computed) persists in the SAME transaction
@@ -404,10 +423,23 @@ export class ScorecardService {
       newId: this.newId,
       now: this.now,
     });
-    await this.deps.store.create(
-      record,
-      creation.map((c) => c.record),
-    );
+    try {
+      await this.deps.store.create(
+        record,
+        creation.map((c) => c.record),
+      );
+    } catch (err) {
+      // The work this right was claimed for never came into existence, so the right goes back (arch-review 18
+      // P1). Without this the counter stayed incremented with no scorecard and no execution, and the caller's
+      // retry mints a NEW batch id — so the same logical submission is charged twice against an autonomy
+      // budget the system otherwise treats as a conservation law. Best-effort and idempotent: a store with no
+      // release degrades to the previous behavior rather than silently double-counting.
+      if (admissionRequestId !== undefined && admittedEnvelopeId !== undefined)
+        await this.deps.envelopes
+          ?.releaseRuns?.(admittedEnvelopeId, input.tenant, admissionRequestId)
+          .catch(() => undefined);
+      throw err;
+    }
     if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
     // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
     // replace it with this fire. GitHub-side concurrency only cancels the "workflow" while an already-submitted batch keeps running on the server
@@ -526,7 +558,7 @@ export class ScorecardService {
   async scoreGroup(input: ScoreGroupInput): Promise<ScorecardRecord> {
     // Same rule at the re-score door (arch-review 16 P1-7): the selection a pass runs under is the unit the
     // stage claims and the strip mutates, and neither can hold a judge twice.
-    assertUniqueJudges(input.judges);
+    assertJudgeSelection(input.judges);
     return this.scoreService.score(input);
   }
 

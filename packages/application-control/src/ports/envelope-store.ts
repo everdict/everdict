@@ -26,4 +26,15 @@ export interface EnvelopeStore {
   // response) is the same right, never a second charge.
   // Optional like the tenant ledger's tryAdmit: a store without it falls back to the advisory sequence.
   tryAdmitRuns?(id: string, tenant: string, requestId: string, runs: number, capRuns: number): Promise<boolean>;
+  // GIVE THE RIGHT BACK when the work it was claimed for never came into existence (arch-review 18 P1).
+  // `tryAdmitRuns` is a durable, conserved claim, and the submit that follows it can still fail — a database
+  // error between the admission and the record's creation left the counter incremented with no scorecard, no
+  // execution, and a delegation the caller can never use. That is fail-closed rather than an overspend, and
+  // it is still a defect if an autonomy budget is a conservation law: the retry mints a new batch id, so the
+  // same logical submission is charged twice.
+  //
+  // Exactly the inverse of the claim and idempotent by the same request identity: it decrements only for a
+  // request row it actually removes, so a duplicate release is a no-op rather than a refund. Optional — a
+  // store without it degrades to the previous behavior, honestly and without a silent double-count.
+  releaseRuns?(id: string, tenant: string, requestId: string): Promise<void>;
 }

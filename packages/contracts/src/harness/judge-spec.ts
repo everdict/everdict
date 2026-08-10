@@ -20,7 +20,12 @@ import {
 // the same "logical identity unit ≠ serialized namespace unit" shape as the per-judge/per-case arbitration
 // bug — one level down, in the name itself. Structured score identity would dissolve it; until then the
 // separator is reserved.
-const JudgeIdSchema = z
+// Exported because a namespace grammar is an invariant of REFERENCES too, not only of definitions
+// (arch-review 18 P1). Registration refused `foo:bar` while every selection surface still took a bare
+// `z.string()`, and an unregistered id survives version pinning as-given — so `foo:bar` could be selected,
+// produce the placeholder metric `judge:foo:bar`, and that row is simultaneously inside legitimate judge
+// `foo`'s criterion family. A re-score of `foo` would then strip it.
+export const JudgeIdSchema = z
   .string()
   .min(1)
   .refine((id) => !id.includes(":"), {
