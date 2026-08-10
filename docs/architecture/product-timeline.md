@@ -134,6 +134,29 @@ decision; state moves between the calls. The ship path freezes the resolution on
 readiness evaluation AND the recorded decision (`seriesDecisions[].evaluationContract`), so what a release
 passed is answerable without walking to a scorecard that may since have been deleted.
 
+**Runtime is NOT part of the evaluation contract — a decision, not an oversight** (arch-review 14 §14). The
+contract seals what is being ASKED: dataset, harness closure, judge closure. `autoEval.runtime` is placement,
+and placement is not the question. The alternative — folding the execution world into the contract — is
+tempting because a Windows run and a Linux run genuinely can produce different results, and it is wrong for
+the same reason a too-broad guard is always wrong: every environment difference would become a contract
+change, so every infrastructure move would invalidate a product's entire evidence base and the signal would
+be trained out of people within a week.
+
+The right decomposition is the one the scorecard side already uses:
+
+```
+Evaluation Contract   what is being asked   → identity; a change means new evidence is required
+Execution World       where it ran          → cohort/stratum; a change means compare within, not across
+```
+
+So a world difference is a COMPARISON constraint, not an identity change: two runs of the same contract in
+different worlds are the same question answered under different conditions, and the honest handling is to
+stratify rather than to declare them incomparable. That machinery does not exist yet — everdict has no world
+cohort axis, which is a real gap (the adoption-metrics work names it) — and the decision recorded here is
+that when it arrives it arrives as a cohort, not as another field in the contract digest. Writing it down
+because leaving it ambiguous is how "same series contract, different world" quietly ends up averaged into one
+regression series.
+
 **Service identity is the STREAM, not the name.** `serviceStreamKey` (repository · source · host · tagPrefix)
 is one exported domain decision with three consumers that used to read it differently: the product edit
 applied it (repoint a service and its watermark cannot survive), the sync reconciler re-matched by NAME and
@@ -163,6 +186,12 @@ purpose: `ProductService.update` also REFUSES an edit that would strip a planned
 failure is legible at the edit rather than discovered later as a release nobody can ship — but a preflight
 can be bypassed (an import, a migration, another replica), so the gate is the guarantee and the preflight is
 the explanation.
+
+**Version reads are paginated, with a declared ceiling.** `listReleases`/`listTags` sent one `per_page` and
+stopped, so a repository with more than a page of history had its first page imported and the rest silently
+absent — while the first sync is documented as backfilling "the timeline's past". Both now walk until a short
+page, bounded by `maxPages` (default 50 × 100 = 5,000 versions). The bound is declared rather than incidental:
+a limit that merely happens reads as completeness to whoever comes next.
 
 **Deleting a product is ONE statement, and children SERIALIZE against it.** `removeAggregate` deletes all
 three in a single data-modifying CTE — but atomicity is not serialization: a child INSERT took no lock on the

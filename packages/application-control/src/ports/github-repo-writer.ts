@@ -119,8 +119,14 @@ export interface GithubTag {
 // reasoning GithubRepositoryTokenSource gives: depend on the behaviour, not on the whole repo-ops port — and
 // a separate interface keeps every existing GithubRepoWriter fake compiling untouched).
 export interface GithubVersionReader {
-  listReleases(repository: string, opts: { perPage: number }): Promise<GithubRelease[]>;
-  listTags(repository: string, opts: { perPage: number }): Promise<GithubTag[]>;
+  // PAGINATED (arch-review 14 §16). Both reads sent a single `per_page` and stopped, so a repository with
+  // more than one page of history got its first page and nothing else — while the docs described the first
+  // sync as backfilling "the timeline's past". For recent-release detection one page is plenty; for a
+  // System of Record it is a silent truncation, and a silent truncation is the shape this codebase spends
+  // most of its guards refusing. `maxPages` bounds the walk so an enormous repository cannot turn one sync
+  // into an unbounded crawl — a bound that is DECLARED and reported, rather than one that happens.
+  listReleases(repository: string, opts: { perPage: number; maxPages?: number }): Promise<GithubRelease[]>;
+  listTags(repository: string, opts: { perPage: number; maxPages?: number }): Promise<GithubTag[]>;
   // The commit's committer date (ISO) — the tag's stand-in for publishedAt. Undefined when the commit cannot
   // be read (a force-pushed-away sha), which the sync maps to its own import time rather than failing the tag.
   commitDate(repository: string, sha: string): Promise<string | undefined>;

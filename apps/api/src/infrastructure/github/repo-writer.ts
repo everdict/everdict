@@ -294,6 +294,11 @@ const TAG_ROW = z.object({ name: z.string(), commit: z.object({ sha: z.string() 
 
 // The version half of the GitHub read surface (GithubVersionReader) — same base/auth/error discipline as the
 // repo writer above, minted per (installation token, host) by the same composition roots.
+// How many pages one version read may walk before it stops. 50 × 100 = 5,000 versions, which is more history
+// than any product timeline needs and still a bound rather than an open crawl — a limit that is DECLARED,
+// because a limit that merely happens reads as completeness to whoever comes next.
+const DEFAULT_MAX_PAGES = 50;
+
 export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVersionReaderFactory {
   return {
     for(token, host): GithubVersionReader {
@@ -304,11 +309,30 @@ export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVers
         if (!res.ok) throw await upstream(res, "GitHub API call failed");
         return res;
       };
+      // Walk GitHub's pages until one comes back short (the last page) or the declared ceiling is reached.
+      // A page-1-only read is fine for "what shipped lately" and wrong for "backfill the timeline's past",
+      // which is what the first sync claims to do (arch-review 14 §16).
+      const pages = async <S extends z.ZodTypeAny>(
+        url: (page: number) => string,
+        row: S,
+        opts: { perPage: number; maxPages?: number },
+      ): Promise<z.infer<S>[]> => {
+        const out: z.infer<S>[] = [];
+        const ceiling = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
+        for (let page = 1; page <= ceiling; page++) {
+          const rows = z.array(row).parse(await (await gh(url(page))).json());
+          out.push(...rows);
+          if (rows.length < opts.perPage) break; // a short page is the last page
+        }
+        return out;
+      };
       return {
         async listReleases(repository, opts) {
-          const rows = z
-            .array(RELEASE_ROW)
-            .parse(await (await gh(`${base}/repos/${repository}/releases?per_page=${opts.perPage}`)).json());
+          const rows = await pages(
+            (page) => `${base}/repos/${repository}/releases?per_page=${opts.perPage}&page=${page}`,
+            RELEASE_ROW,
+            opts,
+          );
           return rows.map((row) => ({
             tagName: row.tag_name,
             ...(row.name ? { name: row.name } : {}),
@@ -320,9 +344,11 @@ export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVers
           }));
         },
         async listTags(repository, opts) {
-          const rows = z
-            .array(TAG_ROW)
-            .parse(await (await gh(`${base}/repos/${repository}/tags?per_page=${opts.perPage}`)).json());
+          const rows = await pages(
+            (page) => `${base}/repos/${repository}/tags?per_page=${opts.perPage}&page=${page}`,
+            TAG_ROW,
+            opts,
+          );
           return rows.map((row) => ({ name: row.name, sha: row.commit.sha }));
         },
         async commitDate(repository, sha) {
