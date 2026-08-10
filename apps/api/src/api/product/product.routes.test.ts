@@ -64,18 +64,21 @@ function build() {
     readers: {
       for: () => ({
         async listReleases() {
-          return [
-            {
-              tagName: "v1.0.0",
-              url: "https://github.com/acme/api/releases/v1.0.0",
-              draft: false,
-              prerelease: false,
-              publishedAt: "2026-08-01T00:00:00.000Z",
-            },
-          ];
+          return {
+            complete: true,
+            rows: [
+              {
+                tagName: "v1.0.0",
+                url: "https://github.com/acme/api/releases/v1.0.0",
+                draft: false,
+                prerelease: false,
+                publishedAt: "2026-08-01T00:00:00.000Z",
+              },
+            ],
+          };
         },
         async listTags() {
-          return [];
+          return { rows: [], complete: true };
         },
         async commitDate() {
           return undefined;

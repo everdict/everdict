@@ -125,8 +125,18 @@ export interface GithubVersionReader {
   // System of Record it is a silent truncation, and a silent truncation is the shape this codebase spends
   // most of its guards refusing. `maxPages` bounds the walk so an enormous repository cannot turn one sync
   // into an unbounded crawl — a bound that is DECLARED and reported, rather than one that happens.
-  listReleases(repository: string, opts: { perPage: number; maxPages?: number }): Promise<GithubRelease[]>;
-  listTags(repository: string, opts: { perPage: number; maxPages?: number }): Promise<GithubTag[]>;
+  // `complete` says whether the walk REACHED THE END or stopped at the ceiling (arch-review 15 §13). A bare
+  // array made "5,000 rows because that is all there are" and "5,000 rows because we stopped" the same
+  // answer — the one-page truncation this replaced, scaled up rather than removed. A caller that imports
+  // history needs to know which it got.
+  listReleases(
+    repository: string,
+    opts: { perPage: number; maxPages?: number },
+  ): Promise<{ rows: GithubRelease[]; complete: boolean }>;
+  listTags(
+    repository: string,
+    opts: { perPage: number; maxPages?: number },
+  ): Promise<{ rows: GithubTag[]; complete: boolean }>;
   // The commit's committer date (ISO) — the tag's stand-in for publishedAt. Undefined when the commit cannot
   // be read (a force-pushed-away sha), which the sync maps to its own import time rather than failing the tag.
   commitDate(repository: string, sha: string): Promise<string | undefined>;

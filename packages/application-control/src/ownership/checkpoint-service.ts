@@ -367,7 +367,20 @@ export class CheckpointService {
         ? [`no wired tool can address ${unreachable.map((r) => `${r.type}:${r.id}`).join(", ")}`]
         : []),
     ];
-    const affirmable = verdict.verdict !== "verified" || gaps.length === 0;
+    // A verdict that CARRIES CONSEQUENCE needs the coverage its consequence rests on — and "refuted" is on
+    // its way to carrying one (rollback, block, escalation), so the rule is stated now rather than after
+    // something starts acting on it (arch-review 15 §16). The asymmetry is deliberate and named:
+    //
+    //   verified   — every offered-and-reachable ref successfully read, independence fully established
+    //   refuted    — at least ONE ref successfully read; a contradiction has to have been seen somewhere
+    //   inconclusive — no coverage requirement; it is the verdict for "I could not tell"
+    //
+    // A refutation from an agent that read nothing is a model's opinion about the question, not a finding
+    // about the artifact, and it must not be able to stop a deploy on that basis.
+    const affirmable =
+      verdict.verdict === "verified" ? gaps.length === 0 : verdict.verdict === "refuted" ? reviewed.length > 0 : true;
+    if (verdict.verdict === "refuted" && reviewed.length === 0)
+      gaps.push("a refutation must rest on evidence the verifier actually read, and none was");
 
     // …and the verdict becomes a RECORD, not a return value. A judgment nobody can look up afterwards
     // cannot be cited, cannot be audited, and cannot be compared against the next one.

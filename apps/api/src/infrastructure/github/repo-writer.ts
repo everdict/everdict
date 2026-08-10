@@ -316,40 +316,45 @@ export function githubVersionReaderFactory(fetchImpl?: typeof fetch): GithubVers
         url: (page: number) => string,
         row: S,
         opts: { perPage: number; maxPages?: number },
-      ): Promise<z.infer<S>[]> => {
+      ): Promise<{ rows: z.infer<S>[]; complete: boolean }> => {
         const out: z.infer<S>[] = [];
         const ceiling = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
         for (let page = 1; page <= ceiling; page++) {
           const rows = z.array(row).parse(await (await gh(url(page))).json());
           out.push(...rows);
-          if (rows.length < opts.perPage) break; // a short page is the last page
+          // A SHORT page is the last page — that, and only that, is what "complete" means here. Falling out
+          // of the loop at the ceiling means there is very likely more, and saying so is the whole point.
+          if (rows.length < opts.perPage) return { rows: out, complete: true };
         }
-        return out;
+        return { rows: out, complete: false };
       };
       return {
         async listReleases(repository, opts) {
-          const rows = await pages(
+          const { rows, complete } = await pages(
             (page) => `${base}/repos/${repository}/releases?per_page=${opts.perPage}&page=${page}`,
             RELEASE_ROW,
             opts,
           );
-          return rows.map((row) => ({
-            tagName: row.tag_name,
-            ...(row.name ? { name: row.name } : {}),
-            ...(row.body ? { body: row.body } : {}),
-            url: row.html_url,
-            draft: row.draft,
-            prerelease: row.prerelease,
-            ...(row.published_at ? { publishedAt: row.published_at } : {}),
-          }));
+          return {
+            complete,
+            rows: rows.map((row) => ({
+              tagName: row.tag_name,
+              ...(row.name ? { name: row.name } : {}),
+              ...(row.body ? { body: row.body } : {}),
+              url: row.html_url,
+              draft: row.draft,
+              prerelease: row.prerelease,
+              ...(row.published_at ? { publishedAt: row.published_at } : {}),
+            })),
+          };
         },
         async listTags(repository, opts) {
-          const rows = await pages(
+          const { rows, complete } = await pages(
             (page) => `${base}/repos/${repository}/tags?per_page=${opts.perPage}&page=${page}`,
             TAG_ROW,
             opts,
           );
-          return rows.map((row) => ({ name: row.name, sha: row.commit.sha }));
+          return { complete, rows: rows.map((row) => ({ name: row.name, sha: row.commit.sha })) };
         },
         async commitDate(repository, sha) {
           // Best-effort by contract: a commit that cannot be read (force-pushed away) is not an error the

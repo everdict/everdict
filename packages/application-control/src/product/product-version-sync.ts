@@ -171,7 +171,14 @@ export class ProductVersionSync {
     // that was removed. The imports already landed and the ledger is insert-once, so stopping here loses
     // nothing that was not already lost by the delete.
     if (!current) return { services: outcomes, triggered: [] };
-    const { triggered, failedSeries } = await this.autoEval(tenant, current, inserted);
+    // ONLY the CURRENT streams' arrivals trigger the current product's evaluation (arch-review 15 §12). A
+    // repoint that lands mid-sync leaves this run holding rows imported from the stream the service USED to
+    // point at; running the new definition because the old stream moved attributes a cause to an effect it
+    // did not have. The evaluation would not be wrong — it evaluates the current series — but the timeline
+    // would say "we ran this because repo-A released v5" about a product that no longer watches repo-A.
+    const liveStreams = new Set(current.services.map((s) => serviceStreamKey(s)));
+    const causedByCurrent = inserted.filter((row) => liveStreams.has(row.streamKey ?? ""));
+    const { triggered, failedSeries } = await this.autoEval(tenant, current, causedByCurrent);
     return { services: outcomes, triggered, ...(failedSeries.length > 0 ? { failedSeries } : {}) };
   }
 
@@ -234,6 +241,7 @@ export class ProductVersionSync {
       service.host,
     );
     const reader = this.deps.readers.for(token, host);
+    let incomplete = false;
     // KNOWN within this STREAM (arch-review 14 P1). Collected by name, repo-A's v1.0.0 made repo-B's v1.0.0
     // look already-imported and it never even reached the store — so the stream-scoped key the store had
     // just learned to honour was never given the chance to.
@@ -249,7 +257,12 @@ export class ProductVersionSync {
     const prefixed = (name: string): boolean => service.tagPrefix === undefined || name.startsWith(service.tagPrefix);
     const candidates: Array<Omit<ProductServiceVersionRecord, "id" | "tenant" | "productId" | "service">> = [];
     if (service.source === "releases") {
-      for (const release of await reader.listReleases(service.repository, { perPage: LIST_PER_PAGE })) {
+      const releases = await reader.listReleases(service.repository, { perPage: LIST_PER_PAGE });
+      // A walk that stopped at the ceiling did NOT see the whole history, and a backfill that says otherwise
+      // is the truncation this pagination replaced, only larger (arch-review 15 §13). Recorded on the
+      // service's sync state so an operator can see which services are only partly imported.
+      if (!releases.complete) incomplete = true;
+      for (const release of releases.rows) {
         // A draft has not made the "released" claim yet; publishedAt is the remote's own instant.
         if (release.draft || release.publishedAt === undefined || !prefixed(release.tagName)) continue;
         if (known.has(release.tagName)) continue;
@@ -266,7 +279,9 @@ export class ProductVersionSync {
         });
       }
     } else {
-      for (const tag of await reader.listTags(service.repository, { perPage: LIST_PER_PAGE })) {
+      const tags = await reader.listTags(service.repository, { perPage: LIST_PER_PAGE });
+      if (!tags.complete) incomplete = true;
+      for (const tag of tags.rows) {
         if (!prefixed(tag.name) || known.has(tag.name)) continue;
         // Tags carry no date; the commit's is the closest fact — fetched only for genuinely new tags, so a
         // steady-state sync costs one or two commit reads, not one per tag ever published.
@@ -309,6 +324,10 @@ export class ProductVersionSync {
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
       insertedRows.push(row);
     }
+    if (incomplete)
+      throw new Error(
+        `the version history of ${service.repository} exceeds the read ceiling — imported the newest page(s) only; raise maxPages or narrow the tagPrefix before treating this service's timeline as complete`,
+      );
     return insertedRows;
   }
 

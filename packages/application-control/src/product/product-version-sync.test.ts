@@ -93,10 +93,10 @@ class FakeVersionStore implements ProductVersionStore {
 function reader(releases: GithubRelease[], tags: GithubTag[] = []): GithubVersionReader {
   return {
     async listReleases() {
-      return releases;
+      return { rows: releases, complete: true };
     },
     async listTags() {
-      return tags;
+      return { rows: tags, complete: true };
     },
     async commitDate() {
       return "2026-08-05T00:00:00.000Z";
@@ -302,5 +302,41 @@ describe("ProductVersionSync — GitHub pull into the insert-once ledger", () =>
     expect(products.current().services[1]?.sync?.lastError?.message).toContain("copilot-web");
     // And the reachable service's watermark still landed
     expect(products.current().services[0]?.sync?.syncedAt).toBe(NOW);
+  });
+});
+
+// arch-review 15 §13: an import that stopped at the read CEILING has not seen the whole history, and a
+// backfill that says otherwise is the one-page truncation this pagination replaced, only larger.
+describe("ProductVersionSync — an incomplete read is not a complete import", () => {
+  it("reports the service instead of importing a prefix silently", async () => {
+    const products = new FakeProductStore(productRecord());
+    const versions = new FakeVersionStore();
+    const sync = new ProductVersionSync({
+      products,
+      releases: new FakeReleaseStore(),
+      versions,
+      tokens: {
+        async tokenForRepository() {
+          return { token: "ghs_test" };
+        },
+      },
+      readers: {
+        for: () => ({
+          // A FULL last page means the walk stopped at the ceiling, not at the end of history.
+          async listReleases() {
+            return { rows: [], complete: false };
+          },
+          async listTags() {
+            return { rows: [], complete: true };
+          },
+          async commitDate() {
+            return undefined;
+          },
+        }),
+      },
+      now: () => NOW,
+    });
+    const out = await sync.sync("acme", "prod-1", { subject: "dana" });
+    expect(out.services[0]?.error).toMatch(/read ceiling/);
   });
 });
