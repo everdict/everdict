@@ -103,8 +103,41 @@ Ordered by points available, not by effort:
 Reaching ≤5 requires ~50 points, so every round lands and then some — R1–R6 as scoped are roughly 55.
 None of them is a rewrite of the site; all of them are content and craft.
 
-## 5. Log
+## 5. Re-score — after R1–R7
+
+| Dim | Mastra | Everdict | Evidence |
+| --- | ---: | ---: | --- |
+| D1 Executable | 9 | **8** | 104 code blocks across 30 guide pages (3.4/page, was 0.9). Every concept page opens with something runnable; `examples/quickstart/` is a working evaluation you clone. 5 pages still carry none — all of them section landings, which is correct. Short of 9 because examples are single blocks rather than complete files with expected output. |
+| D2 Coverage | 9 | **8** | Six sections: start · concepts · workspace · integrations · **operate** · self-host. The seven named gaps are pages; the operating loop (tracker, schedules, views, notifications) is covered. Still absent: browser profiles, the product timeline, the desktop app as a guide page. |
+| D3 Onboarding | 9 | **8** | Two commands to a verified verdict, a clonable example, and a per-agent-kind on-ramp. Short of 9 because there is no scaffolding command and no framework-specific integrations. |
+| D4 Craft | 8 | **7** | 17 of 30 pages carry semantic callouts; 8 diagrams; explanation-tables removed from every concept page. Short because diagrams are ASCII (CommonMark constraint) and there are no tabs for alternatives. |
+| D5 Voice | 8 | **7** | Pages open on a scenario and argue rather than assert; three carry explicit "when not to use" / limitations, including advice against adopting the tracker. Short because the pattern is not yet everywhere. |
+| D6 Findability | 9 | **8** | Offline full-text search (index built and served), five section landings, See-also on every page. Short of 9: no AI-assisted search. |
+| D7 Design | 9 | **8** | Homepage rebuilt around the argument, product screenshots, OG/Twitter cards, responsive; docs theme given measure, heading and code-block treatment. Short because it is a themed default rather than a designed system. |
+| **Weighted total** | **87.0** | **77.0** | **gap 10.0** |
+
+Seven rounds moved 45.5 points. The remaining 10 is concentrated in things that need either design
+work (D7 as a system, D4 tabs) or a scaffolding tool (D3), plus the coverage tail (D2).
+
+### What R8+ would need
+
+| Round | Work | Dim | Points |
+| --- | --- | --- | ---: |
+| R8 | Complete examples — full files with paths and expected output; tabs for alternatives | D1, D4 | ~3.5 |
+| R9 | Remaining surfaces: browser profiles, product timeline, desktop app | D2 | ~1.5 |
+| R10 | `everdict init` scaffolding, framework on-ramps | D3 | ~1.5 |
+| R11 | Voice pass over the reference tier (the 24 root docs) | D5 | ~1.5 |
+| R12 | Custom components, illustrated hero, an actual design system | D7 | ~1.5 |
+
+## 6. Log
 
 | Date | Round | Everdict | Gap | Note |
 | --- | --- | ---: | ---: | --- |
 | 2026-08-11 | baseline | 31.5 | 55.5 | The site shipped; quality measured for the first time. |
+| 2026-08-11 | R1 | 37.5 | 49.5 | The seven missing surfaces get pages. |
+| 2026-08-11 | R2 | 51.0 | 36.0 | Concept pages become executable; explanation-tables removed. |
+| 2026-08-11 | R3 | 60.0 | 27.0 | A first result you clone rather than assemble. |
+| 2026-08-11 | R4 | 65.0 | 22.0 | Offline search and section landings. |
+| 2026-08-11 | R5 | 70.0 | 17.0 | Homepage and docs surface rebuilt. |
+| 2026-08-11 | R6 | 73.0 | 14.0 | When not to use it, and what it costs. |
+| 2026-08-11 | R7 | 77.0 | **10.0** | The operating loop; diagrams that survive CommonMark. |
