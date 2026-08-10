@@ -27,6 +27,23 @@ const config: Config = {
 
   i18n: { defaultLocale: "en", locales: ["en"] },
 
+  themes: [
+    // Offline full-text search. Algolia DocSearch would mean a third-party index and credentials in
+    // CI for a project people deploy behind their own firewall — this builds the index at build time
+    // and ships it with the site, so a self-hosted copy has search too.
+    [
+      "@easyops-cn/docusaurus-search-local",
+      {
+        hashed: true,
+        indexBlog: false,
+        docsRouteBasePath: "/docs",
+        highlightSearchTermsOnTargetPage: true,
+        searchResultLimits: 10,
+        explicitSearchResultPath: true,
+      },
+    ],
+  ],
+
   presets: [
     [
       "classic",
