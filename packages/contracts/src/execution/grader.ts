@@ -4,6 +4,7 @@ import type { EnvSnapshot } from "./environment.js";
 import type { EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvidence } from "./trace-source.js";
 import type { TraceEvent } from "./trace.js";
+import { type MetricAuthority, type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
 
 // Why a score was NOT a measurement. Closed vocabulary — a new skip path picks an existing reason or adds one here.
 export const UNMEASURED_REASONS = [
@@ -176,17 +177,31 @@ export function measuredScores(scores: Score[]): MeasuredScore[] {
 // grader's return value is collected (safeGrade, the judge runner) so a grader that RETURNS garbage (a
 // NaN/Infinity value, an empty metric or grader id) becomes a visible invalid row at the moment it is
 // produced, rather than at whatever read happens to come first.
-export function sanitizeScore(score: Score): Score {
+export function sanitizeScore(score: Score, producer?: ScoreProducer): Score {
   const idsBroken = score.metric === "" || score.graderId === "";
   const valueBroken = isMeasured(score) && !Number.isFinite(score.value);
-  if (!idsBroken && !valueBroken) return score;
+  // …and the METRIC NAME is part of the contract (arch-review 17 P0-2). In this system a name is what assigns
+  // authority, so a producer choosing its own name is a producer choosing its own authority: an undeclared
+  // custom grader printing `{"metric":"state"}` was read as ground truth, and a code judge whose raw metric
+  // did not start with `judge` kept that name through the rewrite and escalated itself the same way. The
+  // right to NAME ground truth and the right to be BELIEVED as ground truth have to be one right.
+  //
+  // It becomes `invalid`, which is the vocabulary this file already uses for a producer contract violation:
+  // visible on the plane, aggregated nowhere, unable to decide a case — and the metric is preserved verbatim
+  // in the detail so the author sees exactly what they emitted and what to do instead. Silently renaming it
+  // would be the other temptation, and it hides the violation from the person who can fix it.
+  const forged = producer === undefined ? undefined : forgedMetricReason(score.metric, producer);
+  if (!idsBroken && !valueBroken && forged === undefined) return score;
   const shownValue = isMeasured(score) ? String(score.value) : "none";
   return {
     graderId: score.graderId === "" ? "unknown" : score.graderId,
     metric: score.metric === "" ? score.graderId || "unknown" : score.metric,
     status: "invalid",
     reason: "contract_violation",
-    detail: `[invalid-score] value=${shownValue} metric=${JSON.stringify(score.metric)} graderId=${JSON.stringify(score.graderId)}`,
+    detail:
+      forged !== undefined
+        ? `[invalid-score] ${forged}`
+        : `[invalid-score] value=${shownValue} metric=${JSON.stringify(score.metric)} graderId=${JSON.stringify(score.graderId)}`,
   };
 }
 
@@ -225,6 +240,11 @@ export interface GradeContext {
 // enabling fair comparison across harnesses/versions.
 export interface Grader {
   readonly id: string;
+  // What this grader's SPEC declared (arch-review 17 P0-2) — stamped by `makeGraders`, which is the trusted
+  // construction boundary that reads the GraderSpec, and never by the grader's own output. It is what lets
+  // the collection boundary tell a grader that HOLDS authority over a reserved metric name from one that is
+  // merely printing the name: the declaration is constitution-gated at submit, the name is not gated at all.
+  readonly declaredAuthority?: MetricAuthority;
   // A grader that runs commands in the environment (compute) at scoring time declares true (outcome-family: tests-pass/command etc.).
   // Undeclared = observation-only (trace/snapshot) → runCase scores it after releasing compute, minimizing sandbox occupancy to
   // the execution window (not held while waiting on the judge LLM). docs/architecture/streaming-case-pipeline.md

@@ -12,6 +12,9 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
   it("passes a healthy grader's score through unchanged (as a one-element list)", async () => {
     const ok: Grader = {
       id: "judge",
+      // What `makeGraders` stamps on the inline judge grader — the ladder's own assignment for the metric it
+      // emits, said at the boundary that constructs the producer (arch-review 17 P0-2).
+      declaredAuthority: "judge",
       grade: async (): Promise<Score> => ({ graderId: "judge", metric: "judge", value: 1, pass: true }),
     };
     const scores = await safeGrade(ok, CTX);
@@ -21,6 +24,7 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
   it("collects a multi-metric grader's Score[] in order (multi-metric contract)", async () => {
     const multi: Grader = {
       id: "rubric-judge",
+      declaredAuthority: "judge",
       grade: async (): Promise<Score[]> => [
         { graderId: "rubric-judge", metric: "judge", value: 0.8, pass: true },
         { graderId: "rubric-judge", metric: "judge:accuracy", value: 0.9, pass: true },

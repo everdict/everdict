@@ -3,6 +3,11 @@ import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } f
 // Whether the final DOM contains specific text (browser snapshot target).
 export class DomContainsGrader implements Grader {
   readonly id = "dom-contains";
+  // INTRINSIC authority (arch-review 17 P0-2): this grader's metric name is fixed in its own code, not taken
+  // from config or from a script's stdout, so the ladder's assignment for it is a property of the
+  // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
+  // site that builds the grader directly instead of going through `makeGraders`.
+  readonly declaredAuthority = "objective" as const;
   constructor(private readonly needle: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;
@@ -20,6 +25,11 @@ export class DomContainsGrader implements Grader {
 // purification — the reference output is case DATA, not grader config). docs/architecture/eval-domain-model.md S5
 export class AnswerMatchGrader implements Grader {
   readonly id = "answer-match";
+  // INTRINSIC authority (arch-review 17 P0-2): this grader's metric name is fixed in its own code, not taken
+  // from config or from a script's stdout, so the ladder's assignment for it is a property of the
+  // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
+  // site that builds the grader directly instead of going through `makeGraders`.
+  readonly declaredAuthority = "objective" as const;
   constructor(
     private readonly expect?: string,
     private readonly mode: "contains" | "exact" = "contains",
@@ -39,6 +49,11 @@ export class AnswerMatchGrader implements Grader {
 // Whether the final URL matches the pattern (regex).
 export class UrlMatchesGrader implements Grader {
   readonly id = "url-matches";
+  // INTRINSIC authority (arch-review 17 P0-2): this grader's metric name is fixed in its own code, not taken
+  // from config or from a script's stdout, so the ladder's assignment for it is a property of the
+  // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
+  // site that builds the grader directly instead of going through `makeGraders`.
+  readonly declaredAuthority = "objective" as const;
   constructor(private readonly pattern: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;

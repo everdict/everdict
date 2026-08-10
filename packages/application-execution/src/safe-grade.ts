@@ -1,4 +1,11 @@
-import { type GradeContext, type Grader, type Score, sanitizeScore, toScores } from "@everdict/contracts";
+import {
+  type GradeContext,
+  type Grader,
+  type Score,
+  type ScoreProducer,
+  sanitizeScore,
+  toScores,
+} from "@everdict/contracts";
 
 // Isolate a single grader's run-time failure so it can't sink the whole case (or drop the sibling
 // graders' real scores). A grader that THROWS at scoring time — most often the judge grader on a
@@ -13,7 +20,16 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
   try {
     // sanitizeScore: a grader that RETURNS garbage (NaN value, empty ids) becomes a visible INVALID score —
     // a grader bug to fix, excluded from every aggregate — never a number that flows downstream.
-    return toScores(await grader.grade(ctx)).map(sanitizeScore);
+    // …and the metric NAMES are part of that contract (arch-review 17 P0-2). A producer that chooses its own
+    // name chooses its own authority in a system where the name IS the authority assignment, so the
+    // collection boundary — which knows what this grader's spec DECLARED, and the grader cannot speak for —
+    // is where a reserved name without a declaration becomes a visible invalid row.
+    const producer: ScoreProducer = {
+      kind: "grader",
+      id: grader.id,
+      ...(grader.declaredAuthority !== undefined ? { declaredAuthority: grader.declaredAuthority } : {}),
+    };
+    return toScores(await grader.grade(ctx)).map((s) => sanitizeScore(s, producer));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return [

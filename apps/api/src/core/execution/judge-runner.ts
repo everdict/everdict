@@ -16,7 +16,7 @@ import type {
   UnmeasuredReason,
   UsageCost,
 } from "@everdict/contracts";
-import { isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
+import { type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
 import { billingCharges, modelApiKeySecretName, normalizeModelBinding, priceUsd } from "@everdict/domain";
 import {
   JUDGE_OVERALL_METRIC,
@@ -309,6 +309,12 @@ export function buildCodeJudgeJob(
           timeoutSec: spec.timeoutSec,
           id: "judge",
         },
+        // THIS WRAPPER IS A JUDGE (arch-review 17 P0-2). A code judge executes as a `script` grader inside a
+        // sandboxed wrapper job, and it legitimately emits the `judge` metric family — which the producer
+        // rule otherwise reserves for judges, since a grader writing there would forge a verdict and own rows
+        // a re-score cannot replace. The declaration is made HERE because this builder is the trusted party
+        // that knows what it is constructing; the judge's own code never gets to claim it.
+        authority: "judge",
       },
     ],
     timeoutSec: spec.timeoutSec + 120, // job slack over the grading budget (env materialize + no-op harness)
@@ -337,13 +343,22 @@ export function buildCodeJudgeJob(
 // Rewrite the wrapper job's raw script scores into this judge's identity — graderId stamped, "judge" metric prefix
 // → judge:<id> (judge:<sub> → judge:<id>:<sub>), exactly like the model path.
 function stampCodeJudgeScores(spec: Extract<JudgeSpec, { kind: "code" }>, scores: Score[]): Score[] {
-  // sanitizeScore: a code judge emitting garbage (NaN, empty ids) becomes a visible invalid score here too.
+  // sanitizeScore: a code judge emitting garbage (NaN, empty ids) becomes a visible invalid score here too —
+  // and now also one emitting a metric OUTSIDE its own family (arch-review 17 P0-2). The rewrite replaces a
+  // leading "judge" and nothing else, so `{"metric":"state"}` from user judge code kept the name and gained
+  // ground-truth authority. Worse, judge ownership is defined as the `judge:<id>` family, so a re-score of
+  // that judge would not recognise the forged row as its own and could never replace it: a stale
+  // pseudo-ground-truth outliving every later pass.
+  const producer: ScoreProducer = { kind: "judge", id: spec.id };
   return scores.map((score) =>
-    sanitizeScore({
-      ...score,
-      graderId: spec.id,
-      metric: score.metric.replace(/^judge/, metricOf(spec)),
-    }),
+    sanitizeScore(
+      {
+        ...score,
+        graderId: spec.id,
+        metric: score.metric.replace(/^judge/, metricOf(spec)),
+      },
+      producer,
+    ),
   );
 }
 
@@ -544,14 +559,20 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
         // sanitizeScore: a judge transport returning garbage (NaN score) becomes a visible INVALID score at
         // THIS collection boundary too — safeGrade guards the in-job path, this guards the control-plane one.
+        // A JUDGE OWNS ITS OWN FAMILY AND NOTHING ELSE (arch-review 17 P0-2). The rewrite below only replaces
+        // a LEADING "judge", so a raw metric of anything else — `state`, say — passed through untouched and
+        // arrived carrying whatever authority that name has in the ladder: a judge escalating itself to
+        // ground truth. Declared to the boundary as a judge producer, which refuses any metric outside
+        // `judge:<id>[:criterion]`.
+        const producer: ScoreProducer = { kind: "judge", id: spec.id };
         return graded.map((score) => {
           const metric = score.metric.replace(/^judge/, metricOf(spec));
           // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
           // and no pass to re-decide, so only its identity is rewritten.
-          if (!isMeasured(score)) return sanitizeScore({ ...score, metric });
+          if (!isMeasured(score)) return sanitizeScore({ ...score, metric }, producer);
           const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
           const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
-          return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) });
+          return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) }, producer);
         });
       } catch (err) {
         return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);

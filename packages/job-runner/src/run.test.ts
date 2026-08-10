@@ -130,6 +130,9 @@ describe("runCaseJob judge env threading (code-judge wrapper on the local/runner
               contextPath: "judge-context.json",
               id: "judge",
             },
+            // What `buildCodeJudgeJob` declares on the wrapper it constructs — the control plane is the
+            // trusted party that knows this script IS a judge (arch-review 17 P0-2).
+            authority: "judge",
           },
         ],
         timeoutSec: 60,

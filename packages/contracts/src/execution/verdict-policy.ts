@@ -16,6 +16,72 @@ export const MetricAuthoritySchema = z.enum([
 ]);
 export type MetricAuthority = z.infer<typeof MetricAuthoritySchema>;
 
+// THE NAMES THAT CARRY BUILT-IN AUTHORITY — reserved, because in this system a metric NAME is what assigns
+// authority (arch-review 17 P0-2).
+//
+// The default ladder maps `state`/`tests_pass` to ground_truth and `answer_match`/`url_matches`/`dom_contains`
+// to objective, and a custom grader gains authority by DECLARING it on its GraderSpec — a declaration that is
+// constitution-gated (ground_truth is admin-only at submit), precisely because whoever can name new ground
+// truth decides what passing MEANS.
+//
+// The gate was on the declaration and not on the NAME, and the name is producer-controlled: a custom script
+// prints whatever `metric` it likes and the collector stamps only `graderId`. So an undeclared grader
+// emitting `{"metric": "state", "value": 1, "pass": true}` was read as ground truth by the default policy —
+// the authority of a declaration nobody made. The right to name ground truth and the right to be believed as
+// ground truth have to be the same right.
+//
+// Kept HERE, beside the authority vocabulary, so the producer boundary (`sanitizeScore`) can enforce it
+// without reaching into the domain — the ladder itself stays a frozen document in `@everdict/domain`, and a
+// test asserts this list is exactly its authority-bearing exact matchers rather than a second hand-written
+// copy of them.
+export const RESERVED_AUTHORITY_METRICS: readonly string[] = [
+  "state",
+  "tests_pass",
+  "answer_match",
+  "url_matches",
+  "dom_contains",
+];
+
+// The judge family's root. Only a JUDGE may produce `judge` / `judge:<id>` / `judge:<id>:<criterion>` — a
+// grader emitting into it would forge a verdict, and (worse) the family it forged into is the unit re-scoring
+// strips and replaces, so the row would survive every later pass of the judge whose name it wears.
+export const JUDGE_METRIC_ROOT = "judge";
+
+// WHO produced a score — supplied by the collection boundary, never by the producer. This is the whole point:
+// authority must be stamped by something the producer cannot speak for.
+export type ScoreProducer =
+  | {
+      kind: "grader";
+      id: string;
+      // What this grader's spec DECLARED (composed into the batch's verdict policy at submit, and
+      // constitution-gated there). A grader holding a declaration may emit reserved names; one without may not.
+      declaredAuthority?: MetricAuthority;
+    }
+  | { kind: "judge"; id: string };
+
+// May this producer emit this metric? Pure and total — the reason, or undefined when it may.
+export function forgedMetricReason(metric: string, producer: ScoreProducer): string | undefined {
+  const inJudgeFamily = metric === JUDGE_METRIC_ROOT || metric.startsWith(`${JUDGE_METRIC_ROOT}:`);
+  if (producer.kind === "judge") {
+    // A judge owns exactly its OWN family. The code-judge path rewrites a leading `judge` into `judge:<id>`,
+    // so a raw metric of anything else (`state`, say) passed through untouched and arrived carrying whatever
+    // authority that name has — a judge escalating itself to ground truth.
+    const own = `${JUDGE_METRIC_ROOT}:${producer.id}`;
+    if (metric === own || metric.startsWith(`${own}:`)) return undefined;
+    return `a judge may only produce its own metric family ('${own}' or '${own}:<criterion>'); '${metric}' belongs to something else`;
+  }
+  // The judge family belongs to judges — including the INLINE judge grader, which is a grader by construction
+  // and a judge by declaration (`makeGraders` stamps the built-in ladder's own assignment onto it). Anything
+  // else writing here would forge a verdict, and would own rows a re-score of that judge then cannot replace:
+  // judge ownership is the `judge:<id>` family, so a forged row outlives every later pass of the judge whose
+  // name it wears.
+  if (inJudgeFamily && producer.declaredAuthority !== "judge")
+    return `'${metric}' belongs to the judge family, which only a judge may produce — a grader writing into it would forge a verdict and own rows a re-score cannot replace`;
+  if (RESERVED_AUTHORITY_METRICS.includes(metric) && producer.declaredAuthority === undefined)
+    return `'${metric}' carries built-in verdict authority, and this grader declared none — declare \`authority\` on the grader spec (ground_truth is admin-gated at submit) or use a different metric name`;
+  return undefined;
+}
+
 // How a rung combines multiple deciding measurements:
 // priority — the first definition (in declaration order) with a deciding measurement wins
 // all — every deciding measurement must pass (unanimous)  ·  any — one pass suffices

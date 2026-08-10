@@ -163,6 +163,11 @@ export const JUDGE_OVERALL_METRIC = "judge";
 // A case's milestones merge in as additional criteria (withCaseMilestones) — per-case, at grade time.
 export class JudgeGrader implements Grader {
   readonly id: string;
+  // INTRINSIC authority (arch-review 17 P0-2): this grader's metric name is fixed in its own code, not taken
+  // from config or from a script's stdout, so the ladder's assignment for it is a property of the
+  // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
+  // site that builds the grader directly instead of going through `makeGraders`.
+  readonly declaredAuthority = "judge" as const;
   constructor(
     private readonly judge: Judge,
     private readonly opts: {
