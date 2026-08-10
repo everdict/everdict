@@ -11,10 +11,41 @@ export type BenchmarkSource =
   | { kind: "huggingface"; dataset: string; config?: string; split?: string; file?: string; gated?: boolean }
   | { kind: "jsonl" };
 
+// WHAT A SCORE FROM THIS ADAPTER IS, as data rather than as prose (arch-review 16 P2-8).
+//
+// Several catalog entries cannot run their benchmark's OFFICIAL evaluator — TravelPlanner's eval.py, TREK's
+// scoring.py, OSWorld's per-task Python checkers all need the benchmark's own database and its exact plan
+// schema, which is precisely what a harness-agnostic runtime cannot host. Those adapters approximate the same
+// constraints with a judge, and every one of them says so at length in its `description`.
+//
+// A sentence in a description is not a contract. Everdict treats evaluation results as trust artifacts that
+// travel — into trends, exports, release gates, reports — and every one of those surfaces reads structured
+// fields and drops prose. The distinction has to be machine-readable at the point where it is TRUE, or a
+// proxy number eventually gets rendered as "the TREK score" by a surface that never saw the paragraph.
+//
+//   official  the benchmark's own evaluator runs here; the number is comparable to its leaderboard
+//   proxy     the same constraints, scored a different way (usually a judge); an everdict-internal signal
+//             for regression tracking, NEVER a leaderboard number
+export interface BenchmarkScoringSemantics {
+  kind: "official" | "proxy";
+  // Why it is a proxy, and what would make it official — the one sentence a UI can show beside the number.
+  // Required for `proxy`: an approximation that cannot say what it approximates is not a description of one.
+  approximates?: string;
+  // The evaluator that WOULD produce the official number, so a reader knows what to run to reproduce it.
+  officialEvaluator?: string;
+  // Data/code license as published — recorded because a benchmark's redistribution terms are part of what a
+  // workspace is agreeing to when it imports the cases.
+  license?: string;
+}
+
 export interface BenchmarkAdapter {
   id: string;
   description: string;
   category: "browser" | "qa" | "coding" | "tool" | "desktop"; // informational classification (separate from the core env kind)
+  // How to read a score from this benchmark. Absent = `official` by omission would be a claim nobody made, so
+  // readers must treat absence as UNSTATED and never as comparability — the same absence discipline the
+  // scoring plane uses everywhere else.
+  scoring?: BenchmarkScoringSemantics;
   defaultVersion: string; // catalog reference version (benchmark config/release)
   source: BenchmarkSource;
   mapping: CaseMapping;

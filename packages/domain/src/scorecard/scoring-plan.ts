@@ -107,6 +107,24 @@ export function pendingJudgesFor<J extends { id: string }>(
   });
 }
 
+// WHICH JUDGE IDS APPEAR TWICE in a selection (arch-review 16 P1-7).
+//
+// A judge OWNS a metric family — `judge:<id>` plus its `judge:<id>:<criterion>` children — and every
+// mechanism below is keyed the same way: `pendingJudgesFor`, `stripJudgeScores`, the attempt budget, and the
+// scoring stage's natural key (case, judgeId). Two versions of ONE judge in a single selection is therefore
+// not a richer request, it is a state the plane cannot represent: they would write the same metric family,
+// claim the same stage row, and a Postgres upsert whose statement carries the same conflict key twice fails
+// outright. Uniqueness is by ID, never by (id, version), because the id is what owns the family.
+export function duplicateJudgeIds(judges: ReadonlyArray<{ id: string }>): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const judge of judges) {
+    if (seen.has(judge.id)) duplicates.add(judge.id);
+    seen.add(judge.id);
+  }
+  return [...duplicates].sort();
+}
+
 // Does this case still have work for THIS pass? The PLANNER's predicate — "should this case be on the
 // worklist at all". The executor narrows further with `pendingJudgesFor`.
 export function judgePending(

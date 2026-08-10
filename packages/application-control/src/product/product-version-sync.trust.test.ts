@@ -13,7 +13,7 @@ import type {
 import type { GithubRelease, GithubVersionReader } from "../ports/github-repo-writer.js";
 import { ProductVersionSync, type SeriesRunSubmitter } from "./product-version-sync.js";
 
-// Trust suite (docs/trust-certification.md) — TRUST-59 · TRUST-60.
+// Trust suite (docs/trust-certification.md) — TRUST-59 · TRUST-60 · TRUST-68.
 //
 // A CAUSE IS A FACT ABOUT THE WORLD THAT NOW EXISTS, AND A BOUNDED READ IS NOT A HISTORY.
 //
@@ -193,7 +193,7 @@ describeTrust("TRUST-59 — an arrival on a stream the product no longer watches
   });
 });
 
-describeTrust("TRUST-60 — a read that hit its ceiling is never recorded as a complete history", () => {
+describeTrust("TRUST-60/68 — a bounded read says so, and its side effects are all-or-none", () => {
   it("reports the service as errored instead of importing the newest page as if it were everything", async () => {
     // The shape this closes: the reader walked to a page ceiling and returned a bare array, so "5,000 rows
     // because that is all there are" and "5,000 rows because we stopped" were the same answer. That is the
@@ -219,14 +219,17 @@ describeTrust("TRUST-60 — a read that hit its ceiling is never recorded as a c
     expect(backfilled.services[0]?.error).toContain("cannot establish this service's baseline");
     expect(first.versions.rows).toHaveLength(0);
 
-    // An already-synced stream has a baseline, so the newest pages ARE the news and are kept — but the read is
-    // still reported as incomplete rather than settling as a clean sync.
+    // An already-synced stream HAS a baseline, so the news is on the pages we read. One policy all the way
+    // through: the row lands, its fact goes out, and the auto-eval runs — with the incompleteness carried as
+    // its own fact rather than as a throw. Committing the side effects and THEN throwing left the version in
+    // the ledger, its fact delivered, and nothing evaluating it, permanently: the next sync sees the row as
+    // already known, so the evaluation it skipped never happens at all.
     const { sync, versions, submitted } = build([productAt("acme/copilot-api", true)], reader);
     const result = await sync.sync("acme", "prod-1", { subject: "dana" });
-    expect(result.services[0]?.error).toContain("read ceiling");
+    expect(result.services[0]?.incomplete).toBe(true);
+    expect(result.services[0]?.error).toBeUndefined(); // coverage is not failure
     expect(versions.rows).toHaveLength(1);
-    // …and the fan-out does not fire off a knowingly-incomplete read.
-    expect(result.triggered).toEqual([]);
-    expect(submitted).toEqual([]);
+    expect(result.triggered).toHaveLength(1); // ledger, fact and evaluation agree — all three, or none
+    expect(submitted).toHaveLength(1);
   });
 });

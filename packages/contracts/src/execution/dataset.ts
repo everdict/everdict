@@ -40,6 +40,20 @@ export const DatasetProvenanceSchema = z.object({
   version: z.string().optional(), // recipe version (if any) — the exact version for the detail back-link
   source: DatasetSourceRefSchema.optional(), // original data source (HF etc.) — stamped at ingest
   origin: DatasetOriginSchema.optional(), // official benchmark provenance (when provided by a recipe/catalog)
+  // WHAT A SCORE OVER THESE CASES IS (arch-review 16 P2-8). Several first-party benchmarks cannot run their
+  // OFFICIAL evaluator here — it needs the benchmark's own database and plan schema, which a harness-agnostic
+  // runtime cannot host — so the adapter scores the same constraints with a judge. Every such adapter says so
+  // in its description, and a description is not something a trend, an export or a release report can read.
+  // Carried as data so a proxy number cannot be rendered as "the TREK score" by a surface that never saw the
+  // paragraph. Absent = UNSTATED, never a claim of comparability.
+  scoring: z
+    .object({
+      kind: z.enum(["official", "proxy"]),
+      approximates: z.string().optional(), // what the proxy stands in for
+      officialEvaluator: z.string().optional(), // what to run to reproduce the official number
+      license: z.string().optional(),
+    })
+    .optional(),
 });
 export type DatasetProvenance = z.infer<typeof DatasetProvenanceSchema>;
 

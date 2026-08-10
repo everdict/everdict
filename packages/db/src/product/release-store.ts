@@ -81,15 +81,17 @@ export class InMemoryReleaseStore implements ReleaseStore {
     if (guard?.expectProduct !== undefined && this.productPolicy !== undefined) {
       // Mirrors the Pg condition: the digest decides, the version stands in only for a legacy row.
       const live = this.productPolicy(guard.expectProduct.id);
-      // Mirrors the Pg condition: BOTH digests must hold where present; the version stands in only for a row
-      // that predates them entirely.
+      // Mirrors the Pg condition, PER DIMENSION (arch-review 16 P1-5): each digest guards its own question,
+      // and a dimension with no digest yet falls back to the row VERSION rather than passing. Sharing one
+      // fallback across both failed open whenever exactly one column was populated — which is what a rolling
+      // deploy of mig 0160 produces on every product that already had a policy digest.
+      const dimension = (live: string | undefined, expected: string, version: number): boolean =>
+        live === undefined ? version === guard.expectProduct?.version : live === expected;
       const ok =
         live === undefined
           ? false
-          : live.policyDigest !== undefined || live.definitionDigest !== undefined
-            ? (live.policyDigest === undefined || live.policyDigest === guard.expectProduct.policyDigest) &&
-              (live.definitionDigest === undefined || live.definitionDigest === guard.expectProduct.definitionDigest)
-            : (live.version ?? 0) === guard.expectProduct.version;
+          : dimension(live.policyDigest, guard.expectProduct.policyDigest, live.version ?? 0) &&
+            dimension(live.definitionDigest, guard.expectProduct.definitionDigest, live.version ?? 0);
       if (!ok) return undefined;
     }
     const next0 = { ...current, ...patch, version: (current.version ?? 0) + 1 };
@@ -303,10 +305,19 @@ export class PgReleaseStore implements ReleaseStore {
       // schema knows: correlating to the row makes the guard structurally about THIS release's product, and
       // the tenant clause makes it structurally about this workspace's.
       //
-      // Self-healing (mig 0154): the digest is the identity; the version is the fallback a product keeps only
-      // until its next write populates the column. Never `IS NULL → pass` — that would leave every
-      // un-migrated product's ship decisions unguarded, which is the fail-open this shape invites.
-      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (p.release_policy_digest IS NULL OR p.release_policy_digest=$${digestIdx}) AND (p.evaluation_definition_digest IS NULL OR p.evaluation_definition_digest=$${defIdx}) AND (p.release_policy_digest IS NOT NULL OR p.evaluation_definition_digest IS NOT NULL OR coalesce(p.version, 0)=$${versionIdx}))`;
+      // Self-healing (mig 0154/0160), PER DIMENSION (arch-review 16 P1-5). Each digest is the identity for
+      // its own question and the row version is the fallback that dimension keeps until its column is
+      // populated. The first version shared ONE fallback across both, which failed open on the exact
+      // combination a rolling deploy produces: `release_policy_digest` populated by 0154, and
+      // `evaluation_definition_digest` still NULL because no writer running the new code has touched the
+      // product yet. The definition clause then passed on NULL, and the shared fallback was skipped BECAUSE
+      // the policy digest was present — so an old replica could edit a series' definition, bump the version,
+      // and a ship resolved against the pre-edit definition would still commit.
+      //
+      // Never `IS NULL → pass`: absence means "this dimension has no digest yet", and the honest stand-in is
+      // the row version, which moves on every write including the edit we are guarding against. A legacy row
+      // therefore conflicts slightly too eagerly — the safe direction, and self-healing on its next write.
+      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (CASE WHEN p.release_policy_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.release_policy_digest=$${digestIdx} END) AND (CASE WHEN p.evaluation_definition_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.evaluation_definition_digest=$${defIdx} END))`;
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

@@ -73,7 +73,19 @@ export const ProductSeriesSchema = z.object({
   label: z.string().min(1).max(200),
   dataset: SeriesCapabilityRefSchema,
   harness: SeriesCapabilityRefSchema,
-  judges: z.array(SeriesCapabilityRefSchema).default([]),
+  // UNIQUE BY ID, not by (id, version) — arch-review 16 P1-7. A judge OWNS a metric family (`judge:<id>` plus
+  // its criterion children) and the scoring stage's natural key is (case, judgeId), so two versions of one
+  // judge in a single selection is a state the plane below cannot represent: they would write the same metric
+  // family and claim the same stage row, and a Postgres upsert whose statement carries the conflict key twice
+  // fails outright. A structurally impossible selection has to be refused where it is declared, not
+  // discovered at judging time on the provider's bill.
+  judges: z
+    .array(SeriesCapabilityRefSchema)
+    .default([])
+    .refine((rows) => new Set(rows.map((r) => r.id)).size === rows.length, {
+      message:
+        "A series may name each judge once — a judge owns one metric family, so two versions of it cannot both score a case.",
+    }),
   // Whether this series GATES a release (arch-review 7 P0). Absent = TRUE — fail closed: a series someone
   // declared worth watching blocks a ship until it is evaluated and passes. Opting a series out of the gate
   // is an EXPLICIT product choice recorded here, never something inferred from the absence of evidence

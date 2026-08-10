@@ -146,6 +146,15 @@ export const TRAVEL_BENCHMARKS = {
   // has one identically-named split. Rows carry no id column, so case ids fall back to positional (as gsm8k does).
   travelplanner: {
     id: "travelplanner",
+    // A judge approximation, declared as DATA (arch-review 16 P2-8) — the description says so too, and a
+    // description is not something a trend, an export or a report can read.
+    scoring: {
+      kind: "proxy" as const,
+      approximates:
+        "the official six metrics (delivery rate, commonsense and hard-constraint pass rates, final pass rate) over the authors' sandbox database and structured plan schema",
+      officialEvaluator: "osunlp/TravelPlanner evaluation/eval.py",
+      license: "data CC-BY-4.0, code MIT",
+    },
     description:
       "TravelPlanner — real-world travel planning under hard + commonsense constraints (osunlp/TravelPlanner, ICML 2024 spotlight; data CC-BY-4.0, code MIT). Sole-planning mode over the validation split. Judge-scored approximation: the official six metrics need the authors' sandbox DB (Google Drive) and structured plan schema.",
     category: "qa",
@@ -166,6 +175,13 @@ export const TRAVEL_BENCHMARKS = {
   // convert to jsonl (one record per line) before import. 120 TravelPlanner validation queries + `new_constraints`.
   "flex-travelplanner": {
     id: "flex-travelplanner",
+    scoring: {
+      kind: "proxy" as const,
+      approximates:
+        "the official Flex-TravelPlanner constraint/priority evaluation, which is derived from TravelPlanner's own sandbox evaluator",
+      officialEvaluator: "juhyunohh/FlexTravelBench evaluation scripts (over TravelPlanner's sandbox DB)",
+      license: "NO LICENSE declared upstream — derived from TravelPlanner (data CC-BY-4.0, code MIT)",
+    },
     description:
       "Flex-TravelPlanner — revising an existing plan as constraints arrive across turns, and prioritizing competing constraints (github.com/juhyunohh/FlexTravelBench, arXiv 2506.04649; NO LICENSE declared, derived from TravelPlanner). Source data is a JSON array — convert to jsonl. Judge-scored approximation.",
     category: "qa",
@@ -187,6 +203,15 @@ export const TRAVEL_BENCHMARKS = {
   // column, so case ids fall back to positional.
   trek: {
     id: "trek",
+    // A judge approximation, declared as DATA (arch-review 16 P2-8) — the description says so too, and a
+    // description is not something a trend, an export or a report can read.
+    scoring: {
+      kind: "proxy" as const,
+      approximates:
+        "the official constraint checker over TREK's own query database, including the refusal polarity for infeasible tasks",
+      officialEvaluator: "TREK scoring.py",
+      license: "see the benchmark's repository",
+    },
     description:
       "TREK — 800 complex trip-planning tasks (533 feasible / 267 provably infeasible) over a 212,530-record KB across 375 cities and 13 personas (arXiv 2607.26977; code MIT, data CC-BY-4.0). Data ships as CSV in the GitHub repo — convert trek_queries.csv to jsonl. Judge-scored approximation; infeasible rows are graded as refusal tasks. The official rule-based evaluator (scoring.py) is deterministic — run it for a citable score.",
     category: "tool",
@@ -207,6 +232,14 @@ export const TRAVEL_BENCHMARKS = {
   // preference rather than guessing it.
   travelbench: {
     id: "travelbench",
+    // A judge approximation, declared as DATA (arch-review 16 P2-8) — the description says so too, and a
+    // description is not something a trend, an export or a report can read.
+    scoring: {
+      kind: "proxy" as const,
+      approximates: "the official constraint and refusal evaluation over the benchmark's task database",
+      officialEvaluator: "TravelBench scripts/eval.sh",
+      license: "see the benchmark's repository",
+    },
     description:
       "TravelBench — real user travel queries in three subtasks: single-turn, multi-turn (elicit implicit preferences) and unsolvable (recognize capability boundaries) (github.com/small-xiangcheng/TravelBench, ACL 2026 Main, arXiv 2512.22673; code MIT, data CC-BY-NC-4.0 — noncommercial). Chinese-language, China geography. Judge-scored approximation.",
     category: "tool",
@@ -226,6 +259,14 @@ export const TRAVEL_BENCHMARKS = {
   // extract and convert to jsonl before import. taskField is the English query; `nature_language` is the Chinese one.
   traveleval: {
     id: "traveleval",
+    // A judge approximation, declared as DATA (arch-review 16 P2-8) — the description says so too, and a
+    // description is not something a trend, an export or a report can read.
+    scoring: {
+      kind: "proxy" as const,
+      approximates: "the official metric suite over the benchmark's own reference data",
+      officialEvaluator: "TravelEval core/metrics/*",
+      license: "see the benchmark's repository",
+    },
     description:
       "TravelEval — itinerary quality across six dimensions: accuracy, compliance, temporality, spatiality, economy, utility (github.com/onlycwy11/TravelEval, arXiv 2606.01046; NO LICENSE declared — no usage rights granted by default). Source JSON wraps records in a `queries` array — extract to jsonl. Judge-scored approximation; the official pipeline additionally requires a Gaode/AMAP API key.",
     category: "qa",

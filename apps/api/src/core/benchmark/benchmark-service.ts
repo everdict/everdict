@@ -279,7 +279,16 @@ export class BenchmarkService {
         { id: input.id ?? adapter.id, version: input.version, description: adapter.description },
         opts,
       );
-      producedBy = { via: "catalog", id: input.benchmark, source: toSourceRef(adapter.source) };
+      producedBy = {
+        via: "catalog",
+        id: input.benchmark,
+        source: toSourceRef(adapter.source),
+        // WHAT A SCORE OVER THESE CASES IS (arch-review 16 P2-8). Several catalog entries cannot run their
+        // benchmark's official evaluator here, so they approximate it with a judge — a fact that until now
+        // lived only in the adapter's prose description, where no trend, export or release report can read
+        // it. Etched onto the dataset at import so it travels with the cases it qualifies.
+        ...(adapter.scoring ? { scoring: adapter.scoring } : {}),
+      };
     } else {
       throw new BadRequestError(
         "BAD_REQUEST",

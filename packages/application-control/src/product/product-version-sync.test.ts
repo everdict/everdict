@@ -308,7 +308,7 @@ describe("ProductVersionSync — GitHub pull into the insert-once ledger", () =>
 // arch-review 15 §13: an import that stopped at the read CEILING has not seen the whole history, and a
 // backfill that says otherwise is the one-page truncation this pagination replaced, only larger.
 describe("ProductVersionSync — an incomplete read is not a complete import", () => {
-  it("reports the service instead of importing a prefix silently", async () => {
+  it("a FIRST sync that hit the ceiling imports nothing and says why (an established one keeps its news)", async () => {
     const products = new FakeProductStore(productRecord());
     const versions = new FakeVersionStore();
     const sync = new ProductVersionSync({
@@ -338,5 +338,6 @@ describe("ProductVersionSync — an incomplete read is not a complete import", (
     });
     const out = await sync.sync("acme", "prod-1", { subject: "dana" });
     expect(out.services[0]?.error).toMatch(/read ceiling/);
+    expect(out.services[0]?.error).toMatch(/baseline/); // the backfill half — no baseline to establish
   });
 });
