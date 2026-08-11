@@ -151,6 +151,9 @@ export class BrowserSessionService {
         id,
         patch,
         stamped.map((f) => f.record),
+        // The settle CAS (arch-review 26 P1): `closeSessionTransition` refuses a terminal record in this
+        // process, and the sweep that expires sessions runs in every other one.
+        { expectNonTerminal: true },
       );
       if (stamped.length > 0) void this.events?.pushPersisted?.(stamped);
     } catch (e) {

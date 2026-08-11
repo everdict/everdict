@@ -971,7 +971,16 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       // failed{CANCELLED} is the run lifecycle's cancellation shape (settleAgent precedent — no status widening);
       // scorecard children carry no terminal facts by domain law (flood prevention), so the patch is the whole write.
       const stop = Run.from(c).fail({ code: "CANCELLED", message: `Scorecard ${rec.id} was stopped.` }, this.now());
-      await this.deps.runStore.update(c.id, stop.patch).catch(() => {});
+      // …UNDER THE SAME CAS the completion writer uses (arch-review 26 P1). This is the production
+      // cancellation path, and it was the one terminal writer still doing read-check-write: the list above is
+      // a snapshot, so a case that finished between the read and this line had its `succeeded` overwritten by
+      // a cancel that was already stale. "First terminal write wins" held for one side of the race only —
+      // and the certified scenario (TRUST-135) drove a store call that DID carry the guard, which is exactly
+      // the shape the suite's own rules warn about: the decision helper is right and the wiring does not use it.
+      //
+      // `undefined` = another terminal outcome won. That is a normal race result, not a failure: the child is
+      // settled either way, which is all this loop needs.
+      await this.deps.runStore.update(c.id, stop.patch, undefined, { expectNonTerminal: true }).catch(() => {});
     }
   }
 

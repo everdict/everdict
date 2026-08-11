@@ -235,7 +235,11 @@ export class ScorecardBatchService {
               : undefined;
             if (adoptable) {
               adopted += 1;
-              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()).patch);
+              // Under the settle CAS: adopting a child that finished on its own between the list and here
+              // would rewrite a real outcome with a harvested one (arch-review 26 P1).
+              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()).patch, undefined, {
+                expectNonTerminal: true,
+              });
               seed.push(adoptable);
               seedRunIds.push(c.id);
               continue;
@@ -246,6 +250,8 @@ export class ScorecardBatchService {
                 { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
                 this.now(),
               ).patch,
+              undefined,
+              { expectNonTerminal: true },
             );
           }
         }

@@ -278,6 +278,9 @@ export class FileExecutionService {
         runId,
         patch,
         stamped.map((f) => f.record),
+        // The settle CAS (arch-review 26 P1) — the domain guard above refuses a terminal record in THIS
+        // process; the row can also be settled by another one.
+        { expectNonTerminal: true },
       );
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     } catch (e) {

@@ -93,8 +93,16 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
     const children = await deps.runs.list(c.tenant, { scorecardId: c.id });
     for (const child of children) {
       if (!ACTIVE.has(child.status)) continue;
-      await deps.runs.update(child.id, { status: "failed", error: INTERRUPTED, updatedAt: now() });
-      runCount += 1;
+      // …under the settle CAS (arch-review 26 P1). A booting replica reclaiming a dead one's work reads a
+      // snapshot; a late drain, a self-hosted runner reporting in, or the dying process's own last write can
+      // land between that read and this one. Marking such a child INTERRUPTED would erase a real outcome.
+      const settled = await deps.runs.update(
+        child.id,
+        { status: "failed", error: INTERRUPTED, updatedAt: now() },
+        undefined,
+        { expectNonTerminal: true },
+      );
+      if (settled) runCount += 1;
     }
   }
 
@@ -121,13 +129,20 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         liveCount += 1;
         continue;
       }
-      if (claim) await deps.runs.update(r.id, claim);
+      // Claiming a run that settled since the list is claiming nothing — the CAS says so rather than
+      // stamping this replica's ownership onto a finished row.
+      if (claim) await deps.runs.update(r.id, claim, undefined, { expectNonTerminal: true });
       if (deps.resumeRun && (await deps.resumeRun(r).catch(() => false))) {
         runsResumed += 1;
         continue;
       }
-      await deps.runs.update(r.id, { status: "failed", error: INTERRUPTED, updatedAt: now() });
-      runCount += 1;
+      const settled = await deps.runs.update(
+        r.id,
+        { status: "failed", error: INTERRUPTED, updatedAt: now() },
+        undefined,
+        { expectNonTerminal: true },
+      );
+      if (settled) runCount += 1;
     }
   }
   return {
