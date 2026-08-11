@@ -446,6 +446,52 @@ describe("product routes", () => {
     ]);
   });
 
+  it("reaches the furthest PLANNED release on the axis, while keeping the visible past a quarter behind now", async () => {
+    const { app } = build(); // the service's clock is fixed at 2026-08-04
+    const product = await createProduct(app);
+    const plan = async (name: string, targetDate: string) => {
+      const res = await app.inject({
+        method: "POST",
+        url: `/products/${product.id}/releases`,
+        headers: H,
+        payload: { name, targetDate },
+      });
+      expect(res.statusCode).toBe(201);
+      return res.json().id as string;
+    };
+    await plan("2026.3", "2026-09-15");
+    await plan("2026.4", "2026-11-20");
+    const abandoned = await plan("2027.1", "2027-06-01");
+    const cancelled = await app.inject({
+      method: "POST",
+      url: `/releases/${abandoned}/status`,
+      headers: H,
+      payload: { status: "cancelled" },
+    });
+    expect(cancelled.statusCode).toBe(200);
+
+    const timeline = await app.inject({ method: "GET", url: `/products/${product.id}/timeline`, headers: H });
+    expect(timeline.statusCode).toBe(200);
+    // The window ENDS at the furthest planned target, not at `now` — a planned release the axis cannot place
+    // is the one marker the whole screen exists for. A cancelled one never stretches it: nobody is working
+    // toward that date, so the axis would spend its width on a span where nothing will ever be drawn.
+    expect(timeline.json().window.to).toBe("2026-11-20T23:59:59.999Z");
+    expect(timeline.json().window.now).toBe("2026-08-04T00:00:00.000Z");
+    // …and the visible PAST is still a quarter back from NOW, never from the horizon: deriving it from `to`
+    // would slide the window three months forward and silently drop the versions and batches the trend is
+    // being read against.
+    expect(timeline.json().window.from).toBe("2026-05-06T00:00:00.000Z");
+
+    // A caller who names the end still gets exactly that window.
+    const named = await app.inject({
+      method: "GET",
+      url: `/products/${product.id}/timeline?to=2026-08-01T00:00:00.000Z`,
+      headers: H,
+    });
+    expect(named.json().window.to).toBe("2026-08-01T00:00:00.000Z");
+    expect(named.json().window.from).toBe("2026-05-03T00:00:00.000Z");
+  });
+
   it("refuses a release watching a series the product never declared", async () => {
     const { app } = build();
     const product = await createProduct(app);

@@ -218,7 +218,10 @@ export const productSeriesPointSchema = z.object({
 })
 
 export const productTimelineSchema = z.object({
-  window: z.object({ from: z.string(), to: z.string() }),
+  // `to` 는 "지금"이 아니라 프로덕트가 약속한 가장 먼 목표일까지다 — 계획된 릴리즈를 축 위에 놓으려면
+  // 창이 미래를 덮어야 한다. `now` 는 그래서 창의 일부다: 일어난 구간과 예정 구간의 경계이고,
+  // 끝나지 않은 스팬(미해결 이슈)이 멈추는 지점이다.
+  window: z.object({ from: z.string(), to: z.string(), now: z.string() }),
   releases: z.array(releaseSchema),
   versions: z.array(productVersionSchema),
   series: z.array(

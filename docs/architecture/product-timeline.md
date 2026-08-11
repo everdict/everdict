@@ -339,7 +339,16 @@ regression watch's, and an issue it reopened blocks the release through the link
 - `GET /products/:id/timeline?from&to` — the axis in one read (the pulse's treatment: composed from stores
   server-side, drawn by the web): releases + windowed version ledger + per-series points (oldest first, with
   pass rate via `headlinePassRate` and the triggering `serviceVersion`) + linked issues' lifecycle markers.
-  Default window 90 days.
+  The default window is **the last 90 days through the product's HORIZON** — `to` reaches the furthest
+  *planned* release's `targetDate` (end of that day), not the present instant, because a release is planned
+  before it ships and an axis stopping at `now` cannot place the one marker the planning conversation is about
+  (every future target collapsed onto the right edge at the same position). A cancelled release never stretches
+  it — that is a date nobody is working toward. `from` stays a quarter measured back from `now` (or from a
+  caller-named `to`), never from the horizon, or a release planned two months out would silently drop two
+  months of the past the trend is read against. The window therefore also carries **`now`**: it is the boundary
+  between the part of the axis that happened and the part that is intended, and what an open-ended span (an
+  unresolved issue) ends at. The web draws the future half as a pressed-back band with a "today" line
+  (`widgets/product-timeline`); it does not compute the boundary from the browser clock (SSR would disagree).
 - HTTP + MCP full parity in the `api/product` slice; authz reuses the ISSUE pair (`issues:read`/`issues:write`
   — the timeline is the same planning workflow, one axis over); delete = creator-or-admin in the service;
   product deletion cascades releases + ledger (they exist only under their product).

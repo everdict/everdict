@@ -72,6 +72,18 @@ const DETAIL_VERSION_LIMIT = 100;
 // The timeline's default window when the caller names none — a quarter, the span a release conversation looks at.
 const TIMELINE_DEFAULT_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
+// How far ahead the axis reaches: the furthest date the product still INTENDS to hit, or the present instant
+// when it intends nothing. Only a PLANNED release counts — a cancelled one is a date nobody is working toward,
+// and stretching the axis to it would spend the whole width on a span where nothing will ever be drawn; a
+// released one already sits at its `releasedAt`, in the past. The target is a calendar date, so the horizon is
+// the END of that day: the marker then lands just inside the axis instead of half-clipped on its edge.
+function timelineHorizon(now: string, releases: readonly ReleaseRecord[]): string {
+  const targets = releases
+    .filter((release) => release.status === "planned" && release.targetDate !== undefined)
+    .map((release) => `${release.targetDate}T23:59:59.999Z`);
+  return targets.reduce((furthest, target) => (target > furthest ? target : furthest), now);
+}
+
 export interface ProductActor {
   subject: string;
   isAdmin?: boolean;
@@ -311,15 +323,26 @@ export class ProductService {
   // The product's time axis in ONE read (the pulse's treatment: composed from stores, drawn by the web):
   // releases (all — a handful, and a planned date may sit beyond any window), the windowed version ledger,
   // each watch series' scorecard points oldest-first, and the lifecycle markers of linked issues.
+  //
+  // The window's END IS THE PRODUCT'S HORIZON, not the present instant: what a product timeline is FOR is the
+  // conversation about the next ship, and a release is planned before it happens. An axis stopping at `now`
+  // cannot place that marker at all — every future target collapsed onto the right edge, so three releases
+  // planned across two months drew as one pile on the same day. The horizon is therefore the furthest date the
+  // product has committed to, and `now` rides along in the window so the reader can still tell the part of the
+  // axis that HAPPENED from the part that is intended.
   async timeline(
     tenant: string,
     id: string,
     window?: { from?: string; to?: string },
   ): Promise<ProductTimelineResponse> {
     const product = await this.get(tenant, id);
-    const to = window?.to ?? this.now();
-    const from = window?.from ?? new Date(Date.parse(to) - TIMELINE_DEFAULT_WINDOW_MS).toISOString();
+    const now = this.now();
     const releases = await this.deps.releases.list(tenant, { productId: id });
+    const to = window?.to ?? timelineHorizon(now, releases);
+    // The visible PAST is a quarter measured back from the anchor the caller named — or from `now`, never from
+    // the horizon: deriving it from `to` would slide the window forward by however far the next release sits in
+    // the future and silently drop the versions and batches the trend is being read against.
+    const from = window?.from ?? new Date(Date.parse(window?.to ?? now) - TIMELINE_DEFAULT_WINDOW_MS).toISOString();
     const versions = (await this.deps.versions.list(tenant, { productId: id })).filter(
       (row) => row.publishedAt >= from && row.publishedAt <= to,
     );
@@ -370,7 +393,7 @@ export class ProductService {
       for (const release of releases)
         collect(await this.deps.issues.list(tenant, { link: { type: "release", id: release.id } }), release.id);
     }
-    return { window: { from, to }, releases, versions, series, issues };
+    return { window: { from, to, now }, releases, versions, series, issues };
   }
 
   // --- Releases -----------------------------------------------------------------------------------------------

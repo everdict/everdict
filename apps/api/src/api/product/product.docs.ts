@@ -130,7 +130,9 @@ export const productDocs: Record<
     description:
       "Releases (past + planned), the windowed version ledger, each watch series' scorecard points (oldest " +
       "first, with pass rate and the service version that triggered them), and the lifecycle markers of " +
-      "linked issues. Default window: the last 90 days. Requires issues:read.",
+      "linked issues. Default window: the last 90 days through the product's horizon — `to` reaches the " +
+      "furthest PLANNED release's target date so a planned ship has a place on the axis, and `now` comes back " +
+      "with it as the boundary between what happened and what is intended. Requires issues:read.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     querystring: toJsonSchema(

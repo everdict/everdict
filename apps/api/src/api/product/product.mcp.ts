@@ -165,8 +165,10 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
       description:
         "The product's time axis in one read: releases (past + planned), the windowed version ledger, each " +
         "watch series' scorecard points (oldest first, with pass rate and the triggering service version), " +
-        "and linked issues' lifecycle markers. Default window: the last 90 days. This is the read that " +
-        "answers 'how has the product moved between releases'.",
+        "and linked issues' lifecycle markers. Default window: the last 90 days through the product's " +
+        "horizon — the window's `to` reaches the furthest PLANNED release's target date (so a planned ship " +
+        "has a place on the axis) and `now` rides along as the boundary between what happened and what is " +
+        "intended. This is the read that answers 'how has the product moved between releases'.",
       inputSchema: {
         id: z.string(),
         from: z.string().datetime().optional(),

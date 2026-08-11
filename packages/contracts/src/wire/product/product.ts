@@ -63,7 +63,12 @@ export const ProductTimelineIssueSchema = z.object({
 export type ProductTimelineIssue = z.infer<typeof ProductTimelineIssueSchema>;
 
 export const ProductTimelineResponseSchema = z.object({
-  window: z.object({ from: z.string(), to: z.string() }),
+  // The axis the caller may draw. `to` REACHES THE FURTHEST PLANNED TARGET DATE, not the present instant: a
+  // release is planned before it ships, so an axis that stops at now cannot place the one marker the planning
+  // conversation is about (every future release piled up on the right edge at the same, wrong, position).
+  // `now` is therefore part of the window and not derivable from it — it is what separates the part of the axis
+  // that HAPPENED from the part that is intended, and what an open-ended span (an unresolved issue) ends at.
+  window: z.object({ from: z.string(), to: z.string(), now: z.string() }),
   releases: z.array(ReleaseRecordSchema),
   versions: z.array(ProductServiceVersionRecordSchema),
   series: z.array(ProductTimelineSeriesSchema),
