@@ -292,6 +292,17 @@ export const VerificationDecisionSchema = z.object({
       applied: z.string().optional(),
     })
     .optional(),
+  // …AND WHAT APPLIED THEM (arch-review 26 P1). The policy says under which rules the verdict was reached;
+  // this says by which instrument. Both are non-secret configuration identity: which model DOCUMENT, at which
+  // version, with which bytes — never a credential. Absent = the runner did not report one, which a reader
+  // takes as "this verdict's executor is unknown" rather than as any particular model.
+  executionProfile: z
+    .object({
+      modelRef: z.string().min(1),
+      version: z.string().min(1),
+      documentDigest: z.string().min(1),
+    })
+    .optional(),
   claim: z
     .object({
       digest: z.string().min(1),

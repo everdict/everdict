@@ -1353,6 +1353,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     }),
     // The requester's focus: where to look. Bounded, and rendered subordinate to the policy.
     focus: z.string().min(1).max(600).optional(),
+    // The exact artifacts this verification was planned against (arch-review 26 P0). Enforced at the READER:
+    // a read observing a different identity is refused, so the model never reasons over evidence from a world
+    // the plan did not see.
+    evidencePins: z
+      .array(
+        z.object({
+          type: z.string().min(1),
+          id: z.string().min(1),
+          identity: z.object({
+            scoringRevision: z.number().int().nonnegative().optional(),
+            scorePlaneDigest: z.string().optional(),
+          }),
+        }),
+      )
+      .optional(),
     envelope: TaskEnvelopeSchema,
     // The claim under review, carried verbatim so the verifier can be shown WHAT is asserted and not only the
     // artifacts. Its digest is echoed back and compared by the caller.
@@ -1450,6 +1465,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         claim: parsed.data.claim,
         policy: parsed.data.policy,
         ...(parsed.data.focus !== undefined ? { focus: parsed.data.focus } : {}),
+        ...(parsed.data.evidencePins !== undefined ? { evidencePins: parsed.data.evidencePins } : {}),
       });
       return reply.send(result);
     } catch (err) {

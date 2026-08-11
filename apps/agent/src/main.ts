@@ -48,7 +48,9 @@ import { mcpToolProvider } from "./mcp-tools.js";
 import {
   type ModelByIdResolver,
   type ModelResolver,
+  type VerifierModelResolver,
   envModelResolver,
+  platformVerifierModelResolver,
   registryModelByIdResolver,
   registryModelResolver,
 } from "./model.js";
@@ -101,6 +103,7 @@ async function main(): Promise<void> {
   let sessions: AgentSessionStore;
   let artifacts: AnalysisArtifactStore;
   let resolveModel: ModelResolver;
+  let resolveVerifierModel: VerifierModelResolver | undefined;
   // Per-workspace agent customization (Phase 1). resolveProfile is always set (base fallback when no DB / no key);
   // resolveModelById is only available with a DB + secrets key (needed to resolve an AgentSpec.model override's key).
   let resolveProfile: ProfileResolver = baseProfileResolver(EVERDICT_AGENT_SYSTEM_PROMPT);
@@ -138,6 +141,16 @@ async function main(): Promise<void> {
           ? registryModelResolver({ modelRegistry, secretStore, modelRef: config.AGENT_MODEL })
           : envModelFallback(config);
       resolveModelById = registryModelByIdResolver({ modelRegistry, secretStore });
+      // …and the VERIFIER's instrument, from the platform namespace. Deliberately a separate resolver rather
+      // than a flag on the one above: the difference is not which id is asked for, it is which namespace may
+      // answer (arch-review 26 P0).
+      const verifierModelRef = config.EVERDICT_VERIFIER_MODEL ?? config.AGENT_MODEL;
+      if (verifierModelRef !== undefined)
+        resolveVerifierModel = platformVerifierModelResolver({
+          modelRegistry,
+          secretStore,
+          modelRef: verifierModelRef,
+        });
       const settingsStore = new PgWorkspaceSettingsStore(client);
       // Latest-version resolution for skill freshness (the knowledge-layer staleness contract): a skill pinning
       // harness@2.1.0 surfaces as stale once the registry's latest moved on. Best-effort inside the resolver.
@@ -213,6 +226,7 @@ async function main(): Promise<void> {
     // refuses a non-isolated host regardless of the flag).
     ...(process.env.AGENT_ALLOW_RUN_ANALYSIS === "true" ? { analysisScriptRuntime: codeRuntime } : {}),
     resolveModel,
+    ...(resolveVerifierModel ? { resolveVerifierModel } : {}),
     resolveProfile,
     ...(listSubagentTypes ? { listSubagentTypes } : {}),
     ...(resolveModelById ? { resolveModelById } : {}),

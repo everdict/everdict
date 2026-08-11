@@ -5,6 +5,7 @@ import {
   type McpInvoke,
   type PermissionHook,
   type SubagentType,
+  type ToolDefinition,
   ToolRegistry,
   type WaitRequest,
   buildSummarizer,
@@ -28,7 +29,12 @@ import {
   memberMemorySlug,
   traceIdForRun,
 } from "@everdict/contracts";
-import { assertTaskEnvelope } from "@everdict/domain";
+import {
+  type EvidenceIdentity,
+  assertTaskEnvelope,
+  evidenceIdentityHolds,
+  observedScorecardIdentity,
+} from "@everdict/domain";
 import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
 import type { AgentTryEvent, AgentTryResult } from "./agent-try.js";
@@ -44,7 +50,7 @@ import {
   maintainMemoryExtraction,
   turnWroteMemory,
 } from "./memory-extraction.js";
-import type { ModelByIdResolver, ModelResolver } from "./model.js";
+import type { ModelByIdResolver, ModelResolver, VerifierExecutionProfile, VerifierModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
 import type { AgentTurnUsage } from "./run-trace.js";
@@ -510,6 +516,11 @@ export interface ChatDeps {
   // scripts (HITL-gated). Wired only when the operator opts in (AGENT_ALLOW_RUN_ANALYSIS); absent → no tool.
   analysisScriptRuntime?: CodeToolRuntime;
   resolveModel: ModelResolver;
+  // THE VERIFIER'S OWN INSTRUMENT (arch-review 26 P0). Resolved from the PLATFORM namespace, pinned to an
+  // exact version, digest returned — never through the ordinary owner-first resolver, which answers with the
+  // workspace's document whenever one wears the same id. Absent = this deployment cannot run a verification,
+  // which the turn refuses rather than quietly falling back to the workspace's model.
+  resolveVerifierModel?: VerifierModelResolver;
   toolProvider: ToolProvider;
   systemPrompt: string; // base persona — used as-is when no resolveProfile is wired (dev / no DB)
   now: () => string;
@@ -684,6 +695,20 @@ export interface ChatHooks {
   // separation was enforced on the pull side and open on the push side, so a verifier could read the
   // executor's account of the work without ever calling a tool.
   contextPolicy?: "default" | "evidence_only";
+  // PLATFORM-AUTHORITY INSTRUCTIONS — prepended to the system message, above the persona. For rules that must
+  // outrank every piece of text the turn later reads: a verifier's constitution is the case this exists for,
+  // because the claim it judges is authored by the party being judged.
+  systemPolicy?: string;
+  // THE EXACT ARTIFACTS this turn was planned against (arch-review 26 P0). Each entry pins one resource's
+  // identity; a read that observes a different one is refused at the reader, so the turn cannot reason over
+  // bytes from a world its plan never saw. Absent = no pinning, the ordinary chat posture.
+  evidencePins?: ReadonlyArray<{ type: string; id: string; identity: EvidenceIdentity }>;
+  // …and what was ACTUALLY observed, reported per successful read. This is what the decision records: the
+  // preflight resolution is a plan, and a plan is not an observation.
+  onEvidenceObserved?: (observation: { type: string; id: string; identity?: EvidenceIdentity; moved?: true }) => void;
+  // WHICH INSTRUMENT ran this turn — reported so a verdict's record can name the model document that produced
+  // it. A procedure digest answers "under what rules"; this answers "by what".
+  onVerifierProfile?: (identity: { modelRef: string; version: string; documentDigest: string } | undefined) => void;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -865,6 +890,60 @@ function deriveTitle(userText: string): string {
 
 // One chat turn: persist the user message, replay history into the kernel, run the loop with the workspace's
 // read-only MCP tools, then persist the produced assistant/tool transcript. Returns the new tail for the caller.
+// Wrap each tool so a read of PINNED evidence is checked against the pin it was planned under. Only the
+// tools that address a pinned resource are affected; everything else passes through untouched, because a
+// wrapper that changed unrelated tools would be enforcing this invariant somewhere it does not apply.
+function pinnedReader(hooks: ChatHooks): (tool: ToolDefinition) => ToolDefinition {
+  const pins = hooks.evidencePins ?? [];
+  return (tool) => {
+    const targets = tool.resourceTargets;
+    if (targets === undefined) return tool;
+    return {
+      ...tool,
+      call: async (input, ...rest) => {
+        const result = await tool.call(input, ...rest);
+        if (result.isError) return result;
+        const addressed = targets(input);
+        if (addressed.kind !== "targets") return result;
+        for (const target of addressed.values) {
+          const pin = pins.find((p) => p.type === target.type && p.id === target.id);
+          if (pin === undefined) continue;
+          let observed: EvidenceIdentity;
+          try {
+            observed = observedScorecardIdentity(JSON.parse(result.content));
+          } catch {
+            // A reader whose output this platform cannot read an identity out of has not been shown to be
+            // the pinned artifact. Refusing beats letting an unverifiable read count as evidence.
+            hooks.onEvidenceObserved?.({ ...target, moved: true });
+            return {
+              content: `evidence_moved: the identity of ${target.type}:${target.id} could not be read from this response, so it cannot be used as the evidence this verification was planned against.`,
+              isError: true,
+            };
+          }
+          hooks.onEvidenceObserved?.({ ...target, identity: observed });
+          if (!evidenceIdentityHolds(pin.identity, observed))
+            return {
+              content: `evidence_moved: ${target.type}:${target.id} has changed since this verification was planned (planned under scoring revision ${pin.identity.scoringRevision ?? "none"}, now ${observed.scoringRevision ?? "none"}). Do not use it — say so and answer inconclusive.`,
+              isError: true,
+            };
+        }
+        return result;
+      },
+    };
+  };
+}
+
+// A verification with no platform verifier model is not a weaker verification; it is one whose instrument
+// nobody can name. Refusing is the honest outcome — the alternative is running under the workspace's own
+// model and filing the result as an independent verdict.
+async function requireVerifierModel(resolve: VerifierModelResolver | undefined): Promise<VerifierExecutionProfile> {
+  if (!resolve)
+    throw new Error(
+      "this deployment has no platform verifier model wired, so a verification cannot state which instrument produced its verdict.",
+    );
+  return resolve();
+}
+
 export async function runChat(
   deps: ChatDeps,
   principal: Principal,
@@ -1040,7 +1119,18 @@ export async function runChat(
     ...draftTools,
     ...(analysisScriptTool ? [analysisScriptTool] : []),
   ];
-  const registry = extraTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...extraTools]) : tools.registry;
+  const composed: ToolDefinition[] = [...tools.registry.list(), ...extraTools];
+  // THE READER CONSUMES THE PIN (arch-review 26 P0). A verification plan resolves each piece of evidence's
+  // identity before the turn starts, but what the model is handed is a LOCATOR — the tool returns whatever
+  // that id resolves to at the moment of the call. A re-score landing in between gives a decision that names
+  // revision 3 while the model read revision 4, and nothing anywhere notices.
+  //
+  // So the check happens where the bytes arrive: a read whose observed identity differs from the pinned one
+  // comes back as an ERROR the model cannot use, and the identity it DID observe is reported so the decision
+  // records what was seen rather than what was expected.
+  const registry = hooks?.evidencePins
+    ? new ToolRegistry(composed.map(pinnedReader(hooks)))
+    : new ToolRegistry(composed);
   // Declared out here because the model and its token counters live inside the turn block, while the result
   // this function returns is assembled after it.
   let turnUsage: ChatResult["usage"];
@@ -1116,23 +1206,38 @@ export async function runChat(
     // is a member's choice about their own chat; a verifier is an instrument, and which model it thinks with
     // is part of what its verdict means.
     const modelRef = hooks?.contextPolicy === "evidence_only" ? undefined : (session.model ?? profile?.model);
+    // …and under `evidence_only` the model itself is the PLATFORM's. Dropping the overrides was only half of
+    // it: `resolveModel(principal)` reads the registry owner-first, so a workspace could shadow the operator's
+    // verifier model by registering its own document under the same id — the verified party choosing the
+    // instrument that judges it, with every prompt-level guarantee still intact.
+    const verifierProfile =
+      hooks?.contextPolicy === "evidence_only" ? await requireVerifierModel(deps.resolveVerifierModel) : undefined;
+    hooks?.onVerifierProfile?.(verifierProfile?.identity);
     const model =
-      modelRef && deps.resolveModelById
+      verifierProfile ??
+      (modelRef && deps.resolveModelById
         ? await deps.resolveModelById(principal, modelRef)
-        : await deps.resolveModel(principal);
+        : await deps.resolveModel(principal));
     // Append the per-turn environment block (workspace · model · date) now that the model is resolved.
-    const systemWithEnv = `${systemPrompt}\n\n${buildEnvironmentSection({
-      workspace,
-      model: model.model,
-      date: deps.now(),
-      taskDirectory: `tasks/${sessionId}`, // per-task separation on the workspace filesystem
-      // A turn whose platform tools failed to load says so IN the prompt — the model must not answer as though it
-      // had read the workspace (see ToolSession.platformToolsError).
-      ...(tools.platformToolsError !== undefined ? { platformToolsError: tools.platformToolsError } : {}),
+    // THE PLATFORM'S RULES SIT IN THE SYSTEM MESSAGE (arch-review 26 P0). Rendering the verifier constitution
+    // as one more paragraph of the user turn made it text competing with other text: the claim is authored by
+    // the party being verified, the focus by the party asking for the verdict, and the evidence is whatever a
+    // tool returned. All four arrived at the same instruction authority, so "policy bytes were delivered" was
+    // never the same claim as "policy governs". Hoisting it here is what makes the difference structural.
+    const systemWithEnv = `${hooks?.systemPolicy ? `${hooks.systemPolicy}\n\n` : ""}${systemPrompt}\n\n${buildEnvironmentSection(
+      {
+        workspace,
+        model: model.model,
+        date: deps.now(),
+        taskDirectory: `tasks/${sessionId}`, // per-task separation on the workspace filesystem
+        // A turn whose platform tools failed to load says so IN the prompt — the model must not answer as though it
+        // had read the workspace (see ToolSession.platformToolsError).
+        ...(tools.platformToolsError !== undefined ? { platformToolsError: tools.platformToolsError } : {}),
 
-      ...(deps.webBaseUrl !== undefined ? { webBaseUrl: deps.webBaseUrl } : {}),
-      ...(deps.desktopDownloadUrl !== undefined ? { desktopDownloadUrl: deps.desktopDownloadUrl } : {}),
-    })}`;
+        ...(deps.webBaseUrl !== undefined ? { webBaseUrl: deps.webBaseUrl } : {}),
+        ...(deps.desktopDownloadUrl !== undefined ? { desktopDownloadUrl: deps.desktopDownloadUrl } : {}),
+      },
+    )}`;
 
     // Model tiering (both need the by-id resolver). The summariser is LAZY — the cheaper model is only resolved if a
     // compaction actually fires — so a normal turn pays nothing. The fallback is resolved up front (opt-in per

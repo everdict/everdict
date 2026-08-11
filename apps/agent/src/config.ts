@@ -9,6 +9,11 @@ const ConfigSchema = z.object({
   DATABASE_URL: z.string().optional(),
   // The registered workspace model the agent runs on (D3). Falls back to AGENT_LLM_* when unset / no DB.
   AGENT_MODEL: z.string().optional(),
+  // The PLATFORM's verifier model — resolved from the `_shared` namespace only, never owner-first, so a
+  // workspace cannot shadow the instrument that audits it (arch-review 26 P0). Defaults to AGENT_MODEL's id
+  // when unset, which is only safe BECAUSE the resolution is platform-namespaced: same name, platform's
+  // document. Absent + no AGENT_MODEL = this deployment cannot run verifications, and says so at the door.
+  EVERDICT_VERIFIER_MODEL: z.string().optional(),
   // Optional model tiering (needs a registered model + DB + secrets, like AGENT_MODEL). AGENT_SMALL_MODEL digests
   // compaction summaries on a cheaper/faster model instead of the main one (resolved lazily — only when compaction
   // fires). AGENT_FALLBACK_MODEL takes over for the rest of a run if the main model keeps failing transiently.

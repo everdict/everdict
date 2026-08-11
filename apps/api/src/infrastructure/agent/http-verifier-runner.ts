@@ -27,6 +27,7 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
           // the runner renders the platform's words rather than composing its own (arch-review 25 P0-4).
           policy: input.policy,
           ...(input.focus !== undefined ? { focus: input.focus } : {}),
+          ...(input.evidencePins !== undefined ? { evidencePins: input.evidencePins } : {}),
           // The claim travels WITH the question — the statements the evidence is supposed to support. The
           // runner echoes back the digest of what it rendered, and the caller refuses an affirmative when the
           // two differ (arch-review 24 P0-3).
@@ -53,6 +54,13 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         failedResources: Array<{ type: string; id: string; tool?: string }>;
         claimDigest?: string;
         policyDigest?: string;
+        observedEvidence?: Array<{
+          type: string;
+          id: string;
+          identity?: { scoringRevision?: number; scorePlaneDigest?: string };
+          moved?: true;
+        }>;
+        executionProfile?: { modelRef: string; version: string; documentDigest: string };
       };
       return {
         verdict: body.verdict,
@@ -65,6 +73,8 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         failedResources: body.failedResources,
         ...(body.claimDigest !== undefined ? { claimDigest: body.claimDigest } : {}),
         ...(body.policyDigest !== undefined ? { policyDigest: body.policyDigest } : {}),
+        ...(body.observedEvidence !== undefined ? { observedEvidence: body.observedEvidence } : {}),
+        ...(body.executionProfile !== undefined ? { executionProfile: body.executionProfile } : {}),
       };
     },
   };

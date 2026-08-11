@@ -287,7 +287,14 @@ describe("verification — a spawned verdict is checked for independence and FIL
     claimDigest?: string; // what the runner says it RENDERED — differing from what was sent is its own test
     policyDigest?: string; // …and the same for the decision procedure
     readerOverride?: string; // which tool the runtime reports doing the reading
-    evidencePins?: CheckpointServiceDeps["evidencePins"]; // which VERSION of the evidence was reviewed
+    evidencePins?: CheckpointServiceDeps["evidencePins"]; // which VERSION the plan resolved
+    // …and which one the READ observed. Absent = the double saw exactly what it was pinned to.
+    observedEvidence?: Array<{
+      type: string;
+      id: string;
+      identity?: { scoringRevision?: number; scorePlaneDigest?: string };
+      moved?: true;
+    }>;
     evidence?: CheckpointRef[]; // what the checkpoint cites (defaults to the run above)
   }): { svc: CheckpointService; envelopes: TaskEnvelope[]; claims: unknown[] } {
     const envelopes: TaskEnvelope[] = [];
@@ -333,6 +340,10 @@ describe("verification — a spawned verdict is checked for independence and FIL
             // affirmable. The policy echo is what stops a verdict reached under some other constitution.
             claimDigest: opts.claimDigest ?? input.claim.digest,
             policyDigest: opts.policyDigest ?? input.policy.digest,
+            // WHAT THE READER SAW. The decision records this, never the caller's preflight resolution — the
+            // default double observes exactly what it was pinned to, and the scenarios below vary it.
+            observedEvidence:
+              opts.observedEvidence ?? (input.evidencePins ?? []).map((p) => ({ ...p, identity: p.identity })),
           };
         },
       },
@@ -375,6 +386,46 @@ describe("verification — a spawned verdict is checked for independence and FIL
     ]);
   });
 
+  // arch-review 26 P0: PRE-READ IDENTITY IS NOT OBSERVATION IDENTITY. The plan resolves an identity before
+  // the verifier runs; what the verifier is handed is a locator, and the reader returns whatever it resolves
+  // to at the moment of the call. A re-score landing in between produced a decision naming revision 3 while
+  // the model had read revision 4 — every artifact around it consistent, and the sentence it recorded false.
+  it("records the identity the READ observed, not the one the plan resolved", async () => {
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      evidence: [{ type: "scorecard", id: "sc-7" }],
+      reviewed: [{ type: "scorecard", id: "sc-7" }],
+      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+      // The reader is pinned to revision 3 and would refuse anything else; this double reports what it saw.
+      observedEvidence: [
+        { type: "scorecard", id: "sc-7", identity: { scoringRevision: 3, scorePlaneDigest: "sha256:p3" } },
+      ],
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.evidenceIdentity).toEqual([
+      { type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+    ]);
+    // …and no evidence-version gap was raised: the read agreed with the plan. (The verdict is still
+    // inconclusive here for an unrelated reason — a scorecard-only checkpoint resolves no executor, so
+    // independence abstains. Asserting the identity is what this scenario is about.)
+    expect(decision.detail).not.toContain("the version of");
+  });
+
+  it("refuses the affirmative when the artifact MOVED between the plan and the read", async () => {
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      evidence: [{ type: "scorecard", id: "sc-7" }],
+      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+      // The reader refused it: a re-score landed, so what the locator resolves to is no longer the artifact
+      // this verification was planned against.
+      observedEvidence: [{ type: "scorecard", id: "sc-7", moved: true }],
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("the version of scorecard:sc-7 that the verifier actually read");
+    expect(decision.evidenceIdentity).toEqual([{ type: "scorecard", id: "sc-7", unpinnable: true }]);
+  });
+
   it("refuses the affirmative when the evidence's version could not be pinned", async () => {
     // A resolver that ran and could not answer is the third state. The verdict is still filed — it happened —
     // but nobody can put the same artifact in front of a second verifier, which is what "verified" claims.
@@ -385,7 +436,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
     });
     const decision = await svc.requestVerification("acme", "cp-1");
     expect(decision.verdict).toBe("inconclusive");
-    expect(decision.detail).toContain("could not be pinned");
+    expect(decision.detail).toContain("could not be established");
     expect(decision.evidenceIdentity).toEqual([{ type: "scorecard", id: "sc-7", unpinnable: true }]);
   });
 

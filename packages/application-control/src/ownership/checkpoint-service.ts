@@ -322,7 +322,9 @@ export class CheckpointService {
             pinnable.map((ref) => ({ type: ref.type, id: ref.id })),
           )
         : undefined;
-    const evidenceIdentity =
+    // The PLAN's identities. What the decision records is the OBSERVATION (below) — this is what the readers
+    // are pinned to, so a read that sees anything else is refused before the model can reason over it.
+    const planned =
       pins === undefined
         ? undefined
         : pinnable.map((ref) => {
@@ -336,6 +338,16 @@ export class CheckpointService {
               ...(pin.scorePlaneDigest !== undefined ? { scorePlaneDigest: pin.scorePlaneDigest } : {}),
             };
           });
+    const evidencePins = (planned ?? [])
+      .filter((entry): entry is Exclude<typeof entry, { unpinnable: true }> => !("unpinnable" in entry))
+      .map((entry) => ({
+        type: entry.type,
+        id: entry.id,
+        identity: {
+          ...(entry.scoringRevision !== undefined ? { scoringRevision: entry.scoringRevision } : {}),
+          ...(entry.scorePlaneDigest !== undefined ? { scorePlaneDigest: entry.scorePlaneDigest } : {}),
+        },
+      }));
 
     // THE CLAIM — assembled here, carried there (arch-review 24 P0-3). The question below refers to "the
     // checkpoint's confirmed facts"; until this existed, those facts never left this process, so the verifier
@@ -350,6 +362,33 @@ export class CheckpointService {
       claim,
       policy,
       ...(focus !== undefined ? { focus } : {}),
+      ...(evidencePins.length > 0 ? { evidencePins } : {}),
+    });
+
+    // WHAT WAS OBSERVED, not what was planned (arch-review 26 P0). The plan resolves an identity before the
+    // verifier runs; what the verifier is handed is a LOCATOR, and the reader returns whatever that id
+    // resolves to at the moment of the call. A re-score landing in between used to produce a decision naming
+    // revision 3 while the model had in fact read revision 4 — every artifact around it consistent, and the
+    // sentence it recorded false. The readers now refuse a moved artifact, and the identity filed here is the
+    // one the successful read reported.
+    const observedByRef = new Map((verdict.observedEvidence ?? []).map((o) => [`${o.type}:${o.id}`, o]));
+    const evidenceIdentity = planned?.map((entry) => {
+      if ("unpinnable" in entry) return entry;
+      const observed = observedByRef.get(`${entry.type}:${entry.id}`);
+      // Never opened, or opened and refused as moved: either way this decision cannot state the version the
+      // verifier reasoned over, which the gap below turns into a refusal of the affirmative.
+      if (observed === undefined || observed.moved === true || observed.identity === undefined)
+        return { type: entry.type, id: entry.id, unpinnable: true as const };
+      return {
+        type: entry.type,
+        id: entry.id,
+        ...(observed.identity.scoringRevision !== undefined
+          ? { scoringRevision: observed.identity.scoringRevision }
+          : {}),
+        ...(observed.identity.scorePlaneDigest !== undefined
+          ? { scorePlaneDigest: observed.identity.scorePlaneDigest }
+          : {}),
+      };
     });
 
     // INDEPENDENCE, applied against EVERY executor in the evidence (arch-review 11). The domain owns the
@@ -443,10 +482,10 @@ export class CheckpointService {
     // …and evidence whose VERSION nobody could state (arch-review 25 P0-3). The verdict may still be filed —
     // it happened — but it cannot be affirmative: nobody reading it later can put the same artifact in front
     // of a second verifier, which is the whole content of "this was verified".
-    const unpinned = (evidenceIdentity ?? []).filter((e) => e.unpinnable === true);
+    const unpinned = (evidenceIdentity ?? []).filter((e) => "unpinnable" in e);
     if (unpinned.length > 0)
       gaps.push(
-        `the version of ${unpinned.map((e) => `${e.type}:${e.id}`).join(", ")} could not be pinned, so this verdict cannot be reproduced against the same evidence`,
+        `the version of ${unpinned.map((e) => `${e.type}:${e.id}`).join(", ")} that the verifier actually read could not be established, so this verdict cannot be reproduced against the same evidence`,
       );
 
     // THE CLAIM ECHO. The runner reports the digest of the claim text it actually rendered; if that is missing
@@ -488,6 +527,7 @@ export class CheckpointService {
       detail: affirmable ? verdict.detail : `${verdict.detail} — recorded as inconclusive: ${gaps.join("; ")}.`,
       independence,
       ...(evidenceIdentity !== undefined ? { evidenceIdentity } : {}),
+      ...(verdict.executionProfile !== undefined ? { executionProfile: verdict.executionProfile } : {}),
       policy: {
         version: policy.version,
         digest: policy.digest,

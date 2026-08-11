@@ -421,3 +421,48 @@ export function verifierFocus(raw: string | undefined): string | undefined {
   if (focus === undefined || focus.length === 0) return undefined;
   return focus.length > MAX_VERIFIER_FOCUS ? `${focus.slice(0, MAX_VERIFIER_FOCUS)}…` : focus;
 }
+
+// ── OBSERVED EVIDENCE IDENTITY (arch-review 26 P0) ───────────────────────────────────────────────────
+//
+// PRE-READ IDENTITY IS NOT OBSERVATION IDENTITY.
+//
+// The verification plan resolves each scorecard's scoring revision and score-plane digest before the verifier
+// runs, and the decision recorded those numbers. What the verifier was actually handed, though, was the
+// LOCATOR — `scorecard:sc-7` — and the tool that opens it returns whatever that id resolves to at the moment
+// of the call. A re-score landing in between produces a decision that says the verifier read revision 3 while
+// the model in fact read revision 4. Every artifact around it stays consistent; the sentence it records is
+// simply false.
+//
+// So the reader itself has to consume the pin: a read whose observed identity differs from the one the plan
+// pinned is refused as evidence, and the identity the DECISION records is the one the successful observation
+// reported — never the preflight guess.
+export interface EvidenceIdentity {
+  scoringRevision?: number;
+  scorePlaneDigest?: string;
+}
+
+// What a scorecard document says its current judgment is. Reads the same coordinate the release fence
+// conditions on — the newest entry of the scoring ledger — so "which judgment of this row" means one thing
+// across the whole platform. A document with no ledger has no revision, and that IS its identity: "this row
+// has had no scoring pass", which a later pass changes.
+export function observedScorecardIdentity(document: unknown): EvidenceIdentity {
+  if (document === null || typeof document !== "object") return {};
+  const scoring = (document as { scoring?: unknown }).scoring;
+  if (!Array.isArray(scoring) || scoring.length === 0) return {};
+  const newest = scoring[scoring.length - 1];
+  if (newest === null || typeof newest !== "object") return {};
+  const revision = (newest as { revision?: unknown }).revision;
+  const digest = (newest as { scorePlaneDigest?: unknown }).scorePlaneDigest;
+  return {
+    ...(typeof revision === "number" ? { scoringRevision: revision } : {}),
+    ...(typeof digest === "string" ? { scorePlaneDigest: digest } : {}),
+  };
+}
+
+// Do the two identities name the same judgment? Absent-on-both is agreement ("no pass then, no pass now");
+// absent-on-one is not, because a pass appearing is exactly the change this comparison exists to catch.
+export function evidenceIdentityHolds(expected: EvidenceIdentity, observed: EvidenceIdentity): boolean {
+  return (
+    expected.scoringRevision === observed.scoringRevision && expected.scorePlaneDigest === observed.scorePlaneDigest
+  );
+}

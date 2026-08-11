@@ -1,5 +1,5 @@
 import type { ActorRef, TaskEnvelope } from "@everdict/contracts";
-import type { VerificationClaim, VerifierPolicy } from "@everdict/domain";
+import type { EvidenceIdentity, VerificationClaim, VerifierPolicy } from "@everdict/domain";
 
 // What a verifier came back with. `verified` is the only affirmative — a verifier that cannot decide says so
 // rather than passing by default, because "I could not tell" and "it holds" are the two answers a trust
@@ -44,6 +44,14 @@ export interface VerifierVerdict {
   // reason: a verdict reached under a different constitution is a verdict about a different question, and the
   // caller refuses to make it affirmative.
   policyDigest?: string;
+  // WHAT THE READS OBSERVED — the identity each artifact actually had when the verifier opened it. The
+  // caller records THIS, never its own preflight resolution: a plan is not an observation, and the gap
+  // between them is exactly where a concurrent re-score lives.
+  observedEvidence?: Array<{ type: string; id: string; identity?: EvidenceIdentity; moved?: true }>;
+  // WHICH INSTRUMENT applied the policy (arch-review 26 P1). Rules without an executor identity answer "under
+  // what constitution" and leave "by what" unanswerable — and this platform treats procedure identity as part
+  // of what a verdict means everywhere else.
+  executionProfile?: { modelRef: string; version: string; documentDigest: string };
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed
@@ -71,6 +79,10 @@ export interface VerifierRunner {
     // …and what the REQUESTER contributed: where to look. Carried beside the policy and subordinate to it,
     // never merged into it. Absent = no particular focus, which is the ordinary case.
     focus?: string;
+    // WHICH VERSION of each piece of evidence this verification is about. The runner hands them to its
+    // readers, which refuse a read that observes anything else — the pin is consumed where the bytes arrive
+    // rather than resolved beforehand and hoped over (arch-review 26 P0).
+    evidencePins?: ReadonlyArray<{ type: string; id: string; identity: EvidenceIdentity }>;
     // WHAT IS CLAIMED — the statements themselves, verbatim, carried across the process boundary. Without it
     // the question referred to facts that never left the caller, so the verifier could only judge whether the
     // evidence was internally coherent and the platform recorded that as support for claims it never saw.
