@@ -1,6 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import type { ConstitutionApprovalStore, WorkflowStateService } from "@everdict/application-control";
+import type {
+  ConstitutionApprovalStore,
+  ConstitutionalPublisher,
+  WorkflowStateService,
+} from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
@@ -77,6 +81,7 @@ import {
   JudgeRunConfigSchema,
   JudgeSpecSchema,
   ModelSpecSchema,
+  NotFoundError,
   type RunRecord,
   type RuntimeSpec,
   RuntimeSpecSchema,
@@ -206,6 +211,9 @@ export interface ServerDeps {
   // The receipt a constitutional declaration leaves (mig 0165) — absent = no provenance recorded, which the
   // reader treats as an unauthorized declaration rather than as an approval nobody wrote down.
   constitutionApprovals?: ConstitutionApprovalStore;
+  // Bytes + receipt as ONE commit. Absent = this deployment cannot publish a dataset that declares
+  // ground_truth authority, and says so rather than publishing it in two.
+  constitutionalPublisher?: ConstitutionalPublisher;
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (route disabled if absent)
   judgePreviewService?: JudgePreviewService; // zero-cost judge preview + one-case dry-run (route disabled if absent)
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
@@ -571,28 +579,66 @@ export function assertDatasetConstitution(principal: Principal, dataset: Pick<Da
 // Ordering it first is what makes the refusal clean: an orphan receipt names bytes at a version that does not
 // exist, which authorizes nothing until exactly those bytes are registered (a different document at that
 // version is refused by immutability, and a matching one is the act the receipt was written for).
-export async function recordDatasetConstitution(
+// …AND THE RECEIPT, IN THE SAME COMMIT (arch-review 23 P1, made atomic by 25 P0-2). Authorizing at the door
+// leaves no trace, so an artifact already in the database cannot say whether an admin approved it, a member
+// registered it before the gate existed, or it is a platform seed. Those are three facts and a trust kernel
+// may not read them as one.
+//
+// Writing them as two commits — in either order — leaves a window, and the state inside it is the one state
+// this mechanism has no vocabulary for: bytes registered under a name whose recorded approval names DIFFERENT
+// bytes. Submit compares the two, so such a dataset is refused forever, and the only way back
+// (`legacy_attested`) records that it was authorised after it already ran, which is false. A half-landed
+// publication does not lose information; it writes a wrong history.
+//
+// So a constitutional dataset publishes through the transactional path or NOT AT ALL. A deployment that
+// cannot commit both is one that cannot publish one: refusing is recoverable, and a signed constitution whose
+// signature is about other bytes is not.
+export async function publishDataset(
   deps: ServerDeps,
   principal: Principal,
   dataset: Dataset,
   metrics: string[],
+  provenance: { teamId?: string; origin?: unknown } = {},
 ): Promise<void> {
-  if (metrics.length === 0) return;
-  if (deps.constitutionApprovals === undefined)
+  const registry = deps.datasetRegistry;
+  if (!registry) throw new NotFoundError("NOT_FOUND", {}, "dataset registry not configured");
+  // A dataset that declares NOTHING constitutional is an ordinary registration — there is no second write to
+  // be atomic with, and demanding a transaction for it would make a routine publish depend on a capability
+  // this deployment may not have.
+  if (metrics.length === 0) {
+    await registry.register(
+      principal.workspace,
+      dataset,
+      principal.subject,
+      provenance.teamId,
+      provenance.origin as never,
+    );
+    return;
+  }
+  if (deps.constitutionalPublisher === undefined)
     throw new UpstreamError(
       "UPSTREAM_MISCONFIGURED",
       { dataset: `${dataset.id}@${dataset.version}`, metrics },
-      "This dataset declares ground_truth authority, and this deployment has nowhere to record who authorized it. Registering it would create a constitution nobody signed.",
+      "This dataset declares ground_truth authority, and this deployment cannot publish the bytes and the approval that authorises them as one act. Registering it would risk a constitution nobody signed, or one that signs different bytes than the ones that run.",
     );
-  await deps.constitutionApprovals.record(principal.workspace, {
-    kind: "dataset",
-    id: dataset.id,
-    version: dataset.version,
-    contentDigest: contentDigest(dataset),
-    metrics,
-    mode: principal.workspace === SHARED_TENANT ? "platform_seed" : "approved",
-    approvedBy: principal.subject,
-    approvedAt: new Date().toISOString(),
+  await deps.constitutionalPublisher.publish({
+    tenant: principal.workspace,
+    dataset,
+    approval: {
+      kind: "dataset",
+      id: dataset.id,
+      version: dataset.version,
+      // THESE bytes — the reason the two writes must land together. A receipt that names other bytes is not
+      // a weaker approval, it is an approval of a different document.
+      contentDigest: contentDigest(dataset),
+      metrics,
+      mode: principal.workspace === SHARED_TENANT ? "platform_seed" : "approved",
+      approvedBy: principal.subject,
+      approvedAt: new Date().toISOString(),
+    },
+    createdBy: principal.subject,
+    ...(provenance.teamId !== undefined ? { teamId: provenance.teamId } : {}),
+    ...(provenance.origin !== undefined ? { origin: provenance.origin } : {}),
   });
 }
 

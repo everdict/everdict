@@ -510,7 +510,13 @@ export class PgReleaseStore implements ReleaseStore {
       // …and the workspace SETTINGS the contracts resolved under (mig 0164) — the default judge model is part
       // of the contract identity, and it lives on a row this statement can condition on.
       const settingsRevision = guard.expectDecision.settingsRevision;
-      if (settingsRevision === null) {
+      if (settingsRevision === 0) {
+        // Zero = "never moved", which an absent row and a row nobody has made a contractual edit to say
+        // equally. Either shape holds; anything above zero is a change this decision did not read.
+        params.push(0);
+        const zeroIdx = params.length;
+        guardSql += ` AND (NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant) OR EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${zeroIdx}))`;
+      } else if (settingsRevision === null) {
         guardSql +=
           " AND NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant)";
       } else if (settingsRevision !== undefined) {
@@ -584,12 +590,15 @@ export class PgCapabilityGenerationStore implements CapabilityGenerationStore {
     }));
   }
 
+  // NO ROW IS REVISION ZERO (arch-review 25 P2). "This workspace has never changed its evaluation contract"
+  // is one state, and whether a settings row happens to exist for some unrelated integration is not part of
+  // it — treating the row's birth as a change refused in-flight ships for edits that cannot move any verdict.
   async settingsRevision(workspace: string): Promise<number | null> {
     const { rows } = await this.client.query<{ revision: string | number }>(
       "SELECT revision FROM everdict_workspace_settings WHERE workspace = $1",
       [workspace],
     );
     const row = rows[0];
-    return row === undefined ? null : Number(row.revision);
+    return row === undefined ? 0 : Number(row.revision);
   }
 }

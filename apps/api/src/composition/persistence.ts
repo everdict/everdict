@@ -1,6 +1,7 @@
 import type {
   CapabilityGenerationStore,
   ConstitutionApprovalStore,
+  ConstitutionalPublisher,
   HandoffCheckpointStore,
   LeaderElector,
   ReplicaRegistry,
@@ -197,6 +198,7 @@ import {
   type RuntimeRegistry,
 } from "@everdict/registry";
 import { httpOfflineTokenMinter } from "../infrastructure/oauth/offline-token-minter.js";
+import { pgConstitutionalPublisher } from "../infrastructure/registry/constitutional-publisher.js";
 import { CONTROL_PLANE_ROLE, REPLICA_ID } from "./replica.js";
 
 export interface Persistence {
@@ -262,6 +264,7 @@ export interface Persistence {
   // The receipts constitutional declarations leave (mig 0165) — Postgres only, like every other provenance
   // ledger. Without it a declaration is authorized but unrecorded, which the reader reports as unapproved.
   constitutionApprovalStore?: ConstitutionApprovalStore;
+  constitutionalPublisher?: ConstitutionalPublisher;
   productVersionStore: ProductVersionStore;
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
@@ -473,6 +476,9 @@ export async function makePersistence(): Promise<Persistence> {
     // The resolution generations a ship's commit conditions on (mig 0163) — see PgCapabilityGenerationStore.
     capabilityGenerationStore: new PgCapabilityGenerationStore(client),
     constitutionApprovalStore: new PgConstitutionApprovalStore(client),
+    // …and the PUBLISHER that writes a receipt and its dataset in one commit (arch-review 25 P0-2). Only this
+    // layer can see one connection underneath two adapters, which is why cross-adapter atomicity lives here.
+    constitutionalPublisher: pgConstitutionalPublisher(client),
     productVersionStore: new PgProductVersionStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),

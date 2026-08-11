@@ -65,9 +65,19 @@ class RecordingApprovals {
 
 const serverAs = (role: string) => {
   const approvals = new RecordingApprovals();
+  const datasets = new InMemoryDatasetRegistry();
+  // The PUBLISHER, not two stores. A constitutional dataset publishes its bytes and its receipt in one act
+  // (arch-review 25 P0-2), so the door this scenario drives is the transactional one; the in-memory twin
+  // writes both, which is what "one act" means where there is no database to open a transaction on.
   const app = buildServer({
-    datasetRegistry: new InMemoryDatasetRegistry(),
+    datasetRegistry: datasets,
     constitutionApprovals: approvals,
+    constitutionalPublisher: {
+      async publish(input: { tenant: string; dataset: never; approval: Record<string, unknown> }) {
+        await datasets.register(input.tenant, input.dataset);
+        await approvals.record(input.tenant, input.approval);
+      },
+    },
     requireAuth: true,
     authenticator: roleAuth([role]),
   } as never);

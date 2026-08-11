@@ -20,7 +20,7 @@ import {
   declaredOriginFromIssue,
 } from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { assertDatasetConstitution, recordDatasetConstitution } from "../route-context.js";
+import { assertDatasetConstitution, publishDataset } from "../route-context.js";
 import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
@@ -166,8 +166,11 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             declaredOriginFromIssue(fromIssue, originNote),
           );
           const constitutional = assertDatasetConstitution(principal, result.data); // same door as the REST create
-          await recordDatasetConstitution(ctx.deps, principal, result.data, constitutional);
-          await datasets.register(ws, result.data, principal.subject, teamId, origin); // creator = subject (delete permission)
+          // Bytes + receipt + capability generation, as ONE publication (creator = subject, delete permission).
+          await publishDataset(ctx.deps, { ...principal, workspace: ws }, result.data, constitutional, {
+            ...(teamId ? { teamId } : {}),
+            origin,
+          });
           return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
@@ -226,8 +229,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             image_template ? { imageTemplate: image_template } : {},
           );
           const constitutional = assertDatasetConstitution(principal, dataset);
-          await recordDatasetConstitution(ctx.deps, principal, dataset, constitutional);
-          await datasets.register(ws, dataset, principal.subject);
+          await publishDataset(ctx.deps, { ...principal, workspace: ws }, dataset, constitutional);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
     );
@@ -275,8 +277,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             image_template ? { imageTemplate: image_template } : {},
           );
           const constitutional = assertDatasetConstitution(principal, dataset);
-          await recordDatasetConstitution(ctx.deps, principal, dataset, constitutional);
-          await datasets.register(ws, dataset, principal.subject);
+          await publishDataset(ctx.deps, { ...principal, workspace: ws }, dataset, constitutional);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
     );

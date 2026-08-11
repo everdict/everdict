@@ -1,4 +1,4 @@
-import type { CiLinkService, ConstitutionApprovalStore } from "@everdict/application-control";
+import type { CiLinkService, ConstitutionApprovalStore, ConstitutionalPublisher } from "@everdict/application-control";
 import type { WorkflowStateService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
@@ -93,6 +93,9 @@ export interface McpDeps {
   scorecardService?: ScorecardService;
   // The receipts constitutional declarations leave — the MCP twin of the attest route (BFF↔MCP parity).
   constitutionApprovals?: ConstitutionApprovalStore;
+  // Bytes + receipt as ONE commit. Absent = this deployment cannot publish a dataset that declares
+  // ground_truth authority, and says so rather than publishing it in two.
+  constitutionalPublisher?: ConstitutionalPublisher;
   driverOps?: DriverOpsService; // Driver ops surface v0 — describe/cancel the durable Temporal driver by ledger id
   approvalService?: ApprovalService; // durable agent approvals (A6) — list/decide
   usageMeter?: UsageMeter; // meter-only billing usage (get_usage)

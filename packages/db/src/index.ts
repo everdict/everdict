@@ -122,7 +122,7 @@ export {
   InMemoryAgentMemberPreferenceStore,
   PgAgentMemberPreferenceStore,
 } from "./workspace/agent-member-preference-store.js";
-export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
+export { type SqlClient, type PgPool, makePool, sqlClient, withTransaction } from "./client.js";
 export {
   type UsageRow,
   type UsageCost,

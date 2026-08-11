@@ -124,6 +124,7 @@ export type {
   ConstitutionApproval,
   ConstitutionApprovalMode,
   ConstitutionApprovalStore,
+  ConstitutionalPublisher,
 } from "./ports/constitution-approval-store.js";
 export { stagePromotionReport } from "./scorecard/stage-promotion-report.js";
 export type { ViewStore } from "./ports/view-store.js";

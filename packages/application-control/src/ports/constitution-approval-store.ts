@@ -29,3 +29,26 @@ export interface ConstitutionApprovalStore {
   // state to surface, not a default to pass.
   find(tenant: string, kind: "dataset", id: string, version: string): Promise<ConstitutionApproval | undefined>;
 }
+
+// PUBLISHING A CONSTITUTIONAL DATASET IS ONE ACT (arch-review 25 P0-2).
+//
+// The receipt and the dataset are two writes owned by two different adapters — the approval store and the
+// versioned registry — so no single statement can span them, and ordering them (receipt first) only moved the
+// window rather than closing it. What sits inside that window is a state the trust kernel has no vocabulary
+// for: bytes registered under a name whose recorded approval names DIFFERENT bytes, or a receipt authorising
+// a document that does not exist. The second is harmless; the first is a dataset that decides what passing
+// means while the artifact an admin signed is not the artifact that runs.
+//
+// So the boundary that owns both adapters — the composition root, the only layer that can see one connection
+// underneath two stores — publishes them together or not at all. A deployment that cannot transact cannot
+// publish a constitutional dataset: refusing is recoverable, and a half-published constitution is not.
+export interface ConstitutionalPublisher {
+  publish(input: {
+    tenant: string;
+    dataset: { id: string; version: string } & Record<string, unknown>;
+    approval: ConstitutionApproval;
+    createdBy?: string;
+    teamId?: string;
+    origin?: unknown;
+  }): Promise<void>;
+}

@@ -226,6 +226,7 @@ async function main(): Promise<void> {
     releaseStore,
     capabilityGenerationStore,
     constitutionApprovalStore,
+    constitutionalPublisher,
     productVersionStore,
     browserProfileStore,
     skillStore,
@@ -718,6 +719,7 @@ async function main(): Promise<void> {
     scoringStageStore,
     // Submit refuses a dataset whose graders declare ground_truth without a recorded approval (mig 0165).
     ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
+    ...(constitutionalPublisher ? { constitutionalPublisher } : {}),
     modelRegistry,
     envelopes: envelopeStore,
     trajectories: trajectoryStore,
@@ -731,6 +733,7 @@ async function main(): Promise<void> {
     metrics,
     settingsStore,
     ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
+    ...(constitutionalPublisher ? { constitutionalPublisher } : {}),
     datasetRegistry,
     harnessInstanceRegistry,
     judgeRegistry,

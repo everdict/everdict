@@ -42,8 +42,12 @@ export class PgWorkspaceSettingsStore implements WorkspaceSettingsStore {
   async set(workspace: string, patch: WorkspaceSettings): Promise<WorkspaceSettings> {
     // Atomic upsert via jsonb merge (||) — does not overwrite other settings keys.
     const contractual = Object.keys(patch).some((key) => EVALUATION_CONTRACT_KEYS.has(key)) ? 1 : 0;
+    // …and the ROW'S BIRTH is not a change either (arch-review 25 P2). Creating the settings row for a
+    // Mattermost channel used to jump the revision from "no row" to 1, which every in-flight ship read as
+    // "the judging apparatus moved". A workspace that has never touched an evaluation setting is at revision
+    // 0 whether or not a row exists for it — that is the same state, not two.
     const r = await this.client.query<{ settings: unknown }>(
-      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at, revision) VALUES ($1, $2::jsonb, now(), 1)
+      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at, revision) VALUES ($1, $2::jsonb, now(), $3::int)
        ON CONFLICT (workspace) DO UPDATE SET settings = everdict_workspace_settings.settings || $2::jsonb, updated_at = now(), revision = everdict_workspace_settings.revision + $3::int
        RETURNING settings`,
       [workspace, JSON.stringify(patch), contractual],
