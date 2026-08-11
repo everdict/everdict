@@ -80,5 +80,11 @@ if (dirty) {
   );
   process.exit(0);
 }
-writeFileSync(path.join(root, ".git", "everdict-ci-ok"), `${head}\n`);
+// The stamp lives in the REAL git directory, which is not `<root>/.git` in a linked worktree — there `.git`
+// is a FILE pointing at the shared repo, and writing through it fails with ENOTDIR after every check has
+// already passed. That matters because a clean worktree is exactly how this gate is run when the main tree
+// holds someone else's work in progress: the one arrangement that needs the stamp most was the one that
+// could not write it.
+const gitDir = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, encoding: "utf8" }).stdout.trim();
+writeFileSync(path.join(gitDir, "everdict-ci-ok"), `${head}\n`);
 console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} — safe to push.`);
