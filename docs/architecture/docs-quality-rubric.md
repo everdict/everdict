@@ -141,7 +141,34 @@ work (D7 as a system, D4 tabs) or a scaffolding tool (D3), plus the coverage tai
 | 2026-08-11 | R5 | 70.0 | 17.0 | Homepage and docs surface rebuilt. |
 | 2026-08-11 | R6 | 73.0 | 14.0 | When not to use it, and what it costs. |
 | 2026-08-11 | R7 | 77.0 | 10.0 | The operating loop; diagrams that survive CommonMark. |
-| 2026-08-11 | R8 | 80.0 | **7.0** | Runtime becomes the eighth concept; Temporal gets the page it never had. Found by the maintainer, not by the rubric — see below. |
+| 2026-08-11 | R8 | 78.0 | 9.0 | Runtime becomes the eighth concept; Temporal gets the page it never had. Found by the maintainer, not by the rubric — see below. *(First logged as 80.0. Recomputed from the anchors it was 78.0 — an optimistic score, corrected here rather than left standing.)* |
+| 2026-08-11 | R9 | 80.0 | **7.0** | The mention-without-a-page sweep, run as a measurement instead of a guess. |
+
+### R9 — the lesson, executed
+
+R8 ended by saying the next pass should measure **terms with a high mention count and no page**,
+because that is the shape of a gap a writer cannot see from inside. R9 ran it before writing anything:
+
+| Term | Mentions | Page |
+| --- | ---: | --- |
+| secret | 42 | none |
+| bundle | 23 | none |
+| browser | 13 | none |
+| budget | 8 | none |
+| release | 6 | none |
+| desktop app | 5 | none |
+
+`secret` was the largest gap in the entire guide and nothing had surfaced it — 42 mentions across 11
+pages, every one of them assuming the reader already knew where credentials live. It is also the most
+security-relevant page in the set: the asymmetry where model keys are injected into the job and cluster
+credentials are stripped from it was documented nowhere a user would look.
+
+Six pages followed. The measurement found in one command what four rounds of writing had missed, which
+is the argument for keeping it: `secret 42 / bundle 23` is not a judgement call, and neither is the
+absence of a file.
+
+D2 moves to 9 — coverage is now genuinely comprehensive rather than section-complete — and D5 to 8,
+since most pages now carry a "when not to" or a warning about a failure that is silent.
 
 ### What R8 exposed about the rubric
 

@@ -6,6 +6,7 @@ Four pages, in order. Twenty minutes to a verdict you can defend.
 - **[Quickstart](quickstart.md)** — the whole stack on your machine in one command
 - **[Your first scorecard](first-scorecard.md)** — clone a working evaluation, then make it yours
 - **[Bring your own agent](bring-your-agent.md)** — the on-ramp for your agent's shape
+- **[Bundles](bundles.md)** — a whole setup as one document
 - **[Connect an agent](connect-an-agent.md)** — hand the whole thing to Claude Code, CI, or any MCP client
 
 In a hurry? Two commands:

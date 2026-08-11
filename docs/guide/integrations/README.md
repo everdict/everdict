@@ -6,6 +6,7 @@ machine half.
 - **[MCP](mcp.md)** — the agent-facing surface, at parity with the HTTP API by construction
 - **[Claude Code plugin](claude-code-plugin.md)** — two commands: the tools *and* the domain context
 - **[Running Codex](codex.md)** — Codex as the agent under test, via a declarative harness
+- **[Desktop app](desktop-app.md)** — the shell that carries a runner on your machine
 
 One distinction worth getting straight before you read further. An agent can be **the driver** (it
 operates Everdict) or **the subject** (Everdict evaluates it). Claude Code can be either, and the two
