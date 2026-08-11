@@ -9,6 +9,7 @@ import {
   PgReleaseStore,
   PgScorecardStore,
 } from "@everdict/db";
+import { PgDatasetRegistry } from "@everdict/registry";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
@@ -389,6 +390,80 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
     await expect(
       service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  // ── arch-review 24 P0-2/P0-1: the token is a VECTOR, and it advances with the mutation ──────────────
+  //
+  // HISTORICAL TIME DOES NOT ESTABLISH MUTATION AUTHORITY, and neither does an aggregate over two clocks. A
+  // fence needs the generation of EVERY namespace that can answer the name, each compared on its own, and it
+  // needs that generation to move as part of the mutation rather than shortly after it.
+  describe("TRUST-130 — the capability fence is a per-namespace vector, advanced inside the mutation", () => {
+    it("a TENANT-side mutation refuses even while `_shared` sits at a higher number — two clocks, compared apart", async () => {
+      // Owner-first resolution means either namespace can change what `support-cases` answers, and the two
+      // counters advance independently. The fence used to read `max(generation)` across both, which is a
+      // PROJECTION of the pair rather than the pair: with `_shared` at 100 and the tenant at 3, a tenant
+      // mutation to 4 leaves the maximum at 100 — the decision reads 100 before, 100 after, and commits
+      // believing nothing moved. The failure direction is always "nothing changed", which is the one direction
+      // a fence must never guess in.
+      const { service, product, scorecards, releases } = await world();
+      await pg.client.query(
+        `INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
+       VALUES ('_shared','dataset','support-cases',100,now()), ('trust','dataset','support-cases',3,now())
+       ON CONFLICT (tenant, kind, id) DO UPDATE SET generation = excluded.generation`,
+      );
+      await scorecards.create(
+        seriesBatch(trustId("sc-vec"), product.id, "2026-08-10T00:00:00.000Z", [scored("a", true)]),
+      );
+      const release = await service.createRelease({
+        tenant: "trust",
+        createdBy: "captain",
+        productId: product.id,
+        name: "2026.20",
+      });
+      releases.onNextWrite(async () => {
+        await pg.client.query(
+          `UPDATE everdict_capability_generation SET generation = 4
+         WHERE tenant = 'trust' AND kind = 'dataset' AND id = 'support-cases'`,
+        );
+      });
+      await expect(
+        service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+
+    it("the REAL registry advances the fence in the same statement as the write it fences", async () => {
+      // The scenarios above move the generation by hand, which certifies the GUARD and says nothing about the
+      // producer. This one calls the production registration path end to end: a mutation path that forgot to
+      // advance the fence — or advanced it and swallowed the failure — commits here. That the bump now travels
+      // INSIDE the mutation's own statement is certified where the SQL is
+      // (`packages/registry/src/pg-versioned-store-invariants.test.ts`); what this adds is that the real
+      // registry, wired as the control plane wires it, moves the number at all.
+      const { service, product, scorecards, releases } = await world();
+      await scorecards.create(
+        seriesBatch(trustId("sc-reg"), product.id, "2026-08-10T00:00:00.000Z", [scored("a", true)]),
+      );
+      const release = await service.createRelease({
+        tenant: "trust",
+        createdBy: "captain",
+        productId: product.id,
+        name: "2026.21",
+      });
+      const registry = new PgDatasetRegistry(pg.client);
+      releases.onNextWrite(async () => {
+        await registry.register("trust", {
+          id: "support-cases",
+          version:
+            trustId("v")
+              .replace(/[^0-9a-z]/g, "")
+              .slice(0, 8) || "9.9.9",
+          cases: [],
+          tags: [],
+        } as never);
+      });
+      await expect(
+        service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
   });
 
   it("a workspace SETTINGS change refuses — the default judge model is contract identity, and it is a row", async () => {
