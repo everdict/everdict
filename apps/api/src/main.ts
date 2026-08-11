@@ -109,6 +109,7 @@ import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { WorkspacePulseService } from "./core/workspace/workspace-pulse-service.js";
+import { httpVerifierRunner } from "./infrastructure/agent/http-verifier-runner.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-session-provision.js";
@@ -808,6 +809,12 @@ async function main(): Promise<void> {
   const checkpointService = buildCheckpoint({
     handoffCheckpointStore,
     verificationDecisionStore,
+    // The verifier runtime, when there is an agent service to run one in. Without it the service refuses a
+    // verification request outright — "verification is a human act in this deployment" — which is the state a
+    // reader can act on, unlike a verdict nobody produced.
+    ...(approvalAgentUrl && approvalAgentToken
+      ? { verifier: httpVerifierRunner({ agentUrl: approvalAgentUrl, internalToken: approvalAgentToken }) }
+      : {}),
     runStore: store,
     scorecardStore,
     // issue + file are everdict-HELD records — resolvable, so "unverifiable" stays reserved for what we

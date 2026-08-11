@@ -30,6 +30,9 @@ export interface TurnOutcome {
   // envelope's only exhaustion vocabulary, and a halt with nothing left behind is the failure it exists to
   // prevent). Absent = the turn drained empty or died before the loop ran.
   stopReason?: string;
+  // What the turn SUBMITTED when its caller demanded a shape (`hooks.outputSchema`). Absent = the model never
+  // submitted one, which a caller must be able to tell from a submitted answer — so it is never defaulted.
+  structuredOutput?: unknown;
 }
 
 // The envelope this activation runs inside, minus the one part the activation cannot know. `scope` is the

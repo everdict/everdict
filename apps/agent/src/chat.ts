@@ -604,6 +604,10 @@ export interface ChatResult {
   // How the kernel loop ENDED. Carried out so a HOST that bound this turn to a task envelope can act on the
   // envelope's own halt ("budget_exhausted") — the loop stops, and someone outside it owes the handoff.
   stopReason?: string;
+  // What the turn SUBMITTED when the caller demanded a shape (`hooks.outputSchema`) — a verifier's verdict is
+  // the case this exists for. Absent = never submitted, which is a different fact from an answer and is never
+  // defaulted into one.
+  structuredOutput?: unknown;
 }
 
 // What a turn that died still knows about itself: the spans it recorded up to the failure (sealed with the
@@ -662,6 +666,11 @@ export interface ChatHooks {
     tool: string;
     outcome: "success" | "error";
   }) => void;
+  // The SHAPE this turn must answer in. Set by callers whose result is consumed by code rather than read by a
+  // person — a verifier's verdict is the case this exists for: prose would have to be parsed, and a parse
+  // that fails silently turns "the verifier could not decide" into "there is no verdict", which are different
+  // facts. The kernel refuses a submission that does not match, so what comes back has the named shape.
+  outputSchema?: Record<string, unknown>;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -1015,6 +1024,9 @@ export async function runChat(
   // How the loop ended, carried out of the try so the caller sees it. A host that bound this turn to a task
   // envelope acts on "budget_exhausted": the kernel halts, and the handoff is owed by whoever set the boundary.
   let turnStopReason: string | undefined;
+  // What the turn SUBMITTED, when the caller demanded a shape. Absent means the model never submitted one —
+  // which the caller must be able to tell apart from a submitted answer, so it is never defaulted here.
+  let turnStructuredOutput: unknown;
   // Declared at TURN scope: the recorder is built once the model is resolved (inside the block below) and
   // sealed after the loop returns, so both halves need to see the same binding.
   let spanRecorder: TurnSpanRecorder | undefined;
@@ -1251,6 +1263,7 @@ export async function runChat(
             }
           : {}),
         ...(hooks?.onResourceAccess ? { onResourceAccess: hooks.onResourceAccess } : {}),
+        ...(hooks?.outputSchema ? { outputSchema: hooks.outputSchema } : {}),
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
         ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
         ...(hooks?.onInterruptReady ? { onInterruptReady: hooks.onInterruptReady } : {}),
@@ -1273,6 +1286,7 @@ export async function runChat(
       // happened. The partial answer itself was already committed by the kernel; this is the line after it.
       // Best-effort: a store write must not turn a clean cancellation into a failure.
       turnStopReason = loopResult.stopReason;
+      turnStructuredOutput = loopResult.structuredOutput;
       if (loopResult.stopReason === "aborted" || loopResult.stopReason === "interrupted") {
         try {
           await persist({ role: "assistant", content: INTERRUPTED_BY_USER });
@@ -1404,5 +1418,6 @@ export async function runChat(
     ...(turnUsage ? { usage: turnUsage } : {}),
     ...(spans && spans.length > 0 ? { spans } : {}),
     ...(turnStopReason !== undefined ? { stopReason: turnStopReason } : {}),
+    ...(turnStructuredOutput !== undefined ? { structuredOutput: turnStructuredOutput } : {}),
   };
 }

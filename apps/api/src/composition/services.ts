@@ -1,5 +1,5 @@
 import { CiLinkService } from "@everdict/application-control";
-import type { GithubAppService } from "@everdict/application-control";
+import type { GithubAppService, VerifierRunner } from "@everdict/application-control";
 import { MattermostCommandService } from "@everdict/application-control";
 import type { TenantValueMap } from "@everdict/application-control";
 import { QueueService } from "@everdict/application-control";
@@ -257,9 +257,13 @@ export function buildCheckpoint(deps: {
   issueStore?: IssueStore;
   workspaceFs?: WorkspaceFs;
   events?: PlatformEventEmitter;
+  // The verifier RUNTIME (the protocol's third enforcement site). Absent = verification stays a human act,
+  // which is the honest state for a deployment with no agent service — never a silent auto-pass.
+  verifier?: VerifierRunner;
 }): CheckpointService {
   return new CheckpointService({
     store: deps.handoffCheckpointStore,
+    ...(deps.verifier ? { verifier: deps.verifier } : {}),
     // The tenant comparison is the resolver's own job: RunStore.get is keyed by id alone, and a checkpoint in
     // one workspace proving a "fact" with another workspace's run would be evidence its readers cannot see.
     // Every everdict-HELD record type gets a resolver (run/scorecard/issue/file) — "unverifiable" is a claim

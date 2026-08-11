@@ -67,6 +67,7 @@ export async function runTeammateTurn(
       ...(result.usage ? { usage: result.usage } : {}),
       ...(result.spans && result.spans.length > 0 ? { spans: result.spans } : {}),
       ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
+      ...(result.structuredOutput !== undefined ? { structuredOutput: result.structuredOutput } : {}),
     };
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);

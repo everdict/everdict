@@ -33,6 +33,7 @@ import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
 import type { AgentRunEventReport } from "./usage.js";
+import { runVerificationTurn } from "./verification-turn.js";
 import { buildWakeResumer } from "./wake-resume.js";
 
 export interface AgentServerDeps extends ChatDeps {
@@ -1331,6 +1332,15 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   // EXISTING session (durable (agent, eventId) dedup), so the workflow keeps watching instead of
   // double-running. 200 {sessionId} = watch it; 200 {skipped} = permanently not runnable (chain stops);
   // 503 = transiently busy (the activity retries later).
+  // The envelope is passed THROUGH, not rebuilt: it is produced by `verifierEnvelopeFor` on the control
+  // plane, where the evidence lives. A runner that assembled its own scope would put the guarantee in
+  // whichever implementation happened to be wired — the arrangement the protocol doc refused to write.
+  const verifySchema = z.object({
+    workspace: z.string().min(1),
+    actingAs: z.string().min(1),
+    question: z.string().min(1),
+    envelope: z.record(z.unknown()),
+  });
   const directActivationSchema = z.object({
     workspace: z.string().min(1),
     agentId: z.string().min(1),
@@ -1375,6 +1385,35 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
 
   // Acks 202 and runs the turn DETACHED (a HITL approval can park it for minutes — never a held request);
   // progress lands on the placeholder comment via the /internal/comment-activity bridge, not this response.
+  // THE VERIFIER RUNTIME (ownership protocol, third enforcement site). The control plane builds the
+  // evidence-only envelope and asks for a verdict; this runs one bounded turn inside it and reports what came
+  // back — including what the RUNTIME saw consumed, which is the half a model cannot be asked about itself.
+  //
+  // Synchronous on purpose, unlike an activation: a verification's whole product is its verdict, and a
+  // fire-and-forget spawn would leave the caller with a session id and no answer.
+  app.post("/internal/verify", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    const parsed = verifySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const result = await runVerificationTurn({ ...deps, persistentRetry: true } as never, deps.authenticate, {
+        workspace: parsed.data.workspace,
+        actingAs: parsed.data.actingAs,
+        envelope: parsed.data.envelope as never,
+        question: parsed.data.question,
+      });
+      return reply.send(result);
+    } catch (err) {
+      // A verification that could not RUN is not a verdict — the caller must be able to tell the two apart,
+      // so this is an error rather than an `inconclusive` the ledger would file as a judgment.
+      return reply
+        .code(503)
+        .send({ code: "UNAVAILABLE", message: err instanceof Error ? err.message : "verification failed" });
+    }
+  });
+
   app.post("/internal/discussion-turn", async (req, reply) => {
     const presented = req.headers["x-internal-token"];
     if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
