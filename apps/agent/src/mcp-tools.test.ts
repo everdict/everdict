@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { effectsRequireConsent } from "@everdict/contracts";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +12,7 @@ import {
   isBaseToolReadOnly,
   isDefaultBaseTool,
   makeInvoke,
+  mcpToolProvider,
   stdioEnv,
 } from "./mcp-tools.js";
 
@@ -347,5 +349,35 @@ describe("makeInvoke — resilient MCP invocation (reconnect through a dead sess
     const result = await invoke("get_run", { id: "nope" });
     expect(result).toEqual({ content: "no such run", isError: true });
     expect(connects).toBe(0);
+  });
+});
+
+// The DEPLOYMENT fault this file used to hide (live incident, 2026-08-11): the control plane's MCP door is
+// bearer-only, the deployment lost its authorization server, so every connect got a 401 — and the base-MCP catch
+// swallowed it. The agent then ran with zero platform tools, logged nothing, and looked like an agent that had
+// simply decided not to use them; the only evidence anywhere was one warn line on the control plane. A turn may
+// still degrade, but it must NAME the reason.
+describe("mcpToolProvider — a refused platform surface names its reason", () => {
+  it("reports the door's own HTTP status instead of degrading silently", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication." }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("expected a TCP address");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const url = `http://127.0.0.1:${address.port}/mcp`;
+      const session = await mcpToolProvider(url)({ tenant: "acme" });
+      expect(session.registry.list()).toEqual([]); // still degrades — the turn runs without platform tools
+      expect(session.platformToolsError).toContain(url); // …but says which door, and what it answered
+      expect(session.platformToolsError).toContain("HTTP 401"); // the status the SDK message omits
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("platform tools unavailable"));
+      await session.close();
+    } finally {
+      warn.mockRestore();
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
   });
 });

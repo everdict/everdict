@@ -68,6 +68,10 @@ export function buildEnvironmentSection(env: {
   taskDirectory?: string; // this conversation's own area on the workspace filesystem (tasks/<conversation-id>)
   webBaseUrl?: string;
   desktopDownloadUrl?: string;
+  // Set only when this turn's platform tools are MISSING, and then it says why (ToolSession.platformToolsError).
+  // The system prompt above promises tools covering the whole platform; when that promise cannot be kept, the turn
+  // has to say so, or the model answers from memory about a workspace it cannot actually read.
+  platformToolsError?: string;
 }): string {
   // Date renders DAY precision only (an ISO timestamp is sliced): the environment block sits in the system prompt,
   // and a millisecond timestamp makes every turn's system prompt byte-different — invalidating the provider's
@@ -79,6 +83,11 @@ export function buildEnvironmentSection(env: {
     `- Model: ${env.model}`,
     `- Date: ${env.date.slice(0, 10)}`,
   ];
+  if (env.platformToolsError !== undefined) {
+    lines.push(
+      `- ⚠️ Your Everdict platform tools are UNAVAILABLE this turn (${env.platformToolsError}). You cannot read or change anything in the workspace right now. Say that plainly when the member asks for platform data or an action — never answer from memory as though you had looked, and never claim a change was made. Report the reason above so it can be fixed.`,
+    );
+  }
   if (env.taskDirectory !== undefined) {
     lines.push(
       `- Task directory: ${env.taskDirectory} — this conversation's own area on the workspace filesystem. Write this task's outputs there; promote finished deliverables to the shared library (reports/ · data/ · artifacts/).`,

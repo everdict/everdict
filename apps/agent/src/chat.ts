@@ -1126,6 +1126,9 @@ export async function runChat(
       model: model.model,
       date: deps.now(),
       taskDirectory: `tasks/${sessionId}`, // per-task separation on the workspace filesystem
+      // A turn whose platform tools failed to load says so IN the prompt — the model must not answer as though it
+      // had read the workspace (see ToolSession.platformToolsError).
+      ...(tools.platformToolsError !== undefined ? { platformToolsError: tools.platformToolsError } : {}),
 
       ...(deps.webBaseUrl !== undefined ? { webBaseUrl: deps.webBaseUrl } : {}),
       ...(deps.desktopDownloadUrl !== undefined ? { desktopDownloadUrl: deps.desktopDownloadUrl } : {}),

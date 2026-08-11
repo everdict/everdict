@@ -145,6 +145,13 @@ export interface ToolSession {
   // Direct read-tool invocation for @-reference resolution (get_*) — always the BASE everdict client (its read tools
   // resolve workspace entities); null when no base MCP session is available.
   call: McpInvoke | null;
+  // WHY the platform surface is missing, when it is. A base-MCP failure degrades the turn (the agent answers from
+  // its own knowledge) — but degrading SILENTLY is what turned a one-line deployment fault into an unexplainable
+  // agent: the credential the control plane's MCP door requires was absent, every tool vanished, and the only
+  // evidence anywhere was one warn line on the CONTROL PLANE. Nothing on this side, nothing in the transcript, and
+  // an agent that looks like it simply chose not to use its tools. So the reason travels: into this field, into the
+  // agent's log, and into the turn's environment block so the model can SAY it instead of improvising an answer.
+  platformToolsError?: string;
   close: () => Promise<void>;
 }
 
@@ -246,6 +253,7 @@ export function mcpToolProvider(
     const boxes: McpClientBox[] = [];
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
+    let platformToolsError: string | undefined;
 
     // 1. Base everdict MCP — the whole catalog minus the runner protocol tools, forwarding the caller's bearer
     // (dogfooding the control plane's own tools). Mutations are bridged isReadOnly:false so each call is decided by
@@ -301,10 +309,22 @@ export function mcpToolProvider(
         // "can we promise this call touches nothing outside the evidence?" for someone else's tool.
         bridged.push(...withResourceTargets(baseDefs));
       } else {
+        // Connected, and the catalog came back EMPTY. Not the same failure as an unreachable door, and worth saying
+        // so: it means the surface answered with nothing this principal may call.
+        platformToolsError = `the control plane at ${baseUrl.href} listed no usable tools`;
         await baseClient.close().catch(() => {});
       }
-    } catch {
+    } catch (err) {
       // Degrade rather than fail: the agent answers from its own knowledge when the platform tools are unreachable.
+      // But NAME the reason — see ToolSession.platformToolsError. The STATUS is stated separately because the SDK's
+      // message does not carry it (`Error POSTing to endpoint: <body>`), and it is the one fact that tells an
+      // operator which fault this is: 401 = the door wants a credential nobody forwarded, 404 = wrong URL,
+      // 5xx = the control plane itself. `StreamableHTTPError.code` holds it; a transport-level failure has none.
+      const status = (err as { code?: unknown }).code;
+      platformToolsError = `could not reach the control plane's MCP at ${baseUrl.href}${
+        typeof status === "number" ? ` (HTTP ${status})` : ""
+      }: ${err instanceof Error ? err.message : String(err)}`;
+      console.warn(`▶ everdict-agent: platform tools unavailable — ${platformToolsError}`);
       await baseClient.close().catch(() => {});
     }
 
@@ -393,7 +413,10 @@ export function mcpToolProvider(
     // Adopted code capabilities → native `code__<name>` tools. buildCodeTools drops any adopted-from-others code the
     // runtime can't safely (isolatedly) run — never execute untrusted code on the host.
     const { defs: codeDefs } = buildCodeTools(codeTools, codeRuntime);
-    if (bridged.length === 0 && skillTools.length === 0 && codeDefs.length === 0) return EMPTY_SESSION;
+    // A toolless turn is the case that USED to be indistinguishable from a well-behaved agent choosing not to call
+    // anything — so the empty session carries the reason too.
+    if (bridged.length === 0 && skillTools.length === 0 && codeDefs.length === 0)
+      return platformToolsError !== undefined ? { ...EMPTY_SESSION, platformToolsError } : EMPTY_SESSION;
 
     const tools: ToolDefinition[] = [];
     if (bridged.length > 0) tools.push(buildToolSearchTool(new ToolRegistry(bridged)), ...bridged);
@@ -403,6 +426,7 @@ export function mcpToolProvider(
     return {
       registry,
       call: baseCall,
+      ...(platformToolsError !== undefined ? { platformToolsError } : {}),
       close: async () => {
         // Close through the boxes — a reconnect may have swapped the live client since connect time.
         for (const b of boxes) await b.current.close().catch(() => {});

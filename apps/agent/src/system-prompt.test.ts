@@ -58,4 +58,20 @@ describe("buildEnvironmentSection", () => {
     const bare = buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-07-27" });
     expect(bare).not.toContain("Task directory"); // sessionless callers (try/preview) get no task area
   });
+
+  // The prompt promises tools over the whole platform. When that promise cannot be kept, the turn has to say so —
+  // otherwise the model answers about a workspace it never read, which is the failure this line exists to prevent.
+  it("declares WHY the platform tools are missing when they are, and stays silent when they are not", () => {
+    const degraded = buildEnvironmentSection({
+      workspace: "acme",
+      model: "m1",
+      date: "2026-07-27",
+      platformToolsError: "could not reach the control plane's MCP at http://api:8787/mcp: HTTP 401",
+    });
+    expect(degraded).toContain("platform tools are UNAVAILABLE this turn");
+    expect(degraded).toContain("http://api:8787/mcp: HTTP 401"); // the reason travels verbatim, not a euphemism
+    expect(degraded).toContain("never claim a change was made");
+    const healthy = buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-07-27" });
+    expect(healthy).not.toContain("UNAVAILABLE");
+  });
 });
