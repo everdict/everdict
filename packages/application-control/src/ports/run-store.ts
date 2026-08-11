@@ -85,6 +85,16 @@ export interface RunUpdateGuard {
   // lands `succeeded` on top — so the ledger says a cancelled batch's child succeeded, and every aggregate
   // over it counts a result the user stopped.
   expectNonTerminal?: true;
+  // FIRST TERMINAL WRITE WINS FOR THE PAYLOAD TOO (arch-review 25 P1). `expectNonTerminal` fenced the STATUS
+  // race and left the other half open: the batch's write-back reflects each case's final result onto its child
+  // afterwards, unconditionally, so a case that was already past the point of no return when the user stopped
+  // the batch still landed a successful `result` on a row whose status says CANCELLED. Status and payload are
+  // one settlement; a row that carries both readings is not a smaller record, it is a self-contradicting one.
+  //
+  // Deliberately narrower than "any terminal row": a case that ran and FAILED still has a real result the
+  // write-back is supposed to reflect. What must not be overwritten is the settlement that says the work was
+  // abandoned.
+  expectNotCancelled?: true;
 }
 
 export interface RunStore extends AdmissionLedger {

@@ -6,7 +6,7 @@ import type {
   RunStore,
   RunUpdateGuard,
 } from "@everdict/application-control";
-import { type RunRecord, RunRecordSchema, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
+import { CANCELLED_ERROR_CODE, type RunRecord, RunRecordSchema, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
@@ -213,6 +213,11 @@ export class PgRunStore implements RunStore {
     if (guard?.expectNonTerminal === true) {
       vals.push([...TERMINAL_RUN_STATUSES]);
       fenceSql += ` AND status <> ALL($${vals.length}::text[])`;
+    }
+    // …and the payload half of the same rule: a cancelled settlement is never overwritten by a late result.
+    if (guard?.expectNotCancelled === true) {
+      vals.push(CANCELLED_ERROR_CODE);
+      fenceSql += ` AND (error->>'code' IS DISTINCT FROM $${vals.length})`;
     }
     const fence = guard?.scoring;
     if (fence) {

@@ -1217,7 +1217,10 @@ export class ScorecardBatchService {
           // best-effort — a recording failure never affects the scorecard
         }
       }
-      await store.update(childId, { result: r, updatedAt: this.now() });
+      // The payload half of "first terminal write wins" (arch-review 25 P1). A case already past the point of
+      // no return when the batch was stopped still comes back with a result; writing it onto the cancelled
+      // child produced a row saying `status: cancelled` and `result: success` at the same time.
+      await store.update(childId, { result: r, updatedAt: this.now() }, undefined, { expectNotCancelled: true });
     }
   }
 

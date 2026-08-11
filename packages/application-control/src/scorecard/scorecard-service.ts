@@ -17,7 +17,7 @@ import {
   type ScorecardRecord,
   isConstitutionalMetric,
 } from "@everdict/contracts";
-import { JudgeIdSchema } from "@everdict/contracts";
+import { CANCELLED_ERROR_CODE, JudgeIdSchema } from "@everdict/contracts";
 import {
   type AnalysisConfig,
   type AnalysisResult,
@@ -1093,7 +1093,14 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     let hydrated = record;
     if (!record.scorecard && record.runIds?.length && this.deps.runStore) {
       const children = await this.deps.runStore.list(record.tenant, { scorecardId: id });
-      const results = children.map((c) => c.result).filter((r): r is CaseResult => r !== undefined);
+      // A CANCELLED child's payload is not this batch's evidence (arch-review 25 P1). The write-back can no
+      // longer land a result on such a row, and this is the reading half of the same rule: a result that
+      // arrived before the fence existed — or one written by an older deploy — must not be counted as a case
+      // this batch measured. The user stopped the work; the ledger says so, and the aggregate agrees with it.
+      const results = children
+        .filter((c) => c.error?.code !== CANCELLED_ERROR_CODE)
+        .map((c) => c.result)
+        .filter((r): r is CaseResult => r !== undefined);
       if (results.length > 0) {
         const harness = `${record.harness.id}@${record.harness.version}`;
         hydrated = { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };

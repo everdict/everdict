@@ -16,6 +16,13 @@ export type RunStatus = z.infer<typeof RunStatusSchema>;
 // One list, two enforcement sites, no chance of them drifting into two different definitions of "done".
 export const TERMINAL_RUN_STATUSES = ["succeeded", "failed", "suspended"] as const satisfies readonly RunStatus[];
 
+// THE SETTLEMENT THAT ABANDONS THE WORK. A run settled with this code stopped because somebody decided it
+// should, which is a different fact from "it ran and failed" — and it is the one settlement whose PAYLOAD must
+// never be overwritten by a late result. A dispatch already past the point of no return when the user hit stop
+// still comes back; writing its CaseResult onto the cancelled row produces `status: cancelled, result:
+// success`, a row that contradicts itself and that every aggregate over the batch then counts.
+export const CANCELLED_ERROR_CODE = "CANCELLED";
+
 export const RunErrorSchema = z.object({ code: z.string(), message: z.string() });
 
 // ─── The universal-run shape (execution-model.md P0) ────────────────────────────────────────────────────────

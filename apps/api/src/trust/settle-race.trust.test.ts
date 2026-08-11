@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PgRunStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
@@ -97,6 +98,77 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-135 — a cancel racing a completion s
     expect(row?.status).toBe(cancelled.won ? "failed" : "succeeded");
     if (cancelled.won) expect(row?.error?.code).toBe("CANCELLED");
     else expect(row?.error).toBeNull();
+  }, 60_000);
+
+  // arch-review 25 P1: STATUS FENCED IS NOT PAYLOAD FENCED. The status race above is only half the
+  // settlement — the batch's write-back reflects each case's final result onto its child afterwards, and it
+  // did so unconditionally. A case already past the point of no return when the user stopped the batch still
+  // came back, and its successful CaseResult landed on a row whose status says CANCELLED: one record making
+  // two incompatible claims, with every aggregate over the batch counting the optimistic one.
+  it("a cancelled child refuses a late RESULT, not just a late status", async () => {
+    const runId = trustId("run-payload");
+    await seedRunning(runId);
+    const runs = new PgRunStore(pg.client);
+    // The user's cancel settles the child…
+    await runs.update(
+      runId,
+      { status: "failed", error: { code: "CANCELLED", message: "stopped" }, updatedAt: new Date().toISOString() },
+      undefined,
+      { expectNonTerminal: true },
+    );
+    // …and the case that was already in flight comes back with a real, successful result.
+    const late = await runs.update(
+      runId,
+      {
+        result: {
+          caseId: "c-1",
+          harness: "h@1",
+          trace: [],
+          scores: [],
+          snapshot: { kind: "prompt", output: "done" },
+        } as never,
+      },
+      undefined,
+      { expectNotCancelled: true },
+    );
+    expect(late).toBeUndefined();
+    const { rows } = await pg.client.query<{ status: string; result: unknown }>(
+      "SELECT status, result FROM everdict_runs WHERE id = $1",
+      [runId],
+    );
+    expect(rows[0]?.status).toBe("failed");
+    // No payload at all — the row says one thing about what happened, not two.
+    expect(rows[0]?.result).toBeNull();
+  }, 60_000);
+
+  it("…and a child that ran and FAILED still takes its result — the rule is narrow on purpose", async () => {
+    // A case that genuinely failed has a real result the write-back is supposed to reflect. Fencing every
+    // terminal row would have thrown that away, which is why the condition names the settlement that
+    // ABANDONED the work rather than terminality in general.
+    const runId = trustId("run-failed");
+    await seedRunning(runId);
+    const runs = new PgRunStore(pg.client);
+    await runs.update(
+      runId,
+      { status: "failed", error: { code: "HARNESS_RUN_FAILED", message: "the agent crashed" } },
+      undefined,
+      { expectNonTerminal: true },
+    );
+    const written = await runs.update(
+      runId,
+      {
+        result: {
+          caseId: "c-1",
+          harness: "h@1",
+          trace: [],
+          scores: [],
+          snapshot: { kind: "prompt", output: "crashed" },
+        } as never,
+      },
+      undefined,
+      { expectNotCancelled: true },
+    );
+    expect(written).toBeDefined();
   }, 60_000);
 
   it("a writer arriving after the settle is refused — a late drain cannot rewrite a cancelled child", async () => {

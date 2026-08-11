@@ -1,4 +1,4 @@
-import type { RunRecord } from "@everdict/contracts";
+import { CANCELLED_ERROR_CODE, type RunRecord } from "@everdict/contracts";
 import { canReadRun, isRunTerminal, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
 
 // On read, fills the DERIVED usage from the run's result trace (no stored column → it always matches the
@@ -82,6 +82,7 @@ export class InMemoryRunStore implements RunStore {
     // …and the settled row refuses a second outcome, exactly as the SQL condition refuses it. A dev store that
     // allowed the overwrite would make the in-memory path the one place "first terminal write wins" is false.
     if (guard?.expectNonTerminal === true && isRunTerminal(cur)) return undefined;
+    if (guard?.expectNotCancelled === true && cur.error?.code === CANCELLED_ERROR_CODE) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.runs.set(id, next);
     await this.appendEvents(events);
