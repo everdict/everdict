@@ -83,8 +83,18 @@ if (dirty) {
 // The stamp lives in the REAL git directory, which is not `<root>/.git` in a linked worktree — there `.git`
 // is a FILE pointing at the shared repo, and writing through it fails with ENOTDIR after every check has
 // already passed. That matters because a clean worktree is exactly how this gate is run when the main tree
-// holds someone else's work in progress: the one arrangement that needs the stamp most was the one that
+// holds another session's work in progress: the one arrangement that needs the stamp most was the one that
 // could not write it.
+//
+// It is written to the worktree's own git dir AND to the COMMON one (the main tree's `.git`, identical to the
+// first outside a worktree). The stamp attests a fact about the SHA — "this commit passed the full gate on a
+// clean tree" — not about which checkout ran it, and the pre-push hook reads the common location. Keeping it
+// worktree-local would mean validating a commit and then being refused permission to push the very commit
+// that was validated.
 const gitDir = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, encoding: "utf8" }).stdout.trim();
-writeFileSync(path.join(gitDir, "everdict-ci-ok"), `${head}\n`);
+const commonDir = path.resolve(
+  gitDir,
+  spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+);
+for (const dir of new Set([gitDir, commonDir])) writeFileSync(path.join(dir, "everdict-ci-ok"), `${head}\n`);
 console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} — safe to push.`);
