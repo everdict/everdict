@@ -155,15 +155,22 @@ half the other missed, and both looked handled.
 
 | TRUST-127 | **A real process boundary** (real Postgres + the BUILT control plane as a child process): a booting control plane settles the batch owned by a replica that stopped heartbeating and leaves the live replica's alone. TRUST-09 certifies the recovery DECISION given a heartbeat set; only a booting process can certify that the composition root hands it the right one — and a boot that reclaims everything is as wrong as one that reclaims nothing. A missing build FAILS this scenario rather than skipping it | `apps/api/src/trust/process-boundary.trust.test.ts` |
 
+| TRUST-31 | **A role-bound verifier cannot acquire write capability**: the evidence-only envelope a verification activation runs inside — reads drawn from the cited evidence's own tools (never `all`), an EMPTY write list, and the objects whitelisted to exactly the refs the checkpoint stands on. Certified against the real kernel guards, which existed and were enforced for several generations with nothing that BUILT such an envelope: the guarantee had all of its enforcement and no producer | `packages/domain/src/ownership/verifier-envelope.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
 
-TRUST-31 — *a role-bound verifier activation keeps its evidence-only scope down to the kernel and cannot
-acquire write capability* — awaits the verifier RUNTIME (no path spawns one; see
-`docs/architecture/ownership-protocol.md`). The decisions that spawn must call are already certified:
-`assertEnvelopeForRole` bounds the scope, TRUST-14 certifies the kernel honors it, TRUST-32 certifies the
-completion side. The number is reserved so the claim lands under its own name when the runtime does.
+TRUST-31 is CLAIMED (above). What it waited on for several generations was not enforcement — the kernel
+guards were there and honored on every call — but a PRODUCER: nothing built an evidence-only envelope for
+them to enforce, so the guarantee was a sentence about a shape no code could make. `verifierEnvelope` is that
+producer, and the scenario drives the real kernel functions rather than restating them.
+
+What remains beside it is the SPAWN SITE — who activates a verifier, and when. The decision recorded in
+`docs/architecture/ownership-protocol.md` is that a handoff does not wake one automatically: `checkpoint.created`
+is deliberately not trigger-matchable (an agent waking on another agent's handoff is the runaway vector the
+`agent.run.*` family is excluded for), so the request is a judgment a LEAD makes about work it delegated, not
+an ambient reaction. The envelope above is what that request hands to the activation.
 
 Plus the pre-existing live scenario test the nightly can now satisfy:
 

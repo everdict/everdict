@@ -5,6 +5,11 @@
 
 // scorecard — verdict authority + pass@k trials + diff/z-test + leaderboard/trend/models (from @everdict/suite)
 export {
+  type VerifierEnvelopeInput,
+  checkpointEvidence,
+  verifierEnvelope,
+} from "./ownership/verifier-envelope.js";
+export {
   type CaseDelta,
   type CaseTransition,
   caseVerdict,
