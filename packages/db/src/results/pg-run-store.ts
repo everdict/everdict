@@ -3,10 +3,10 @@ import type {
   LiveSessionRow,
   OutboxEvent,
   RunListOptions,
-  RunScoringFence,
   RunStore,
+  RunUpdateGuard,
 } from "@everdict/application-control";
-import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
+import { type RunRecord, RunRecordSchema, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
@@ -153,7 +153,7 @@ export class PgRunStore implements RunStore {
     id: string,
     patch: Partial<RunRecord>,
     events?: OutboxEvent[],
-    fence?: RunScoringFence,
+    guard?: RunUpdateGuard,
   ): Promise<RunRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/result/error/runtime/updatedAt).
     const sets: string[] = [];
@@ -207,14 +207,22 @@ export class PgRunStore implements RunStore {
     // service instead would leave exactly the window it exists to close (the winner settles and clears the
     // marker between the check and the write), so a superseded writer would still land on a settled plane.
     let fenceSql = "";
+    // FIRST TERMINAL WRITE WINS, in the WHERE clause. The service still reads the row to BUILD the patch —
+    // a settle is computed from the current record — but whether the row is still open to being settled is
+    // decided by the database, at the instant of the write, because the competing writer is another process.
+    if (guard?.expectNonTerminal === true) {
+      vals.push([...TERMINAL_RUN_STATUSES]);
+      fenceSql += ` AND status <> ALL($${vals.length}::text[])`;
+    }
+    const fence = guard?.scoring;
     if (fence) {
-      const scorecardIdx = i + 1;
-      const passIdx = i + 2;
+      const scorecardIdx = vals.length + 1;
+      const passIdx = vals.length + 2;
       // …and the marker must still be LIVE, not merely still be this pass (arch-review 17 P0-3). A pass whose
       // workflow died terminally has its marker flipped to `failed` and its stage collected, and the comment
       // on that path says it "will never write again" — this is what enforces the sentence. Without it a late
       // activity of a dead pass still cleared every guard and wrote its judgment onto the child.
-      fenceSql = ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx} AND s.scoring_pass->>'status' = 'running')`;
+      fenceSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx} AND s.scoring_pass->>'status' = 'running')`;
       vals.push(fence.scorecardId, fence.passId);
     }
     if (events && events.length > 0) {

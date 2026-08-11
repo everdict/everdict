@@ -1158,7 +1158,12 @@ export class ScorecardBatchService {
     if (!store) return;
     const current = await store.get(childId);
     if (!current || Run.from(current).isTerminal()) return;
-    await store.update(childId, settle(current));
+    // …and the CONDITION travels with the write (Tier B, the cancel/completion race). The read above builds
+    // the patch and answers "is there anything to do"; it cannot answer "is this row still open", because the
+    // other writer is in another process — a user's cancel in the control plane against a case drain landing
+    // from a worker. Read-check-write made the LAST write win, which is the exact inverse of the rule this
+    // method is named after.
+    await store.update(childId, settle(current), undefined, { expectNonTerminal: true });
   }
 
   private async markChildRunning(childId: string): Promise<void> {

@@ -71,6 +71,22 @@ export interface RunScoringFence {
   passId: string; // the pass claiming the right to write — must still be the marker's owner
 }
 
+// THE CONDITIONS A RUN WRITE COMMITS UNDER. Both are storage-layer for the same reason: a service that reads
+// the row, decides, and then writes has left a window open between the two, and the writers this guards
+// against are in ANOTHER PROCESS — a cancel in the control plane against a case drain landing from a worker.
+export interface RunUpdateGuard {
+  // Commit only while the named scoring pass still owns the parent scorecard's marker.
+  scoring?: RunScoringFence;
+  // FIRST TERMINAL WRITE WINS — as a condition on the write rather than a sentence in a comment.
+  //
+  // `settleChild` read the row, checked `isTerminal()`, and wrote. Across two processes that is a TOCTOU with
+  // the outcome inverted: both read a running child, both write, and the LAST write wins. A user cancels a
+  // batch, the child settles `failed{CANCELLED}`, and a case that was already past the point of no return
+  // lands `succeeded` on top — so the ledger says a cancelled batch's child succeeded, and every aggregate
+  // over it counts a result the user stopped.
+  expectNonTerminal?: true;
+}
+
 export interface RunStore extends AdmissionLedger {
   create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
   // `fence`: commit ONLY while the named scoring pass still owns the parent scorecard's marker. A miss
@@ -79,7 +95,7 @@ export interface RunStore extends AdmissionLedger {
     id: string,
     patch: Partial<RunRecord>,
     events?: OutboxEvent[],
-    fence?: RunScoringFence,
+    guard?: RunUpdateGuard,
   ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;

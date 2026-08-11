@@ -1,4 +1,4 @@
-import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
+import { type CaseResult, ConflictError, type EvalCase, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
 import type { DomainFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
 import { settleAgentTransition } from "./agent-run.js";
 import { settleCommandTransition } from "./command-run.js";
@@ -125,7 +125,7 @@ export function canReadRun(
 
 // ── Shared transition guards (free functions so the per-kind transition modules stand on the SAME rules) ──
 export function isRunTerminal(record: Pick<RunRecord, "status">): boolean {
-  return record.status === "succeeded" || record.status === "failed" || record.status === "suspended";
+  return (TERMINAL_RUN_STATUSES as readonly string[]).includes(record.status);
 }
 
 export function assertRunNotTerminal(record: Pick<RunRecord, "id" | "status">, transition: string): void {

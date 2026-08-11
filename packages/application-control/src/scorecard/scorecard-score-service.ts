@@ -1169,7 +1169,7 @@ export class ScorecardScoreService {
         child.id,
         { result: { ...child.result, scores: nextScores }, updatedAt: this.now() },
         undefined,
-        fence,
+        fence ? { scoring: fence } : undefined,
       );
       // A fenced miss means this pass was superseded MID-WRITE. Stop immediately: continuing would scatter
       // half of a dead pass's judgments across a plane another pass is certifying.

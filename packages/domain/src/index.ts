@@ -168,6 +168,7 @@ export {
 export {
   attachChannelsFor,
   canReadRun,
+  isRunTerminal,
   type NewQueuedRunInput,
   PERSONAL_RUN_KINDS,
   Run,

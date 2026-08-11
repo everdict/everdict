@@ -10,6 +10,12 @@ import { RunUsageSummarySchema } from "../execution/trace.js";
 export const RunStatusSchema = z.enum(["queued", "running", "suspended", "succeeded", "failed"]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
+// SETTLED — the statuses whose outcome nothing may rewrite ("first terminal write wins"). Here rather than in
+// the domain guard that reads it, because the STORE has to state the same rule in SQL: the guard runs in a
+// process, and two processes racing to settle one run is exactly the case a process-local check cannot decide.
+// One list, two enforcement sites, no chance of them drifting into two different definitions of "done".
+export const TERMINAL_RUN_STATUSES = ["succeeded", "failed", "suspended"] as const satisfies readonly RunStatus[];
+
 export const RunErrorSchema = z.object({ code: z.string(), message: z.string() });
 
 // ─── The universal-run shape (execution-model.md P0) ────────────────────────────────────────────────────────

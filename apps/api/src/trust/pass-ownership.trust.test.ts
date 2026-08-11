@@ -120,7 +120,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-42 — a scoring pass owns the plane (
       childId,
       { result: { ...result, scores: [{ graderId: "g", metric: "m", value: 1 }] } } as Partial<RunRecord>,
       undefined,
-      { scorecardId: id, passId: "A" },
+      { scoring: { scorecardId: id, passId: "A" } },
     );
     expect(owned).toBeDefined();
 
@@ -131,7 +131,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-42 — a scoring pass owns the plane (
       childId,
       { result: { ...result, scores: [{ graderId: "g", metric: "m", value: 0 }] } } as Partial<RunRecord>,
       undefined,
-      { scorecardId: id, passId: "A" },
+      { scoring: { scorecardId: id, passId: "A" } },
     );
     expect(superseded).toBeUndefined();
 
@@ -142,7 +142,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-42 — a scoring pass owns the plane (
       childId,
       { result: { ...result, scores: [{ graderId: "g", metric: "m", value: 0 }] } } as Partial<RunRecord>,
       undefined,
-      { scorecardId: id, passId: "A" },
+      { scoring: { scorecardId: id, passId: "A" } },
     );
     expect(afterSettle).toBeUndefined();
     expect(firstValue(await runs.get(childId))).toBe(1); // the winner's judgment, untouched
@@ -383,7 +383,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-82/83 — a failed pass may not write 
         },
       } as unknown as Partial<RunRecord>,
       undefined,
-      { scorecardId: id, passId },
+      { scoring: { scorecardId: id, passId } },
     );
     expect(written).toBeUndefined();
     // The plane is exactly as the live pass left it.

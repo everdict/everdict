@@ -1,5 +1,5 @@
 import type { RunRecord } from "@everdict/contracts";
-import { canReadRun, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
+import { canReadRun, isRunTerminal, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
 
 // On read, fills the DERIVED usage from the run's result trace (no stored column → it always matches the
 // result, and needs no migration). The VERDICT is deliberately NOT derived here: which policy judged a
@@ -18,8 +18,8 @@ import type {
   OutboxEvent,
   PlatformEventStore,
   RunListOptions,
-  RunScoringFence,
   RunStore,
+  RunUpdateGuard,
 } from "@everdict/application-control";
 
 // Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
@@ -70,14 +70,18 @@ export class InMemoryRunStore implements RunStore {
     id: string,
     patch: Partial<RunRecord>,
     events?: OutboxEvent[],
-    fence?: RunScoringFence,
+    guard?: RunUpdateGuard,
   ): Promise<RunRecord | undefined> {
     const cur = this.runs.get(id);
     if (!cur) return undefined;
     // Superseded writer → refused, exactly as the Pg cross-row condition refuses it. Without an owner
     // resolver the fence cannot be evaluated, and a fence that cannot be evaluated must REFUSE: silently
     // allowing the write would make the dev store the one place the invariant does not hold.
+    const fence = guard?.scoring;
     if (this.scoringPassOwner && fence && this.scoringPassOwner(fence.scorecardId) !== fence.passId) return undefined;
+    // …and the settled row refuses a second outcome, exactly as the SQL condition refuses it. A dev store that
+    // allowed the overwrite would make the in-memory path the one place "first terminal write wins" is false.
+    if (guard?.expectNonTerminal === true && isRunTerminal(cur)) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.runs.set(id, next);
     await this.appendEvents(events);

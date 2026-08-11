@@ -69,6 +69,7 @@ export type {
   OutboxEvent,
   RunListOptions,
   RunScoringFence,
+  RunUpdateGuard,
   RunStore,
 } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
