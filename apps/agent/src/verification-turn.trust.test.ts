@@ -1,6 +1,7 @@
 import { ToolRegistry } from "@everdict/agent-runtime";
 import type { ToolDefinition } from "@everdict/agent-runtime";
 import { InMemoryAgentSessionStore } from "@everdict/db";
+import { verificationClaimFor } from "@everdict/domain";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
 import type { ChatDeps } from "./chat.js";
@@ -72,6 +73,26 @@ async function world(transport: LlmTransport) {
   return { deps, authenticate: authenticate as never };
 }
 
+// The claim the verifier is shown — built by the same producer the control plane uses, so the digest this
+// turn echoes is the digest the caller will compare against.
+const claim = verificationClaimFor({
+  id: "cp-1",
+  goal: "fix the empty-trace grader",
+  currentState: "fixed",
+  confirmedFacts: [
+    { statement: "the grader no longer throws on an empty trace", refs: [{ type: "run", id: "run-42" }] },
+  ],
+  hypotheses: [],
+  actionsTaken: [],
+  openDecisions: [],
+  remainingTasks: [],
+  requiredCapabilities: [],
+  risks: [],
+  validationPlan: "re-run the case",
+  createdAt: "2026-08-11T00:00:00.000Z",
+  createdBy: "agent:fixer:conv-1",
+});
+
 const envelope = {
   id: "env-v",
   goal: "verify cp-1",
@@ -111,12 +132,18 @@ describeTrust("TRUST-129 — a verification turn reports the submission and the 
       actingAs: "verifier",
       envelope,
       question: "does the evidence support the claim?",
+      claim,
     });
     // The answer came from the submission — not from prose a parser had to guess at.
     expect(result.verdict).toBe("refuted");
     expect(result.detail).toContain("never applied");
     // …and the coverage is the RUNTIME's account of what was consumed.
-    expect(result.reviewedResources).toEqual([{ type: "run", id: "run-42" }]);
+    // …with the TOOL that did the reading, because the caller's coverage rule is per-reader: a trajectory
+    // read addresses the same run and is not evidence about the artifact.
+    expect(result.reviewedResources).toEqual([{ type: "run", id: "run-42", tool: "get_run" }]);
+    // The claim crossed the boundary intact — the echo is recomputed here from what arrived, and the caller
+    // refuses an affirmative when it differs from what it sent.
+    expect(result.claimDigest).toBe(claim.digest);
     expect(result.failedResources).toEqual([]);
   });
 
@@ -129,6 +156,7 @@ describeTrust("TRUST-129 — a verification turn reports the submission and the 
       actingAs: "verifier",
       envelope,
       question: "does the evidence support the claim?",
+      claim,
     });
     expect(result.verdict).toBe("inconclusive");
     expect(result.detail).toContain("without submitting");

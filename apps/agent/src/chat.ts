@@ -671,6 +671,19 @@ export interface ChatHooks {
   // that fails silently turns "the verifier could not decide" into "there is no verdict", which are different
   // facts. The kernel refuses a submission that does not match, so what comes back has the named shape.
   outputSchema?: Record<string, unknown>;
+  // WHAT AMBIENT CONTEXT THIS TURN MAY BE GIVEN, beyond what it asks for (arch-review 24 P0-5).
+  //
+  //   default        — the assistant posture: workspace memory rides every turn, references auto-recall the
+  //                    knowledge around them, touched files report who revised them since.
+  //   evidence_only  — none of it. The turn sees its prompt and whatever it reaches for through the tools its
+  //                    envelope allows, and nothing the host thought would be helpful.
+  //
+  // The verifier is why this exists. Its envelope pins `scope.resources` to the evidence precisely so it
+  // cannot reach the executor's context — and the compose point was prepending the workspace's own memory
+  // index, which is where an executor agent writes what it concluded about the work now under review. The
+  // separation was enforced on the pull side and open on the push side, so a verifier could read the
+  // executor's account of the work without ever calling a tool.
+  contextPolicy?: "default" | "evidence_only";
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -1042,11 +1055,13 @@ export async function runChat(
     }
     // Workspace auto-memory: the memory/ index rides EVERY turn (one best-effort fs read) — unlike knowledge
     // recall it is not gated on references, because memory is exactly the context a plain question can't anchor.
-    if (tools.call) {
+    // `evidence_only` turns it off: see `contextPolicy`.
+    const ambientContext = hooks?.contextPolicy !== "evidence_only";
+    if (tools.call && ambientContext) {
       const memory = await workspaceMemoryPreamble(tools.call, Date.now(), memberMemoryDirectoryFor(principal.subject));
       if (memory) preambles.push(memory);
     }
-    if (references && references.length > 0 && tools.call) {
+    if (references && references.length > 0 && tools.call && ambientContext) {
       preambles.push(await resolveReferences(tools.call, references));
       // Auto-recall: what the workspace already knows about those anchors rides along (best-effort, one call).
       const recalled = await recallKnowledge(tools.call, references);
@@ -1054,7 +1069,7 @@ export async function runChat(
     }
     // Stale-file reminders: files this conversation touched that someone ELSE has revised since (zero ledger
     // calls when the conversation never touched a file).
-    if (tools.call) {
+    if (tools.call && ambientContext) {
       const stale = await staleFileReminder(tools.call, existing, sessionId);
       if (stale) preambles.push(stale);
     }

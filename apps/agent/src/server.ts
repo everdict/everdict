@@ -8,6 +8,7 @@ import {
   AgentReferenceSchema,
   AppError,
   CodeToolSpecSchema,
+  TaskEnvelopeSchema,
 } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -1335,11 +1336,30 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   // The envelope is passed THROUGH, not rebuilt: it is produced by `verifierEnvelopeFor` on the control
   // plane, where the evidence lives. A runner that assembled its own scope would put the guarantee in
   // whichever implementation happened to be wired — the arrangement the protocol doc refused to write.
+  // THE WIRE IS A BOUNDARY, and the envelope is the boundary's whole point (arch-review 24 P1). Accepting it
+  // as an opaque record and casting it into the turn meant every structural guarantee the caller built —
+  // writes empty, resources pinned to the evidence, role verifier — was a property of the SENDER, re-asserted
+  // nowhere. An envelope arriving with `reads: "all"` and no resources would have run as a verification.
   const verifySchema = z.object({
     workspace: z.string().min(1),
     actingAs: z.string().min(1),
     question: z.string().min(1),
-    envelope: z.record(z.unknown()),
+    envelope: TaskEnvelopeSchema,
+    // The claim under review, carried verbatim so the verifier can be shown WHAT is asserted and not only the
+    // artifacts. Its digest is echoed back and compared by the caller.
+    claim: z.object({
+      subject: z.object({ type: z.literal("checkpoint"), id: z.string().min(1) }),
+      goal: z.string().min(1),
+      statements: z
+        .array(
+          z.object({
+            statement: z.string().min(1),
+            refs: z.array(z.object({ type: z.string().min(1), id: z.string().min(1) })),
+          }),
+        )
+        .min(1),
+      digest: z.string().min(1),
+    }),
   });
   const directActivationSchema = z.object({
     workspace: z.string().min(1),
@@ -1397,12 +1417,29 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
     const parsed = verifySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    // …and the SHAPE is not enough: a well-formed envelope can still describe something that is not a
+    // verification. These four refusals are the separation itself, checked where the bytes arrive rather than
+    // trusted from where they were built.
+    const envelope = parsed.data.envelope;
+    const violation =
+      envelope.role !== "verifier"
+        ? "an envelope that is not role 'verifier' is not a verification"
+        : envelope.scope.writes.length > 0
+          ? "a verifier that can write is an actor, not a verifier"
+          : envelope.scope.reads === "all"
+            ? "a verifier reading the whole workspace is reviewing the executor's context, not its artifact"
+            : (envelope.scope.resources ?? []).length === 0
+              ? "a verifier with no pinned resources has nothing it is allowed to look at"
+              : undefined;
+    if (violation)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: `refusing this verification: ${violation}.` });
     try {
       const result = await runVerificationTurn({ ...deps, persistentRetry: true } as never, deps.authenticate, {
         workspace: parsed.data.workspace,
         actingAs: parsed.data.actingAs,
-        envelope: parsed.data.envelope as never,
+        envelope,
         question: parsed.data.question,
+        claim: parsed.data.claim,
       });
       return reply.send(result);
     } catch (err) {

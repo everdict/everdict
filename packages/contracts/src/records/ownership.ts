@@ -253,6 +253,19 @@ export const VerificationDecisionSchema = z.object({
   verifier: ActorRefSchema,
   verdict: z.enum(["verified", "refuted", "inconclusive"]),
   detail: z.string().min(1),
+  // WHAT WAS CLAIMED, and the digest of the text the verifier was actually shown (arch-review 24 P0-3). A
+  // decision that records only the evidence records half the question: read a year later, "verified" against
+  // run-42 says nothing about WHICH assertion run-42 was held to support. `digest` is the claim as the caller
+  // assembled it, `echoed` what the runner reported rendering — equal is the only affirmable state, and both
+  // are kept so a mismatch stays inspectable rather than collapsing into a bare refusal.
+  // Absent = recorded before the claim crossed the boundary (the shape that could not carry it at all).
+  claim: z
+    .object({
+      digest: z.string().min(1),
+      echoed: z.string().optional(),
+      statements: z.array(z.string().min(1)).default([]),
+    })
+    .optional(),
   // Whether the independence invariant was actually applied to EVERY actor in the evidence, to some of them,
   // or to none. `partial` exists because the two-state version collapsed partial knowledge into a binary and
   // the optimistic half won (arch-review 12): evidence citing run-A (resolvable) and run-B (linkage missing)

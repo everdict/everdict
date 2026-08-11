@@ -6,6 +6,7 @@ import {
   type RoleProfile,
   type TaskEnvelope,
 } from "@everdict/contracts";
+import { contentDigest } from "../provenance/content-digest.js";
 
 // The ownership kernel's INVARIANTS (O2/O5/O6) — the rules that make ownership verifiable and transferable.
 // Pure guards: a violated invariant throws (an illegal profile/envelope/checkpoint never becomes a record),
@@ -314,4 +315,52 @@ export function verifierEnvelopeFor(
   // profiled to see.
   assertEnvelopeForRole(profile, envelope);
   return envelope;
+}
+
+// ── THE CLAIM ITSELF, as an artifact that crosses the boundary (arch-review 24 P0-3) ─────────────────
+//
+// The verifier spawn already carried the evidence, the read tools and the question. It never carried WHAT WAS
+// CLAIMED. The prompt said "does this evidence support the checkpoint's confirmed facts?" while the confirmed
+// facts stayed on this side of the process boundary — so the verifier answered the only question it could
+// actually see: "is this evidence internally coherent?". Those are different questions, and the affirmative
+// answer to the second was being recorded as an answer to the first.
+//
+// A verifier is not verifying a claim unless the exact claim — not merely its evidence — crosses the boundary.
+// So the statements travel verbatim, and they travel with a DIGEST: the runner echoes the digest of the text
+// it actually put in front of the model, and a decision whose echo does not match what was sent cannot be
+// affirmative. That closes the other half — a verdict about some other, paraphrased claim.
+export interface VerificationClaim {
+  subject: { type: "checkpoint"; id: string };
+  goal: string;
+  // Verbatim. Each confirmed fact with the refs it rests on, so the verifier can tell which artifact is
+  // supposed to support which sentence — a flattened list of sentences would make every ref support everything.
+  statements: ReadonlyArray<{ statement: string; refs: ReadonlyArray<{ type: string; id: string }> }>;
+  digest: string;
+}
+
+// The digest is over the CLAIM CONTENT, not the envelope around it: the same statements about the same
+// checkpoint digest identically no matter who assembled the request, which is what makes the echo comparable.
+export function verificationClaimDigest(claim: Omit<VerificationClaim, "digest">): string {
+  return contentDigest({ subject: claim.subject, goal: claim.goal, statements: claim.statements });
+}
+
+export function verificationClaimFor(checkpoint: HandoffCheckpoint): VerificationClaim {
+  // A checkpoint with no confirmed facts claims nothing — and "verified" against nothing is the emptiest
+  // affirmative there is. The caller already refuses an evidence-free checkpoint; this refuses the other
+  // shape, where evidence exists but no sentence asserts anything about it.
+  if (checkpoint.confirmedFacts.length === 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { checkpoint: checkpoint.id },
+      "this checkpoint states no confirmed facts — there is no claim for a verifier to hold the evidence against, and a verdict about no claim is not a verdict.",
+    );
+  const content = {
+    subject: { type: "checkpoint" as const, id: checkpoint.id },
+    goal: checkpoint.goal,
+    statements: checkpoint.confirmedFacts.map((f) => ({
+      statement: f.statement,
+      refs: f.refs.map((r) => ({ type: r.type, id: r.id })),
+    })),
+  };
+  return { ...content, digest: verificationClaimDigest(content) };
 }

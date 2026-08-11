@@ -32,6 +32,15 @@ class FakeCheckpointStore implements HandoffCheckpointStore {
   }
 }
 
+// The tool the platform designates as each evidence kind's reader. A double that reported some OTHER tool
+// would be reporting a read of the executor's story, which no longer counts as coverage.
+const READER_BY_TYPE: Record<string, string> = {
+  run: "get_run",
+  scorecard: "get_scorecard",
+  file: "get_file",
+  issue: "get_issue",
+};
+
 const body = (over: Partial<HandoffCheckpoint> = {}): Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy"> => ({
   goal: "fix the failing grader",
   currentState: "root cause isolated; fix drafted, tests not yet run",
@@ -274,7 +283,9 @@ describe("verification — a spawned verdict is checked for independence and FIL
     executor?: ActorRef;
     verifications?: VerificationDecisionStore;
     reviewed?: Array<{ type: string; id: string }>;
-  }): { svc: CheckpointService; envelopes: TaskEnvelope[] } {
+    claimDigest?: string; // what the runner says it RENDERED — differing from what was sent is its own test
+    readerOverride?: string; // which tool the runtime reports doing the reading
+  }): { svc: CheckpointService; envelopes: TaskEnvelope[]; claims: unknown[] } {
     const envelopes: TaskEnvelope[] = [];
     const store: HandoffCheckpointStore = {
       async create() {},
@@ -285,6 +296,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
         return [];
       },
     };
+    const claims: unknown[] = [];
     const svc = new CheckpointService({
       store,
       resolvers: {},
@@ -293,21 +305,79 @@ describe("verification — a spawned verdict is checked for independence and FIL
       verifier: {
         async verify(input) {
           envelopes.push(input.envelope);
+          claims.push(input.claim);
           return {
             verdict: "verified",
             detail: "the run's trace supports the claim",
             actor: opts.verdictActor,
-            // What the RUNTIME observed being read. A verifier that reports nothing gets an `inconclusive`
-            // decision, which is its own test below.
-            reviewedResources: opts.reviewed ?? [{ type: "run", id: "run-42" }],
+            // What the RUNTIME observed being read — WITH the tool that read it, because coverage is
+            // per-reader: the evidence reader and the trajectory reader address the same run and only one of
+            // them is evidence about the artifact.
+            reviewedResources: (opts.reviewed ?? [{ type: "run", id: "run-42" }]).map((r) => ({
+              ...r,
+              tool: opts.readerOverride ?? READER_BY_TYPE[r.type] ?? "get_run",
+            })),
+            // The echo: the claim the runner actually rendered. Equal to what was sent = affirmable.
+            claimDigest: opts.claimDigest ?? input.claim.digest,
           };
         },
       },
       newId: () => "vd-1",
       now: () => "2026-08-08T01:00:00.000Z",
     });
-    return { svc, envelopes };
+    return { svc, envelopes, claims };
   }
+
+  // arch-review 24 P0-3. The question said "does this evidence support the checkpoint's confirmed facts?"
+  // while the confirmed facts stayed on this side of the process boundary. The verifier could only judge
+  // whether the artifacts were internally coherent — a different question — and the platform filed the answer
+  // as support for claims the verifier never saw.
+  it("carries the CLAIM itself across the boundary, and records which claim the verdict was about", async () => {
+    const { svc, claims } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" } });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    const claim = claims[0] as { subject: { id: string }; statements: Array<{ statement: string }>; digest: string };
+    expect(claim.subject.id).toBe("cp-1");
+    expect(claim.statements.map((x) => x.statement)).toEqual(["the grader throws on empty traces"]);
+    // …and the decision records it, so a reader a year later can tell WHICH assertion run-42 was held to.
+    expect(decision.claim).toMatchObject({
+      digest: claim.digest,
+      echoed: claim.digest,
+      statements: ["the grader throws on empty traces"],
+    });
+  });
+
+  it("refuses the affirmative when the runner rendered a DIFFERENT claim than the one under review", async () => {
+    // A verdict about some other text is not a verdict about this checkpoint, however confident it sounds.
+    const { svc } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" }, claimDigest: "sha256:other" });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("a different claim");
+    expect(decision.claim).toMatchObject({ echoed: "sha256:other" });
+  });
+
+  // arch-review 24 P0-4. Two tools address one run: the evidence reader returns the run's recorded outcome,
+  // the trajectory reader returns the executor's own account of producing it. Counting the second as coverage
+  // certifies "the verifier examined run-42" for a verifier that read the story about run-42 — which is the
+  // exact context separation this envelope exists to enforce, defeated through the coverage door.
+  it("does NOT count a trajectory read as having examined the evidence", async () => {
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      reviewed: [{ type: "run", id: "run-42" }],
+      readerOverride: "get_run_trajectory",
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("never successfully read");
+    expect(decision.evidenceCoverage).toMatchObject({ reviewed: [] });
+  });
+
+  // …and the production DEFAULT must not grant that tool at all. The invariant held only in tests that passed
+  // their own tool list; the default the control plane actually ships with named it.
+  it("does not grant the trajectory reader by default", async () => {
+    const { svc, envelopes } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" } });
+    await svc.requestVerification("acme", "cp-1");
+    expect(envelopes[0]?.scope.reads).not.toContain("get_run_trajectory");
+  });
 
   it("hands the verifier read TOOLS and pins its RESOURCES to the evidence", async () => {
     const { svc, envelopes } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" } });
@@ -493,12 +563,17 @@ describe("verification — an affirmative needs full identity AND evidence cover
       resolvers: {},
       runActor: async (_t, runId) => opts.resolvable[runId],
       verifier: {
-        async verify() {
+        async verify(input) {
           return {
             verdict: "verified" as const,
             detail: "the evidence supports it",
             actor: { id: "agent:auditor", runId: "run-Z", sessionId: "conv-Z" },
-            ...(opts.reviewed ? { reviewedResources: opts.reviewed } : {}),
+            ...(opts.reviewed
+              ? {
+                  reviewedResources: opts.reviewed.map((r) => ({ ...r, tool: READER_BY_TYPE[r.type] ?? "get_run" })),
+                }
+              : {}),
+            claimDigest: input.claim.digest,
           };
         },
       },
@@ -580,14 +655,15 @@ describe("verification — a failed read is not coverage", () => {
       resolvers: {},
       runActor: async () => ({ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }),
       verifier: {
-        async verify() {
+        async verify(input) {
           return {
             verdict: "verified" as const,
             detail: "looks right",
             actor: { id: "agent:auditor", runId: "run-Z", sessionId: "conv-Z" },
             // Addressed, and the read FAILED — the distinction the outcome exists to carry.
             reviewedResources: [],
-            failedResources: [{ type: "run", id: "run-42" }],
+            failedResources: [{ type: "run", id: "run-42", tool: "get_run" }],
+            claimDigest: input.claim.digest,
           };
         },
       },

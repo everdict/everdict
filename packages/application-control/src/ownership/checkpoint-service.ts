@@ -16,6 +16,7 @@ import {
   assertCompletionForRole,
   assertIndependentVerification,
   danglingCheckpointRefs,
+  verificationClaimFor,
   verifierEnvelopeFor,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -292,9 +293,14 @@ export class CheckpointService {
       // this call site is not exempt from it.
       budgets: input.budgets ?? { tokens: 200_000 },
     });
+    // THE CLAIM — assembled here, carried there (arch-review 24 P0-3). The question below refers to "the
+    // checkpoint's confirmed facts"; until this existed, those facts never left this process, so the verifier
+    // was answering about evidence with no assertion attached to it.
+    const claim = verificationClaimFor(checkpoint);
     const verdict = await this.deps.verifier.verify({
       tenant,
       envelope,
+      claim,
       question:
         input.question ??
         `Does this evidence support the checkpoint's confirmed facts? Answer from the evidence alone — you cannot see how the work was done, and that is deliberate.`,
@@ -328,14 +334,25 @@ export class CheckpointService {
 
     // EVIDENCE coverage: what the RUNTIME saw the verifier read, against what the checkpoint offered.
     // SUCCESSFULLY read, per the runtime's own outcome — not merely addressed (arch-review 13).
-    const reviewed = evidence.filter((ref) =>
-      (verdict.reviewedResources ?? []).some((r) => r.type === ref.type && r.id === ref.id),
-    );
-    const failedReads = evidence.filter((ref) =>
-      (verdict.failedResources ?? []).some((r) => r.type === ref.type && r.id === ref.id),
-    );
     const granted = new Set<string>(this.deps.verifierTools ?? DEFAULT_VERIFIER_TOOLS);
     const readerFor = (ref: CheckpointRef): string | undefined => EVIDENCE_READER_BY_TYPE[ref.type];
+    // COVERAGE IS PER-READER, not per-ref-id (arch-review 24 P0-4). Several tools can address one run: the
+    // evidence reader returns the run's recorded outcome, the trajectory reader returns the executor's own
+    // account of producing it. Only the first is evidence about the artifact — counting the second as
+    // coverage certifies "the verifier examined run-42" for a verifier that read the story about run-42, which
+    // is the exact context separation the verifier envelope exists to enforce.
+    //
+    // A read the runtime could not attribute to a tool does not count either: unattributed is unproven, and
+    // this is a coverage claim an affirmative verdict rests on.
+    const readByDesignatedReader = (
+      observed: ReadonlyArray<{ type: string; id: string; tool?: string }>,
+      ref: CheckpointRef,
+    ): boolean => {
+      const reader = readerFor(ref);
+      return observed.some((r) => r.type === ref.type && r.id === ref.id && reader !== undefined && r.tool === reader);
+    };
+    const reviewed = evidence.filter((ref) => readByDesignatedReader(verdict.reviewedResources ?? [], ref));
+    const failedReads = evidence.filter((ref) => readByDesignatedReader(verdict.failedResources ?? [], ref));
     const unreachable = evidence.filter((ref) => {
       const reader = readerFor(ref);
       return reader === undefined || !granted.has(reader);
@@ -377,8 +394,22 @@ export class CheckpointService {
     //
     // A refutation from an agent that read nothing is a model's opinion about the question, not a finding
     // about the artifact, and it must not be able to stop a deploy on that basis.
+    // THE CLAIM ECHO. The runner reports the digest of the claim text it actually rendered; if that is missing
+    // or different, whatever the verifier answered was about some other statement of the case, and neither
+    // direction of a strong verdict may rest on it.
+    if (verdict.claimDigest === undefined)
+      gaps.push("the runner did not report which claim it showed the verifier, so the verdict cannot be tied to one");
+    else if (verdict.claimDigest !== claim.digest)
+      gaps.push(
+        `the verifier was shown a different claim than the one under review (sent ${claim.digest}, rendered ${verdict.claimDigest})`,
+      );
+    const claimCarried = verdict.claimDigest === claim.digest;
     const affirmable =
-      verdict.verdict === "verified" ? gaps.length === 0 : verdict.verdict === "refuted" ? reviewed.length > 0 : true;
+      verdict.verdict === "verified"
+        ? gaps.length === 0
+        : verdict.verdict === "refuted"
+          ? reviewed.length > 0 && claimCarried
+          : true;
     if (verdict.verdict === "refuted" && reviewed.length === 0)
       gaps.push("a refutation must rest on evidence the verifier actually read, and none was");
 
@@ -394,6 +425,11 @@ export class CheckpointService {
       verdict: affirmable ? verdict.verdict : "inconclusive",
       detail: affirmable ? verdict.detail : `${verdict.detail} — recorded as inconclusive: ${gaps.join("; ")}.`,
       independence,
+      claim: {
+        digest: claim.digest,
+        ...(verdict.claimDigest !== undefined ? { echoed: verdict.claimDigest } : {}),
+        statements: claim.statements.map((s) => s.statement),
+      },
       executorCoverage: { runRefs: coverage.runRefs, unresolvedRunIds: coverage.unresolvedRunIds },
       evidenceCoverage: { offered: evidence.length, reviewed, failed: failedReads, unreachable },
       envelopeId,
@@ -444,7 +480,10 @@ export class CheckpointService {
 // The read tools a spawned verifier may call. Evidence readers only — nothing that reaches the executor's
 // trajectory, reasoning or conversation, which is the whole point of the separation. Overridable per
 // deployment (`verifierTools`) because tool names are a deployment's vocabulary, not a domain constant.
-const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue", "get_run_trajectory"] as const;
+// `get_run_trajectory` was in this list and must never be: it is the executor's own account of how the work
+// was done, which is precisely what the envelope's context separation withholds (arch-review 24 P0-4). Its
+// presence in the PRODUCTION default meant the invariant held only in the test that passed its own list.
+const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue"] as const;
 
 // WHICH TOOL READS EACH EVIDENCE KIND — the map that decides what a verifier can actually REACH
 // (arch-review 12). The previous default set named `get_trace`, which is not a tool the control-plane surface

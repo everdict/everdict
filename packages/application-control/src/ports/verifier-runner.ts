@@ -1,4 +1,5 @@
 import type { ActorRef, TaskEnvelope } from "@everdict/contracts";
+import type { VerificationClaim } from "@everdict/domain";
 
 // What a verifier came back with. `verified` is the only affirmative — a verifier that cannot decide says so
 // rather than passing by default, because "I could not tell" and "it holds" are the two answers a trust
@@ -24,11 +25,21 @@ export interface VerifierVerdict {
   //
   // Absent = the runner does not report it. The decision then records no evidence coverage and cannot be
   // affirmative — an unmeasured guarantee is not a satisfied one.
-  reviewedResources?: Array<{ type: string; id: string }>;
+  //
+  // `tool` is the tool that DID the reading, and it is part of the fact rather than trivia: coverage asks
+  // whether the EVIDENCE was examined, and two different tools can address the same run — the evidence reader
+  // and the executor's trajectory (arch-review 24 P0-4). Counting a trajectory read as evidence coverage would
+  // certify "the verifier looked at the artifact" for a verifier that read the executor's story about it.
+  reviewedResources?: Array<{ type: string; id: string; tool?: string }>;
   // Refs the verifier reached for and could NOT read (a 404, a transport error, a timeout). Recorded so the
   // decision can say WHY coverage is short rather than leaving an unexplained gap; a failed read is evidence
   // about the platform, not about the artifact under review.
-  failedResources?: Array<{ type: string; id: string }>;
+  failedResources?: Array<{ type: string; id: string; tool?: string }>;
+  // THE CLAIM THE RUNNER ACTUALLY SHOWED THE MODEL, digested (arch-review 24 P0-3). The caller sends the
+  // claim; the runner echoes the digest of what it rendered. A mismatch means the verdict is about some other
+  // text than the one under review, and the caller refuses to make it affirmative. Absent = the runner does
+  // not report it, which is the same as unproven — an unmeasured guarantee is not a satisfied one.
+  claimDigest?: string;
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed
@@ -51,5 +62,9 @@ export interface VerifierRunner {
     // The question the verifier answers, in the caller's words ("does the evidence support this checkpoint's
     // confirmed facts?"). Not a template: what is being verified differs per call site.
     question: string;
+    // WHAT IS CLAIMED — the statements themselves, verbatim, carried across the process boundary. Without it
+    // the question referred to facts that never left the caller, so the verifier could only judge whether the
+    // evidence was internally coherent and the platform recorded that as support for claims it never saw.
+    claim: VerificationClaim;
   }): Promise<VerifierVerdict>;
 }

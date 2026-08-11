@@ -1,5 +1,6 @@
 import type { TaskEnvelope } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
+import { type VerificationClaim, verificationClaimDigest } from "@everdict/domain";
 import { type ChatDeps, runChat } from "./chat.js";
 
 // A VERIFICATION TURN — the third enforcement site of the ownership protocol, finally bound to the loop.
@@ -44,8 +45,29 @@ export interface VerificationTurnResult {
   verdict: "verified" | "refuted" | "inconclusive";
   detail: string;
   sessionId: string;
-  reviewedResources: Array<{ type: string; id: string }>;
-  failedResources: Array<{ type: string; id: string }>;
+  // `tool` rides along because the caller's coverage rule is per-READER, not per-ref: the evidence reader and
+  // the trajectory reader can both address one run, and only one of them is evidence about the artifact.
+  reviewedResources: Array<{ type: string; id: string; tool: string }>;
+  failedResources: Array<{ type: string; id: string; tool: string }>;
+  // The digest of the claim text this turn ACTUALLY rendered — recomputed here from what crossed the wire,
+  // never copied from the request. Copying it would echo the sender's own assertion back at itself and prove
+  // nothing about what the model was shown.
+  claimDigest: string;
+}
+
+// The claim, as the verifier reads it. Written as an explicit block rather than folded into the question: the
+// verifier must be able to tell the ASSERTION apart from the instruction about how to answer, and each
+// statement carries the refs it rests on so "supported" is a per-statement judgment.
+function renderClaim(claim: VerificationClaim): string {
+  const lines = claim.statements.map(
+    (s, i) =>
+      `  ${i + 1}. ${s.statement}\n     (offered as support: ${s.refs.map((r) => `${r.type}:${r.id}`).join(", ") || "nothing"})`,
+  );
+  return [
+    `THE CLAIM UNDER REVIEW — checkpoint ${claim.subject.id}, goal: ${claim.goal}`,
+    "These are the statements someone else asserted. Hold the evidence against THESE, not against a claim you infer from the artifacts:",
+    ...lines,
+  ].join("\n");
 }
 
 export async function runVerificationTurn(
@@ -55,7 +77,7 @@ export async function runVerificationTurn(
     now: () => string;
   },
   authenticate: (headers: { authorization: string }) => Promise<Parameters<typeof runChat>[1]>,
-  input: { workspace: string; actingAs: string; envelope: TaskEnvelope; question: string },
+  input: { workspace: string; actingAs: string; envelope: TaskEnvelope; question: string; claim: VerificationClaim },
 ): Promise<VerificationTurnResult> {
   if (!deps.keyStore)
     throw new Error("verification turns need a key store (agt_ execution tokens) — set DATABASE_URL.");
@@ -81,20 +103,35 @@ export async function runVerificationTurn(
     ["read"],
     `verify:${input.envelope.id}`,
   );
-  const reviewed = new Map<string, { type: string; id: string }>();
-  const failed = new Map<string, { type: string; id: string }>();
+  const reviewed = new Map<string, { type: string; id: string; tool: string }>();
+  const failed = new Map<string, { type: string; id: string; tool: string }>();
+  // Recomputed from the statements that arrived, so the echo attests to the text rendered below.
+  const claimDigest = verificationClaimDigest({
+    subject: input.claim.subject,
+    goal: input.claim.goal,
+    statements: input.claim.statements,
+  });
+  const prompt = `${renderClaim(input.claim)}\n\n${input.question}`;
   try {
     const headers = { authorization: `Bearer ${token}` };
     const principal = await authenticate(headers);
-    const result = await runChat(deps, principal, headers, sessionId, input.question, undefined, undefined, undefined, {
+    const result = await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, undefined, {
       envelope: input.envelope,
       outputSchema: VERDICT_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+      // EVIDENCE ONLY — no workspace memory, no knowledge recall, no stale-file reminders (arch-review 24
+      // P0-5). Those are the host's ambient context, and the host is where the executor's own notes about this
+      // very work live: a boundary that pins `scope.resources` to the evidence and then prepends the
+      // executor's memory has separated nothing. The verifier reads what it was handed, or it reads nothing.
+      contextPolicy: "evidence_only",
       onResourceAccess: (access) => {
-        const key = `${access.target.type}:${access.target.id}`;
+        // Keyed by TOOL as well as target: reading run-42's record and reading run-42's trajectory are two
+        // different observations, and collapsing them would let the second stand in for the first.
+        const key = `${access.tool} ${access.target.type}:${access.target.id}`;
+        const entry = { ...access.target, tool: access.tool };
         // Consumed and merely attempted are tracked apart, because a verdict that counted its failures as
         // coverage would be an affirmative built on what it could not read.
-        if (access.outcome === "success") reviewed.set(key, access.target);
-        else failed.set(key, access.target);
+        if (access.outcome === "success") reviewed.set(key, entry);
+        else failed.set(key, entry);
       },
     });
     const submitted = result.structuredOutput as { verdict?: string; detail?: string } | undefined;
@@ -107,6 +144,7 @@ export async function runVerificationTurn(
         sessionId,
         reviewedResources: [...reviewed.values()],
         failedResources: [...failed.values()],
+        claimDigest,
       };
     return {
       verdict,
@@ -114,6 +152,7 @@ export async function runVerificationTurn(
       sessionId,
       reviewedResources: [...reviewed.values()],
       failedResources: [...failed.values()],
+      claimDigest,
     };
   } finally {
     // One-shot credential, revoked with the run — no standing token accumulates from verifying.

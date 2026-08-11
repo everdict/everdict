@@ -24,6 +24,10 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
           actingAs: "verifier",
           question: input.question,
           envelope: input.envelope,
+          // The claim travels WITH the question — the statements the evidence is supposed to support. The
+          // runner echoes back the digest of what it rendered, and the caller refuses an affirmative when the
+          // two differ (arch-review 24 P0-3).
+          claim: input.claim,
         }),
       }).catch((err: unknown) => {
         throw new UpstreamError(
@@ -42,8 +46,9 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         verdict: VerifierVerdict["verdict"];
         detail: string;
         sessionId: string;
-        reviewedResources: Array<{ type: string; id: string }>;
-        failedResources: Array<{ type: string; id: string }>;
+        reviewedResources: Array<{ type: string; id: string; tool?: string }>;
+        failedResources: Array<{ type: string; id: string; tool?: string }>;
+        claimDigest?: string;
       };
       return {
         verdict: body.verdict,
@@ -54,6 +59,7 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         actor: { id: "agent:verifier", sessionId: body.sessionId },
         reviewedResources: body.reviewedResources,
         failedResources: body.failedResources,
+        ...(body.claimDigest !== undefined ? { claimDigest: body.claimDigest } : {}),
       };
     },
   };
