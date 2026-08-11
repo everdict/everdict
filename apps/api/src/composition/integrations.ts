@@ -17,7 +17,7 @@ import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSetting
 import { buildTraceSink, buildTraceSource, probeTraceConnection } from "@everdict/trace";
 import { httpAgentEventSink } from "../infrastructure/agent/agent-event-sink.js";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
-import { githubRepoWriterFactory } from "../infrastructure/github/repo-writer.js";
+import { githubRepoTreeReaderFactory, githubRepoWriterFactory } from "../infrastructure/github/repo-writer.js";
 import { mattermostHttpClient } from "../infrastructure/mattermost/mattermost-client.js";
 
 // Workspace integration services: completion notifications (Mattermost channel + personal feed), the Mattermost
@@ -186,6 +186,7 @@ export function buildIntegrations(deps: {
     settings: settingsStore,
     gateway: githubAppGateway(), // outbound App-JWT/installation-token + installation-repos/runner-token adapter (fetch)
     repoOps: githubRepoWriterFactory(), // per-token repo-ops adapter (agent read tools: get file / list issues)
+    trees: githubRepoTreeReaderFactory(), // per-token tree reader (agent read tool: list the repo's files)
     config: {
       webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
       ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),

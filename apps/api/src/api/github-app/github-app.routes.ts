@@ -24,14 +24,16 @@ export function registerGithubAppRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  // repo picker — the repos the workspace App installation can access (only those chosen at install). For the CI repo-link UX. settings:read.
+  // repo picker — the repos the workspace App installation can access (only those chosen at install). For the CI
+  // repo-link UX and for anyone (member or agent) who has to name a repository before reading or writing it, so it
+  // is gated github:read (member+) like the reads themselves, not settings:read (admin-only App governance).
   app.get("/workspace/github-app/repos", { schema: githubAppDocs.repos }, async (req, reply) => {
     if (!deps.githubAppService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "settings:read");
+      gate(principal, "github:read");
       return reply.send(await deps.githubAppService.listRepos(principal.workspace));
     } catch (err) {
       return sendError(reply, err);

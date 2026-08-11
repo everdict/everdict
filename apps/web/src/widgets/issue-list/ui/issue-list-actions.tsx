@@ -1,4 +1,5 @@
 import { getTranslations } from 'next-intl/server'
+import { z } from 'zod'
 
 import {
   ImportGithubIssuesButton,
@@ -6,7 +7,7 @@ import {
   type SyncedRepository,
 } from '@/features/import-github-issues'
 import { CreateIssueButton } from '@/features/manage-issue'
-import { githubAppViewSchema } from '@/entities/github-app'
+import { githubAppRepoSchema } from '@/entities/github-app'
 import { issuePageSchema, type IssueSummary } from '@/entities/issue'
 import type { TeamWithSummary } from '@/entities/team'
 import { authContext } from '@/shared/auth/principal'
@@ -42,8 +43,8 @@ export async function IssueListActions({
   // 이 팀의 열린 이터레이션 — 접수하면서 바로 주기에 넣기 위해. 팀 스코프에서만 채워진다.
   cycles?: { id: string; name: string }[]
   defaultTeamId?: string
-  // 가져오기 픽커는 워크스페이스 App 의 저장소 목록을 읽어야 하고 그건 settings:read(관리자)다 — 끝까지
-  // 진행할 수 있는 사람에게만 입구를 내민다.
+  // The import picker reads the workspace App's repo list (github:read, member+) — the entry point is only
+  // offered to someone who can actually complete the flow.
   canReadIntegrations: boolean
   // 팀 스코프면 그 팀의 동기화 저장소만 센다.
   team?: TeamWithSummary
@@ -53,9 +54,13 @@ export async function IssueListActions({
 
   const [resolvedTeams, githubConnected, syncedRoster] = await Promise.all([
     teams,
+    // "Is GitHub connected?" is asked through the REPO list, not the installation view: the installation view is
+    // App administration (settings:read, admin-only), so a member asking it got a silent false from the catch and
+    // an import entry point that claimed nothing was connected. The repo list answers the same question with the
+    // read the import flow itself uses (github:read) — and repos, not installations, are what can be imported from.
     controlPlane
-      .getGithubApp(ctx)
-      .then((r) => githubAppViewSchema.parse(r).installations.length > 0)
+      .getGithubAppRepos(ctx)
+      .then((r) => z.array(githubAppRepoSchema).parse(r).length > 0)
       .catch(() => false),
     // 대량 불러오기는 저장소 단위라, 버튼은 새로고칠 것이 있는 저장소만 내민다. 좁히기는 SERVER 가 한다
     // (`syncPull`) — 예전에는 필터 없는 이슈 목록을 통째로 다시 읽어 여기서 걸렀고, 저장소 이름 몇 개를

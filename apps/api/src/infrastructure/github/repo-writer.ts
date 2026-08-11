@@ -135,6 +135,12 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
           });
           if (!put.ok) throw await upstream(put, "file commit failed");
         },
+        async branchHead(repository, branch) {
+          const head = z
+            .object({ object: z.object({ sha: z.string() }) })
+            .parse(await (await gh(`${base}/repos/${repository}/git/ref/heads/${branch}`)).json());
+          return head.object.sha;
+        },
         async openPr(repository, opts) {
           // Create PR — if one is already open (422), find and return the existing PR.
           const mkPr = await doFetch(`${base}/repos/${repository}/pulls`, {
@@ -195,6 +201,37 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
           return toGithubIssue(
             ISSUE_ROW.parse(await (await gh(`${base}/repos/${repository}/issues/${issueNumber}`)).json()),
           );
+        },
+        async listPullRequestFiles(repository, pullNumber, opts) {
+          const perPage = Math.min(100, Math.max(1, opts.maxFiles));
+          // The PR itself carries changed_files — the honest denominator for "is this the whole diff".
+          const pr = z
+            .object({ changed_files: z.number().default(0) })
+            .parse(await (await gh(`${base}/repos/${repository}/pulls/${pullNumber}`)).json());
+          const rows = z
+            .array(
+              z.object({
+                filename: z.string(),
+                status: z.string(),
+                additions: z.number().default(0),
+                deletions: z.number().default(0),
+                patch: z.string().nullish(),
+              }),
+            )
+            .parse(
+              await (await gh(`${base}/repos/${repository}/pulls/${pullNumber}/files?per_page=${perPage}`)).json(),
+            );
+          return {
+            changedFiles: pr.changed_files,
+            files: rows.map((r) => ({
+              filename: r.filename,
+              status: r.status,
+              additions: r.additions,
+              deletions: r.deletions,
+              // A binary file (and one GitHub declined to render) has no patch — omitted rather than "".
+              ...(r.patch ? { patch: r.patch } : {}),
+            })),
+          };
         },
         async updateIssue(repository, issueNumber, patch) {
           const res = await doFetch(`${base}/repos/${repository}/issues/${issueNumber}`, {

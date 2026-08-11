@@ -49,10 +49,16 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
     },
     async ensureBranch() {},
     async putFile() {},
+    async branchHead() {
+      throw new Error("unused");
+    },
     async openPr() {
       throw new Error("unused");
     },
     async getFile() {
+      throw new Error("unused");
+    },
+    async listPullRequestFiles() {
       throw new Error("unused");
     },
     async listIssues() {

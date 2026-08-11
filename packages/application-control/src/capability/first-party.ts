@@ -343,8 +343,9 @@ context — a reviewer must be able to judge the fix without re-running anything
 - Find the source repository for the harness under evaluation: check \`list_ci_links\` (repo ↔ harness links) first,
   then \`list_github_app_repos\` + the harness spec (\`get_harness_instance\` — image/command names hint at the repo).
   If it stays ambiguous, ask the member — never guess a repository for a write.
-- Follow the failure signatures into the source: \`get_github_file\` on each implicated file (and its tests), walking
-  imports as needed, until you can name the file, the line, and the mechanism.
+- Follow the failure signatures into the source: \`list_github_repo_files\` to find the paths (narrow with \`prefix\`;
+  a \`truncated\` listing is NOT the whole repository), then \`get_github_file\` on each implicated file (and its
+  tests), walking imports as needed, until you can name the file, the line, and the mechanism.
 
 ## 3. Diagnose at code level
 - State the root cause in the form: case X fails because <file:line> does <wrong thing> when <condition>.
@@ -365,10 +366,14 @@ context — a reviewer must be able to judge the fix without re-running anything
   - changes: the full new file contents.
   - body: composed per \`references/pr-body.md\`.
 - Summarize the intended diff to the member before the call — the PR write is approved inline (HITL).
+- Re-running against the same scorecard? Read what the existing PR already proposes first
+  (\`get_github_pull_request_changes\`) so the second pass extends the fix instead of reverting it.
 
 ## Constraints
 - Never include secrets, API keys, or raw full logs in the PR body — quote only the minimal excerpts.
-- One PR per scorecard; never target the default branch directly.
+- One PR per scorecard; never target the default branch directly. This skill PROPOSES — use \`open_github_pr\`,
+  never \`commit_github_files\`, however small the fix looks: a fix derived from failing evidence is exactly the
+  kind of change a human should read before it lands.
 `.trim();
 
 // The mandatory PR-body structure — a supporting file (loaded via read_skill_file only when the agent reaches the

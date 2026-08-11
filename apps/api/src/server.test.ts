@@ -50,7 +50,7 @@ import { defaultJudgeRunner } from "./core/execution/judge-runner.js";
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
-import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
+import { githubRepoTreeReaderFactory, githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { dockerRegistryReader } from "./infrastructure/registry/registry-reader.js";
 import { buildServer } from "./server.js";
 
@@ -214,6 +214,7 @@ function server(
     settings: settingsStore,
     gateway: githubAppGateway(),
     repoOps: githubRepoWriterFactory(),
+    trees: githubRepoTreeReaderFactory(),
     config: {
       webBaseUrl: "http://web.test",
       apiPublicUrl: "http://api.test",
@@ -1034,6 +1035,24 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       headers: h,
       payload: {},
     });
+    expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
+  // The repo picker answers "which repositories may I touch at all" — the question every GitHub read and write
+  // starts from. It used to be gated settings:read (ADMIN-only) while creating an issue or opening a PR was
+  // member+, so a member (and the agent acting as one) could write to a repository it was not allowed to
+  // enumerate. github:read puts the two halves at the same level.
+  it("GitHub App repos: a member may list the installation's repos (github:read), a viewer may not", async () => {
+    const h = { authorization: "Bearer x" };
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const listed = await member.app.inject({ method: "GET", url: "/workspace/github-app/repos", headers: h });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual([]); // no installation yet — but the ANSWER is the member's to have
+    await member.app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewer.app.inject({ method: "GET", url: "/workspace/github-app/repos", headers: h });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();
   });

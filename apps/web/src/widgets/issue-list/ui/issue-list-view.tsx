@@ -77,10 +77,11 @@ export async function IssueListView({
   // 쓰기 버튼은 역할 + 팀 두 축을 모두 통과해야 뜬다 — 속하지 않은 팀의 목록에서 「이슈 만들기」를 내밀면
   // 제어 평면이 403 을 줄 게 확실한 버튼을 보여 주는 것이다(강제는 여전히 제어 평면 몫).
   const canWrite = canInTeam(principal, 'issues:write', team?.id)
-  // The import picker needs the workspace App's repo list, and that read is settings:read (admin) — so the entry
-  // point is only offered to someone who can actually complete the flow. A member keeps the whole sync surface
-  // (bulk pull, per-issue sync, toggles): those ride issues:write and never touch the App configuration.
-  const canReadIntegrations = can(principal?.roles ?? [], 'settings:read')
+  // The import picker needs the workspace App's repo list — a github:read (member+) read now that using the
+  // integration and configuring it are separate actions, so the entry point follows it instead of the admin-only
+  // settings:read it used to borrow. A member keeps the whole sync surface too (bulk pull, per-issue sync,
+  // toggles): those ride issues:write and never touch the App configuration.
+  const canReadIntegrations = can(principal?.roles ?? [], 'github:read')
 
   // 주소가 정한 좁히기 — 보기를 바꿔도 변하지 않는 부분이다.
   const base: IssueViewBase = {

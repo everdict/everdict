@@ -57,7 +57,7 @@ import { LiveLogStore } from "./common/live-log-store.js";
 import { LiveTraceStore } from "./common/live-trace-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
-import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
+import { githubRepoTreeReaderFactory, githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { buildMcpServer } from "./mcp.js";
 
 const result: CaseResult = {
@@ -128,6 +128,7 @@ function harness() {
       settings: new InMemoryWorkspaceSettingsStore(),
       gateway: githubAppGateway(),
       repoOps: githubRepoWriterFactory(),
+      trees: githubRepoTreeReaderFactory(),
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
@@ -309,6 +310,36 @@ describe("MCP — mattermost post", () => {
   });
 });
 
+// The read half of the workspace GitHub App. These tools used to be gated settings:read — ADMIN-only workspace
+// governance — while their write siblings were member+. A member-role agent could therefore open a pull request
+// against a repository it was forbidden to read a single file of, which is the wrong way round: everything the
+// integration can write, whoever may write it must first be able to read. github:read is that read half.
+describe("MCP — github read", () => {
+  // No App installed in the harness, so the read reaches tokenForRepository and fails NOT_FOUND. That is the
+  // point: the FAILURE CODE says whether the gate let the caller through, and pre-fix a member got FORBIDDEN.
+  const readTools: { name: string; arguments: Record<string, unknown> }[] = [
+    { name: "get_github_file", arguments: { repository: "acme-org/api", path: "README.md" } },
+    { name: "list_github_repo_files", arguments: { repository: "acme-org/api" } },
+    { name: "list_github_issues", arguments: { repository: "acme-org/api" } },
+    { name: "get_github_issue", arguments: { repository: "acme-org/api", issueNumber: 5 } },
+    { name: "get_github_pull_request_changes", arguments: { repository: "acme-org/api", pullNumber: 7 } },
+  ];
+
+  it.each(readTools)("$name is gated github:read — a member is past the gate", async (call) => {
+    const member = await connect(harness(), ["member"]);
+    const res = await member.callTool(call);
+    expect(text(res)).toContain("NOT_FOUND"); // no App installed on that owner — NOT a permission refusal
+    expect(text(res)).not.toContain("FORBIDDEN");
+  });
+
+  it.each(readTools)("$name is gated github:read — a viewer is denied", async (call) => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const res = await viewer.callTool(call);
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain("FORBIDDEN");
+  });
+});
+
 describe("MCP — github write", () => {
   it("create_github_issue is gated github:write — a viewer is denied (before any GitHub call)", async () => {
     const viewer = await connect(harness(), ["viewer"]);
@@ -332,6 +363,39 @@ describe("MCP — github write", () => {
       },
     });
     expect(res.isError).toBe(true);
+  });
+
+  // The direct-commit sibling of open_github_pr: same authorization, no review step in between (the agent's
+  // consent gate classifies it as guarded, which is where that difference is answered).
+  it("commit_github_files is gated github:write — a viewer is denied (before any GitHub call)", async () => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const res = await viewer.callTool({
+      name: "commit_github_files",
+      arguments: {
+        repository: "acme-org/api",
+        branch: "everdict/fix",
+        message: "fix",
+        changes: [{ path: "a.ts", content: "x" }],
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain("FORBIDDEN");
+  });
+
+  it("set_github_issue_state is gated github:write — a viewer is denied, a member is past the gate", async () => {
+    const viewer = await connect(harness(), ["viewer"]);
+    const denied = await viewer.callTool({
+      name: "set_github_issue_state",
+      arguments: { repository: "acme-org/api", issueNumber: 5, state: "closed" },
+    });
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    const member = await connect(harness(), ["member"]);
+    const res = await member.callTool({
+      name: "set_github_issue_state",
+      arguments: { repository: "acme-org/api", issueNumber: 5, state: "closed" },
+    });
+    expect(text(res)).toContain("NOT_FOUND"); // no App installed on that owner — not a permission refusal
   });
 });
 
@@ -525,6 +589,7 @@ describe("MCP tools", () => {
       "cancel_scorecard",
       "close_sandbox",
       "comment_on_github_issue",
+      "commit_github_files",
       "control_runtime",
       "create_agent",
       "create_api_key",
@@ -564,6 +629,8 @@ describe("MCP tools", () => {
       "get_agent",
       "get_dataset",
       "get_github_file",
+      "get_github_issue",
+      "get_github_pull_request_changes",
       "get_harness_instance",
       "get_harness_template",
       "get_judge",
@@ -611,6 +678,7 @@ describe("MCP tools", () => {
       "list_api_keys",
       "list_datasets",
       "list_github_issues",
+      "list_github_repo_files",
       "list_harness_templates",
       "list_harnesses",
       "list_invites",
@@ -670,6 +738,7 @@ describe("MCP tools", () => {
       "sandbox_git_push",
       "score_group",
       "set_dataset_version_tags",
+      "set_github_issue_state",
       "set_harness_version_tags",
       "set_judge_version_tags",
       "set_member_role",

@@ -55,7 +55,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: true },
         description:
-          "List issues and pull requests in a repository the workspace's GitHub App is installed on (most-recently-updated first): number, title, state, author, URL, and whether each is a PR. Use to triage or find an item to read.",
+          "List issues and pull requests in a repository the workspace's GitHub App is installed on (most-recently-updated first): number, title, state, author, URL, and whether each is a PR. Use to triage or find an item to read. member+ (github:read).",
         inputSchema: {
           repository: z.string().min(1).describe('"owner/name"'),
           state: z.enum(["open", "closed", "all"]).optional().describe("state filter (default open)"),
@@ -64,7 +64,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ repository, state, limit, host }) =>
-        run(principal, "settings:read", async () =>
+        run(principal, "github:read", async () =>
           ok({
             issues: await gh.listRepoIssues(
               ws,
@@ -80,7 +80,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: true },
         description:
-          "Read a text file from a repository the workspace's GitHub App is installed on — returns its UTF-8 content, sha, and size. Use to inspect code or config referenced in a task.",
+          "Read a text file from a repository the workspace's GitHub App is installed on — returns its UTF-8 content, sha, and size. Use to inspect code or config referenced in a task; call list_github_repo_files first when you do not already know the path. member+ (github:read).",
         inputSchema: {
           repository: z.string().min(1).describe('"owner/name"'),
           path: z.string().min(1).describe("file path within the repo"),
@@ -89,7 +89,99 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ repository, path, ref, host }) =>
-        run(principal, "settings:read", async () => ok(await gh.getRepoFile(ws, repository, path, ref, host))),
+        run(principal, "github:read", async () => ok(await gh.getRepoFile(ws, repository, path, ref, host))),
+    );
+    server.registerTool(
+      "list_github_repo_files",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "List the file paths in a repository the workspace's GitHub App is installed on (recursive, on a ref). " +
+          "This is how you FIND what to read — get_github_file needs an exact path. `prefix` narrows to a subtree. " +
+          "`truncated` true = there are more paths than were returned (raise limit or narrow the prefix); never " +
+          "treat a truncated listing as the whole repository. member+ (github:read).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          prefix: z.string().optional().describe("only paths inside this directory (unset = the whole tree)"),
+          ref: z.string().optional().describe("branch, tag, or sha (default: the repo's default branch)"),
+          limit: z.number().int().positive().max(2000).optional().describe("max paths (default 500, max 2000)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, prefix, ref, limit, host }) =>
+        run(principal, "github:read", async () =>
+          ok(
+            await gh.listRepoFiles(
+              ws,
+              repository,
+              {
+                ...(prefix !== undefined ? { prefix } : {}),
+                ...(ref !== undefined ? { ref } : {}),
+                ...(limit !== undefined ? { limit } : {}),
+              },
+              host,
+            ),
+          ),
+        ),
+    );
+    server.registerTool(
+      "get_github_issue",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "Read ONE issue or pull request in a repository the workspace's GitHub App is installed on — title, " +
+          "state, author, labels, body, and the comment thread. list_github_issues says what is open; this says " +
+          "what was actually reported and discussed. `commentsTruncated` true = older comments were not returned. " +
+          "member+ (github:read).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          issueNumber: z.number().int().positive().describe("the issue or PR number"),
+          maxComments: z.number().int().positive().max(100).optional().describe("newest comments (default 30)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, issueNumber, maxComments, host }) =>
+        run(principal, "github:read", async () =>
+          ok(
+            await gh.getRepoIssue(
+              ws,
+              repository,
+              issueNumber,
+              { ...(maxComments !== undefined ? { maxComments } : {}) },
+              host,
+            ),
+          ),
+        ),
+    );
+    server.registerTool(
+      "get_github_pull_request_changes",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "What a pull request CHANGES in a repository the workspace's GitHub App is installed on — per file: " +
+          "status, added/removed line counts, and GitHub's unified diff. Use to review a PR, or to see what an " +
+          "earlier open_github_pr already proposed before adding to it. A file with no `patch` is binary or too " +
+          "large to render — its counts still hold. `truncated` true = more files changed than were returned. " +
+          "member+ (github:read).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          pullNumber: z.number().int().positive().describe("the pull request number"),
+          maxFiles: z.number().int().positive().max(100).optional().describe("max files (default 50, max 100)"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, pullNumber, maxFiles, host }) =>
+        run(principal, "github:read", async () =>
+          ok(
+            await gh.listPullRequestChanges(
+              ws,
+              repository,
+              pullNumber,
+              { ...(maxFiles !== undefined ? { maxFiles } : {}) },
+              host,
+            ),
+          ),
+        ),
     );
     server.registerTool(
       "create_github_issue",
@@ -138,6 +230,58 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       ({ repository, branch, title, body, changes, host }) =>
         run(principal, "github:write", async () =>
           ok(await gh.openPullRequest(ws, repository, { branch, title, body, changes }, host)),
+        ),
+    );
+    server.registerTool(
+      "commit_github_files",
+      {
+        annotations: { readOnlyHint: false },
+        description:
+          "Commit file changes DIRECTLY to a branch in a repository the workspace's GitHub App is installed on — " +
+          "no pull request, no review. The branch is created off the default branch if it does not exist. Prefer " +
+          "open_github_pr when the change is a PROPOSAL somebody should read first; use this for work on a branch " +
+          "you already own, or when the member explicitly asked to commit. Naming the default branch here ships " +
+          "straight to it. Each change carries the FULL new content of the file. Returns a commit sha per file. " +
+          "member+ (github:write).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          branch: z.string().min(1).describe("branch to commit on (created off the default branch if absent)"),
+          message: z.string().min(1).describe("commit message"),
+          changes: z
+            .array(
+              z.object({
+                path: z.string().min(1).describe("file path within the repo"),
+                content: z.string().describe("the FULL new content of the file (create or overwrite)"),
+              }),
+            )
+            .min(1)
+            .describe("files to commit"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, branch, message, changes, host }) =>
+        run(principal, "github:write", async () =>
+          ok(await gh.commitFiles(ws, repository, { branch, message, changes }, host)),
+        ),
+    );
+    server.registerTool(
+      "set_github_issue_state",
+      {
+        annotations: { readOnlyHint: false },
+        description:
+          "Close or reopen an issue or pull request (PRs are issues) in a repository the workspace's GitHub App is " +
+          "installed on. STATE ONLY — the title and body stay as their author wrote them; put the reasoning in a " +
+          "comment (comment_on_github_issue) so the state change is explained where people read it. member+ (github:write).",
+        inputSchema: {
+          repository: z.string().min(1).describe('"owner/name"'),
+          issueNumber: z.number().int().positive().describe("the issue or PR number"),
+          state: z.enum(["open", "closed"]).describe("closed = close it, open = reopen it"),
+          host: z.string().url().optional().describe("GitHub Enterprise base URL (unset = github.com)"),
+        },
+      },
+      ({ repository, issueNumber, state, host }) =>
+        run(principal, "github:write", async () =>
+          ok(await gh.setIssueState(ws, repository, issueNumber, state, host)),
         ),
     );
     server.registerTool(

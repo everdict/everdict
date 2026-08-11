@@ -1,7 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { BadRequestError, NotFoundError, type WorkspaceSettings } from "@everdict/contracts";
 import type { GithubAppGateway } from "../ports/github-app-gateway.js";
-import type { GithubFileContent, GithubIssue, GithubRepoWriterFactory } from "../ports/github-repo-writer.js";
+import type {
+  GithubFileContent,
+  GithubIssue,
+  GithubIssueComment,
+  GithubPullRequestFile,
+  GithubRepoTreeReaderFactory,
+  GithubRepoWriterFactory,
+} from "../ports/github-repo-writer.js";
 import type { OAuthStateStore } from "../ports/oauth-state-store.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
@@ -116,6 +123,9 @@ export interface GithubAppServiceDeps {
   gateway: GithubAppGateway;
   // Per-token repo-ops adapter — mints a repo client from a resolved installation token (the agent's read tools).
   repoOps: GithubRepoWriterFactory;
+  // Per-token tree reader — what a repository CONTAINS, as opposed to one file of it. get_github_file can only be
+  // called by someone who already knows the path; without this the agent's "read any installed repo" is guesswork.
+  trees: GithubRepoTreeReaderFactory;
   config: GithubAppServiceConfig;
   now?: () => Date;
 }
@@ -125,6 +135,7 @@ export class GithubAppService {
   private readonly settings: WorkspaceSettingsStore;
   private readonly gateway: GithubAppGateway;
   private readonly repoOps: GithubRepoWriterFactory;
+  private readonly trees: GithubRepoTreeReaderFactory;
   private readonly config: GithubAppServiceConfig;
   private readonly now: () => Date;
   constructor(deps: GithubAppServiceDeps) {
@@ -132,6 +143,7 @@ export class GithubAppService {
     this.settings = deps.settings;
     this.gateway = deps.gateway;
     this.repoOps = deps.repoOps;
+    this.trees = deps.trees;
     this.config = deps.config;
     this.now = deps.now ?? (() => new Date());
   }
@@ -148,6 +160,25 @@ export class GithubAppService {
   ): Promise<GithubFileContent> {
     const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { contents: "read" }, host);
     return this.repoOps.for(token, resolved).getFile(repository, path, ref);
+  }
+
+  // The file paths of a repo the workspace App is installed on (the agent's list_github_repo_files tool). Reading a
+  // repository starts here: get_github_file needs a path, and an agent that has to guess one reads nothing. `prefix`
+  // narrows to a subtree (the whole tree otherwise) and `limit` bounds the page — but the bound is REPORTED, never
+  // silent: `truncated` is true when GitHub itself cut the tree short OR when the limit dropped matches, so a caller
+  // that got 500 of 4,000 paths cannot mistake them for the repository. Token scoped to contents:read.
+  async listRepoFiles(
+    workspace: string,
+    repository: string,
+    opts: { prefix?: string; ref?: string; limit?: number },
+    host?: string,
+  ): Promise<{ paths: string[]; truncated: boolean }> {
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { contents: "read" }, host);
+    const tree = await this.trees.for(token, resolved).listTree(repository, { ...(opts.ref ? { ref: opts.ref } : {}) });
+    const prefix = opts.prefix?.replace(/^\/+/, "").replace(/\/+$/, "");
+    const matched = prefix ? tree.paths.filter((p) => p === prefix || p.startsWith(`${prefix}/`)) : tree.paths;
+    const limit = Math.min(Math.max(opts.limit ?? 500, 1), 2000);
+    return { paths: matched.slice(0, limit), truncated: tree.truncated || matched.length > limit };
   }
 
   // List issues + pull requests in a repo the workspace App is installed on (the agent's list_github_issues tool),
@@ -168,6 +199,111 @@ export class GithubAppService {
     return this.repoOps
       .for(token, resolved)
       .listIssues(repository, { ...(opts.state ? { state: opts.state } : {}), perPage });
+  }
+
+  // One issue or pull request WITH its comment thread (the agent's get_github_issue tool). The list read answers
+  // "what is open"; this answers "what was said", which is where the actual context of a bug report lives. Comments
+  // are capped and the cap is reported, for the same reason the tree read reports its bound.
+  async getRepoIssue(
+    workspace: string,
+    repository: string,
+    issueNumber: number,
+    opts: { maxComments?: number },
+    host?: string,
+  ): Promise<{ issue: GithubIssue; comments: GithubIssueComment[]; commentsTruncated: boolean }> {
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { issues: "read", pull_requests: "read" },
+      host,
+    );
+    const reader = this.repoOps.for(token, resolved);
+    const maxComments = Math.min(Math.max(opts.maxComments ?? 30, 1), 100);
+    // One extra asked for, so "there are more" is observed rather than assumed from a full page.
+    const [issue, comments] = await Promise.all([
+      reader.getIssue(repository, issueNumber),
+      reader.listIssueComments(repository, issueNumber, { maxComments: maxComments + 1 }),
+    ]);
+    return {
+      issue,
+      comments: comments.slice(0, maxComments),
+      commentsTruncated: comments.length > maxComments,
+    };
+  }
+
+  // What a pull request CHANGES — per-file status, line counts and GitHub's own diff (the agent's
+  // get_github_pull_request_changes tool). `truncated` compares the returned rows against the PR's own
+  // changed-files count: a review written against half a diff is worse than no review.
+  async listPullRequestChanges(
+    workspace: string,
+    repository: string,
+    pullNumber: number,
+    opts: { maxFiles?: number },
+    host?: string,
+  ): Promise<{ changedFiles: number; files: GithubPullRequestFile[]; truncated: boolean }> {
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { contents: "read", pull_requests: "read" },
+      host,
+    );
+    const maxFiles = Math.min(Math.max(opts.maxFiles ?? 50, 1), 100);
+    const { changedFiles, files } = await this.repoOps
+      .for(token, resolved)
+      .listPullRequestFiles(repository, pullNumber, { maxFiles });
+    return { changedFiles, files, truncated: files.length < changedFiles };
+  }
+
+  // Commit file changes STRAIGHT to a branch, with no pull request (the agent's commit_github_files tool). The
+  // sibling of openPullRequest, and deliberately a separate use-case rather than a flag on it: opening a PR
+  // PROPOSES a change to reviewers, while this one lands it — including on the default branch, if that is the
+  // branch named. The branch is created off the default branch when it does not exist yet (same reuse semantics
+  // as the PR path), and every commit sha is returned, because a write that cannot be named cannot be audited.
+  async commitFiles(
+    workspace: string,
+    repository: string,
+    opts: { branch: string; message: string; changes: { path: string; content: string }[] },
+    host?: string,
+  ): Promise<{ branch: string; base: string; createdBranch: boolean; files: string[]; headSha: string }> {
+    if (opts.changes.length === 0)
+      throw new BadRequestError("BAD_REQUEST", { repository }, "a commit needs at least one file change.");
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { contents: "write" }, host);
+    const writer = this.repoOps.for(token, resolved);
+    const { defaultBranch, headSha } = await writer.repoHead(repository);
+    // The default branch already exists — creating it is not just unnecessary, it is a different operation.
+    const createdBranch = opts.branch !== defaultBranch;
+    if (createdBranch) await writer.ensureBranch(repository, opts.branch, headSha);
+    for (const change of opts.changes) {
+      await writer.putFile(repository, {
+        branch: opts.branch,
+        path: change.path,
+        contentUtf8: change.content,
+        message: opts.message,
+      });
+    }
+    // The branch's resulting head — read AFTER the writes, so the sha names what actually landed.
+    return {
+      branch: opts.branch,
+      base: defaultBranch,
+      createdBranch,
+      files: opts.changes.map((c) => c.path),
+      headSha: await writer.branchHead(repository, opts.branch),
+    };
+  }
+
+  // Close or reopen an issue or pull request (the agent's set_github_issue_state tool). STATE ONLY, matching the
+  // tracker's push: title and body stay GitHub-owned, and whatever explanation belongs with the change rides as a
+  // comment — an agent silently rewriting someone's issue text is not a transition anybody asked for.
+  async setIssueState(
+    workspace: string,
+    repository: string,
+    issueNumber: number,
+    state: "open" | "closed",
+    host?: string,
+  ): Promise<{ number: number; state: "open" | "closed" }> {
+    const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { issues: "write" }, host);
+    await this.repoOps.for(token, resolved).updateIssue(repository, issueNumber, { state });
+    return { number: issueNumber, state };
   }
 
   // Create an issue in a repo the workspace App is installed on (the agent's create_github_issue tool). Token scoped

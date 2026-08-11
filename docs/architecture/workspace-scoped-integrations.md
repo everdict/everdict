@@ -180,6 +180,40 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
   registered integration (posting to the channel) is a member action — honestly named as its own action
   (like `images:push`) rather than overloading admin-only `settings:write`. This is what lets a member's
   conversational agent notify the team by default.
+- **Using the GitHub App = member, on BOTH halves (`github:read` + `github:write`).** Same split as
+  Mattermost: installing the App and picking its repos is admin governance (`settings:write`), and every
+  repository the installation covers is then readable *and* writable by a member — which is what a
+  workspace means when it says "we connected GitHub".
+  The read half was `settings:read` (**admin-only**) while `github:write` was already member+, so a member —
+  and the conversational agent acting as one — could open a pull request against a repository it was
+  forbidden to read one file of, and the shipped `scorecard-fix-pr` skill 403'd at its "locate the code"
+  step. `github:read` covers the repo picker (`GET /workspace/github-app/repos`, `list_github_app_repos`),
+  `get_github_file`, `list_github_repo_files`, and `list_github_issues`; it rides the **read** api-key scope
+  (reading a repository is reading, not governance). Installation status itself — installation ids, the
+  callback URL, `GET /workspace/github-app` — stays `settings:read`: that is the App's administration, not
+  its use. The repository set is still the fence: a token is minted per repo against the owner's
+  installation, so a repo nobody selected at install time is unreachable to reads and writes alike.
+- **The surface on an installed repository, end to end.** Read (`github:read`): `list_github_app_repos` (which
+  repos) → `list_github_repo_files` (what is in one) → `get_github_file` (one file) · `list_github_issues` (what
+  is open) → `get_github_issue` (one item WITH its comment thread) · `get_github_pull_request_changes` (what a PR
+  changes, per file, with GitHub's diff). Write (`github:write`): `create_github_issue` ·
+  `comment_on_github_issue` · `set_github_issue_state` (close/reopen — STATE ONLY, the author's title and body
+  are never rewritten) · `open_github_pr` (propose) · `commit_github_files` (land it directly on a branch) ·
+  `sandbox_git_push` (publish a session's branch).
+  **`open_github_pr` proposes, `commit_github_files` lands.** They are siblings, not a flag on one tool: a PR is
+  a change somebody still has to accept, while a direct commit is the change. That difference is answered in the
+  agent's consent gate rather than in authorization — `commit_github_files` is a GUARDED action
+  (`apps/agent/src/action-policy.ts`), so it keeps asking the member even in `auto` mode, exactly like
+  `sandbox_git_push`, while `open_github_pr` does not.
+- **Every bounded read reports its bound.** `truncated` on the tree and the PR diff, `commentsTruncated` on an
+  issue thread — because a partial answer taken for a complete one is how an agent concludes a file does not
+  exist, or reviews half a diff and calls it reviewed. `commitFiles` likewise returns the branch's resulting
+  `headSha`, read AFTER the writes: a write nobody can name afterwards is a write nobody can verify.
+- **Reading a repo starts with `list_github_repo_files`.** `get_github_file` needs an exact path, so a
+  surface that only offers it is readable only by someone who already knows the repository. The tree read
+  (`GithubRepoTreeReader`, shared with the product wizard's discovery) reports its own bound: `truncated`
+  is true when GitHub cut the tree short **or** when the caller's `limit` dropped matches, because a partial
+  listing mistaken for the repository is how an agent concludes a file does not exist.
 
 ## Install / link flow (S2) — mirrors the connections callback
 

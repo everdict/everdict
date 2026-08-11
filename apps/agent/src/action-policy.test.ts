@@ -42,6 +42,7 @@ describe("action policy (bridge-all surface)", () => {
       "pair_workspace_runner",
       "github_install_workspace_runner",
       "spawn_teammate", // delegates a write-scoped execution token to an autonomous agent
+      "commit_github_files", // lands code on a real branch with no review step — unlike open_github_pr, which proposes
     ])
       expect(isGuardedAction(name)).toBe(true);
   });

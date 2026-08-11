@@ -21,6 +21,17 @@ export interface GithubIssue {
   labels: string[];
 }
 
+// One file changed by a pull request (GET /repos/{repo}/pulls/{n}/files). `patch` is GitHub's unified diff for
+// that file — absent for a binary file, and for one whose diff GitHub declined to render (too large). Absent
+// therefore means "not shown", never "unchanged": the counts stay authoritative on that.
+export interface GithubPullRequestFile {
+  filename: string;
+  status: string; // added | modified | removed | renamed | …
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+
 // One comment on an issue — pulled read-only into the tracker's copy for context.
 export interface GithubIssueComment {
   author: string;
@@ -53,6 +64,10 @@ export interface GithubRepoWriter {
     repository: string,
     opts: { branch: string; path: string; contentUtf8: string; message: string },
   ): Promise<void>;
+  // One branch's head sha. The direct-commit use-case's EVIDENCE read: a write nobody can name afterwards is a
+  // write nobody can verify, and one sha for the finished branch says more than a sha per file. Read separately
+  // rather than returned by putFile on purpose — a completed write must not fail on how its receipt parsed.
+  branchHead(repository: string, branch: string): Promise<string>;
   // Open the PR; if one is already open for the head (422), return that PR instead.
   openPr(
     repository: string,
@@ -79,6 +94,13 @@ export interface GithubRepoWriter {
     issueNumber: number,
     opts: { maxComments: number },
   ): Promise<GithubIssueComment[]>;
+  // The files one pull request changes, with GitHub's own per-file diff. `maxFiles` bounds the page — the PR's
+  // own `changedFiles` count says whether the listing is the whole change (the caller compares and reports).
+  listPullRequestFiles(
+    repository: string,
+    pullNumber: number,
+    opts: { maxFiles: number },
+  ): Promise<{ changedFiles: number; files: GithubPullRequestFile[] }>;
   // Create an issue; returns its number + html_url.
   createIssue(repository: string, opts: { title: string; body?: string }): Promise<{ number: number; url: string }>;
   // Add a comment to an issue or PR (PRs are issues via the issues API); returns the comment's html_url.

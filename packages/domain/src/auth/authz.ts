@@ -95,9 +95,16 @@ export type Action =
   // (like images:push) rather than reusing settings:write — that REGISTERS the bot (admin governance). A member can have the
   // agent notify the team without being able to reconfigure the integration.
   | "mattermost:post"
+  // Reading through the workspace GitHub App — which repositories the installation covers, a file's content, a repo's
+  // file tree, the issue list (the conversational agent's list_github_app_repos / get_github_file / list_github_repo_files /
+  // list_github_issues tools). USING the integration, exactly like github:write below, so it sits at the same member+ level:
+  // reads used to ride settings:read, which is ADMIN-ONLY, so a member-role agent could open a pull request against a repo
+  // it was not allowed to read first — write without read. Not viewer+ like other reads: this reaches OUTSIDE the workspace,
+  // into private source the org installed the App on, and "use the integration" is a member's job on both halves.
+  | "github:read"
   // Using the workspace GitHub App to create an issue or add a comment (the conversational agent's create_github_issue /
   // comment_on_github_issue tools). A member-level runtime action = USING the integration (like mattermost:post), not the
-  // admin-only App registration (settings:write). Read (issues/files) stays settings:read; only mutation needs this.
+  // admin-only App registration (settings:write). Its read twin is github:read.
   | "github:write";
 
 export const EVERDICT_ROLES = ["viewer", "member", "admin"] as const;
@@ -162,6 +169,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "teams:join", // putting YOURSELF on (or off) a public team's roster — self-service, never someone else's membership
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
+    "github:read", // reading repos/files/issues via the workspace App (using the integration) — the read half of github:write, same level: a role that may open a PR must be able to read what it is changing
     "github:write", // creating a GitHub issue/comment via the workspace App (using the integration) — a member's job, unlike admin-only App registration (settings:write)
   ]),
   // GitHub Actions OIDC federation (via=github-actions) only — the minimum CI needs:
@@ -219,6 +227,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "teams:join",
     "images:push",
     "mattermost:post",
+    "github:read",
     "github:write",
   ]),
 };
@@ -248,6 +257,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "members:read",
   "comments:read",
   "issues:read",
+  "github:read", // reading repos/files/issues through the workspace App = reading, not governance (unlike secrets/keys/settings). Its write twin rides the write scope below
 ];
 // write scope = read ∪ content mutation (submit runs, register, create versions, run). Governance (secrets/members/settings/keys write, datasets:delete) is admin-scope only.
 const SCOPE_WRITE_ACTIONS: readonly Action[] = [

@@ -52,6 +52,10 @@ const GUARDED_NAMES = new Set<string>([
   // code on a real remote. `sandbox_exec` stays unguarded — a container is the agent's own scratch space —
   // but the moment its contents leave for a repository, that is a governed write like any other.
   "sandbox_git_push",
+  // Same reasoning one step earlier in the pipeline: committing straight to a branch lands code on a real
+  // repository with NO review step in between (open_github_pr stays unguarded precisely because a PR is a
+  // proposal somebody still has to accept). Naming the default branch here ships to production's source.
+  "commit_github_files",
   // native (non-MCP) kernel tool — spawning a persistent teammate mints it a write-scoped execution token and it
   // then acts autonomously with no human channel, so the delegation itself stays consented even in auto mode.
   "spawn_teammate",

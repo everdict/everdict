@@ -87,10 +87,11 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
       {
         annotations: { readOnlyHint: true },
         description:
-          "Repos accessible to the workspace's GitHub App installation (picker) — only those chosen at install time. settings:read.",
+          "Repos accessible to the workspace's GitHub App installation (picker) — only those chosen at install time. " +
+          "This is the set every other GitHub tool may read and write; start here when you do not know the repository. member+ (github:read).",
         inputSchema: {},
       },
-      () => run(principal, "settings:read", async () => ok(await ci.listRepos(ws))),
+      () => run(principal, "github:read", async () => ok(await ci.listRepos(ws))),
     );
     server.registerTool(
       "open_ci_setup_pr",

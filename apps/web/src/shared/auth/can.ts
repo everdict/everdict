@@ -50,6 +50,10 @@ export type WebAction =
   | 'teams:write'
   | 'teams:join'
   | 'images:push'
+  // Using the workspace GitHub App to READ (the installation's repos, a file, a repo's file tree, the issue list).
+  // Mirrors the control plane, where it sits at the same member+ level as its write twin: whoever may open a pull
+  // request against the installation's repositories may read them. App installation/unlinking stays settings:write.
+  | 'github:read'
 
 const PERMS: Record<string, WebAction[]> = {
   viewer: [
@@ -105,6 +109,7 @@ const PERMS: Record<string, WebAction[]> = {
     'teams:read', // 멤버는 팀에 이슈를 넣으므로 목록은 봐야 한다(생성은 admin)
     'teams:join', // 자기 자신을 공개 팀 로스터에 넣고 빼는 셀프 서비스 — 남의 멤버십은 teams:write(admin)
     'images:push', // publishing/retracting a workspace image is harness authoring → member+ (mirrors the control plane)
+    'github:read', // reading the workspace GitHub App's repos/files/issues → member+ (mirrors the control plane)
   ],
   admin: [
     'runs:read',
@@ -155,6 +160,7 @@ const PERMS: Record<string, WebAction[]> = {
     'teams:write', // 팀 생성은 식별자 접두사를 찍고 이슈가 누구 목록에 뜰지 정한다 → 워크스페이스 운영
     'teams:join',
     'images:push',
+    'github:read',
   ],
 }
 
