@@ -97,3 +97,34 @@ docker build -f apps/web/Dockerfile --target runtime -t everdict-web .
 
 > Note: the runtime image copies all of `/app` (including node_modules) for reliability first. Slimming the image can be a
 > follow-up optimization via `pnpm deploy --filter <pkg> --prod` or Next standalone (`output: 'standalone'`).
+
+## Versions — each service releases on its own tag
+
+The four server images are built from one commit but versioned separately: a git tag names one service and
+one version, and `.github/workflows/images.yml` publishes only that image.
+
+| tag | publishes |
+|---|---|
+| `api-v1.2.0` | `ghcr.io/everdict/everdict-api:1.2.0` + `:latest` |
+| `web-v1.2.0` | `ghcr.io/everdict/everdict-web:1.2.0` + `:latest` |
+| `agent-v1.2.0` | `ghcr.io/everdict/everdict-agent:1.2.0` + `:latest` |
+| `job-runner-v1.2.0` | `ghcr.io/everdict/everdict-job-runner:1.2.0` + `:latest` |
+| `v1.2.0` | all four at `1.2.0` — the stack tag, for when they genuinely move together |
+
+Every tag also gets a GitHub Release (generated notes), and the release job runs only after each image of that
+ref has pushed — so the page never advertises a build that failed. `cli-v*` and `desktop-v*` are unchanged;
+they have their own workflows.
+
+Pin them independently in `.env`:
+
+```dotenv
+EVERDICT_VERSION=1.2.0        # what any unset service falls back to
+EVERDICT_API_VERSION=1.3.1    # …and this one moves on its own
+```
+
+⚠️ **A version no longer proves a working set.** These four share `packages/contracts` and the web is a typed
+client of that wire, so "api 1.3.1 with web 1.2.0" is a claim you are making, not one the version numbers
+check. When they move together, use the stack tag and let every service inherit `EVERDICT_VERSION`.
+
+⚠️ **`:latest` belongs to whichever tag was pushed last.** Releasing `api-v1.3.0` and then `v1.2.0` moves
+`everdict-api:latest` backwards. Pick one axis per service and stay on it.

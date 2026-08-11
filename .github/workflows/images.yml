@@ -1,11 +1,26 @@
 # Container images — build + push api/web/agent/job-runner to GHCR (ghcr.io/everdict/*).
-# Triggers: a release tag `v*` (versioned + latest) or manual dispatch (latest only).
-# The compose prod profile can pull these instead of building from source.
+#
+# A service is released BY ITS OWN TAG: `api-v1.2.0` publishes only everdict-api:1.2.0, the way
+# `cli-v*` and `desktop-v*` already work. The four server images share a repository and a commit,
+# but they no longer share a version — so a tag names one service and one version, and the deploy
+# side pins each image separately (EVERDICT_<SERVICE>_VERSION, see deploy/compose/README.md).
+#
+# `v*` is kept as the STACK tag: it publishes all four at the same version, for the case where they
+# genuinely move together. Both write the same image names, so the LAST tag pushed owns `:latest`
+# for the images it covers — releasing api-v1.3.0 and then v1.2.0 moves everdict-api:latest
+# backwards. Pick one axis per service and stay on it.
+#
+# workflow_dispatch builds all four as `:latest` + `:sha` with no version tag.
 name: images
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*" # stack release — all four services at this version
+      - "api-v*"
+      - "web-v*"
+      - "agent-v*"
+      - "job-runner-v*"
   workflow_dispatch:
 
 permissions:
@@ -13,24 +28,51 @@ permissions:
   packages: write
 
 jobs:
+  # Which images does this ref release, and under what version? Reading the tag ONCE here is what lets the
+  # build job stay a plain matrix — a per-image `if` would still spin up four runners to skip three of them.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - id: plan
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          api='{"image":"api","dockerfile":"apps/api/Dockerfile","target":"runtime"}'
+          web='{"image":"web","dockerfile":"apps/web/Dockerfile","target":"runtime"}'
+          agent='{"image":"agent","dockerfile":"apps/agent/Dockerfile","target":"runtime"}'
+          # single-stage Dockerfile — no target
+          jobrunner='{"image":"job-runner","dockerfile":"packages/job-runner/Dockerfile","target":""}'
+          all="[$api,$web,$agent,$jobrunner]"
+
+          version=""
+          include="$all"
+          if [ "$REF_TYPE" = "tag" ]; then
+            case "$REF_NAME" in
+              api-v*)        include="[$api]";       version="${REF_NAME#api-v}" ;;
+              web-v*)        include="[$web]";       version="${REF_NAME#web-v}" ;;
+              agent-v*)      include="[$agent]";     version="${REF_NAME#agent-v}" ;;
+              job-runner-v*) include="[$jobrunner]"; version="${REF_NAME#job-runner-v}" ;;
+              v*)            include="$all";         version="${REF_NAME#v}" ;;
+              # A tag the trigger let through but nothing here claims is a mistake worth failing on, not a
+              # silent full-stack publish under an unparsed version.
+              *) echo "::error::tag '$REF_NAME' matches no release prefix" >&2; exit 1 ;;
+            esac
+          fi
+          echo "matrix={\"include\":$include}" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "releasing $include at version '${version:-<none>}'"
+
   build:
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - image: api
-            dockerfile: apps/api/Dockerfile
-            target: runtime
-          - image: web
-            dockerfile: apps/web/Dockerfile
-            target: runtime
-          - image: agent
-            dockerfile: apps/agent/Dockerfile
-            target: runtime
-          - image: job-runner
-            dockerfile: packages/job-runner/Dockerfile
-            target: "" # single-stage Dockerfile — no target
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
@@ -43,8 +85,10 @@ jobs:
         id: meta
         with:
           images: ghcr.io/everdict/everdict-${{ matrix.image }}
+          # The version comes from `prepare`, not from `type=semver`: metadata-action parses the git tag itself,
+          # and `api-v1.2.0` is not semver — it would silently emit no version tag at all.
           tags: |
-            type=semver,pattern={{version}}
+            type=raw,value=${{ needs.prepare.outputs.version }},enable=${{ needs.prepare.outputs.version != '' }}
             type=sha,format=short
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
       - uses: docker/build-push-action@v6
@@ -57,3 +101,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The tag alone left no Release page — for a year of `v*` tags there was none, and a version nobody can read
+  # notes for is a number, not a release. Runs only after every image of this ref is published, so the page
+  # never advertises an image that failed to build.
+  release:
+    needs: [prepare, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # release-note generation compares against the previous tag
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true

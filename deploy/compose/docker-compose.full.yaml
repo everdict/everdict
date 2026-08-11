@@ -216,7 +216,7 @@ services:
 
   # ── Control-plane API (Fastify :8787) — owns stores, dispatch, the runner lease hub, and the /internal bridge ─
   api:
-    image: ghcr.io/everdict/everdict-api:${EVERDICT_VERSION:-latest}
+    image: ghcr.io/everdict/everdict-api:${EVERDICT_API_VERSION:-${EVERDICT_VERSION:-latest}}
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
@@ -433,7 +433,7 @@ services:
   # With NEITHER set the container fails fast on boot with an actionable error; web/api are unaffected (they do not
   # wait on the agent's health), so only the chat is down until you configure a model.
   agent:
-    image: ghcr.io/everdict/everdict-agent:${EVERDICT_VERSION:-latest}
+    image: ghcr.io/everdict/everdict-agent:${EVERDICT_AGENT_VERSION:-${EVERDICT_VERSION:-latest}}
     build:
       context: ../..
       dockerfile: apps/agent/Dockerfile
@@ -492,7 +492,7 @@ services:
 
   # ── SaaS web (Next.js :3001) — pure HTTP client of the API; token courier for Keycloak when auth is on ───────
   web:
-    image: ghcr.io/everdict/everdict-web:${EVERDICT_VERSION:-latest}
+    image: ghcr.io/everdict/everdict-web:${EVERDICT_WEB_VERSION:-${EVERDICT_VERSION:-latest}}
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
