@@ -9,6 +9,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 // (context serialization → dispatch → sandbox contract → score rewrite) with a genuine `node` execution.
 describe("code judge — real dispatch end-to-end (in-process LocalBackend)", () => {
   const judgeCtx: GradeContext = {
+    deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
     case: {
       id: "c1",
       env: { kind: "prompt" },

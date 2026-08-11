@@ -17,6 +17,8 @@ import { safeGrade } from "./safe-grade.js";
 const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : describe.skip;
 
 const context = (timeoutSec: number): GradeContext => ({
+  // ONE deadline for the whole scoring phase, computed where the clock starts.
+  deadlineAt: Date.now() + timeoutSec * 1000,
   case: EvalCaseSchema.parse({
     id: "c-1",
     env: { kind: "prompt" },
@@ -51,7 +53,7 @@ describeTrust("TRUST-133 — a grader that hangs settles as a fact, inside the c
         // A hang is a liveness fact about this ATTEMPT, not a verdict about the case — re-scoring this one
         // grader can still recover the measurement, exactly as a transport throw can.
         retryable: true,
-        detail: "[grader-timeout] 'hangs' did not return within the case's 1s budget",
+        detail: "[grader-timeout] 'hangs' did not return within what remained of the case's 1s budget (1s)",
       },
     ]);
     // The deadline is the case's, honoured in wall-clock time: it waited, and it did not wait forever.

@@ -20,7 +20,12 @@ const msg = (text: string, role: "user" | "assistant" = "assistant"): TraceEvent
   text,
 });
 
-const ctx = (trace: TraceEvent[]) => ({ case: CASE, trace, snapshot: { kind: "prompt" as const, output: "" } });
+const ctx = (trace: TraceEvent[]) => ({
+  deadlineAt: Date.now() + 60_000,
+  case: CASE,
+  trace,
+  snapshot: { kind: "prompt" as const, output: "" },
+});
 
 describe("text-metric grader (numeric metric from the agent's printed output)", () => {
   const grader = new TextMetricGrader({ pattern: "^steps: (\\d+)", metric: "agent_steps" });

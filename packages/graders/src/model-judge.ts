@@ -4,7 +4,9 @@ import type { CriterionVerdict, Judge, JudgeImage, JudgeInput, JudgeVerdict } fr
 
 // Model-call primitive — (prompt[, image]) → raw text. Separates transport from judging logic (injected in tests).
 // If an image is given, sends multimodally to a vision model (VLM) (e.g. os-use screenshot judging).
-export type JudgeCompletion = (prompt: string, image?: JudgeImage) => Promise<string>;
+// `signal` carries the case deadline's cancellation to the provider (arch-review 25 P1) — a timed-out judge
+// must stop spending, not merely stop being listened to.
+export type JudgeCompletion = (prompt: string, image?: JudgeImage, signal?: AbortSignal) => Promise<string>;
 
 const MAX_CHARS = 6000; // Trace/DOM can be large, so truncate to protect the context.
 
@@ -231,8 +233,8 @@ function parseVerdict(text: string, criteria?: JudgeCriterion[]): JudgeVerdict {
 // model judge — takes a JudgeCompletion (model call) and returns a Judge. Transport is injected via anthropicComplete etc.
 export function modelJudge(complete: JudgeCompletion): Judge {
   return {
-    async judge(input) {
-      const text = await complete(buildPrompt(input), input.screenshot);
+    async judge(input, signal) {
+      const text = await complete(buildPrompt(input), input.screenshot, signal);
       return parseVerdict(text, input.criteria);
     },
   };
@@ -251,7 +253,7 @@ export function transportComplete(
   transport: LlmTransport,
   cfg: { model: string; maxTokens?: number },
 ): JudgeCompletion {
-  return async (prompt, image) => {
+  return async (prompt, image, signal) => {
     const content: LlmMessage["content"] = image
       ? [
           { type: "text", text: prompt },
@@ -267,6 +269,7 @@ export function transportComplete(
       messages: [{ role: "user", content }],
       tools: [],
       ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
+      ...(signal ? { signal } : {}),
     });
     const text = result.content;
     if (typeof text !== "string" || text.length === 0) {

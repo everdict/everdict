@@ -18,6 +18,7 @@ const artifactFetch = () =>
   }) as unknown as typeof fetch;
 
 const ctxWith = (snapshot: EnvSnapshot, evidence?: GradeContext["evidence"]): GradeContext => ({
+  deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
   case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
   trace: [],
   snapshot,

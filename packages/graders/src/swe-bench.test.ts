@@ -21,6 +21,7 @@ function mockCompute(opts: { applyExit?: number; testExit?: number }): { compute
 }
 
 const ctxWith = (compute?: ComputeHandle): GradeContext => ({
+  deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
   case: { id: "i1", env: { kind: "repo", source: { files: {} } }, task: "fix", graders: [], timeoutSec: 1, tags: [] },
   trace: [],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },

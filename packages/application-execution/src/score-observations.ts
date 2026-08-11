@@ -32,6 +32,10 @@ export async function scoreObservations(input: ScoreObservationsInput): Promise<
     scores.push(
       ...(await safeGrade(grader, {
         case: input.evalCase,
+        // Deferred observation scoring runs on the control plane, AFTER the case's own execution window — so
+        // its budget starts here. The case's declared seconds are what bound it either way; what must not
+        // happen is a grader with no bound at all.
+        deadlineAt: Date.now() + input.evalCase.timeoutSec * 1000,
         trace: input.trace,
         snapshot: input.snapshot,
         ...(input.provision ? { provision: input.provision } : {}),

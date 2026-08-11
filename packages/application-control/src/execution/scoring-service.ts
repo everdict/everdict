@@ -289,6 +289,8 @@ export class ScoringService {
     // into a char-capped prompt, so leaving it in would crowd the agent's own steps out of the judged window.
     const ctx: GradeContext = {
       case: evalCase,
+      // One deadline for this scoring phase, bounded by the case's declared budget (arch-review 25 P1).
+      deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
       trace: result.trace.filter((e) => e.kind !== "infra"),
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),

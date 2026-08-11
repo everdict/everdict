@@ -5,7 +5,7 @@ import { StoreStateGrader } from "./store-state.js";
 const CASE: EvalCase = { id: "c", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] };
 
 function ctx(over: Partial<GradeContext> = {}): GradeContext {
-  return { case: CASE, trace: [], snapshot: { kind: "prompt", output: "" }, ...over };
+  return { deadlineAt: Date.now() + 60_000, case: CASE, trace: [], snapshot: { kind: "prompt", output: "" }, ...over };
 }
 
 describe("StoreStateGrader", () => {
@@ -44,7 +44,9 @@ describe("StoreStateGrader", () => {
   it("falls back to the case's expected when config.expect is absent", async () => {
     const g = new StoreStateGrader({ store: "postgres", query: "x" });
     const withExpected: EvalCase = { ...CASE, expected: "done" };
-    const score = await g.grade(ctx({ case: withExpected, readStore: async () => "all done" }));
+    const score = await g.grade(
+      ctx({ deadlineAt: Date.now() + 60_000, case: withExpected, readStore: async () => "all done" }),
+    );
     expect(score.pass).toBe(true);
   });
 

@@ -74,6 +74,7 @@ describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () =>
       tenant: "acme",
       spec: CODE_JUDGE,
       ctx: {
+        deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
         case: { id: "preview", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
         trace: [],
         snapshot: { kind: "prompt", output: "" },
@@ -94,6 +95,7 @@ describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () =>
     const { jobs, service } = capture();
     const submit = codeJudgeRunSubmitter(service);
     const sourceCtx = {
+      deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
       case: {
         id: "c1",
         env: { kind: "prompt" as const },

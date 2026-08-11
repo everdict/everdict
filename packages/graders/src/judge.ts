@@ -48,7 +48,11 @@ export interface JudgeInput {
 
 // Model-based judging abstraction (LLM/VLM). The concrete implementation (real model call) is injected.
 export interface Judge {
-  judge(input: JudgeInput): Promise<JudgeVerdict>;
+  // `signal` is the CANCELLATION half of the case's deadline (arch-review 25 P1). A judge is the one grader
+  // that routinely reaches an external, billed system, so a timeout that only stops the WAITING leaves a
+  // provider request running and charging after its answer stopped being admissible. Optional because a judge
+  // that reaches nothing has nothing to abort.
+  judge(input: JudgeInput, signal?: AbortSignal): Promise<JudgeVerdict>;
 }
 
 function mediaTypeFor(path: string): string {
@@ -214,7 +218,9 @@ export class JudgeGrader implements Grader {
       ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),
       ...(this.opts.useScreenshot ? { useScreenshot: true } : {}),
     });
-    const verdict = await this.judge.judge(input);
+    // The signal rides from safeGrade's per-grader controller: when this grader's slice of the case budget
+    // runs out, the provider call is told to stop rather than left to finish unheard.
+    const verdict = await this.judge.judge(input, ctx.signal);
     const overall: MeasuredScore = {
       graderId: this.id,
       metric: JUDGE_OVERALL_METRIC,

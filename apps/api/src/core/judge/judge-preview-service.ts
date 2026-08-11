@@ -74,6 +74,10 @@ export interface PreviewCommand {
 // Build a GradeContext from a pasted trace + a synthetic, environment-free prompt snapshot (unless one is provided).
 export function gradeContextFromTrace(evidence: Extract<JudgeEvidenceInput, { source: "trace" }>): GradeContext {
   return {
+    // A PREVIEW's OWN bound, deliberately not read off the synthetic case below: that case's `timeoutSec` is
+    // a placeholder for a run that never happens, and a one-second deadline would fail every real judge call.
+    // This is an interactive request, so what it needs is a bound a person will wait for.
+    deadlineAt: Date.now() + 60_000,
     case: {
       id: "preview",
       env: { kind: "prompt" },
@@ -112,6 +116,8 @@ export class JudgePreviewService {
       tags: [],
     };
     return {
+      // Same: the preview's own interactive bound, not the case's execution window (which already happened).
+      deadlineAt: Date.now() + 60_000,
       case: evalCase,
       trace: record.result.trace,
       snapshot: record.result.snapshot,

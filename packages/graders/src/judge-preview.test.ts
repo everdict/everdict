@@ -6,6 +6,7 @@ import { modelJudge, previewJudge } from "./model-judge.js";
 
 function promptCtx(trace: TraceEvent[], expected?: string): GradeContext {
   return {
+    deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
     case: {
       id: "c",
       env: { kind: "prompt" },
@@ -35,6 +36,7 @@ describe("assembleJudgeInput", () => {
 
   it("maps a browser snapshot's dom and a prompt snapshot's output as evidence", async () => {
     const browser: GradeContext = {
+      deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
       case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [],
       snapshot: { kind: "browser", url: "u", dom: "<h1>Done</h1>", console: [] },
@@ -59,6 +61,7 @@ describe("assembleJudgeInput", () => {
   // gap 18: the VLM media type must be sniffed from the image's MAGIC BYTES, not the ref extension. The control-plane
   // artifact resolver puts base64 into snap.screenshot without a content-type, so a `*.png` ref would mislabel a JPEG.
   const browserShot = (screenshot: string, screenshotRef: string): GradeContext => ({
+    deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
     case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
     trace: [],
     snapshot: { kind: "browser", url: "u", dom: "", console: [], screenshotRef, screenshot },
@@ -215,6 +218,7 @@ describe("assessEvidence", () => {
 
   it("satisfies a dom requirement from a browser snapshot", () => {
     const browser: GradeContext = {
+      deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
       case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [],
       snapshot: { kind: "browser", url: "u", dom: "<h1>ok</h1>", console: [] },

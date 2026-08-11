@@ -24,17 +24,26 @@ import {
 // timeout, a script grader waiting on a process that will not exit, a store read against an unreachable
 // dependency — none of them throw.
 //
-// The deadline is the CASE'S OWN, not a constant this module invents. `timeoutSec` is what the user declared
+// The deadline is the CASE'S OWN and it is SHARED (arch-review 25 P1). `timeoutSec` is what the user declared
 // this case may take, grading is part of running it, and a bound taken from the artifact under evaluation
 // cannot silently turn a legitimately slow judge (a delegated harness dispatching a whole agent) into a
-// failure the way a hard-coded number would.
+// failure the way a hard-coded number would. The first version handed each grader that full budget
+// independently, so three hanging graders spent three times it — a per-grader timeout wearing a case budget's
+// name. `ctx.deadlineAt` is one instant for the whole scoring phase, and each grader gets what is left of it.
 //
-// The abandoned promise keeps running — JavaScript has no way to cancel one — and that is safe here because
-// its result is discarded: the score for this grader is already decided, and a late resolution has nowhere
-// to write. What must not happen, and does not, is the timer holding the process open after the race is
-// over.
+// …and the timeout CANCELS, it does not merely stop waiting. Revoking a result's authority and revoking the
+// work that produces it are two different acts, and doing only the first leaves a judge's provider request
+// open and billing after everyone stopped caring what it said. The derived signal is what a grader passes to
+// whatever it reaches; the abandoned promise is still discarded, because a grader that ignores the signal
+// must not be able to write a score after its authority is gone.
 export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Score[]> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Aborted on this grader's timeout, and chained to the caller's signal so a cancelled CASE cancels the
+  // grader it is currently inside rather than waiting for it to finish being irrelevant.
+  const controller = new AbortController();
+  const onOuterAbort = () => controller.abort();
+  ctx.signal?.addEventListener("abort", onOuterAbort, { once: true });
+  if (ctx.signal?.aborted === true) controller.abort();
   try {
     // sanitizeScore: a grader that RETURNS garbage (NaN value, empty ids) becomes a visible INVALID score —
     // a grader bug to fix, excluded from every aggregate — never a number that flows downstream.
@@ -48,15 +57,19 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
       ...(grader.ownsMetrics !== undefined ? { ownsMetrics: grader.ownsMetrics } : {}),
       ...(grader.ownsJudgeVerdict === true ? { ownsJudgeVerdict: true } : {}),
     };
-    const deadlineMs = ctx.case.timeoutSec * 1000;
+    // What is LEFT of the case's budget. Never negative: a deadline already past means this grader gets no
+    // time at all, which is the honest answer — the case's budget was spent before it started.
+    const remainingMs = Math.max(0, ctx.deadlineAt - Date.now());
     const timedOut = Symbol("grader_timeout");
     const raced = await Promise.race([
-      grader.grade(ctx),
+      grader.grade({ ...ctx, signal: controller.signal }),
       new Promise<typeof timedOut>((resolve) => {
-        timer = setTimeout(() => resolve(timedOut), deadlineMs);
+        timer = setTimeout(() => resolve(timedOut), remainingMs);
       }),
     ]);
-    if (raced === timedOut)
+    if (raced === timedOut) {
+      // The result's authority is revoked AND the work is told to stop. Only the first was ever guaranteed.
+      controller.abort();
       return [
         {
           graderId: grader.id,
@@ -66,9 +79,10 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
           // Retryable: a hang is a liveness fact about this attempt, not a verdict about the case. Re-scoring
           // just this grader can recover the measurement, exactly as a transport throw can.
           retryable: true,
-          detail: `[grader-timeout] '${grader.id}' did not return within the case's ${ctx.case.timeoutSec}s budget`,
+          detail: `[grader-timeout] '${grader.id}' did not return within what remained of the case's ${ctx.case.timeoutSec}s budget (${Math.round(remainingMs / 1000)}s)`,
         },
       ];
+    }
     return toScores(raced).map((s) => sanitizeScore(s, producer));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -86,5 +100,6 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
     // Cleared on every path — a live timer would keep the event loop (and the worker process) alive for the
     // remainder of a 30-minute budget after the case had already settled.
     if (timer !== undefined) clearTimeout(timer);
+    ctx.signal?.removeEventListener("abort", onOuterAbort);
   }
 }

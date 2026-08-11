@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { judgeFromEnv, makeGradersFromEnv } from "./judge-env.js";
 
 const ctx = (text: string): GradeContext => ({
+  deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
   case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "q", graders: [], timeoutSec: 1, tags: [] },
   trace: [{ t: 0, kind: "message", role: "assistant", text }] as TraceEvent[],
   snapshot: { kind: "browser", url: "https://x", dom: text, console: [] },

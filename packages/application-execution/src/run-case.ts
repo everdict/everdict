@@ -246,6 +246,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // The os resolution goes through resolvePlacementOs and is KEPT (→ the execution manifest below): this is
   // the moment the `?? "linux"` decision is made, and it used to be the moment the answer was lost.
   const world = resolvePlacementOs(evalCase.placement);
+  // ONE DEADLINE FOR THE WHOLE CASE, taken where the clock starts (arch-review 25 P1). Grading is part of
+  // running a case, so it spends the same declared budget the execution does — and every grader shares that
+  // one instant rather than each getting a fresh copy of it.
+  const deadlineAt = Date.now() + evalCase.timeoutSec * 1000;
   const compute = await deps.driver.provision({
     os: world.os,
     needs: computeNeedsFor(evalCase),
@@ -339,7 +343,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const provision = (spec: ComputeSpec): Promise<ComputeHandle> => deps.driver.provision(spec);
     for (const [i, grader] of deps.graders.entries()) {
       if (grader.needsCompute === true) {
-        slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot, compute, provision });
+        slots[i] = await safeGrade(grader, { case: evalCase, deadlineAt, trace, snapshot, compute, provision });
       }
     }
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);
@@ -386,7 +390,13 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       if (!collectFailure) {
         for (const [i, grader] of deps.graders.entries()) {
           if (grader.needsCompute !== true) {
-            slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized, provision });
+            slots[i] = await safeGrade(grader, {
+              case: evalCase,
+              deadlineAt,
+              trace,
+              snapshot: materialized,
+              provision,
+            });
           }
         }
       } else {

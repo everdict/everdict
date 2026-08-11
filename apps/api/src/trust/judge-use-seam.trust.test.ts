@@ -21,6 +21,7 @@ import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 const describeTrust = TRUST_SUITE_ENABLED ? describe : describe.skip;
 
 const ctx: GradeContext = {
+  deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
   case: { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "do x", graders: [], timeoutSec: 60, tags: [] },
   trace: [{ t: 0, kind: "llm_call", model: "m" }],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },

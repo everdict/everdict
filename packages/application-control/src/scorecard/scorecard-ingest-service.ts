@@ -317,7 +317,12 @@ export class ScorecardIngestService {
           ? up.trace
           : await this.materialize(id, tenant, up.caseId, up.trace);
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
-      const ctx: GradeContext = { case: evalCase, trace, snapshot };
+      const ctx: GradeContext = {
+        case: evalCase,
+        deadlineAt: Date.now() + evalCase.timeoutSec * 1000, // this scoring phase's bound (arch-review 25 P1)
+        trace,
+        snapshot,
+      };
       // Re-derive trace-only graders (steps/cost/latency) — same metrics as a live run for diff alignment. The
       // grader impls live in @everdict/graders, which the application layer never imports; apps/api injects them
       // as defaultTraceGraders (re-architecture P2 S4). Absent = uploaded scores only (no derived trace metrics).

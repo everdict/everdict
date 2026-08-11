@@ -218,6 +218,16 @@ export type StoreReader = (q: StoreReadQuery) => Promise<string>;
 
 export interface GradeContext {
   case: EvalCase;
+  // WHEN THIS CASE'S GRADING MUST BE OVER (epoch ms) — ONE deadline for the whole scoring phase, not one per
+  // grader (arch-review 25 P1). The first version gave every grader the case's full budget, so three graders
+  // hanging in sequence spent three times the budget the case declared and the bound stopped being a bound.
+  // Computed by whoever starts the case, because only it knows when the clock started.
+  deadlineAt: number;
+  // …and the way to STOP the work, not merely to stop waiting for it (arch-review 25 P1). A timeout revokes a
+  // result's authority; it does not revoke the underlying call, so a judge that timed out kept its provider
+  // request open and kept spending. `safeGrade` derives a per-grader signal from this and the deadline; a
+  // grader that reaches an external system passes it down.
+  signal?: AbortSignal;
   trace: TraceEvent[];
   snapshot: EnvSnapshot;
   // Evidence extracted from a pulled trace via the mapping's evidence slots — carries the CUSTOM named slots a

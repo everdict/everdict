@@ -140,7 +140,14 @@ export async function collectDeferredTrace(
   // 2) Score the observations the job deferred — the separation rule matches the agent (needsCompute=true was already scored in the job).
   //    An inline judge can't be reconstructed without a Judge injection → explicit skip (registered judges are handled separately by the judge stream).
   const scores = [...result.scores];
-  const ctx: GradeContext = { case: evalCase, trace, snapshot: result.snapshot };
+  // The scoring phase's own deadline — this runs on the control plane after the case executed, so its clock
+  // starts here, bounded by the same declared budget (arch-review 25 P1).
+  const ctx: GradeContext = {
+    case: evalCase,
+    deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
+    trace,
+    snapshot: result.snapshot,
+  };
   const makeGraders = deps.makeGraders;
   for (const spec of evalCase.graders) {
     if (!makeGraders) {
