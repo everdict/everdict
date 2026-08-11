@@ -159,6 +159,8 @@ half the other missed, and both looked handled.
 
 | TRUST-128 | **A declared scope survives the compose point**: the turn completes an activation's envelope from its resolved toolset — reads `all`, every write tool — and did so UNCONDITIONALLY, which would have replaced a verifier's empty write list, evidence-only reads and object whitelist on the way to the kernel. Both guards would then have enforced, faithfully, a boundary nobody meant. The producer was certified and the kernel was certified; the step between them decided what the other two were talking about | `apps/agent/src/verifier-scope.trust.test.ts` |
 
+| TRUST-129 | **A verdict is what the verifier SUBMITTED and what the runtime SAW**: a verification turn runs inside the handed envelope and reports the submitted verdict with the kernel's own account of what it consumed — a turn that never submits comes back `inconclusive` SAYING that is what happened, which is not "the evidence could not decide". An agent that read nothing can still write a confident paragraph, so a prose-parsed verdict would have made the two indistinguishable | `apps/agent/src/verification-turn.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
