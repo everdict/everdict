@@ -646,7 +646,9 @@ export interface ChatHooks {
   // the resolved tool registry, because the agent's granted capabilities only exist as names once tools are
   // built. Set by autonomous callers (the activation); deliberately UNSET for interactive chat, where a human
   // is present and refusing a tool they just asked for would be the gate misfiring, not working.
-  envelope?: Omit<TaskEnvelope, "scope">;
+  // …and its SCOPE is optional, not absent: an ordinary activation lets the turn complete it from the
+  // resolved toolset, while a role-bound task (a verifier) arrives with the scope that IS its guarantee.
+  envelope?: Omit<TaskEnvelope, "scope"> & { scope?: TaskEnvelope["scope"] };
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -1212,9 +1214,16 @@ export async function runChat(
         ...(hooks?.envelope
           ? {
               envelope: (() => {
+                // A DECLARED scope is kept, never "completed" (arch-review 23, verifier wiring). The posture
+                // below is the DEFAULT for an activation that arrives without one — it is not an override.
+                // A role-bound task (a verifier) has its scope decided before it is spawned, and that scope
+                // IS the guarantee: widening it here to `reads: "all"` plus every write tool, and dropping
+                // `resources` on the way, would hand the kernel a different envelope than the one the spawn
+                // site built and the trust suite certifies. The guards would then enforce, faithfully, a
+                // boundary nobody meant.
                 const composed = {
                   ...hooks.envelope,
-                  scope: {
+                  scope: hooks.envelope.scope ?? {
                     reads: "all" as const,
                     writes: registry
                       .list()

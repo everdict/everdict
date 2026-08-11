@@ -35,7 +35,12 @@ export interface TurnOutcome {
 // The envelope this activation runs inside, minus the one part the activation cannot know. `scope` is the
 // agent's RESOLVED toolset, and that set only exists once the turn has built its tool registry — so the
 // activation states the boundary it owns (goal, budgets, halt vocabulary) and the turn completes the scope.
-export type ActivationEnvelope = Omit<TaskEnvelope, "scope">;
+// An activation's envelope. `scope` is OPTIONAL rather than absent (arch-review 23, verifier wiring): an
+// ordinary activation lets the turn complete it from the resolved toolset — the executor posture, where reads
+// are the agent's senses — but a role-bound task arrives with its scope ALREADY decided and must keep it. A
+// verifier is the case that proves the difference: its envelope is the whole guarantee, and a compose point
+// that "completes" it would hand the kernel a widened one to enforce.
+export type ActivationEnvelope = Omit<TaskEnvelope, "scope"> & { scope?: TaskEnvelope["scope"] };
 
 // A headless run's own hard bound, in the kernel's own units. Deliberately NOT derived from spec.budgetUsd:
 // that is the DELEGATED slice governing the work an activation CAUSES (runs it submits, refused at the

@@ -157,6 +157,8 @@ half the other missed, and both looked handled.
 
 | TRUST-31 | **A spawned verifier cannot acquire write capability**: the envelope a spawn site builds (`verifierEnvelopeFor`) driven through the two kernel guards the agent loop actually calls — an EMPTY write list, reads restricted to the evidence's own tools (never `all`, so a verifier cannot read the executor's trajectory and review its STORY instead of the artifact), and objects pinned to the cited refs. Both halves existed for generations; what was missing was the scenario that drives one through the other. It also refuses to build a WEAKENED envelope — a non-verifier profile, no evidence, or no read tools — rather than returning one that looks spawned and verifies nothing | `packages/domain/src/ownership/verifier-envelope.trust.test.ts` |
 
+| TRUST-128 | **A declared scope survives the compose point**: the turn completes an activation's envelope from its resolved toolset — reads `all`, every write tool — and did so UNCONDITIONALLY, which would have replaced a verifier's empty write list, evidence-only reads and object whitelist on the way to the kernel. Both guards would then have enforced, faithfully, a boundary nobody meant. The producer was certified and the kernel was certified; the step between them decided what the other two were talking about | `apps/agent/src/verifier-scope.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
