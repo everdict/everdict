@@ -14,6 +14,7 @@ export const UNMEASURED_REASONS = [
   "unsupported", // this deployment/path cannot run the grader (no dispatcher, unresolvable rubric)
   "policy_skip", // deliberately skipped by configuration/policy — not an error
   "contract_violation", // the grader RETURNED a score that violates the contract (NaN value, empty ids) — a grader bug, never retried
+  "grader_timeout", // the grader never returned within the case's own declared budget — a hang, not a throw
 ] as const;
 export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
 
