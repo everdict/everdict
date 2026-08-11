@@ -205,6 +205,16 @@ The realm defines:
 A Keycloak user needs `firstName`/`lastName`/`email` or it is *"not fully set up"* and ROPC fails — keep the
 fixture complete.
 
+⚠️ **The realm must declare an unmanaged-attribute policy, or `workspace` never reaches a token** (live incident,
+2026-08-11). Keycloak 24+ has a DECLARATIVE user profile and, by default, refuses attributes it does not know: on
+import it silently drops `users[].attributes.workspace`, the `workspace` protocol mapper then maps nothing, and every
+SSO principal resolves with `workspace: ""` — an authenticated member with no workspace, which reads as "everything
+disappeared" rather than as a realm-config fault. The fixture therefore carries a
+`components["org.keycloak.userprofile.UserProfileProvider"]` entry with `{"unmanagedAttributePolicy":"ENABLED"}`
+(verified by importing the fixture into a throwaway realm and reading the claim back off a minted token). An
+`UPDATE`-by-admin-API repair has the same trap in reverse: `PUT /admin/realms/<r>/users/<id>` REPLACES the user, so a
+body carrying only `attributes` wipes `email`/`firstName`/`lastName` and the account stops being "fully set up".
+
 ## Live-verified (real Keycloak)
 Token via **ROPC** (browserless), then through the control plane:
 

@@ -2,6 +2,15 @@
   "realm": "everdict",
   "enabled": true,
   "sslRequired": "none",
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": { "kc.user.profile.config": ["{\"unmanagedAttributePolicy\":\"ENABLED\"}"] }
+      }
+    ]
+  },
   "roles": {
     "realm": [{ "name": "viewer" }, { "name": "member" }, { "name": "admin" }]
   },
