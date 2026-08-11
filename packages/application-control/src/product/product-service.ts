@@ -18,6 +18,7 @@ import {
   type ReleaseStatus,
   type ScorecardRecord,
   type ShippedComponent,
+  UpstreamError,
 } from "@everdict/contracts";
 import type {
   ProductDetailResponse,
@@ -154,6 +155,25 @@ export interface ProductServiceDeps {
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
+}
+
+// READING A FENCE IS PART OF THE DECISION, not preparation for it. Every condition a terminal commit stands
+// on has to be ESTABLISHED — and a store that is wired but cannot answer has established nothing. Degrading
+// to "no condition" is the failure mode this whole generation of review has been removing: it is silent, it
+// is in the direction of green, and it happens at the transition a workspace cannot take back.
+//
+// UpstreamError rather than Conflict: nothing about the release is wrong, the platform could not read its own
+// state. The caller retries.
+async function fenceRead<T>(what: string, release: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { release, fence: what },
+      `Refusing to ship: ${what} could not be read (${err instanceof Error ? err.message : String(err)}), so this decision cannot state the conditions it commits under. A ship that skips a fence it could not read is not a smaller guarantee — it is a different one.`,
+    );
+  }
 }
 
 export class ProductService {
@@ -473,9 +493,21 @@ export class ProductService {
         out.push({ service: component.service, resolution: "unplanned" });
         continue;
       }
+      // A LEDGER THAT COULD NOT BE READ IS NOT AN EMPTY LEDGER (arch-review 25 P1). `catch(() => [])` made a
+      // transient outage indistinguishable from "this version does not exist", and the difference was then
+      // frozen into the ship's permanent record. The ship still proceeds — a bookkeeping read must not block
+      // a release — but it records what actually happened.
       const rows = await this.deps.versions
         .list(tenant, { productId: record.productId, service: component.service })
-        .catch(() => []);
+        .catch(() => undefined);
+      if (rows === undefined) {
+        out.push({
+          service: component.service,
+          ...(component.version !== undefined ? { version: component.version } : {}),
+          resolution: "unavailable",
+        });
+        continue;
+      }
       // RESOLUTION MAY REFINE AMBIGUITY ONLY WHEN THE INPUT UNIQUELY IDENTIFIES THE RESULT (arch-review 22
       // P1). The plan may pin the row the picker offered; otherwise `{service, version}` is matched, and that
       // pair does not uniquely name a row once a service can be repointed at another repository. Taking the
@@ -528,9 +560,15 @@ export class ProductService {
     // evaluated (arch-review 14 §9).
     // READ BEFORE the resolution reads anything — a mutation that lands during the read is one this decision
     // may or may not have seen, and "may have" is not a state a fence gets to assume away.
-    const fenced = input.status === "released" && this.deps.capabilityGenerations !== undefined;
-    const settingsRevision = fenced
-      ? await this.deps.capabilityGenerations?.settingsRevision(tenant).catch(() => undefined)
+    // A FENCE THAT COULD NOT BE READ IS NOT AN ABSENT FENCE. Swallowing these read failures turned "I could
+    // not find out whether the world moved" into "this decision needs no such condition", and the ship then
+    // committed under a strictly weaker guard than the one this deployment is configured to enforce —
+    // silently, in the direction of green, at the one transition that cannot be taken back. A configured
+    // dependency that cannot answer REFUSES the ship: an operator can retry a refusal and cannot un-ship a
+    // release. (`fence` is bound once so the narrowing carries — the wiring is read here, not re-asked.)
+    const fence = input.status === "released" ? this.deps.capabilityGenerations : undefined;
+    const settingsRevision = fence
+      ? await fenceRead("the workspace settings revision", record.id, () => fence.settingsRevision(tenant))
       : undefined;
     const topLevelRefs = ProductService.capabilityRefsFor(product, record);
     const contracts = await this.resolveContracts(tenant, product, record);
@@ -538,10 +576,10 @@ export class ProductService {
     // They cannot be enumerated before the resolution (that is what the resolution discovers), so they are
     // read after it, and the contract RE-VERIFY below is what covers the gap between the two: anything that
     // moved in between changes the contract digest, which refuses.
-    const generations = fenced
-      ? await this.deps.capabilityGenerations
-          ?.read(tenant, [...topLevelRefs, ...ProductService.nestedCapabilityRefs(contracts)])
-          .catch(() => undefined)
+    const generations = fence
+      ? await fenceRead("the capability generations", record.id, () =>
+          fence.read(tenant, [...topLevelRefs, ...ProductService.nestedCapabilityRefs(contracts)]),
+        )
       : undefined;
     const readiness = await this.readinessUnder(tenant, record, product, contracts);
     const transition = Release.from(record).setStatus(
@@ -775,7 +813,12 @@ export class ProductService {
         )
           // Newest first, explicitly — the port does not promise an order (Pg sorts, in-memory does not), and
           // "latest" deciding a release gate must not depend on which store happened to be wired.
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          //
+          // …with the SAME tie-break the write's fence uses (arch-review 25 P2). The guard asks "has anything
+          // `(created_at, id) >` the pinned candidate landed", so a read that ordered on the timestamp alone
+          // could pick a different row of a same-millisecond pair than the condition it then commits under —
+          // the decision and its fence disagreeing about which one is latest. One ordering, both sides.
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
         const latest = rows[0];
         if (latest !== undefined) latestBySeries.set(series.key, seriesPoint(latest));
         // The PREVIOUS SHIP'S OWN CANDIDATE is the baseline — the exact evidence that ship stood on, pin

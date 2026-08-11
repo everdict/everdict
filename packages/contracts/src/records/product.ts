@@ -229,7 +229,11 @@ export const ShippedComponentSchema = z.object({
   // currently holds exactly one such row, which is a different claim from "the author chose this row". Only
   // a plan that PINNED the row earns `ledger`; a legacy plan that matched one gets the weaker word, and a
   // plan whose two identities disagree gets `conflicting` rather than a quiet preference for one of them.
-  resolution: z.enum(["ledger", "inferred", "unresolved", "unplanned", "ambiguous", "conflicting"]),
+  // `unavailable` is the sixth answer and the one that was missing (arch-review 25 P1): the version ledger
+  // could not be READ. Folding that into `unresolved` wrote "this version is not in the ledger" into a
+  // permanent historical record on the strength of a transient outage — a claim about the world, made from a
+  // fact about the platform. The same distinction `unmeasured` draws for a score.
+  resolution: z.enum(["ledger", "inferred", "unresolved", "unplanned", "ambiguous", "conflicting", "unavailable"]),
 });
 export type ShippedComponent = z.infer<typeof ShippedComponentSchema>;
 
