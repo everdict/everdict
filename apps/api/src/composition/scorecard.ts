@@ -1,4 +1,5 @@
 import type {
+  ConstitutionApprovalStore,
   EnvelopeStore,
   GithubAppService,
   ScoringStageStore,
@@ -61,6 +62,8 @@ export function buildScorecard(deps: {
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   recordingStore?: RecordingStore;
+  // The receipts constitutional declarations leave (mig 0165) — submit refuses an unapproved one.
+  constitutionApprovals?: ConstitutionApprovalStore;
   meteredDispatcher: CoreDispatcher;
   scheduler: Scheduler;
   // Self-hosted lease hub — cancel/supersede reclaims a batch's in-flight lease jobs through it (requestCancel).
@@ -304,6 +307,9 @@ export function buildScorecard(deps: {
     ...(artifacts ? { artifacts } : {}),
     // Workspace default judge model (a per-request override wins): the batch eval's inline judge grader scores with this model.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
+    // The receipts constitutional declarations leave — submit REFUSES a dataset that declares ground_truth
+    // without one (arch-review 23 P1), and `attest_dataset_constitution` is how an old one gets its receipt.
+    ...(deps.constitutionApprovals ? { constitutionApprovals: deps.constitutionApprovals } : {}),
     // Pull ingest: pull traces from the tenant's OTel/MLflow and score them. Credentials come from the tenant SecretStore (authSecret name).
     buildTraceSource,
     // "Register once, pull by name" — a pull-ingest source given as { name } resolves against the workspace pool.

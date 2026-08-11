@@ -151,6 +151,8 @@ half the other missed, and both looked handled.
 
 | TRUST-125 | **Evidence is only meaningful together with the decision procedure that produced it**: stage parity observations carry the observer's ERA, and the contract gate counts only its own — a `promotionSafe: true` from the era of stage-sourced expectations, per-case units or `JSON.stringify` equality is a green about a different question, and stale evidence still moves the denominator so a fleet cannot reach the minimum on it | `packages/domain/src/scorecard/stage-promotion-readiness.trust.test.ts` |
 
+| TRUST-126 | **A constitutional declaration executes only under its receipt**: submit REFUSES a dataset whose graders declare `ground_truth` with no recorded approval, and refuses one whose receipt names different bytes — "it is in the registry" is not evidence that anybody approved it, and an id-and-version approval would wave a re-registration through. An admin attestation (`legacy_attested`) is the way back in, so the refusal is a gate rather than a wall | `apps/api/src/trust/dataset-constitution.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.

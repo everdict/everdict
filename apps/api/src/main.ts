@@ -715,6 +715,8 @@ async function main(): Promise<void> {
 
   const scorecardService = buildScorecard({
     scoringStageStore,
+    // Submit refuses a dataset whose graders declare ground_truth without a recorded approval (mig 0165).
+    ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
     modelRegistry,
     envelopes: envelopeStore,
     trajectories: trajectoryStore,

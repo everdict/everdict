@@ -43,7 +43,13 @@ import {
   seriesContractDigest,
   seriesContractFromManifest,
 } from "@everdict/domain";
-import { applyGradingPlan, effectiveGraderDeclarations, sealGrading, selectSubsetCases } from "@everdict/domain";
+import {
+  applyGradingPlan,
+  effectiveGraderDeclarations,
+  groundTruthDeclarations,
+  sealGrading,
+  selectSubsetCases,
+} from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -210,6 +216,23 @@ export class ScorecardService {
     const resolved =
       input.inlineDataset ??
       (await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest"));
+    // A CONSTITUTIONAL DECLARATION EXECUTES ONLY UNDER ITS RECEIPT (arch-review 23 P1).
+    //
+    // Declaring `ground_truth` redefines what passing means, and it is authorized where the declaration is
+    // authored. That gate leaves an artifact behind — and the artifact is the point: without it, a dataset
+    // already in the registry cannot say whether an admin approved it, someone registered it before the gate
+    // existed, or it is a platform seed. Three different facts, and executing them alike is how an
+    // authorization regime becomes a story about the past.
+    //
+    // So the receipt is REQUIRED, not consulted. An unapproved declaration does not degrade into "the built-in
+    // ladder decides" — it refuses, because the batch was asked to measure something under semantics nobody
+    // authorized, and quietly measuring it under different ones would answer a question nobody asked.
+    await this.assertConstitutionApproved(
+      input.tenant,
+      resolved,
+      input.inlineDataset !== undefined,
+      input.submitterRoles,
+    );
     // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
     // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
@@ -576,6 +599,43 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       },
     );
     return record;
+  }
+
+  // The receipt check itself. An INLINE dataset has no registry artifact to have approved, so its declaration
+  // is a run-time act like a grading plan: gated on the admin role, at the moment it is made.
+  private async assertConstitutionApproved(
+    tenant: string,
+    dataset: Dataset,
+    inline: boolean,
+    roles: readonly string[] | undefined,
+  ): Promise<void> {
+    const declared = groundTruthDeclarations(dataset.cases);
+    if (declared.length === 0) return;
+    if (inline) {
+      if ((roles ?? []).includes("admin")) return;
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { metrics: declared },
+        `This run's inline dataset declares ground_truth authority for ${declared.join(", ")}, which requires the admin role — it decides what passing means for the batch.`,
+      );
+    }
+    const approval = await this.deps.constitutionApprovals?.find(tenant, "dataset", dataset.id, dataset.version);
+    if (approval === undefined)
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { dataset: `${dataset.id}@${dataset.version}`, metrics: declared },
+        `The dataset '${dataset.id}@${dataset.version}' declares ground_truth authority for ${declared.join(", ")} and carries no constitutional approval — nothing records who authorized it to decide what passing means. An admin must attest this exact version before it can be evaluated.`,
+      );
+    // …and the receipt must name THESE bytes. A version is immutable, so a digest mismatch means the receipt
+    // was written for a different document — which is precisely the case an id-and-version approval would
+    // wave through.
+    const current = contentDigest(dataset);
+    if (approval.contentDigest !== current)
+      throw new ConflictError(
+        "CONFLICT",
+        { dataset: `${dataset.id}@${dataset.version}`, approved: approval.contentDigest, current },
+        `The constitutional approval on record for '${dataset.id}@${dataset.version}' was written for different content (approved ${approval.contentDigest}, current ${current}) — what an admin authorized is not what this batch would run.`,
+      );
   }
 
   // P1 experiment — phase 1 alone (execution-model.md): the SAME fan-out machinery as a scorecard, with no

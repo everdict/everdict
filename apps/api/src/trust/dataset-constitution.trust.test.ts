@@ -1,5 +1,9 @@
+import { ScorecardService } from "@everdict/application-control";
+import type { ConstitutionApproval } from "@everdict/application-control";
 import type { Authenticator } from "@everdict/auth";
 import type { Dataset } from "@everdict/contracts";
+import { InMemoryScorecardStore } from "@everdict/db";
+import { contentDigest } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../server.js";
@@ -69,6 +73,85 @@ const serverAs = (role: string) => {
   } as never);
   return { app, approvals };
 };
+
+// The reader half — an approval that nothing consumes authorizes nothing.
+describeTrust("TRUST-126 — a constitutional declaration executes only under its receipt", () => {
+  const dataset = (): Dataset =>
+    ({
+      id: "ground-truth-set",
+      version: "1.0.0",
+      cases: [
+        {
+          id: "c1",
+          env: { kind: "prompt" },
+          task: "do",
+          graders: [{ id: "probe", metrics: [{ id: "business_ok", authority: "ground_truth" }] }],
+          timeoutSec: 60,
+          tags: [],
+        },
+      ],
+      tags: [],
+    }) as Dataset;
+
+  async function world(approval?: ConstitutionApproval) {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", dataset());
+    const approvals = {
+      async record() {},
+      async find() {
+        return approval;
+      },
+    };
+    return new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("a refused submit never dispatches");
+        },
+      },
+      store: new InMemoryScorecardStore(),
+      datasets,
+      constitutionApprovals: approvals as never,
+      newId: () => "t126",
+    });
+  }
+
+  const receipt = (over: Partial<ConstitutionApproval> = {}): ConstitutionApproval => ({
+    kind: "dataset",
+    id: "ground-truth-set",
+    version: "1.0.0",
+    contentDigest: contentDigest(dataset()),
+    metrics: ["business_ok"],
+    mode: "approved",
+    approvedBy: "admin",
+    approvedAt: "2026-08-01T00:00:00.000Z",
+    ...over,
+  });
+
+  const submit = (service: ScorecardService) =>
+    service.submit({
+      tenant: "acme",
+      dataset: { id: "ground-truth-set", version: "1.0.0" },
+      harness: { id: "cli", version: "1.0.0" },
+    });
+
+  it("no receipt REFUSES — 'it is in the registry' is not evidence that anybody approved it", async () => {
+    // The fail-closed direction on purpose: an unapproved declaration does not degrade into "the built-in
+    // ladder decides". The batch was asked to measure something under semantics nobody authorized, and
+    // quietly measuring it under different ones would answer a question nobody asked.
+    await expect(submit(await world(undefined))).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("a receipt for DIFFERENT bytes refuses — a version-level approval would wave this through", async () => {
+    await expect(submit(await world(receipt({ contentDigest: "sha256:other" })))).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("an ATTESTED version runs — the refusal has a way back in, or it is a wall", async () => {
+    const record = await submit(await world(receipt({ mode: "legacy_attested" })));
+    expect(record.id).toBe("t126");
+  });
+});
 
 describeTrust("TRUST-123 — a dataset cannot mint ground truth without the constitutional role", () => {
   it("a MEMBER registering a ground_truth declaration is refused, on both transports' shared door", async () => {

@@ -114,6 +114,30 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  attestVersion: {
+    summary: "Attest a dataset version's ground_truth declarations",
+    description:
+      "Records the constitutional approval for one version's EXACT bytes (mode: legacy_attested) — the path " +
+      "for datasets whose graders declare ground_truth but that predate the authoring gate. Admin only; a " +
+      "version declaring nothing constitutional is a 400, because a receipt for an act nobody performed " +
+      "proves nothing. Evaluation refuses an unapproved constitutional dataset, which is why this exists.",
+    tags: ["dataset"],
+    params: idVersionParams,
+    response: {
+      200: {
+        description: "Attested",
+        type: "object",
+        properties: {
+          workspace: { type: "string" },
+          id: { type: "string" },
+          version: { type: "string" },
+          metrics: { type: "array", items: { type: "string" } },
+          mode: { type: "string" },
+        },
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   deleteVersion: {
     summary: "Soft-delete a dataset version",
     description:

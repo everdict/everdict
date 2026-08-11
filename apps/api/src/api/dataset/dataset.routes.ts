@@ -1,5 +1,5 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
+import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
@@ -241,6 +241,32 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
 
   // Soft-delete a dataset version — only that version's own creator or a workspace admin (deleteDatasetVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecards stay reproducible. Missing/already-deleted/non-owned version = 404.
+  // Attest a version whose graders declare ground_truth but that carries no approval — the path that exists
+  // because submit REFUSES an unapproved constitutional dataset (arch-review 23 P1). Admin-gated inside the
+  // action, beside the rest of the constitutional policy, so both transports inherit one rule.
+  app.post<{ Params: { id: string; version: string } }>(
+    "/datasets/:id/versions/:version/attest",
+    { schema: datasetDocs.attestVersion },
+    async (req, reply) => {
+      if (!deps.datasetRegistry || !deps.constitutionApprovals)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "constitution approvals not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        return reply.send(
+          await attestDatasetConstitution(
+            { datasets: deps.datasetRegistry, approvals: deps.constitutionApprovals },
+            principal,
+            req.params.id,
+            req.params.version,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // not admin 403 / unknown version 404 / nothing to attest 400
+      }
+    },
+  );
+
   app.delete<{ Params: { id: string; version: string } }>(
     "/datasets/:id/versions/:version",
     { schema: datasetDocs.deleteVersion },

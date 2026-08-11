@@ -84,6 +84,11 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
 - **Evidence is only meaningful together with the decision procedure that produced it.** An observation
   carries its observer's era (`CURRENT_STAGE_PARITY_VERSION`), and a gate counts only its own — a green from a
   weaker comparison is a green about a different question (arch-review 23 P1).
+- **An authorization that leaves no artifact authorizes nothing.** A constitutional declaration (a grader
+  declaring `ground_truth`) is gated where it is authored AND leaves a receipt naming the approved content,
+  the metrics and the mode (`approved` · `platform_seed` · `legacy_attested`); submit refuses a declaration
+  with no receipt, or whose receipt names different bytes. Otherwise "it is in the registry" becomes the
+  evidence, which is a story about the past rather than an authorization (arch-review 23 P1).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

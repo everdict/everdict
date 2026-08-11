@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
+import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import {
@@ -294,6 +294,24 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ id, version }) => plain(async () => ok(await deleteDatasetVersion(datasets, principal, id, version))),
+    );
+
+    server.registerTool(
+      "attest_dataset_constitution",
+      {
+        description:
+          "Record the constitutional approval for ONE dataset version whose graders declare ground_truth authority (mode: legacy_attested) — the path for versions that predate the authoring gate. Evaluation REFUSES an unapproved constitutional dataset, so this is what brings an old one back into service. Admin only. The receipt pins the version's exact content, so re-registering different bytes is not covered by it; a version that declares nothing constitutional is a BAD_REQUEST, because approving an act nobody performed proves nothing.",
+        inputSchema: {
+          id: z.string().describe("dataset id"),
+          version: z.string().describe("the exact version to attest (versions are immutable)"),
+        },
+      },
+      ({ id, version }) =>
+        plain(async () => {
+          const approvals = ctx.deps.constitutionApprovals;
+          if (!approvals) return fail("constitution approvals are not configured");
+          return ok(await attestDatasetConstitution({ datasets, approvals }, principal, id, version));
+        }),
     );
 
     server.registerTool(

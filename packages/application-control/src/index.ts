@@ -291,7 +291,11 @@ export {
   CommentService,
   type CommentServiceDeps,
 } from "./comment/comment-service.js";
-export { deleteDatasetVersion, deleteDatasetVersions } from "./dataset/dataset-service.js";
+export {
+  attestDatasetConstitution,
+  deleteDatasetVersion,
+  deleteDatasetVersions,
+} from "./dataset/dataset-service.js";
 export { deleteModelVersion, deleteModelVersions } from "./model/model-service.js";
 export { deleteAgentVersion, deleteAgentVersions } from "./agent/agent-service.js";
 // The per-member agent — the single answer the settings pages render and the agent runtime carries (tools + skills).

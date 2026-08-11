@@ -520,6 +520,7 @@ describe("MCP tools", () => {
       "apply_bundle",
       "assign_harness_trace_sink",
       "assign_harness_trace_source",
+      "attest_dataset_constitution",
       "backfill_scorecard_models",
       "cancel_scorecard",
       "close_sandbox",

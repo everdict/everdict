@@ -20,6 +20,7 @@ import type {
 } from "@everdict/domain";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { ConstitutionApprovalStore } from "../ports/constitution-approval-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
@@ -65,6 +66,10 @@ export interface ScorecardServiceDeps {
   // nested model documents seal no digest, which a verifier reads as "never pinned", never as agreement.
   models?: Pick<ModelRegistry, "get">;
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
+  // The receipts constitutional declarations leave (arch-review 23 P1). Submit REFUSES a dataset whose
+  // graders declare ground_truth without one — see the check in ScorecardService.submit for why an absent
+  // receipt is not a legacy allowance.
+  constitutionApprovals?: ConstitutionApprovalStore;
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   // Resolve a ModelBinding to its CONCRETE identity for the manifest seal ("ref@version" after latest-
