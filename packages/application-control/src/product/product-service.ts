@@ -39,6 +39,7 @@ import {
   type SeriesContractResolution,
   type SeriesGateReading,
   type SeriesScorecardPoint,
+  contentDigest,
   currentScoringPin,
   decisionPassRate,
   productEvaluationDefinitionDigest,
@@ -750,7 +751,24 @@ export class ProductService {
           );
       }
     }
-    return this.applyReleaseTransition(record, transition, product, decision);
+    // THE DIGEST OF THE READ-SET (arch-review 27), stamped onto the recorded decision. The conditions
+    // themselves are enforced inside the write statement, where they belong; this is the cheap answer to
+    // "what did this ship read", so two decisions can be told apart in history without re-deriving anything.
+    const stamped =
+      decision === undefined
+        ? transition
+        : {
+            ...transition,
+            patch: {
+              ...transition.patch,
+              history: transition.patch.history?.map((entry, i, all) =>
+                i === all.length - 1 && entry.detail !== undefined
+                  ? { ...entry, detail: { ...entry.detail, contextDigest: contentDigest(decision) } }
+                  : entry,
+              ),
+            },
+          };
+    return this.applyReleaseTransition(record, stamped, product, decision);
   }
 
   async removeRelease(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {

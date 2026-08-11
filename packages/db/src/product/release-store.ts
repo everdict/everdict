@@ -1,6 +1,7 @@
 import type {
   CapabilityGenerationStore,
   OutboxEvent,
+  ReleaseDecisionContext,
   ReleaseListFilter,
   ReleaseStore,
 } from "@everdict/application-control";
@@ -99,26 +100,7 @@ export class InMemoryReleaseStore implements ReleaseStore {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
-      expectDecision?: {
-        openIssues: number;
-        candidates: ReadonlyArray<{
-          productId: string;
-          seriesKey: string;
-          pin: {
-            scorecardId: string;
-            createdAt: string;
-            scoringRevision?: number | undefined;
-            scorePlaneDigest?: string | undefined;
-          } | null;
-        }>;
-        capabilities?: ReadonlyArray<{
-          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
-          id: string;
-          tenantGeneration: number | null;
-          sharedGeneration: number | null;
-        }>;
-        settingsRevision?: number | null;
-      };
+      expectDecision?: ReleaseDecisionContext;
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = this.byId.get(id);
@@ -323,26 +305,7 @@ export class PgReleaseStore implements ReleaseStore {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
-      expectDecision?: {
-        openIssues: number;
-        candidates: ReadonlyArray<{
-          productId: string;
-          seriesKey: string;
-          pin: {
-            scorecardId: string;
-            createdAt: string;
-            scoringRevision?: number | undefined;
-            scorePlaneDigest?: string | undefined;
-          } | null;
-        }>;
-        capabilities?: ReadonlyArray<{
-          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
-          id: string;
-          tenantGeneration: number | null;
-          sharedGeneration: number | null;
-        }>;
-        settingsRevision?: number | null;
-      };
+      expectDecision?: ReleaseDecisionContext;
     },
   ): Promise<ReleaseRecord | undefined> {
     const current = await this.get(tenant, id);
@@ -426,104 +389,115 @@ export class PgReleaseStore implements ReleaseStore {
     // that went stale before it. Re-reading them first would only narrow the window — the same argument that
     // put the product policy in here.
     if (guard?.expectDecision !== undefined) {
-      params.push(guard.expectDecision.openIssues);
-      const openIdx = params.length;
-      params.push(JSON.stringify([{ type: "release", id }]));
-      const linkIdx = params.length;
-      params.push(OPEN_ISSUE_STATUSES);
-      const statusIdx = params.length;
-      // The same predicate the readiness read used (`links @> [{type:"release", id}]`, non-terminal status),
-      // evaluated at commit. A blocking issue linked between the decision and the write makes this false and
-      // the release stays planned — instead of shipping a history entry that says `openIssues: 0`.
-      guardSql += ` AND (SELECT count(*) FROM everdict_issues i WHERE i.tenant = everdict_product_releases.tenant AND i.links @> $${linkIdx}::jsonb AND i.status = ANY($${statusIdx}::text[])) = $${openIdx}`;
-      for (const candidate of guard.expectDecision.candidates) {
-        params.push(candidate.productId, candidate.seriesKey);
-        const productIdx = params.length - 1;
-        const keyIdx = params.length;
-        const series = `s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded'`;
-        if (candidate.pin === null) {
-          // The decision saw NO evidence for this series. Any succeeded batch now is a different question.
-          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series})`;
-          continue;
-        }
-        params.push(candidate.pin.scorecardId, candidate.pin.createdAt);
-        const idIdx = params.length - 1;
-        const atIdx = params.length;
-        // ① THE PINNED ROW IS STILL THERE, still succeeded, and NOT under a live scoring pass. A deleted
-        //    candidate leaves nothing "newer" to find, and a pass that claimed the plane after the gate read
-        //    it means the evidence is mid-revision at the moment of commit.
-        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring_pass IS NULL)`;
-        // ② …AND IT IS STILL THE JUDGMENT THE GATE READ. A re-score of the SAME row leaves `created_at`
-        //    untouched while replacing the verdict — the case a timestamp fence is structurally blind to.
-        //    Compared against the ledger's last entry, which is what `currentScoringPin` reads.
-        if (candidate.pin.scoringRevision !== undefined && candidate.pin.scorePlaneDigest !== undefined) {
-          params.push(candidate.pin.scoringRevision, candidate.pin.scorePlaneDigest);
-          const revIdx = params.length - 1;
-          const digestIdx = params.length;
-          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND (s.scoring -> -1 ->> 'revision')::int = $${revIdx} AND s.scoring -> -1 ->> 'scorePlaneDigest' = $${digestIdx})`;
-        } else {
-          // AN UNPINNED CANDIDATE IS A CONDITION, NOT AN EXEMPTION (arch-review 24). A row scored before the
-          // revision ledger existed carries no revision to compare, and skipping the check gave exactly those
-          // candidates — the oldest evidence in the workspace — no protection against a re-score committing
-          // under the decision. So the absent pin becomes its own claim: the row must STILL have no ledger
-          // entry. A pass that scores it writes one, and the ship refuses rather than shipping a verdict the
-          // gate never read.
-          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring -> -1 ->> 'revision' IS NULL)`;
-        }
-        // ③ …AND NOTHING NEWER HAS LANDED. Ordered by (created_at, id) exactly as the read that chose it —
-        //    a row arriving in the same millisecond is not `>` a timestamp, and the tie-break is what the
-        //    list ordering already uses to decide which of the two is latest.
-        guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND (s.created_at, s.id) > ($${atIdx}::timestamptz, $${idIdx}))`;
-      }
-      // …AND THE CAPABILITY REGISTRIES, as far as a row can speak for them. A new version, or a
-      // workspace-local document shadowing a `_shared` one, changes what a series' refs resolve to — and both
-      // arrive as INSERTS in tables this database owns, so they are conditions the write can hold rather than
-      // drift only a later read would notice. `_shared` is included because that is where the fallback comes
-      // from: a first-party dataset gaining a version moves `latest` for every workspace that inherits it.
+      // EVERY MEMBER OF THE READ-SET GETS A CLAUSE, and the compiler is what says so (arch-review 27). The
+      // conditions used to be a run of `if` blocks, so adding a member to the decision context meant
+      // remembering to add its clause here — and a forgotten one does not fail, it just silently commits
+      // under a weaker guard, which is the failure mode this whole series of reviews keeps finding.
       //
-      // A soft DELETE moves no `created_at`, and workspace settings are a different row entirely; both stay
-      // covered by the service's contract re-verify, whose window is decision→commit rather than zero.
-      // Naming which half is which beats one guard that implies it covers both.
-      for (const ref of guard.expectDecision.capabilities ?? []) {
-        // EACH NAMESPACE ON ITS OWN (arch-review 24 P0-2). The two counters advance independently, so they are
-        // compared independently: collapsing them with MAX made a local mutation invisible whenever `_shared`
-        // happened to be the larger number.
-        for (const [owner, expected] of [
-          ["tenant", ref.tenantGeneration],
-          ["shared", ref.sharedGeneration],
-        ] as const) {
-          params.push(ref.kind, ref.id);
-          const kindIdx = params.length - 1;
-          const idIdx = params.length;
-          const scope = owner === "tenant" ? "g.tenant = everdict_product_releases.tenant" : "g.tenant = '_shared'";
-          const row = `g.kind = $${kindIdx} AND g.id = $${idIdx} AND ${scope}`;
-          if (expected === null) {
-            // No row in this namespace when the decision read it. One appearing since IS the change.
-            guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row})`;
-            continue;
+      // `satisfies Record<keyof ReleaseDecisionContext, …>` turns that into a typecheck: a new member with no
+      // clause does not compile. A member that genuinely cannot be a row condition still has to say so out
+      // loud, by writing a builder that returns "" and explaining why.
+      const context = guard.expectDecision;
+      const clauses: Record<keyof ReleaseDecisionContext, () => string> = {
+        // The same predicate the readiness read used (`links @> [{type:"release", id}]`, non-terminal
+        // status), evaluated at commit. A blocking issue linked between the decision and the write makes
+        // this false and the release stays planned — instead of shipping a history entry saying
+        // `openIssues: 0`.
+        openIssues: () => {
+          params.push(context.openIssues);
+          const openIdx = params.length;
+          params.push(JSON.stringify([{ type: "release", id }]));
+          const linkIdx = params.length;
+          params.push(OPEN_ISSUE_STATUSES);
+          const statusIdx = params.length;
+          return ` AND (SELECT count(*) FROM everdict_issues i WHERE i.tenant = everdict_product_releases.tenant AND i.links @> $${linkIdx}::jsonb AND i.status = ANY($${statusIdx}::text[])) = $${openIdx}`;
+        },
+        candidates: () => {
+          let sql = "";
+          for (const candidate of context.candidates) {
+            params.push(candidate.productId, candidate.seriesKey);
+            const productIdx = params.length - 1;
+            const keyIdx = params.length;
+            const series = `s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded'`;
+            if (candidate.pin === null) {
+              // The decision saw NO evidence for this series. Any succeeded batch now is a different question.
+              sql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series})`;
+              continue;
+            }
+            params.push(candidate.pin.scorecardId, candidate.pin.createdAt);
+            const idIdx = params.length - 1;
+            const atIdx = params.length;
+            // ① THE PINNED ROW IS STILL THERE, still succeeded, and NOT under a live scoring pass. A deleted
+            //    candidate leaves nothing "newer" to find, and a pass that claimed the plane after the gate
+            //    read it means the evidence is mid-revision at the moment of commit.
+            sql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring_pass IS NULL)`;
+            // ② …AND IT IS STILL THE JUDGMENT THE GATE READ. A re-score of the SAME row leaves `created_at`
+            //    untouched while replacing the verdict — the case a timestamp fence is structurally blind to.
+            if (candidate.pin.scoringRevision !== undefined && candidate.pin.scorePlaneDigest !== undefined) {
+              params.push(candidate.pin.scoringRevision, candidate.pin.scorePlaneDigest);
+              const revIdx = params.length - 1;
+              const digestIdx = params.length;
+              sql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND (s.scoring -> -1 ->> 'revision')::int = $${revIdx} AND s.scoring -> -1 ->> 'scorePlaneDigest' = $${digestIdx})`;
+            } else {
+              // AN UNPINNED CANDIDATE IS A CONDITION, NOT AN EXEMPTION (arch-review 24). A row scored before
+              // the revision ledger existed carries no revision to compare, and skipping the check gave
+              // exactly those candidates — the oldest evidence in the workspace — no protection at all. The
+              // absent pin becomes its own claim: the row must STILL have no ledger entry.
+              sql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring -> -1 ->> 'revision' IS NULL)`;
+            }
+            // ③ …AND NOTHING NEWER HAS LANDED. Ordered by (created_at, id) exactly as the read that chose it
+            //    — a row arriving in the same millisecond is not `>` a timestamp, and the tie-break is what
+            //    the list ordering already uses to decide which of the two is latest.
+            sql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND (s.created_at, s.id) > ($${atIdx}::timestamptz, $${idIdx}))`;
           }
-          params.push(expected);
-          const genIdx = params.length;
-          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row} AND g.generation = $${genIdx})`;
-        }
-      }
-      // …and the workspace SETTINGS the contracts resolved under (mig 0164) — the default judge model is part
-      // of the contract identity, and it lives on a row this statement can condition on.
-      const settingsRevision = guard.expectDecision.settingsRevision;
-      if (settingsRevision === 0) {
-        // Zero = "never moved", which an absent row and a row nobody has made a contractual edit to say
-        // equally. Either shape holds; anything above zero is a change this decision did not read.
-        params.push(0);
-        const zeroIdx = params.length;
-        guardSql += ` AND (NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant) OR EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${zeroIdx}))`;
-      } else if (settingsRevision === null) {
-        guardSql +=
-          " AND NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant)";
-      } else if (settingsRevision !== undefined) {
-        params.push(settingsRevision);
-        const revIdx = params.length;
-        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${revIdx})`;
-      }
+          return sql;
+        },
+        capabilities: () => {
+          let sql = "";
+          for (const ref of context.capabilities ?? []) {
+            // EACH NAMESPACE ON ITS OWN (arch-review 24 P0-2). The two counters advance independently, so
+            // they are compared independently: collapsing them with MAX made a local mutation invisible
+            // whenever `_shared` happened to be the larger number.
+            for (const [owner, expected] of [
+              ["tenant", ref.tenantGeneration],
+              ["shared", ref.sharedGeneration],
+            ] as const) {
+              params.push(ref.kind, ref.id);
+              const kindIdx = params.length - 1;
+              const idIdx = params.length;
+              const scope = owner === "tenant" ? "g.tenant = everdict_product_releases.tenant" : "g.tenant = '_shared'";
+              const row = `g.kind = $${kindIdx} AND g.id = $${idIdx} AND ${scope}`;
+              if (expected === null) {
+                // No row in this namespace when the decision read it. One appearing since IS the change.
+                sql += ` AND NOT EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row})`;
+                continue;
+              }
+              params.push(expected);
+              const genIdx = params.length;
+              sql += ` AND EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row} AND g.generation = $${genIdx})`;
+            }
+          }
+          return sql;
+        },
+        settingsRevision: () => {
+          const settingsRevision = context.settingsRevision;
+          if (settingsRevision === 0) {
+            // Zero = "never moved", which an absent row and a row nobody has made a contractual edit to say
+            // equally. Either shape holds; anything above zero is a change this decision did not read.
+            params.push(0);
+            const zeroIdx = params.length;
+            return ` AND (NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant) OR EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${zeroIdx}))`;
+          }
+          if (settingsRevision === null)
+            return " AND NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant)";
+          if (settingsRevision === undefined) return "";
+          params.push(settingsRevision);
+          const revIdx = params.length;
+          return ` AND EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${revIdx})`;
+        },
+      };
+      // Ordered by the type's own member order, so the SQL a reader sees matches the type they read it from.
+      for (const clause of Object.values(clauses)) guardSql += clause();
     }
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

@@ -466,6 +466,30 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
     });
   });
 
+  // arch-review 27: WHAT A DECISION READ IS AUTOMATICALLY WHAT ITS COMMIT CONDITIONS ON. The read-set used to
+  // be an anonymous shape declared inline on the guard and repeated in the store, so a new member had to be
+  // remembered in four places — and a forgotten clause does not fail, it commits under a weaker guard. This
+  // reads the shipped record instead of the code: the decision's own digest is written into the history
+  // entry, so two ships can be told apart by what they READ without re-deriving any of it.
+  it("the ship records the DIGEST of the read-set it decided under", async () => {
+    const { service, product, scorecards } = await world();
+    await scorecards.create(
+      seriesBatch(trustId("sc-ctx"), product.id, "2026-08-12T00:00:00.000Z", [scored("a", true)]),
+    );
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.40",
+    });
+    await service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" });
+    const shipped = await service.getRelease("trust", release.id);
+    const entry = shipped.history?.[shipped.history.length - 1];
+    const digest = (entry?.detail as { contextDigest?: unknown } | undefined)?.contextDigest;
+    expect(typeof digest).toBe("string");
+    expect(digest).toMatch(/^sha256:/);
+  });
+
   it("a workspace SETTINGS change refuses — the default judge model is contract identity, and it is a row", async () => {
     // The comment this replaces said the ambient half "cannot be a row condition". The settings ARE a row, in
     // this database, beside everything else the ship conditions on (arch-review 23 P0-3): an identical judge

@@ -99,68 +99,80 @@ export interface ReleaseStore {
       //
       // Without this the record is not merely racy, it is WRONG in its own words: the history entry states
       // `openIssues: 0, force: false` while an open issue existed before the ship committed.
-      expectDecision?: {
-        // How many OPEN issues were linked to this release when readiness ran.
-        openIssues: number;
-        // Per watched series, the candidate the decision compared — as an IDENTITY, not as a timestamp
-        // (arch-review 23 P0-1).
-        //
-        // "Which row was latest" and "which judgment of that row did we read" are one candidate identity. A
-        // `created_at >` predicate answers neither on its own: a RE-SCORE of the same scorecard leaves the
-        // timestamp untouched while replacing the judgment the gate read, a live pass can be mid-flight over
-        // it, the row can be deleted outright, and a new row landing in the same millisecond is not `>`
-        // anything. Each of those is a decision made about evidence that is no longer what it was.
-        //
-        // `pin: null` means the decision saw NO evidence for that series — itself a decision input, since a
-        // required series with no run blocks and one that gains a run afterwards was not the thing evaluated.
-        candidates: ReadonlyArray<{
-          productId: string;
-          seriesKey: string;
-          pin: {
-            scorecardId: string;
-            createdAt: string;
-            // The judgment, from the scoring ledger. Absent on a batch settled before the ledger existed —
-            // the identity then rests on the row and its recency, which is what those records can support.
-            scoringRevision?: number;
-            scorePlaneDigest?: string;
-          } | null;
-        }>;
-        // …AND THE AMBIENT HALF, as far as a row can carry it (arch-review 22, second pass). A series'
-        // evaluation contract resolves from the capability registries: a new version that `latest` moves to,
-        // or a workspace-local document shadowing a `_shared` one, both arrive as INSERTS in a table this
-        // database owns. Those are conditions the write can hold.
-        //
-        // What a row cannot carry is a SOFT DELETE (no insert) or a settings edit — those stay covered by
-        // the service's re-verify, whose window is decision→commit rather than zero. Saying which half is
-        // which beats one guard that implies it covers both.
-        // …each name with the MUTATION GENERATION it resolved under (arch-review 23 P0-2). `created_at` was
-        // the first attempt and it only ever saw an INSERT: a revive (`deleted_at = NULL`) and a soft delete
-        // both change what a name answers while leaving every timestamp where it was, so a workspace-local
-        // document could come back to life under a `_shared` name mid-decision and the fence saw nothing.
-        // Historical time does not establish mutation authority.
-        capabilities?: ReadonlyArray<{
-          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
-          id: string;
-          // TWO independent counters, carried apart (arch-review 24 P0-2). Owner-first resolution means either
-          // namespace can change what a name answers, and they advance on their own clocks — so reducing them
-          // to one number (a MAX) is not a fencing token, it is a PROJECTION. With `_shared` at 100 and the
-          // tenant at 3, a local mutation to 4 leaves the maximum at 100 and the guard sees a world that did
-          // not move — precisely the shadow this fence exists for.
-          //
-          // `null` = that namespace had no row when the decision read it, which the fence holds as "still
-          // none": a first mutation creates one, and its appearance is the change.
-          tenantGeneration: number | null;
-          sharedGeneration: number | null;
-        }>;
-        // The workspace SETTINGS revision the contracts resolved under (mig 0164). The default judge model
-        // is part of a series' contract identity — an identical judge list judged by a different model is a
-        // different judging apparatus — and the settings are a row in this database like everything else the
-        // ship conditions on, so there was never a reason for this half to be re-verify-only.
-        settingsRevision?: number | null;
-      };
+      expectDecision?: ReleaseDecisionContext;
     },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
+}
+
+// THE READ-SET A RELEASE DECISION WAS COMPUTED FROM — one artifact, named, so the thing the service READ and
+// the thing the write CONDITIONS ON cannot drift apart (arch-review 27).
+//
+// It used to be an anonymous shape declared inline on the guard and repeated in the Pg store, which meant a
+// new member of the read-set had to be remembered in four places: the service's read, the recorded decision,
+// the store's guard contract, and the SQL WHERE. Three of those failing silently is what every review in this
+// series has been finding, one member at a time. The type is now one declaration, and the Pg guard builds its
+// clauses from a map keyed by `keyof ReleaseDecisionContext` — so a member nobody wired does not compile.
+//
+// The rule this encodes: what a decision read is automatically what its commit conditions on.
+export interface ReleaseDecisionContext {
+  // How many OPEN issues were linked to this release when readiness ran.
+  openIssues: number;
+  // Per watched series, the candidate the decision compared — as an IDENTITY, not as a timestamp
+  // (arch-review 23 P0-1).
+  //
+  // "Which row was latest" and "which judgment of that row did we read" are one candidate identity. A
+  // `created_at >` predicate answers neither on its own: a RE-SCORE of the same scorecard leaves the
+  // timestamp untouched while replacing the judgment the gate read, a live pass can be mid-flight over
+  // it, the row can be deleted outright, and a new row landing in the same millisecond is not `>`
+  // anything. Each of those is a decision made about evidence that is no longer what it was.
+  //
+  // `pin: null` means the decision saw NO evidence for that series — itself a decision input, since a
+  // required series with no run blocks and one that gains a run afterwards was not the thing evaluated.
+  candidates: ReadonlyArray<{
+    productId: string;
+    seriesKey: string;
+    pin: {
+      scorecardId: string;
+      createdAt: string;
+      // The judgment, from the scoring ledger. Absent on a batch settled before the ledger existed —
+      // the identity then rests on the row and its recency, which is what those records can support.
+      scoringRevision?: number;
+      scorePlaneDigest?: string;
+    } | null;
+  }>;
+  // …AND THE AMBIENT HALF, as far as a row can carry it (arch-review 22, second pass). A series'
+  // evaluation contract resolves from the capability registries: a new version that `latest` moves to,
+  // or a workspace-local document shadowing a `_shared` one, both arrive as INSERTS in a table this
+  // database owns. Those are conditions the write can hold.
+  //
+  // What a row cannot carry is a SOFT DELETE (no insert) or a settings edit — those stay covered by
+  // the service's re-verify, whose window is decision→commit rather than zero. Saying which half is
+  // which beats one guard that implies it covers both.
+  // …each name with the MUTATION GENERATION it resolved under (arch-review 23 P0-2). `created_at` was
+  // the first attempt and it only ever saw an INSERT: a revive (`deleted_at = NULL`) and a soft delete
+  // both change what a name answers while leaving every timestamp where it was, so a workspace-local
+  // document could come back to life under a `_shared` name mid-decision and the fence saw nothing.
+  // Historical time does not establish mutation authority.
+  capabilities?: ReadonlyArray<{
+    kind: "dataset" | "harness" | "judge" | "rubric" | "model";
+    id: string;
+    // TWO independent counters, carried apart (arch-review 24 P0-2). Owner-first resolution means either
+    // namespace can change what a name answers, and they advance on their own clocks — so reducing them
+    // to one number (a MAX) is not a fencing token, it is a PROJECTION. With `_shared` at 100 and the
+    // tenant at 3, a local mutation to 4 leaves the maximum at 100 and the guard sees a world that did
+    // not move — precisely the shadow this fence exists for.
+    //
+    // `null` = that namespace had no row when the decision read it, which the fence holds as "still
+    // none": a first mutation creates one, and its appearance is the change.
+    tenantGeneration: number | null;
+    sharedGeneration: number | null;
+  }>;
+  // The workspace SETTINGS revision the contracts resolved under (mig 0164). The default judge model
+  // is part of a series' contract identity — an identical judge list judged by a different model is a
+  // different judging apparatus — and the settings are a row in this database like everything else the
+  // ship conditions on, so there was never a reason for this half to be re-verify-only.
+  settingsRevision?: number | null;
 }
 
 // THE RESOLUTION GENERATION of a capability NAME (mig 0163) — read before a decision resolves its contracts,

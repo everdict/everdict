@@ -119,6 +119,7 @@ export type {
   ProductVersionStore,
   ReleaseListFilter,
   ReleaseStore,
+  ReleaseDecisionContext,
 } from "./ports/product-store.js";
 export type {
   ConstitutionApproval,
