@@ -24,6 +24,7 @@ the two map onto the site.
 ## Your workspace
 - [Section index](workspace/README.md)
 - [Workspace agents](workspace/agents.md) — the agent that runs *inside* Everdict, and how it wakes itself
+- [What the agent knows](workspace/agent-context.md) — the context a turn starts with, and inherited knowledge
 - [The workspace filesystem](workspace/filesystem.md) — one file tree per workspace, with attributed revisions
 - [Environments](workspace/environments.md) — `repo` · `prompt` · `browser` · `os-use`, and how to choose
 - [Secrets](workspace/secrets.md) — credentials by name, and the two kinds treated differently

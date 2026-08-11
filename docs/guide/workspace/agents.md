@@ -104,6 +104,13 @@ An agent's own actions emit events too. Everdict stamps agent-caused facts with
 on its own effects. Keep `cooldownSec` anyway — it is the second guard, and the one you control.
 :::
 
+## What it knows when it starts
+
+An agent's usefulness is mostly decided before it reads your message: the workspace instructions in
+front of it, the per-turn environment block, and — the part worth reading on its own — the mechanism
+by which it inherits what your workspace already concluded, projected onto the *version* the task is
+about. See [What the agent knows](agent-context.md).
+
 ## Skills and knowledge
 
 Two things shape what an agent is good at, and both live in the [workspace

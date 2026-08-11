@@ -5,6 +5,7 @@ agent writes into, the environments your evals run in, and the registry that say
 came from.
 
 - **[Workspace agents](agents.md)** — the agent that runs *inside* Everdict, and how it wakes itself
+- **[What the agent knows](agent-context.md)** — three layers of context, and time as a coordinate
 - **[The workspace filesystem](filesystem.md)** — one file tree per workspace, with attributed revisions
 - **[Environments](environments.md)** — `repo` · `prompt` · `browser` · `os-use`, and which one a task deserves
 - **[Secrets](secrets.md)** — every credential, by name, encrypted at rest
