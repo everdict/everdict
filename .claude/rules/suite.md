@@ -89,6 +89,11 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   the metrics and the mode (`approved` · `platform_seed` · `legacy_attested`); submit refuses a declaration
   with no receipt, or whose receipt names different bytes. Otherwise "it is in the registry" becomes the
   evidence, which is a story about the past rather than an authorization (arch-review 23 P1).
+- **Absence is not a legacy allowance.** An unsealed batch does not execute, a manifest with no era or no
+  per-case seal does not execute, and a product with a NULL policy/definition digest cannot have a ship
+  decided against it. Each of these used to pass its check by having nothing to check — "a record from before
+  X" is a statement about our history, not a reason to run something whose identity nobody can state
+  (arch-review 23, legacy sweep).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

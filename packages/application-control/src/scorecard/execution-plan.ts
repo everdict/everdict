@@ -28,13 +28,37 @@ export class ExecutionPlan {
     private readonly ref: { scorecardId: string; harness: string },
   ) {}
 
-  // A record's plan. A record with no manifest predates sealing — the plan then verifies nothing and carries
-  // nothing, which is the same honest degradation each call site implemented separately.
+  // A record's plan. A record with NO MANIFEST has no sealed identity; the reads below answer honestly
+  // (nothing pinned, nothing carried), but such a record may not EXECUTE — see `assertSealed`.
   static of(record: Pick<ScorecardRecord, "id" | "manifest" | "harness">): ExecutionPlan {
     return new ExecutionPlan(record.manifest, {
       scorecardId: record.id,
       harness: `${record.harness.id}@${record.harness.version}`,
     });
+  }
+
+  // AN UNSEALED BATCH DOES NOT EXECUTE (arch-review 23, legacy sweep).
+  //
+  // Every verification below was conditional on the manifest existing, so a record without one passed each of
+  // them by having nothing to check — the exact shape five reviews have been removing everywhere else. It was
+  // tolerated as "a record from before sealing", which is a statement about our history, not a reason to run
+  // a batch whose identity nobody can state.
+  //
+  // The era declaration goes with it: `identityVersion` says WHICH seal generation wrote this manifest, and
+  // one that cannot say is one nobody can verify against the rules of any generation.
+  assertSealed(): void {
+    if (this.manifest === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.ref.scorecardId },
+        "this batch sealed no execution identity, so there is nothing to verify the documents it would run against — submit a new batch. An evaluation whose identity cannot be stated cannot be reproduced or defended.",
+      );
+    if (this.manifest.identityVersion === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.ref.scorecardId },
+        "this batch's manifest declares no identity era, so which sealing rules it was written under is unknown — refusing to verify it against rules it may never have followed.",
+      );
   }
 
   // ── What an executor must CHECK ───────────────────────────────────────────────────────────────────────
@@ -43,6 +67,16 @@ export class ExecutionPlan {
 
   // The dataset half — the EXACT selection plus each case's content and default grading.
   assertSelection(cases: ReadonlyArray<Pick<EvalCase, "id" | "graders">>): void {
+    this.assertSealed();
+    // …and the per-case seal must BE there. A manifest without `cases` predates the split seal, so the exact
+    // selection — which cases, with which content — is unverifiable, and the old reading of that was
+    // "nothing to compare", which ran.
+    if (this.manifest?.cases === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.ref.scorecardId },
+        "this batch sealed no per-case documents, so the selection it would execute cannot be checked against what it certified — submit a new batch.",
+      );
     this.refuse(verifySealedSelection(this.manifest, { cases }));
   }
 
@@ -78,6 +112,7 @@ export class ExecutionPlan {
   // one of them. Different question, same artifact: the re-score path used to call the domain verifier
   // directly, which left a second reader of the manifest alive beside the one this class exists to be.
   assertJudgedCases(judgedCaseIds: readonly string[], resolved: ReadonlyArray<Pick<EvalCase, "id" | "graders">>): void {
+    this.assertSealed();
     this.refuse(verifySealedCaseDocuments(this.manifest, judgedCaseIds, resolved));
   }
 

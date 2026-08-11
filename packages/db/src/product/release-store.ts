@@ -137,13 +137,12 @@ export class InMemoryReleaseStore implements ReleaseStore {
       // and a dimension with no digest yet falls back to the row VERSION rather than passing. Sharing one
       // fallback across both failed open whenever exactly one column was populated — which is what a rolling
       // deploy of mig 0160 produces on every product that already had a policy digest.
-      const dimension = (live: string | undefined, expected: string, version: number): boolean =>
-        live === undefined ? version === guard.expectProduct?.version : live === expected;
+      // Both digests, no version fallback (arch-review 23, legacy sweep) — a product that cannot state its
+      // policy and definition identity cannot have a ship decided against it.
       const ok =
-        live === undefined
-          ? false
-          : dimension(live.policyDigest, guard.expectProduct.policyDigest, live.version ?? 0) &&
-            dimension(live.definitionDigest, guard.expectProduct.definitionDigest, live.version ?? 0);
+        live !== undefined &&
+        live.policyDigest === guard.expectProduct.policyDigest &&
+        live.definitionDigest === guard.expectProduct.definitionDigest;
       if (!ok) return undefined;
     }
     // …and the rest of the read-set: the issues this decision counted and the candidate it compared.
@@ -389,10 +388,9 @@ export class PgReleaseStore implements ReleaseStore {
     // as the write. Read separately it would only be a wider window — the edit lands between the read and
     // the write and the decision commits anyway, which is exactly the race being closed.
     if (guard?.expectProduct !== undefined) {
-      params.push(guard.expectProduct.policyDigest, guard.expectProduct.definitionDigest, guard.expectProduct.version);
-      const digestIdx = params.length - 2;
-      const defIdx = params.length - 1;
-      const versionIdx = params.length;
+      params.push(guard.expectProduct.policyDigest, guard.expectProduct.definitionDigest);
+      const digestIdx = params.length - 1;
+      const defIdx = params.length;
       // CORRELATED to the row being updated, and TENANT-SCOPED (arch-review 13). The first version compared
       // `p.id = $callerSuppliedProductId` with no tenant clause — so the guard trusted the caller to restate
       // a relationship the database already holds (`everdict_product_releases.product_id`), and evaluated it
@@ -412,7 +410,13 @@ export class PgReleaseStore implements ReleaseStore {
       // Never `IS NULL → pass`: absence means "this dimension has no digest yet", and the honest stand-in is
       // the row version, which moves on every write including the edit we are guarding against. A legacy row
       // therefore conflicts slightly too eagerly — the safe direction, and self-healing on its next write.
-      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND (CASE WHEN p.release_policy_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.release_policy_digest=$${digestIdx} END) AND (CASE WHEN p.evaluation_definition_digest IS NULL THEN coalesce(p.version, 0)=$${versionIdx} ELSE p.evaluation_definition_digest=$${defIdx} END))`;
+      // BOTH DIGESTS, no version fallback (arch-review 23, legacy sweep). The fallback existed for products
+      // written before the columns did: a NULL digest fell back to the row VERSION, which moves on every
+      // write and therefore conflicted a little too eagerly — the safe direction, and a reason to keep it
+      // while such rows existed. They no longer need to. A product that cannot state its policy and
+      // definition identity cannot have a ship decided against it, and saying so beats a guard whose
+      // strength depends on which columns a row happens to have.
+      guardSql += ` AND EXISTS (SELECT 1 FROM everdict_products p WHERE p.tenant = everdict_product_releases.tenant AND p.id = everdict_product_releases.product_id AND p.release_policy_digest=$${digestIdx} AND p.evaluation_definition_digest=$${defIdx})`;
     }
     // THE REST OF THE DECISION'S READ-SET, in the SAME statement (arch-review 22 P0-1). A ship decision is
     // computed from the open issues linked to this release and from the newest succeeded scorecard per

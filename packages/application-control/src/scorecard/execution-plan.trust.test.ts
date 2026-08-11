@@ -97,12 +97,41 @@ describeTrust("TRUST-119 — the plan is the one reader of what a batch sealed",
     ]);
   });
 
-  it("a record sealed before any of this verifies nothing and carries nothing — never a claim of sameness", () => {
+  it("an UNSEALED record does not execute — absence stopped being a tolerated state", () => {
+    // It used to pass every check by having nothing to check, which is the shape this review generation has
+    // removed everywhere else. "A record from before sealing" is a statement about our history, not a reason
+    // to run a batch whose identity nobody can state.
     const legacy = { id: "sc-0", harness: { id: "cli", version: "1.0.0" } } as unknown as ScorecardRecord;
     const plan = ExecutionPlan.of(legacy);
-    expect(() => plan.assertSelection([CASE])).not.toThrow();
+    expect(() => plan.assertSelection([CASE])).toThrow(/sealed no execution identity/);
+    expect(() => plan.assertJudgedCases(["c1"], [CASE])).toThrow(/sealed no execution identity/);
+    // The READS stay honest — nothing pinned, nothing carried. Refusing to execute and lying about what was
+    // sealed are different things.
     expect(plan.modelPins).toBeUndefined();
     expect(plan.sealedJudges).toBeUndefined();
+  });
+
+  it("a manifest with no ERA declared does not execute — rules it may never have followed", () => {
+    const noEra = sealed();
+    const record = { ...noEra, manifest: { ...noEra.manifest, identityVersion: undefined } } as ScorecardRecord;
+    expect(() => ExecutionPlan.of(record).assertSelection([CASE])).toThrow(/identity era/);
+  });
+
+  it("a RETRY carries the source's seal — the same experiment, not a new one and not an unsealed one", () => {
+    // A retry re-runs the source's experiment, and the record used to inherit its lineage without its
+    // identity: `retryOf` said which batch it came from while the new record could not state what it WAS.
+    // Sealing a second time would be worse than not sealing — it would re-resolve today's registry and turn a
+    // retry into a different question.
+    const source = sealed();
+    const retry = { id: "sc-retry", harness: source.harness, manifest: source.manifest } as ScorecardRecord;
+    expect(() => ExecutionPlan.of(retry).assertSelection([CASE])).not.toThrow();
+    expect(ExecutionPlan.of(retry).modelPins).toEqual(ExecutionPlan.of(source).modelPins);
+  });
+
+  it("a manifest with no PER-CASE seal does not execute — the selection would be unverifiable", () => {
+    const noCases = sealed();
+    const record = { ...noCases, manifest: { ...noCases.manifest, cases: undefined } } as ScorecardRecord;
+    expect(() => ExecutionPlan.of(record).assertSelection([CASE])).toThrow(/per-case documents/);
   });
 });
 

@@ -760,30 +760,20 @@ describeTrust("TRUST-62 — editing a series' definition mid-decision refuses th
 
 // Trust suite — TRUST-69.
 //
-// A DIMENSION WITH NO DIGEST YET IS GUARDED BY THE ROW VERSION, NOT WAVED THROUGH.
+// A PRODUCT THAT CANNOT STATE ITS IDENTITY CANNOT HAVE A SHIP DECIDED AGAINST IT.
 //
-// Mig 0154 gave the release CAS a governance digest and mig 0160 gave it an evaluation-definition digest;
-// each is self-healing, falling back to the product's row version until its own column is populated. The
-// first implementation shared ONE fallback across both dimensions, and that is fail-open on exactly the
-// combination a rolling deploy produces: `release_policy_digest` populated, `evaluation_definition_digest`
-// still NULL because nothing running the new code has written that product yet. The definition clause passed
-// on NULL, and the shared fallback was skipped BECAUSE the policy digest was present — so an old replica
-// could edit a series' definition, bump the version, and a decision resolved before that edit would still
-// commit.
+// Mig 0154 gave the release CAS a governance digest and 0160 an evaluation-definition digest, and each fell
+// back to the product's ROW VERSION until its own column was populated — self-healing, and correct while rows
+// written before those columns still existed. (The first implementation shared ONE fallback across both
+// dimensions, which was fail-open on exactly the combination a rolling deploy produces; per-dimension fixed
+// that.) Those rows no longer need supporting, and the fallback is the weaker guarantee: the row version
+// moves on every write, so it conflicts a decision whose policy never moved, and it makes the guard's
+// strength depend on which columns a row happens to have.
 //
-// Certified against real Postgres because the guard is a correlated EXISTS inside the UPDATE; the two twins
-// are asserted to agree, since an in-memory pair that drifts here would hide the whole class.
-// Trust suite — TRUST-106.
-//
-// THE WORLD CROSSES THE DATABASE, OR IT DOES NOT EXIST. The cohort a batch ran in is derived at settle and
-// consumed by the release decision, and everything between those two points is Postgres. A domain-level
-// certificate proves `crossWorldReason` means the right thing; it cannot prove the release path ever sees a
-// world, and the first cut of this feature had no column at all — every comparison would have read as
-// within-world, which is the reassuring answer rather than the true one. Product readiness reads scorecards
-// through `list`, so this drives the PRODUCTION seam end to end: PgScorecardStore → ProductService →
-// ReleaseSeriesState.
+// Both digests are now required. A NULL is not a smaller guard, it is an unanswerable question — and the
+// answer to an unanswerable question about what a ship stands on is "no".
 describe.skipIf(!TRUST_PG_ENABLED)(
-  "TRUST-106 — a cross-world comparison is visible in the release decision (real Postgres)",
+  "TRUST-69 — a product with no stated identity refuses the ship (real Postgres)",
   () => {
     let pg: TrustPg;
     beforeAll(async () => {
@@ -791,154 +781,94 @@ describe.skipIf(!TRUST_PG_ENABLED)(
     });
     afterAll(async () => pg?.close());
 
-    async function shipOverWorlds(baselineWorld: ScorecardRecord["world"], candidateWorld: ScorecardRecord["world"]) {
-      const { PgScorecardStore } = await import("@everdict/db");
-      const store = new PgScorecardStore(pg.client);
-      const { scorecardStore, productService } = build(store, trustId("t106"));
-      const product = await productService.create({
-        tenant: "acme",
-        createdBy: "release-captain",
-        name: "Support Copilot",
-        services: [{ name: "api", repository: "acme/copilot-api", source: "releases" as const }],
-        series: [SERIES],
-      });
-      const first = await productService.createRelease({
-        tenant: "acme",
-        createdBy: "release-captain",
-        productId: product.id,
-        name: "2026.2",
-      });
-      await scorecardStore.create(
-        seriesBatch(
-          trustId("t106-base"),
-          [scored("a", true), scored("b", true)],
-          "2026-07-01T00:00:00.000Z",
-          { productId: product.id, seriesKey: "quality" },
-          baselineWorld,
-        ),
+    it("a row with a NULL definition digest refuses — the version fallback that used to stand in is gone", async () => {
+      const { PgReleaseStore } = await import("@everdict/db");
+      const releases = new PgReleaseStore(pg.client);
+      const productId = trustId("prod-69");
+      const releaseId = trustId("rel-69");
+      // The rolling-deploy state: policy digest present (0154 populated it), definition digest still NULL, and
+      // the product at version 1.
+      await pg.client.query(
+        `INSERT INTO everdict_products (id, tenant, name, services, series, auto_eval, history, created_by, created_at, updated_at, version, release_policy_digest)
+       VALUES ($1,'trust','Shipped','[]'::jsonb,'[]'::jsonb,'{}'::jsonb,'[]'::jsonb,'dana',now(),now(),1,'policy-A')`,
+        [productId],
       );
-      await productService.setReleaseStatus("acme", first.id, { status: "released" }, { subject: "release-captain" });
-      await scorecardStore.create(
-        seriesBatch(
-          trustId("t106-cand"),
-          [scored("a", true), scored("b", true)],
-          "2026-08-05T00:00:00.000Z",
-          { productId: product.id, seriesKey: "quality" },
-          candidateWorld,
-        ),
+      await pg.client.query(
+        `INSERT INTO everdict_product_releases (id, tenant, product_id, name, status, history, created_by, created_at, updated_at, version)
+       VALUES ($1,'trust',$2,'2026.4','planned','[]'::jsonb,'dana',now(),now(),0)`,
+        [releaseId, productId],
       );
-      const next = await productService.createRelease({
-        tenant: "acme",
-        createdBy: "release-captain",
-        productId: product.id,
-        name: "2026.3",
-      });
-      await productService.setReleaseStatus("acme", next.id, { status: "released" }, { subject: "release-captain" });
-      return (await productService.releaseDetail("acme", next.id)).readiness.series[0];
-    }
 
-    it("a baseline measured on linux and a candidate on windows ship, and say so", async () => {
-      const entry = await shipOverWorlds(
-        { os: "linux", drivers: ["docker"], mixed: false, observed: 2 },
-        { os: "windows", drivers: ["docker"], mixed: false, observed: 2 },
-      );
-      // It SHIPS — attaching, never blocking, is the whole design: refusing would make an infrastructure move
-      // un-shippable until every baseline is re-run.
-      expect(entry).toMatchObject({ key: "quality", verdict: "pass", regressed: false });
-      expect(entry?.crossWorld).toBeDefined();
-      // …and it rides the reasons too, so a reader seeing the verdict sees the caveat without knowing to look.
-      expect(entry?.reasons?.some((r) => r.includes("linux") && r.includes("windows"))).toBe(true);
+      // The definition column is NULL — the row cannot say what its series ask, so no decision can claim to
+      // have stood on it. Pre-sweep this fell back to the row version and committed.
+      const refused = await releases.update("trust", releaseId, { status: "released" }, undefined, {
+        expectProduct: { id: productId, version: 1, policyDigest: "policy-A", definitionDigest: "def-A" },
+      });
+      expect(refused).toBeUndefined();
+
+      // …and once the row STATES both, the same decision commits — the rule is "say what you are", not "never
+      // ship".
+      await pg.client.query("UPDATE everdict_products SET evaluation_definition_digest = 'def-A' WHERE id = $1", [
+        productId,
+      ]);
+      const committed = await releases.update("trust", releaseId, { status: "released" }, undefined, {
+        expectProduct: { id: productId, version: 1, policyDigest: "policy-A", definitionDigest: "def-A" },
+      });
+      expect(committed?.status).toBe("released");
+
+      await pg.client.query("DELETE FROM everdict_product_releases WHERE id=$1", [releaseId]);
+      await pg.client.query("DELETE FROM everdict_products WHERE id=$1", [productId]);
     });
 
-    it("the same world on both sides attaches nothing — the signal stays rare enough to mean something", async () => {
-      const world = { os: "linux" as const, drivers: ["docker"], mixed: false, observed: 2 };
-      const entry = await shipOverWorlds(world, world);
-      expect(entry?.crossWorld).toBeUndefined();
+    it("the in-memory twin answers identically — a guarantee may not differ by store", async () => {
+      const { InMemoryProductStore, InMemoryReleaseStore } = await import("@everdict/db");
+      const products = new InMemoryProductStore();
+      const releases = new InMemoryReleaseStore();
+      releases.attachProducts(products);
+      await products.create({
+        id: "p1",
+        tenant: "trust",
+        name: "Shipped",
+        services: [],
+        series: [],
+        autoEval: { enabled: false },
+        createdBy: "dana",
+        createdAt: "2026-08-09T00:00:00.000Z",
+        updatedAt: "2026-08-09T00:00:00.000Z",
+        version: 1,
+        releasePolicyDigest: "policy-A",
+        // evaluationDefinitionDigest deliberately absent — the row cannot state what its series ask
+      } as never);
+      await releases.create({
+        id: "r1",
+        tenant: "trust",
+        productId: "p1",
+        name: "2026.4",
+        status: "planned",
+        createdBy: "dana",
+        createdAt: "2026-08-09T00:00:00.000Z",
+        updatedAt: "2026-08-09T00:00:00.000Z",
+        version: 0,
+      } as never);
+      expect(
+        await releases.update("trust", "r1", { status: "released" }, undefined, {
+          expectProduct: { id: "p1", version: 1, policyDigest: "policy-A", definitionDigest: "def-A" },
+        }),
+      ).toBeUndefined();
+      // …and it commits once the row STATES both, exactly as the Pg half does. The store derives the two
+      // digests from the product's own content on every write — which is the point: a decision names what the
+      // row says about itself, not a value somebody handed it.
+      const stated = await products.update("trust", "p1", {}, undefined);
+      expect(
+        await releases.update("trust", "r1", { status: "released" }, undefined, {
+          expectProduct: {
+            id: "p1",
+            version: stated?.version ?? 0,
+            policyDigest: stated?.releasePolicyDigest ?? "",
+            definitionDigest: stated?.evaluationDefinitionDigest ?? "",
+          },
+        }),
+      ).toMatchObject({ status: "released" });
     });
   },
 );
-
-describe.skipIf(!TRUST_PG_ENABLED)("TRUST-69 — each CAS dimension falls back on its own (real Postgres)", () => {
-  let pg: TrustPg;
-  beforeAll(async () => {
-    pg = await openTrustPg();
-  });
-  afterAll(async () => pg?.close());
-
-  it("a legacy row with only the POLICY digest populated still conflicts when the product moves", async () => {
-    const { PgReleaseStore } = await import("@everdict/db");
-    const releases = new PgReleaseStore(pg.client);
-    const productId = trustId("prod-69");
-    const releaseId = trustId("rel-69");
-    // The rolling-deploy state: policy digest present (0154 populated it), definition digest still NULL, and
-    // the product at version 1.
-    await pg.client.query(
-      `INSERT INTO everdict_products (id, tenant, name, services, series, auto_eval, history, created_by, created_at, updated_at, version, release_policy_digest)
-       VALUES ($1,'trust','Shipped','[]'::jsonb,'[]'::jsonb,'{}'::jsonb,'[]'::jsonb,'dana',now(),now(),1,'policy-A')`,
-      [productId],
-    );
-    await pg.client.query(
-      `INSERT INTO everdict_product_releases (id, tenant, product_id, name, status, history, created_by, created_at, updated_at, version)
-       VALUES ($1,'trust',$2,'2026.4','planned','[]'::jsonb,'dana',now(),now(),0)`,
-      [releaseId, productId],
-    );
-
-    // An old replica edits the series definition and bumps the product's version. It cannot populate the new
-    // column — it has never heard of it.
-    await pg.client.query("UPDATE everdict_products SET version = 2 WHERE id = $1", [productId]);
-
-    // A decision resolved BEFORE that edit now tries to commit. It read version 1 and definition digest
-    // "def-A" (what it resolved), and the policy digest still matches.
-    const refused = await releases.update("trust", releaseId, { status: "released" }, undefined, {
-      expectProduct: { id: productId, version: 1, policyDigest: "policy-A", definitionDigest: "def-A" },
-    });
-    expect(refused).toBeUndefined(); // pre-fix: committed, because the NULL definition column passed
-
-    // …and the same decision re-resolved against the CURRENT version commits, so the guard is not a wall.
-    const committed = await releases.update("trust", releaseId, { status: "released" }, undefined, {
-      expectProduct: { id: productId, version: 2, policyDigest: "policy-A", definitionDigest: "def-A" },
-    });
-    expect(committed?.status).toBe("released");
-
-    await pg.client.query("DELETE FROM everdict_product_releases WHERE id=$1", [releaseId]);
-    await pg.client.query("DELETE FROM everdict_products WHERE id=$1", [productId]);
-  });
-
-  it("the in-memory twin answers identically — the fallback must not differ by store", async () => {
-    const { InMemoryProductStore, InMemoryReleaseStore } = await import("@everdict/db");
-    const products = new InMemoryProductStore();
-    const releases = new InMemoryReleaseStore();
-    releases.attachProducts(products);
-    await products.create({
-      id: "p1",
-      tenant: "trust",
-      name: "Shipped",
-      services: [],
-      series: [],
-      autoEval: { enabled: false },
-      createdBy: "dana",
-      createdAt: "2026-08-09T00:00:00.000Z",
-      updatedAt: "2026-08-09T00:00:00.000Z",
-      version: 1,
-      releasePolicyDigest: "policy-A",
-      // evaluationDefinitionDigest deliberately absent — the legacy half
-    } as never);
-    await releases.create({
-      id: "r1",
-      tenant: "trust",
-      productId: "p1",
-      name: "2026.4",
-      status: "planned",
-      createdBy: "dana",
-      createdAt: "2026-08-09T00:00:00.000Z",
-      updatedAt: "2026-08-09T00:00:00.000Z",
-      version: 0,
-    } as never);
-    await products.update("trust", "p1", { version: 2 } as never);
-    expect(
-      await releases.update("trust", "r1", { status: "released" }, undefined, {
-        expectProduct: { id: "p1", version: 1, policyDigest: "policy-A", definitionDigest: "def-A" },
-      }),
-    ).toBeUndefined();
-  });
-});

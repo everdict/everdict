@@ -34,6 +34,7 @@ import {
   type Principal,
   Run,
   composeVerdictPolicy,
+  contentDigest,
   evidenceStatus,
   inMemoryUsageMeter,
   verdictPolicyRef,
@@ -920,6 +921,18 @@ const datasetWithCase = (): Dataset => ({
     },
   ],
   tags: [],
+});
+
+// The seal a batch carries. Every submit path writes one, and an unsealed record no longer executes
+// (arch-review 23, legacy sweep) — so a record built by hand for a Temporal-path test has to carry the same
+// identity a real one would, derived from THIS dataset rather than hand-written (a hand digest certifies the
+// fixture, not the code).
+const sealOf = (dataset: Dataset = datasetWithCase()): ScorecardRecord["manifest"] => ({
+  identityVersion: MANIFEST_IDENTITY_VERSION,
+  dataset: { id: dataset.id, version: dataset.version, digest: contentDigest(dataset.cases) },
+  cases: Object.fromEntries(dataset.cases.map((c) => [c.id, contentDigest({ ...c, graders: undefined })])),
+  gradingCases: Object.fromEntries(dataset.cases.map((c) => [c.id, contentDigest(c.graders)])),
+  harness: { id: "h", version: "1" },
 });
 
 // Poll until the background trackPull finishes (terminal status).
@@ -2840,6 +2853,10 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     tenant: "acme",
     dataset: { id: "td", version: "1.0.0" },
     harness: { id: "h", version: "1" },
+    // The seal every submit writes — an unsealed batch no longer executes (arch-review 23, legacy sweep), and
+    // a Temporal-path fixture has to carry the identity a real record would. Derived from THIS dataset: a
+    // hand-written digest would certify the fixture rather than the code.
+    manifest: sealOf(threeCases),
     status: "queued" as const,
     runtime: "rt-a,rt-b",
     orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "everdict-batch-sc-t" },
@@ -3151,6 +3168,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "running",
       orchestration: { judges: [], concurrency: 2, retries: 0 },
       createdAt: "2026-07-08T00:00:00.000Z",
@@ -3216,6 +3234,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "running",
       runtime: "nomad-local",
       orchestration: { judges: [], concurrency: 2, retries: 0 },
@@ -3255,6 +3274,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 1, retries: 0 },
       createdAt: "2026-07-08T00:00:00.000Z",
@@ -3265,6 +3285,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "running", // interrupted, but a pre-orchestration record
       createdAt: "2026-07-08T00:00:00.000Z",
       updatedAt: "2026-07-08T00:00:00.000Z",
@@ -3282,6 +3303,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 1 },
       scorecard: {
@@ -3326,6 +3348,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 1 },
       scorecard: {
@@ -3377,6 +3400,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 1 },
       scorecard: {
@@ -3430,6 +3454,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 1 },
       scorecard: {
@@ -3559,6 +3584,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 0 },
       scorecard: {
@@ -3647,6 +3673,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       orchestration: { judges: [], concurrency: 3, retries: 0 },
       createdAt: "2026-07-08T00:00:00.000Z",
@@ -3694,6 +3721,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "running",
       orchestration: { judges: [], concurrency: 1, retries: 0 },
       createdAt: "2026-07-08T00:00:00.000Z",
@@ -3727,6 +3755,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "running",
       createdAt: "2026-07-08T00:00:00.000Z",
       updatedAt: "2026-07-08T00:00:00.000Z",
@@ -3736,6 +3765,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       tenant: "acme",
       dataset: { id: "rd", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
       status: "succeeded",
       scorecard: { suiteId: "rd", harness: "h@1", results: [passResult("c1")] },
       createdAt: "2026-07-08T00:00:00.000Z",
@@ -4354,6 +4384,7 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       tenant: "acme",
       dataset: { id: "d", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(),
       status: "superseded",
       error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
       orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-sup" },
@@ -4385,6 +4416,7 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       tenant: "acme",
       dataset: { id: "d", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(),
       status: "superseded",
       error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
       orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-fin" },
@@ -4610,6 +4642,7 @@ describe("ScorecardService.cancel — user stop", () => {
       tenant: "acme",
       dataset: { id: "d", version: "1.0.0" },
       harness: { id: "h", version: "1" },
+      manifest: sealOf(),
       status: "cancelled",
       error: { code: "CANCELLED", message: "Stopped by user" },
       orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-can" },

@@ -1033,6 +1033,13 @@ export class ScorecardBatchService {
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       ...(src.runtime ? { runtime: src.runtime } : {}),
       ...(src.subset ? { subset: src.subset } : {}),
+      // …AND THE SOURCE'S SEALED IDENTITY. A retry re-runs THAT experiment — same dataset documents, same
+      // harness closure, same judges; that is what `retryOf` means and what the dispatch below already pins
+      // its models from. The record was inheriting the lineage and not the identity, so the new batch could
+      // not state what it was: its own resume, its own Temporal plan and every later comparison read an
+      // unsealed record. Sealing a SECOND time would be worse than not sealing — it would re-resolve today's
+      // registry and quietly turn a retry into a different experiment.
+      ...(src.manifest ? { manifest: src.manifest } : {}),
       orchestration: orch,
       now: this.now(),
     });
