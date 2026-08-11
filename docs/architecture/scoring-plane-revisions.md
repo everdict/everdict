@@ -200,6 +200,16 @@ unreadable" to what it should have been all along: a lease saying who may promot
    and an unawaited one is unobservable — nothing can assert it and a process exiting after the settle would
    leave the rows behind for no reason.
 
+   **The gate itself is a function, not a sentence** (arch-review 22, final). "Promote once real-traffic
+   parity is observed" is a precondition nobody could evaluate, and a migration whose gate cannot be
+   evaluated is one that never happens — this one has been deferred by five consecutive reviews on exactly
+   that wording. `stagePromotionReadiness(revisions, minimumObserved)` (domain) reads the durable
+   observations and answers it: a revision with no `stageParity` counts as UNOBSERVED rather than as
+   agreement, one incomplete comparison blocks whatever the others said, and a disagreeing pass is named so
+   the decision is traceable to what stops it. `minimumObserved` stays the caller's — how much traffic is
+   enough is a product judgement — but zero is refused, because a fleet that never staged anything agrees
+   with itself perfectly. TRUST-124.
+
    **Forensics** (arch-review 17 P1-7). The revision also freezes WHICH units disagreed, bounded and labelled
    as a sample. The counts make the promotion decision; the ids make it diagnosable — and since the rows are
    collected immediately afterwards, a `promotionSafe: false` investigated later would otherwise know that N

@@ -38,7 +38,12 @@ export {
   experimentIdentity,
 } from "./scorecard/experiment-identity.js";
 export { flakeIndex } from "./scorecard/flake.js";
-export { type ScoringStageParity, stagePromotionSafe } from "./scorecard/stage-promotion.js";
+export {
+  type ScoringStageParity,
+  type StagePromotionReadiness,
+  stagePromotionReadiness,
+  stagePromotionSafe,
+} from "./scorecard/stage-promotion.js";
 export {
   applyGradingPlan,
   caseReason,

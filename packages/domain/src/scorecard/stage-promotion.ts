@@ -48,3 +48,85 @@ export function stagePromotionSafe(parity: ScoringStageParity): boolean {
     parity.orphaned.length === 0
   );
 }
+
+// WHETHER THE FLEET MAY TAKE THE CONTRACT STEP — the aggregate over what passes actually observed.
+//
+// `stagePromotionSafe` answers it for ONE pass. The migration is a decision about all of them, and it has
+// been carried across five reviews as "deferred pending observed real-traffic parity" — a precondition
+// stated in prose, which means nobody could ever say whether it had been met. It is now a function over the
+// durable observations (`ScoringRevision.stageParity`), so the answer comes from evidence rather than from
+// somebody's reading of a dashboard.
+//
+// Two rules, both inherited from this suite's oldest one — NOT EVALUATED IS NEVER GREEN:
+//
+//   1. An UNOBSERVED pass is not a passing pass. A revision with no `stageParity` predates the observation
+//      or ran with no stage wired; either way it is evidence of nothing, and counting it as agreement is how
+//      "0 mismatches" comes to mean "0 comparisons".
+//   2. ONE incomplete report blocks. A comparison that could not run is the case the operator most needs to
+//      see, and averaging it away is the failure this whole field exists to prevent.
+//
+// `minimumObserved` is the caller's — how much traffic is enough is a product judgement, not a domain one.
+export interface StagePromotionReadiness {
+  // Every recorded observation, whatever it said.
+  observed: number;
+  // …of which agreed completely (`promotionSafe`).
+  safe: number;
+  // Revisions carrying no observation at all — the denominator that makes `safe` meaningful.
+  unobserved: number;
+  // Comparisons that could not run. Any of these blocks, regardless of the counts.
+  incomplete: number;
+  // The passes that disagreed, named — a promotion decision has to be traceable to the units that block it.
+  blockedBy: Array<{ scorecardId?: string; passId?: string; reason: string }>;
+  ready: boolean;
+}
+
+export function stagePromotionReadiness(
+  revisions: ReadonlyArray<{
+    scorecardId?: string;
+    passId?: string;
+    stageParity?: { completed: boolean; failure?: string; promotionSafe: boolean };
+  }>,
+  minimumObserved: number,
+): StagePromotionReadiness {
+  const blockedBy: StagePromotionReadiness["blockedBy"] = [];
+  let observed = 0;
+  let safe = 0;
+  let unobserved = 0;
+  let incomplete = 0;
+  for (const revision of revisions) {
+    const parity = revision.stageParity;
+    if (parity === undefined) {
+      unobserved += 1;
+      continue;
+    }
+    observed += 1;
+    if (!parity.completed) {
+      incomplete += 1;
+      blockedBy.push({
+        ...(revision.scorecardId !== undefined ? { scorecardId: revision.scorecardId } : {}),
+        ...(revision.passId !== undefined ? { passId: revision.passId } : {}),
+        reason: parity.failure ?? "the parity comparison did not complete",
+      });
+      continue;
+    }
+    if (parity.promotionSafe) {
+      safe += 1;
+      continue;
+    }
+    blockedBy.push({
+      ...(revision.scorecardId !== undefined ? { scorecardId: revision.scorecardId } : {}),
+      ...(revision.passId !== undefined ? { passId: revision.passId } : {}),
+      reason: "the staged judgments differ from the plane this pass settled",
+    });
+  }
+  return {
+    observed,
+    safe,
+    unobserved,
+    incomplete,
+    blockedBy,
+    // Enough evidence, all of it clean. `minimumObserved` guards the trivial case the per-pass rule already
+    // refuses one level down: a fleet that never staged anything agrees with itself perfectly.
+    ready: observed >= minimumObserved && minimumObserved > 0 && blockedBy.length === 0,
+  };
+}
