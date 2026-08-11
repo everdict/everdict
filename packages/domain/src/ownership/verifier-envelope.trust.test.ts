@@ -1,94 +1,96 @@
 import { authorizeResourceAccess, authorizeToolInvocation } from "@everdict/contracts";
-import type { HandoffCheckpoint } from "@everdict/contracts";
+import type { RoleProfile } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { verifierEnvelope } from "./verifier-envelope.js";
+import { verifierEnvelopeFor } from "./ownership.js";
 
 // Trust suite (docs/trust-certification.md) — TRUST-31.
 //
 // A ROLE-BOUND VERIFIER KEEPS ITS EVIDENCE-ONLY SCOPE DOWN TO THE KERNEL AND CANNOT ACQUIRE WRITE CAPABILITY.
 //
-// This number was reserved several reviews ago and could not be claimed, for a reason worth stating: both
-// kernel guards existed and were enforced on every call — `authorizeToolInvocation` for which tools,
-// `authorizeResourceAccess` for which OBJECTS — and nothing ever BUILT an evidence-only envelope for them to
-// enforce. The guarantee had all of its enforcement and no producer, so "a verifier sees the evidence and
-// nothing else" was a sentence about a shape no code could make.
+// The number was reserved for several generations on the note "no path spawns one". The producer
+// (`verifierEnvelopeFor`) and the two kernel guards were both already here; what was never written was the
+// scenario that drives one through the other. So this certifies the composition rather than either half:
+// the envelope a spawn site actually builds, handed to the functions the agent loop actually calls.
 //
-// The producer is what this certifies, against the real kernel functions rather than a restatement of them.
+// The two guards answer different questions, and the split is the whole guarantee: `authorizeToolInvocation`
+// says which VERBS, `authorizeResourceAccess` says on which OBJECTS. Before they lived apart, the evidence ids
+// were written into the capability list — where they matched no tool name, so the envelope blocked every tool
+// and restricted no object. Two concepts in one field is not a weaker guarantee; it is a false one that
+// happened to fail in the direction that looked like enforcement.
 const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : describe.skip;
 
-const checkpoint = (): HandoffCheckpoint =>
-  ({
-    id: "cp-1",
-    goal: "make the flaky suite green",
-    currentState: "two cases still fail",
-    confirmedFacts: [{ statement: "case b regressed", refs: [{ type: "scorecard", id: "sc-7" }] }],
-    hypotheses: [],
-    actionsTaken: [{ what: "re-ran the batch", refs: [{ type: "run", id: "run-42" }] }],
-    openDecisions: [],
-    remainingTasks: [],
-    requiredCapabilities: [],
-    risks: [],
-    validationPlan: "re-run and compare",
-    createdAt: "2026-08-01T00:00:00.000Z",
-    createdBy: "agent:fixer:conv-1",
-  }) as unknown as HandoffCheckpoint;
+const VERIFIER: RoleProfile = {
+  role: "verifier",
+  capabilities: { read: "all", write: [] },
+  requiredEvidence: [],
+  completion: "verification",
+} as unknown as RoleProfile;
 
-const envelope = () => verifierEnvelope({ id: "env-v", checkpoint: checkpoint(), budgets: { timeSec: 600 } });
-
-describeTrust("TRUST-31 — a verifier activation cannot acquire write capability", () => {
-  it("reads the evidence's own tools, and NOT `all` — a conclusion must be attributable to what it was given", () => {
-    const scope = envelope().scope;
-    expect(scope.reads).not.toBe("all");
-    expect(scope.reads).toContain("get_scorecard");
-    expect(scope.reads).toContain("get_run");
+const envelope = () =>
+  verifierEnvelopeFor(VERIFIER, {
+    id: "env-v",
+    goal: "verify checkpoint cp-1",
+    evidence: [
+      { type: "scorecard", id: "sc-7" },
+      { type: "run", id: "run-42" },
+    ],
+    tools: ["get_scorecard", "get_run"],
+    budgets: { timeSec: 600 },
   });
 
-  it("holds NO write capability — not a short list, an empty one", () => {
+describeTrust("TRUST-31 — a spawned verifier cannot acquire write capability", () => {
+  it("holds NO write capability, and the KERNEL is what says so", () => {
     const env = envelope();
     expect(env.scope.writes).toEqual([]);
-    // Through the KERNEL, which is where it has to hold: any write tool, refused, with the replan action the
-    // envelope's escalation vocabulary allows.
-    for (const tool of ["submit_scorecard", "create_issue", "write_file", "file_verification_decision"])
+    for (const tool of ["submit_scorecard", "create_issue", "write_file"])
       expect(authorizeToolInvocation({ name: tool }, env)).toMatchObject({
         allowed: false,
         action: "refuse_and_replan",
       });
   });
 
-  it("…and a READ tool outside the evidence's own set is refused too", () => {
-    expect(authorizeToolInvocation({ name: "list_datasets", isReadOnly: true }, envelope())).toMatchObject({
+  it("reads the evidence's own tools and NOT `all` — a verdict must be attributable to what it was handed", () => {
+    const env = envelope();
+    expect(env.scope.reads).not.toBe("all");
+    expect(authorizeToolInvocation({ name: "get_scorecard", isReadOnly: true }, env)).toMatchObject({
+      allowed: true,
+    });
+    // Reading the executor's trajectory would be reviewing the executor's STORY rather than the artifact.
+    expect(authorizeToolInvocation({ name: "get_run_trajectory", isReadOnly: true }, env)).toMatchObject({
       allowed: false,
       reason: "out_of_scope",
     });
   });
 
-  it("sees the cited objects and no others — holding `get_scorecard` is not permission to read sc-8", () => {
+  it("sees the cited OBJECTS and no others — holding `get_scorecard` is not permission to read sc-8", () => {
     const env = envelope();
     expect(authorizeResourceAccess({ type: "scorecard", id: "sc-7" }, env)).toMatchObject({ allowed: true });
-    expect(authorizeResourceAccess({ type: "run", id: "run-42" }, env)).toMatchObject({ allowed: true });
-    // The second guard's whole reason for existing: the tool check above passes for both of these.
+    // The second guard's entire reason for existing: the tool check above passes for this one too.
     expect(authorizeResourceAccess({ type: "scorecard", id: "sc-8" }, env)).toMatchObject({ allowed: false });
   });
 
-  it("evidence from BOTH halves of the claim is in scope — facts and actions taken", () => {
-    // A verifier scoped to the facts but not to what was DONE could not check half of what it is judging.
-    const resources = envelope().scope.resources ?? [];
-    expect(resources).toEqual(
-      expect.arrayContaining([
-        { type: "scorecard", id: "sc-7" },
-        { type: "run", id: "run-42" },
-      ]),
-    );
-  });
-
-  it("an unreadable evidence type stays IN the world it defines — the part nobody can check is not deleted", () => {
-    // An outside commit has no first-party reader. Dropping it here would narrow the verifier's world to the
-    // convenient half; keeping it lets the runtime record `unreachable`, which is a fact about the evidence.
-    const withCommit = checkpoint();
-    withCommit.confirmedFacts.push({ statement: "fixed upstream", refs: [{ type: "commit", id: "abc123" }] });
-    const env = verifierEnvelope({ id: "env-c", checkpoint: withCommit, budgets: { timeSec: 600 } });
-    expect(env.scope.resources).toEqual(expect.arrayContaining([{ type: "commit", id: "abc123" }]));
-    // …and it grants no tool, because none can address it.
-    expect(env.scope.reads).not.toContain("get_commit");
+  it("refuses to build a WEAKENED envelope rather than returning one", () => {
+    // Each of these would produce a verifier that looks spawned and verifies nothing.
+    expect(() =>
+      verifierEnvelopeFor({ ...VERIFIER, role: "executor" } as RoleProfile, {
+        id: "e",
+        goal: "g",
+        evidence: [{ type: "run", id: "r" }],
+        tools: ["get_run"],
+        budgets: { timeSec: 60 },
+      }),
+    ).toThrow(/only a verifier profile/);
+    expect(() =>
+      verifierEnvelopeFor(VERIFIER, { id: "e", goal: "g", evidence: [], tools: ["get_run"], budgets: { timeSec: 60 } }),
+    ).toThrow(/nothing to verify/);
+    expect(() =>
+      verifierEnvelopeFor(VERIFIER, {
+        id: "e",
+        goal: "g",
+        evidence: [{ type: "run", id: "r" }],
+        tools: [],
+        budgets: { timeSec: 60 },
+      }),
+    ).toThrow(/cannot reach its own evidence/);
   });
 });

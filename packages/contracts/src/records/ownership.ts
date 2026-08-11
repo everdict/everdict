@@ -80,8 +80,10 @@ export type RoleProfile = z.infer<typeof RoleProfileSchema>;
 //      are the agent's senses). The kernel honors BOTH halves on every call (authorizeToolInvocation) and
 //      sub-agents inherit the read scope. A second vocabulary for the same concern would be a false
 //      guarantee, not a weaker one.
-// A verifier RUNTIME (a spawn site that constructs an evidence-only envelope) does not exist yet — see
-// docs/architecture/ownership-protocol.md; when it does, `scope.reads` is the field it fills.
+// The spawn site that fills `scope.reads` is `verifierEnvelopeFor` (@everdict/domain), composed by
+// `CheckpointService.requestVerification`; TRUST-31 drives that envelope through both kernel guards. What is
+// still unbound is the RUNNER — the `VerifierRunner` port has no implementation, so a deployment that has not
+// written one gets a refusal ("verification is a human act here"), never a silent auto-pass.
 
 // A role PLUS the actor holding it — the unit the independence invariant is stated over. A bare RoleProfile
 // cannot answer "is the verifier someone else?", so every check that separation matters to takes this.
