@@ -1,5 +1,6 @@
 import type { VerifierRunner, VerifierVerdict } from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
+import type { EvidenceIdentity } from "@everdict/domain";
 
 // The VerifierRunner bound to the agent service (ownership protocol, third enforcement site).
 //
@@ -54,12 +55,7 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         failedResources: Array<{ type: string; id: string; tool?: string }>;
         claimDigest?: string;
         policyDigest?: string;
-        observedEvidence?: Array<{
-          type: string;
-          id: string;
-          identity?: { scoringRevision?: number; scorePlaneDigest?: string };
-          moved?: true;
-        }>;
+        observedEvidence?: Array<{ type: string; id: string; identity?: EvidenceIdentity; moved?: true }>;
         executionProfile?: { modelRef: string; version: string; documentDigest: string };
       };
       return {

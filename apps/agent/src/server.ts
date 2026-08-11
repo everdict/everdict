@@ -1361,10 +1361,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         z.object({
           type: z.string().min(1),
           id: z.string().min(1),
-          identity: z.object({
-            scoringRevision: z.number().int().nonnegative().optional(),
-            scorePlaneDigest: z.string().optional(),
-          }),
+          // The coordinate that MOVES for this evidence kind — one per kind, discriminated, because a
+          // scorecard's judgment and a workspace file's bytes do not move by the same number.
+          identity: z.discriminatedUnion("kind", [
+            z.object({
+              kind: z.literal("scorecard"),
+              scoringRevision: z.number().int().nonnegative().optional(),
+              scorePlaneDigest: z.string().optional(),
+            }),
+            z.object({ kind: z.literal("run"), updatedAt: z.string().optional(), status: z.string().optional() }),
+            z.object({ kind: z.literal("file"), revision: z.number().int().positive().optional() }),
+            z.object({ kind: z.literal("issue"), updatedAt: z.string().optional() }),
+          ]),
         }),
       )
       .optional(),

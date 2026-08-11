@@ -402,7 +402,11 @@ describeTrust("TRUST-139 — the reader consumes the pin, and reports what it ac
       claim,
       policy,
       evidencePins: [
-        { type: "scorecard", id: "sc-7", identity: { scoringRevision: pinnedRevision, scorePlaneDigest: "sha256:p3" } },
+        {
+          type: "scorecard",
+          id: "sc-7",
+          identity: { kind: "scorecard", scoringRevision: pinnedRevision, scorePlaneDigest: "sha256:p3" },
+        },
       ],
     });
   }
@@ -411,7 +415,11 @@ describeTrust("TRUST-139 — the reader consumes the pin, and reports what it ac
     const result = await verify([{ revision: 3, scorePlaneDigest: "sha256:p3" }], 3);
     expect(result.verdict).toBe("verified");
     expect(result.observedEvidence).toEqual([
-      { type: "scorecard", id: "sc-7", identity: { scoringRevision: 3, scorePlaneDigest: "sha256:p3" } },
+      {
+        type: "scorecard",
+        id: "sc-7",
+        identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+      },
     ]);
     // …and the coverage counts it, because the read succeeded.
     expect(result.reviewedResources).toEqual([{ type: "scorecard", id: "sc-7", tool: "get_scorecard" }]);
@@ -426,7 +434,11 @@ describeTrust("TRUST-139 — the reader consumes the pin, and reports what it ac
     expect(result.failedResources).toEqual([{ type: "scorecard", id: "sc-7", tool: "get_scorecard" }]);
     // …and the observation says why: this is a fact about the verification, not a broken tool.
     expect(result.observedEvidence).toEqual([
-      { type: "scorecard", id: "sc-7", identity: { scoringRevision: 4, scorePlaneDigest: "sha256:p4" } },
+      {
+        type: "scorecard",
+        id: "sc-7",
+        identity: { kind: "scorecard", scoringRevision: 4, scorePlaneDigest: "sha256:p4" },
+      },
     ]);
   });
 
@@ -437,5 +449,80 @@ describeTrust("TRUST-139 — the reader consumes the pin, and reports what it ac
       version: "1.2.0",
       documentDigest: "sha256:verifier-doc",
     });
+  });
+});
+
+// …and the same rule for a WORKSPACE FILE (arch-review 26 P1). `existence is not evidence identity` was never
+// a statement about scorecards: `file:plans/release.md` verified today points at different bytes next
+// quarter, and a decision citing the path alone says the verifier read "it". The workspace filesystem already
+// publishes an attributed revision per write — this platform's own mutation counter for exactly this
+// question — so a file's identity is that number, and the reader compares it like any other.
+describeTrust("TRUST-139 — a mutable workspace file is pinned by the revision the fs ledger publishes", () => {
+  const fileTool = (revision: number): ToolDefinition => ({
+    name: "get_file",
+    description: "read a workspace file",
+    parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } },
+    isReadOnly: true,
+    resourceTargets: (input) => {
+      const path = (input as { path?: unknown }).path;
+      return typeof path === "string"
+        ? { kind: "targets", values: [{ type: "file", id: path }] }
+        : { kind: "indeterminate" };
+    },
+    call: async () => ({
+      content: JSON.stringify({ path: "plans/release.md", content: "ship it", encoding: "utf-8", revision }),
+      isError: false,
+    }),
+  });
+
+  const scopedToFile = {
+    ...envelope,
+    scope: {
+      reads: ["get_file"],
+      writes: [],
+      forbidden: [],
+      resources: [{ type: "file", id: "plans/release.md" }],
+    },
+  };
+
+  async function verifyFile(revisionNow: number, pinnedRevision: number) {
+    const { deps, authenticate } = await world(
+      scripted([
+        { toolCalls: [{ id: "c1", name: "get_file", arguments: '{"path":"plans/release.md"}' }] },
+        {
+          toolCalls: [
+            { id: "c2", name: "structured_output", arguments: '{"verdict":"verified","detail":"the plan says so"}' },
+          ],
+        },
+        { text: "done" },
+      ]),
+      undefined,
+      [fileTool(revisionNow)],
+    );
+    return runVerificationTurn(deps, authenticate, {
+      workspace: "acme",
+      actingAs: "verifier",
+      envelope: scopedToFile,
+      claim,
+      policy,
+      evidencePins: [{ type: "file", id: "plans/release.md", identity: { kind: "file", revision: pinnedRevision } }],
+    });
+  }
+
+  it("the revision the read observed is what comes back", async () => {
+    const result = await verifyFile(7, 7);
+    expect(result.observedEvidence).toEqual([
+      { type: "file", id: "plans/release.md", identity: { kind: "file", revision: 7 } },
+    ]);
+    expect(result.reviewedResources).toEqual([{ type: "file", id: "plans/release.md", tool: "get_file" }]);
+  });
+
+  it("an edit between the plan and the read is REFUSED, exactly as a re-score is", async () => {
+    const result = await verifyFile(8, 7);
+    expect(result.reviewedResources).toEqual([]);
+    expect(result.failedResources).toEqual([{ type: "file", id: "plans/release.md", tool: "get_file" }]);
+    expect(result.observedEvidence).toEqual([
+      { type: "file", id: "plans/release.md", identity: { kind: "file", revision: 8 } },
+    ]);
   });
 });

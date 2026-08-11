@@ -30,6 +30,7 @@ import type {
   ViewStore,
   WorkspaceSettingsStore,
 } from "@everdict/db";
+import type { EvidenceIdentity } from "@everdict/domain";
 import type { CircuitBreaker } from "@everdict/domain";
 import type {
   BenchmarkRegistry,
@@ -301,21 +302,61 @@ export function buildCheckpoint(deps: {
     // reader see verdicts the verifier never saw. The scoring ledger's newest entry IS that version, and it
     // is the same coordinate the release fence conditions on — one vocabulary for "which judgment of this
     // row", used by both.
+    // WHICH VERSION of each piece of evidence a verdict is about (arch-review 25 P0-3, generalised by 26 P1).
+    // Existence is not evidence identity, and that is not a statement about scorecards: a workspace FILE is
+    // the plainest case of all — `file:plans/release.md` verified today points at different bytes next
+    // quarter. Each kind is pinned by the coordinate that actually moves for it, read from the same store the
+    // reader will serve from, because a pin and an observation computed over different things cannot be
+    // compared.
     evidencePins: async (tenant, refs) => {
-      const pinned: Array<{ type: string; id: string; scoringRevision?: number; scorePlaneDigest?: string }> = [];
+      const pinned: Array<{ type: string; id: string; identity: EvidenceIdentity }> = [];
       for (const ref of refs) {
-        if (ref.type !== "scorecard") continue;
-        const record = await deps.scorecardStore.get(ref.id);
-        if (record?.tenant !== tenant) continue; // unresolvable → the service records it as unpinnable
-        const newest = record.scoring?.[record.scoring.length - 1];
-        pinned.push({
-          type: ref.type,
-          id: ref.id,
-          // A batch scored once and never re-scored carries no revision entry. That is not a failure to pin:
-          // "this row has had no scoring pass" is itself the version, and a pass appearing later changes it.
-          ...(newest?.revision !== undefined ? { scoringRevision: newest.revision } : {}),
-          ...(newest?.scorePlaneDigest !== undefined ? { scorePlaneDigest: newest.scorePlaneDigest } : {}),
-        });
+        if (ref.type === "scorecard") {
+          const record = await deps.scorecardStore.get(ref.id);
+          if (record?.tenant !== tenant) continue; // unresolvable → the service records it as unpinnable
+          const newest = record.scoring?.[record.scoring.length - 1];
+          pinned.push({
+            type: ref.type,
+            id: ref.id,
+            // A batch scored once and never re-scored carries no revision entry. That is not a failure to
+            // pin: "this row has had no scoring pass" is itself the version, and a pass appearing changes it.
+            identity: {
+              kind: "scorecard",
+              ...(newest?.revision !== undefined ? { scoringRevision: newest.revision } : {}),
+              ...(newest?.scorePlaneDigest !== undefined ? { scorePlaneDigest: newest.scorePlaneDigest } : {}),
+            },
+          });
+          continue;
+        }
+        if (ref.type === "run") {
+          // A run settles once and its RESULT does not — a scoring pass rewrites `result.scores` in place.
+          // `updatedAt` moves on every such write; `status` is the settlement it moves within.
+          const record = await deps.runStore.get(ref.id);
+          if (record?.tenant !== tenant) continue;
+          pinned.push({
+            type: ref.type,
+            id: ref.id,
+            identity: { kind: "run", updatedAt: record.updatedAt, status: record.status },
+          });
+          continue;
+        }
+        if (ref.type === "file" && deps.workspaceFs) {
+          // The attributed revision the workspace filesystem publishes on every write — this platform's own
+          // mutation counter for exactly this question.
+          const entry = await deps.workspaceFs.stat(tenant, ref.id).catch(() => undefined);
+          if (entry === undefined) continue;
+          pinned.push({
+            type: ref.type,
+            id: ref.id,
+            identity: { kind: "file", ...(entry.revision !== undefined ? { revision: entry.revision } : {}) },
+          });
+          continue;
+        }
+        if (ref.type === "issue" && deps.issueStore) {
+          const record = await deps.issueStore.get(tenant, ref.id).catch(() => undefined);
+          if (record === undefined) continue;
+          pinned.push({ type: ref.type, id: ref.id, identity: { kind: "issue", updatedAt: record.updatedAt } });
+        }
       }
       return pinned;
     },

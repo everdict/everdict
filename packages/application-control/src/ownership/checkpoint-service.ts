@@ -12,6 +12,8 @@ import {
   type VerificationDecision,
 } from "@everdict/contracts";
 import {
+  type EvidenceIdentity,
+  PINNABLE_EVIDENCE_KINDS,
   assertCheckpointForEnvelope,
   assertCompletionForRole,
   assertIndependentVerification,
@@ -77,7 +79,7 @@ export interface CheckpointServiceDeps {
   evidencePins?: (
     tenant: string,
     refs: ReadonlyArray<{ type: string; id: string }>,
-  ) => Promise<Array<{ type: string; id: string; scoringRevision?: number; scorePlaneDigest?: string }>>;
+  ) => Promise<Array<{ type: string; id: string; identity: EvidenceIdentity }>>;
   newId?: () => string;
   now?: () => string;
 }
@@ -314,7 +316,7 @@ export class CheckpointService {
     // WHICH VERSION of each piece of evidence this verdict is about (arch-review 25 P0-3). Resolved BEFORE
     // the verifier runs, so the pin names what was put in front of it rather than what the world looked like
     // when the verdict came back.
-    const pinnable = evidence.filter((ref) => PINNABLE_EVIDENCE_TYPES.has(ref.type));
+    const pinnable = evidence.filter((ref) => PINNABLE_EVIDENCE_KINDS.has(ref.type));
     const pins =
       this.deps.evidencePins && pinnable.length > 0
         ? await this.deps.evidencePins(
@@ -322,8 +324,7 @@ export class CheckpointService {
             pinnable.map((ref) => ({ type: ref.type, id: ref.id })),
           )
         : undefined;
-    // The PLAN's identities. What the decision records is the OBSERVATION (below) — this is what the readers
-    // are pinned to, so a read that sees anything else is refused before the model can reason over it.
+    // The PLAN's identities — what the readers are pinned to. What the decision records is the OBSERVATION.
     const planned =
       pins === undefined
         ? undefined
@@ -331,23 +332,9 @@ export class CheckpointService {
             const pin = pins.find((p) => p.type === ref.type && p.id === ref.id);
             // A resolver that ran and could not answer for THIS ref is the third state — named, and blocking.
             if (pin === undefined) return { type: ref.type, id: ref.id, unpinnable: true as const };
-            return {
-              type: ref.type,
-              id: ref.id,
-              ...(pin.scoringRevision !== undefined ? { scoringRevision: pin.scoringRevision } : {}),
-              ...(pin.scorePlaneDigest !== undefined ? { scorePlaneDigest: pin.scorePlaneDigest } : {}),
-            };
+            return { type: ref.type, id: ref.id, identity: pin.identity };
           });
-    const evidencePins = (planned ?? [])
-      .filter((entry): entry is Exclude<typeof entry, { unpinnable: true }> => !("unpinnable" in entry))
-      .map((entry) => ({
-        type: entry.type,
-        id: entry.id,
-        identity: {
-          ...(entry.scoringRevision !== undefined ? { scoringRevision: entry.scoringRevision } : {}),
-          ...(entry.scorePlaneDigest !== undefined ? { scorePlaneDigest: entry.scorePlaneDigest } : {}),
-        },
-      }));
+    const evidencePins = planned?.filter((entry) => entry.identity !== undefined) ?? [];
 
     // THE CLAIM — assembled here, carried there (arch-review 24 P0-3). The question below refers to "the
     // checkpoint's confirmed facts"; until this existed, those facts never left this process, so the verifier
@@ -373,22 +360,13 @@ export class CheckpointService {
     // one the successful read reported.
     const observedByRef = new Map((verdict.observedEvidence ?? []).map((o) => [`${o.type}:${o.id}`, o]));
     const evidenceIdentity = planned?.map((entry) => {
-      if ("unpinnable" in entry) return entry;
+      if (entry.identity === undefined) return { type: entry.type, id: entry.id, unpinnable: true as const };
       const observed = observedByRef.get(`${entry.type}:${entry.id}`);
       // Never opened, or opened and refused as moved: either way this decision cannot state the version the
       // verifier reasoned over, which the gap below turns into a refusal of the affirmative.
       if (observed === undefined || observed.moved === true || observed.identity === undefined)
         return { type: entry.type, id: entry.id, unpinnable: true as const };
-      return {
-        type: entry.type,
-        id: entry.id,
-        ...(observed.identity.scoringRevision !== undefined
-          ? { scoringRevision: observed.identity.scoringRevision }
-          : {}),
-        ...(observed.identity.scorePlaneDigest !== undefined
-          ? { scorePlaneDigest: observed.identity.scorePlaneDigest }
-          : {}),
-      };
+      return { type: entry.type, id: entry.id, identity: observed.identity };
     });
 
     // INDEPENDENCE, applied against EVERY executor in the evidence (arch-review 11). The domain owns the
@@ -482,7 +460,7 @@ export class CheckpointService {
     // …and evidence whose VERSION nobody could state (arch-review 25 P0-3). The verdict may still be filed —
     // it happened — but it cannot be affirmative: nobody reading it later can put the same artifact in front
     // of a second verifier, which is the whole content of "this was verified".
-    const unpinned = (evidenceIdentity ?? []).filter((e) => "unpinnable" in e);
+    const unpinned = (evidenceIdentity ?? []).filter((e) => e.unpinnable === true);
     if (unpinned.length > 0)
       gaps.push(
         `the version of ${unpinned.map((e) => `${e.type}:${e.id}`).join(", ")} that the verifier actually read could not be established, so this verdict cannot be reproduced against the same evidence`,
@@ -592,13 +570,6 @@ export class CheckpointService {
 // was done, which is precisely what the envelope's context separation withholds (arch-review 24 P0-4). Its
 // presence in the PRODUCTION default meant the invariant held only in the test that passed its own list.
 const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue"] as const;
-
-// WHICH EVIDENCE KINDS HAVE A VERSION TO PIN. A scorecard does: a re-score rewrites its judgments in place
-// while the id stays the same, which is exactly the shape "existence is not identity" describes. A run's
-// result is settled once (first terminal write wins) and an issue is a live record nobody claims is frozen —
-// pinning those would be inventing a version rather than reading one. Kept as a set so a new pinnable kind
-// is one entry plus a resolver, never a scattered condition.
-const PINNABLE_EVIDENCE_TYPES = new Set<string>(["scorecard"]);
 
 // WHICH TOOL READS EACH EVIDENCE KIND — the map that decides what a verifier can actually REACH
 // (arch-review 12). The previous default set named `get_trace`, which is not a tool the control-plane surface

@@ -33,7 +33,7 @@ import {
   type EvidenceIdentity,
   assertTaskEnvelope,
   evidenceIdentityHolds,
-  observedScorecardIdentity,
+  observedEvidenceIdentity,
 } from "@everdict/domain";
 import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
@@ -908,12 +908,15 @@ function pinnedReader(hooks: ChatHooks): (tool: ToolDefinition) => ToolDefinitio
         for (const target of addressed.values) {
           const pin = pins.find((p) => p.type === target.type && p.id === target.id);
           if (pin === undefined) continue;
-          let observed: EvidenceIdentity;
+          let observed: EvidenceIdentity | undefined;
           try {
-            observed = observedScorecardIdentity(JSON.parse(result.content));
+            observed = observedEvidenceIdentity(target.type, JSON.parse(result.content));
           } catch {
-            // A reader whose output this platform cannot read an identity out of has not been shown to be
-            // the pinned artifact. Refusing beats letting an unverifiable read count as evidence.
+            observed = undefined;
+          }
+          if (observed === undefined) {
+            // A read this platform cannot extract an identity from has not been shown to be the pinned
+            // artifact. Refusing beats letting an unverifiable read count as evidence.
             hooks.onEvidenceObserved?.({ ...target, moved: true });
             return {
               content: `evidence_moved: the identity of ${target.type}:${target.id} could not be read from this response, so it cannot be used as the evidence this verification was planned against.`,
@@ -923,7 +926,7 @@ function pinnedReader(hooks: ChatHooks): (tool: ToolDefinition) => ToolDefinitio
           hooks.onEvidenceObserved?.({ ...target, identity: observed });
           if (!evidenceIdentityHolds(pin.identity, observed))
             return {
-              content: `evidence_moved: ${target.type}:${target.id} has changed since this verification was planned (planned under scoring revision ${pin.identity.scoringRevision ?? "none"}, now ${observed.scoringRevision ?? "none"}). Do not use it — say so and answer inconclusive.`,
+              content: `evidence_moved: ${target.type}:${target.id} has changed since this verification was planned (planned as ${JSON.stringify(pin.identity)}, now ${JSON.stringify(observed)}). Do not use it — say so and answer inconclusive.`,
               isError: true,
             };
         }

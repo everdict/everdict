@@ -258,8 +258,26 @@ export const VerificationDecisionSchema = z.object({
       z.object({
         type: z.string().min(1),
         id: z.string().min(1),
-        scoringRevision: z.number().int().nonnegative().optional(),
-        scorePlaneDigest: z.string().optional(),
+        // The coordinate that MOVES for this evidence kind, as the verifier's own read observed it. A union
+        // rather than one bag of optional fields (arch-review 26 P1): a scorecard's judgment moves by scoring
+        // revision, a run's result by its settlement timestamp, a workspace file by the revision the fs ledger
+        // publishes, an issue by the stamp every write leaves.
+        identity: z
+          .discriminatedUnion("kind", [
+            z.object({
+              kind: z.literal("scorecard"),
+              scoringRevision: z.number().int().nonnegative().optional(),
+              scorePlaneDigest: z.string().optional(),
+            }),
+            z.object({ kind: z.literal("run"), updatedAt: z.string().optional(), status: z.string().optional() }),
+            z.object({ kind: z.literal("file"), revision: z.number().int().positive().optional() }),
+            z.object({ kind: z.literal("issue"), updatedAt: z.string().optional() }),
+          ])
+          .optional(),
+        // No identity could be established for this ref — either the platform cannot pin that kind at all
+        // (a commit on a git host it does not run) or the read that would have established it never
+        // succeeded. Blocks an affirmative: a verdict nobody can re-take against the same artifact is not
+        // one this platform will call verified.
         unpinnable: z.literal(true).optional(),
       }),
     )
@@ -275,12 +293,6 @@ export const VerificationDecisionSchema = z.object({
   verifier: ActorRefSchema,
   verdict: z.enum(["verified", "refuted", "inconclusive"]),
   detail: z.string().min(1),
-  // WHAT WAS CLAIMED, and the digest of the text the verifier was actually shown (arch-review 24 P0-3). A
-  // decision that records only the evidence records half the question: read a year later, "verified" against
-  // run-42 says nothing about WHICH assertion run-42 was held to support. `digest` is the claim as the caller
-  // assembled it, `echoed` what the runner reported rendering — equal is the only affirmable state, and both
-  // are kept so a mismatch stays inspectable rather than collapsing into a bare refusal.
-  // Absent = recorded before the claim crossed the boundary (the shape that could not carry it at all).
   // WHICH DECISION PROCEDURE produced this verdict (arch-review 25 P0-4). Evidence is only meaningful with
   // the procedure that read it: two verdicts reached under different constitutions are not comparable, and a
   // stored verdict whose procedure nobody can name cannot be re-taken. `applied` is what the runner reported
@@ -303,6 +315,12 @@ export const VerificationDecisionSchema = z.object({
       documentDigest: z.string().min(1),
     })
     .optional(),
+  // WHAT WAS CLAIMED, and the digest of the text the verifier was actually shown (arch-review 24 P0-3). A
+  // decision that records only the evidence records half the question: read a year later, "verified" against
+  // run-42 says nothing about WHICH assertion run-42 was held to support. `digest` is the claim as the caller
+  // assembled it, `echoed` what the runner reported rendering — equal is the only affirmable state, and both
+  // are kept so a mismatch stays inspectable rather than collapsing into a bare refusal.
+  // Absent = recorded before the claim crossed the boundary (the shape that could not carry it at all).
   claim: z
     .object({
       digest: z.string().min(1),

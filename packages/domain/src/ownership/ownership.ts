@@ -436,18 +436,55 @@ export function verifierFocus(raw: string | undefined): string | undefined {
 // So the reader itself has to consume the pin: a read whose observed identity differs from the one the plan
 // pinned is refused as evidence, and the identity the DECISION records is the one the successful observation
 // reported — never the preflight guess.
-export interface EvidenceIdentity {
-  scoringRevision?: number;
-  scorePlaneDigest?: string;
+// EVERY MUTABLE EVIDENCE TYPE NEEDS ONE (arch-review 26 P1). The first version of this had one shape —
+// a scorecard's scoring revision — because that was the type the race was found on. But `existence is not
+// evidence identity` is not a statement about scorecards; a workspace FILE is the plainest case of all:
+// `file:plans/release.md` verified today points at different bytes next quarter, and the decision would say
+// the verifier read "it".
+//
+// A DISCRIMINATED UNION, not one flat bag of optional fields — the same argument the Score algebra makes.
+// Each kind names the coordinate that actually MOVES for that type, and each coordinate must be readable
+// from BOTH sides: the store (where the plan resolves it) and the served document (where the verifier
+// observes it). A coordinate present on only one side cannot be compared, and a comparison that cannot run
+// is not a weaker check — it is an unenforced one wearing a check's name.
+export type EvidenceIdentity =
+  // The scoring ledger's newest entry — the coordinate a re-score moves, and the one the release fence
+  // already conditions on. Absent on both = "this row has had no scoring pass", which is itself an identity.
+  | { kind: "scorecard"; scoringRevision?: number; scorePlaneDigest?: string }
+  // A run settles once, and its RESULT does not: a scoring pass rewrites the judgments inside that result in
+  // place. `updatedAt` moves on every such write, and `status` is the settlement it moves within.
+  | { kind: "run"; updatedAt?: string; status?: string }
+  // The workspace filesystem publishes a revision per write (the attributed ledger). It is the mutation
+  // counter this platform already maintains for exactly this question.
+  | { kind: "file"; revision?: number }
+  // A tracker record has no revision column; `updatedAt` is what every write stamps.
+  | { kind: "issue"; updatedAt?: string };
+
+// WHICH EVIDENCE KINDS HAVE AN IDENTITY TO PIN. A kind absent here is honestly unpinnable — a `commit` on a
+// git host everdict does not run, a `trace` on someone else's platform — and a verdict resting on one cannot
+// claim to be reproducible against the same evidence.
+export const PINNABLE_EVIDENCE_KINDS = new Set<string>(["scorecard", "run", "file", "issue"]);
+
+// What a served document says its current identity is. One reader per kind, and `undefined` for a kind this
+// platform cannot pin — never a silently empty identity, which would compare equal to everything.
+export function observedEvidenceIdentity(type: string, document: unknown): EvidenceIdentity | undefined {
+  if (document === null || typeof document !== "object") return undefined;
+  const doc = document as Record<string, unknown>;
+  if (type === "scorecard") return { kind: "scorecard", ...scorecardCoordinates(doc) };
+  if (type === "run")
+    return {
+      kind: "run",
+      ...(typeof doc.updatedAt === "string" ? { updatedAt: doc.updatedAt } : {}),
+      ...(typeof doc.status === "string" ? { status: doc.status } : {}),
+    };
+  if (type === "file") return { kind: "file", ...(typeof doc.revision === "number" ? { revision: doc.revision } : {}) };
+  if (type === "issue")
+    return { kind: "issue", ...(typeof doc.updatedAt === "string" ? { updatedAt: doc.updatedAt } : {}) };
+  return undefined;
 }
 
-// What a scorecard document says its current judgment is. Reads the same coordinate the release fence
-// conditions on — the newest entry of the scoring ledger — so "which judgment of this row" means one thing
-// across the whole platform. A document with no ledger has no revision, and that IS its identity: "this row
-// has had no scoring pass", which a later pass changes.
-export function observedScorecardIdentity(document: unknown): EvidenceIdentity {
-  if (document === null || typeof document !== "object") return {};
-  const scoring = (document as { scoring?: unknown }).scoring;
+function scorecardCoordinates(doc: Record<string, unknown>): { scoringRevision?: number; scorePlaneDigest?: string } {
+  const scoring = doc.scoring;
   if (!Array.isArray(scoring) || scoring.length === 0) return {};
   const newest = scoring[scoring.length - 1];
   if (newest === null || typeof newest !== "object") return {};
@@ -459,10 +496,23 @@ export function observedScorecardIdentity(document: unknown): EvidenceIdentity {
   };
 }
 
-// Do the two identities name the same judgment? Absent-on-both is agreement ("no pass then, no pass now");
-// absent-on-one is not, because a pass appearing is exactly the change this comparison exists to catch.
+// Kept as the scorecard-only entry point the release vocabulary already speaks.
+export function observedScorecardIdentity(document: unknown): EvidenceIdentity {
+  return observedEvidenceIdentity("scorecard", document) ?? { kind: "scorecard" };
+}
+
+// Do the two identities name the same artifact? Kind must match, then every coordinate. Absent-on-both is
+// agreement ("no pass then, no pass now"); absent-on-one is not, because a coordinate appearing is exactly
+// the change this comparison exists to catch.
 export function evidenceIdentityHolds(expected: EvidenceIdentity, observed: EvidenceIdentity): boolean {
-  return (
-    expected.scoringRevision === observed.scoringRevision && expected.scorePlaneDigest === observed.scorePlaneDigest
-  );
+  if (expected.kind !== observed.kind) return false;
+  if (expected.kind === "scorecard" && observed.kind === "scorecard")
+    return (
+      expected.scoringRevision === observed.scoringRevision && expected.scorePlaneDigest === observed.scorePlaneDigest
+    );
+  if (expected.kind === "run" && observed.kind === "run")
+    return expected.updatedAt === observed.updatedAt && expected.status === observed.status;
+  if (expected.kind === "file" && observed.kind === "file") return expected.revision === observed.revision;
+  if (expected.kind === "issue" && observed.kind === "issue") return expected.updatedAt === observed.updatedAt;
+  return false;
 }

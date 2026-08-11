@@ -7,7 +7,7 @@ import type {
   VerificationDecision,
 } from "@everdict/contracts";
 import { HandoffCheckpointSchema } from "@everdict/contracts";
-import { VERIFIER_POLICY_VERSION, authorizeResourceAccess } from "@everdict/domain";
+import { type EvidenceIdentity, VERIFIER_POLICY_VERSION, authorizeResourceAccess } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
@@ -289,12 +289,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
     readerOverride?: string; // which tool the runtime reports doing the reading
     evidencePins?: CheckpointServiceDeps["evidencePins"]; // which VERSION the plan resolved
     // …and which one the READ observed. Absent = the double saw exactly what it was pinned to.
-    observedEvidence?: Array<{
-      type: string;
-      id: string;
-      identity?: { scoringRevision?: number; scorePlaneDigest?: string };
-      moved?: true;
-    }>;
+    observedEvidence?: Array<{ type: string; id: string; identity?: EvidenceIdentity; moved?: true }>;
     evidence?: CheckpointRef[]; // what the checkpoint cites (defaults to the run above)
   }): { svc: CheckpointService; envelopes: TaskEnvelope[]; claims: unknown[] } {
     const envelopes: TaskEnvelope[] = [];
@@ -378,11 +373,21 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const { svc } = build({
       verdictActor: { id: "agent:auditor", runId: "run-99" },
       evidence: [{ type: "scorecard", id: "sc-7" }],
-      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+      evidencePins: async () => [
+        {
+          type: "scorecard",
+          id: "sc-7",
+          identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+        },
+      ],
     });
     const decision = await svc.requestVerification("acme", "cp-1");
     expect(decision.evidenceIdentity).toEqual([
-      { type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+      {
+        type: "scorecard",
+        id: "sc-7",
+        identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+      },
     ]);
   });
 
@@ -395,15 +400,29 @@ describe("verification — a spawned verdict is checked for independence and FIL
       verdictActor: { id: "agent:auditor", runId: "run-99" },
       evidence: [{ type: "scorecard", id: "sc-7" }],
       reviewed: [{ type: "scorecard", id: "sc-7" }],
-      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+      evidencePins: async () => [
+        {
+          type: "scorecard",
+          id: "sc-7",
+          identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+        },
+      ],
       // The reader is pinned to revision 3 and would refuse anything else; this double reports what it saw.
       observedEvidence: [
-        { type: "scorecard", id: "sc-7", identity: { scoringRevision: 3, scorePlaneDigest: "sha256:p3" } },
+        {
+          type: "scorecard",
+          id: "sc-7",
+          identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+        },
       ],
     });
     const decision = await svc.requestVerification("acme", "cp-1");
     expect(decision.evidenceIdentity).toEqual([
-      { type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+      {
+        type: "scorecard",
+        id: "sc-7",
+        identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+      },
     ]);
     // …and no evidence-version gap was raised: the read agreed with the plan. (The verdict is still
     // inconclusive here for an unrelated reason — a scorecard-only checkpoint resolves no executor, so
@@ -415,7 +434,13 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const { svc } = build({
       verdictActor: { id: "agent:auditor", runId: "run-99" },
       evidence: [{ type: "scorecard", id: "sc-7" }],
-      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+      evidencePins: async () => [
+        {
+          type: "scorecard",
+          id: "sc-7",
+          identity: { kind: "scorecard", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+        },
+      ],
       // The reader refused it: a re-score landed, so what the locator resolves to is no longer the artifact
       // this verification was planned against.
       observedEvidence: [{ type: "scorecard", id: "sc-7", moved: true }],
