@@ -15,6 +15,11 @@ import type { Activities } from "./types.js";
 // The actual backend dispatch happens in the activity (dispatchCase) (retry/timeout capable).
 const { dispatchCase } = proxyActivities<Activities>({
   startToCloseTimeout: "1 hour", // Nomad alloc + claude execution can be long
+  // …and WITHOUT this, that hour was also the detection latency for a dead worker (arch-review 26, found by
+  // TRUST-140). Temporal cannot tell "still working" from "the machine is gone" except by a heartbeat, so a
+  // case lost mid-dispatch sat silent until start-to-close expired. The activity beats every 10s; a minute of
+  // silence is a death, and the case is retried on a live worker instead of an hour later.
+  heartbeatTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
 

@@ -181,6 +181,8 @@ half the other missed, and both looked handled.
 
 | TRUST-139 | **The reader consumes the pin, and the record names what was OBSERVED**: the plan resolved each artifact's identity before the verifier ran, but what the verifier held was a LOCATOR — the tool returns whatever that id resolves to at the moment of the call, so a re-score landing in between produced a decision naming revision 3 while the model had read revision 4, with every artifact around it consistent and the sentence it filed false. The pin is now enforced where the bytes arrive (a moved artifact comes back as an error the model cannot reason over, and is not coverage), the decision records the observation rather than the plan, and the verdict names the instrument that produced it — the platform verifier model by version and document digest, resolved from the platform namespace so a workspace cannot shadow the thing that audits it. The identity is a UNION over every pinnable kind, because "existence is not evidence identity" was never a statement about scorecards: a workspace file verified today points at different bytes next quarter, and each kind is pinned by the coordinate that actually moves for it (scoring revision · settlement stamp · fs revision) | `apps/agent/src/verification-turn.trust.test.ts` |
 
+| TRUST-140 | **A Temporal worker killed mid-activity loses no work and produces one result**: the real workflow module (the BUILT one) against a real Temporal, with two real worker processes — worker A is SIGKILLed while its activity is in flight (no shutdown hook, the way a machine dies) and worker B finishes the case. The ledger may hold both attempts, because at-least-once is Temporal's honest contract; what must be exactly one is the workflow's RESULT, the thing everything downstream treats as the case's outcome. **Finding**: `dispatchCase` declared a one-hour start-to-close and never heartbeat, so that hour was also how long Temporal waited before admitting the worker was gone — durability held and "eventually" was doing a great deal of work in the sentence. The activity now beats every 10s under a one-minute heartbeat timeout | `apps/api/src/trust/temporal-replay.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
@@ -332,9 +334,12 @@ process-kill scenario that quietly degrades into an in-process one certifies not
   BUILT control plane as a child process against a real database and reads what it settled. The harness it
   established (spawn the artifact, wait for a log line rather than a sleep, assert over SQL) is what the
   remaining scenarios below should reuse.
-- **Temporal worker kill and replay.** `scripts/live/orchestration-torture.mjs` and
-  `scripts/live/chaos-orchestration.mjs` already drive real Temporal failure injection by hand. Wiring them
-  in needs a Temporal service in the workflow; until then they stay manual. This is the last Tier B item.
+- ~~**Temporal worker kill and replay.**~~ Done — TRUST-140 runs two real worker processes against a real
+  Temporal and SIGKILLs one mid-activity. It needs a Temporal service (`EVERDICT_TRUST_TEMPORAL`, default
+  `localhost:7233`); the by-hand drills (`scripts/live/orchestration-torture.mjs`,
+  `scripts/live/chaos-orchestration.mjs`) remain for the Nomad-shaped faults this does not cover.
+  **Tier B is now empty.** The next scenarios to want are not on this list yet — write them when a claim on
+  this page outruns what a single process can prove.
 - ~~**A grader that hangs rather than throws.**~~ Done — TRUST-133, against a real clock. Finding one:
   `safeGrade` had no deadline at all, so the scenario came with the fix rather than after it.
 - ~~**Cancel racing completion.**~~ Done — TRUST-135 spawns two OS processes contending over one run through

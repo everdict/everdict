@@ -4,6 +4,9 @@ import { Context } from "@temporalio/activity";
 import { Agent, fetch as undiciFetch } from "undici";
 import type { Activities } from "./types.js";
 
+// Far enough inside the heartbeat timeout the workflow declares that one missed beat is not a false death.
+const HEARTBEAT_INTERVAL_MS = 10_000;
+
 // The current activity attempt, when running inside one. Outside an activity (unit paths, the in-process
 // scoring fallback) there is no attempt to speak of — the caller then behaves as it always did.
 function attemptOf(): number | undefined {
@@ -38,8 +41,27 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
   const agent = schedule ? new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs }) : undefined;
   const fetch: typeof undiciFetch = (url, init) => undiciFetch(url, { ...init, dispatcher: agent });
   return {
-    dispatchCase(job: CaseJob): Promise<CaseResult> {
-      return dispatcher.dispatch(job);
+    // HEARTBEAT WHILE THE CASE RUNS (arch-review 26, found by TRUST-140). A dispatch can legitimately take an
+    // hour — a Nomad alloc plus a long agent run — so `startToCloseTimeout` is an hour, and without a
+    // heartbeat that timeout is also how long Temporal waits before it will admit the WORKER died. A machine
+    // lost mid-dispatch left its case silent for up to an hour, on a platform whose claim is that a workflow
+    // survives the process running it: it does, and "eventually" was doing a great deal of work in that
+    // sentence. Beating every 10s makes a dead worker detectable in tens of seconds, and costs one RPC.
+    async dispatchCase(job: CaseJob): Promise<CaseResult> {
+      const beat = setInterval(() => {
+        // Best-effort by construction: a heartbeat that throws (no activity context in a direct call, a
+        // cancelled activity) must never be the reason a case fails.
+        try {
+          Context.current().heartbeat();
+        } catch {
+          // not running inside an activity context — the direct/in-process path
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+      try {
+        return await dispatcher.dispatch(job);
+      } finally {
+        clearInterval(beat);
+      }
     },
     async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId?: string }> {
       if (!schedule)
