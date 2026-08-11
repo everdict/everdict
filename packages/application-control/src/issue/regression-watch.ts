@@ -4,6 +4,7 @@ import type { PlatformEventConsumer } from "../platform-event/event-consumer-run
 import type { IssueStore } from "../ports/issue-store.js";
 import type { NotificationStore } from "../ports/notification-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import { ExecutionPlan } from "../scorecard/execution-plan.js";
 import type { IssueService } from "./issue-service.js";
 
 // The REGRESSION WATCH (docs/tracker.md): a resolved issue whose evaluation later degraded reopens itself as
@@ -38,7 +39,7 @@ export interface RegressionWatchDeps {
 // name attached to it.
 function passRateOf(record: ScorecardRecord): number | undefined {
   if (!record.scorecard) return undefined;
-  const resolution = resolvePolicyResolution(record.verdictPolicy, record.manifest?.verdictPolicy);
+  const resolution = resolvePolicyResolution(record.verdictPolicy, ExecutionPlan.of(record).verdictPolicy);
   if (resolution.status === "unresolvable") return undefined;
   const { total, rate } = scorecardPassRate(record.scorecard, resolution.policy);
   return total > 0 ? rate : undefined;

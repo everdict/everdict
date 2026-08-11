@@ -97,6 +97,10 @@ export class InMemoryReleaseStore implements ReleaseStore {
       expectDecision?: {
         openIssues: number;
         candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+        capabilities?: {
+          asOf: string;
+          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
+        };
       };
     },
   ): Promise<ReleaseRecord | undefined> {
@@ -130,6 +134,9 @@ export class InMemoryReleaseStore implements ReleaseStore {
     if (guard?.expectDecision !== undefined && this.decisionSources !== undefined) {
       const sources = this.decisionSources;
       if (sources.openIssues(id) !== guard.expectDecision.openIssues) return undefined;
+      // The capability half has no in-memory twin: the fence is a subquery over registry TABLES, and an
+      // in-process registry has no insert timestamp to compare. It abstains, exactly as `expectProduct` does
+      // when unbound — the concurrent registration it covers cannot happen in a single-threaded fake.
       for (const candidate of guard.expectDecision.candidates) {
         const newest = sources.newestCandidateAt(candidate.productId, candidate.seriesKey);
         // A candidate that appeared, or a NEWER one than the decision read, means the decision was made
@@ -302,6 +309,10 @@ export class PgReleaseStore implements ReleaseStore {
       expectDecision?: {
         openIssues: number;
         candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+        capabilities?: {
+          asOf: string;
+          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
+        };
       };
     },
   ): Promise<ReleaseRecord | undefined> {
@@ -405,6 +416,29 @@ export class PgReleaseStore implements ReleaseStore {
           // the selection predicate ("S10 was latest"), which the recorded scoring pin cannot express.
           guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded' AND s.created_at > $${atIdx}::timestamptz)`;
         }
+      }
+      // …AND THE CAPABILITY REGISTRIES, as far as a row can speak for them. A new version, or a
+      // workspace-local document shadowing a `_shared` one, changes what a series' refs resolve to — and both
+      // arrive as INSERTS in tables this database owns, so they are conditions the write can hold rather than
+      // drift only a later read would notice. `_shared` is included because that is where the fallback comes
+      // from: a first-party dataset gaining a version moves `latest` for every workspace that inherits it.
+      //
+      // A soft DELETE moves no `created_at`, and workspace settings are a different row entirely; both stay
+      // covered by the service's contract re-verify, whose window is decision→commit rather than zero.
+      // Naming which half is which beats one guard that implies it covers both.
+      const CAPABILITY_TABLES = {
+        dataset: "everdict_datasets",
+        harness: "everdict_harness_instances",
+        judge: "everdict_judges",
+        rubric: "everdict_rubrics",
+        model: "everdict_models",
+      } as const;
+      const capabilities = guard.expectDecision.capabilities;
+      for (const ref of capabilities?.refs ?? []) {
+        params.push(ref.id, capabilities?.asOf);
+        const idIdx = params.length - 1;
+        const asOfIdx = params.length;
+        guardSql += ` AND NOT EXISTS (SELECT 1 FROM ${CAPABILITY_TABLES[ref.kind]} c WHERE c.id = $${idIdx} AND c.tenant IN (everdict_product_releases.tenant, '_shared') AND c.created_at > $${asOfIdx}::timestamptz)`;
       }
     }
     if (events && events.length > 0) {

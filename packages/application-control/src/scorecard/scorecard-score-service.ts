@@ -1008,7 +1008,7 @@ export class ScorecardScoreService {
       // A fallback is a new semantic decision; it may not silently replace an identity the system knew
       // exactly. Losing the historical context is a reason to refuse, not a reason to continue with less.
       const datasetless = record.dataset.id === EXPERIMENT_ADHOC_REF || record.dataset.id === TRACE_EVAL_REF;
-      if (!datasetless && record.manifest?.cases !== undefined)
+      if (!datasetless && ExecutionPlan.of(record).sealsCaseDocuments)
         throw new ConflictError(
           "CONFLICT",
           { scorecard: record.id, dataset: `${record.dataset.id}@${record.dataset.version}` },

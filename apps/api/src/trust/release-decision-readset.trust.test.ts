@@ -178,6 +178,33 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("a capability REGISTERED between the decision and the write refuses — the ambient half, fenced", async () => {
+    // A new version, or a workspace-local document shadowing a `_shared` one, changes what the series' refs
+    // resolve to. Both are INSERTS in a table this database owns, so unlike the settings edit below they do
+    // not have to wait for a re-verify: they are conditions on the write itself.
+    const { service, product, scorecards, releases } = await world();
+    await scorecards.create(
+      seriesBatch(trustId("sc-cap"), product.id, "2026-08-03T00:00:00.000Z", [scored("a", true)]),
+    );
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.9",
+    });
+    releases.onNextWrite(async () => {
+      // The dataset the watched series names gains a version under this workspace, after the decision read it.
+      await pg.client.query(
+        `INSERT INTO everdict_datasets (tenant, id, version, dataset, created_at)
+         VALUES ('trust', 'support-cases', $1, '{"id":"support-cases","version":"9.9.9","cases":[],"tags":[]}'::jsonb, now())`,
+        [trustId("v")],
+      );
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("a contract that moves mid-decision REFUSES — the ambient half, re-verified rather than fenced", async () => {
     // The evaluation contract is resolved from REGISTRIES and workspace settings, none of which touch a row
     // the CAS can condition on. So this half is a RE-VERIFY between the decision and the commit, and it is

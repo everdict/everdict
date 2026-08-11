@@ -460,7 +460,7 @@ export class ScorecardBatchService {
       ...(orch.traceSink ? { traceSink: orch.traceSink } : {}),
       // The batch's own composed policy, sealed in the manifest at submit — the live verdicts and the
       // settle-time analysis bundle are judged under it, never under whatever the ladder says today.
-      ...(rec.manifest?.verdictPolicy ? { verdictPolicy: rec.manifest.verdictPolicy } : {}),
+      ...(plan.verdictPolicy ? { verdictPolicy: plan.verdictPolicy } : {}),
       // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
       // empty duration history on a CP restart — it re-learns the median from the resumed cases).
       ...(targets.length > 1
@@ -853,8 +853,8 @@ export class ScorecardBatchService {
     // is what its revision numbers count from.
     const scoring = appendScoringRevision(final?.scoring, {
       kind: "initial",
-      judges: rec.manifest?.judges ?? ctx.judges,
-      ...(rec.manifest?.judgeRun ? { judgeRun: rec.manifest.judgeRun } : {}),
+      judges: ExecutionPlan.of(rec).sealedJudges ?? ctx.judges,
+      ...(ExecutionPlan.of(rec).sealedJudgeRun ? { judgeRun: ExecutionPlan.of(rec).sealedJudgeRun } : {}),
       results,
       // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
@@ -931,7 +931,7 @@ export class ScorecardBatchService {
     // A stamp whose document cannot be restored refuses rather than falling back to today's ladder: a retry
     // selected by re-judging history would re-run the cases a rule change invented and carry over the ones it
     // absolved, all under the original's name.
-    const resolution = resolvePolicyResolution(src.verdictPolicy, src.manifest?.verdictPolicy);
+    const resolution = resolvePolicyResolution(src.verdictPolicy, ExecutionPlan.of(src).verdictPolicy);
     if (resolution.status === "unresolvable")
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -1692,8 +1692,8 @@ export class ScorecardBatchService {
           // deliberately carry none: a cancelled batch never gates, so it has no judgment to identify).
           const scoring = appendScoringRevision(settled.scoring, {
             kind: "initial",
-            judges: settled.manifest?.judges ?? judges,
-            ...(settled.manifest?.judgeRun ? { judgeRun: settled.manifest.judgeRun } : {}),
+            judges: ExecutionPlan.of(settled).sealedJudges ?? judges,
+            ...(ExecutionPlan.of(settled).sealedJudgeRun ? { judgeRun: ExecutionPlan.of(settled).sealedJudgeRun } : {}),
             results: scorecard.results,
             // The revision entry points at its own FROZEN artifact — never the mutable current key (I7).
             ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),

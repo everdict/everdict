@@ -112,4 +112,24 @@ export class ExecutionPlan {
   get sealedJudges(): SealedJudgeEntry[] | undefined {
     return this.manifest?.judges;
   }
+
+  // The RUNTIME judge configuration this batch scored under — stamped onto each scoring revision, so a
+  // judgment records which judging apparatus produced it and not merely which judges were listed.
+  get sealedJudgeRun(): ScorecardManifest["judgeRun"] {
+    return this.manifest?.judgeRun;
+  }
+
+  // WHAT THIS BATCH JUDGES UNDER — the composed policy embedded at submit, absent when the built-in ladder
+  // decides. Read through the plan for the same reason as everything else here: a verdict is only
+  // re-derivable if every reader resolves the same stamped document.
+  get verdictPolicy(): ScorecardManifest["verdictPolicy"] {
+    return this.manifest?.verdictPolicy;
+  }
+
+  // Did this batch seal CASE DOCUMENTS at all? The re-score path asks it to tell a batch whose dataset it
+  // must re-verify from one that legitimately has no registry dataset behind it (an ad-hoc experiment, an
+  // ingested trace) — the difference between "the documents moved" and "there were never any".
+  get sealsCaseDocuments(): boolean {
+    return this.manifest?.cases !== undefined;
+  }
 }

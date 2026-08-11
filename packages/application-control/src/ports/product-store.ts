@@ -106,6 +106,18 @@ export interface ReleaseStore {
         // means the decision saw NO evidence for that series (which is itself a decision input: a required
         // series with no run blocks, and one that gains a run afterwards was not the thing evaluated).
         candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+        // …AND THE AMBIENT HALF, as far as a row can carry it (arch-review 22, second pass). A series'
+        // evaluation contract resolves from the capability registries: a new version that `latest` moves to,
+        // or a workspace-local document shadowing a `_shared` one, both arrive as INSERTS in a table this
+        // database owns. Those are conditions the write can hold.
+        //
+        // What a row cannot carry is a SOFT DELETE (no insert) or a settings edit — those stay covered by
+        // the service's re-verify, whose window is decision→commit rather than zero. Saying which half is
+        // which beats one guard that implies it covers both.
+        capabilities?: {
+          asOf: string; // when the contracts were resolved
+          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
+        };
       };
     },
   ): Promise<ReleaseRecord | undefined>;

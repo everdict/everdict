@@ -38,6 +38,7 @@ import {
   verdictPolicyRef,
   workspaceOpsReport,
 } from "@everdict/domain";
+import { ExecutionPlan } from "../scorecard/execution-plan.js";
 import type { ScorecardAnalyticsDeps } from "./scorecard-deps.js";
 import { analysisArtifactKey, analysisRevisionKey } from "./scorecard-observability.js";
 
@@ -141,8 +142,8 @@ export class ScorecardAnalyticsService {
     // Each side is read under ITS OWN stamped policy. A stamp that cannot be restored is the one case that
     // must not fall through to the default ladder: the comparison would then stand on verdicts re-derived
     // under rules that batch never ran under, which is exactly what a release gate would act on.
-    const bResolution = resolvePolicyResolution(baseRecord.verdictPolicy, baseRecord.manifest?.verdictPolicy);
-    const cResolution = resolvePolicyResolution(candRecord.verdictPolicy, candRecord.manifest?.verdictPolicy);
+    const bResolution = resolvePolicyResolution(baseRecord.verdictPolicy, ExecutionPlan.of(baseRecord).verdictPolicy);
+    const cResolution = resolvePolicyResolution(candRecord.verdictPolicy, ExecutionPlan.of(candRecord).verdictPolicy);
     const policyUnresolvable = unresolvableStamps(bResolution, cResolution);
     // Metric DIRECTIONS (cost down = better) are read off a policy too. They are cosmetic here — they colour
     // deltas, they decide nothing — so an unrestorable stamp falls back to the built-in directions rather

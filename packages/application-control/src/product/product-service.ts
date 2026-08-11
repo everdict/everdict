@@ -415,6 +415,23 @@ export class ProductService {
   }
 
   // The release gate. The service counts (it owns the stores); the domain decides what the counts mean.
+  // WHICH capability documents this decision's contracts were resolved from — the dataset, the harness, and
+  // every selected judge of every watched series. Rubrics and models sit one level deeper, inside a judge's
+  // own closure, and are covered by the contract re-verify rather than by this fence: enumerating them would
+  // mean resolving each judge document here, which is a second resolution of the thing we are fencing.
+  private static capabilityRefsFor(
+    product: ProductRecord,
+    release: ReleaseRecord,
+  ): Array<{ kind: "dataset" | "harness" | "judge"; id: string }> {
+    const refs = new Map<string, { kind: "dataset" | "harness" | "judge"; id: string }>();
+    for (const series of resolveWatchedSeries(product, release).series) {
+      refs.set(`dataset:${series.dataset.id}`, { kind: "dataset", id: series.dataset.id });
+      refs.set(`harness:${series.harness.id}`, { kind: "harness", id: series.harness.id });
+      for (const judge of series.judges ?? []) refs.set(`judge:${judge.id}`, { kind: "judge", id: judge.id });
+    }
+    return [...refs.values()];
+  }
+
   // The plan's components, each resolved to the exact ledger row it names. A `{service, version}` pair is not
   // historical identity once the ledger is stream-aware: repointing a service at another repository means the
   // same name tracks a different stream, and both streams can publish `v1.0.0`. What a shipped release must
@@ -468,6 +485,9 @@ export class ProductService {
     // The contracts this decision is about to stand on — resolved ONCE and carried into both the readiness
     // evaluation and the recorded decision, so the ship cannot record a question different from the one it
     // evaluated (arch-review 14 §9).
+    // Stamped BEFORE the resolution reads anything — a registration that lands during the read is one this
+    // decision may or may not have seen, and "may have" is not a state a fence gets to assume away.
+    const resolvedAt = this.now();
     const contracts = await this.resolveContracts(tenant, product, record);
     const readiness = await this.readinessUnder(tenant, record, product, contracts);
     const transition = Release.from(record).setStatus(
@@ -546,6 +566,11 @@ export class ProductService {
     //
     // `scope_invalid` entries are excluded: a promised series whose declaration is gone has no watched
     // definition, so "no succeeded batch exists for it" is not a claim this decision made.
+    //
+    // …and the CAPABILITIES those contracts were resolved from, so a registration landing between the
+    // decision and the commit is a condition on the write rather than something only the re-verify below can
+    // notice. `asOf` is taken BEFORE the contracts resolve: anything registered from that instant on is a
+    // document this decision did not read.
     const decision =
       input.status === "released"
         ? {
@@ -557,6 +582,7 @@ export class ProductService {
                 seriesKey: entry.key,
                 newestAt: entry.latest?.createdAt ?? null,
               })),
+            capabilities: { asOf: resolvedAt, refs: ProductService.capabilityRefsFor(product, record) },
           }
         : undefined;
     // THE AMBIENT HALF of the read-set, which has no row to fence (arch-review 22 P0-1). Each series'

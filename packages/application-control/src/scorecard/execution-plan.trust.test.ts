@@ -153,12 +153,19 @@ describeTrust("TRUST-120 — no execution path re-derives the plan", () => {
       what: "re-score selection verification",
       allow: ["execution-plan.ts"],
     },
+    // THE WHOLE CLAIM, not a sample of it (arch-review 22 P1). The scan named a handful of facets while the
+    // test was called "no execution path re-derives the plan" — a guarantee whose name is wider than its
+    // implementation, which is the same defect one level up: it tells the next author the question has been
+    // asked. Reading ANY sealed facet off a record's manifest is now the violation.
+    //
+    // Two files are allowed to, and for opposite reasons: `scorecard-service.ts` WRITES the manifest at
+    // submit, and `scorecard-score-service.ts` REWRITES the judge closure on a re-score. Authorship is not
+    // reconstruction — the plan is the reader, not the owner of the bytes.
     {
-      pattern: /manifest\??\.judges\b(?!\s*(\?\?|:))/,
-      what: "the sealed judge closure",
-      // The score service REWRITES the closure on a re-score (a later pass rewriting the same identity), and
-      // the settle paths read it to stamp a scoring revision — authorship and stamping, not execution.
-      allow: ["execution-plan.ts", "scorecard-score-service.ts", "scorecard-batch-service.ts"],
+      pattern:
+        /\bmanifest\??\.(cases|gradingCases|grading|harness|judges|judgeRun|judgeRunModelDigest|verdictPolicy|dataset)\b/,
+      what: "any sealed manifest facet",
+      allow: ["execution-plan.ts", "scorecard-service.ts", "scorecard-score-service.ts"],
     },
   ];
 
@@ -170,9 +177,12 @@ describeTrust("TRUST-120 — no execution path re-derives the plan", () => {
       const codeOf = (file: string): string =>
         readFileSync(file, "utf8")
           .split("\n")
-          .filter((line) => {
+          .map((line) => {
             const trimmed = line.trim();
-            return !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("/*");
+            if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return "";
+            // …and TRAILING comments, which is where this package explains a field beside the field.
+            const comment = line.indexOf("//");
+            return comment === -1 ? line : line.slice(0, comment);
           })
           .join("\n");
       const offenders = sources()
