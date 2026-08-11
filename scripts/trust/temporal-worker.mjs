@@ -40,7 +40,7 @@ const worker = await Worker.create({
     // The production activity NAME, so the real workflow's `proxyActivities<Activities>()` binding resolves.
     async dispatchCase(job) {
       await pool.query(
-        `INSERT INTO everdict_trust_temporal_effects (task_queue, worker_id, case_id, at) VALUES ($1,$2,$3, now())`,
+        "INSERT INTO everdict_trust_temporal_effects (task_queue, worker_id, case_id, at) VALUES ($1,$2,$3, now())",
         [taskQueue, workerId, job.evalCase?.id ?? "?"],
       );
       // Long enough that the scenario can kill this worker WHILE the activity is in flight — the state the
