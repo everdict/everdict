@@ -89,6 +89,37 @@ const internal = {
       ...errorResponses(400, 401, 404),
     },
   },
+  stagePromotion: {
+    summary: "Is the scoring plane's contract step ready?",
+    description:
+      "Reads the durable per-pass stage-parity observations and answers whether the write-ahead stage may be " +
+      "promoted to the source of truth. A pass that recorded nothing counts as UNOBSERVED, never as " +
+      "agreement; one incomplete comparison blocks; a disagreeing pass is named. Only observations from the " +
+      "CURRENT parity era count — a green from an earlier, weaker comparison is a green about a different " +
+      "question. Operator surface (x-internal-token).",
+    tags: ["internal"],
+    querystring: {
+      type: "object",
+      properties: {
+        tenant: { type: "string", description: "workspace to scope to; omit for the cross-workspace view" },
+        minimum: { type: "string", description: "how many clean observations are enough (default 50)" },
+      },
+    },
+    response: {
+      200: {
+        description: "Readiness",
+        type: "object",
+        properties: {
+          observed: { type: "number" },
+          safe: { type: "number" },
+          unobserved: { type: "number" },
+          incomplete: { type: "number" },
+          ready: { type: "boolean" },
+          blockedBy: { type: "array", items: { type: "object" } },
+        },
+      },
+    },
+  },
   schedulingGet: {
     summary: "Get scheduler fairness dials",
     description:

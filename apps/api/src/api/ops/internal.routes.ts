@@ -28,6 +28,27 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     deps.schedulingControl.set(body.data);
     return reply.send(deps.schedulingControl.effective());
   });
+  // THE SCORING PLANE'S CONTRACT STEP, as a question an operator can ask (arch-review 23, final). The
+  // promotion's precondition lived in a design document for five reviews, which is how a migration becomes
+  // permanent: nobody could say whether it had been met. This answers from the passes' own durable
+  // observations — and answers `ready: false, observed: 0` until evidence exists under the CURRENT parity
+  // era, which is the honest state of a migration nobody has measured yet.
+  app.get<{ Querystring: { tenant?: string; minimum?: string } }>(
+    "/internal/scoring-stage-promotion",
+    { schema: internalDocs.stagePromotion },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(401).send({ code: "UNAUTHENTICATED", message: "x-internal-token required." });
+      const minimum = Number(req.query.minimum ?? "50");
+      if (!Number.isFinite(minimum) || minimum < 1)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "minimum must be a positive integer" });
+      return reply.send(await deps.scorecardService.stagePromotionReadiness(req.query.tenant, Math.floor(minimum)));
+    },
+  );
+
   app.get("/internal/scheduling", { schema: internalDocs.schedulingGet }, async (req, reply) => {
     if (!deps.internalToken || !deps.schedulingControl)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scheduling control not configured" });

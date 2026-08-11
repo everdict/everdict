@@ -153,6 +153,8 @@ half the other missed, and both looked handled.
 
 | TRUST-126 | **A constitutional declaration executes only under its receipt**: submit REFUSES a dataset whose graders declare `ground_truth` with no recorded approval, and refuses one whose receipt names different bytes — "it is in the registry" is not evidence that anybody approved it, and an id-and-version approval would wave a re-registration through. An admin attestation (`legacy_attested`) is the way back in, so the refusal is a gate rather than a wall | `apps/api/src/trust/dataset-constitution.trust.test.ts` |
 
+| TRUST-127 | **A real process boundary** (real Postgres + the BUILT control plane as a child process): a booting control plane settles the batch owned by a replica that stopped heartbeating and leaves the live replica's alone. TRUST-09 certifies the recovery DECISION given a heartbeat set; only a booting process can certify that the composition root hands it the right one — and a boot that reclaims everything is as wrong as one that reclaims nothing. A missing build FAILS this scenario rather than skipping it | `apps/api/src/trust/process-boundary.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
@@ -295,9 +297,10 @@ scenarios below need a real process boundary — kill a running control plane an
 does. They are the suite's next stage, and they are listed here rather than half-implemented because a
 process-kill scenario that quietly degrades into an in-process one certifies nothing.
 
-- **Kill the API mid-batch, boot a replacement, assert ownership is honored.** TRUST-09 certifies the
-  *decision* (`recoverInterrupted` given a heartbeat set). The remaining claim is that a real booting process
-  wires that decision correctly — which needs the composition root, not the use case.
+- ~~**Kill the API mid-batch, boot a replacement, assert ownership is honored.**~~ Done — TRUST-127 boots the
+  BUILT control plane as a child process against a real database and reads what it settled. The harness it
+  established (spawn the artifact, wait for a log line rather than a sleep, assert over SQL) is what the
+  remaining scenarios below should reuse.
 - **Temporal worker kill and replay.** `scripts/live/orchestration-torture.mjs` and
   `scripts/live/chaos-orchestration.mjs` already drive real Temporal failure injection by hand. Wiring them
   in needs a Temporal service in the workflow; until then they stay manual.

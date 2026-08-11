@@ -76,6 +76,13 @@ describeTrust("TRUST-124 — the contract step is gated on evidence, not on some
     expect(readiness).toMatchObject({ observed: 1, unobserved: 2, ready: false });
   });
 
+  it("with no evidence at all the answer is a STATE, not a blocker nobody can see", () => {
+    // The gate's first honest job: before any pass has been observed under the current era it says so —
+    // `observed: 0, ready: false` — which is what a migration nobody has measured actually looks like. Five
+    // reviews carried this step as a sentence precisely because no surface could say that.
+    expect(stagePromotionReadiness([], 50)).toMatchObject({ observed: 0, unobserved: 0, ready: false });
+  });
+
   it("a minimum of zero is not a shortcut — an unevidenced promotion stays refused", () => {
     expect(stagePromotionReadiness([], 0).ready).toBe(false);
   });

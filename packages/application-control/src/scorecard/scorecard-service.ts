@@ -78,6 +78,7 @@ import type {
   SubmitExperimentInput,
 } from "./scorecard-requests.js";
 import { type ScoreGroupInput, ScorecardScoreService } from "./scorecard-score-service.js";
+import { stagePromotionReport } from "./stage-promotion-report.js";
 
 // Public surface preserved through the R2-b decomposition — the moved declarations stay importable from here.
 export { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "./scorecard-requests.js";
@@ -636,6 +637,13 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         { dataset: `${dataset.id}@${dataset.version}`, approved: approval.contentDigest, current },
         `The constitutional approval on record for '${dataset.id}@${dataset.version}' was written for different content (approved ${approval.contentDigest}, current ${current}) — what an admin authorized is not what this batch would run.`,
       );
+  }
+
+  // IS THE SCORING PLANE'S CONTRACT STEP READY? The operator's question, answered from the passes' own
+  // durable observations rather than from a dashboard (arch-review 23, final). A transport asks the service;
+  // the service owns the store — the same one-way chain every other read here follows.
+  async stagePromotionReadiness(tenant: string | undefined, minimumObserved: number) {
+    return stagePromotionReport(this.deps.store, tenant, minimumObserved);
   }
 
   // P1 experiment — phase 1 alone (execution-model.md): the SAME fan-out machinery as a scorecard, with no
