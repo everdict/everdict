@@ -515,6 +515,9 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
         status: "resolved" as const,
         digest: contractDigest,
         contract: { dataset: { id: "d", version: "1" }, harness: { id: "h", version: "1" }, judges: [] },
+        // No nested closure to fence — this scenario is about the contract DIGEST, and the read-set is the
+        // resolution's own statement rather than something a reader infers from the refs.
+        documents: [],
       }),
       newId: () => `${prefix}-${n++}`,
       now: () => new Date().toISOString(),

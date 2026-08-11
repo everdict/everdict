@@ -166,8 +166,8 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             declaredOriginFromIssue(fromIssue, originNote),
           );
           const constitutional = assertDatasetConstitution(principal, result.data); // same door as the REST create
-          await datasets.register(ws, result.data, principal.subject, teamId, origin); // creator = subject (delete permission)
           await recordDatasetConstitution(ctx.deps, principal, result.data, constitutional);
+          await datasets.register(ws, result.data, principal.subject, teamId, origin); // creator = subject (delete permission)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
@@ -226,8 +226,8 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             image_template ? { imageTemplate: image_template } : {},
           );
           const constitutional = assertDatasetConstitution(principal, dataset);
-          await datasets.register(ws, dataset, principal.subject);
           await recordDatasetConstitution(ctx.deps, principal, dataset, constitutional);
+          await datasets.register(ws, dataset, principal.subject);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
     );
@@ -275,8 +275,8 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             image_template ? { imageTemplate: image_template } : {},
           );
           const constitutional = assertDatasetConstitution(principal, dataset);
-          await datasets.register(ws, dataset, principal.subject);
           await recordDatasetConstitution(ctx.deps, principal, dataset, constitutional);
+          await datasets.register(ws, dataset, principal.subject);
           return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
         }),
     );

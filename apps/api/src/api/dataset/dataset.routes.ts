@@ -56,8 +56,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       // The constitutional act, gated where the declaration is AUTHORED (arch-review 22 P0-2) — and RECORDED,
       // so the artifact can later say who authorized it (arch-review 23 P1).
       const constitutional = assertDatasetConstitution(principal, parsed.data);
-      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin); // creator = subject (delete rights)
       await recordDatasetConstitution(deps, principal, parsed.data, constitutional);
+      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
@@ -91,8 +91,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
       const constitutional = assertDatasetConstitution(principal, dataset); // an imported set declares like any other
-      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       await recordDatasetConstitution(deps, principal, dataset, constitutional);
+      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       return reply.code(201).send({
         workspace: principal.workspace,
         id: dataset.id,
@@ -129,8 +129,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
         parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
       );
       const constitutional = assertDatasetConstitution(principal, dataset); // an imported set declares like any other
-      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       await recordDatasetConstitution(deps, principal, dataset, constitutional);
+      await deps.datasetRegistry.register(principal.workspace, dataset, principal.subject);
       return reply.code(201).send({
         workspace: principal.workspace,
         id: dataset.id,

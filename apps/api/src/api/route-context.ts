@@ -80,6 +80,7 @@ import {
   type RunRecord,
   type RuntimeSpec,
   RuntimeSpecSchema,
+  UpstreamError,
   resolveHarnessInstance,
 } from "@everdict/contracts";
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
@@ -559,29 +560,40 @@ export function assertDatasetConstitution(principal: Principal, dataset: Pick<Da
 
 // …AND THE RECEIPT (arch-review 23 P1). Authorizing at the door leaves no trace, so an artifact already in
 // the database cannot say whether an admin approved it, a member registered it before the gate existed, or it
-// is a platform seed. Those are three facts and a trust kernel may not read them as one. Best-effort by
-// contract: a registration must not fail because its provenance record did — but an absent receipt is then
-// exactly what it looks like, an unauthorized declaration, which the reader below reports rather than assumes
-// away.
+// is a platform seed. Those are three facts and a trust kernel may not read them as one.
+//
+// THE RECEIPT PRECEDES THE ACT, and a receipt that cannot be written refuses it (arch-review 24). The first
+// version wrote it afterwards and swallowed the failure, which produced a dataset that declares what passing
+// means, that nothing records anyone approving, and that every later submit refuses. The only way back was
+// `legacy_attested` — a mode whose whole meaning is "authorized after it already ran" — so a lost receipt did
+// not merely lose information, it rewrote the history of an authorization that did happen at the door.
+//
+// Ordering it first is what makes the refusal clean: an orphan receipt names bytes at a version that does not
+// exist, which authorizes nothing until exactly those bytes are registered (a different document at that
+// version is refused by immutability, and a matching one is the act the receipt was written for).
 export async function recordDatasetConstitution(
   deps: ServerDeps,
   principal: Principal,
   dataset: Dataset,
   metrics: string[],
 ): Promise<void> {
-  if (metrics.length === 0 || deps.constitutionApprovals === undefined) return;
-  await deps.constitutionApprovals
-    .record(principal.workspace, {
-      kind: "dataset",
-      id: dataset.id,
-      version: dataset.version,
-      contentDigest: contentDigest(dataset),
-      metrics,
-      mode: principal.workspace === SHARED_TENANT ? "platform_seed" : "approved",
-      approvedBy: principal.subject,
-      approvedAt: new Date().toISOString(),
-    })
-    .catch(() => undefined);
+  if (metrics.length === 0) return;
+  if (deps.constitutionApprovals === undefined)
+    throw new UpstreamError(
+      "UPSTREAM_MISCONFIGURED",
+      { dataset: `${dataset.id}@${dataset.version}`, metrics },
+      "This dataset declares ground_truth authority, and this deployment has nowhere to record who authorized it. Registering it would create a constitution nobody signed.",
+    );
+  await deps.constitutionApprovals.record(principal.workspace, {
+    kind: "dataset",
+    id: dataset.id,
+    version: dataset.version,
+    contentDigest: contentDigest(dataset),
+    metrics,
+    mode: principal.workspace === SHARED_TENANT ? "platform_seed" : "approved",
+    approvedBy: principal.subject,
+    approvedAt: new Date().toISOString(),
+  });
 }
 
 // Is this run THIS caller's to read? Workspace scoping and the audience rule in one question, because the two

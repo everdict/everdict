@@ -173,7 +173,24 @@ export type SeriesContractResolution =
   // digest of `harness@10` and then submitted the version-less ref, which `latest` had meanwhile moved to
   // `@11` — a record whose origin and whose execution disagreed. Using the same resolver twice is not the
   // same as carrying one decision; state moves between the calls. Submit what was resolved.
-  | { status: "resolved"; digest: string; contract: ResolvedSeriesContract }
+  | {
+      status: "resolved";
+      digest: string;
+      contract: ResolvedSeriesContract;
+      // THE REGISTRY DOCUMENTS THIS RESOLUTION READ (arch-review 24). Kind and id, because that is what a
+      // fence keys on: owner-first lookup means the NAME is what a concurrent registration changes.
+      //
+      // It sits on the RESOLUTION and not inside the contract on purpose — the contract is digested, and a
+      // read-set is a fact about this act of resolving rather than about the identity being resolved. Two
+      // deployments resolving the same contract must produce the same digest even if one of them reads a
+      // literal model where the other reads a registry document.
+      //
+      // Carried rather than re-derived: the sealed closure states its refs as strings, so every reader that
+      // wanted to know "which of these name documents" was reduced to inspecting the spelling — and a literal
+      // model name containing an `@` would have been fenced as a document nobody registered. The resolver
+      // knows the binding's type; it says so.
+      documents: ReadonlyArray<{ kind: "model" | "rubric" | "harness"; id: string }>;
+    }
   | { status: "unresolvable"; reason: string }
   | { status: "unknown" };
 

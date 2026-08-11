@@ -58,29 +58,53 @@ export type { SealedJudgeEntry };
 //
 // The rubric and delegated-harness helpers already had this shape — one read, both facets off the same object.
 // The model path now matches them.
+// A REGISTRY DOCUMENT A RESOLUTION READ, named by what a fence can key on. Kind and id only — the generation
+// table is keyed by name, because owner-first resolution means the NAME is what a concurrent registration
+// changes, not the version that was chosen last time.
+export interface ClosureDocument {
+  kind: "model" | "rubric" | "harness";
+  id: string;
+}
+
 export async function resolveModelPin(
   deps: Pick<ScorecardServiceDeps, "models" | "resolveModelBinding">,
   tenant: string,
   binding: ModelBinding,
-): Promise<{ ref: string; digest?: string; unreadable?: true }> {
-  if (typeof binding === "string") return { ref: binding }; // already concrete — no document behind it
+): Promise<{ ref: string; digest?: string; unreadable?: true; document?: ClosureDocument }> {
+  // WHETHER A DOCUMENT IS BEHIND THIS REF IS KNOWN HERE AND NOWHERE ELSE (arch-review 24). The sealed ref is
+  // a string, so every later reader had to guess the answer from its shape — "does it contain an `@`" — and a
+  // literal model name carrying one would be fenced as a registry document while the vocabulary of the
+  // decision quietly became a spelling convention. The binding's TYPE is the fact; it is carried, not
+  // re-derived. Only kind and id: the generation table is keyed by name, and it is the NAME whose resolution
+  // can change under a decision.
+  if (typeof binding === "string") return { ref: binding }; // a literal — no document, nothing to fence
   if (deps.models) {
     try {
       const spec = await deps.models.get(tenant, binding.ref, binding.version ?? "latest");
-      return { ref: `${binding.ref}@${spec.version}`, digest: contentDigest(spec) };
+      return {
+        ref: `${binding.ref}@${spec.version}`,
+        digest: contentDigest(spec),
+        document: { kind: "model", id: binding.ref },
+      };
     } catch {
       // A ref WITH a reader that could not read it is a third state, and the two consumers want opposite
       // things from it (arch-review 21 P1). The manifest records the run that happened, so it keeps the ref
       // and says the document was never verified; the release gate is asking whether today's identity is
       // established, and a hole is not an answer. Saying which case this is lets each apply its own policy
       // instead of both inheriting the weaker one.
+      // Unreadable, and still a NAME — the document it names is exactly the one whose resolution a
+      // concurrent registration could change, so it stays in the read-set.
       return {
         ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved",
         unreadable: true,
+        document: { kind: "model", id: binding.ref },
       };
     }
   }
-  return { ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved" };
+  return {
+    ref: (await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved",
+    document: { kind: "model", id: binding.ref },
+  };
 }
 
 // A raw string binding is already concrete; a registry ref resolves to "ref@version" (latest pinned to the
@@ -118,9 +142,13 @@ export async function sealJudgeClosureWithHoles(
   deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses" | "models">,
   tenant: string,
   judges: Array<{ id: string; version: string }>,
-): Promise<{ entries: Array<SealedJudgeEntry>; holes: string[] }> {
+): Promise<{ entries: Array<SealedJudgeEntry>; holes: string[]; documents: ClosureDocument[] }> {
   const out: Array<SealedJudgeEntry> = [];
   const holes: string[] = [];
+  // Every registry document this closure READ, collected as it is read (arch-review 24). The release fence
+  // needs the closure's read-set, and re-deriving it from the sealed strings is the reconstruction this
+  // generation of review keeps removing: the resolver knows, so the resolver says.
+  const documents: ClosureDocument[] = [];
   for (const j of judges) {
     const at = `judge '${j.id}@${j.version}'`;
     try {
@@ -130,6 +158,7 @@ export async function sealJudgeClosureWithHoles(
       // whichever namespace answers, and the model spec carries the provider, the underlying model name, the
       // base URL and the key secret — every one of which changes what the judge actually is.
       const modelPin = binding === undefined ? undefined : await resolveModelPin(deps, tenant, binding);
+      if (modelPin?.document) documents.push(modelPin.document);
       const model = modelPin?.ref;
       const modelDigest = modelPin?.digest;
       const rubricRef =
@@ -137,14 +166,17 @@ export async function sealJudgeClosureWithHoles(
           ? spec.rubric
           : undefined;
       const rubric = rubricRef === undefined ? undefined : await sealVersionedRef(rubricRef, deps.rubrics, tenant);
+      if (rubricRef !== undefined) documents.push({ kind: "rubric", id: rubricRef.id });
       const harnessRef = spec !== undefined && spec.kind === "harness" ? spec.harness : undefined;
       const harness = harnessRef === undefined ? undefined : await sealVersionedRef(harnessRef, deps.harnesses, tenant);
+      if (harnessRef !== undefined) documents.push({ kind: "harness", id: harnessRef.id });
       // …AND THE DELEGATED HARNESS'S OWN MODEL CLOSURE (arch-review 20 P0-4, the last level of the
       // recursion). Pinning the harness document proves the agent is the one we sealed; that document then
       // names its own `{ref}` model bindings, which resolve at the judge's dispatch through the same
       // owner-first lookup. Without this the delegated agent is verified and the model it thinks with is not.
       const delegatedClosure =
         harness?.document === undefined ? undefined : await sealHarnessModelClosure(deps, tenant, harness.document);
+      documents.push(...(delegatedClosure?.documents ?? []));
       if (modelPin?.unreadable) holes.push(`${at} names a model document that could not be read`);
       if (rubric?.unreadable) holes.push(`${at} names a rubric document that could not be read`);
       if (harness?.unreadable) holes.push(`${at} names a delegated harness document that could not be read`);
@@ -170,7 +202,7 @@ export async function sealJudgeClosureWithHoles(
       holes.push(`${at} could not be read`);
     }
   }
-  return { entries: out, holes };
+  return { entries: out, holes, documents };
 }
 
 // The manifest's view: entries only. A hole is recorded honestly (an absent digest) and the batch still runs,
@@ -203,6 +235,8 @@ export async function sealHarnessModelClosure(
   // verify is not an identity it can call current. Dropping it here made the two policies share the
   // sealer's weaker one.
   unreadable?: string[];
+  // The registry documents this closure read — the fence's read-set, stated by the resolver.
+  documents?: ClosureDocument[];
 }> {
   if (spec === undefined) return {};
   if (spec.kind === "command") {
@@ -212,12 +246,14 @@ export async function sealHarnessModelClosure(
       model: pin.ref,
       ...(pin.digest ? { modelDigest: pin.digest } : {}),
       ...(pin.unreadable ? { unreadable: ["model"] } : {}),
+      ...(pin.document ? { documents: [pin.document] } : {}),
     };
   }
   if (spec.kind === "service") {
     const serviceModels: Record<string, string> = {};
     const serviceModelDigests: Record<string, string> = {};
     const unreadable: string[] = [];
+    const documents: ClosureDocument[] = [];
     for (const s of spec.services) {
       if (s.model === undefined) continue;
       // Per service, from ONE read each: a topology's binding is the same owner-first ref as any other, and
@@ -226,11 +262,13 @@ export async function sealHarnessModelClosure(
       serviceModels[s.name] = pin.ref;
       if (pin.digest) serviceModelDigests[s.name] = pin.digest;
       if (pin.unreadable) unreadable.push(`service '${s.name}' model`);
+      if (pin.document) documents.push(pin.document);
     }
     return {
       ...(Object.keys(serviceModels).length > 0 ? { serviceModels } : {}),
       ...(Object.keys(serviceModelDigests).length > 0 ? { serviceModelDigests } : {}),
       ...(unreadable.length > 0 ? { unreadable } : {}),
+      ...(documents.length > 0 ? { documents } : {}),
     };
   }
   return {};

@@ -9,7 +9,12 @@ import {
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { ScorecardServiceDeps } from "../scorecard/scorecard-deps.js";
-import { resolveModelPin, sealHarnessModelClosure, sealJudgeClosureWithHoles } from "../scorecard/scorecard-plan.js";
+import {
+  type ClosureDocument,
+  resolveModelPin,
+  sealHarnessModelClosure,
+  sealJudgeClosureWithHoles,
+} from "../scorecard/scorecard-plan.js";
 
 // WHAT A WATCH SERIES ASKS TODAY — resolved ONCE, for both readers (arch-review 15 P1-5).
 //
@@ -134,7 +139,11 @@ export async function resolveSeriesContract(
   // …and the JUDGES' closure, from the same sealer the manifest uses. `specDigest` absent means the sealer
   // could not read the document at all (it catches per judge so one bad spec never fails a batch) — for the
   // gate that IS the unresolvable case, since the version was resolved a moment ago and should therefore read.
-  const { entries: judgeClosure, holes } = await sealJudgeClosureWithHoles(deps, tenant, judges);
+  const {
+    entries: judgeClosure,
+    holes,
+    documents: judgeDocuments,
+  } = await sealJudgeClosureWithHoles(deps, tenant, judges);
   // The nested holes, on the same terms: an explicit `rubric@1` the registry could not answer is a ref this
   // gate cannot verify, and the manifest-side sealer deliberately keeps going on it.
   if (holes.length > 0)
@@ -160,6 +169,7 @@ export async function resolveSeriesContract(
   // a hole.
   let judgeRun: { provider?: string; model: string } | undefined;
   let judgeRunModelDigest: string | undefined;
+  const judgeRunDocuments: ClosureDocument[] = [];
   if (deps.judgeFor !== undefined) {
     const judge = await deps.judgeFor(tenant);
     if (judge !== undefined) {
@@ -167,6 +177,7 @@ export async function resolveSeriesContract(
       // ref alone said `model-x@1` is identity while the bytes behind it are not, which is the shadow every
       // other facet of this contract exists to catch.
       const pin = await resolveModelPin(deps, tenant, judge.model);
+      if (pin.document) judgeRunDocuments.push(pin.document);
       if (pin.ref === "unresolved" || pin.unreadable === true)
         return {
           status: "unresolvable",
@@ -193,5 +204,15 @@ export async function resolveSeriesContract(
     ...(judgeRun !== undefined ? { judgeRun } : {}),
     ...(judgeRunModelDigest !== undefined ? { judgeRunModelDigest } : {}),
   };
-  return { status: "resolved", digest: seriesContractDigest(contract), contract };
+  // The read-set this resolution actually touched, deduplicated on (kind, id) — the fence conditions on each
+  // name once, and a judge and a harness naming the same model is one name whose resolution can move.
+  const documents = new Map<string, ClosureDocument>();
+  for (const doc of [...(harnessClosure.documents ?? []), ...judgeDocuments, ...judgeRunDocuments])
+    documents.set(`${doc.kind}:${doc.id}`, doc);
+  return {
+    status: "resolved",
+    digest: seriesContractDigest(contract),
+    contract,
+    documents: [...documents.values()],
+  };
 }

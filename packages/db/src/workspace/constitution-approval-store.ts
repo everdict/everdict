@@ -37,8 +37,18 @@ export class PgConstitutionApprovalStore implements ConstitutionApprovalStore {
       approved_by: string | null;
       approved_at: Date | string;
     }>(
+      // OWNER-FIRST, like the artifact itself (arch-review 24). A dataset resolves tenant-then-`_shared`, so
+      // a receipt looked up under the tenant alone cannot answer for a platform seed: the seed's approval is
+      // recorded under `_shared` at boot, and every workspace evaluating it would have been refused for
+      // "carrying no constitutional approval" — a fail-closed refusal, but about the wrong fact.
+      //
+      // The fallback is safe because it is not the last word: the caller compares the receipt's digest against
+      // the bytes it actually resolved, so a `_shared` approval can only ever authorize the exact document it
+      // was written for. Namespace order decides WHICH receipt is read; content decides whether it applies.
       `SELECT content_digest, metrics, mode, approved_by, approved_at FROM everdict_constitution_approval
-       WHERE tenant = $1 AND kind = $2 AND id = $3 AND version = $4`,
+       WHERE tenant IN ($1, '_shared') AND kind = $2 AND id = $3 AND version = $4
+       ORDER BY (tenant = $1) DESC
+       LIMIT 1`,
       [tenant, kind, id, version],
     );
     const row = rows[0];

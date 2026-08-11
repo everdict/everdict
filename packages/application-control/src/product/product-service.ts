@@ -443,24 +443,14 @@ export class ProductService {
   private static nestedCapabilityRefs(
     contracts: Map<string, SeriesContractResolution> | undefined,
   ): Array<{ kind: "rubric" | "model" | "harness"; id: string }> {
+    // READ OFF THE RESOLUTION'S OWN READ-SET (arch-review 24). This used to parse the sealed refs — "does the
+    // string contain an `@`" — which made a decision's vocabulary depend on a spelling convention: a literal
+    // model name carrying one was fenced as a registry document, and nothing in the type system could say
+    // which of the two a given string was. The resolver knows, because it holds the binding; it now says.
     const refs = new Map<string, { kind: "rubric" | "model" | "harness"; id: string }>();
-    const add = (kind: "rubric" | "model" | "harness", ref: string | undefined): void => {
-      // "id@version" | a raw binding verbatim | the honest "unresolved" sentinel. Only a registry ref has a
-      // name to fence; a raw model string names no document at all.
-      if (ref === undefined || ref === "unresolved" || !ref.includes("@")) return;
-      const id = ref.slice(0, ref.lastIndexOf("@"));
-      if (id.length > 0) refs.set(`${kind}:${id}`, { kind, id });
-    };
     for (const resolution of contracts?.values() ?? []) {
       if (resolution.status !== "resolved") continue;
-      add("model", resolution.contract.harnessModel);
-      for (const model of Object.values(resolution.contract.serviceModels ?? {})) add("model", model);
-      for (const judge of resolution.contract.judgeClosure ?? []) {
-        add("model", judge.model);
-        add("rubric", judge.rubric);
-        add("harness", judge.harness);
-      }
-      add("model", resolution.contract.judgeRun?.model);
+      for (const doc of resolution.documents) refs.set(`${doc.kind}:${doc.id}`, doc);
     }
     return [...refs.values()];
   }

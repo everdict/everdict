@@ -186,11 +186,16 @@ describe("sealHarnessModelClosure — the treatment's own moving reference (H13)
     }) as unknown as HarnessSpec;
 
   it("seals a command harness's {ref} binding to its concrete resolution — and 'unresolved' without a resolver", async () => {
+    // …and the closure names the DOCUMENT it read, rather than leaving the next reader to infer it from the
+    // ref's spelling (arch-review 24). Kind and id: the name is what a concurrent registration moves.
     expect(await sealHarnessModelClosure({ resolveModelBinding }, "acme", command({ ref: "agent-model" }))).toEqual({
       model: "agent-model@5.0.0",
+      documents: [{ kind: "model", id: "agent-model" }],
     });
+    // A ref that could not be resolved still NAMES a document — the one whose resolution the fence conditions on.
     expect(await sealHarnessModelClosure({}, "acme", command({ ref: "agent-model" }))).toEqual({
       model: "unresolved",
+      documents: [{ kind: "model", id: "agent-model" }],
     });
     // A raw string binding is already concrete — verbatim, no resolver needed.
     expect(await sealHarnessModelClosure({}, "acme", command("claude-opus-4-8"))).toEqual({
@@ -212,6 +217,7 @@ describe("sealHarnessModelClosure — the treatment's own moving reference (H13)
     } as unknown as HarnessSpec;
     expect(await sealHarnessModelClosure({ resolveModelBinding }, "acme", spec)).toEqual({
       serviceModels: { api: "agent-model@5.0.0" },
+      documents: [{ kind: "model", id: "agent-model" }],
     });
   });
 });

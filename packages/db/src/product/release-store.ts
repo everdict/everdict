@@ -461,6 +461,14 @@ export class PgReleaseStore implements ReleaseStore {
           const revIdx = params.length - 1;
           const digestIdx = params.length;
           guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND (s.scoring -> -1 ->> 'revision')::int = $${revIdx} AND s.scoring -> -1 ->> 'scorePlaneDigest' = $${digestIdx})`;
+        } else {
+          // AN UNPINNED CANDIDATE IS A CONDITION, NOT AN EXEMPTION (arch-review 24). A row scored before the
+          // revision ledger existed carries no revision to compare, and skipping the check gave exactly those
+          // candidates — the oldest evidence in the workspace — no protection against a re-score committing
+          // under the decision. So the absent pin becomes its own claim: the row must STILL have no ledger
+          // entry. A pass that scores it writes one, and the ship refuses rather than shipping a verdict the
+          // gate never read.
+          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring -> -1 ->> 'revision' IS NULL)`;
         }
         // ③ …AND NOTHING NEWER HAS LANDED. Ordered by (created_at, id) exactly as the read that chose it —
         //    a row arriving in the same millisecond is not `>` a timestamp, and the tie-break is what the

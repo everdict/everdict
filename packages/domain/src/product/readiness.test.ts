@@ -327,7 +327,7 @@ describe("series evaluation contract — evidence must answer the question the s
     judges: [],
   };
   const contracts = new Map<string, SeriesContractResolution>([
-    ["quality", { status: "resolved", digest: CONTRACT, contract: plan }],
+    ["quality", { status: "resolved", digest: CONTRACT, contract: plan, documents: [] }],
   ]);
 
   const pointWith = (digest?: string): SeriesScorecardPoint => ({
