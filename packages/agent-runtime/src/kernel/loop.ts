@@ -454,6 +454,39 @@ async function invokeWithTimeout(
 
 // One agentic run: LLM call (with progressively-disclosed tools) → dispatch tool calls → feed results back →
 // repeat until the model stops asking for tools (end_turn), turns/budget run out, it stalls, or the caller aborts.
+// The shallow shape check behind `structured_output`. Required keys, plus each named property's `type` and
+// `enum` when it declares one — NOT a JSON Schema implementation, and the caller's own validator (a Zod parse
+// at the consumer) stays the authority on everything richer. What this closes is the gap between "the model
+// called the tool" and "the model answered the question asked", which every consumer of a structured result
+// was previously assuming.
+function shallowSchemaViolations(value: unknown, schema: unknown): string[] {
+  if (schema === null || typeof schema !== "object") return [];
+  const s = schema as { type?: unknown; required?: unknown; properties?: unknown; enum?: unknown };
+  const out: string[] = [];
+  if (s.type === "object" && (value === null || typeof value !== "object" || Array.isArray(value)))
+    return ["expected an object"];
+  const obj = (value ?? {}) as Record<string, unknown>;
+  for (const key of Array.isArray(s.required) ? s.required : [])
+    if (typeof key === "string" && obj[key] === undefined) out.push(`missing required "${key}"`);
+  const properties = (s.properties ?? {}) as Record<string, unknown>;
+  for (const [key, raw] of Object.entries(properties)) {
+    const present = obj[key];
+    if (present === undefined) continue;
+    const prop = raw as { type?: unknown; enum?: unknown };
+    if (Array.isArray(prop.enum) && !prop.enum.includes(present as never))
+      out.push(`"${key}" must be one of ${prop.enum.map((v) => JSON.stringify(v)).join(", ")}`);
+    const expected = prop.type;
+    if (typeof expected !== "string") continue;
+    const actual = Array.isArray(present) ? "array" : present === null ? "null" : typeof present;
+    const ok =
+      (expected === "integer" && actual === "number") ||
+      (expected === "number" && actual === "number") ||
+      expected === actual;
+    if (!ok) out.push(`"${key}" must be a ${expected}`);
+  }
+  return out;
+}
+
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS;
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -620,6 +653,22 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           parametersJsonSchema: opts.outputSchema,
           isReadOnly: true,
           call: async (input) => {
+            // THE SCHEMA IS A REQUIREMENT, NOT A REQUEST (arch-review 23). This tool recorded whatever the
+            // model passed: `{}` and `{verdict: "probably"}` were both "the final result". A caller that
+            // asked for a shape and got an arbitrary object has no way to tell a refusal from a malformed
+            // answer — and a verifier's verdict built on that would be a decision assembled from garbage,
+            // filed as a judgment.
+            //
+            // The check is DELIBERATELY SHALLOW and says so: required keys, and each named property's
+            // declared `type`/`enum` when it has one. It is not a JSON Schema implementation, and treating
+            // it as one is how a guard starts lying — what it certifies is that the answer has the shape the
+            // caller named, which is the part a consumer builds on.
+            const invalid = shallowSchemaViolations(input, opts.outputSchema);
+            if (invalid.length > 0)
+              return {
+                content: `Structured output rejected — it does not match the required schema (${invalid.join("; ")}). Call structured_output again with a value that does; the result is not recorded until it matches.`,
+                isError: true,
+              };
             structuredOutput = input;
             hasStructuredOutput = true;
             return { content: "Structured output recorded.", isError: false };

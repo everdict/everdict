@@ -1353,6 +1353,37 @@ describe("runAgentLoop", () => {
     expect(result.toolCalls).toEqual([{ name: "structured_output", ok: true }]);
   });
 
+  // arch-review 23: the schema was a REQUEST. This tool recorded whatever the model passed — `{}` and
+  // `{verdict:"probably"}` were both "the final result" — so a consumer that asked for a shape and got an
+  // arbitrary object could not tell a refusal from a malformed answer. A verifier's verdict built on that
+  // would be a decision assembled from garbage and filed as a judgment.
+  it("refuses a submission that does not match the schema, and records nothing until one does", async () => {
+    const { transport } = fakeTransport([
+      toolCallResult("s1", "structured_output", '{"score":0.9}'), // missing the required field
+      toolCallResult("s2", "structured_output", '{"verdict":"maybe"}'), // not one of the allowed values
+      toolCallResult("s3", "structured_output", '{"verdict":"refuted"}'), // finally the shape asked for
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      outputSchema: {
+        type: "object",
+        properties: { verdict: { type: "string", enum: ["verified", "refuted", "inconclusive"] } },
+        required: ["verdict"],
+      },
+    });
+    // Only the matching submission is recorded — the rejections leave no partial value behind.
+    expect(result.structuredOutput).toEqual({ verdict: "refuted" });
+    expect(result.toolCalls).toEqual([
+      { name: "structured_output", ok: false },
+      { name: "structured_output", ok: false },
+      { name: "structured_output", ok: true },
+    ]);
+  });
+
   it("nudges ONCE when the model finishes without submitting structured output, then accepts", async () => {
     const { transport, requests } = fakeTransport([
       textResult("here is my answer in prose"), // finishes without submitting → nudged
