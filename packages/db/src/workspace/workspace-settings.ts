@@ -28,8 +28,8 @@ export class PgWorkspaceSettingsStore implements WorkspaceSettingsStore {
   async set(workspace: string, patch: WorkspaceSettings): Promise<WorkspaceSettings> {
     // Atomic upsert via jsonb merge (||) — does not overwrite other settings keys.
     const r = await this.client.query<{ settings: unknown }>(
-      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at) VALUES ($1, $2::jsonb, now())
-       ON CONFLICT (workspace) DO UPDATE SET settings = everdict_workspace_settings.settings || $2::jsonb, updated_at = now()
+      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at, revision) VALUES ($1, $2::jsonb, now(), 1)
+       ON CONFLICT (workspace) DO UPDATE SET settings = everdict_workspace_settings.settings || $2::jsonb, updated_at = now(), revision = everdict_workspace_settings.revision + 1
        RETURNING settings`,
       [workspace, JSON.stringify(patch)],
     );

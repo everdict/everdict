@@ -27,6 +27,7 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     private readonly templates: HarnessTemplateRegistry,
   ) {
     this.store = new PgVersionedStore(client, {
+      generationKind: "harness", // the resolution fence a release decision holds (mig 0163)
       table: "everdict_harness_instances",
       column: "spec",
       label: "harness instance",

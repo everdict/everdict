@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stagePromotionReadiness } from "./stage-promotion.js";
+import { CURRENT_STAGE_PARITY_VERSION, stagePromotionReadiness } from "./stage-promotion.js";
 
 // Trust suite (docs/trust-certification.md) — TRUST-124.
 //
@@ -15,12 +15,26 @@ import { stagePromotionReadiness } from "./stage-promotion.js";
 // oldest rule rather than inventing a friendlier one: NOT EVALUATED IS NEVER GREEN.
 const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : describe.skip;
 
-const clean = (passId: string) => ({ passId, stageParity: { completed: true, promotionSafe: true } });
-const disagreed = (passId: string) => ({ passId, stageParity: { completed: true, promotionSafe: false } });
+const clean = (passId: string) => ({
+  passId,
+  stageParity: { version: CURRENT_STAGE_PARITY_VERSION, completed: true, promotionSafe: true },
+});
+const disagreed = (passId: string) => ({
+  passId,
+  stageParity: { version: CURRENT_STAGE_PARITY_VERSION, completed: true, promotionSafe: false },
+});
 const unmeasured = (passId: string) => ({
   passId,
-  stageParity: { completed: false, promotionSafe: false, failure: "stage read threw" },
+  stageParity: {
+    version: CURRENT_STAGE_PARITY_VERSION,
+    completed: false,
+    promotionSafe: false,
+    failure: "stage read threw",
+  },
 });
+
+// The same clean report, from an OLDER observer — the shape a pre-stamp deployment left behind.
+const legacyClean = (passId: string) => ({ passId, stageParity: { completed: true, promotionSafe: true } });
 
 describeTrust("TRUST-124 — the contract step is gated on evidence, not on somebody's reading of a dashboard", () => {
   it("enough clean observations is READY — the gate is passable, or it is theatre", () => {
@@ -46,6 +60,20 @@ describeTrust("TRUST-124 — the contract step is gated on evidence, not on some
     const readiness = stagePromotionReadiness([clean("p1"), disagreed("p2")], 2);
     expect(readiness.ready).toBe(false);
     expect(readiness.blockedBy.map((b) => b.passId)).toEqual(["p2"]);
+  });
+
+  it("a legacy `promotionSafe: true` is NOT current evidence — the observer changed meaning five times", () => {
+    // Evidence is only meaningful together with the decision procedure that produced it. The parity
+    // comparison moved from stage-sourced to settled-plane expectation, from per-case to per-judge units,
+    // and from JSON.stringify to canonical equality — a green from any of those is a green about a different
+    // question, and the contract step must not be able to consume it.
+    const readiness = stagePromotionReadiness([legacyClean("p1"), legacyClean("p2"), legacyClean("p3")], 3);
+    expect(readiness).toMatchObject({ observed: 0, unobserved: 3, ready: false });
+  });
+
+  it("…and mixing eras does not top up the denominator", () => {
+    const readiness = stagePromotionReadiness([clean("p1"), legacyClean("p2"), legacyClean("p3")], 3);
+    expect(readiness).toMatchObject({ observed: 1, unobserved: 2, ready: false });
   });
 
   it("a minimum of zero is not a shortcut — an unevidenced promotion stays refused", () => {

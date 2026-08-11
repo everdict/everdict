@@ -1,0 +1,12 @@
+-- 0164_workspace_settings_revision — additive (expand): a MUTATION COUNTER on the workspace settings row.
+--
+-- The workspace's default judge model is part of a series' evaluation contract identity: an identical judge
+-- list judged by a different model is a different judging apparatus. So a release decision that resolved its
+-- contracts under judge J1 must not commit after the workspace switched to J2 — and the comment that said
+-- this half "cannot be a row condition" was wrong about this codebase: the settings ARE a row, in this
+-- database, next to everything else the ship conditions on (arch-review 23 P0-3).
+--
+-- A revision rather than `updated_at`, for the reason the capability generation is a revision: a counter
+-- moves on every write by construction, where a timestamp depends on clock frames and on the write happening
+-- to change the mtime at all.
+ALTER TABLE everdict_workspace_settings ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 1;

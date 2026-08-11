@@ -1,4 +1,9 @@
-import type { OutboxEvent, ReleaseListFilter, ReleaseStore } from "@everdict/application-control";
+import type {
+  CapabilityGenerationStore,
+  OutboxEvent,
+  ReleaseListFilter,
+  ReleaseStore,
+} from "@everdict/application-control";
 import {
   ISSUE_STATUSES,
   ISSUE_STATUS_CATEGORY,
@@ -96,11 +101,22 @@ export class InMemoryReleaseStore implements ReleaseStore {
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
       expectDecision?: {
         openIssues: number;
-        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
-        capabilities?: {
-          asOf: string;
-          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
-        };
+        candidates: ReadonlyArray<{
+          productId: string;
+          seriesKey: string;
+          pin: {
+            scorecardId: string;
+            createdAt: string;
+            scoringRevision?: number | undefined;
+            scorePlaneDigest?: string | undefined;
+          } | null;
+        }>;
+        capabilities?: ReadonlyArray<{
+          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
+          id: string;
+          generation: number | null;
+        }>;
+        settingsRevision?: number | null;
       };
     },
   ): Promise<ReleaseRecord | undefined> {
@@ -140,9 +156,10 @@ export class InMemoryReleaseStore implements ReleaseStore {
       for (const candidate of guard.expectDecision.candidates) {
         const newest = sources.newestCandidateAt(candidate.productId, candidate.seriesKey);
         // A candidate that appeared, or a NEWER one than the decision read, means the decision was made
-        // about evidence that is no longer the latest — which is the selection predicate the recorded
-        // scoring pin cannot express.
-        if ((newest ?? null) !== candidate.newestAt) return undefined;
+        // about evidence that is no longer the latest — the selection predicate a scoring pin cannot express.
+        // The in-memory twin compares the recency half only; the judgment half is a jsonb read the Pg guard
+        // does in SQL and a fake has no equivalent of.
+        if ((newest ?? null) !== (candidate.pin?.createdAt ?? null)) return undefined;
       }
     }
     const next0 = { ...current, ...patch, version: (current.version ?? 0) + 1 };
@@ -308,11 +325,22 @@ export class PgReleaseStore implements ReleaseStore {
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
       expectDecision?: {
         openIssues: number;
-        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
-        capabilities?: {
-          asOf: string;
-          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
-        };
+        candidates: ReadonlyArray<{
+          productId: string;
+          seriesKey: string;
+          pin: {
+            scorecardId: string;
+            createdAt: string;
+            scoringRevision?: number | undefined;
+            scorePlaneDigest?: string | undefined;
+          } | null;
+        }>;
+        capabilities?: ReadonlyArray<{
+          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
+          id: string;
+          generation: number | null;
+        }>;
+        settingsRevision?: number | null;
       };
     },
   ): Promise<ReleaseRecord | undefined> {
@@ -406,16 +434,32 @@ export class PgReleaseStore implements ReleaseStore {
         params.push(candidate.productId, candidate.seriesKey);
         const productIdx = params.length - 1;
         const keyIdx = params.length;
-        if (candidate.newestAt === null) {
+        const series = `s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded'`;
+        if (candidate.pin === null) {
           // The decision saw NO evidence for this series. Any succeeded batch now is a different question.
-          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded')`;
-        } else {
-          params.push(candidate.newestAt);
-          const atIdx = params.length;
-          // A NEWER succeeded batch means the decision compared something that is no longer the latest —
-          // the selection predicate ("S10 was latest"), which the recorded scoring pin cannot express.
-          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.tenant = everdict_product_releases.tenant AND s.origin->>'productId' = $${productIdx} AND s.origin->>'seriesKey' = $${keyIdx} AND s.status = 'succeeded' AND s.created_at > $${atIdx}::timestamptz)`;
+          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series})`;
+          continue;
         }
+        params.push(candidate.pin.scorecardId, candidate.pin.createdAt);
+        const idIdx = params.length - 1;
+        const atIdx = params.length;
+        // ① THE PINNED ROW IS STILL THERE, still succeeded, and NOT under a live scoring pass. A deleted
+        //    candidate leaves nothing "newer" to find, and a pass that claimed the plane after the gate read
+        //    it means the evidence is mid-revision at the moment of commit.
+        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND s.scoring_pass IS NULL)`;
+        // ② …AND IT IS STILL THE JUDGMENT THE GATE READ. A re-score of the SAME row leaves `created_at`
+        //    untouched while replacing the verdict — the case a timestamp fence is structurally blind to.
+        //    Compared against the ledger's last entry, which is what `currentScoringPin` reads.
+        if (candidate.pin.scoringRevision !== undefined && candidate.pin.scorePlaneDigest !== undefined) {
+          params.push(candidate.pin.scoringRevision, candidate.pin.scorePlaneDigest);
+          const revIdx = params.length - 1;
+          const digestIdx = params.length;
+          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND s.id = $${idIdx} AND (s.scoring -> -1 ->> 'revision')::int = $${revIdx} AND s.scoring -> -1 ->> 'scorePlaneDigest' = $${digestIdx})`;
+        }
+        // ③ …AND NOTHING NEWER HAS LANDED. Ordered by (created_at, id) exactly as the read that chose it —
+        //    a row arriving in the same millisecond is not `>` a timestamp, and the tie-break is what the
+        //    list ordering already uses to decide which of the two is latest.
+        guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_scorecards s WHERE ${series} AND (s.created_at, s.id) > ($${atIdx}::timestamptz, $${idIdx}))`;
       }
       // …AND THE CAPABILITY REGISTRIES, as far as a row can speak for them. A new version, or a
       // workspace-local document shadowing a `_shared` one, changes what a series' refs resolve to — and both
@@ -426,19 +470,34 @@ export class PgReleaseStore implements ReleaseStore {
       // A soft DELETE moves no `created_at`, and workspace settings are a different row entirely; both stay
       // covered by the service's contract re-verify, whose window is decision→commit rather than zero.
       // Naming which half is which beats one guard that implies it covers both.
-      const CAPABILITY_TABLES = {
-        dataset: "everdict_datasets",
-        harness: "everdict_harness_instances",
-        judge: "everdict_judges",
-        rubric: "everdict_rubrics",
-        model: "everdict_models",
-      } as const;
-      const capabilities = guard.expectDecision.capabilities;
-      for (const ref of capabilities?.refs ?? []) {
-        params.push(ref.id, capabilities?.asOf);
-        const idIdx = params.length - 1;
-        const asOfIdx = params.length;
-        guardSql += ` AND NOT EXISTS (SELECT 1 FROM ${CAPABILITY_TABLES[ref.kind]} c WHERE c.id = $${idIdx} AND c.tenant IN (everdict_product_releases.tenant, '_shared') AND c.created_at > $${asOfIdx}::timestamptz)`;
+      for (const ref of guard.expectDecision.capabilities ?? []) {
+        params.push(ref.kind, ref.id);
+        const kindIdx = params.length - 1;
+        const idIdx = params.length;
+        const row = `g.kind = $${kindIdx} AND g.id = $${idIdx} AND g.tenant IN (everdict_product_releases.tenant, '_shared')`;
+        if (ref.generation === null) {
+          // No generation row when the decision read it — the name has never been mutated under this fence.
+          // One appearing since is a mutation, whatever it did.
+          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row})`;
+          continue;
+        }
+        params.push(ref.generation);
+        const genIdx = params.length;
+        // The generation moves on every write that can change what this NAME resolves to — a registration, a
+        // revive, a soft delete. Comparing it (rather than a timestamp) is what makes the fence cover the two
+        // mutations that leave `created_at` untouched.
+        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row} AND g.generation = $${genIdx})`;
+      }
+      // …and the workspace SETTINGS the contracts resolved under (mig 0164) — the default judge model is part
+      // of the contract identity, and it lives on a row this statement can condition on.
+      const settingsRevision = guard.expectDecision.settingsRevision;
+      if (settingsRevision === null) {
+        guardSql +=
+          " AND NOT EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant)";
+      } else if (settingsRevision !== undefined) {
+        params.push(settingsRevision);
+        const revIdx = params.length;
+        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_workspace_settings w WHERE w.workspace = everdict_product_releases.tenant AND w.revision = $${revIdx})`;
       }
     }
     if (events && events.length > 0) {
@@ -462,5 +521,48 @@ export class PgReleaseStore implements ReleaseStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_product_releases WHERE tenant=$1 AND id=$2", [tenant, id]);
+  }
+}
+
+// THE CAPABILITY RESOLUTION GENERATIONS (mig 0163) — what a decision reads before resolving its contracts and
+// holds as a condition on its commit.
+//
+// Both the tenant's own row and `_shared`'s are read, because owner-first resolution means either can change
+// what a name answers: a workspace registering its own `support@1` shadows the shared document, and the
+// shared one gaining a version moves `latest` for everyone who inherits it. The MAXIMUM of the two is the
+// name's generation — a single number that moves whichever side mutated.
+export class PgCapabilityGenerationStore implements CapabilityGenerationStore {
+  constructor(private readonly client: SqlClient) {}
+
+  async read(
+    tenant: string,
+    refs: ReadonlyArray<{ kind: string; id: string }>,
+  ): Promise<Array<{ kind: string; id: string; generation: number | null }>> {
+    if (refs.length === 0) return [];
+    const { rows } = await this.client.query<{ kind: string; id: string; generation: string | number }>(
+      `SELECT kind, id, max(generation) AS generation FROM everdict_capability_generation
+       WHERE tenant IN ($1, '_shared') AND (kind, id) IN (${refs
+         .map((_, i) => `($${i * 2 + 2}, $${i * 2 + 3})`)
+         .join(", ")})
+       GROUP BY kind, id`,
+      [tenant, ...refs.flatMap((ref) => [ref.kind, ref.id])],
+    );
+    const found = new Map(rows.map((row) => [`${row.kind}:${row.id}`, Number(row.generation)]));
+    // A name with no row is `null`, not zero: "never mutated" and "mutated to generation 0" would be the same
+    // number, and the fence has to be able to refuse when the first mutation appears.
+    return refs.map((ref) => ({
+      kind: ref.kind,
+      id: ref.id,
+      generation: found.get(`${ref.kind}:${ref.id}`) ?? null,
+    }));
+  }
+
+  async settingsRevision(workspace: string): Promise<number | null> {
+    const { rows } = await this.client.query<{ revision: string | number }>(
+      "SELECT revision FROM everdict_workspace_settings WHERE workspace = $1",
+      [workspace],
+    );
+    const row = rows[0];
+    return row === undefined ? null : Number(row.revision);
   }
 }

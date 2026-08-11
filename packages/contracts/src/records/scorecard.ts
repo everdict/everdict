@@ -279,6 +279,14 @@ export const ScoringRevisionSchema = z.object({
   // unobserved, which is exactly what it must not be confusable with.
   stageParity: z
     .object({
+      // WHICH OBSERVER PRODUCED THIS (arch-review 23 P1). Evidence is only meaningful together with the
+      // decision procedure that produced it, and this comparison has changed meaning repeatedly:
+      // stage-sourced expectation → settled-plane expectation, per-case → per-judge units, silent zero-work
+      // reports → `completed`, JSON.stringify equality → canonical Score equality. A `promotionSafe: true`
+      // from an earlier, weaker observer is not the same certification as one from today's, and the contract
+      // step must not be able to consume it. Absent = an era before this stamp, which the readiness gate
+      // counts as unobserved rather than as agreement.
+      version: z.number().int().positive().optional(),
       completed: z.boolean(), // false = the comparison itself could not run; `failure` says why
       failure: z.string().optional(),
       expectedJudged: z.number().int().nonnegative(), // units this pass actually judged (from the settled plane)

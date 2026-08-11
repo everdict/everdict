@@ -10,6 +10,7 @@ export class PgModelRegistry implements ModelRegistry {
   private readonly store: PgVersionedStore<ModelSpec>;
   constructor(client: SqlClient) {
     this.store = new PgVersionedStore(client, {
+      generationKind: "model", // the resolution fence a release decision holds (mig 0163)
       table: "everdict_models",
       column: "model",
       label: "model",

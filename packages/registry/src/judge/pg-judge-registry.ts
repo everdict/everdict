@@ -10,6 +10,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
   private readonly store: PgVersionedStore<JudgeSpec>;
   constructor(client: SqlClient) {
     this.store = new PgVersionedStore(client, {
+      generationKind: "judge", // the resolution fence a release decision holds (mig 0163)
       table: "everdict_judges",
       column: "judge",
       label: "judge",

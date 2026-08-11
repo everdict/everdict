@@ -429,7 +429,10 @@ describeTrust("TRUST-37 — the release gate is the scorecard gate, certified th
 // ship?" — which is the question a release exists to answer later. The picker in the UI already refused to
 // invent versions; the API accepted any non-empty string, and the ship froze it verbatim.
 describeTrust("TRUST-118 — the shipped composition resolves to the ledger row it names", () => {
-  async function shipWith(component: { service: string; version?: string }, seedLedger: boolean) {
+  async function shipWith(
+    component: { service: string; version?: string; versionRecordId?: string },
+    seedLedger: boolean,
+  ) {
     const { productService, versions } = build();
     const product = await productService.create({
       tenant: "acme",
@@ -464,14 +467,25 @@ describeTrust("TRUST-118 — the shipped composition resolves to the ledger row 
     return (entry?.detail as { components?: Array<Record<string, unknown>> } | undefined)?.components?.[0];
   }
 
-  it("a planned version that exists in the ledger freezes with the ROW's identity — id and stream", async () => {
+  it("an UNPINNED plan matching one row freezes that row's identity — as INFERRED, not as chosen", async () => {
+    // "The ledger holds exactly one row with this version" is a weaker statement than "the author meant this
+    // row", and the record says which one it is (arch-review 23 P1). A pinned plan earns `ledger`.
     expect(await shipWith({ service: "api", version: "v1.0.0" }, true)).toMatchObject({
       service: "api",
       version: "v1.0.0",
       versionRecordId: "ver-row-1",
       streamKey: "github|acme/copilot-api|releases|",
-      resolution: "ledger",
+      resolution: "inferred",
     });
+  });
+
+  it("a plan whose two identities DISAGREE is conflicting — one fact may not carry two authorities", async () => {
+    // The picker sends the row it offered; nothing stopped an API caller from sending `version: v2` beside
+    // the row for v1, and the ship froze both — a historical claim contradicting itself.
+    const conflicting = await shipWith({ service: "api", version: "v2.0.0", versionRecordId: "ver-row-1" }, true);
+    expect(conflicting).toMatchObject({ service: "api", version: "v2.0.0", resolution: "conflicting" });
+    expect(conflicting?.versionRecordId).toBeUndefined();
+    expect(conflicting?.streamKey).toBeUndefined();
   });
 
   it("TWO rows matching the plan is AMBIGUOUS — a resolver may not pick one and call it history", async () => {

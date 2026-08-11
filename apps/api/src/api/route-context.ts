@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import type { WorkflowStateService } from "@everdict/application-control";
+import type { ConstitutionApprovalStore, WorkflowStateService } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
@@ -98,7 +98,14 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@everdict/db";
-import { canReadRun, collectHarnessImages, groundTruthDeclarations, imageWarnings } from "@everdict/domain";
+import {
+  SHARED_TENANT,
+  canReadRun,
+  collectHarnessImages,
+  contentDigest,
+  groundTruthDeclarations,
+  imageWarnings,
+} from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type { ImageTokenService } from "@everdict/images";
 import type {
@@ -195,6 +202,9 @@ export interface ServerDeps {
   harnessInstances?: HarnessInstanceRegistry; // individual harness (template+pins) CRUD + resolve
 
   datasetRegistry?: DatasetRegistry; // dataset CRUD (route disabled if absent)
+  // The receipt a constitutional declaration leaves (mig 0165) — absent = no provenance recorded, which the
+  // reader treats as an unauthorized declaration rather than as an approval nobody wrote down.
+  constitutionApprovals?: ConstitutionApprovalStore;
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (route disabled if absent)
   judgePreviewService?: JudgePreviewService; // zero-cost judge preview + one-case dry-run (route disabled if absent)
   rubricRegistry?: RubricRegistry; // Rubric (HOW to judge — referenced by judges) CRUD (route disabled if absent)
@@ -536,15 +546,42 @@ export function gate(principal: Principal, action: Action, resource?: ResourceSc
 //
 // Every dataset write surface calls this (REST create/import, MCP, bundle apply, benchmark import) because
 // they are all the same door; the check itself lives in one place so they cannot drift apart.
-export function assertDatasetConstitution(principal: Principal, dataset: Pick<Dataset, "cases">): void {
+export function assertDatasetConstitution(principal: Principal, dataset: Pick<Dataset, "cases">): string[] {
   const declared = groundTruthDeclarations(dataset.cases);
-  if (declared.length === 0) return;
-  if (principal.roles.includes("admin")) return;
+  if (declared.length === 0) return [];
+  if (principal.roles.includes("admin")) return declared;
   throw new ForbiddenError(
     "FORBIDDEN",
     { metrics: declared },
     `Registering a dataset whose graders declare ground_truth authority for ${declared.join(", ")} requires the admin role — it defines what passing means for every evaluation that ever runs this dataset.`,
   );
+}
+
+// …AND THE RECEIPT (arch-review 23 P1). Authorizing at the door leaves no trace, so an artifact already in
+// the database cannot say whether an admin approved it, a member registered it before the gate existed, or it
+// is a platform seed. Those are three facts and a trust kernel may not read them as one. Best-effort by
+// contract: a registration must not fail because its provenance record did — but an absent receipt is then
+// exactly what it looks like, an unauthorized declaration, which the reader below reports rather than assumes
+// away.
+export async function recordDatasetConstitution(
+  deps: ServerDeps,
+  principal: Principal,
+  dataset: Dataset,
+  metrics: string[],
+): Promise<void> {
+  if (metrics.length === 0 || deps.constitutionApprovals === undefined) return;
+  await deps.constitutionApprovals
+    .record(principal.workspace, {
+      kind: "dataset",
+      id: dataset.id,
+      version: dataset.version,
+      contentDigest: contentDigest(dataset),
+      metrics,
+      mode: principal.workspace === SHARED_TENANT ? "platform_seed" : "approved",
+      approvedBy: principal.subject,
+      approvedAt: new Date().toISOString(),
+    })
+    .catch(() => undefined);
 }
 
 // Is this run THIS caller's to read? Workspace scoping and the audience rule in one question, because the two

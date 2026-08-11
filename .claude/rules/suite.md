@@ -76,6 +76,14 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   transport later executes it. `ground_truth` on a run-time grading plan is gated at submit; the same
   declaration inside a dataset is gated at REGISTRATION, on every door (REST, MCP, bundle, benchmark import),
   because an immutable document cannot be re-approved by the schedule that runs it (arch-review 22 P0-2).
+- **A decision token preserves both the semantic identity AND the mutation generations that keep it valid
+  until commit.** A candidate is a row plus the judgment of that row (id + revision + plane digest + no live
+  pass), not a timestamp — a re-score changes what was read while `created_at` stands still. A capability is a
+  GENERATION, not an insert time — a revive (`deleted_at = NULL`) and a soft delete both change what a name
+  resolves to and move no timestamp. Historical time does not establish mutation authority (arch-review 23).
+- **Evidence is only meaningful together with the decision procedure that produced it.** An observation
+  carries its observer's era (`CURRENT_STAGE_PARITY_VERSION`), and a gate counts only its own — a green from a
+  weaker comparison is a green about a different question (arch-review 23 P1).
 - **Scoring is Grader-only.** `caseVerdict` derives per-case pass from `scores` by **authority rank**
   (ground-truth > objective > judge) — don't reinvent pass logic elsewhere. `summarizeScorecard` auto-emits
   `MetricSummary[]` (passRate/mean per `metric` label). The Metric(threshold) *entity* is gone; `Score.metric` as a

@@ -36,6 +36,13 @@ export interface ScoringStageParity {
   orphaned: string[];
 }
 
+// THE OBSERVER'S ERA. Bumped whenever the parity comparison changes what it MEANS — a different expectation
+// source, a different unit, a different equality. Evidence stamped under an older number is not weaker data
+// about the same question; it is data about a different one, and the readiness gate below refuses to count it.
+//
+//   1 — settled-plane expectation, per-judge units, canonical Score equality, `completed` reporting.
+export const CURRENT_STAGE_PARITY_VERSION = 1;
+
 // The contract step's precondition, as code so nobody reconstructs it from a dashboard. `staged === matched`
 // is NOT it: that holds trivially when nothing was staged, which is the exact failure being guarded against.
 export function stagePromotionSafe(parity: ScoringStageParity): boolean {
@@ -84,9 +91,13 @@ export function stagePromotionReadiness(
   revisions: ReadonlyArray<{
     scorecardId?: string;
     passId?: string;
-    stageParity?: { completed: boolean; failure?: string; promotionSafe: boolean };
+    stageParity?: { version?: number; completed: boolean; failure?: string; promotionSafe: boolean };
   }>,
   minimumObserved: number,
+  // Which observer's evidence counts. Defaults to the current one — a caller asking about the contract step
+  // is asking about today's comparison, and having to remember to say so would be a footgun with a green
+  // default.
+  parityVersion: number = CURRENT_STAGE_PARITY_VERSION,
 ): StagePromotionReadiness {
   const blockedBy: StagePromotionReadiness["blockedBy"] = [];
   let observed = 0;
@@ -95,7 +106,10 @@ export function stagePromotionReadiness(
   let incomplete = 0;
   for (const revision of revisions) {
     const parity = revision.stageParity;
-    if (parity === undefined) {
+    // An observation from another ERA is not an observation of this question (arch-review 23 P1). Counted as
+    // unobserved rather than dropped, so it still moves the denominator the minimum is measured against —
+    // a fleet whose evidence is all stale has not observed today's comparison at all.
+    if (parity === undefined || (parity.version ?? 0) !== parityVersion) {
       unobserved += 1;
       continue;
     }

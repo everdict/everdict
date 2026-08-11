@@ -16,6 +16,7 @@ import {
   scoringPassReclaimable,
 } from "@everdict/contracts";
 import {
+  CURRENT_STAGE_PARITY_VERSION,
   ScorecardBatch,
   type ScorecardOutcomeExtras,
   type ScoringStageParity,
@@ -783,6 +784,8 @@ export class ScorecardScoreService {
       ...(parity !== undefined
         ? {
             stageParity: {
+              // WHICH observer produced this (arch-review 23 P1) — the contract gate counts only its own era.
+              version: CURRENT_STAGE_PARITY_VERSION,
               completed: parity.completed,
               ...(parity.failure !== undefined ? { failure: parity.failure } : {}),
               expectedJudged: parity.expectedJudged,

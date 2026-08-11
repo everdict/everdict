@@ -198,7 +198,8 @@ export {
 // The product timeline (docs/architecture/product-timeline.md) — Product ⊃ Release over the imported
 // service-version ledger, facts on the E0 same-tx outbox.
 export { InMemoryProductStore, PgProductStore } from "./product/product-store.js";
-export { InMemoryReleaseStore, PgReleaseStore } from "./product/release-store.js";
+export { InMemoryReleaseStore, PgCapabilityGenerationStore, PgReleaseStore } from "./product/release-store.js";
+export { PgConstitutionApprovalStore } from "./workspace/constitution-approval-store.js";
 export { InMemoryProductVersionStore, PgProductVersionStore } from "./product/product-version-store.js";
 export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";
 export { InMemoryRunnerStore, PgRunnerStore, generateRunnerToken } from "./workspace/runner-store.js";

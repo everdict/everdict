@@ -225,7 +225,11 @@ export const ShippedComponentSchema = z.object({
   // `ambiguous` is its own answer, not a flavour of `unresolved` (arch-review 22 P1): "we could not find it"
   // and "we found two and the plan does not say which" are completely different facts in a post-mortem, and
   // only one of them is fixed by importing more versions.
-  resolution: z.enum(["ledger", "unresolved", "unplanned", "ambiguous"]),
+  // `inferred` is NOT `ledger` (arch-review 23 P1): matching a single row by version string says the ledger
+  // currently holds exactly one such row, which is a different claim from "the author chose this row". Only
+  // a plan that PINNED the row earns `ledger`; a legacy plan that matched one gets the weaker word, and a
+  // plan whose two identities disagree gets `conflicting` rather than a quiet preference for one of them.
+  resolution: z.enum(["ledger", "inferred", "unresolved", "unplanned", "ambiguous", "conflicting"]),
 });
 export type ShippedComponent = z.infer<typeof ShippedComponentSchema>;
 

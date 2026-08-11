@@ -102,10 +102,29 @@ export interface ReleaseStore {
       expectDecision?: {
         // How many OPEN issues were linked to this release when readiness ran.
         openIssues: number;
-        // Per watched series, the candidate the decision compared — `newestAt` is its `createdAt`, and `null`
-        // means the decision saw NO evidence for that series (which is itself a decision input: a required
-        // series with no run blocks, and one that gains a run afterwards was not the thing evaluated).
-        candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+        // Per watched series, the candidate the decision compared — as an IDENTITY, not as a timestamp
+        // (arch-review 23 P0-1).
+        //
+        // "Which row was latest" and "which judgment of that row did we read" are one candidate identity. A
+        // `created_at >` predicate answers neither on its own: a RE-SCORE of the same scorecard leaves the
+        // timestamp untouched while replacing the judgment the gate read, a live pass can be mid-flight over
+        // it, the row can be deleted outright, and a new row landing in the same millisecond is not `>`
+        // anything. Each of those is a decision made about evidence that is no longer what it was.
+        //
+        // `pin: null` means the decision saw NO evidence for that series — itself a decision input, since a
+        // required series with no run blocks and one that gains a run afterwards was not the thing evaluated.
+        candidates: ReadonlyArray<{
+          productId: string;
+          seriesKey: string;
+          pin: {
+            scorecardId: string;
+            createdAt: string;
+            // The judgment, from the scoring ledger. Absent on a batch settled before the ledger existed —
+            // the identity then rests on the row and its recency, which is what those records can support.
+            scoringRevision?: number;
+            scorePlaneDigest?: string;
+          } | null;
+        }>;
         // …AND THE AMBIENT HALF, as far as a row can carry it (arch-review 22, second pass). A series'
         // evaluation contract resolves from the capability registries: a new version that `latest` moves to,
         // or a workspace-local document shadowing a `_shared` one, both arrive as INSERTS in a table this
@@ -114,14 +133,41 @@ export interface ReleaseStore {
         // What a row cannot carry is a SOFT DELETE (no insert) or a settings edit — those stay covered by
         // the service's re-verify, whose window is decision→commit rather than zero. Saying which half is
         // which beats one guard that implies it covers both.
-        capabilities?: {
-          asOf: string; // when the contracts were resolved
-          refs: ReadonlyArray<{ kind: "dataset" | "harness" | "judge" | "rubric" | "model"; id: string }>;
-        };
+        // …each name with the MUTATION GENERATION it resolved under (arch-review 23 P0-2). `created_at` was
+        // the first attempt and it only ever saw an INSERT: a revive (`deleted_at = NULL`) and a soft delete
+        // both change what a name answers while leaving every timestamp where it was, so a workspace-local
+        // document could come back to life under a `_shared` name mid-decision and the fence saw nothing.
+        // Historical time does not establish mutation authority.
+        capabilities?: ReadonlyArray<{
+          kind: "dataset" | "harness" | "judge" | "rubric" | "model";
+          id: string;
+          // The generation read before the contracts resolved. `null` = the name had no generation row yet,
+          // which the fence holds as "still none" — a first mutation creates one.
+          generation: number | null;
+        }>;
+        // The workspace SETTINGS revision the contracts resolved under (mig 0164). The default judge model
+        // is part of a series' contract identity — an identical judge list judged by a different model is a
+        // different judging apparatus — and the settings are a row in this database like everything else the
+        // ship conditions on, so there was never a reason for this half to be re-verify-only.
+        settingsRevision?: number | null;
       };
     },
   ): Promise<ReleaseRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
+}
+
+// THE RESOLUTION GENERATION of a capability NAME (mig 0163) — read before a decision resolves its contracts,
+// held as a condition on the decision's commit. Its own port because it is not a product concern: it answers
+// "has anything changed what this name resolves to", and the release decision is simply its first consumer.
+export interface CapabilityGenerationStore {
+  // The workspace settings row's mutation counter — `null` when the workspace has no settings row at all,
+  // which is a real answer the fence holds as "still none".
+  settingsRevision(workspace: string): Promise<number | null>;
+  // Missing name = `null`, which is a real answer: nothing has ever mutated it under this fence.
+  read(
+    tenant: string,
+    refs: ReadonlyArray<{ kind: string; id: string }>,
+  ): Promise<Array<{ kind: string; id: string; generation: number | null }>>;
 }
 
 export interface ProductVersionListFilter {

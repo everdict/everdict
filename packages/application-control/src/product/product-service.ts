@@ -53,6 +53,7 @@ import { stampFacts } from "../platform-event/outbox.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ProductStore, ProductVersionStore, ReleaseStore } from "../ports/product-store.js";
+import type { CapabilityGenerationStore } from "../ports/product-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 
 // The product timeline's facade (docs/architecture/product-timeline.md): products + releases + the derived
@@ -118,6 +119,9 @@ export interface ProductServiceDeps {
   // The series trend/readiness points. Absent = no trend: every series reads "not run yet" — which BLOCKS a
   // required series (not evaluated is never green), never silently passes.
   scorecards?: ScorecardStore;
+  // The capability resolution generations a ship's commit conditions on (mig 0163). Optional: a deployment
+  // without it keeps the other fences and the contract re-verify — a smaller guarantee, never a silent one.
+  capabilityGenerations?: CapabilityGenerationStore;
   // The release gate's evidence seam (arch-review 7 P0): a series' release verdict is the SCORECARD GATE's
   // decision over (baseline, latest) — analytics.diff + evaluateGate, wired at composition. The product
   // layer composes decisions; it never invents truth semantics (the pass-rate arithmetic this replaces
@@ -432,6 +436,35 @@ export class ProductService {
     return [...refs.values()];
   }
 
+  // The NESTED documents a resolved contract named — read off the CARRIED artifact rather than by resolving
+  // the judges a second time (arch-review 23 P0-3). The closure already states them as `id@version` refs; a
+  // second resolution would be a second answer to a question this decision has already answered, which is
+  // the reconstruction this generation of review has been removing everywhere else.
+  private static nestedCapabilityRefs(
+    contracts: Map<string, SeriesContractResolution> | undefined,
+  ): Array<{ kind: "rubric" | "model" | "harness"; id: string }> {
+    const refs = new Map<string, { kind: "rubric" | "model" | "harness"; id: string }>();
+    const add = (kind: "rubric" | "model" | "harness", ref: string | undefined): void => {
+      // "id@version" | a raw binding verbatim | the honest "unresolved" sentinel. Only a registry ref has a
+      // name to fence; a raw model string names no document at all.
+      if (ref === undefined || ref === "unresolved" || !ref.includes("@")) return;
+      const id = ref.slice(0, ref.lastIndexOf("@"));
+      if (id.length > 0) refs.set(`${kind}:${id}`, { kind, id });
+    };
+    for (const resolution of contracts?.values() ?? []) {
+      if (resolution.status !== "resolved") continue;
+      add("model", resolution.contract.harnessModel);
+      for (const model of Object.values(resolution.contract.serviceModels ?? {})) add("model", model);
+      for (const judge of resolution.contract.judgeClosure ?? []) {
+        add("model", judge.model);
+        add("rubric", judge.rubric);
+        add("harness", judge.harness);
+      }
+      add("model", resolution.contract.judgeRun?.model);
+    }
+    return [...refs.values()];
+  }
+
   // The plan's components, each resolved to the exact ledger row it names. A `{service, version}` pair is not
   // historical identity once the ledger is stream-aware: repointing a service at another repository means the
   // same name tracks a different stream, and both streams can publish `v1.0.0`. What a shipped release must
@@ -458,15 +491,33 @@ export class ProductService {
       // pair does not uniquely name a row once a service can be repointed at another repository. Taking the
       // first match — which the store returns newest-first — would write "this is the exact row that
       // shipped" into history on the strength of a sort order.
+      // ONE INVARIANT, ONE OWNER (arch-review 23 P1). When a plan carries both a row id and a version string,
+      // the ROW is the identity and the string is a label of it — so the two disagreeing is a malformed claim,
+      // not a preference to resolve. Recording `versionRecordId: row-for-v1` beside `version: v2` would put
+      // two authoritative-looking identities inside one historical fact.
       const pinned = component.versionRecordId;
-      const matches = rows.filter((r) => (pinned !== undefined ? r.id === pinned : r.version === component.version));
+      if (pinned !== undefined) {
+        const row = rows.find((r) => r.id === pinned);
+        const disagrees = row !== undefined && component.version !== undefined && row.version !== component.version;
+        out.push({
+          service: component.service,
+          ...(component.version !== undefined ? { version: component.version } : {}),
+          ...(row !== undefined && !disagrees ? { versionRecordId: row.id } : {}),
+          ...(row?.streamKey !== undefined && !disagrees ? { streamKey: row.streamKey } : {}),
+          resolution: disagrees ? "conflicting" : row !== undefined ? "ledger" : "unresolved",
+        });
+        continue;
+      }
+      // No pin: the legacy shape. A single match is the best available reading and says so — "the ledger holds
+      // exactly one row with this version" is not the same statement as "the author meant this row".
+      const matches = rows.filter((r) => r.version === component.version);
       const row = matches.length === 1 ? matches[0] : undefined;
       out.push({
         service: component.service,
         version: component.version,
         ...(row !== undefined ? { versionRecordId: row.id } : {}),
         ...(row?.streamKey !== undefined ? { streamKey: row.streamKey } : {}),
-        resolution: row !== undefined ? "ledger" : matches.length > 1 ? "ambiguous" : "unresolved",
+        resolution: row !== undefined ? "inferred" : matches.length > 1 ? "ambiguous" : "unresolved",
       });
     }
     return out;
@@ -485,10 +536,23 @@ export class ProductService {
     // The contracts this decision is about to stand on — resolved ONCE and carried into both the readiness
     // evaluation and the recorded decision, so the ship cannot record a question different from the one it
     // evaluated (arch-review 14 §9).
-    // Stamped BEFORE the resolution reads anything — a registration that lands during the read is one this
-    // decision may or may not have seen, and "may have" is not a state a fence gets to assume away.
-    const resolvedAt = this.now();
+    // READ BEFORE the resolution reads anything — a mutation that lands during the read is one this decision
+    // may or may not have seen, and "may have" is not a state a fence gets to assume away.
+    const fenced = input.status === "released" && this.deps.capabilityGenerations !== undefined;
+    const settingsRevision = fenced
+      ? await this.deps.capabilityGenerations?.settingsRevision(tenant).catch(() => undefined)
+      : undefined;
+    const topLevelRefs = ProductService.capabilityRefsFor(product, record);
     const contracts = await this.resolveContracts(tenant, product, record);
+    // …and the NESTED documents those contracts named — a judge's model, its rubric, its delegated harness.
+    // They cannot be enumerated before the resolution (that is what the resolution discovers), so they are
+    // read after it, and the contract RE-VERIFY below is what covers the gap between the two: anything that
+    // moved in between changes the contract digest, which refuses.
+    const generations = fenced
+      ? await this.deps.capabilityGenerations
+          ?.read(tenant, [...topLevelRefs, ...ProductService.nestedCapabilityRefs(contracts)])
+          .catch(() => undefined)
+      : undefined;
     const readiness = await this.readinessUnder(tenant, record, product, contracts);
     const transition = Release.from(record).setStatus(
       {
@@ -575,14 +639,41 @@ export class ProductService {
       input.status === "released"
         ? {
             openIssues: readiness.openIssues,
+            // The candidate as an IDENTITY (arch-review 23 P0-1): which row, and which judgment OF that row.
+            // The scoring pin comes from the gate's own reading where the gate ran — the same pin the ship
+            // records — so the fence holds exactly what the decision stood on rather than a re-derivation.
             candidates: readiness.series
               .filter((entry) => entry.verdict !== "scope_invalid")
               .map((entry) => ({
                 productId: product.id,
                 seriesKey: entry.key,
-                newestAt: entry.latest?.createdAt ?? null,
+                pin:
+                  entry.latest === undefined
+                    ? null
+                    : {
+                        scorecardId: entry.latest.scorecardId,
+                        createdAt: entry.latest.createdAt,
+                        ...(entry.latest.scoring !== undefined
+                          ? {
+                              scoringRevision: entry.latest.scoring.revision,
+                              scorePlaneDigest: entry.latest.scoring.scorePlaneDigest,
+                            }
+                          : {}),
+                      },
               })),
-            capabilities: { asOf: resolvedAt, refs: ProductService.capabilityRefsFor(product, record) },
+            // …each name with the generation it resolved under. Absent reader = no fence (the guard then holds
+            // only what the other conditions cover), which is the same honest degradation every optional
+            // store in this service has.
+            ...(generations !== undefined
+              ? {
+                  capabilities: generations.map((g) => ({
+                    kind: g.kind as "dataset" | "harness" | "judge" | "rubric" | "model",
+                    id: g.id,
+                    generation: g.generation,
+                  })),
+                }
+              : {}),
+            ...(settingsRevision !== undefined ? { settingsRevision } : {}),
           }
         : undefined;
     // THE AMBIENT HALF of the read-set, which has no row to fence (arch-review 22 P0-1). Each series'
@@ -904,7 +995,21 @@ export class ProductService {
     // refuse a decision nothing could invalidate.
     decision?: {
       openIssues: number;
-      candidates: ReadonlyArray<{ productId: string; seriesKey: string; newestAt: string | null }>;
+      candidates: ReadonlyArray<{
+        productId: string;
+        seriesKey: string;
+        pin: {
+          scorecardId: string;
+          createdAt: string;
+          scoringRevision?: number;
+          scorePlaneDigest?: string;
+        } | null;
+      }>;
+      capabilities?: ReadonlyArray<{
+        kind: "dataset" | "harness" | "judge" | "rubric" | "model";
+        id: string;
+        generation: number | null;
+      }>;
     },
   ): Promise<ReleaseRecord> {
     const stamped = stampFacts(current.tenant, transition.facts, { newId: this.newId, now: this.now });

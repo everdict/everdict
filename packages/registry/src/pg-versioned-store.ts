@@ -29,6 +29,11 @@ export interface PgVersionedStoreConfig<T> {
   // table has an origin jsonb column (migration 0111) → INSERT stamps it and listMeta/versionOrigins read it.
   // Provenance beside created_by/team_id, never inside the spec (see records/capability-origin.ts).
   origin?: boolean;
+  // WHICH CAPABILITY KIND this store holds, for the resolution generation (migration 0163). A decision that
+  // resolved a name has to be able to prove, at its commit, that the name still resolves the same way — and
+  // `created_at` cannot carry that: a revive and a soft delete both change what a name answers while leaving
+  // every timestamp in place. Absent = this store does not participate in that fence (runtimes, templates).
+  generationKind?: "dataset" | "harness" | "judge" | "rubric" | "model";
 }
 
 // The spec-column value is read back under the table's own column name (dataset/judge/spec/…), keyed dynamically.
@@ -47,6 +52,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   private readonly hasTeamId: boolean;
   private readonly hasTags: boolean;
   private readonly hasOrigin: boolean;
+  private readonly generationKind: PgVersionedStoreConfig<T>["generationKind"];
 
   constructor(
     private readonly client: SqlClient,
@@ -61,6 +67,27 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     this.hasTeamId = config.teamId ?? false;
     this.hasTags = config.tags ?? false;
     this.hasOrigin = config.origin ?? false;
+    this.generationKind = config.generationKind;
+  }
+
+  // BUMP THE NAME'S RESOLUTION GENERATION — every mutation that can change what `id` resolves to, not only
+  // the ones that insert a row (arch-review 23 P0-2). Keyed by the NAME because that is what owner-first
+  // resolution answers: reviving one version changes `latest` for every reader of it.
+  //
+  // Best-effort by contract, and deliberately so: a fence's job is to REFUSE when it cannot prove the world
+  // held still, and a failed bump leaves the generation behind, which makes the next decision that reads it
+  // conflict rather than commit. A registry write must not fail because a fence's bookkeeping did.
+  private async bumpGeneration(tenant: string, id: string): Promise<void> {
+    if (this.generationKind === undefined) return;
+    await this.client
+      .query(
+        `INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
+         VALUES ($1, $2, $3, 1, now())
+         ON CONFLICT (tenant, kind, id)
+         DO UPDATE SET generation = everdict_capability_generation.generation + 1, updated_at = now()`,
+        [tenant, this.generationKind, id],
+      )
+      .catch(() => undefined);
   }
 
   // " AND deleted_at IS NULL" only where the table has the column — otherwise the clause would reference a missing column.
@@ -120,11 +147,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         );
       }
       // re-registering identical content = revive — content immutability is preserved (same pattern as dataset tombstones).
-      if (this.hasSoftDelete && row.deleted_at !== null)
+      if (this.hasSoftDelete && row.deleted_at !== null) {
         await this.client.query(
           `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3`,
           [tenant, item.id, item.version],
         );
+        // A REVIVE is the shadow that leaves no trace in `created_at` — a workspace-local document coming
+        // back to life under a name a `_shared` document was answering.
+        await this.bumpGeneration(tenant, item.id);
+      }
       // A revive may ADOPT an unowned version, but never moves an owned one to another team — transferring
       // ownership is its own act, and doing it as a side effect of re-registering identical content would move a
       // resource out from under whoever could write it (`team_id IS NULL` is the guard, not an UPDATE).
@@ -165,6 +196,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`,
       values,
     );
+    await this.bumpGeneration(tenant, item.id);
   }
 
   // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned
@@ -267,6 +299,9 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     );
     if (r.rows.length === 0)
       throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
+    // A soft DELETE changes resolution as surely as a registration does — removing a workspace-local version
+    // lets the `_shared` document answer the name again.
+    await this.bumpGeneration(tenant, id);
   }
 
   async versions(tenant: string, id: string): Promise<string[]> {

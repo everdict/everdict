@@ -14,6 +14,7 @@ export class PgDatasetRegistry implements DatasetRegistry {
   private readonly store: PgVersionedStore<Dataset>;
   constructor(private readonly client: SqlClient) {
     this.store = new PgVersionedStore(client, {
+      generationKind: "dataset", // the resolution fence a release decision holds (mig 0163)
       table: "everdict_datasets",
       column: "dataset",
       label: "Dataset",

@@ -111,6 +111,7 @@ export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-s
 export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "./ports/initiative-store.js";
 export type {
+  CapabilityGenerationStore,
   ProductListFilter,
   ProductStore,
   ProductVersionListFilter,
@@ -118,6 +119,11 @@ export type {
   ReleaseListFilter,
   ReleaseStore,
 } from "./ports/product-store.js";
+export type {
+  ConstitutionApproval,
+  ConstitutionApprovalMode,
+  ConstitutionApprovalStore,
+} from "./ports/constitution-approval-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { HandoffCheckpointStore } from "./ports/handoff-checkpoint-store.js";
 export type { VerificationDecisionStore } from "./ports/verification-decision-store.js";

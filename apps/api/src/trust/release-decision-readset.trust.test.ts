@@ -1,7 +1,14 @@
 import { ProductService } from "@everdict/application-control";
 import type { CaseResult, ProductSeries, ScorecardRecord } from "@everdict/contracts";
 import { MANIFEST_IDENTITY_VERSION } from "@everdict/contracts";
-import { PgIssueStore, PgProductStore, PgProductVersionStore, PgReleaseStore, PgScorecardStore } from "@everdict/db";
+import {
+  PgCapabilityGenerationStore,
+  PgIssueStore,
+  PgProductStore,
+  PgProductVersionStore,
+  PgReleaseStore,
+  PgScorecardStore,
+} from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
@@ -102,6 +109,8 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
       versions: new PgProductVersionStore(pg.client),
       issues,
       scorecards,
+      // The fence under test reads generations; without the reader the guard simply omits that condition.
+      capabilityGenerations: new PgCapabilityGenerationStore(pg.client),
       // The gate is not what these scenarios test — they are about the read-set the decision was computed
       // from, so the verdict is held constant at `pass` and the refusal, when it comes, is the fence's.
       seriesGate: async () => ({ decision: "pass" as const, reasons: [] }),
@@ -178,6 +187,133 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("a RE-SCORE of the pinned candidate refuses — the row is unchanged, the judgment is not", async () => {
+    // The case a timestamp fence is structurally blind to. Re-scoring S10 leaves `created_at` exactly where
+    // it was while replacing the verdict the gate read, so "nothing newer than S10" stays true of a world that
+    // no longer exists. Which row was latest and which judgment of that row was read are ONE identity.
+    const { service, product, scorecards, releases } = await world();
+    const id = trustId("sc-rescored");
+    await scorecards.create(seriesBatch(id, product.id, "2026-08-04T00:00:00.000Z", [scored("a", true)]));
+    await scorecards.update(id, {
+      scoring: [
+        {
+          revision: 1,
+          kind: "initial",
+          judges: [],
+          scorePlaneDigest: "sha256:plane-1",
+          createdAt: "2026-08-04T00:01:00.000Z",
+        },
+      ],
+    } as never);
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.10",
+    });
+    releases.onNextWrite(async () => {
+      // A re-score settles a NEW revision over the same row, between the decision and the write.
+      await scorecards.update(id, {
+        scoring: [
+          {
+            revision: 1,
+            kind: "initial",
+            judges: [],
+            scorePlaneDigest: "sha256:plane-1",
+            createdAt: "2026-08-04T00:01:00.000Z",
+          },
+          {
+            revision: 2,
+            kind: "rescore",
+            judges: [],
+            scorePlaneDigest: "sha256:plane-2",
+            createdAt: "2026-08-04T00:02:00.000Z",
+          },
+        ],
+      } as never);
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a LIVE scoring pass over the candidate refuses — the plane is mid-revision at commit", async () => {
+    const { service, product, scorecards, releases } = await world();
+    const id = trustId("sc-claimed");
+    await scorecards.create(seriesBatch(id, product.id, "2026-08-05T00:00:00.000Z", [scored("a", true)]));
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.11",
+    });
+    releases.onNextWrite(async () => {
+      await scorecards.update(
+        id,
+        {
+          scoringPass: {
+            passId: "pass-live",
+            epoch: 1,
+            leaseUntil: "2999-01-01T00:00:00.000Z",
+            heartbeatAt: "2026-08-05T00:01:00.000Z",
+            targetRevision: 2,
+            baseRevision: 1,
+            judges: [],
+            startedAt: "2026-08-05T00:01:00.000Z",
+            status: "running",
+          },
+        } as never,
+        undefined,
+        { expectScoringPassId: null },
+      );
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("the pinned candidate being DELETED refuses — absence leaves nothing 'newer' to find", async () => {
+    const { service, product, scorecards, releases } = await world();
+    const id = trustId("sc-deleted");
+    await scorecards.create(seriesBatch(id, product.id, "2026-08-06T00:00:00.000Z", [scored("a", true)]));
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.12",
+    });
+    releases.onNextWrite(async () => {
+      await scorecards.delete(id);
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a new candidate at the SAME millisecond refuses — `>` on a timestamp is not an ordering", async () => {
+    // The list orders by (created_at, id); a row arriving in the same millisecond is not `>` the pin, and
+    // deciding which of the two is latest is exactly what the tie-break exists for.
+    const { service, product, scorecards, releases } = await world();
+    const at = "2026-08-07T00:00:00.000Z";
+    // Ids that sort either side of each other, unique per run (a shared database keeps every past fixture).
+    const stamp = trustId("tie");
+    const first = `aaa-${stamp}`;
+    const second = `zzz-${stamp}`;
+    await scorecards.create(seriesBatch(first, product.id, at, [scored("a", true)]));
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.13",
+    });
+    releases.onNextWrite(async () => {
+      await scorecards.create(seriesBatch(second, product.id, at, [scored("a", false)]));
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("a capability REGISTERED between the decision and the write refuses — the ambient half, fenced", async () => {
     // A new version, or a workspace-local document shadowing a `_shared` one, changes what the series' refs
     // resolve to. Both are INSERTS in a table this database owns, so unlike the settings edit below they do
@@ -194,10 +330,89 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
     });
     releases.onNextWrite(async () => {
       // The dataset the watched series names gains a version under this workspace, after the decision read it.
+      const version = trustId("v");
       await pg.client.query(
         `INSERT INTO everdict_datasets (tenant, id, version, dataset, created_at)
          VALUES ('trust', 'support-cases', $1, '{"id":"support-cases","version":"9.9.9","cases":[],"tags":[]}'::jsonb, now())`,
-        [trustId("v")],
+        [version],
+      );
+      await pg.client.query(
+        `INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
+         VALUES ('trust','dataset','support-cases',1,now())
+         ON CONFLICT (tenant, kind, id) DO UPDATE SET generation = everdict_capability_generation.generation + 1`,
+      );
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a REVIVED tombstone refuses — the shadow that leaves every timestamp where it was", async () => {
+    // The case a `created_at` fence is structurally blind to (arch-review 23 P0-2). A workspace-local
+    // document that was soft-deleted still HAS its original row: re-registering identical content sets
+    // `deleted_at = NULL` and inserts nothing. So a local `support-cases` can come back to life over the
+    // `_shared` one the decision resolved, mid-decision, with no timestamp anywhere moving.
+    const { service, product, scorecards, releases } = await world();
+    await scorecards.create(
+      seriesBatch(trustId("sc-revive"), product.id, "2026-08-08T00:00:00.000Z", [scored("a", true)]),
+    );
+    // The tombstone exists BEFORE the decision — its `created_at` is in the past, which is the whole point.
+    const version = trustId("dead");
+    await pg.client.query(
+      `INSERT INTO everdict_datasets (tenant, id, version, dataset, created_at, deleted_at)
+       VALUES ('trust', 'support-cases', $1, '{"id":"support-cases","version":"1.0.0","cases":[],"tags":[]}'::jsonb,
+               now() - interval '30 days', now() - interval '1 day')`,
+      [version],
+    );
+    await pg.client.query(
+      `INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
+       VALUES ('trust','dataset','support-cases',7,now())
+       ON CONFLICT (tenant, kind, id) DO UPDATE SET generation = 7`,
+    );
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.14",
+    });
+    releases.onNextWrite(async () => {
+      // The revive: an UPDATE, not an insert. `created_at` is untouched — only the generation moves.
+      await pg.client.query(
+        `UPDATE everdict_datasets SET deleted_at = NULL WHERE tenant = 'trust' AND id = 'support-cases' AND version = $1`,
+        [version],
+      );
+      await pg.client.query(
+        `UPDATE everdict_capability_generation SET generation = generation + 1
+         WHERE tenant = 'trust' AND kind = 'dataset' AND id = 'support-cases'`,
+      );
+    });
+    await expect(
+      service.setReleaseStatus("trust", release.id, { status: "released" }, { subject: "captain" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a workspace SETTINGS change refuses — the default judge model is contract identity, and it is a row", async () => {
+    // The comment this replaces said the ambient half "cannot be a row condition". The settings ARE a row, in
+    // this database, beside everything else the ship conditions on (arch-review 23 P0-3): an identical judge
+    // list judged by a different model is a different judging apparatus.
+    const { service, product, scorecards, releases } = await world();
+    await scorecards.create(
+      seriesBatch(trustId("sc-settings"), product.id, "2026-08-09T00:00:00.000Z", [scored("a", true)]),
+    );
+    await pg.client.query(
+      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at, revision)
+       VALUES ('trust', '{}'::jsonb, now(), 1)
+       ON CONFLICT (workspace) DO UPDATE SET revision = everdict_workspace_settings.revision + 1`,
+    );
+    const release = await service.createRelease({
+      tenant: "trust",
+      createdBy: "captain",
+      productId: product.id,
+      name: "2026.15",
+    });
+    releases.onNextWrite(async () => {
+      await pg.client.query(
+        `UPDATE everdict_workspace_settings SET revision = revision + 1, updated_at = now() WHERE workspace = 'trust'`,
       );
     });
     await expect(

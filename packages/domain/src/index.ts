@@ -39,6 +39,7 @@ export {
 } from "./scorecard/experiment-identity.js";
 export { flakeIndex } from "./scorecard/flake.js";
 export {
+  CURRENT_STAGE_PARITY_VERSION,
   type ScoringStageParity,
   type StagePromotionReadiness,
   stagePromotionReadiness,

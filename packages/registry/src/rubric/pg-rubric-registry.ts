@@ -10,6 +10,7 @@ export class PgRubricRegistry implements RubricRegistry {
   private readonly store: PgVersionedStore<RubricSpec>;
   constructor(client: SqlClient) {
     this.store = new PgVersionedStore(client, {
+      generationKind: "rubric", // the resolution fence a release decision holds (mig 0163)
       table: "everdict_rubrics",
       column: "rubric",
       label: "rubric",

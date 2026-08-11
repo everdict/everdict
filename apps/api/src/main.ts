@@ -223,6 +223,8 @@ async function main(): Promise<void> {
     initiativeUpdateStore,
     productStore,
     releaseStore,
+    capabilityGenerationStore,
+    constitutionApprovalStore,
     productVersionStore,
     browserProfileStore,
     skillStore,
@@ -725,6 +727,7 @@ async function main(): Promise<void> {
     breaker,
     metrics,
     settingsStore,
+    ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
     datasetRegistry,
     harnessInstanceRegistry,
     judgeRegistry,
@@ -939,6 +942,9 @@ async function main(): Promise<void> {
     resolveSeriesContractFor(seriesContractDeps, tenant, series);
   const productService = new ProductService({
     store: productStore,
+    // The capability resolution generations a ship's commit conditions on (mig 0163) — Postgres only, since
+    // the fence is a subquery over the generation table. Without a database the other conditions still hold.
+    ...(capabilityGenerationStore ? { capabilityGenerations: capabilityGenerationStore } : {}),
     releases: releaseStore,
     versions: productVersionStore,
     issues: issueStore,

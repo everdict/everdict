@@ -1,4 +1,6 @@
 import type {
+  CapabilityGenerationStore,
+  ConstitutionApprovalStore,
   HandoffCheckpointStore,
   LeaderElector,
   ReplicaRegistry,
@@ -93,8 +95,10 @@ import {
   PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
+  PgCapabilityGenerationStore,
   PgCapabilityStore,
   PgCommentStore,
+  PgConstitutionApprovalStore,
   PgCycleStore,
   PgEnvelopeStore,
   PgEventConsumerStateStore,
@@ -251,6 +255,13 @@ export interface Persistence {
   // The product timeline (docs/architecture/product-timeline.md) — Product ⊃ Release over the version ledger.
   productStore: ProductStore;
   releaseStore: ReleaseStore;
+  // The capability resolution generations a ship's terminal commit conditions on (mig 0163). Postgres only —
+  // the fence is a subquery, and an in-memory registry has no mutation counter to compare (the in-memory
+  // release store abstains on it, as it does on every cross-row guard).
+  capabilityGenerationStore?: CapabilityGenerationStore;
+  // The receipts constitutional declarations leave (mig 0165) — Postgres only, like every other provenance
+  // ledger. Without it a declaration is authorized but unrecorded, which the reader reports as unapproved.
+  constitutionApprovalStore?: ConstitutionApprovalStore;
   productVersionStore: ProductVersionStore;
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
@@ -459,6 +470,9 @@ export async function makePersistence(): Promise<Persistence> {
     initiativeUpdateStore: new PgInitiativeUpdateStore(client),
     productStore: new PgProductStore(client),
     releaseStore: new PgReleaseStore(client),
+    // The resolution generations a ship's commit conditions on (mig 0163) — see PgCapabilityGenerationStore.
+    capabilityGenerationStore: new PgCapabilityGenerationStore(client),
+    constitutionApprovalStore: new PgConstitutionApprovalStore(client),
     productVersionStore: new PgProductVersionStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
