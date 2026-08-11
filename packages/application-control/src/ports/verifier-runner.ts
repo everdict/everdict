@@ -1,5 +1,5 @@
 import type { ActorRef, TaskEnvelope } from "@everdict/contracts";
-import type { VerificationClaim } from "@everdict/domain";
+import type { VerificationClaim, VerifierPolicy } from "@everdict/domain";
 
 // What a verifier came back with. `verified` is the only affirmative — a verifier that cannot decide says so
 // rather than passing by default, because "I could not tell" and "it holds" are the two answers a trust
@@ -40,6 +40,10 @@ export interface VerifierVerdict {
   // text than the one under review, and the caller refuses to make it affirmative. Absent = the runner does
   // not report it, which is the same as unproven — an unmeasured guarantee is not a satisfied one.
   claimDigest?: string;
+  // The digest of the POLICY text the runner actually rendered. Same contract as the claim echo, for the same
+  // reason: a verdict reached under a different constitution is a verdict about a different question, and the
+  // caller refuses to make it affirmative.
+  policyDigest?: string;
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed
@@ -59,9 +63,14 @@ export interface VerifierRunner {
   verify(input: {
     tenant: string;
     envelope: TaskEnvelope;
-    // The question the verifier answers, in the caller's words ("does the evidence support this checkpoint's
-    // confirmed facts?"). Not a template: what is being verified differs per call site.
-    question: string;
+    // THE DECISION PROCEDURE, owned by the platform (arch-review 25 P0-4). What "verified" means, what to do
+    // with a contradiction, what insufficient evidence answers, and that nothing may be inferred beyond the
+    // evidence. It is not a parameter the caller composes: the party asking for a verdict must not be able to
+    // define what the verdict means.
+    policy: VerifierPolicy;
+    // …and what the REQUESTER contributed: where to look. Carried beside the policy and subordinate to it,
+    // never merged into it. Absent = no particular focus, which is the ordinary case.
+    focus?: string;
     // WHAT IS CLAIMED — the statements themselves, verbatim, carried across the process boundary. Without it
     // the question referred to facts that never left the caller, so the verifier could only judge whether the
     // evidence was internally coherent and the platform recorded that as support for claims it never saw.

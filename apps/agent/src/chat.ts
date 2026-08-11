@@ -982,7 +982,17 @@ export async function runChat(
   // Resolve the workspace's agent customization (Phase 1): system prompt (base + instructions), MCP tool servers, and
   // an optional model override. A trigger-activated run resolves the CRAFTED agent's config (origin.agentId) — its
   // instructions/tools/model are its identity; everything else keeps the workspace chat default.
-  const profile = deps.resolveProfile ? await deps.resolveProfile(principal, session.origin?.agentId) : undefined;
+  //
+  // …EXCEPT under `evidence_only`, where the workspace's agent profile is not this turn's identity (arch-review
+  // 25 P1). Blocking memory and knowledge recall closed the two channels a verifier could be TOLD things
+  // through, and left the one it would be BUILT from: a workspace agent's system instructions, its model
+  // override, its skills, MCP servers and code tools. "Always trust our own scorecards" as a workspace
+  // instruction is a verifier constitution written by the party being verified, arriving through the profile
+  // door rather than the prompt door. A verification runs as the platform's verifier or it is not one.
+  const profile =
+    hooks?.contextPolicy === "evidence_only" || !deps.resolveProfile
+      ? undefined
+      : await deps.resolveProfile(principal, session.origin?.agentId);
   const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
 
   // The MCP session carries this conversation's identity, so anything the agent publishes through the control
@@ -1102,7 +1112,10 @@ export async function runChat(
     // Which registered model powers this turn, in priority order: the conversation's own pick (session.model, set in
     // the chat) → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
     // (`spanRecorder` is declared at turn scope below the loop's block so the seal can reach it.)
-    const modelRef = session.model ?? profile?.model;
+    // …and the MODEL is the platform's for a verification (arch-review 25 P1). A conversation-level override
+    // is a member's choice about their own chat; a verifier is an instrument, and which model it thinks with
+    // is part of what its verdict means.
+    const modelRef = hooks?.contextPolicy === "evidence_only" ? undefined : (session.model ?? profile?.model);
     const model =
       modelRef && deps.resolveModelById
         ? await deps.resolveModelById(principal, modelRef)

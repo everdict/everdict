@@ -296,6 +296,29 @@ export function buildCheckpoint(deps: {
         ...(record.group?.id !== undefined ? { sessionId: record.group.id } : {}),
       };
     },
+    // WHICH VERSION of the evidence a verdict is about (arch-review 25 P0-3). A scorecard's id is a locator:
+    // a re-score rewrites its judgments in place, so a decision citing `scorecard:sc-7` alone lets a later
+    // reader see verdicts the verifier never saw. The scoring ledger's newest entry IS that version, and it
+    // is the same coordinate the release fence conditions on — one vocabulary for "which judgment of this
+    // row", used by both.
+    evidencePins: async (tenant, refs) => {
+      const pinned: Array<{ type: string; id: string; scoringRevision?: number; scorePlaneDigest?: string }> = [];
+      for (const ref of refs) {
+        if (ref.type !== "scorecard") continue;
+        const record = await deps.scorecardStore.get(ref.id);
+        if (record?.tenant !== tenant) continue; // unresolvable → the service records it as unpinnable
+        const newest = record.scoring?.[record.scoring.length - 1];
+        pinned.push({
+          type: ref.type,
+          id: ref.id,
+          // A batch scored once and never re-scored carries no revision entry. That is not a failure to pin:
+          // "this row has had no scoring pass" is itself the version, and a pass appearing later changes it.
+          ...(newest?.revision !== undefined ? { scoringRevision: newest.revision } : {}),
+          ...(newest?.scorePlaneDigest !== undefined ? { scorePlaneDigest: newest.scorePlaneDigest } : {}),
+        });
+      }
+      return pinned;
+    },
     ...(deps.verificationDecisionStore ? { verifications: deps.verificationDecisionStore } : {}),
     ...(deps.events ? { events: deps.events } : {}),
   });

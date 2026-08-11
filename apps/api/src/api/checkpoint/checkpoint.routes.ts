@@ -72,7 +72,7 @@ export function registerCheckpointRoutes(app: FastifyInstance, deps: ServerDeps)
   //
   // `agents:write` rather than a new action: requesting one spends the workspace's compute and files a
   // durable judgment, which is the same authority every other agent-launching surface already gates on.
-  app.post<{ Params: { id: string }; Body: { question?: string } }>(
+  app.post<{ Params: { id: string }; Body: { focus?: string } }>(
     "/checkpoints/:id/verify",
     { schema: checkpointDocs.verify },
     async (req, reply) => {
@@ -88,7 +88,7 @@ export function registerCheckpointRoutes(app: FastifyInstance, deps: ServerDeps)
       try {
         return reply.send(
           await deps.checkpointService.requestVerification(principal.workspace, req.params.id, {
-            ...(req.body?.question !== undefined ? { question: req.body.question } : {}),
+            ...(req.body?.focus !== undefined ? { focus: req.body.focus } : {}),
             requestedBy: principal.subject,
           }),
         );

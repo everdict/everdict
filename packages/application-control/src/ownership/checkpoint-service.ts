@@ -18,6 +18,8 @@ import {
   danglingCheckpointRefs,
   verificationClaimFor,
   verifierEnvelopeFor,
+  verifierFocus,
+  verifierPolicy,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
@@ -63,6 +65,19 @@ export interface CheckpointServiceDeps {
   // evidence). Tool names are a deployment's vocabulary, so this is injectable — absent falls back to the
   // evidence-reader defaults below.
   verifierTools?: readonly string[];
+  // WHICH VERSION of a piece of evidence is on the table (arch-review 25 P0-3). Existence is not identity: a
+  // scorecard's judgments are rewritten in place by a re-score, so a decision that cites only the id records
+  // what was LOOKED UP rather than what was SEEN. Bound by the composition root because only it can read the
+  // scorecard store; absent = this deployment cannot pin evidence versions, which the decision records as an
+  // abstention rather than as a pin nobody made.
+  //
+  // Returning `undefined` for one ref while answering for others is the third state: a resolver that exists
+  // and could not answer. That blocks an affirmative — a verdict about evidence whose version nobody can
+  // state cannot be reproduced, and reproducibility is what the pin is for.
+  evidencePins?: (
+    tenant: string,
+    refs: ReadonlyArray<{ type: string; id: string }>,
+  ) => Promise<Array<{ type: string; id: string; scoringRevision?: number; scorePlaneDigest?: string }>>;
   newId?: () => string;
   now?: () => string;
 }
@@ -244,7 +259,10 @@ export class CheckpointService {
   async requestVerification(
     tenant: string,
     checkpointId: string,
-    input: { question?: string; budgets?: TaskEnvelope["budgets"]; requestedBy?: string } = {},
+    // `focus` is the requester's contribution: WHERE to look. What "verified" means is the platform's
+    // (`verifierPolicy`) and no caller supplies it — see the constitution's own comment for what went wrong
+    // when this parameter was the whole instruction.
+    input: { focus?: string; budgets?: TaskEnvelope["budgets"]; requestedBy?: string } = {},
   ): Promise<VerificationDecision> {
     if (!this.deps.verifier)
       throw new BadRequestError(
@@ -293,17 +311,45 @@ export class CheckpointService {
       // this call site is not exempt from it.
       budgets: input.budgets ?? { tokens: 200_000 },
     });
+    // WHICH VERSION of each piece of evidence this verdict is about (arch-review 25 P0-3). Resolved BEFORE
+    // the verifier runs, so the pin names what was put in front of it rather than what the world looked like
+    // when the verdict came back.
+    const pinnable = evidence.filter((ref) => PINNABLE_EVIDENCE_TYPES.has(ref.type));
+    const pins =
+      this.deps.evidencePins && pinnable.length > 0
+        ? await this.deps.evidencePins(
+            tenant,
+            pinnable.map((ref) => ({ type: ref.type, id: ref.id })),
+          )
+        : undefined;
+    const evidenceIdentity =
+      pins === undefined
+        ? undefined
+        : pinnable.map((ref) => {
+            const pin = pins.find((p) => p.type === ref.type && p.id === ref.id);
+            // A resolver that ran and could not answer for THIS ref is the third state — named, and blocking.
+            if (pin === undefined) return { type: ref.type, id: ref.id, unpinnable: true as const };
+            return {
+              type: ref.type,
+              id: ref.id,
+              ...(pin.scoringRevision !== undefined ? { scoringRevision: pin.scoringRevision } : {}),
+              ...(pin.scorePlaneDigest !== undefined ? { scorePlaneDigest: pin.scorePlaneDigest } : {}),
+            };
+          });
+
     // THE CLAIM — assembled here, carried there (arch-review 24 P0-3). The question below refers to "the
     // checkpoint's confirmed facts"; until this existed, those facts never left this process, so the verifier
     // was answering about evidence with no assertion attached to it.
     const claim = verificationClaimFor(checkpoint);
+    // …AND THE PROCEDURE, which the requester does not get to write (arch-review 25 P0-4).
+    const policy = verifierPolicy();
+    const focus = verifierFocus(input.focus);
     const verdict = await this.deps.verifier.verify({
       tenant,
       envelope,
       claim,
-      question:
-        input.question ??
-        `Does this evidence support the checkpoint's confirmed facts? Answer from the evidence alone — you cannot see how the work was done, and that is deliberate.`,
+      policy,
+      ...(focus !== undefined ? { focus } : {}),
     });
 
     // INDEPENDENCE, applied against EVERY executor in the evidence (arch-review 11). The domain owns the
@@ -394,9 +440,25 @@ export class CheckpointService {
     //
     // A refutation from an agent that read nothing is a model's opinion about the question, not a finding
     // about the artifact, and it must not be able to stop a deploy on that basis.
+    // …and evidence whose VERSION nobody could state (arch-review 25 P0-3). The verdict may still be filed —
+    // it happened — but it cannot be affirmative: nobody reading it later can put the same artifact in front
+    // of a second verifier, which is the whole content of "this was verified".
+    const unpinned = (evidenceIdentity ?? []).filter((e) => e.unpinnable === true);
+    if (unpinned.length > 0)
+      gaps.push(
+        `the version of ${unpinned.map((e) => `${e.type}:${e.id}`).join(", ")} could not be pinned, so this verdict cannot be reproduced against the same evidence`,
+      );
+
     // THE CLAIM ECHO. The runner reports the digest of the claim text it actually rendered; if that is missing
     // or different, whatever the verifier answered was about some other statement of the case, and neither
     // direction of a strong verdict may rest on it.
+    if (verdict.policyDigest === undefined)
+      gaps.push("the runner did not report which verifier policy it applied, so the verdict names no procedure");
+    else if (verdict.policyDigest !== policy.digest)
+      gaps.push(
+        `the verifier decided under a different policy than this platform's (sent ${policy.digest}, applied ${verdict.policyDigest})`,
+      );
+    const policyHeld = verdict.policyDigest === policy.digest;
     if (verdict.claimDigest === undefined)
       gaps.push("the runner did not report which claim it showed the verifier, so the verdict cannot be tied to one");
     else if (verdict.claimDigest !== claim.digest)
@@ -408,7 +470,7 @@ export class CheckpointService {
       verdict.verdict === "verified"
         ? gaps.length === 0
         : verdict.verdict === "refuted"
-          ? reviewed.length > 0 && claimCarried
+          ? reviewed.length > 0 && claimCarried && policyHeld
           : true;
     if (verdict.verdict === "refuted" && reviewed.length === 0)
       gaps.push("a refutation must rest on evidence the verifier actually read, and none was");
@@ -425,6 +487,12 @@ export class CheckpointService {
       verdict: affirmable ? verdict.verdict : "inconclusive",
       detail: affirmable ? verdict.detail : `${verdict.detail} — recorded as inconclusive: ${gaps.join("; ")}.`,
       independence,
+      ...(evidenceIdentity !== undefined ? { evidenceIdentity } : {}),
+      policy: {
+        version: policy.version,
+        digest: policy.digest,
+        ...(verdict.policyDigest !== undefined ? { applied: verdict.policyDigest } : {}),
+      },
       claim: {
         digest: claim.digest,
         ...(verdict.claimDigest !== undefined ? { echoed: verdict.claimDigest } : {}),
@@ -484,6 +552,13 @@ export class CheckpointService {
 // was done, which is precisely what the envelope's context separation withholds (arch-review 24 P0-4). Its
 // presence in the PRODUCTION default meant the invariant held only in the test that passed its own list.
 const DEFAULT_VERIFIER_TOOLS = ["get_run", "get_scorecard", "get_file", "get_issue"] as const;
+
+// WHICH EVIDENCE KINDS HAVE A VERSION TO PIN. A scorecard does: a re-score rewrites its judgments in place
+// while the id stays the same, which is exactly the shape "existence is not identity" describes. A run's
+// result is settled once (first terminal write wins) and an issue is a live record nobody claims is frozen —
+// pinning those would be inventing a version rather than reading one. Kept as a set so a new pinnable kind
+// is one entry plus a resolver, never a scattered condition.
+const PINNABLE_EVIDENCE_TYPES = new Set<string>(["scorecard"]);
 
 // WHICH TOOL READS EACH EVIDENCE KIND — the map that decides what a verifier can actually REACH
 // (arch-review 12). The previous default set named `get_trace`, which is not a tool the control-plane surface

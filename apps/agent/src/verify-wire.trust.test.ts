@@ -1,5 +1,6 @@
 import { ToolRegistry } from "@everdict/agent-runtime";
 import { InMemoryAgentSessionStore, InMemoryTenantKeyStore } from "@everdict/db";
+import { verifierPolicy } from "@everdict/domain";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
 import { type AgentServerDeps, buildServer } from "./server.js";
@@ -68,7 +69,7 @@ async function post(envelope: unknown): Promise<{ status: number; message: strin
     method: "POST",
     url: "/internal/verify",
     headers: { "x-internal-token": "shhh" },
-    payload: { workspace: "acme", actingAs: "verifier", question: "does it hold?", envelope, claim },
+    payload: { workspace: "acme", actingAs: "verifier", envelope, claim, policy: verifierPolicy() },
   });
   await app.close();
   return { status: res.statusCode, message: (res.json() as { message?: string }).message ?? "" };

@@ -1343,7 +1343,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const verifySchema = z.object({
     workspace: z.string().min(1),
     actingAs: z.string().min(1),
-    question: z.string().min(1),
+    // THE PROCEDURE, not a question (arch-review 25 P0-4). The caller sends the platform's constitution
+    // verbatim and this turn renders exactly that, echoing its digest so the caller can refuse a verdict
+    // reached under anything else. A free-form instruction from the requester used to be the whole prompt.
+    policy: z.object({
+      version: z.number().int().positive(),
+      text: z.string().min(1),
+      digest: z.string().min(1),
+    }),
+    // The requester's focus: where to look. Bounded, and rendered subordinate to the policy.
+    focus: z.string().min(1).max(600).optional(),
     envelope: TaskEnvelopeSchema,
     // The claim under review, carried verbatim so the verifier can be shown WHAT is asserted and not only the
     // artifacts. Its digest is echoed back and compared by the caller.
@@ -1438,8 +1447,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         workspace: parsed.data.workspace,
         actingAs: parsed.data.actingAs,
         envelope,
-        question: parsed.data.question,
         claim: parsed.data.claim,
+        policy: parsed.data.policy,
+        ...(parsed.data.focus !== undefined ? { focus: parsed.data.focus } : {}),
       });
       return reply.send(result);
     } catch (err) {

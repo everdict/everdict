@@ -58,10 +58,11 @@ export const checkpointDocs: Record<"create" | "list" | "get" | "verify", Fastif
     body: {
       type: "object",
       properties: {
-        question: {
+        focus: {
           type: "string",
+          maxLength: 600,
           description:
-            "what the verifier should answer; defaults to whether the evidence supports the checkpoint's confirmed facts",
+            "Where the verifier should look — a hint, not an instruction. What 'verified' means, how a contradiction is handled, what insufficient evidence answers, and that nothing may be inferred beyond the evidence are the platform's rules and are not settable from here.",
         },
       },
     },

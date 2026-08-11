@@ -242,6 +242,28 @@ export const VerificationDecisionSchema = z.object({
   subject: z.object({ type: z.enum(["checkpoint"]), id: z.string().min(1) }),
   // The EVIDENCE the verifier was given, and nothing else — the same list that became `scope.resources`.
   evidence: z.array(CheckpointRefSchema).min(1),
+  // …AND WHICH VERSION OF IT (arch-review 25 P0-3). EXISTENCE IS NOT EVIDENCE IDENTITY. `scorecard:sc-7` is a
+  // locator, not an artifact: a re-score rewrites that batch's judgments in place, so a decision citing only
+  // the id says "the verifier looked at sc-7" while anyone opening it later sees a different set of verdicts
+  // than the verifier saw. The claim was pinned to its bytes two reviews ago; this pins the other side.
+  //
+  //   pinned      — the identity the platform resolved at verification time (a scorecard's scoring revision
+  //                 and score-plane digest: the coordinates a re-score moves)
+  //   unpinnable  — a resolver exists and could not answer. Named, and it blocks an affirmative: a verdict
+  //                 about evidence whose version nobody can state is not reproducible.
+  //   absent      — no resolver wired for this type (a commit on someone else's git host). Honest, and the
+  //                 same abstention `unverified_external` already makes about existence.
+  evidenceIdentity: z
+    .array(
+      z.object({
+        type: z.string().min(1),
+        id: z.string().min(1),
+        scoringRevision: z.number().int().nonnegative().optional(),
+        scorePlaneDigest: z.string().optional(),
+        unpinnable: z.literal(true).optional(),
+      }),
+    )
+    .optional(),
   // EVERY actor whose work this verdict covers, not one of them (arch-review 11). A checkpoint may cite
   // several runs, and they can have different executors: taking "the first run reference that resolves"
   // produced a decision that compared the verifier against agent A while agent B's own work sat in the same
@@ -259,6 +281,17 @@ export const VerificationDecisionSchema = z.object({
   // assembled it, `echoed` what the runner reported rendering — equal is the only affirmable state, and both
   // are kept so a mismatch stays inspectable rather than collapsing into a bare refusal.
   // Absent = recorded before the claim crossed the boundary (the shape that could not carry it at all).
+  // WHICH DECISION PROCEDURE produced this verdict (arch-review 25 P0-4). Evidence is only meaningful with
+  // the procedure that read it: two verdicts reached under different constitutions are not comparable, and a
+  // stored verdict whose procedure nobody can name cannot be re-taken. `applied` is what the runner reported
+  // rendering — equal to `digest` is the only affirmable state.
+  policy: z
+    .object({
+      version: z.number().int().positive(),
+      digest: z.string().min(1),
+      applied: z.string().optional(),
+    })
+    .optional(),
   claim: z
     .object({
       digest: z.string().min(1),

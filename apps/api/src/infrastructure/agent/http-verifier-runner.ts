@@ -22,8 +22,11 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
           // The verifier acts as the workspace's agent identity for this run; independence is decided against
           // the EXECUTORS in the evidence, which the checkpoint service checks with the actor this returns.
           actingAs: "verifier",
-          question: input.question,
           envelope: input.envelope,
+          // THE PROCEDURE, not a question: what verified means is the platform's, and it crosses the wire so
+          // the runner renders the platform's words rather than composing its own (arch-review 25 P0-4).
+          policy: input.policy,
+          ...(input.focus !== undefined ? { focus: input.focus } : {}),
           // The claim travels WITH the question — the statements the evidence is supposed to support. The
           // runner echoes back the digest of what it rendered, and the caller refuses an affirmative when the
           // two differ (arch-review 24 P0-3).
@@ -49,6 +52,7 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         reviewedResources: Array<{ type: string; id: string; tool?: string }>;
         failedResources: Array<{ type: string; id: string; tool?: string }>;
         claimDigest?: string;
+        policyDigest?: string;
       };
       return {
         verdict: body.verdict,
@@ -60,6 +64,7 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         reviewedResources: body.reviewedResources,
         failedResources: body.failedResources,
         ...(body.claimDigest !== undefined ? { claimDigest: body.claimDigest } : {}),
+        ...(body.policyDigest !== undefined ? { policyDigest: body.policyDigest } : {}),
       };
     },
   };

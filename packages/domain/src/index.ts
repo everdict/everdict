@@ -332,9 +332,15 @@ export {
   danglingCheckpointRefs,
   type EnvelopeDecision,
   type EnvelopeSpend,
+  MAX_VERIFIER_FOCUS,
   type VerificationClaim,
   verificationClaimDigest,
   verificationClaimFor,
+  VERIFIER_CONSTITUTION,
+  VERIFIER_POLICY_VERSION,
+  verifierFocus,
+  type VerifierPolicy,
+  verifierPolicy,
 } from "./ownership/ownership.js";
 
 // member — the last-admin invariant (from apps/api core/member)

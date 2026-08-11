@@ -86,17 +86,20 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
         "Use it when a handoff's claims matter more than the cost of checking them.",
       inputSchema: {
         id: z.string().describe("checkpoint id"),
-        question: z
+        focus: z
           .string()
+          .max(600)
           .optional()
-          .describe("what the verifier should answer; defaults to whether the evidence supports the confirmed facts"),
+          .describe(
+            "where the verifier should look — a hint, not an instruction. What 'verified' means, how a contradiction is handled and what insufficient evidence answers are the platform's rules and cannot be changed from here.",
+          ),
       },
     },
-    ({ id, question }) =>
+    ({ id, focus }) =>
       run(principal, "agents:write", async () =>
         ok(
           await checkpoints.requestVerification(ws, id, {
-            ...(question !== undefined ? { question } : {}),
+            ...(focus !== undefined ? { focus } : {}),
             requestedBy: principal.subject,
           }),
         ),

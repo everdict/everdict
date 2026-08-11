@@ -1,17 +1,18 @@
 import type {
   ActorRef,
+  CheckpointRef,
   HandoffCheckpoint,
   HandoffCheckpointRecord,
   TaskEnvelope,
   VerificationDecision,
 } from "@everdict/contracts";
 import { HandoffCheckpointSchema } from "@everdict/contracts";
-import { authorizeResourceAccess } from "@everdict/domain";
+import { VERIFIER_POLICY_VERSION, authorizeResourceAccess } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import type { VerificationDecisionStore } from "../ports/verification-decision-store.js";
-import { type CheckpointRefResolvers, CheckpointService } from "./checkpoint-service.js";
+import { type CheckpointRefResolvers, CheckpointService, type CheckpointServiceDeps } from "./checkpoint-service.js";
 
 // A handoff is only worth resuming from if its evidence is real and its verdict is somebody else's — the two
 // admission rules the service exists to hold (docs/architecture/ownership-protocol.md).
@@ -284,13 +285,23 @@ describe("verification — a spawned verdict is checked for independence and FIL
     verifications?: VerificationDecisionStore;
     reviewed?: Array<{ type: string; id: string }>;
     claimDigest?: string; // what the runner says it RENDERED — differing from what was sent is its own test
+    policyDigest?: string; // …and the same for the decision procedure
     readerOverride?: string; // which tool the runtime reports doing the reading
+    evidencePins?: CheckpointServiceDeps["evidencePins"]; // which VERSION of the evidence was reviewed
+    evidence?: CheckpointRef[]; // what the checkpoint cites (defaults to the run above)
   }): { svc: CheckpointService; envelopes: TaskEnvelope[]; claims: unknown[] } {
     const envelopes: TaskEnvelope[] = [];
+    const cited =
+      opts.evidence === undefined
+        ? checkpoint
+        : ({
+            ...checkpoint,
+            confirmedFacts: [{ statement: "the grader throws on empty traces", refs: opts.evidence }],
+          } as HandoffCheckpointRecord);
     const store: HandoffCheckpointStore = {
       async create() {},
       async get() {
-        return checkpoint;
+        return cited;
       },
       async list() {
         return [];
@@ -300,6 +311,7 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const svc = new CheckpointService({
       store,
       resolvers: {},
+      ...(opts.evidencePins ? { evidencePins: opts.evidencePins } : {}),
       ...(opts.executor ? { runActor: async () => opts.executor } : {}),
       ...(opts.verifications ? { verifications: opts.verifications } : {}),
       verifier: {
@@ -317,8 +329,10 @@ describe("verification — a spawned verdict is checked for independence and FIL
               ...r,
               tool: opts.readerOverride ?? READER_BY_TYPE[r.type] ?? "get_run",
             })),
-            // The echo: the claim the runner actually rendered. Equal to what was sent = affirmable.
+            // The echoes: the claim and the POLICY the runner actually rendered. Equal to what was sent =
+            // affirmable. The policy echo is what stops a verdict reached under some other constitution.
             claimDigest: opts.claimDigest ?? input.claim.digest,
+            policyDigest: opts.policyDigest ?? input.policy.digest,
           };
         },
       },
@@ -344,6 +358,52 @@ describe("verification — a spawned verdict is checked for independence and FIL
       echoed: claim.digest,
       statements: ["the grader throws on empty traces"],
     });
+  });
+
+  // arch-review 25 P0-3: EXISTENCE IS NOT EVIDENCE IDENTITY. `scorecard:sc-7` is a locator — a re-score
+  // rewrites that batch's judgments in place, so a decision citing only the id says "the verifier looked at
+  // sc-7" while anyone opening it a month later sees a different set of verdicts than the verifier saw.
+  it("records WHICH VERSION of the evidence the verdict is about", async () => {
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      evidence: [{ type: "scorecard", id: "sc-7" }],
+      evidencePins: async () => [{ type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" }],
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.evidenceIdentity).toEqual([
+      { type: "scorecard", id: "sc-7", scoringRevision: 3, scorePlaneDigest: "sha256:p3" },
+    ]);
+  });
+
+  it("refuses the affirmative when the evidence's version could not be pinned", async () => {
+    // A resolver that ran and could not answer is the third state. The verdict is still filed — it happened —
+    // but nobody can put the same artifact in front of a second verifier, which is what "verified" claims.
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      evidence: [{ type: "scorecard", id: "sc-7" }],
+      evidencePins: async () => [], // wired, ran, answered for nothing
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("could not be pinned");
+    expect(decision.evidenceIdentity).toEqual([{ type: "scorecard", id: "sc-7", unpinnable: true }]);
+  });
+
+  // arch-review 25 P0-4: the procedure has an identity too, and a verdict reached under another one is a
+  // verdict about a different question.
+  it("refuses the affirmative when the runner applied a DIFFERENT policy than the platform's", async () => {
+    const { svc } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" }, policyDigest: "sha256:theirs" });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("a different policy");
+    expect(decision.policy).toMatchObject({ applied: "sha256:theirs" });
+  });
+
+  it("records the platform's policy VERSION and digest on every decision", async () => {
+    const { svc } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" } });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.policy?.version).toBe(VERIFIER_POLICY_VERSION);
+    expect(decision.policy?.applied).toBe(decision.policy?.digest);
   });
 
   it("refuses the affirmative when the runner rendered a DIFFERENT claim than the one under review", async () => {
@@ -574,6 +634,7 @@ describe("verification — an affirmative needs full identity AND evidence cover
                 }
               : {}),
             claimDigest: input.claim.digest,
+            policyDigest: input.policy.digest,
           };
         },
       },
@@ -664,6 +725,7 @@ describe("verification — a failed read is not coverage", () => {
             reviewedResources: [],
             failedResources: [{ type: "run", id: "run-42", tool: "get_run" }],
             claimDigest: input.claim.digest,
+            policyDigest: input.policy.digest,
           };
         },
       },
