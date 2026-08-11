@@ -67,7 +67,7 @@ async function world(transport: LlmTransport) {
       async add() {},
       async revoke() {},
     },
-  } as unknown as ChatDeps & { keyStore: unknown; newId: () => string; now: () => string };
+  } as unknown as Parameters<typeof runVerificationTurn>[0];
   const authenticate = async () => ({ workspace: "acme", subject: "verifier", roles: ["member"], via: "api-key" });
   return { deps, authenticate: authenticate as never };
 }
