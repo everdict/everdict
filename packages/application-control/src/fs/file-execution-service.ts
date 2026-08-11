@@ -274,7 +274,7 @@ export class FileExecutionService {
         newId: this.newId,
         now: this.now,
       });
-      await runs.update(
+      const settled = await runs.update(
         runId,
         patch,
         stamped.map((f) => f.record),
@@ -282,6 +282,11 @@ export class FileExecutionService {
         // process; the row can also be settled by another one.
         { expectNonTerminal: true },
       );
+      // A CAS LOSER PUBLISHES NOTHING (arch-review 27 P1). `pushPersisted` means "these events are already in
+      // the ledger" — and when the guarded write matches no row, the Pg adapter inserts none. Pushing the
+      // pre-stamped batch anyway announced a settlement that did not happen, to a bus whose consumers are
+      // agent activations rather than a toast in a UI.
+      if (settled === undefined) return;
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     } catch (e) {
       console.warn(`[fs] file run settle failed (${runId}):`, e);

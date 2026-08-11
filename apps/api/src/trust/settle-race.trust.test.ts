@@ -171,6 +171,50 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-135 — a cancel racing a completion s
     expect(written).toBeDefined();
   }, 60_000);
 
+  // arch-review 27 P1: CAS REJECTED STATE IS NOT REJECTED SIDE EFFECTS. The guarded write is correct about
+  // the ledger — a statement that matches no row inserts no outbox event either — but several callers stamped
+  // their facts BEFORE the write and pushed them to the live bus afterwards without looking at whether the
+  // write landed. In this platform that bus is not a UI toast: it is the input to agent activation. A loser
+  // announcing a settlement that never happened can start work nobody can take back.
+  it("a CAS loser writes no row AND leaves no durable event", async () => {
+    const runId = trustId("run-loser");
+    await seedRunning(runId);
+    const runs = new PgRunStore(pg.client);
+    const event = (id: string) => ({
+      id,
+      tenant: "trust",
+      kind: "run.settled",
+      subject: { type: "run", id: runId },
+      actor: "system",
+      payload: {},
+      message: "settled",
+      createdAt: new Date().toISOString(),
+    });
+    // The winner settles, carrying its fact.
+    const won = await runs.update(
+      runId,
+      { status: "succeeded", updatedAt: new Date().toISOString() },
+      [event(trustId("ev-win")) as never],
+      { expectNonTerminal: true },
+    );
+    expect(won).toBeDefined();
+    // …and the loser's guarded write matches nothing, so its fact never becomes durable either.
+    const loserEventId = trustId("ev-lose");
+    const lost = await runs.update(
+      runId,
+      { status: "failed", error: { code: "CANCELLED", message: "too late" } },
+      [event(loserEventId) as never],
+      { expectNonTerminal: true },
+    );
+    expect(lost).toBeUndefined();
+    const { rows } = await pg.client.query<{ id: string }>("SELECT id FROM everdict_platform_events WHERE id = $1", [
+      loserEventId,
+    ]);
+    // The durable half was already right. What this pins is that it STAYS right — and the callers now read
+    // the guarded write's return before pushing the same batch to the live bus.
+    expect(rows).toHaveLength(0);
+  }, 60_000);
+
   it("a writer arriving after the settle is refused — a late drain cannot rewrite a cancelled child", async () => {
     // The sequential half of the same rule, and the one an operator actually sees: the cancel lands, then a
     // dispatch that was already in flight comes back with a result minutes later.

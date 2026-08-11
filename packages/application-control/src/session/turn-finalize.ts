@@ -32,7 +32,19 @@ export interface FinalizeDeps {
   now: () => string;
 }
 
-// First terminal write wins — mirrors RunService.finalize. Returns whether the transition applied.
+// FIRST TERMINAL WRITE WINS — and it says so in SQL, not only in this comment (arch-review 27 P0). This is
+// the shared settle every session-shaped driver goes through, and it was read-check-write: the `get` above is
+// a snapshot, and the writer that finished this run can be in another process. Two settles both read a
+// running row, both wrote, and the LAST one won — the exact inverse of the rule the function is named after.
+//
+// …AND A CAS LOSER PUBLISHES NOTHING. The facts were stamped before the write and pushed after it without
+// looking at whether the write landed. The Pg adapter is correct — a guarded update that matches no row
+// inserts no outbox event either — so the DURABLE record was already right; what leaked was the LIVE push,
+// which in this platform is not a UI notification but the input to agent activation. A rejected state whose
+// side effects still fire is a rejection nobody downstream heard.
+//
+// Returns whether the transition applied — `false` now means "somebody else settled it", which is the only
+// honest reading of a lost CAS.
 export async function finalizeRun(
   deps: FinalizeDeps,
   runId: string,
@@ -43,11 +55,13 @@ export async function finalizeRun(
   if (!current || Run.from(current).isTerminal()) return false;
   const transition = fn(Run.from(current));
   const stamped = stampFacts(tenant, transition.facts, { newId: deps.newId, now: deps.now });
-  await deps.store.update(
+  const settled = await deps.store.update(
     runId,
     transition.patch,
     stamped.map((f) => f.record),
+    { expectNonTerminal: true },
   );
+  if (settled === undefined) return false;
   if (stamped.length > 0) void deps.events?.pushPersisted?.(stamped);
   return true;
 }

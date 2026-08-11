@@ -37,11 +37,20 @@ export async function settleOrphanSessionRuns(deps: {
     if (run.isTerminal()) continue;
     const transition = run.closeSession("orphaned", now());
     const stamped = stampFacts(record.tenant, transition.facts, { newId, now });
-    await deps.store.update(
+    // UNDER THE SETTLE CAS (arch-review 27 P0). This sweep exists to clean up rows OTHER PROCESSES left
+    // behind, so its read-check-write is not a theoretical race — it is the sweep's normal working condition.
+    // A lane finishing the session between the read above and this write would have had `succeeded` replaced
+    // by `orphaned`, and the run would be recorded as abandoned work that in fact completed.
+    const closed = await deps.store.update(
       row.id,
       transition.patch,
       stamped.map((f) => f.record),
+      { expectNonTerminal: true },
     );
+    // …and a lost CAS publishes nothing. The durable outbox already agreed (the guarded write inserts no
+    // event when it matches no row); the live push is what would have told an agent that a session it is
+    // watching went orphaned when it had actually succeeded.
+    if (closed === undefined) continue;
     if (stamped.length > 0) void deps.events?.pushPersisted?.(stamped);
     settled += 1;
   }

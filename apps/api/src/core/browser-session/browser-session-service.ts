@@ -147,7 +147,7 @@ export class BrowserSessionService {
         newId: this.newId,
         now: () => new Date(this.now()).toISOString(),
       });
-      await this.runs.update(
+      const closed = await this.runs.update(
         id,
         patch,
         stamped.map((f) => f.record),
@@ -155,6 +155,9 @@ export class BrowserSessionService {
         // process, and the sweep that expires sessions runs in every other one.
         { expectNonTerminal: true },
       );
+      // …and the loser announces nothing (arch-review 27 P1): the guarded write inserted no durable event, so
+      // pushing the pre-stamped batch would put a settlement on the live bus that the ledger never recorded.
+      if (closed === undefined) return;
       if (stamped.length > 0) void this.events?.pushPersisted?.(stamped);
     } catch (e) {
       console.warn(`[browser] session ledger close failed (${id}):`, e);
