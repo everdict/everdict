@@ -7,7 +7,7 @@ import { CreateCheckpointBodySchema } from "./request/create-checkpoint.js";
 // OpenAPI descriptors for the handoff-checkpoint routes (doc-only — never validates/serializes; see
 // api/openapi.ts). Authz reuses the agent actions (no new action): read = agents:read, write = agents:write.
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
-export const checkpointDocs: Record<"create" | "list" | "get", FastifySchema> = {
+export const checkpointDocs: Record<"create" | "list" | "get" | "verify", FastifySchema> = {
   create: {
     summary: "Publish a handoff checkpoint",
     description:
@@ -39,6 +39,35 @@ export const checkpointDocs: Record<"create" | "list" | "get", FastifySchema> = 
     response: {
       200: { description: "Checkpoints, newest first", ...toJsonSchema(CheckpointListResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  verify: {
+    summary: "Request an independent verification of a checkpoint",
+    description:
+      "Spawns a verifier INSIDE an evidence-only envelope (empty write list, reads restricted to the tools " +
+      "that reach the cited evidence, objects pinned to the refs themselves) and files the verdict as a " +
+      "durable VerificationDecision. Deliberately not automatic: a handoff does not wake a verifier, so this " +
+      "is a judgment a lead makes about work it delegated. A deployment with no verifier runtime gets a 400 " +
+      "saying verification is a human act there — never a silent pass. Gate: agents:write.",
+    tags: ["checkpoint"],
+    params: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+    body: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description:
+            "what the verifier should answer; defaults to whether the evidence supports the checkpoint's confirmed facts",
+        },
+      },
+    },
+    response: {
+      200: { description: "The filed verification decision", type: "object" },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   get: {

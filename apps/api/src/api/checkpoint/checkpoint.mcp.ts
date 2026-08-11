@@ -68,6 +68,41 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
       ),
   );
 
+  // The LEAD's judgment, as a tool it can call about work it delegated. Deliberately not automatic: a handoff
+  // does not wake a verifier (`checkpoint.created` is not trigger-matchable — an agent waking on another
+  // agent's handoff is the runaway vector the agent.run.* family is excluded for), so asking for one is a
+  // decision someone makes rather than an ambient reaction.
+  server.registerTool(
+    "request_verification",
+    {
+      description:
+        "Ask an INDEPENDENT verifier to check a checkpoint's claims against the evidence it cites. The " +
+        "verifier runs inside an evidence-only envelope — no write capability at all, reads restricted to " +
+        "the tools that reach that evidence, and the objects pinned to the cited refs — so its conclusion is " +
+        "attributable to what it was given and nothing else. It cannot be you: a verifier that executed the " +
+        "work is refused, and so is one running in the same run or session. The verdict is filed as a " +
+        "durable decision that records what was actually read; a 'verified' with a ref nobody read comes " +
+        "back INCONCLUSIVE with the gap named, because an unchecked half is a species of could-not-tell. " +
+        "Use it when a handoff's claims matter more than the cost of checking them.",
+      inputSchema: {
+        id: z.string().describe("checkpoint id"),
+        question: z
+          .string()
+          .optional()
+          .describe("what the verifier should answer; defaults to whether the evidence supports the confirmed facts"),
+      },
+    },
+    ({ id, question }) =>
+      run(principal, "agents:write", async () =>
+        ok(
+          await checkpoints.requestVerification(ws, id, {
+            ...(question !== undefined ? { question } : {}),
+            requestedBy: principal.subject,
+          }),
+        ),
+      ),
+  );
+
   server.registerTool(
     "get_checkpoint",
     {

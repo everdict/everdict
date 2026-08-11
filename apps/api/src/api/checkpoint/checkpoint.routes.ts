@@ -65,6 +65,41 @@ export function registerCheckpointRoutes(app: FastifyInstance, deps: ServerDeps)
     },
   );
 
+  // A LEAD ASKS FOR A VERIFICATION — the request surface the ownership protocol deliberately does not make
+  // automatic. `checkpoint.created` is not trigger-matchable (an agent waking on another agent's handoff is
+  // the runaway vector the `agent.run.*` family is excluded for), so verification is a JUDGMENT someone makes
+  // about work they delegated, not an ambient reaction to a handoff being filed.
+  //
+  // `agents:write` rather than a new action: requesting one spends the workspace's compute and files a
+  // durable judgment, which is the same authority every other agent-launching surface already gates on.
+  app.post<{ Params: { id: string }; Body: { question?: string } }>(
+    "/checkpoints/:id/verify",
+    { schema: checkpointDocs.verify },
+    async (req, reply) => {
+      if (!deps.checkpointService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "checkpoint service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "agents:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      try {
+        return reply.send(
+          await deps.checkpointService.requestVerification(principal.workspace, req.params.id, {
+            ...(req.body?.question !== undefined ? { question: req.body.question } : {}),
+            requestedBy: principal.subject,
+          }),
+        );
+      } catch (err) {
+        // No verifier runtime → 400 saying verification is a human act here; a verifier that is not
+        // independent → the domain's refusal. Neither ever becomes a pass.
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.get<{ Params: { id: string } }>("/checkpoints/:id", { schema: checkpointDocs.get }, async (req, reply) => {
     if (!deps.checkpointService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "checkpoint service not configured" });
