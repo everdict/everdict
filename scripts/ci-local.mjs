@@ -91,9 +91,14 @@ if (dirty) {
 // clean tree" — not about which checkout ran it, and the pre-push hook reads the common location. Keeping it
 // worktree-local would mean validating a commit and then being refused permission to push the very commit
 // that was validated.
+// ⚠️ Both paths resolve against ROOT, never against gitDir. `--git-common-dir` answers RELATIVE to the cwd it was
+// asked from (a plain checkout says `.git`), so resolving it against the git dir produced `<root>/.git/.git` — a
+// directory that does not exist. Every one of the twelve stages passed, the real stamp was written, and then the
+// write to that phantom path threw ENOENT: exit 1 with no "GREEN" line, which reads as a red gate. It never showed
+// up in a linked worktree because there the answer is already absolute and the wrong base is ignored.
 const gitDir = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, encoding: "utf8" }).stdout.trim();
 const commonDir = path.resolve(
-  gitDir,
+  root,
   spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).stdout.trim(),
 );
 for (const dir of new Set([gitDir, commonDir])) writeFileSync(path.join(dir, "everdict-ci-ok"), `${head}\n`);
