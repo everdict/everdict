@@ -74,20 +74,24 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   // the ones that insert a row (arch-review 23 P0-2). Keyed by the NAME because that is what owner-first
   // resolution answers: reviving one version changes `latest` for every reader of it.
   //
-  // Best-effort by contract, and deliberately so: a fence's job is to REFUSE when it cannot prove the world
-  // held still, and a failed bump leaves the generation behind, which makes the next decision that reads it
-  // conflict rather than commit. A registry write must not fail because a fence's bookkeeping did.
-  private async bumpGeneration(tenant: string, id: string): Promise<void> {
-    if (this.generationKind === undefined) return;
-    await this.client
-      .query(
-        `INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
-         VALUES ($1, $2, $3, 1, now())
+  // THE BUMP RIDES INSIDE THE MUTATION'S OWN STATEMENT (arch-review 24 P0-1). Postgres runs a data-modifying
+  // CTE as one atomic unit, so there is no instant in which the registry already answers the new resolution
+  // while the generation still reads the old number — the exact window in which a decision reads the NEW
+  // capability, reads the OLD token, and commits believing the world held still. That is also why the bump is
+  // no longer best-effort: a swallowed failure produced precisely that state and called it success. A refused
+  // registry write is recoverable; a silently unfenced one is a wrong verdict nobody can see.
+  //
+  // `mutation` must be the CTE body including its own RETURNING; the fence fires only for the rows it returns,
+  // so a no-op UPDATE (nothing to revive, nothing to delete) advances nothing.
+  private fenced(mutation: string, tail: string, kindIndex: number): string {
+    return `WITH mutation AS (${mutation}),
+       fence AS (
+         INSERT INTO everdict_capability_generation (tenant, kind, id, generation, updated_at)
+         SELECT $1, $${kindIndex}, $2, 1, now() FROM mutation
          ON CONFLICT (tenant, kind, id)
-         DO UPDATE SET generation = everdict_capability_generation.generation + 1, updated_at = now()`,
-        [tenant, this.generationKind, id],
-      )
-      .catch(() => undefined);
+         DO UPDATE SET generation = everdict_capability_generation.generation + 1, updated_at = now()
+       )
+       ${tail}`;
   }
 
   // " AND deleted_at IS NULL" only where the table has the column — otherwise the clause would reference a missing column.
@@ -148,13 +152,16 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       }
       // re-registering identical content = revive — content immutability is preserved (same pattern as dataset tombstones).
       if (this.hasSoftDelete && row.deleted_at !== null) {
-        await this.client.query(
-          `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3`,
-          [tenant, item.id, item.version],
-        );
         // A REVIVE is the shadow that leaves no trace in `created_at` — a workspace-local document coming
-        // back to life under a name a `_shared` document was answering.
-        await this.bumpGeneration(tenant, item.id);
+        // back to life under a name a `_shared` document was answering. It advances the fence in the same
+        // statement that brings it back.
+        const revive = `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING 1`;
+        await this.client.query(
+          this.generationKind === undefined ? revive : this.fenced(revive, "SELECT 1 FROM mutation", 4),
+          this.generationKind === undefined
+            ? [tenant, item.id, item.version]
+            : [tenant, item.id, item.version, this.generationKind],
+        );
       }
       // A revive may ADOPT an unowned version, but never moves an owned one to another team — transferring
       // ownership is its own act, and doing it as a side effect of re-registering identical content would move a
@@ -192,11 +199,13 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       values.push(origin === undefined ? null : JSON.stringify(origin));
       placeholders.push(`$${values.length}::jsonb`);
     }
-    await this.client.query(
-      `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`,
-      values,
-    );
-    await this.bumpGeneration(tenant, item.id);
+    const insert = `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING 1`;
+    if (this.generationKind === undefined) {
+      await this.client.query(insert, values);
+      return;
+    }
+    values.push(this.generationKind);
+    await this.client.query(this.fenced(insert, "SELECT 1 FROM mutation", values.length), values);
   }
 
   // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned
@@ -293,15 +302,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   }
 
   async softDelete(tenant: string, id: string, version: string): Promise<void> {
+    // A soft DELETE changes resolution as surely as a registration does — removing a workspace-local version
+    // lets the `_shared` document answer the name again, so the fence advances in the same statement.
+    const remove = `UPDATE ${this.table} SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`;
     const r = await this.client.query<{ version: string }>(
-      `UPDATE ${this.table} SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`,
-      [tenant, id, version],
+      this.generationKind === undefined ? remove : this.fenced(remove, "SELECT version FROM mutation", 4),
+      this.generationKind === undefined ? [tenant, id, version] : [tenant, id, version, this.generationKind],
     );
     if (r.rows.length === 0)
       throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
-    // A soft DELETE changes resolution as surely as a registration does — removing a workspace-local version
-    // lets the `_shared` document answer the name again.
-    await this.bumpGeneration(tenant, id);
   }
 
   async versions(tenant: string, id: string): Promise<string[]> {

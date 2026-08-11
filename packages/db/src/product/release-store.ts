@@ -114,7 +114,8 @@ export class InMemoryReleaseStore implements ReleaseStore {
         capabilities?: ReadonlyArray<{
           kind: "dataset" | "harness" | "judge" | "rubric" | "model";
           id: string;
-          generation: number | null;
+          tenantGeneration: number | null;
+          sharedGeneration: number | null;
         }>;
         settingsRevision?: number | null;
       };
@@ -337,7 +338,8 @@ export class PgReleaseStore implements ReleaseStore {
         capabilities?: ReadonlyArray<{
           kind: "dataset" | "harness" | "judge" | "rubric" | "model";
           id: string;
-          generation: number | null;
+          tenantGeneration: number | null;
+          sharedGeneration: number | null;
         }>;
         settingsRevision?: number | null;
       };
@@ -475,22 +477,27 @@ export class PgReleaseStore implements ReleaseStore {
       // covered by the service's contract re-verify, whose window is decision→commit rather than zero.
       // Naming which half is which beats one guard that implies it covers both.
       for (const ref of guard.expectDecision.capabilities ?? []) {
-        params.push(ref.kind, ref.id);
-        const kindIdx = params.length - 1;
-        const idIdx = params.length;
-        const row = `g.kind = $${kindIdx} AND g.id = $${idIdx} AND g.tenant IN (everdict_product_releases.tenant, '_shared')`;
-        if (ref.generation === null) {
-          // No generation row when the decision read it — the name has never been mutated under this fence.
-          // One appearing since is a mutation, whatever it did.
-          guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row})`;
-          continue;
+        // EACH NAMESPACE ON ITS OWN (arch-review 24 P0-2). The two counters advance independently, so they are
+        // compared independently: collapsing them with MAX made a local mutation invisible whenever `_shared`
+        // happened to be the larger number.
+        for (const [owner, expected] of [
+          ["tenant", ref.tenantGeneration],
+          ["shared", ref.sharedGeneration],
+        ] as const) {
+          params.push(ref.kind, ref.id);
+          const kindIdx = params.length - 1;
+          const idIdx = params.length;
+          const scope = owner === "tenant" ? "g.tenant = everdict_product_releases.tenant" : "g.tenant = '_shared'";
+          const row = `g.kind = $${kindIdx} AND g.id = $${idIdx} AND ${scope}`;
+          if (expected === null) {
+            // No row in this namespace when the decision read it. One appearing since IS the change.
+            guardSql += ` AND NOT EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row})`;
+            continue;
+          }
+          params.push(expected);
+          const genIdx = params.length;
+          guardSql += ` AND EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row} AND g.generation = $${genIdx})`;
         }
-        params.push(ref.generation);
-        const genIdx = params.length;
-        // The generation moves on every write that can change what this NAME resolves to — a registration, a
-        // revive, a soft delete. Comparing it (rather than a timestamp) is what makes the fence cover the two
-        // mutations that leave `created_at` untouched.
-        guardSql += ` AND EXISTS (SELECT 1 FROM everdict_capability_generation g WHERE ${row} AND g.generation = $${genIdx})`;
       }
       // …and the workspace SETTINGS the contracts resolved under (mig 0164) — the default judge model is part
       // of the contract identity, and it lives on a row this statement can condition on.
@@ -541,23 +548,31 @@ export class PgCapabilityGenerationStore implements CapabilityGenerationStore {
   async read(
     tenant: string,
     refs: ReadonlyArray<{ kind: string; id: string }>,
-  ): Promise<Array<{ kind: string; id: string; generation: number | null }>> {
+  ): Promise<Array<{ kind: string; id: string; tenantGeneration: number | null; sharedGeneration: number | null }>> {
     if (refs.length === 0) return [];
-    const { rows } = await this.client.query<{ kind: string; id: string; generation: string | number }>(
-      `SELECT kind, id, max(generation) AS generation FROM everdict_capability_generation
+    // BOTH NAMESPACES, kept apart. They are independent ordinals — an aggregate over them (the first version
+    // took `max`) answers a different question than the fence asks, and answers it wrong in the direction of
+    // "nothing changed" whenever the other side happens to be larger.
+    const { rows } = await this.client.query<{
+      tenant: string;
+      kind: string;
+      id: string;
+      generation: string | number;
+    }>(
+      `SELECT tenant, kind, id, generation FROM everdict_capability_generation
        WHERE tenant IN ($1, '_shared') AND (kind, id) IN (${refs
          .map((_, i) => `($${i * 2 + 2}, $${i * 2 + 3})`)
-         .join(", ")})
-       GROUP BY kind, id`,
+         .join(", ")})`,
       [tenant, ...refs.flatMap((ref) => [ref.kind, ref.id])],
     );
-    const found = new Map(rows.map((row) => [`${row.kind}:${row.id}`, Number(row.generation)]));
-    // A name with no row is `null`, not zero: "never mutated" and "mutated to generation 0" would be the same
-    // number, and the fence has to be able to refuse when the first mutation appears.
+    const found = new Map(rows.map((row) => [`${row.tenant}:${row.kind}:${row.id}`, Number(row.generation)]));
+    // A namespace with no row is `null`, not zero: "never mutated" and "mutated to generation 0" would be the
+    // same number, and the fence must refuse when the first mutation appears.
     return refs.map((ref) => ({
       kind: ref.kind,
       id: ref.id,
-      generation: found.get(`${ref.kind}:${ref.id}`) ?? null,
+      tenantGeneration: found.get(`${tenant}:${ref.kind}:${ref.id}`) ?? null,
+      sharedGeneration: found.get(`_shared:${ref.kind}:${ref.id}`) ?? null,
     }));
   }
 

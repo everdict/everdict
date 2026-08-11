@@ -79,14 +79,19 @@ function fakePg(): FakePg {
   const rows: Row[] = [];
   const seen: string[] = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  // A mutation now rides inside a data-modifying CTE together with its capability-generation bump, so the two
+  // commit as one statement (arch-review 24 P0-1). The fake matches on the MUTATION half; the fence half is
+  // real Postgres bookkeeping this double does not model.
+  const unwrapFence = (t: string) => /^WITH mutation AS \((.+?)\), fence AS \(/.exec(t)?.[1] ?? t;
   const live = (x: Row) => x.deleted_at === null;
   const base = 1_700_000_000_000;
   let clock = 0;
   return {
     seen,
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
-      const t = norm(text);
-      seen.push(t);
+      const raw = norm(text);
+      seen.push(raw); // RAW — the fence CTE is part of what was issued, and one test asserts it was
+      const t = unwrapFence(raw);
       // register's conflict/revive probe — the ONE read that DELIBERATELY omits deleted_at (sees tombstones).
       if (
         t.startsWith("SELECT dataset, deleted_at FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3")
@@ -309,6 +314,28 @@ describe("PgVersionedStore soft-delete invariant — reads carry WHERE deleted_a
     );
     expect(reads.length).toBeGreaterThan(0);
     for (const q of reads) expect(q).toContain("deleted_at IS NULL");
+  });
+
+  // arch-review 24 P0-1. The bump used to be a SECOND query, issued after the mutation and with its failure
+  // swallowed. Between the two statements the registry already answered the new resolution while the fence
+  // still read the old number — and a release decision reading both in that window saw a changed world report
+  // itself unchanged. A best-effort fence is not a fence; it is a fence that reports success on failure.
+  it("Given a mutation that changes what a name resolves to, When it is issued, Then the generation bump rides INSIDE the same statement", async () => {
+    const pg = fakePg();
+    const r = new PgDatasetRegistry(pg);
+    pg.seen.length = 0;
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.softDelete("acme", "d", "1.0.0");
+    await r.register("acme", ds("d", "1.0.0")); // revive — the mutation that leaves created_at untouched
+    // All THREE resolution-changing mutations are single statements carrying their own fence.
+    const fenced = pg.seen.filter((q) => q.includes("everdict_capability_generation"));
+    expect(fenced.length).toBe(3);
+    for (const q of fenced) {
+      expect(q.startsWith("WITH mutation AS (")).toBe(true);
+      expect(q).toContain("ON CONFLICT (tenant, kind, id)");
+    }
+    // …and nothing bumps the generation on its own, which is what "atomic with the mutation" means.
+    expect(pg.seen.some((q) => q.startsWith("INSERT INTO everdict_capability_generation"))).toBe(false);
   });
 
   it("Given a _shared or already-deleted version, When softDelete targets it, Then RETURNING is empty → NotFoundError (tenant-owned live only)", async () => {

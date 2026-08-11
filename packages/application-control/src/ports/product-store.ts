@@ -141,9 +141,16 @@ export interface ReleaseStore {
         capabilities?: ReadonlyArray<{
           kind: "dataset" | "harness" | "judge" | "rubric" | "model";
           id: string;
-          // The generation read before the contracts resolved. `null` = the name had no generation row yet,
-          // which the fence holds as "still none" — a first mutation creates one.
-          generation: number | null;
+          // TWO independent counters, carried apart (arch-review 24 P0-2). Owner-first resolution means either
+          // namespace can change what a name answers, and they advance on their own clocks — so reducing them
+          // to one number (a MAX) is not a fencing token, it is a PROJECTION. With `_shared` at 100 and the
+          // tenant at 3, a local mutation to 4 leaves the maximum at 100 and the guard sees a world that did
+          // not move — precisely the shadow this fence exists for.
+          //
+          // `null` = that namespace had no row when the decision read it, which the fence holds as "still
+          // none": a first mutation creates one, and its appearance is the change.
+          tenantGeneration: number | null;
+          sharedGeneration: number | null;
         }>;
         // The workspace SETTINGS revision the contracts resolved under (mig 0164). The default judge model
         // is part of a series' contract identity — an identical judge list judged by a different model is a
@@ -167,7 +174,7 @@ export interface CapabilityGenerationStore {
   read(
     tenant: string,
     refs: ReadonlyArray<{ kind: string; id: string }>,
-  ): Promise<Array<{ kind: string; id: string; generation: number | null }>>;
+  ): Promise<Array<{ kind: string; id: string; tenantGeneration: number | null; sharedGeneration: number | null }>>;
 }
 
 export interface ProductVersionListFilter {

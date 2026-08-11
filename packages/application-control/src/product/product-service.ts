@@ -669,7 +669,8 @@ export class ProductService {
                   capabilities: generations.map((g) => ({
                     kind: g.kind as "dataset" | "harness" | "judge" | "rubric" | "model",
                     id: g.id,
-                    generation: g.generation,
+                    tenantGeneration: g.tenantGeneration,
+                    sharedGeneration: g.sharedGeneration,
                   })),
                 }
               : {}),
@@ -1008,7 +1009,8 @@ export class ProductService {
       capabilities?: ReadonlyArray<{
         kind: "dataset" | "harness" | "judge" | "rubric" | "model";
         id: string;
-        generation: number | null;
+        tenantGeneration: number | null;
+        sharedGeneration: number | null;
       }>;
     },
   ): Promise<ReleaseRecord> {

@@ -112,7 +112,13 @@ describe("loadRubricDir", () => {
 // Fake SqlClient — mimics the tenant-aware everdict_rubrics (incl. tags[version tags]).
 function fakePg(): SqlClient {
   const rows: Array<{ tenant: string; id: string; version: string; rubric: unknown; tags: unknown }> = [];
-  const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  // A registry mutation now rides inside a data-modifying CTE together with its capability-generation bump, so
+  // the two commit as ONE statement (arch-review 24 P0-1). This double matches on the mutation half; the fence
+  // half is Postgres bookkeeping it does not model.
+  const norm = (t: string) => {
+    const flat = t.replace(/\s+/g, " ").trim();
+    return /^WITH mutation AS \((.+?)\), fence AS \(/.exec(flat)?.[1] ?? flat;
+  };
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);

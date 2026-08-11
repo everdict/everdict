@@ -137,7 +137,13 @@ interface FakeRow {
 }
 function fakePg(): SqlClient {
   const rows: FakeRow[] = [];
-  const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  // A registry mutation now rides inside a data-modifying CTE together with its capability-generation bump, so
+  // the two commit as ONE statement (arch-review 24 P0-1). This double matches on the mutation half; the fence
+  // half is Postgres bookkeeping it does not model.
+  const norm = (t: string) => {
+    const flat = t.replace(/\s+/g, " ").trim();
+    return /^WITH mutation AS \((.+?)\), fence AS \(/.exec(flat)?.[1] ?? flat;
+  };
   const live = (x: FakeRow) => x.deleted_at === null;
   // Deterministic created_at — incremented 1 second per INSERT (for verifying creation/update time order).
   const base = 1_700_000_000_000;

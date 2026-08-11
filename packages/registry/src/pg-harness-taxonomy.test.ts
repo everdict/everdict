@@ -23,7 +23,13 @@ function fakePg(): SqlClient {
     }
     return a;
   };
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  // A registry mutation now rides inside a data-modifying CTE together with its capability-generation bump, so
+  // the two commit as ONE statement (arch-review 24 P0-1). This double matches on the mutation half; the fence
+  // half is Postgres bookkeeping it does not model.
+  const norm = (s: string) => {
+    const flat = s.replace(/\s+/g, " ").trim();
+    return /^WITH mutation AS \((.+?)\), fence AS \(/.exec(flat)?.[1] ?? flat;
+  };
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
