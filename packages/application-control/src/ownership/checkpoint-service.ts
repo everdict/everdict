@@ -335,6 +335,14 @@ export class CheckpointService {
             return { type: ref.type, id: ref.id, identity: pin.identity };
           });
     const evidencePins = planned?.filter((entry) => entry.identity !== undefined) ?? [];
+    // A RESOLVER WIRED TODAY IS NOT AN INVARIANT OWNED (arch-review 27 P1). `evidencePins` is an optional
+    // dependency, and without it `planned` is undefined — no identities, no unpinned entries, and nothing in
+    // `gaps` to say so. A deployment that simply forgot to wire the resolver could mint `verified` over
+    // evidence whose version nobody recorded, and every artifact around that verdict would look complete.
+    //
+    // This service is the last authority before "verified" is written down, so it states its own
+    // preconditions rather than trusting the composition that happens to be assembled today.
+    const unpinnableKinds = pinnable.length > 0 && pins === undefined;
 
     // THE CLAIM — assembled here, carried there (arch-review 24 P0-3). The question below refers to "the
     // checkpoint's confirmed facts"; until this existed, those facts never left this process, so the verifier
@@ -460,6 +468,19 @@ export class CheckpointService {
     // …and evidence whose VERSION nobody could state (arch-review 25 P0-3). The verdict may still be filed —
     // it happened — but it cannot be affirmative: nobody reading it later can put the same artifact in front
     // of a second verifier, which is the whole content of "this was verified".
+    if (unpinnableKinds)
+      gaps.push(
+        `this deployment cannot pin the version of ${pinnable.map((r) => `${r.type}:${r.id}`).join(", ")}, so nothing records WHICH artifact the verifier read`,
+      );
+    // …and the same for the instrument. A verdict whose executor nobody can name is not reproducible either,
+    // and `executionProfile` was optional on the port precisely because the runner that reports it is the one
+    // wired today.
+    if (verdict.executionProfile === undefined)
+      gaps.push("the runner did not report which model produced this verdict, so its executor is unknown");
+    else if (verdict.executionProfile.closure !== "primary_only")
+      gaps.push(
+        `the verifier ran with an extended model ladder (${verdict.executionProfile.closure}), so the verdict's authority is not the single platform document it names`,
+      );
     const unpinned = (evidenceIdentity ?? []).filter((e) => e.unpinnable === true);
     if (unpinned.length > 0)
       gaps.push(

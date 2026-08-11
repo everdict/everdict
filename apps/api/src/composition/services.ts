@@ -31,6 +31,7 @@ import type {
   WorkspaceSettingsStore,
 } from "@everdict/db";
 import type { EvidenceIdentity } from "@everdict/domain";
+import { contentDigest } from "@everdict/domain";
 import type { CircuitBreaker } from "@everdict/domain";
 import type {
   BenchmarkRegistry,
@@ -336,7 +337,14 @@ export function buildCheckpoint(deps: {
           pinned.push({
             type: ref.type,
             id: ref.id,
-            identity: { kind: "run", updatedAt: record.updatedAt, status: record.status },
+            // The RESULT is the artifact a verifier reads a run for; the stamp rides along as a second signal
+            // (a timestamp alone is a mutation stamp, not an identity — arch-review 27 P1).
+            identity: {
+              kind: "run",
+              ...(record.result !== undefined ? { resultDigest: contentDigest(record.result) } : {}),
+              updatedAt: record.updatedAt,
+              status: record.status,
+            },
           });
           continue;
         }
@@ -344,18 +352,26 @@ export function buildCheckpoint(deps: {
           // The attributed revision the workspace filesystem publishes on every write — this platform's own
           // mutation counter for exactly this question.
           const entry = await deps.workspaceFs.stat(tenant, ref.id).catch(() => undefined);
-          if (entry === undefined) continue;
-          pinned.push({
-            type: ref.type,
-            id: ref.id,
-            identity: { kind: "file", ...(entry.revision !== undefined ? { revision: entry.revision } : {}) },
-          });
+          // No revision = nothing to pin. Recorded as unpinnable rather than as an identity that would
+          // compare equal to every other file.
+          if (entry?.revision === undefined) continue;
+          pinned.push({ type: ref.type, id: ref.id, identity: { kind: "file", revision: entry.revision } });
           continue;
         }
         if (ref.type === "issue" && deps.issueStore) {
           const record = await deps.issueStore.get(tenant, ref.id).catch(() => undefined);
           if (record === undefined) continue;
-          pinned.push({ type: ref.type, id: ref.id, identity: { kind: "issue", updatedAt: record.updatedAt } });
+          pinned.push({
+            type: ref.type,
+            id: ref.id,
+            // `history[]` is the durable per-record log every write appends to — the monotone counter the
+            // timestamp was standing in for.
+            identity: {
+              kind: "issue",
+              ...(Array.isArray(record.history) ? { revision: record.history.length } : {}),
+              updatedAt: record.updatedAt,
+            },
+          });
         }
       }
       return pinned;

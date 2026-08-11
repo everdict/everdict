@@ -708,7 +708,14 @@ export interface ChatHooks {
   onEvidenceObserved?: (observation: { type: string; id: string; identity?: EvidenceIdentity; moved?: true }) => void;
   // WHICH INSTRUMENT ran this turn — reported so a verdict's record can name the model document that produced
   // it. A procedure digest answers "under what rules"; this answers "by what".
-  onVerifierProfile?: (identity: { modelRef: string; version: string; documentDigest: string } | undefined) => void;
+  onVerifierProfile?: (identity: {
+    modelRef: string;
+    version: string;
+    documentDigest: string;
+    // WHETHER ANY OTHER INSTRUMENT COULD HAVE ANSWERED. `primary_only` = no fallback, no summarizer tier, no
+    // sub-agent model — the verdict came from the named document or from nothing.
+    closure: "primary_only" | "extended";
+  }) => void;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -1215,7 +1222,6 @@ export async function runChat(
     // instrument that judges it, with every prompt-level guarantee still intact.
     const verifierProfile =
       hooks?.contextPolicy === "evidence_only" ? await requireVerifierModel(deps.resolveVerifierModel) : undefined;
-    hooks?.onVerifierProfile?.(verifierProfile?.identity);
     const model =
       verifierProfile ??
       (modelRef && deps.resolveModelById
@@ -1245,12 +1251,25 @@ export async function runChat(
     // Model tiering (both need the by-id resolver). The summariser is LAZY — the cheaper model is only resolved if a
     // compaction actually fires — so a normal turn pays nothing. The fallback is resolved up front (opt-in per
     // workspace) so it's ready the moment the main model starts failing.
-    const byId = deps.resolveModelById;
+    // THE WHOLE LADDER IS THE PLATFORM'S, OR NONE OF IT IS (arch-review 27 P0). Pinning the primary model to
+    // the platform namespace closed the front door and left three side doors open: the fallback, the
+    // summarizer and the sub-agent tier all resolved through the ORDINARY owner-first resolver, so a
+    // workspace registering `verifier-fallback` under its own namespace chose the model that would produce
+    // the verdict the moment the primary hiccuped — while `executionProfile` went on naming the platform
+    // model resolved before the loop began.
+    //
+    // Primary authority fixed is not execution closure fixed. Under `evidence_only` there is no ladder: no
+    // fallback (a transient failure ends the turn, and an inconclusive verification is a real answer), no
+    // small-model summarizer, no sub-agent tier, and no workspace-crafted sub-agent TYPES — those inject
+    // their instructions into the same system message the constitution lives in, which is the profile door
+    // this policy already closed once at the top level.
+    const evidenceOnly = hooks?.contextPolicy === "evidence_only";
+    const byId = evidenceOnly ? undefined : deps.resolveModelById;
     // Tier precedence: the resolved model's OWN companions first (the workspace's catalog decision — the model
     // spec is where a workspace tunes the agent it powers), then the deployment AGENT_*_MODEL defaults.
-    const smallRef = model.companions?.small ?? deps.smallModelRef;
-    const fallbackRef = model.companions?.fallback ?? deps.fallbackModelRef;
-    const subagentRef = model.companions?.subagent ?? deps.subagentModelRef;
+    const smallRef = evidenceOnly ? undefined : (model.companions?.small ?? deps.smallModelRef);
+    const fallbackRef = evidenceOnly ? undefined : (model.companions?.fallback ?? deps.fallbackModelRef);
+    const subagentRef = evidenceOnly ? undefined : (model.companions?.subagent ?? deps.subagentModelRef);
     // A tier that fails to resolve degrades to "no tier", never a dead conversation: a companion ref is ordinary
     // workspace catalog data (a member can delete the model it points at), and a missing fallback/subagent tier
     // only loses an optimization — failing every turn over it would punish the wrong party.
@@ -1278,10 +1297,22 @@ export async function runChat(
         : undefined;
     const fallback = await resolveTier(fallbackRef, "fallback");
     const subagentModel = await resolveTier(subagentRef, "subagent");
+    // Reported HERE, not where the primary was resolved: what a verdict's record has to be able to answer is
+    // "which instruments could have produced this", and that is only known once the ladder is. `primary_only`
+    // is a claim about the whole closure — if a tier ever comes back for verifications, this literal is what
+    // stops the record from going on asserting there was none.
+    if (verifierProfile)
+      hooks?.onVerifierProfile?.({
+        ...verifierProfile.identity,
+        closure:
+          fallback === undefined && subagentModel === undefined && summarize === undefined
+            ? "primary_only"
+            : "extended",
+      });
 
     // Spawnable sub-agent types: the builtins + the workspace's crafted agents (name collisions keep the
     // builtin — explore/analyze/verify are the stable vocabulary the base prompt teaches). Best-effort.
-    const crafted = deps.listSubagentTypes ? await deps.listSubagentTypes(principal) : [];
+    const crafted = deps.listSubagentTypes && !evidenceOnly ? await deps.listSubagentTypes(principal) : [];
     const builtinNames = new Set(BUILTIN_SUBAGENT_TYPES.map((t) => t.name));
     const subagentTypes = [...BUILTIN_SUBAGENT_TYPES, ...crafted.filter((t) => !builtinNames.has(t.name))];
 

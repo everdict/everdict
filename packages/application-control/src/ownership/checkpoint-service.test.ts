@@ -286,6 +286,15 @@ describe("verification — a spawned verdict is checked for independence and FIL
     reviewed?: Array<{ type: string; id: string }>;
     claimDigest?: string; // what the runner says it RENDERED — differing from what was sent is its own test
     policyDigest?: string; // …and the same for the decision procedure
+    // WHICH instrument the runner says produced the verdict — absent or `extended` is its own test.
+    // `null` = the runner reported none, which is its own refusal.
+    executionProfile?: {
+      modelRef: string;
+      version: string;
+      documentDigest: string;
+      closure: "primary_only" | "extended";
+    } | null;
+    unwired?: true; // this deployment has no pin resolver at all
     readerOverride?: string; // which tool the runtime reports doing the reading
     evidencePins?: CheckpointServiceDeps["evidencePins"]; // which VERSION the plan resolved
     // …and which one the READ observed. Absent = the double saw exactly what it was pinned to.
@@ -313,7 +322,24 @@ describe("verification — a spawned verdict is checked for independence and FIL
     const svc = new CheckpointService({
       store,
       resolvers: {},
-      ...(opts.evidencePins ? { evidencePins: opts.evidencePins } : {}),
+      // A wired deployment: every pinnable ref gets an identity. `evidencePins` is optional on the SERVICE,
+      // and the scenario for a deployment that never wired it is separate — the point being that the absence
+      // is a refusal, not a quiet affirmative.
+      ...(opts.unwired === true
+        ? {}
+        : {
+            evidencePins:
+              opts.evidencePins ??
+              (async (_t: string, refs: ReadonlyArray<{ type: string; id: string }>) =>
+                refs.map((r) => ({
+                  type: r.type,
+                  id: r.id,
+                  identity:
+                    r.type === "run"
+                      ? ({ kind: "run", updatedAt: "2026-08-08T00:00:00.000Z", status: "succeeded" } as const)
+                      : ({ kind: "scorecard", scoringRevision: 1, scorePlaneDigest: "sha256:p1" } as const),
+                }))),
+          }),
       ...(opts.executor ? { runActor: async () => opts.executor } : {}),
       ...(opts.verifications ? { verifications: opts.verifications } : {}),
       verifier: {
@@ -339,6 +365,18 @@ describe("verification — a spawned verdict is checked for independence and FIL
             // default double observes exactly what it was pinned to, and the scenarios below vary it.
             observedEvidence:
               opts.observedEvidence ?? (input.evidencePins ?? []).map((p) => ({ ...p, identity: p.identity })),
+            // WHICH INSTRUMENT answered — and that nothing else could have. A verdict whose executor nobody
+            // can name is not reproducible, so the service refuses to make it affirmative.
+            ...(opts.executionProfile === null
+              ? {}
+              : {
+                  executionProfile: opts.executionProfile ?? {
+                    modelRef: "trusted-verifier",
+                    version: "1.0.0",
+                    documentDigest: "sha256:verifier",
+                    closure: "primary_only" as const,
+                  },
+                }),
           };
         },
       },
@@ -428,6 +466,46 @@ describe("verification — a spawned verdict is checked for independence and FIL
     // inconclusive here for an unrelated reason — a scorecard-only checkpoint resolves no executor, so
     // independence abstains. Asserting the identity is what this scenario is about.)
     expect(decision.detail).not.toContain("the version of");
+  });
+
+  // arch-review 27 P1: A RESOLVER WIRED TODAY IS NOT AN INVARIANT OWNED. `evidencePins` is optional on the
+  // service, so a deployment that simply never wired it produced decisions with no identities at all — and
+  // nothing in the gaps said so, which meant full coverage plus independence was enough to mint `verified`
+  // over evidence whose version nobody recorded.
+  it("refuses the affirmative when this deployment cannot pin the evidence at all", async () => {
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      evidencePins: undefined,
+      unwired: true,
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("cannot pin the version of");
+  });
+
+  // …and the same for the instrument: a verdict whose executor nobody can name is not reproducible either.
+  it("refuses the affirmative when the runner names no instrument", async () => {
+    const { svc } = build({ verdictActor: { id: "agent:auditor", runId: "run-99" }, executionProfile: null });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("which model produced this verdict");
+  });
+
+  it("refuses the affirmative when the verifier ran with an EXTENDED model ladder", async () => {
+    // A fallback, a summarizer tier or a sub-agent model means the verdict's authority is not the single
+    // platform document the record names — which is the whole reason the ladder is cut for a verification.
+    const { svc } = build({
+      verdictActor: { id: "agent:auditor", runId: "run-99" },
+      executionProfile: {
+        modelRef: "trusted-verifier",
+        version: "1.0.0",
+        documentDigest: "sha256:verifier",
+        closure: "extended",
+      },
+    });
+    const decision = await svc.requestVerification("acme", "cp-1");
+    expect(decision.verdict).toBe("inconclusive");
+    expect(decision.detail).toContain("extended model ladder");
   });
 
   it("refuses the affirmative when the artifact MOVED between the plan and the read", async () => {
@@ -698,6 +776,12 @@ describe("verification — an affirmative needs full identity AND evidence cover
       },
       resolvers: {},
       runActor: async (_t, runId) => opts.resolvable[runId],
+      evidencePins: async (_t, refs) =>
+        refs.map((r) => ({
+          type: r.type,
+          id: r.id,
+          identity: { kind: "run", updatedAt: "2026-08-08T00:00:00.000Z", status: "succeeded" } as const,
+        })),
       verifier: {
         async verify(input) {
           return {
@@ -711,6 +795,14 @@ describe("verification — an affirmative needs full identity AND evidence cover
               : {}),
             claimDigest: input.claim.digest,
             policyDigest: input.policy.digest,
+            // The readers observed exactly what they were pinned to — the ordinary case.
+            observedEvidence: (input.evidencePins ?? []).map((p) => ({ ...p, identity: p.identity })),
+            executionProfile: {
+              modelRef: "trusted-verifier",
+              version: "1.0.0",
+              documentDigest: "sha256:verifier",
+              closure: "primary_only" as const,
+            },
           };
         },
       },
@@ -802,6 +894,12 @@ describe("verification — a failed read is not coverage", () => {
             failedResources: [{ type: "run", id: "run-42", tool: "get_run" }],
             claimDigest: input.claim.digest,
             policyDigest: input.policy.digest,
+            executionProfile: {
+              modelRef: "trusted-verifier",
+              version: "1.0.0",
+              documentDigest: "sha256:verifier",
+              closure: "primary_only" as const,
+            },
           };
         },
       },

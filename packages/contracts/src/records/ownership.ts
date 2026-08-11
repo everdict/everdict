@@ -269,9 +269,18 @@ export const VerificationDecisionSchema = z.object({
               scoringRevision: z.number().int().nonnegative().optional(),
               scorePlaneDigest: z.string().optional(),
             }),
-            z.object({ kind: z.literal("run"), updatedAt: z.string().optional(), status: z.string().optional() }),
-            z.object({ kind: z.literal("file"), revision: z.number().int().positive().optional() }),
-            z.object({ kind: z.literal("issue"), updatedAt: z.string().optional() }),
+            z.object({
+              kind: z.literal("run"),
+              resultDigest: z.string().optional(),
+              updatedAt: z.string().optional(),
+              status: z.string().optional(),
+            }),
+            z.object({ kind: z.literal("file"), revision: z.number().int().positive() }),
+            z.object({
+              kind: z.literal("issue"),
+              revision: z.number().int().nonnegative().optional(),
+              updatedAt: z.string().optional(),
+            }),
           ])
           .optional(),
         // No identity could be established for this ref — either the platform cannot pin that kind at all
@@ -313,6 +322,12 @@ export const VerificationDecisionSchema = z.object({
       modelRef: z.string().min(1),
       version: z.string().min(1),
       documentDigest: z.string().min(1),
+      // …and whether anything ELSE could have answered (arch-review 27 P0). Pinning the primary model while a
+      // fallback, a summarizer tier and a sub-agent model still resolved through the workspace's own registry
+      // fixed the front door only: a transient failure on the primary handed the verdict to a document the
+      // verified party chose, under a record that went on naming the platform's. `primary_only` is the
+      // closure a verification runs under.
+      closure: z.enum(["primary_only", "extended"]),
     })
     .optional(),
   // WHAT WAS CLAIMED, and the digest of the text the verifier was actually shown (arch-review 24 P0-3). A

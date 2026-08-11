@@ -1369,9 +1369,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
               scoringRevision: z.number().int().nonnegative().optional(),
               scorePlaneDigest: z.string().optional(),
             }),
-            z.object({ kind: z.literal("run"), updatedAt: z.string().optional(), status: z.string().optional() }),
-            z.object({ kind: z.literal("file"), revision: z.number().int().positive().optional() }),
-            z.object({ kind: z.literal("issue"), updatedAt: z.string().optional() }),
+            z.object({
+              kind: z.literal("run"),
+              resultDigest: z.string().optional(),
+              updatedAt: z.string().optional(),
+              status: z.string().optional(),
+            }),
+            z.object({ kind: z.literal("file"), revision: z.number().int().positive() }),
+            z.object({
+              kind: z.literal("issue"),
+              revision: z.number().int().nonnegative().optional(),
+              updatedAt: z.string().optional(),
+            }),
           ]),
         }),
       )

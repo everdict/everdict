@@ -51,7 +51,15 @@ export interface VerifierVerdict {
   // WHICH INSTRUMENT applied the policy (arch-review 26 P1). Rules without an executor identity answer "under
   // what constitution" and leave "by what" unanswerable — and this platform treats procedure identity as part
   // of what a verdict means everywhere else.
-  executionProfile?: { modelRef: string; version: string; documentDigest: string };
+  executionProfile?: {
+    modelRef: string;
+    version: string;
+    documentDigest: string;
+    // Whether any OTHER instrument could have answered — a fallback model, a summarizer tier, a sub-agent
+    // model. `primary_only` is the closure a verification runs under; `extended` would mean the verdict's
+    // authority is not the single document named above.
+    closure: "primary_only" | "extended";
+  };
 }
 
 // Spawns an agent to VERIFY someone else's work, inside the envelope it is handed

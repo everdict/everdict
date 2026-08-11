@@ -65,7 +65,12 @@ export interface VerificationTurnResult {
   observedEvidence: Array<{ type: string; id: string; identity?: EvidenceIdentity; moved?: true }>;
   // WHICH INSTRUMENT produced the verdict (arch-review 26 P1) — the platform model document, by exact version
   // and digest. A decision that names its rules but not what applied them cannot be re-taken.
-  executionProfile?: { modelRef: string; version: string; documentDigest: string };
+  executionProfile?: {
+    modelRef: string;
+    version: string;
+    documentDigest: string;
+    closure: "primary_only" | "extended";
+  };
   // …and the digest of the POLICY text it rendered, recomputed here from what arrived. Same reason as the
   // claim echo: the caller must be able to refuse a verdict reached under some other constitution.
   policyDigest: string;
@@ -131,7 +136,9 @@ export async function runVerificationTurn(
     ["read"],
     `verify:${input.envelope.id}`,
   );
-  let executionProfile: { modelRef: string; version: string; documentDigest: string } | undefined;
+  let executionProfile:
+    | { modelRef: string; version: string; documentDigest: string; closure: "primary_only" | "extended" }
+    | undefined;
   const observedEvidence = new Map<string, { type: string; id: string; identity?: EvidenceIdentity; moved?: true }>();
   const reviewed = new Map<string, { type: string; id: string; tool: string }>();
   const failed = new Map<string, { type: string; id: string; tool: string }>();

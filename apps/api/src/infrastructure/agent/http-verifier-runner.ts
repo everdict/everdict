@@ -56,7 +56,12 @@ export function httpVerifierRunner(deps: { agentUrl: string; internalToken: stri
         claimDigest?: string;
         policyDigest?: string;
         observedEvidence?: Array<{ type: string; id: string; identity?: EvidenceIdentity; moved?: true }>;
-        executionProfile?: { modelRef: string; version: string; documentDigest: string };
+        executionProfile?: {
+          modelRef: string;
+          version: string;
+          documentDigest: string;
+          closure: "primary_only" | "extended";
+        };
       };
       return {
         verdict: body.verdict,

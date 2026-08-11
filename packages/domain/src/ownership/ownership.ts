@@ -452,13 +452,18 @@ export type EvidenceIdentity =
   // already conditions on. Absent on both = "this row has had no scoring pass", which is itself an identity.
   | { kind: "scorecard"; scoringRevision?: number; scorePlaneDigest?: string }
   // A run settles once, and its RESULT does not: a scoring pass rewrites the judgments inside that result in
-  // place. `updatedAt` moves on every such write, and `status` is the settlement it moves within.
-  | { kind: "run"; updatedAt?: string; status?: string }
+  // place. `resultDigest` is the artifact itself — A MUTATION STAMP IS NOT AN EVIDENCE IDENTITY (arch-review
+  // 27 P1), and an application-clock ISO timestamp is a stamp: two writes inside one millisecond, or two
+  // replicas whose clocks overlap, give different bytes the same coordinate. The stamp rides along as a cheap
+  // second signal; the digest is what makes this an identity.
+  | { kind: "run"; resultDigest?: string; updatedAt?: string; status?: string }
   // The workspace filesystem publishes a revision per write (the attributed ledger). It is the mutation
-  // counter this platform already maintains for exactly this question.
-  | { kind: "file"; revision?: number }
-  // A tracker record has no revision column; `updatedAt` is what every write stamps.
-  | { kind: "issue"; updatedAt?: string };
+  // counter this platform already maintains for exactly this question — and REQUIRED here: an entry without
+  // one cannot be told apart from any other, so `{kind:"file"}` alone compared equal to every file.
+  | { kind: "file"; revision: number }
+  // A tracker record has no revision column, but it has a durable per-record `history[]` that every write
+  // appends to — the monotone counter the timestamp was standing in for.
+  | { kind: "issue"; revision?: number; updatedAt?: string };
 
 // WHICH EVIDENCE KINDS HAVE AN IDENTITY TO PIN. A kind absent here is honestly unpinnable — a `commit` on a
 // git host everdict does not run, a `trace` on someone else's platform — and a verdict resting on one cannot
@@ -474,12 +479,21 @@ export function observedEvidenceIdentity(type: string, document: unknown): Evide
   if (type === "run")
     return {
       kind: "run",
+      // The result IS the evidence a verifier reads a run for. Absent (a run that has not settled) is itself
+      // an identity: a result appearing is the change this comparison exists to catch.
+      ...(doc.result !== undefined ? { resultDigest: contentDigest(doc.result) } : {}),
       ...(typeof doc.updatedAt === "string" ? { updatedAt: doc.updatedAt } : {}),
       ...(typeof doc.status === "string" ? { status: doc.status } : {}),
     };
-  if (type === "file") return { kind: "file", ...(typeof doc.revision === "number" ? { revision: doc.revision } : {}) };
+  // A file with no revision cannot be pinned — `undefined`, never an identity that compares equal to every
+  // other file.
+  if (type === "file") return typeof doc.revision === "number" ? { kind: "file", revision: doc.revision } : undefined;
   if (type === "issue")
-    return { kind: "issue", ...(typeof doc.updatedAt === "string" ? { updatedAt: doc.updatedAt } : {}) };
+    return {
+      kind: "issue",
+      ...(Array.isArray(doc.history) ? { revision: doc.history.length } : {}),
+      ...(typeof doc.updatedAt === "string" ? { updatedAt: doc.updatedAt } : {}),
+    };
   return undefined;
 }
 
@@ -511,8 +525,13 @@ export function evidenceIdentityHolds(expected: EvidenceIdentity, observed: Evid
       expected.scoringRevision === observed.scoringRevision && expected.scorePlaneDigest === observed.scorePlaneDigest
     );
   if (expected.kind === "run" && observed.kind === "run")
-    return expected.updatedAt === observed.updatedAt && expected.status === observed.status;
+    return (
+      expected.resultDigest === observed.resultDigest &&
+      expected.updatedAt === observed.updatedAt &&
+      expected.status === observed.status
+    );
   if (expected.kind === "file" && observed.kind === "file") return expected.revision === observed.revision;
-  if (expected.kind === "issue" && observed.kind === "issue") return expected.updatedAt === observed.updatedAt;
+  if (expected.kind === "issue" && observed.kind === "issue")
+    return expected.revision === observed.revision && expected.updatedAt === observed.updatedAt;
   return false;
 }
