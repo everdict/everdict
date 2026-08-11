@@ -167,6 +167,12 @@ half the other missed, and both looked handled.
 
 | TRUST-132 | **The verification wire refuses an envelope that is not a verification**: `/internal/verify` took the envelope as an opaque record and cast it into the turn, so writes-empty / evidence-only reads / pinned resources held only because the CALLER held them. Any other caller reaching an internal endpoint could hand over `reads: "all"` with no resources and get a run every layer above would still call a verification. The boundary now reads the boundary object | `apps/agent/src/verify-wire.trust.test.ts` |
 
+| TRUST-133 | **A grader that hangs settles as a FACT, inside the case's own budget**: `safeGrade` turned a grader that THREW into a visible unmeasured score and had no vocabulary for one that never returns — the await sat there, the case never settled, and the batch waiting on it stopped without recording why. A failure that becomes nothing at all is worse than one that becomes a wrong number, because nothing is what a green dashboard looks like. The deadline is the case's own declared `timeoutSec`, not a constant this layer invents, so a legitimately slow judge is not turned into a failure. Real clock | `packages/application-execution/src/grader-liveness.trust.test.ts` |
+
+| TRUST-134 | **The loop's own refusals, certified where they happen**: an out-of-scope capability is refused MID-TURN with the refusal delivered to the model, the in-scope sibling call in the same batch still runs, and the turn reaches its own end — a boundary that killed the run would make replanning impossible, which is what the envelope's `refuse_and_replan` vocabulary promises. And a benign-NAMED read tool whose author declared external egress still asks in auto mode, while a plain read stays ungated: risk is read off the declaration, never off the spelling | `packages/agent-runtime/src/kernel/loop-refusal.trust.test.ts` |
+
+| TRUST-135 | **First terminal write wins, proved as a RACE**: `settleChild` carried that sentence in a comment and implemented read-check-write, so a user's cancel and a case drain landing from a worker both read a running child, both wrote, and the LAST one won — the ledger then said a cancelled batch's child succeeded. Two OS processes, two connections, one wall-clock instant: exactly one commits and the row agrees with it. Which side wins is not the claim; a scenario asserting a particular winner would be asserting the scheduler | `apps/api/src/trust/settle-race.trust.test.ts` |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
@@ -320,15 +326,22 @@ process-kill scenario that quietly degrades into an in-process one certifies not
   remaining scenarios below should reuse.
 - **Temporal worker kill and replay.** `scripts/live/orchestration-torture.mjs` and
   `scripts/live/chaos-orchestration.mjs` already drive real Temporal failure injection by hand. Wiring them
-  in needs a Temporal service in the workflow; until then they stay manual.
-- **A grader that hangs rather than throws.** Timeout handling under a real clock, not a fake one.
-- **Cancel racing completion, and a duplicate case result.** Both are settlement races. They are honest Tier
-  A candidates, but proving a *race* rather than a *sequence* needs two processes contending, which is the
-  same infrastructure the first item needs.
-- **The agent loop's own refusals.** TRUST-10 certifies the envelope at the CONTROL PLANE — the admission
-  gate every lane that takes compute must pass. Two loop-level claims are not yet certified anywhere in this
-  suite: that an out-of-scope capability is refused mid-turn while the run continues, and that a benign-named
-  capability declaring external, non-idempotent effects still prompts in auto mode. Both need the agent
-  runtime driven against a faked transport, which is a different harness from everything above; they belong
-  in `apps/api/src/trust/` when that harness exists. Until then they are covered by unit tests only, which
-  is a weaker claim than the rest of this page makes.
+  in needs a Temporal service in the workflow; until then they stay manual. This is the last Tier B item.
+- ~~**A grader that hangs rather than throws.**~~ Done — TRUST-133, against a real clock. Finding one:
+  `safeGrade` had no deadline at all, so the scenario came with the fix rather than after it.
+- ~~**Cancel racing completion.**~~ Done — TRUST-135 spawns two OS processes contending over one run through
+  the built stores. Finding one: `settleChild` was read-check-write, so "first terminal write wins" was a
+  comment rather than a condition, and the guard (`expectNonTerminal`) is now evaluated by Postgres.
+  A duplicate case RESULT is the same shape and is covered by that guard; if a distinct failure mode for it
+  turns up, it lands as its own scenario rather than being assumed away here.
+- ~~**The agent loop's own refusals.**~~ Done — TRUST-134 drives the real loop against a faked transport, the
+  harness this item was waiting for (`apps/agent`'s verification turn built it).
+
+## Producing the contract step's evidence
+
+`stagePromotionReadiness` answers `observed: 0, ready: false` until passes have actually recorded a
+stage/live-plane comparison, which is the honest state of a migration nobody has measured.
+`scripts/live/rescore-soak.mjs` is what measures it: it re-scores real batches over the control plane's own
+HTTP surface (pinned judges, never `latest`) and prints the delta in observations, so every data point is one
+a real pass wrote. It manufactures nothing — a fabricated observation would certify the promotion against
+evidence the promotion is not about.
