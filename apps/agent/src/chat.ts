@@ -649,6 +649,19 @@ export interface ChatHooks {
   // …and its SCOPE is optional, not absent: an ordinary activation lets the turn complete it from the
   // resolved toolset, while a role-bound task (a verifier) arrives with the scope that IS its guarantee.
   envelope?: Omit<TaskEnvelope, "scope"> & { scope?: TaskEnvelope["scope"] };
+  // WHAT THE RUNTIME OBSERVED THIS TURN READING, per admitted object, with the call's OUTCOME. The kernel has
+  // reported this since the resource guard existed and nothing consumed it — which left the verifier's
+  // `reviewedResources` with no producer, and therefore no verdict able to claim it had looked INSIDE its
+  // evidence. The resource scope proves a task could not read outside the evidence; this is the other half.
+  //
+  // Reported AFTER the call, so `success` means consumed rather than addressed: a verifier that reached for
+  // all three of its refs and got a 404 on each would otherwise report full coverage — an affirmative built
+  // on three failures.
+  onResourceAccess?: (access: {
+    target: { type: string; id: string };
+    tool: string;
+    outcome: "success" | "error";
+  }) => void;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -1237,6 +1250,7 @@ export async function runChat(
               })(),
             }
           : {}),
+        ...(hooks?.onResourceAccess ? { onResourceAccess: hooks.onResourceAccess } : {}),
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
         ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
         ...(hooks?.onInterruptReady ? { onInterruptReady: hooks.onInterruptReady } : {}),

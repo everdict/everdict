@@ -1716,6 +1716,61 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     expect(msgs.some((m) => typeof m.content === "string" && m.content.includes("out_of_scope"))).toBe(true);
   });
 
+  // arch-review 23: the OTHER half of the guarantee. The scope proves a task could not read outside the
+  // evidence; `onResourceAccess` is what proves it read INSIDE — and it reports the call's OUTCOME, because a
+  // verifier that addressed all three of its refs and got a 404 on each would otherwise report full coverage,
+  // an affirmative built on three failures. Attempted and consumed are different facts.
+  it("reports what was CONSUMED, not what was addressed — a failed read is not coverage", async () => {
+    const getRun: ToolDefinition = {
+      name: "get_run",
+      description: "read a run",
+      parametersJsonSchema: { type: "object", properties: { id: { type: "string" } } },
+      isReadOnly: true,
+      resourceTargets: (input) => {
+        const id = (input as { id?: unknown }).id;
+        return typeof id === "string" ? { kind: "targets", values: [{ type: "run", id }] } : { kind: "indeterminate" };
+      },
+      // run-42 answers; run-99 is in scope and 404s — the difference the observation has to carry.
+      call: async (input) =>
+        (input as { id: string }).id === "run-42"
+          ? { content: "ok", isError: false }
+          : { content: "not found", isError: true },
+    };
+    const scoped = {
+      ...envelope,
+      scope: {
+        reads: ["get_run"],
+        writes: [],
+        forbidden: [],
+        resources: [
+          { type: "run", id: "run-42" },
+          { type: "run", id: "run-99" },
+        ],
+      },
+    };
+    const observed: Array<{ id: string; outcome: string }> = [];
+    const { transport } = fakeTransport([
+      toolCallsResult([
+        { id: "c1", name: "get_run", args: '{"id":"run-42"}' },
+        { id: "c2", name: "get_run", args: '{"id":"run-99"}' },
+      ]),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([getRun]),
+      envelope: scoped,
+      onResourceAccess: (access) => observed.push({ id: access.target.id, outcome: access.outcome }),
+    });
+    expect(observed).toEqual([
+      { id: "run-42", outcome: "success" },
+      { id: "run-99", outcome: "error" },
+    ]);
+  });
+
   it("an OBJECT-scoped envelope refuses a granted tool that never declared what it touches", async () => {
     // Fail-closed, deliberately. The guarantee is "this and nothing else"; a tool whose resource semantics
     // nobody stated is one we cannot make that claim about, so it is refused rather than waved through.
