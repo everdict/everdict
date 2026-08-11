@@ -4,8 +4,35 @@ import { Context } from "@temporalio/activity";
 import { Agent, fetch as undiciFetch } from "undici";
 import type { Activities } from "./types.js";
 
-// Far enough inside the heartbeat timeout the workflow declares that one missed beat is not a false death.
+// Far enough inside the heartbeat timeout the workflows declare that one missed beat is not a false death.
 const HEARTBEAT_INTERVAL_MS = 10_000;
+
+// EVERY LONG-RUNNING ACTIVITY BEATS (arch-review 27 P1). Without a heartbeat, an activity's
+// `startToCloseTimeout` is also how long Temporal waits before it will admit the WORKER died — so a case
+// declared "up to an hour" because a Nomad alloc plus an agent run genuinely takes that long ALSO had an hour
+// of detection latency when the machine hosting it disappeared. Durability held; "eventually" was doing a
+// great deal of work in the sentence.
+//
+// It is a wrapper rather than a line inside one activity because the first fix was exactly that, and it left
+// the batch seam — the path production actually drives — with the old hour. A property that has to be
+// remembered per activity is one that will be missing from the next one.
+//
+// Best-effort by construction: a heartbeat that throws (no activity context on the in-process path, a
+// cancelled activity) must never be the reason a case fails.
+async function withHeartbeat<T>(run: () => Promise<T>): Promise<T> {
+  const beat = setInterval(() => {
+    try {
+      Context.current().heartbeat();
+    } catch {
+      // not running inside an activity context — the direct/in-process path
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  try {
+    return await run();
+  } finally {
+    clearInterval(beat);
+  }
+}
 
 // The current activity attempt, when running inside one. Outside an activity (unit paths, the in-process
 // scoring fallback) there is no attempt to speak of — the caller then behaves as it always did.
@@ -41,28 +68,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
   const agent = schedule ? new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs }) : undefined;
   const fetch: typeof undiciFetch = (url, init) => undiciFetch(url, { ...init, dispatcher: agent });
   return {
-    // HEARTBEAT WHILE THE CASE RUNS (arch-review 26, found by TRUST-140). A dispatch can legitimately take an
-    // hour — a Nomad alloc plus a long agent run — so `startToCloseTimeout` is an hour, and without a
-    // heartbeat that timeout is also how long Temporal waits before it will admit the WORKER died. A machine
-    // lost mid-dispatch left its case silent for up to an hour, on a platform whose claim is that a workflow
-    // survives the process running it: it does, and "eventually" was doing a great deal of work in that
-    // sentence. Beating every 10s makes a dead worker detectable in tens of seconds, and costs one RPC.
-    async dispatchCase(job: CaseJob): Promise<CaseResult> {
-      const beat = setInterval(() => {
-        // Best-effort by construction: a heartbeat that throws (no activity context in a direct call, a
-        // cancelled activity) must never be the reason a case fails.
-        try {
-          Context.current().heartbeat();
-        } catch {
-          // not running inside an activity context — the direct/in-process path
-        }
-      }, HEARTBEAT_INTERVAL_MS);
-      try {
-        return await dispatcher.dispatch(job);
-      } finally {
-        clearInterval(beat);
-      }
-    },
+    dispatchCase: (job: CaseJob): Promise<CaseResult> => withHeartbeat(() => dispatcher.dispatch(job)),
     async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId?: string }> {
       if (!schedule)
         throw new Error("Schedule activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
@@ -125,22 +131,24 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         concurrency: typeof json.concurrency === "number" ? json.concurrency : 4,
       };
     },
-    async runBatchCase(input: {
-      scorecardId: string;
-      caseId: string;
-    }): Promise<{ settled: boolean; skipped?: boolean }> {
-      if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
-      const res = await fetch(
-        `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/case`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-          body: JSON.stringify({ caseId: input.caseId }),
-        },
-      );
-      if (!res.ok) throw new Error(`Batch case failed: ${res.status} ${await res.text()}`);
-      return (await res.json()) as { settled: boolean; skipped?: boolean };
-    },
+    // The batch seam, and the one production actually drives: this request stays open while the control plane
+    // runs a WHOLE eval case. It beats for the same reason `dispatchCase` does — the hour it is allowed to
+    // take must not also be the hour before anyone notices the worker died (arch-review 27 P1).
+    runBatchCase: (input: { scorecardId: string; caseId: string }): Promise<{ settled: boolean; skipped?: boolean }> =>
+      withHeartbeat(async () => {
+        if (!schedule)
+          throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+        const res = await fetch(
+          `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/case`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+            body: JSON.stringify({ caseId: input.caseId }),
+          },
+        );
+        if (!res.ok) throw new Error(`Batch case failed: ${res.status} ${await res.text()}`);
+        return (await res.json()) as { settled: boolean; skipped?: boolean };
+      }),
     async finalizeBatch(input: { scorecardId: string }): Promise<void> {
       if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
@@ -214,9 +222,12 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       // comes from this context, where the workflow could not read it deterministically anyway.
       const attempt = attemptOf();
       const claim = attempt === undefined ? undefined : { generation: input.generation ?? 0, attempt };
-      const res = await fetch(
-        `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-case`,
-        {
+      // …and it BEATS while the judge runs (arch-review 27 P1). A judging pass over one case is a provider
+      // call this request holds open; the hour it may take must not also be the hour before a dead worker is
+      // noticed. Wrapped inline rather than around the whole activity so the claim above is computed from
+      // THIS attempt's context, which is the identity the fence downstream arbitrates on.
+      const res = await withHeartbeat(() =>
+        fetch(`${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-case`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
           body: JSON.stringify({
@@ -226,7 +237,7 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
             ...(input.passId !== undefined ? { passId: input.passId } : {}),
             ...(claim !== undefined ? { claim } : {}),
           }),
-        },
+        }),
       );
       if (!res.ok) throw new Error(`Score case failed: ${res.status} ${await res.text()}`);
       return (await res.json()) as { scored: boolean; skipped?: boolean };

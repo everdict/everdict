@@ -70,6 +70,11 @@ const MAX_POLLS = 480; // ~4-hour cap (30s × 480) — prevents indefinite waiti
 // the generous activity retry here is for TRANSPORT failures (CP unreachable), not eval semantics.
 const batchActivities = proxyActivities<Activities>({
   startToCloseTimeout: "1 hour",
+  // The same reason `dispatchCase` has one (arch-review 27 P1): this request holds open for a whole eval
+  // case, so without a heartbeat the hour it is allowed to take is also the hour before Temporal will admit
+  // the worker running it is gone. This is the path production drives — fixing only the primitive left the
+  // seam that matters with the old latency.
+  heartbeatTimeout: "1 minute",
   retry: { maximumAttempts: 10, initialInterval: "5s", maximumInterval: "1 minute" },
 });
 

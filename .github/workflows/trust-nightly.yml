@@ -57,9 +57,28 @@ jobs:
             sleep 2
           done
 
+      # Temporal for the durability scenario (TRUST-140). Same reason as MinIO — the dev server is a
+      # subcommand, which `services:` cannot express. `start-dev` is an in-memory single-binary server: no
+      # database of its own, and a real Temporal service as far as a worker is concerned.
+      #
+      # This is not optional garnish. Without it the durability scenario has nothing to run against, and the
+      # suite's own rule is that a scenario which certified nothing is a FAILED certification — so a nightly
+      # missing this line does not silently drop the claim, it fails.
+      - name: Start Temporal
+        run: |
+          docker run -d --name temporal -p 7233:7233 \
+            temporalio/cli:latest server start-dev --ip 0.0.0.0 --namespace default
+          for i in $(seq 1 60); do
+            docker run --rm --network host temporalio/cli:latest operator namespace describe default \
+              --address 127.0.0.1:7233 >/dev/null 2>&1 && break
+            sleep 2
+          done
+
       # The trust suite proper. The runner REFUSES to certify a suite whose scenarios skipped, so a broken
       # database connection fails the job instead of quietly reporting green over an empty run.
       - name: Trust suite
+        env:
+          EVERDICT_TRUST_TEMPORAL: 127.0.0.1:7233
         run: node scripts/trust/trust-suite.mjs
 
       # The pre-existing live scenario test for the workspace filesystem — CI can satisfy its env, so it runs
@@ -75,6 +94,10 @@ jobs:
       - name: MinIO logs on failure
         if: failure()
         run: docker logs minio || true
+
+      - name: Temporal logs on failure
+        if: failure()
+        run: docker logs temporal || true
 
   # OS lane. Windows is the production gap the trust review named: self-hosted runners run on operators'
   # Windows machines, and nothing in CI has ever executed a line of this code there. It lives in the NIGHTLY

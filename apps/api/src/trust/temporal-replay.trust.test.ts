@@ -28,8 +28,8 @@ const WORKER = path.join(ROOT, "scripts/trust/temporal-worker.mjs");
 const WORKFLOWS = path.join(ROOT, "packages/orchestrator/dist/workflows.js");
 const ADDRESS = process.env.EVERDICT_TRUST_TEMPORAL ?? "localhost:7233";
 
-// A missing Temporal SKIPS, exactly as a missing Postgres does — and the runner treats a skipped scenario as
-// a FAILED certification, so the nightly cannot report green without one.
+// Is there a Temporal to certify against? A missing one FAILS this scenario rather than passing quietly —
+// see the throw below for why the obvious early-return was the more dangerous of the two.
 const temporalReachable = async (): Promise<boolean> => {
   try {
     const connection = await Connection.connect({ address: ADDRESS, connectTimeout: 3_000 });
@@ -106,12 +106,18 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-140 — a killed Temporal worker loses
   });
 
   it("a SIGKILLed worker is replaced, the workflow completes, and the result is exactly one", async () => {
-    if (!client) {
-      // Named rather than silently passed: the runner counts scenarios, and a certification that quietly
-      // skipped its only Temporal test would read as a suite that has one.
-      console.warn(`TRUST-140 SKIPPED — no Temporal at ${ADDRESS} (set EVERDICT_TRUST_TEMPORAL)`);
-      return;
-    }
+    // A PRINTED "SKIPPED" IS NOT A SKIP (arch-review 27 P0). The first version of this returned early with a
+    // console warning when Temporal was unreachable — and vitest reports a test that returns as PASSED, so
+    // the runner counted it, `skipped: 0` held, and the certification could print PASS over a durability
+    // claim nothing had exercised. That is precisely the false green this suite's own rule exists to stop,
+    // arrived at through the one door the rule does not watch: the reporter's status field.
+    //
+    // So it FAILS instead. An operator running one scenario on a laptop gets the same treatment Postgres
+    // gives them — the whole file is skipped by `TRUST_PG_ENABLED` when the suite is not enabled at all.
+    if (!client)
+      throw new Error(
+        `TRUST-140 cannot run: no Temporal at ${ADDRESS}. Start one (\`temporal server start-dev\`) or set EVERDICT_TRUST_TEMPORAL. A durability claim nobody exercised is not a certified one.`,
+      );
     const taskQueue = trustId("tq");
     const caseId = trustId("case");
 
