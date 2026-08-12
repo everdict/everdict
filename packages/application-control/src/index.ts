@@ -50,6 +50,7 @@ export {
   type PlatformEventConsumer,
 } from "./platform-event/event-consumer-runner.js";
 export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
+export { type RunWebhookDeps, runWebhookConsumer } from "./platform-event/run-webhook-consumer.js";
 export { mattermostConsumer } from "./notification/mattermost-consumer.js";
 export {
   trackerUpdateConsumer,

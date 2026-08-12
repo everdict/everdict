@@ -26,6 +26,7 @@ import {
   mattermostConsumer,
   regressionWatch,
   runFeedConsumer,
+  runWebhookConsumer,
   scorecardFeedConsumer,
   subscriptionReactionConsumer,
   trackerUpdateConsumer,
@@ -572,6 +573,10 @@ async function main(): Promise<void> {
       ...(workflowTemporal ? { startReactionWorkflow: (input) => workflowTemporal.startReaction(input) } : {}),
     }),
   );
+  // A run's completion callback (mig 0171): recorded at submit, delivered off the run's own terminal fact.
+  // On the durable cursor rather than inline in the settling process, so a refused settle calls nobody and a
+  // restart between dispatch and settlement does not silently drop the caller's answer.
+  eventConsumers.register(runWebhookConsumer({ runs: store }));
   eventConsumers.start();
 
   // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members

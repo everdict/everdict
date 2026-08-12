@@ -347,6 +347,8 @@ export class RunService {
       evalCase: effective.case,
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
       ...(effective.trigger ? { trigger: effective.trigger } : {}),
+      // Recorded, not remembered: the callback outlives this process and this driver (mig 0171).
+      ...(effective.webhookUrl ? { webhookUrl: effective.webhookUrl } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
       ...(effective.teamId ? { teamId: effective.teamId } : {}),
       origin: standaloneRunOrigin(effective.trigger, effective.submittedBy, effective.causedByRunId),
@@ -957,16 +959,10 @@ export class RunService {
       const rec = await this.deps.store.get(id);
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
-    // …and so is the webhook (arch-review 33 P1). A driver whose settle was refused would otherwise POST a
-    // completion callback for a run it no longer owns — reading the row back first, so it either announces
-    // the WINNER's outcome a second time or, if the winner has not finished, announces a run that is still
-    // going as if it were done.
-    //
-    // The durable shape is a delivery intent written in the same transaction as the settlement, so the
-    // callback survives a takeover instead of living only in the request that started it — the URL is not on
-    // the record today, which means a new driver could not fire it at all. Named here rather than left to be
-    // rediscovered; what is fixed now is that the loser stays quiet.
-    if (committed && input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
+    // THE CALLBACK IS NOT FIRED HERE AT ALL ANY MORE (arch-review 33). It is recorded on the run at submit
+    // and delivered off the terminal FACT by `runWebhookConsumer`, which the settlement wrote in the same
+    // transaction — so a refused settle calls nobody, and a callback survives the process that started the
+    // run. See that consumer for the three ways the inline version failed.
   }
 
   // Flip the run queued→running when compute actually begins (the onStarted hook: managed dispatch / self-hosted
@@ -1192,19 +1188,6 @@ export class RunService {
   // transaction as the write; the SAME ids then travel the push path, so dedup holds on either route.
   private stampFacts(tenant: string, facts: DomainFact[]): StampedFact[] {
     return stampFacts(tenant, facts, { newId: this.newId, now: this.now });
-  }
-
-  private async fireWebhook(url: string, id: string): Promise<void> {
-    const record = await this.deps.store.get(id);
-    try {
-      await this.fetchImpl(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(record),
-      });
-    } catch {
-      // A webhook failure does not affect the run result (the store is the source of truth; also queryable by polling).
-    }
   }
 }
 

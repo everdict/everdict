@@ -1,0 +1,11 @@
+-- 0171_run_webhook_url — additive (expand): a run's completion callback, as durable INTENT.
+--
+-- The URL used to live only in the submit request, which made the callback the property of one process. A
+-- control plane that restarted between dispatch and settlement dropped it silently; a replica taken over by
+-- another lost it entirely, because the replacement driver — the one that would actually settle the run —
+-- had never seen it. The caller waits forever on a POST nobody is able to make.
+--
+-- Recorded here, the callback is something the run OWNS, so whichever driver settles it can honour it, and
+-- delivery rides the platform-event log (at-least-once, retried, dead-lettered) instead of a fire-and-forget
+-- call in the settling process. NULL = a run submitted without one, which is nearly all of them.
+ALTER TABLE everdict_runs ADD COLUMN IF NOT EXISTS webhook_url text;

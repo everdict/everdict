@@ -222,6 +222,11 @@ export const RunRecordSchema = z.object({
   // rises on every claim and every write that DRIVES the run conditions on the value its driver won, so a
   // displaced one fails against a number that moved. Absent = a row written before the column existed.
   ownerEpoch: z.number().int().nonnegative().optional(),
+  // WHERE TO CALL BACK WHEN THIS RUN ENDS (mig 0171). Recorded at submit because a callback that lives only
+  // in the request that started it belongs to one process: a control plane that restarts, or a replica that
+  // is taken over, leaves a caller waiting on a POST nobody can still make. On the record it is an intent the
+  // NEXT driver can honour, delivered off the terminal fact rather than fired inline.
+  webhookUrl: z.string().url().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

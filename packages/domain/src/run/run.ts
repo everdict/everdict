@@ -24,6 +24,7 @@ export interface NewQueuedRunInput {
   evalCase: EvalCase; // the (placement-injected) case body — persisted as the boot-recovery re-dispatch basis
   runtime?: string; // the placed runtime (work-queue axis); unset = default backend
   trigger?: string; // activity-view source axis (web|mcp|api…)
+  webhookUrl?: string; // completion callback, delivered off the terminal fact (mig 0171)
   submittedBy?: string; // executor stamp — notification-feed recipient
   // The universal-run shape (execution-model.md P0). origin = structured WHY (trigger stays dual-stamped for
   // the legacy source axis); class defaults to interactive — a standalone submit is a person waiting.
@@ -191,6 +192,9 @@ export class Run {
       caseId: input.evalCase.id,
       status: "queued",
       ...(input.trigger ? { trigger: input.trigger } : {}),
+      // The completion callback, recorded rather than held in the request (mig 0171) — whichever driver
+      // settles this run is the one that owes the caller an answer.
+      ...(input.webhookUrl ? { webhookUrl: input.webhookUrl } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       caseSpec: input.evalCase,

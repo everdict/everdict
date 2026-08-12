@@ -608,25 +608,20 @@ describe("RunService", () => {
     expect((await svc.get(rec.id))?.status).toBe("succeeded");
   });
 
-  it("fires the webhook on completion", async () => {
+  it("records the completion callback on the run — the delivery rides the terminal fact, not this process", async () => {
+    // The URL used to live only in the submit request, so the callback belonged to whichever process happened
+    // to finish the run: a restart dropped it, and a replica taken over could not hand it on. It is a run
+    // property now, which is what lets `runWebhookConsumer` deliver it off the settlement's own fact.
     const store = new InMemoryRunStore();
-    const calls: Array<{ url: string; status: string }> = [];
-    const fakeFetch = (async (url: string | URL, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      calls.push({ url: String(url), status: body.status });
-      return new Response("ok");
-    }) as unknown as typeof fetch;
-    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids, fetch: fakeFetch });
-    await svc.submit({
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const rec = await svc.submit({
       tenant: "t",
       harness: { id: "s", version: "0" },
       case: CASE,
       webhookUrl: "https://hook.example/cb",
     });
     await flush();
-    await flush();
-    expect(calls[0]?.url).toBe("https://hook.example/cb");
-    expect(calls[0]?.status).toBe("succeeded");
+    expect((await store.get(rec.id))?.webhookUrl).toBe("https://hook.example/cb");
   });
 });
 

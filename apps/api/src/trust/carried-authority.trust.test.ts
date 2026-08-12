@@ -556,3 +556,92 @@ describeTrust("TRUST-152 — a driver displaced mid-case publishes no evidence f
     for (const child of children) expect(["queued", "running"]).toContain(child.status);
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-153.
+//
+// A COMPLETION CALLBACK IS A SETTLEMENT'S EFFECT, NOT A SETTLING PROCESS'S.
+//
+// The run webhook was POSTed inline by whichever process finished the run, from a URL that existed only in
+// the submit request. Three consequences, all the same mistake: a driver whose terminal write was REFUSED
+// still called back; a control plane that restarted between dispatch and settlement dropped the callback
+// with no trace; and a replica taken over could not hand it on, because the replacement — the one that would
+// actually settle the run — had never seen it. The caller waits on an answer nobody is able to send.
+//
+// It is now a property of the RUN, delivered off the terminal FACT that the settlement wrote in its own
+// transaction. So the callback exists exactly when the settlement does, and any process walking the log can
+// make it — including one that boots afterwards, which is the case asserted here.
+describeTrust("TRUST-153 — a run's callback survives the process that started it", () => {
+  it("a settled run's webhook is delivered from the terminal fact by a later process", async () => {
+    const { runWebhookConsumer } = await import("@everdict/application-control");
+    const runs = new InMemoryRunStore();
+    const calls: Array<{ url: string; status: string; eventHeader: string | null }> = [];
+    const fakeFetch = (async (url: string | URL, init?: { body?: string; headers?: Record<string, string> }) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      calls.push({
+        url: String(url),
+        status: String(body.status),
+        eventHeader: init?.headers?.["x-everdict-event"] ?? null,
+      });
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+
+    // A run that settled — and whose callback was recorded when it was submitted, not held by the submitter.
+    await runs.create({
+      id: "run-callback",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "succeeded",
+      webhookUrl: "https://hook.example/cb",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+
+    // …and a DIFFERENT process — this consumer — walks the log afterwards and makes the call.
+    const consumer = runWebhookConsumer({ runs, fetchImpl: fakeFetch });
+    expect(consumer.kinds).toContain("run.completed");
+    await consumer.handle({
+      id: "evt-1",
+      tenant: "acme",
+      kind: "run.completed",
+      subject: { type: "run", id: "run-callback" },
+      message: "Run run-callback completed",
+      createdAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://hook.example/cb");
+    expect(calls[0]?.status).toBe("succeeded");
+    // …carrying the event id, which is what lets a receiver dedup an at-least-once delivery.
+    expect(calls[0]?.eventHeader).toBe("evt-1");
+  }, 20_000);
+
+  it("a failing endpoint is a FAILED delivery — the runner retries it rather than calling it done", async () => {
+    const { runWebhookConsumer } = await import("@everdict/application-control");
+    const runs = new InMemoryRunStore();
+    await runs.create({
+      id: "run-cb-500",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "failed",
+      webhookUrl: "https://hook.example/down",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+    const consumer = runWebhookConsumer({
+      runs,
+      fetchImpl: (async () => new Response("nope", { status: 503 })) as unknown as typeof fetch,
+    });
+    await expect(
+      consumer.handle({
+        id: "evt-2",
+        tenant: "acme",
+        kind: "run.failed",
+        subject: { type: "run", id: "run-cb-500" },
+        message: "Run run-cb-500 failed",
+        createdAt: "2026-08-13T00:00:01.000Z",
+      } as never),
+    ).rejects.toThrow(/503/);
+  }, 20_000);
+});
