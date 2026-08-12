@@ -42,6 +42,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
     // must not resume — which it can only know by this returning undefined.
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
       return undefined;
+    if (guard?.expectStatusIn !== undefined && !guard.expectStatusIn.includes(cur.status)) return undefined;
     // The driver's fencing token (mig 0166) — a stale loop's write fails against a number that moved.
     if (guard?.expectOwnerEpoch !== undefined && (cur.ownerEpoch ?? 0) !== guard.expectOwnerEpoch) return undefined;
     // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that

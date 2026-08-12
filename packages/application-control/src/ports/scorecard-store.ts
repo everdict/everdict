@@ -44,6 +44,11 @@ export interface ScorecardUpdateGuard {
   // An exclusive owner claim does not cover it: `expectOwnerReplica` asks "is the dead replica still the
   // owner", which stays true after the work finished. Exclusive recovery claim is not a terminal-state claim.
   expectNonTerminal?: true;
+  // …and the narrower form some transitions need. `settleAborted` deliberately writes OVER an aborted
+  // terminal record — it attaches the partials a cancelled or superseded batch produced while keeping that
+  // status — and its real rule is "never over succeeded/failed". A blanket non-terminal condition would
+  // refuse the legitimate write; this states the domain's own rule at the storage boundary instead.
+  expectStatusIn?: readonly string[];
   // THE RECOVERY CLAIM (arch-review 28 P1). Two control planes booting together both see a batch whose owner
   // stopped heartbeating, both stamp themselves as the new owner, and both resume it — the child terminal CAS
   // stops the ROWS from being corrupted and does nothing about two replicas dispatching the same unfinished

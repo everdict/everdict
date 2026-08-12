@@ -199,3 +199,37 @@ describeTrust("TRUST-142 — a takeover fences the driver it replaced", () => {
     expect(settled).toBeDefined();
   });
 });
+
+// …and the seam, not only the primitive (arch-review 30 P1). TRUST-142's store scenarios prove that a stale
+// write is refused; the defect they could not see was one layer up — the loop IGNORED the refusal and went
+// on creating children and dispatching cases. `primitive certified ≠ seam certified` cost a review once
+// already (the batch heartbeat), so the driver's own authority check gets a scenario of its own.
+describeTrust("TRUST-142 — a fenced driver stops dispatching, not just writing", () => {
+  it("the authority proof fails after a takeover, and it is what the loop consults", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(batch({ ownerReplica: "cp-a", ownerEpoch: 4 } as never));
+
+    // The proof the loop performs before each case: a guarded touch under the epoch it began with.
+    const prove = (epoch: number) =>
+      store.update("sc-1", { updatedAt: "2026-08-12T00:00:01.000Z" }, undefined, {
+        expectOwnerEpoch: epoch,
+        expectNonTerminal: true,
+      });
+
+    // Before the takeover it holds, so an ordinary batch dispatches normally.
+    expect(await prove(4)).toBeDefined();
+
+    // A recovery takes over: the claim raises the token in the same statement.
+    const claimed = await store.update("sc-1", { ownerReplica: "cp-b" }, undefined, {
+      expectOwnerReplica: "cp-a",
+      expectNonTerminal: true,
+      claimOwnership: true,
+    });
+    expect(claimed?.ownerEpoch).toBe(5);
+
+    // …and the paused driver's next proof fails — which is what stops the fan-out, one case in, instead of
+    // letting it run the whole batch on compute it no longer owns.
+    expect(await prove(4)).toBeUndefined();
+    expect(await prove(5)).toBeDefined();
+  });
+});

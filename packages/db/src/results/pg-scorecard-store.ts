@@ -357,6 +357,11 @@ export class PgScorecardStore implements ScorecardStore {
       guardSql += ` AND status <> ALL($${i}::text[])`;
       vals.push([...TERMINAL_SCORECARD_STATUSES]);
     }
+    if (guard?.expectStatusIn !== undefined) {
+      i++;
+      guardSql += ` AND status = ANY($${i}::text[])`;
+      vals.push([...guard.expectStatusIn]);
+    }
     // THE FENCE the driver proves on every write that drives this batch (mig 0166).
     if (guard?.expectOwnerEpoch !== undefined) {
       i++;
@@ -505,7 +510,7 @@ export class PgScorecardStore implements ScorecardStore {
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
       // batches a live replica is still driving. It is one text column, not a heavy one.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, owner_epoch, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

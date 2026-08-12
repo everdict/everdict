@@ -45,6 +45,7 @@ import {
   applyGradingPlan,
   caseReason,
   childKey,
+  isRunTerminal,
   sealedExecutionMessage,
   selectSubsetCases,
   verdictSummaryOf,
@@ -83,6 +84,11 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
+
+// The statuses `settleAborted` may land on — the domain's rule ("legal over superseded/cancelled, never over
+// succeeded/failed") restated where the write happens, because the domain guard runs in one process and the
+// settle it races runs in another.
+const ABORTABLE_SETTLE_STATUSES = ["queued", "running", "cancelled", "superseded"] as const;
 
 export class ScorecardBatchService {
   private readonly newId: () => string;
@@ -223,7 +229,12 @@ export class ScorecardBatchService {
         // Latest child per case wins (a batch resumed more than once has several children for a re-run case).
         const latestByCase = ScorecardBatch.latestChildPerCase(children);
         for (const c of latestByCase.values()) {
-          if (c.status === "succeeded" && c.result) {
+          // TERMINAL + RESULT IS FINISHED EVIDENCE, whatever the status says (arch-review 30 P1). The
+          // symmetric half of "terminal + no result is unfinished work": a case can settle FAILED and still
+          // carry a complete CaseResult — the write-back attaches one to a failed child on purpose, because
+          // a failed case is a measured outcome, not a missing one. Seeding only `succeeded` re-ran those
+          // cases on resume, and the abandoned attempt stayed parented to the batch.
+          if (isRunTerminal(c) && c.result) {
             seed.push(c.result);
             seedRunIds.push(c.id);
           } else if (c.status === "running" || c.status === "queued") {
@@ -566,7 +577,8 @@ export class ScorecardBatchService {
     const rec = await this.deps.store.get(id);
     if (rec) {
       const batch = ScorecardBatch.from(rec);
-      if (!batch.isTerminal()) await this.deps.store.update(id, batch.start(this.now()).patch);
+      if (!batch.isTerminal())
+        await this.deps.store.update(id, batch.start(this.now()).patch, undefined, { expectNonTerminal: true });
     }
     await this.appendBatchStep(id, {
       phase: "dispatch",
@@ -928,12 +940,17 @@ export class ScorecardBatchService {
       this.now(),
     );
     const stampedCompletion = stampFacts(ctx.tenant, settlement.facts, { newId: this.newId, now: this.now });
-    await this.deps.store.update(
+    // Under the aggregate's terminal fence (arch-review 30 P0). This is the Temporal finalize, and it read
+    // the record before doing the work — a user cancel or a supersede landing in between would have been
+    // overwritten by a `succeeded` that arrives afterwards, with its completion fact published on top.
+    const finalized = await this.deps.store.update(
       id,
       settlement.patch,
       stampedCompletion.map((f) => f.record),
+      { expectNonTerminal: true },
     );
-    if (stampedCompletion.length > 0) void this.deps.events?.pushPersisted?.(stampedCompletion);
+    if (finalized !== undefined && stampedCompletion.length > 0)
+      void this.deps.events?.pushPersisted?.(stampedCompletion);
     // Operator time series (catalog M0) — the Temporal driver settles through the SAME derivation as the
     // in-process loop (batchSettledEvent), so the two paths cannot drift.
     this.deps.onOrchestrationEvent?.(
@@ -1197,6 +1214,26 @@ export class ScorecardBatchService {
   // resurrected or rewritten by a late-landing drain — the killed dispatch's rejection, or a case that was
   // already past the point of no return when the user stopped the batch. The transition is built from the
   // CURRENT record (never the creation-time snapshot) so the domain's terminal guard sees the truth.
+  // Prove this loop still owns the batch. Returns false — and aborts the fan-out cooperatively — when the
+  // epoch it began under is no longer the record's, which is what a takeover leaves behind for a driver that
+  // never noticed it was replaced.
+  //
+  // No epoch = a record nobody has claimed (a single-replica install claims nothing), and demanding a token
+  // there would leave a batch nobody may drive. This fences takeovers, not solitude.
+  private async proveAuthority(
+    id: string,
+    fenced: { expectOwnerEpoch: number } | undefined,
+    controller: AbortController,
+  ): Promise<boolean> {
+    if (!fenced) return true;
+    const held = await this.deps.store
+      .update(id, { updatedAt: this.now() }, undefined, { ...fenced, expectNonTerminal: true })
+      .catch(() => undefined);
+    if (held !== undefined) return true;
+    controller.abort(); // stop the sibling lanes too — they are dispatching under the same lost authority
+    return false;
+  }
+
   private async settleChild(childId: string, settle: (current: RunRecord) => Partial<RunRecord>): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;
@@ -1216,7 +1253,7 @@ export class ScorecardBatchService {
     try {
       const rec = await store.get(childId);
       if (!rec || rec.status !== "queued") return; // already running/terminal — nothing to flip
-      await store.update(childId, Run.from(rec).start(this.now()).patch);
+      await store.update(childId, Run.from(rec).start(this.now()).patch, undefined, { expectNonTerminal: true });
     } catch {
       // Best-effort visibility flip — a failure here must never break the case (the run still executes and settles).
     }
@@ -1385,6 +1422,26 @@ export class ScorecardBatchService {
     const childEnv = batchForOrigin ? await this.childEnvelope(batchForOrigin) : undefined; // §5.2, once per batch
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // throws if over budget → batch fails
+      // AUTHORITY BEFORE EFFECT (arch-review 30 P0). A fencing token on the RECORD is not a fencing token on
+      // the EFFECT: a replica that paused past the liveness threshold comes back with this loop intact, and
+      // its writes being refused says nothing about the compute it is about to spend. So the epoch is proven
+      // BEFORE each case leaves — a takeover raises the number, this write fails against it, and the whole
+      // fan-out aborts rather than dispatching one more case it no longer owns.
+      //
+      // What this closes and what it does not, said plainly: the window between this proof and the dispatch
+      // below is small and real. Closing it entirely needs the dispatch intent itself to commit under the
+      // epoch (the scoring plane's child-write fence is the pattern), which is a deeper change than a guard.
+      // A driver that loses the token here stops within one case instead of running the batch to completion.
+      if (!(await this.proveAuthority(id, fenced, controller)))
+        // Thrown rather than returned: the callback owes a CaseResult, and inventing one would be this loop
+        // reporting an outcome for work it did not do. run-suite isolates the throw, the abort above stops
+        // the sibling lanes, and every settle this driver could still attempt is fenced on the same epoch —
+        // so nothing it writes from here lands.
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: id },
+          "this replica no longer owns the batch — another one claimed it while this loop was running, so the case was not dispatched.",
+        );
       const enriched: CaseJob = {
         ...job,
         tenant,
@@ -1675,6 +1732,10 @@ export class ScorecardBatchService {
               },
               this.now(),
             ).patch,
+            undefined,
+            // Same rule as the other aborted settles, at the storage boundary: partials attach to a batch
+            // that was reclaimed, never to one that settled succeeded/failed.
+            { expectStatusIn: ABORTABLE_SETTLE_STATUSES, ...fenced },
           );
         this.inFlight.delete(id);
         return; // completion notification for a replaced batch is noise — skip
@@ -1758,7 +1819,12 @@ export class ScorecardBatchService {
         if (controller.signal.aborted) {
           // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
           // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
-          await this.deps.store.update(id, batch.settleAborted(extras, this.now()).patch);
+          await this.deps.store.update(id, batch.settleAborted(extras, this.now()).patch, undefined, {
+            // The domain's own rule for this transition, at the storage boundary: it attaches an aborted
+            // batch's partials and must never land on one that settled succeeded/failed.
+            expectStatusIn: ABORTABLE_SETTLE_STATUSES,
+            ...fenced,
+          });
         } else if (!batch.isTerminal()) {
           // E0 outbox: the completion fact rides the terminal transition and persists atomically with the settle.
           // Scoring identity — the INITIAL revision (same shape as the Temporal finalize; aborted settles
@@ -1834,17 +1900,23 @@ export class ScorecardBatchService {
           await this.deps.store.update(
             id,
             batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()).patch,
+            undefined,
+            { expectStatusIn: ABORTABLE_SETTLE_STATUSES, ...fenced },
           );
         } else if (!batch.isTerminal()) {
           // E0 outbox: the failure fact rides the terminal transition and persists atomically with the settle.
           const settlement = batch.fail({ ...base, phase }, extras, this.now());
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
-          await this.deps.store.update(
+          // "A late failure never overwrites it (first terminal write wins)" — said by the comment below,
+          // enforced here (arch-review 30 P0). The `isTerminal()` above answers for this process; the cancel
+          // it races is in another one.
+          const failed = await this.deps.store.update(
             id,
             settlement.patch,
             stamped.map((f) => f.record),
+            { expectNonTerminal: true, ...fenced },
           );
-          if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+          if (failed !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
         }
         // else: a raced supersede already settled this record — a late failure never overwrites it (first
         // terminal write wins).

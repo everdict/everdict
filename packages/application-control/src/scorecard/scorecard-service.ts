@@ -1113,11 +1113,21 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     let hydrated = record;
     if (!record.scorecard && record.runIds?.length && this.deps.runStore) {
       const children = await this.deps.runStore.list(record.tenant, { scorecardId: id });
+      // `runIds` IS THE MEMBERSHIP, not a hint that hydration is needed (arch-review 30 P0). The batch
+      // records which children it published; hydrating "every row whose parent is this id" answers a
+      // different question, and the two diverge exactly where it hurts — a resumed batch re-runs a case, and
+      // the abandoned attempt is still parented here. Both attempts then entered the plane, so the served
+      // results, the settled verdictSummary and the scoring ledger could each describe a different world.
+      //
+      // A record with no `runIds` (an older row) falls back to parentage: that is what those rows can
+      // support, and narrowing them to an empty set would erase evidence rather than scope it.
+      const published = new Set(record.runIds ?? []);
+      const members = published.size > 0 ? children.filter((c) => published.has(c.id)) : children;
       // A CANCELLED child's payload is not this batch's evidence (arch-review 25 P1). The write-back can no
       // longer land a result on such a row, and this is the reading half of the same rule: a result that
       // arrived before the fence existed — or one written by an older deploy — must not be counted as a case
       // this batch measured. The user stopped the work; the ledger says so, and the aggregate agrees with it.
-      const results = children
+      const results = members
         .filter((c) => c.error?.code !== CANCELLED_ERROR_CODE)
         .map((c) => c.result)
         .filter((r): r is CaseResult => r !== undefined);

@@ -48,15 +48,24 @@ const ALLOWED = new Set<string>([
 const TRANSITION_WRITE = /\.patch\b/;
 const LITERAL_STATUS = /status:\s*"(succeeded|failed|suspended|superseded|cancelled)"/;
 const NESTED_MARKER = /scoringPass\s*:/;
-const CAS = /expectNonTerminal/;
+// WHAT COUNTS AS FENCED. `expectNonTerminal` is the ordinary settle's condition; `expectStatusIn` is the
+// narrower one an aborted settle needs (it lands on a cancelled record on purpose); and a re-scoring pass
+// settles an ALREADY-terminal batch under the scoring plane's own authority — demanding a lifecycle guard
+// there would be asking for a condition that contradicts the transition.
+const CAS = /expectNonTerminal|expectStatusIn|expectScoringCount|expectScoringPassId/;
 // WHOSE lifecycle this is. Only two aggregates have a terminal fence — the run and the batch that owns those
 // runs — so only they are scanned: a tracker record's `.patch` write is an ordinary edit, and demanding a
 // settle guard there would be the scanner asking for a condition that does not exist.
 //
-// A module qualifies by declaring the receiver's type, or by using the batch service's shared deps (whose
-// `store` IS the ScorecardStore — the declaration lives one file away, which is exactly how the batch
-// service's seventeen writes stayed invisible to the first version of this scan).
-const LIFECYCLE_STORE_RECEIVER = /\bstore\s*:\s*(RunStore|ScorecardStore)\b|\bScorecardServiceDeps\b/;
+// QUALIFIED BY THE AGGREGATE, NOT BY THE PLUMBING. Twice now this scan has gone green over a file it believed
+// it was watching: first because the receiver's type was declared one file away, then because the deps type
+// it named (`ScorecardServiceDeps`) is not the one the batch service imports (`ScorecardBatchDeps`). Both
+// times the marker was a wiring detail, and wiring details are exactly what a refactor renames.
+//
+// `Run.from(` / `ScorecardBatch.from(` is not a wiring detail. A file that constructs one of these aggregates
+// is driving that lifecycle, whatever it calls the store it writes through — and a file that stops
+// constructing them has stopped driving it.
+const DRIVES_LIFECYCLE = /\b(Run|ScorecardBatch)\.from\(/;
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -108,7 +117,7 @@ describe("terminal-write guard — a settlement carries its CAS", () => {
   const scanned = tsFilesUnder(root).filter((rel) => !ALLOWED.has(rel));
   const settlements = scanned.flatMap((rel) => {
     const code = codeOf(readFileSync(join(root, rel), "utf8"));
-    if (!LIFECYCLE_STORE_RECEIVER.test(code)) return [];
+    if (!DRIVES_LIFECYCLE.test(code)) return [];
     return updateCalls(code)
       .filter((span) => TRANSITION_WRITE.test(span) || (LITERAL_STATUS.test(span) && !NESTED_MARKER.test(span)))
       .map((span) => ({ rel, span }));

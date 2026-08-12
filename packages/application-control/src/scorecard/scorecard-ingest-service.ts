@@ -143,7 +143,9 @@ export class ScorecardIngestService {
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
-    await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()).patch);
+    await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()).patch, undefined, {
+      expectNonTerminal: true,
+    });
     try {
       await this.finishIngest(record.id, tenant, dataset, harnessLabel, traces, judges, undefined, record.createdBy);
     } catch (err) {
@@ -163,7 +165,9 @@ export class ScorecardIngestService {
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
     const id = record.id;
-    await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()).patch);
+    await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()).patch, undefined, {
+      expectNonTerminal: true,
+    });
     try {
       // Continuous evaluation over the OWNED store (native-observability N2): the reserved source name
       // points the pull machinery at everdict's own trajectories — each runId reads straight from the
@@ -448,7 +452,9 @@ export class ScorecardIngestService {
     if (batch.isTerminal()) return;
     // Facts deliberately dropped (not threaded to the outbox): ingest completions were silent before E0 (no
     // onComplete/notification path ever ran here) — widening that coverage is an E2 decision, not a default.
-    await this.deps.store.update(id, outcome(batch).patch);
+    // Under the aggregate's terminal fence: `isTerminal()` above answers for this process, and an ingest
+    // settling a batch a user cancelled meanwhile would overwrite their decision (arch-review 30 P0).
+    await this.deps.store.update(id, outcome(batch).patch, undefined, { expectNonTerminal: true });
   }
 }
 
