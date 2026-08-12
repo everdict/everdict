@@ -15,6 +15,10 @@ const ALLOWED = new Set([
   "scorecard/scoring-plan.ts", // judge-metric ownership + caseReason — gated via isMeasured/measuredScores (moved from application-control scorecard-shared)
   "scorecard/scoring-revision.ts", // scorePlaneDigest — identity over the WHOLE plane on purpose (a digest is not an aggregation: it never averages, and unmeasured rows are part of the judgment record it identifies; the union discriminates them explicitly)
   "trace/spans-to-events.ts", // producer side (no Score consumption) — listed defensively if it ever matches
+  // evidence identity — `judgedPlane` digests the case plane so a verifier's pin moves when the verdicts do.
+  // A digest is not an aggregation, the same reason scoring-revision.ts is here: it never averages and never
+  // reads a score's value as a number, and the unmeasured rows are part of the judgment record it identifies.
+  "ownership/ownership.ts",
 ]);
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {

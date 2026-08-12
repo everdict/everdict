@@ -542,7 +542,7 @@ export function judgedPlane(doc: Record<string, unknown>): { planeDigest?: strin
   const plane = results
     .map((r) => {
       const row = (r ?? {}) as Record<string, unknown>;
-      return { caseId: row.caseId, trial: row.trial, scores: row["scores"] };
+      return { caseId: row.caseId, trial: row.trial, scores: row.scores };
     })
     .sort((a, b) => `${a.caseId}#${a.trial ?? ""}`.localeCompare(`${b.caseId}#${b.trial ?? ""}`));
   return { planeDigest: contentDigest(plane) };
