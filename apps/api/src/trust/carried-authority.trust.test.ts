@@ -10,6 +10,7 @@ import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
+  InMemoryJudgeRegistry,
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
@@ -241,5 +242,167 @@ describeTrust("TRUST-148 — a settlement that lost publishes no evidence", () =
     // …and it published NO evidence. Pre-fix the seal ran regardless, and because the first seal wins it
     // would have been the permanent trajectory of a run whose outcome somebody else decides.
     expect(await trajectories.get("acme", record.id)).toBeUndefined();
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-149.
+//
+// A TERMINAL CHILD IS FINALIZED EVIDENCE, NOT A FINISHED EXECUTION.
+//
+// Recovery's seed rule is a sentence about meaning: a terminal child that carries a result is finished work,
+// so do not re-run it and do not re-judge it. The in-process batch driver made that sentence false. It
+// settled the child `succeeded` the moment the harness returned, with the RAW execution result, and ran the
+// selected judges afterwards on the streaming path. Crash in between — a deploy, an OOM, a lost node — and
+// what survives is a row that satisfies the rule while carrying evidence no judge ever saw. The batch then
+// completes with a case that silently never met a judge its own manifest says was selected: no score, and no
+// `unmeasured` row explaining the absence. That is a wrong VERDICT produced without one failed write.
+//
+// The Temporal driver already awaited its judges before settling, so the SAME recovery rule was reading two
+// different meanings depending on which driver a deployment happened to run. What is certified here is the
+// invariant itself, on the in-process path: while a judge is still out, the child is not terminal.
+describeTrust("TRUST-149 — a child is terminal only once its judges have landed", () => {
+  it("an unfinished judge keeps the child open, and settles it with the judged result", async () => {
+    let releaseJudge!: () => void;
+    const judging = new Promise<void>((r) => {
+      releaseJudge = r;
+    });
+    let judgeStarted!: () => void;
+    const started = new Promise<void>((r) => {
+      judgeStarted = r;
+    });
+
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: { dispatch: async (job: CaseJob) => result(job.evalCase.id) },
+      store,
+      runStore,
+      datasets,
+      judges,
+      // The judge that has not answered yet — the whole window this scenario is about.
+      judgeRunner: {
+        run: async () => {
+          judgeStarted();
+          await judging;
+          return [{ graderId: "quality", metric: "judge:quality", value: 1 }];
+        },
+      },
+    } as never);
+
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      judges: [{ id: "quality", version: "1.0.0" }],
+    } as never);
+
+    await started; // the harness has returned and the judge is in flight
+    await new Promise((r) => setTimeout(r, 50));
+
+    // THE CLAIM. The execution finished; the evidence has not. A crash here must leave recovery something it
+    // reads as unfinished — so the child is still open, and pre-fix it was `succeeded` with a judge-less result.
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    expect(children).toHaveLength(1);
+    expect(children[0]?.status).not.toBe("succeeded");
+
+    releaseJudge();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // …and once the judge lands, the child settles ONCE, carrying the judged result.
+    const settled = (await runStore.list("acme", { scorecardId: record.id }))[0];
+    expect(settled?.status).toBe("succeeded");
+    expect(settled?.result?.scores.some((s) => s.metric === "judge:quality")).toBe(true);
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-150.
+//
+// PARENT AUTHORITY CARRIED IS NOT CHILD MUTATION AUTHORIZED.
+//
+// A batch's children have fencing tokens of their own, and a parent takeover does not move them: claiming the
+// SCORECARD raises the scorecard's epoch and leaves every child exactly where it was. So the child fence — the
+// one added when this rule was first noticed — answers "did somebody take over this run" and never "am I
+// still this batch's driver". A displaced replica clears it every time.
+//
+// It matters because `resume` touches children BEFORE it proves anything: it lists them, adopts the ones with
+// harvestable results, and tombstones the rest, all ahead of the `track` call where the parent epoch is
+// finally checked. A replica that lost the batch while paused therefore discovers it has no authority AFTER
+// it has already rewritten its successor's children.
+//
+// The condition is evaluated inside the child's write, against the parent row, the same way the scoring fence
+// is — a read-then-write would leave a window the shape of the takeover it exists to catch.
+describeTrust("TRUST-150 — a displaced batch driver cannot mutate its successor's children", () => {
+  it("the child write is refused because the PARENT's epoch moved, not the child's", async () => {
+    const scorecards = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    runs.attachScorecards(scorecards);
+    await scorecards.create({
+      id: "sc-parent",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "running",
+      ownerReplica: "cp-b",
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z",
+    } as never);
+    await runs.create({
+      id: "child-1",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "running",
+      parentScorecardId: "sc-parent",
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z",
+    } as never);
+
+    // B holds the batch at epoch 0 and pauses. C takes it: the PARENT's token moves to 1…
+    const claimed = await scorecards.update("sc-parent", { ownerReplica: "cp-c" }, undefined, {
+      expectNonTerminal: true,
+      claimOwnership: true,
+    });
+    expect(claimed?.ownerEpoch).toBe(1);
+    // …and the child's does NOT. This is the whole point: every child-level condition still holds for B.
+    expect((await runs.get("child-1"))?.ownerEpoch ?? 0).toBe(0);
+
+    // B wakes and tombstones the child it believes is its to clean up. Open row, matching child epoch —
+    // and refused anyway, because the batch it was acting for is no longer its own.
+    const stale = await runs.update(
+      "child-1",
+      { status: "failed", error: { code: "INTERRUPTED", message: "b cleaning up" }, updatedAt: "2026-08-12T01:00:00Z" },
+      undefined,
+      { expectNonTerminal: true, expectOwnerEpoch: 0, parentDriver: { scorecardId: "sc-parent", epoch: 0 } },
+    );
+    expect(stale).toBeUndefined();
+    expect((await runs.get("child-1"))?.status).toBe("running");
+
+    // …and C, holding the batch, settles the same child normally.
+    const settled = await runs.update(
+      "child-1",
+      { status: "succeeded", updatedAt: "2026-08-12T01:00:01Z" },
+      undefined,
+      { expectNonTerminal: true, expectOwnerEpoch: 0, parentDriver: { scorecardId: "sc-parent", epoch: 1 } },
+    );
+    expect(settled?.status).toBe("succeeded");
   }, 20_000);
 });

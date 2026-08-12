@@ -190,6 +190,14 @@ export class ScorecardBatchService {
   // replica that displaced it wrote, and then drives beside it holding an identical token. Absent = nobody
   // claimed anything (a manual re-drive in a single-replica install), which drives under the record's own.
   async resume(id: string, authority?: DriverAuthority): Promise<boolean> {
+    // What this resume may do to the batch AND to its children (arch-review 33 P0). The preprocessing below
+    // touches children BEFORE `track` proves anything, so without carrying the parent's token down here a
+    // replica displaced from the batch could still adopt and tombstone its successor's children — each write
+    // clearing a CHILD fence that the parent's takeover never moved.
+    //
+    // Absent authority = a manual re-drive with no claim behind it, which drives under whatever the record
+    // says: the same fallback `track` uses, and the one a single-replica install has always had.
+    const parentDriver = authority === undefined ? undefined : { scorecardId: id, epoch: authority.epoch };
     const rec = await this.deps.store.get(id);
     if (!rec) return false;
     const batch = ScorecardBatch.from(rec);
@@ -409,6 +417,10 @@ export class ScorecardBatchService {
       // The batch's composed verdict policy (manifest.verdictPolicy) — absent = the built-in ladder. Live
       // per-case verdicts are decided by it so a watcher sees the same PASS/FAIL the settled record stamps.
       verdictPolicy?: VerdictPolicy;
+      // The batch driver's fencing token, as this context read it when it was built (arch-review 33 P0). Every
+      // CHILD write proves it, because a parent takeover raises the SCORECARD's epoch and leaves the child's
+      // where it was — the child's own number cannot answer "am I still this batch's driver".
+      driverEpoch: number;
       doneIds: Set<string>;
       // Cases currently executing in THIS process — a synchronous claim so a same-worker Temporal retry of an
       // in-flight case skips instead of double-executing (gap 12). Empty on a fresh ctx (a dead worker → cross-process
@@ -555,6 +567,10 @@ export class ScorecardBatchService {
           }
         : {}),
       doneIds,
+      // The parent's token as this driver reads it when it takes the batch up. The Temporal path rebuilds
+      // this context after a restart, which is exactly when it must be re-read: the worker that rebuilds it
+      // IS the current driver, and a worker holding an older context has already lost its activities.
+      driverEpoch: rec.ownerEpoch ?? 0,
       inFlightIds: new Set<string>(),
       stepChain: Promise.resolve(),
     };
@@ -830,11 +846,15 @@ export class ScorecardBatchService {
           .catch(() => {});
       }
       if (runStore && child)
-        await this.settleChild(child.id, (cur) => ({
-          ...Run.from(cur).succeed(result, this.now()).patch,
-          // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-          ...(ranOn ? { runtime: ranOn } : {}),
-        }));
+        await this.settleChild(
+          child.id,
+          (cur) => ({
+            ...Run.from(cur).succeed(result, this.now()).patch,
+            // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+            ...(ranOn ? { runtime: ranOn } : {}),
+          }),
+          { scorecardId: id, epoch: ctx.driverEpoch },
+        );
       ctx.doneIds.add(caseId);
       const v = caseVerdict(result, ctx.verdictPolicy);
       const reason = caseReason(result);
@@ -1259,7 +1279,40 @@ export class ScorecardBatchService {
     return false;
   }
 
-  private async settleChild(childId: string, settle: (current: RunRecord) => Partial<RunRecord>): Promise<void> {
+  // Cases whose execution finished and whose child is deliberately still OPEN until its judges land. Keyed
+  // by (caseId, trial) like every other per-case map here, because a trialled case has one child per trial.
+  private readonly pendingChildSettle = new Map<
+    string,
+    { childId?: string; ranOn?: string; parentDriver: { scorecardId: string; epoch: number } }
+  >();
+
+  // The child's ONE terminal write, carrying the result as it now stands — execution plus whatever the judges
+  // attached to it (a failed judge leaves its `unmeasured` row, which is evidence too). Idempotent: the entry
+  // is consumed, so a second call after a retried stream does nothing.
+  private async settleJudgedChild(result: CaseResult): Promise<void> {
+    const key = childKey(result.caseId, result.trial);
+    const pending = this.pendingChildSettle.get(key);
+    if (!pending) return;
+    this.pendingChildSettle.delete(key);
+    if (!pending.childId || !this.deps.runStore) return;
+    await this.settleChild(
+      pending.childId,
+      (cur) => ({
+        ...Run.from(cur).succeed(result, this.now()).patch,
+        // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+        ...(pending.ranOn ? { runtime: pending.ranOn } : {}),
+      }),
+      pending.parentDriver,
+    ).catch(() => {});
+  }
+
+  private async settleChild(
+    childId: string,
+    settle: (current: RunRecord) => Partial<RunRecord>,
+    // The batch this child belongs to, and the epoch its driver holds. Proved INSIDE the write: the child's
+    // own epoch cannot answer "am I still this batch's driver" (arch-review 33 P0).
+    parentDriver?: { scorecardId: string; epoch: number },
+  ): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;
     const current = await store.get(childId);
@@ -1269,10 +1322,13 @@ export class ScorecardBatchService {
     // other writer is in another process — a user's cancel in the control plane against a case drain landing
     // from a worker. Read-check-write made the LAST write win, which is the exact inverse of the rule this
     // method is named after.
-    // …under the epoch the CHILD carries. The batch loop proves its own authority before it dispatches; this
-    // write lands afterwards, on a row of its own, and a driver that was displaced in between has no more
-    // right to settle the child than it has to settle the parent.
-    await settleRun(store, childId, settle(current), undefined, { epoch: current.ownerEpoch ?? 0 });
+    // …under the child's own epoch AND the parent's driver. The first refuses a child somebody claimed
+    // directly; the second refuses a driver that lost the BATCH — two different takeovers, and the child's
+    // number moves for only one of them.
+    await settleRun(store, childId, settle(current), undefined, {
+      epoch: current.ownerEpoch ?? 0,
+      ...(parentDriver ? { parentDriver } : {}),
+    });
   }
 
   private async markChildRunning(childId: string): Promise<void> {
@@ -1574,12 +1630,23 @@ export class ScorecardBatchService {
               ...runEvidenceIdentity(child),
               ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});
-        // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        if (runStore && child)
-          await this.settleChild(child.id, (cur) => ({
-            ...Run.from(cur).succeed(result, this.now()).patch,
-            ...(ranOn ? { runtime: ranOn } : {}),
-          }));
+        // A TERMINAL CHILD IS FINALIZED EVIDENCE, NOT A FINISHED EXECUTION (arch-review 33 P0).
+        //
+        // This used to settle the child `succeeded` right here, with the RAW execution result, while the
+        // selected judges ran afterwards on the streaming path. A crash in between left a row that says
+        // terminal AND carries a result — which is exactly the shape recovery reads as "finished evidence,
+        // do not re-run and do not re-judge". The batch would then complete with a case that silently never
+        // met a judge the manifest says was selected: no score, and no `unmeasured` row saying why. That is
+        // a wrong VERDICT, arrived at without a single failed write.
+        //
+        // The Temporal driver already had it right (it awaits `applyJudges` before settling), so the same
+        // recovery rule was reading two different meanings depending on which driver a deployment used. The
+        // settle is now deferred to `onResult`, after the judges land — see `settleJudgedChild`.
+        this.pendingChildSettle.set(childKey(result.caseId, result.trial), {
+          childId: child?.id,
+          ...(ranOn ? { ranOn } : {}),
+          parentDriver: { scorecardId: id, epoch },
+        });
         return result;
       } catch (err) {
         if (runStore && child) {
@@ -1587,7 +1654,10 @@ export class ScorecardBatchService {
             err instanceof AppError
               ? { code: err.code, message: err.message }
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-          await this.settleChild(child.id, (cur) => Run.from(cur).fail(error, this.now()).patch);
+          await this.settleChild(child.id, (cur) => Run.from(cur).fail(error, this.now()).patch, {
+            scorecardId: id,
+            epoch,
+          });
         }
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }
@@ -1646,6 +1716,10 @@ export class ScorecardBatchService {
       // docs/architecture/streaming-case-pipeline.md
       // The child-run resolver lets each case's judge seal its own execution as a judge:<id> plane on that child —
       // caseToChild is filled at dispatch time, so it already holds the entry by the time onResult pushes the case.
+      // The deferred child settles (P0 below): each one is queued behind its case's judges, and the batch may
+      // not finalize until they have landed — a child still open when the write-back runs would be a row the
+      // aggregate counts and the ledger calls unfinished.
+      const childSettles: Array<Promise<void>> = [];
       const judgeStream = await this.scoring.createJudgeStream(
         tenant,
         dataset,
@@ -1729,9 +1803,17 @@ export class ScorecardBatchService {
             payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
             message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
           });
+          // A reclaimed batch fires no judges, so its child settles now with what it has — the alternative is
+          // a row left running forever because the thing that was going to settle it was cancelled.
+          if (controller.signal.aborted) childSettles.push(this.settleJudgedChild(r));
           // After supersede, skip firing judges too (don't spend more LLM cost on a reclaimed batch).
           if (!controller.signal.aborted) {
             const judged = judgeStream.push(r);
+            // …and the child settles HERE, once its judges have landed — terminal means finalized (P0 above).
+            // `then(x, x)`: a judge that failed still produced its `unmeasured` row, and a child left running
+            // by a rejected stream would be a zombie nothing settles.
+            const settleJudged = (): Promise<void> => this.settleJudgedChild(r);
+            childSettles.push(judged.then(settleJudged, settleJudged));
             // Case-completion chaining: export the case only 'after' its judge score is attached — skip new fires after abort
             // (already-fired exports complete naturally; the supersede path joins them and records a partial outcome).
             if (exportStream) {
@@ -1761,6 +1843,7 @@ export class ScorecardBatchService {
         // Join already-fired judge tasks before persisting (prevents a race between in-progress scores mutation and write-back).
         // A judge error on a reclaimed batch is noise — swallow it.
         await judgeStream.settle().catch(() => {});
+        await Promise.all(childSettles).catch(() => {}); // …and the children those judges were gating
         // Exports already sent via streaming are joined and recorded as a partial outcome (for tracking — superseded ≠ succeeded,
         // so baseline/leaderboard stay clean). If no cases went out, skip recording (an empty outcome is noise).
         const exportedPartial = exportStream ? await exportStream.settle().catch(() => undefined) : undefined;
@@ -1806,6 +1889,9 @@ export class ScorecardBatchService {
         await flushSteps();
       }
       await judgeStream.settle(); // trace → judge scores (control plane, streamed the moment each case completes)
+      // …and the child rows each of those judge tasks was gating. A child settles only once its case is fully
+      // judged, so "the judges are done" and "the children are terminal" are the same moment by construction.
+      await Promise.all(childSettles).catch(() => {});
       if (judges.length > 0) {
         // Judge starvation is downstream of trace: if every case died before producing an outcome, the judges never
         // ran on anything real — say so explicitly instead of the misleading "judges applied".

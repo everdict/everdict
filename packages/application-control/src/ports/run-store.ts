@@ -111,6 +111,16 @@ export interface RunUpdateGuard {
   // …and RAISES it in the same statement. A claim that stamped identity and left the token where it was would
   // announce the takeover to nobody.
   claimOwnership?: true;
+  // THE PARENT'S DRIVER, AS A CONDITION ON THE CHILD'S WRITE (arch-review 33 P0).
+  //
+  // A child's own epoch answers "did somebody take over THIS run" and says nothing about the batch that owns
+  // it: a parent takeover raises the SCORECARD's epoch and leaves every child at the number it had. So a
+  // replica displaced from a batch could still adopt, tombstone and settle that batch's children — each write
+  // passing a fence that was never about the authority it had lost.
+  //
+  // Evaluated inside the write statement, like the scoring fence next to it, because the alternative is a
+  // read-then-write whose window is exactly the takeover it exists to catch.
+  parentDriver?: { scorecardId: string; epoch: number };
 }
 
 export interface RunStore extends AdmissionLedger {

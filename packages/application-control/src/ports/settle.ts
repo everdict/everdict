@@ -50,11 +50,19 @@ export async function settleRun(
   id: string,
   patch: Partial<RunRecord>,
   events?: OutboxEvent[],
-  opts?: { expectOwnerReplica?: string | null; epoch?: number },
+  opts?: {
+    expectOwnerReplica?: string | null;
+    epoch?: number;
+    // For a batch's CHILD: the parent's driver, proved inside this write. A child's own epoch is not a
+    // stand-in — a parent takeover raises the SCORECARD's token and leaves the child's untouched, so a
+    // displaced batch driver clears the child fence it was never displaced from (arch-review 33 P0).
+    parentDriver?: { scorecardId: string; epoch: number };
+  },
 ): Promise<RunRecord | undefined> {
   return store.update(id, patch, events, {
     expectNonTerminal: true,
     ...(opts?.expectOwnerReplica !== undefined ? { expectOwnerReplica: opts.expectOwnerReplica } : {}),
     ...(opts?.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
+    ...(opts?.parentDriver !== undefined ? { parentDriver: opts.parentDriver } : {}),
   });
 }

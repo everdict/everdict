@@ -48,7 +48,7 @@ export class InMemoryRunStore implements RunStore {
   // would break every unrelated test into attaching a stub that always says yes, which is a fence that
   // certifies nothing. The boundary this invariant protects is the Postgres one.
   attachScorecards(owner: {
-    peek(id: string): { scoringPass?: { passId?: string; status?: string } | null } | undefined;
+    peek(id: string): { scoringPass?: { passId?: string; status?: string } | null; ownerEpoch?: number } | undefined;
   }): void {
     // A TERMINAL pass is not an owner (arch-review 17 P0-3) — the Pg fence adds `status = 'running'` to the
     // same EXISTS, so the twin resolves an owner only while the marker is live. Answering the passId of a
@@ -57,9 +57,12 @@ export class InMemoryRunStore implements RunStore {
       const live = owner.peek(scorecardId)?.scoringPass;
       return live?.status === "running" ? live.passId : undefined;
     };
+    // …and the parent's fencing token, which the child's own epoch cannot stand in for.
+    this.parentDriverEpoch = (scorecardId) => owner.peek(scorecardId)?.ownerEpoch ?? 0;
   }
 
   private scoringPassOwner?: (scorecardId: string) => string | undefined;
+  private parentDriverEpoch?: (scorecardId: string) => number | undefined;
 
   async create(record: RunRecord, events?: OutboxEvent[]): Promise<void> {
     this.runs.set(record.id, record);
@@ -79,6 +82,12 @@ export class InMemoryRunStore implements RunStore {
     // allowing the write would make the dev store the one place the invariant does not hold.
     const fence = guard?.scoring;
     if (this.scoringPassOwner && fence && this.scoringPassOwner(fence.scorecardId) !== fence.passId) return undefined;
+    // …and the parent batch's driver fence (arch-review 33 P0), on the same terms as the scoring one: with
+    // the pair wired, an epoch that moved under the writer refuses the write; unpaired, this store is not
+    // part of a batch topology and the condition has nothing to evaluate.
+    const parent = guard?.parentDriver;
+    if (this.parentDriverEpoch && parent && this.parentDriverEpoch(parent.scorecardId) !== parent.epoch)
+      return undefined;
     // …and the settled row refuses a second outcome, exactly as the SQL condition refuses it. A dev store that
     // allowed the overwrite would make the in-memory path the one place "first terminal write wins" is false.
     if (guard?.expectNonTerminal === true && isRunTerminal(cur)) return undefined;

@@ -892,6 +892,18 @@ export class RunService {
       committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
       // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:
       // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
+      //
+      // KNOWN, BOUNDED, AND NOT FIXED HERE (arch-review 33 P1): the SEAL is winner-gated, the buffer is not.
+      // Frames, logs and resource samples are appended DURING execution under `job.runId`, which is derived
+      // from the record alone (`evd-run-<id>`) so a live observer needs no lookup — and a re-driven run keeps
+      // that same key. Two attempts of one run therefore append into one row, and the winner seals a
+      // recording that also contains the loser's frames. The trajectory (what judgments read) is clean; the
+      // replay artifact is not.
+      //
+      // Fixing it means giving the ATTEMPT its own identity on the wire — a recording key distinct from the
+      // live-correlation id, threaded through the dispatcher, the self-hosted recorder and the managed
+      // sampler, with the read following the sealed `recordingRef` rather than re-deriving a key. That is a
+      // contract change across three producers and is not something to slip into a fix for something else.
       if (committed && this.deps.recordingStore) {
         try {
           // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the recording before sealing.
@@ -939,7 +951,16 @@ export class RunService {
       const rec = await this.deps.store.get(id);
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
-    if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
+    // …and so is the webhook (arch-review 33 P1). A driver whose settle was refused would otherwise POST a
+    // completion callback for a run it no longer owns — reading the row back first, so it either announces
+    // the WINNER's outcome a second time or, if the winner has not finished, announces a run that is still
+    // going as if it were done.
+    //
+    // The durable shape is a delivery intent written in the same transaction as the settlement, so the
+    // callback survives a takeover instead of living only in the request that started it — the URL is not on
+    // the record today, which means a new driver could not fire it at all. Named here rather than left to be
+    // rediscovered; what is fixed now is that the loser stays quiet.
+    if (committed && input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
   }
 
   // Flip the run queued→running when compute actually begins (the onStarted hook: managed dispatch / self-hosted

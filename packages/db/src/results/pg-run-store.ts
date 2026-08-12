@@ -237,6 +237,15 @@ export class PgRunStore implements RunStore {
       vals.push(guard.expectOwnerEpoch);
       fenceSql += ` AND owner_epoch = $${vals.length}`;
     }
+    // …and the PARENT batch's driver must still be the one asking (arch-review 33 P0). Same shape as the
+    // scoring fence below: a cross-row condition inside the write, so "am I still this batch's driver" is
+    // answered at the instant the child changes rather than a few lines earlier.
+    if (guard?.parentDriver !== undefined) {
+      const parentIdx = vals.length + 1;
+      const epochIdx = vals.length + 2;
+      fenceSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${parentIdx} AND s.owner_epoch = $${epochIdx})`;
+      vals.push(guard.parentDriver.scorecardId, guard.parentDriver.epoch);
+    }
     const fence = guard?.scoring;
     if (fence) {
       const scorecardIdx = vals.length + 1;
