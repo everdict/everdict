@@ -59,6 +59,12 @@ export class PgRecordingStore implements RecordingStore {
     return { ref: `pg://recording/${runId}` };
   }
 
+  // A re-drive starts a fresh recording (arch-review 33 P1) — see the port for why this is a reset and not a
+  // filter at seal time.
+  async reset(runId: string): Promise<void> {
+    await this.client.query("DELETE FROM everdict_recordings WHERE run_id = $1", [runId]);
+  }
+
   async get(runId: string): Promise<CaseRecording | undefined> {
     const { rows } = await this.client.query<RecordingRow>(
       "SELECT tracks, t0, env_kind, effective_fidelity, dispatch FROM everdict_recordings WHERE run_id = $1 AND sealed = true",

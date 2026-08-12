@@ -67,6 +67,7 @@ export type {
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
+  RunCreateGuard,
   RunListOptions,
   RunScoringFence,
   RunUpdateGuard,

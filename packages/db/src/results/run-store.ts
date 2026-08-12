@@ -17,10 +17,12 @@ import type {
   LiveSessionRow,
   OutboxEvent,
   PlatformEventStore,
+  RunCreateGuard,
   RunListOptions,
   RunStore,
   RunUpdateGuard,
 } from "@everdict/application-control";
+import { ConflictError } from "@everdict/contracts";
 
 // Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
 // offset unset/0 = from the newest; limit unset = to the end.
@@ -64,7 +66,16 @@ export class InMemoryRunStore implements RunStore {
   private scoringPassOwner?: (scorecardId: string) => string | undefined;
   private parentDriverEpoch?: (scorecardId: string) => number | undefined;
 
-  async create(record: RunRecord, events?: OutboxEvent[]): Promise<void> {
+  async create(record: RunRecord, events?: OutboxEvent[], guard?: RunCreateGuard): Promise<void> {
+    // The dispatch intent's condition, on the same terms as the update fence: with the scorecard pair wired,
+    // a parent epoch that moved refuses the insert; unpaired, this store is not part of a batch topology.
+    const parent = guard?.parentDriver;
+    if (this.parentDriverEpoch && parent && this.parentDriverEpoch(parent.scorecardId) !== parent.epoch)
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: parent.scorecardId, run: record.id },
+        "this replica no longer drives the batch — the case was not committed to",
+      );
     this.runs.set(record.id, record);
     await this.appendEvents(events);
   }

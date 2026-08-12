@@ -753,6 +753,12 @@ export class RunService {
     // …and the dispatch is DOWNSTREAM of that claim. Without this, a replica whose redispatch lost still
     // started a second execution of a case that already had an answer.
     if (redispatched === undefined) return settledElsewhere();
+    // A NEW ATTEMPT OPENS A NEW RECORDING (arch-review 33 P1). The replay buffer is keyed by the run's
+    // live-correlation id, which a re-drive reuses on purpose — so without this the winner seals a replay
+    // holding the frames of an execution whose settlement was refused, and a reader scrubbing that timeline
+    // watches two runs. The claim above is what earns the right to do this: only the driver that won the
+    // re-drive clears the buffer.
+    await this.deps.recordingStore?.reset(RunService.runIdFor(record)).catch(() => {});
     void this.track(
       record.id,
       {

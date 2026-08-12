@@ -28,6 +28,12 @@ export class InMemoryRecordingStore implements RecordingStore {
     return { ref: `memory://recording/${runId}` };
   }
 
+  // A re-drive starts a fresh recording — the previous attempt produced no outcome, so its frames are not
+  // this run's replay (arch-review 33 P1).
+  async reset(runId: string): Promise<void> {
+    this.recordings.delete(runId);
+  }
+
   async get(runId: string): Promise<CaseRecording | undefined> {
     const rec = this.recordings.get(runId);
     if (!rec?.sealed) return undefined; // only a sealed recording is a complete CaseRecording

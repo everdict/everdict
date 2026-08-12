@@ -74,6 +74,12 @@ export interface RunScoringFence {
 // THE CONDITIONS A RUN WRITE COMMITS UNDER. Both are storage-layer for the same reason: a service that reads
 // the row, decides, and then writes has left a window open between the two, and the writers this guards
 // against are in ANOTHER PROCESS — a cancel in the control plane against a case drain landing from a worker.
+// The condition on a child's CREATION — the same cross-row question its later writes ask, at the moment the
+// work is committed to rather than at the moment it is recorded.
+export interface RunCreateGuard {
+  parentDriver: { scorecardId: string; epoch: number };
+}
+
 export interface RunUpdateGuard {
   // Commit only while the named scoring pass still owns the parent scorecard's marker.
   scoring?: RunScoringFence;
@@ -124,7 +130,17 @@ export interface RunUpdateGuard {
 }
 
 export interface RunStore extends AdmissionLedger {
-  create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
+  // THE CHILD ROW IS THE DISPATCH INTENT (arch-review 33 P1). A batch creates a case's child run immediately
+  // before dispatching it, so conditioning that INSERT on the parent's fencing token is what makes "may I
+  // spend compute for this batch" one atomic decision rather than a proof followed by a hopeful gap. A driver
+  // displaced between its authority proof and this insert writes no row — and no row means no dispatch.
+  //
+  // A refused condition THROWS `ConflictError` — the same answer `proveAuthority` gives, so the batch loop
+  // aborts through the path it already has. (A boolean would have changed the signature every hand-rolled
+  // fake in the repository implements; an added optional parameter changes none of them, which is the same
+  // reason `settleRun` is a free function rather than a port method.) Without a guard: the unconditional
+  // insert it always was.
+  create(record: RunRecord, events?: OutboxEvent[], guard?: RunCreateGuard): Promise<void>;
   // `fence`: commit ONLY while the named scoring pass still owns the parent scorecard's marker. A miss
   // returns undefined (like a missing id) — the caller treats it as "I was superseded" and stops.
   update(

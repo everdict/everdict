@@ -715,7 +715,11 @@ export class ScorecardBatchService {
           ...(caseEnvelope ? { envelope: caseEnvelope } : {}),
           now: this.now(),
         });
-        await runStore.create(child);
+        // THE CHILD ROW IS THE DISPATCH INTENT (arch-review 33 P1). Committing it under the parent's fencing
+        // token is what turns "prove, then hope" into one decision: a driver displaced between its authority
+        // proof and this insert writes no row, and a case with no child is never dispatched. The refusal
+        // arrives as ConflictError, the same shape the proof gives, so the loop aborts the way it already does.
+        await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch: ctx.driverEpoch } });
       }
       const baseJob: CaseJob = {
         evalCase,
@@ -812,10 +816,18 @@ export class ScorecardBatchService {
       // WHY THIS ONE SEALS BEFORE ITS SETTLE, unlike the standalone run's (arch-review 32 P0). The judges
       // below score onto this result and their own executions seal as `judge:<id>` planes on the child's
       // trajectory — so the execution plane has to exist first, and the child's settle carries what the
-      // judges produced. The bound that makes this safe is the one above it: the loop proves its authority
-      // before it dispatches, so a displaced driver reaches this point for at most the case already in
-      // flight, and that case's execution really did happen. Two drivers seal one child only through the
-      // dispatch-intent window named at `proveAuthority`.
+      // judges produced.
+      //
+      // What bounds it, in order of strength: the child ROW is now created under the parent's fencing token
+      // (arch-review 33), so a displaced driver cannot open a case at all; the loop proves its authority
+      // before each dispatch; and the settle itself proves the parent again. The residue is a driver
+      // displaced DURING one case's execution — it seals that case's plane and is then refused the settle,
+      // so a re-driven child could carry an earlier attempt's execution plane beside its own result.
+      //
+      // Closing that means sealing the execution plane AFTER the committed child settle and letting the
+      // judge planes attach to a trajectory the execution plane no longer opens — a change to how a
+      // trajectory is NAMED, which is a browse-surface question and wants its own change with its own drill,
+      // not a rider on this one.
       if (child && result.trace.length > 0)
         if (this.deps.trajectories)
           void sealExecutionPlanes(this.deps.trajectories, {
@@ -1588,7 +1600,8 @@ export class ScorecardBatchService {
           ...(childEnv ? { envelope: childEnv } : {}),
           now: this.now(),
         });
-        await runStore.create(child);
+        // …and the in-process loop commits the same intent under the epoch IT holds (P1 above).
+        await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch } });
         caseToChild.set(childKey(job.evalCase.id, job.trial), child.id);
       }
       try {

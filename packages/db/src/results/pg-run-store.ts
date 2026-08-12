@@ -2,10 +2,12 @@ import type {
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
+  RunCreateGuard,
   RunListOptions,
   RunStore,
   RunUpdateGuard,
 } from "@everdict/application-control";
+import { ConflictError } from "@everdict/contracts";
 import { CANCELLED_ERROR_CODE, type RunRecord, RunRecordSchema, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
@@ -89,6 +91,17 @@ const RUN_COLUMNS =
 const RUN_VALUES =
   "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)";
 
+// A conditional insert that matched nothing is a driver that has been replaced — the same answer the
+// authority proof gives, so the caller aborts through the path it already has.
+function refuseIfUncommitted(rows: number, guard: RunCreateGuard | undefined, runId: string): void {
+  if (rows > 0 || !guard) return;
+  throw new ConflictError(
+    "CONFLICT",
+    { scorecard: guard.parentDriver.scorecardId, run: runId },
+    "this replica no longer drives the batch — the case was not committed to",
+  );
+}
+
 function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
   return [
     r.id,
@@ -134,21 +147,34 @@ export class PgRunStore implements RunStore {
     private readonly replicaId?: string,
   ) {}
 
-  async create(r: RunRecord, events?: OutboxEvent[]): Promise<void> {
+  async create(r: RunRecord, events?: OutboxEvent[], guard?: RunCreateGuard): Promise<void> {
     const base = runInsertParams(r, this.replicaId);
+    // The dispatch intent, committed under the parent's fencing token: `INSERT … SELECT … WHERE EXISTS` is the
+    // same cross-row condition the child's later writes carry, asked at the moment the batch commits to
+    // spending compute. A displaced driver inserts nothing, and a case with no child row is never dispatched.
+    const parentSql = guard
+      ? ` SELECT ${base.map((_, n) => `$${n + 1}`).join(", ")} WHERE EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${base.length + 1} AND s.owner_epoch = $${base.length + 2})`
+      : undefined;
+    const parentParams = guard ? [guard.parentDriver.scorecardId, guard.parentDriver.epoch] : [];
     if (events && events.length > 0) {
       // One statement, two writes (E0): the run insert and its facts commit or roll back together.
-      const ev = eventValuesClause(events, base.length + 1);
-      await this.client.query(
-        `WITH ins AS (INSERT INTO everdict_runs ${RUN_COLUMNS} VALUES ${RUN_VALUES} RETURNING id)
-         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+      const ev = eventValuesClause(events, base.length + parentParams.length + 1);
+      const res = await this.client.query<{ id: string }>(
+        `WITH ins AS (INSERT INTO everdict_runs ${RUN_COLUMNS} ${parentSql ?? `VALUES ${RUN_VALUES}`} RETURNING id),
+         ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
          SELECT * FROM (VALUES ${ev.sql}) AS v
-         WHERE EXISTS (SELECT 1 FROM ins)`,
-        [...base, ...ev.params],
+         WHERE EXISTS (SELECT 1 FROM ins))
+         SELECT id FROM ins`,
+        [...base, ...parentParams, ...ev.params],
       );
+      refuseIfUncommitted(res.rows.length, guard, r.id);
       return;
     }
-    await this.client.query(`INSERT INTO everdict_runs ${RUN_COLUMNS} VALUES ${RUN_VALUES}`, base);
+    const res = await this.client.query<{ id: string }>(
+      `INSERT INTO everdict_runs ${RUN_COLUMNS} ${parentSql ?? `VALUES ${RUN_VALUES}`} RETURNING id`,
+      [...base, ...parentParams],
+    );
+    refuseIfUncommitted(res.rows.length, guard, r.id);
   }
 
   async update(

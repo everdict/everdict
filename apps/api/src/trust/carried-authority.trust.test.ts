@@ -406,3 +406,73 @@ describeTrust("TRUST-150 — a displaced batch driver cannot mutate its successo
     expect(settled?.status).toBe("succeeded");
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-151.
+//
+// A REPLAY IS THE EXECUTION THE RUN KEPT, NOT EVERY EXECUTION THAT CARRIED ITS ID.
+//
+// The seal is winner-gated; the BUFFER is not, and cannot easily be. Frames, logs and resource samples are
+// appended while the run executes under its live-correlation id — derived from the record so an observer needs
+// no lookup, which is the property that makes live observation work at all — and a re-driven run keeps that
+// same id. Two attempts therefore append into one buffer, and the winner used to seal a replay containing an
+// execution whose settlement was REFUSED: a reader scrubbing that timeline watches two runs with nothing
+// saying where the seam is.
+//
+// The boundary is drawn where an attempt BEGINS, by the driver that won the right to begin it, rather than by
+// filtering at seal time — the lanes do not share a clock (frames and logs are wall-clock, folded env deltas
+// are trace-relative offsets), so "older than this attempt" is not a question the entries can all answer.
+// "Start again" is. That distinction is not academic: the first draft of this fix filtered by time and
+// silently dropped every folded env delta, which the ordinary recording tests caught.
+describeTrust("TRUST-151 — a re-driven run's replay is its own attempt, not the one before it", () => {
+  it("the winning re-drive clears the previous attempt's buffer before it executes", async () => {
+    const { InMemoryRecordingStore, InMemoryRunStore: Runs } = await import("@everdict/db");
+    const { RunService } = await import("@everdict/application-control");
+    const recordings = new InMemoryRecordingStore();
+    const store = new Runs();
+
+    // A run interrupted mid-flight, with the previous attempt's frames still in the buffer.
+    await store.create({
+      id: "r-redrive",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "running",
+      caseSpec: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z",
+    } as never);
+    await recordings.append("evd-run-r-redrive", {
+      track: "logs",
+      entry: { t: 1_000, stream: "stdout", text: "attempt A" },
+    });
+    await recordings.append("evd-run-r-redrive", { track: "frames", entry: { t: 1_100, ref: "a://1", hash: "h1" } });
+
+    let dispatched = 0;
+    const service = new RunService({
+      store,
+      recordingStore: recordings,
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          dispatched += 1;
+          await recordings.append("evd-run-r-redrive", {
+            track: "logs",
+            entry: { t: 5_000, stream: "stdout", text: "attempt B" },
+          });
+          return result(job.evalCase.id);
+        },
+      },
+    } as never);
+
+    const record = await store.get("r-redrive");
+    const outcome = await service.resume(record as never);
+    expect(outcome.kind).toBe("resumed");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(dispatched).toBe(1);
+
+    // The sealed replay is attempt B's alone. Pre-fix it held both, on one timeline, with nothing marking
+    // where the discarded execution ended and the kept one began.
+    const sealed = await recordings.get("evd-run-r-redrive");
+    expect(sealed?.tracks.logs?.map((l) => l.text)).toEqual(["attempt B"]);
+    expect(sealed?.tracks.frames ?? []).toHaveLength(0);
+  }, 20_000);
+});

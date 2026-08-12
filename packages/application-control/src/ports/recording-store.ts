@@ -14,6 +14,17 @@ export interface RecordingSeal {
 export interface RecordingStore {
   append(runId: string, item: TrackEntry): Promise<void>;
   seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined>;
+  // A NEW ATTEMPT OPENS A NEW RECORDING (arch-review 33 P1). A re-driven run keeps its live-correlation id —
+  // observers derive `evd-run-<id>` from the record with no lookup, which is what makes live observation work
+  // — so both attempts append into one buffer, and the winner would otherwise seal a replay containing an
+  // execution whose settlement was refused: a reader scrubbing that timeline watches two runs with nothing
+  // saying where the seam is.
+  //
+  // Called by the re-drive itself, which is the one place that knows an attempt is beginning. Deliberately
+  // NOT a time-based filter at seal: the lanes carry different clocks (frames and logs are wall-clock, the
+  // folded env deltas are trace-relative offsets), so "older than the attempt" is not a question the entries
+  // can all answer. "Start again" is.
+  reset(runId: string): Promise<void>;
   get(runId: string): Promise<CaseRecording | undefined>;
   // The recording as it stands RIGHT NOW, sealed or not — the live tail behind "replay while it runs"
   // (live = a replay that has not finished; the player scrubs back mid-run and pins to the live edge).
