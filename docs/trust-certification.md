@@ -367,7 +367,7 @@ are about code that has not shipped yet.
 
 | Guard | What it refuses | Where |
 | --- | --- | --- |
-| terminal-write | A run lifecycle write (a domain transition, or a literal terminal status) that does not carry `expectNonTerminal`. Non-terminal transitions are covered too, deliberately: starting or adopting a run another process settled is the same read-check-write | `packages/application-control/src/ports/terminal-write-guard.test.ts` |
+| terminal-write | A settlement that reaches `store.update` instead of the `settleRun` / `settleScorecard` verb — the verb takes the fence as a parameter, so a settlement written through it cannot omit the CAS. The weaker rule stands for the rest: a non-terminal lifecycle transition (start, adopt, redispatch, extend) is an ordinary write and must carry `expectNonTerminal` by hand, because claiming a run another process settled is the same read-check-write | `packages/application-control/src/ports/terminal-write-guard.test.ts` |
 | CAS-loser | A guarded write followed by a live `pushPersisted` whose answer was never bound — a write nobody COULD have read, so the push after it is unconditional by construction | `packages/application-control/src/platform-event/cas-loser-guard.test.ts` |
 | self-skip | A trust scenario that prints its own SKIP and returns. Vitest reports that as passed, the runner counts it, and the certification prints PASS over a claim nothing exercised — the one door the "no skipped scenario" rule cannot watch | `apps/api/src/trust/self-skip-guard.test.ts` |
 
