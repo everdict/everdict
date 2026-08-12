@@ -476,3 +476,83 @@ describeTrust("TRUST-151 — a re-driven run's replay is its own attempt, not th
     expect(sealed?.tracks.frames ?? []).toHaveLength(0);
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-152.
+//
+// THE LAST PLACE A DISPLACED DRIVER COULD STILL PUBLISH.
+//
+// A batch proves its authority before it dispatches, and its child row is now created under the parent's
+// fencing token — so a driver displaced BEFORE a case opens neither commits to it nor runs it. What was left
+// is the case already in flight when the takeover lands. That one executes, and then its driver publishes:
+// the execution plane, the judges' planes on top of it, and the child's settle.
+//
+// The settle is refused, which used to be treated as enough. It is not, because a trajectory keeps the FIRST
+// segment per emitter — immutable evidence, deliberately. So the displaced driver planted the permanent
+// execution plane of a case whose outcome was thrown away, and the successor's re-drive, whose result the
+// child actually keeps, found its own seal refused as a re-offer. `result = B, trajectory = A`, one level
+// below where that sentence was first fixed.
+//
+// The case really did execute. It is simply no longer this driver's to publish — which is a question asked
+// once, right before anything is written, and answered by the same fence everything else here uses.
+describeTrust("TRUST-152 — a driver displaced mid-case publishes no evidence for it", () => {
+  it("the execution plane of a case whose settle will be refused is never sealed", async () => {
+    const { InMemoryTrajectoryStore } = await import("@everdict/db");
+    const trajectories = new InMemoryTrajectoryStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    runStore.attachScorecards(store);
+
+    let takeover: (() => Promise<void>) | undefined;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          // The takeover lands WHILE this case runs — after its child row was committed, before its evidence.
+          if (takeover) {
+            const claim = takeover;
+            takeover = undefined;
+            await claim();
+          }
+          return {
+            ...result(job.evalCase.id),
+            trace: [{ kind: "message" as const, t: 0, role: "assistant" as const, text: "displaced driver's run" }],
+          };
+        },
+      },
+      store,
+      runStore,
+      trajectories,
+      datasets,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    takeover = async () => {
+      const claimed = await store.update(record.id, { ownerReplica: "cp-b" }, undefined, {
+        expectNonTerminal: true,
+        claimOwnership: true,
+      });
+      expect(claimed?.ownerEpoch).toBeGreaterThan(0);
+    };
+    await new Promise((r) => setTimeout(r, 600));
+
+    // No child of this batch carries a trajectory: the displaced driver published nothing, so the seal its
+    // successor's re-drive makes will be the first one — and therefore the one that stays.
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    for (const child of children) expect(await trajectories.get("acme", child.id)).toBeUndefined();
+    // …and the child is not terminal either, so the batch its successor drives still has the case to run.
+    for (const child of children) expect(["queued", "running"]).toContain(child.status);
+  }, 20_000);
+});

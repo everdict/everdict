@@ -811,23 +811,23 @@ export class ScorecardBatchService {
       }
       // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
       if (caseEnvelope && caseUsd > 0) void this.deps.envelopes?.settle(caseEnvelope.id, ctx.tenant, caseUsd);
+      // DOES THIS LOOP STILL HOLD THE BATCH? Asked once more here, because everything below PUBLISHES — the
+      // execution plane, the judges' own planes, the child's settle. A driver displaced while this case ran
+      // would otherwise plant the permanent trajectory of an execution whose settle is refused a moment
+      // later, and the successor's re-drive — the one whose result the child keeps — would then find its own
+      // seal refused as a re-offer. The case really did execute; it is simply not this driver's to publish.
+      if (!(await this.holdsBatch(id, ctx.driverEpoch))) return { settled: false };
       // P5 dual-write: the case's trajectory seals in the OWNED store under its child run id (idempotent).
       //
       // WHY THIS ONE SEALS BEFORE ITS SETTLE, unlike the standalone run's (arch-review 32 P0). The judges
       // below score onto this result and their own executions seal as `judge:<id>` planes on the child's
       // trajectory — so the execution plane has to exist first, and the child's settle carries what the
-      // judges produced.
+      // judges produced. Reordering would make a judge plane the segment that CREATES the trajectory, and
+      // the judge seal carries no identity, so the browse row would arrive unnamed.
       //
-      // What bounds it, in order of strength: the child ROW is now created under the parent's fencing token
-      // (arch-review 33), so a displaced driver cannot open a case at all; the loop proves its authority
-      // before each dispatch; and the settle itself proves the parent again. The residue is a driver
-      // displaced DURING one case's execution — it seals that case's plane and is then refused the settle,
-      // so a re-driven child could carry an earlier attempt's execution plane beside its own result.
-      //
-      // Closing that means sealing the execution plane AFTER the committed child settle and letting the
-      // judge planes attach to a trajectory the execution plane no longer opens — a change to how a
-      // trajectory is NAMED, which is a browse-surface question and wants its own change with its own drill,
-      // not a rider on this one.
+      // What makes the order safe is that nothing here runs without authority: the child row is committed
+      // under the parent's token, the loop proves itself before each dispatch, and the check just above
+      // proves it once more before any of this publishes. A driver that lost the batch reaches none of it.
       if (child && result.trace.length > 0)
         if (this.deps.trajectories)
           void sealExecutionPlanes(this.deps.trajectories, {
@@ -1283,12 +1283,22 @@ export class ScorecardBatchService {
     fenced: { expectOwnerEpoch: number },
     controller: AbortController,
   ): Promise<boolean> {
-    const held = await this.deps.store
-      .update(id, { updatedAt: this.now() }, undefined, { ...fenced, expectNonTerminal: true })
-      .catch(() => undefined);
-    if (held !== undefined) return true;
+    if (await this.holdsBatch(id, fenced.expectOwnerEpoch)) return true;
     controller.abort(); // stop the sibling lanes too — they are dispatching under the same lost authority
     return false;
+  }
+
+  // The same question with no fan-out to stop: does this loop still hold the batch? Asked once more AFTER a
+  // case executes and BEFORE its evidence is published (arch-review 33). The seal is what makes this matter:
+  // a trajectory keeps its FIRST segment per emitter, so a driver displaced mid-case that seals anyway plants
+  // the permanent execution plane of a case whose settle is about to be refused — and the successor's
+  // re-drive, which produces the result the child actually keeps, then loses its own seal as a re-offer.
+  // `result = B, trajectory = A`, one level below where that sentence was first fixed.
+  private async holdsBatch(id: string, epoch: number): Promise<boolean> {
+    const held = await this.deps.store
+      .update(id, { updatedAt: this.now() }, undefined, { expectOwnerEpoch: epoch, expectNonTerminal: true })
+      .catch(() => undefined);
+    return held !== undefined;
   }
 
   // Cases whose execution finished and whose child is deliberately still OPEN until its judges land. Keyed
@@ -1633,6 +1643,17 @@ export class ScorecardBatchService {
         }
         // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
         if (childEnv && caseUsd > 0) void this.deps.envelopes?.settle(childEnv.id, tenant, caseUsd);
+        // …and the same question the Temporal path asks before it publishes anything (arch-review 33): a
+        // driver displaced while this case ran does not plant its execution plane, because the child it
+        // belongs to is about to be re-driven by somebody else and the FIRST seal is the permanent one.
+        if (!(await this.holdsBatch(id, epoch))) {
+          controller.abort();
+          throw new ConflictError(
+            "CONFLICT",
+            { scorecard: id, case: job.evalCase.id },
+            "this replica no longer drives the batch — the case's evidence is not ours to publish",
+          );
+        }
         // P5 dual-write: the case's trajectory seals in the OWNED store under its child run id (idempotent).
         if (child && result.trace.length > 0)
           if (this.deps.trajectories)
