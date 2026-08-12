@@ -820,6 +820,8 @@ export class RunService {
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),
     };
+    // Did THIS driver's settlement land? Everything after the fork below hangs off it (arch-review 31 P2).
+    let committed = false;
     try {
       // Resolve env secret references ({secretRef}) just before dispatch — shared + the submitter's personal secrets. If absent, throw → isolate as a run failure.
       const secrets =
@@ -882,7 +884,7 @@ export class RunService {
           if (ref) result.recordingRef = ref;
         } catch {}
       }
-      await this.finalize(id, (run) => run.succeed(result, this.now()));
+      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
       // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
       // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.
@@ -900,15 +902,16 @@ export class RunService {
       // after settlement) plus the evidence trace. Live-caught gap — error {code,message} alone left a failed
       // single run with no "why" once the orchestrator job was GC'd.
       const failed = failedCaseResult(job, err);
-      await this.finalize(id, (run) => run.fail(error, this.now(), failed));
+      committed = (await this.finalize(id, (run) => run.fail(error, this.now(), failed))) !== undefined;
       // Dual-write parity with the success path: the evidence trace seals as the run's own trajectory.
       if (failed.trace.length > 0)
         void this.sealPlanes(id, input.tenant, failed.trace, {
           ...(failed.traceT0 !== undefined ? { t0: failed.traceT0 } : {}),
         });
     }
-    // Completion notification (Mattermost etc.) — with the latest record. Failure is independent of the run result (swallow). Independent of the webhook.
-    if (this.deps.onComplete) {
+    // Completion notification (Mattermost etc.) — with the latest record, and only for the writer whose
+    // settlement COMMITTED. Failure is independent of the run result (swallow). Independent of the webhook.
+    if (committed && this.deps.onComplete) {
       const rec = await this.deps.store.get(id);
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
@@ -1097,11 +1100,15 @@ export class RunService {
     }).catch(() => {});
   }
 
-  private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<void> {
+  // Returns the record it SETTLED, or undefined when the fence refused — the caller's licence to do anything
+  // downstream (arch-review 31 P2). A run's completion notification used to fire whether or not this write
+  // landed, so a driver whose settle lost still announced a settlement it had no part in: one outcome, two
+  // notifications, the second from the process that was told it had been replaced.
+  private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<RunRecord | undefined> {
     const current = await this.deps.store.get(id);
-    if (!current) return;
+    if (!current) return undefined;
     const run = Run.from(current);
-    if (run.isTerminal()) return;
+    if (run.isTerminal()) return undefined;
     // E0 outbox: the terminal fact the transition computed persists atomically with the terminal write —
     // a crash between "run settled" and "the world was told" is no longer expressible.
     const { patch, facts } = outcome(run);
@@ -1117,6 +1124,7 @@ export class RunService {
     // A CAS loser publishes nothing — the guarded write inserted no durable event, and this bus feeds agent
     // activation rather than a UI toast.
     if (settled !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    return settled;
   }
 
   // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same

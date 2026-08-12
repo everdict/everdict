@@ -150,13 +150,17 @@ function codeOf(text: string): string {
     .join("\n");
 }
 
-// Each `…update(` call's own ARGUMENT SPAN, by balancing parentheses. File-level co-occurrence is not the
+// Each `…update(` call's own ARGUMENT SPAN, by balancing parentheses. The receiver is matched by SHAPE — any
+// `…store` / `…Store`, plus the two collection names these are held under — rather than by the four
+// identifiers that happened to exist when this was written: a rule that only recognises today's variable
+// names is a rule the next rename repeals.
+// File-level co-occurrence is not the
 // question — a service that filters a query by `status: "succeeded"` somewhere else in the file is not
 // settling a run, and a guard that cannot tell those apart teaches people to add allowlist entries until it
 // means nothing.
 function updateCalls(code: string): Array<{ span: string; context: string }> {
   const spans: Array<{ span: string; context: string }> = [];
-  for (const match of code.matchAll(/\b(?:runs|runStore|scorecards|store)\.update\(/g)) {
+  for (const match of code.matchAll(/\b(?:runs|scorecards|\w*[Ss]tore)\.update\(/g)) {
     let depth = 0;
     let i = (match.index ?? 0) + match[0].length - 1;
     const start = i;
