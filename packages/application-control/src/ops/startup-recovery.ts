@@ -167,17 +167,25 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // The same claim, for a standalone run: still open AND still owned by the replica this recovery saw.
       // `expectNonTerminal` alone said "the run is open", which is true for both racing replicas — it is not
       // an answer to "may I take it" (arch-review 28 P1).
+      // The claim ALSO raises the run's fencing token (arch-review 31 P1, mig 0170), and the resume is driven
+      // from the record the claim RETURNED rather than the one the list read. The distinction is the whole
+      // mechanism: the returned record carries the epoch this replica won, and every write that drives the
+      // run proves that number — so the replica this recovery declared dead, if it was only paused, fails
+      // against a value that moved instead of settling a run it no longer owns.
+      let driving = r;
       if (claim) {
         const claimed = await deps.runs.update(r.id, claim, undefined, {
           expectNonTerminal: true,
           expectOwnerReplica: r.ownerReplica ?? null,
+          claimOwnership: true,
         });
         if (claimed === undefined) {
           liveCount += 1; // settled, or claimed by another replica — either way not ours to drive
           continue;
         }
+        driving = claimed;
       }
-      if (deps.resumeRun && (await deps.resumeRun(r).catch(() => false))) {
+      if (deps.resumeRun && (await deps.resumeRun(driving).catch(() => false))) {
         runsResumed += 1;
         continue;
       }

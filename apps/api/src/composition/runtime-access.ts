@@ -1,4 +1,10 @@
-import { INTERRUPTED, type ReplicaRegistry, recoverInterrupted } from "@everdict/application-control";
+import {
+  INTERRUPTED,
+  type ReplicaRegistry,
+  type ResumeResult,
+  recoverInterrupted,
+  settleRun,
+} from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
@@ -272,19 +278,31 @@ export async function runStartupRecovery(deps: {
     // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it —
     // which makes the CLAIM binding: a background leg that can neither adopt nor re-dispatch must apply the
     // tombstone itself, or the record it claimed stays `running` forever with nobody left to settle it.
+    //
+    // THE TOMBSTONE IS THE UNRESUMABLE BRANCH, NOT THE NOT-RESUMED BRANCH (arch-review 31 P0). This leg used
+    // to settle whenever `resume` came back falsy, through a RAW store write with no CAS — so a run that
+    // SUCCEEDED between the claim and the adoption (the ordinary case: adopting waits for the alloc to
+    // finish) was recorded as an infrastructure failure. Two things were wrong and both are fixed: the
+    // service now says WHICH of the two happened, and the write goes through `settleRun`, which cannot be
+    // called without the terminal fence.
     resumeRun: async (r) => {
       void (async () => {
         const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
-        const resumed = await service.resume(r, adopted).catch(() => false);
-        if (!resumed)
-          await store
-            .update(r.id, { status: "failed", error: INTERRUPTED, updatedAt: new Date().toISOString() })
-            .catch((err) => {
-              console.warn(
-                `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-              return undefined;
-            });
+        // A resume that THREW told us nothing, and the claim is binding — so it falls to the tombstone, which
+        // is now fenced: if the run settled in the meantime the write simply loses and history keeps the real
+        // outcome. That is the difference between guessing safely and guessing.
+        const outcome = await service.resume(r, adopted).catch((): ResumeResult => ({ kind: "unresumable" }));
+        if (outcome.kind !== "unresumable") return; // resumed, or already settled by whoever finished it
+        await settleRun(store, r.id, {
+          status: "failed",
+          error: INTERRUPTED,
+          updatedAt: new Date().toISOString(),
+        }).catch((err) => {
+          console.warn(
+            `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return undefined;
+        });
       })();
       return true;
     },

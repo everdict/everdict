@@ -16,9 +16,17 @@ import { describe, expect, it } from "vitest";
 // write's return value. This scan enforces the observable half of it — a file that guards a write and also
 // pushes must contain the check — because the alternative (teaching a regex to follow control flow) would be
 // a guard nobody can trust either way.
-const GUARDED_UPDATE = /(?:\bconst\s+(\w+)\s*=\s*)?await\s+[\w.?]*\.update\(/g;
+// THE SETTLE VERB IS A GUARDED WRITE (arch-review 31). `settleRun` / `settleScorecard` carry the fence
+// internally, so a scan that only knew the `.update(… expectNonTerminal …)` shape stopped seeing the very
+// writes the refactor moved behind them — the rule would have quietly narrowed to whatever had not been
+// migrated yet.
+const GUARDED_UPDATE = /(?:\bconst\s+(\w+)\s*=\s*)?await\s+(?:[\w.?]*\.update|settleRun|settleScorecard)\(/g;
 const GUARD = /expect(NonTerminal|NotCancelled)\b/;
-const PUSH = /pushPersisted/;
+const VERB = /await\s+(settleRun|settleScorecard)\(/;
+// WHAT COUNTS AS ANNOUNCING IT. The live bus feeds agent activation and the operator series feeds the
+// counters an operator reads a rollout by — a settlement counted by a writer that lost is a case tallied
+// twice, and it is no more derivable from an attempt than a fact is.
+const PUBLISH = /pushPersisted|onOrchestrationEvent/;
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -46,10 +54,10 @@ function guardedWrites(code: string): Array<{ bound: boolean; publishesAfter: bo
       }
     }
     const span = code.slice(from, i + 1);
-    if (!GUARD.test(span)) continue;
+    if (!GUARD.test(span) && !VERB.test(span)) continue;
     // The window a settle's own publish lands in. Generous on purpose: a false positive here costs one
     // binding, and a false negative costs a fact on the live bus that the ledger never recorded.
-    found.push({ bound: match[1] !== undefined, publishesAfter: PUSH.test(code.slice(i, i + 600)) });
+    found.push({ bound: match[1] !== undefined, publishesAfter: PUBLISH.test(code.slice(i, i + 600)) });
   }
   return found;
 }
@@ -60,7 +68,7 @@ describe("CAS-loser guard — a rejected write announces nothing", () => {
     guardedWrites(readFileSync(join(root, rel), "utf8")).map((w) => ({ rel, ...w })),
   );
 
-  it("a guarded write followed by a live push binds its answer", () => {
+  it("a guarded write followed by a live publish binds its answer", () => {
     // Binding is the observable half: a write whose result was never assigned is one whose answer nobody
     // COULD have read, so the push after it is unconditional by construction. (Binding and then ignoring it
     // is caught by the repo's unused-variable lint, which is the other half.)

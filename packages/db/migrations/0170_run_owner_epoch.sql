@@ -1,0 +1,17 @@
+-- 0170_run_owner_epoch — additive (expand): the FENCING TOKEN on a standalone run's driver.
+--
+-- The batch got one in mig 0166 and the run it is made of did not, which left the same hole open one level
+-- down. `owner_replica` ELECTS a driver — boot recovery claims a run only while the replica it observed is
+-- still the recorded owner, so exactly one replica wins the takeover. That says nothing to the LOSER of a
+-- takeover it never agreed to: a replica declared dead after a long pause comes back with its in-memory
+-- dispatch loop intact, and both it and the new owner hold writes whose only proof is "the row is still
+-- open". Whichever result lands first becomes history.
+--
+-- The epoch is what a paused process cannot argue with. It rises on every claim, the claimant carries the
+-- value it won, and every write that DRIVES the run conditions on it — so the displaced driver's settle fails
+-- against a number that moved under it. Owner identity elects the new driver; the fencing token revokes the
+-- old one.
+--
+-- Starts at 0 for existing rows: a run nobody has ever claimed sits at the honest predecessor of the number
+-- its first claimant will raise.
+ALTER TABLE everdict_runs ADD COLUMN IF NOT EXISTS owner_epoch bigint NOT NULL DEFAULT 0;

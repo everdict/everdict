@@ -40,6 +40,7 @@ interface RunRow {
   outputs: unknown | null;
   session: unknown | null;
   owner_replica: string | null; // which control-plane replica drives this run (mig 0135)
+  owner_epoch: string | number | null; // the driver's fencing token (mig 0170) — bigint arrives as a string
   visibility: string | null; // creation-time audience fact (mig 0143) — NULL = legacy class/kind inference
   created_at: string | Date;
   updated_at: string | Date;
@@ -75,6 +76,7 @@ function rowToRecord(row: RunRow): RunRecord {
     ...(row.outputs ? { outputs: row.outputs } : {}),
     ...(row.session ? { session: row.session } : {}),
     ...(row.owner_replica ? { ownerReplica: row.owner_replica } : {}),
+    ...(row.owner_epoch !== null && row.owner_epoch !== undefined ? { ownerEpoch: Number(row.owner_epoch) } : {}),
     ...(row.visibility ? { visibility: row.visibility } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -196,6 +198,9 @@ export class PgRunStore implements RunStore {
       sets.push(`owner_replica = $${i++}`);
       vals.push(patch.ownerReplica);
     }
+    // …and a CLAIM raises the fencing token in the same statement (mig 0170), so the replica this one
+    // replaced discovers the takeover the only way a paused process reliably can: its next write fails.
+    if (guard?.claimOwnership === true) sets.push("owner_epoch = owner_epoch + 1");
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);
       vals.push(patch.updatedAt);
@@ -226,6 +231,11 @@ export class PgRunStore implements RunStore {
         vals.push(guard.expectOwnerReplica);
         fenceSql += ` AND owner_replica = $${vals.length}`;
       }
+    }
+    // THE FENCE the driver proves on every write that drives this run (mig 0170).
+    if (guard?.expectOwnerEpoch !== undefined) {
+      vals.push(guard.expectOwnerEpoch);
+      fenceSql += ` AND owner_epoch = $${vals.length}`;
     }
     const fence = guard?.scoring;
     if (fence) {

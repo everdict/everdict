@@ -276,6 +276,23 @@ function pricedTrace(trace: TraceEvent[]): TraceEvent[] {
 
 // Manages a run's async lifecycle: accept (202) → delegate to the dispatcher → on completion, update the store + webhook.
 // Unit-testable independent of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
+// WHAT A RESUME ANSWERED. Three outcomes, and only one of them is a licence to tombstone:
+//
+//   resumed         — this recovery owns the record now and re-drove it.
+//   already_settled — somebody else finished it first. The work is DONE; the row carries their outcome, and
+//                     the caller's job is to leave it alone.
+//   unresumable     — there is nothing to re-drive (a legacy record with no persisted case). This one, and
+//                     only this one, the caller settles.
+//
+// The boolean this replaced could not tell the second from the third, and a caller that guessed wrong wrote
+// FAILED{INTERRUPTED} over a successful evaluation (arch-review 31 P0).
+export type ResumeResult =
+  | { kind: "resumed" }
+  | { kind: "already_settled"; record: RunRecord }
+  | { kind: "unresumable" };
+
+const UNRESUMABLE: ResumeResult = { kind: "unresumable" };
+
 export class RunService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -345,7 +362,7 @@ export class RunService {
       creation.map((c) => c.record),
     );
     if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
-    void this.track(record.id, effective, record.envelope?.id); // fire-and-track
+    void this.track(record.id, effective, record.envelope?.id, record.ownerEpoch ?? 0); // fire-and-track
     return record;
   }
 
@@ -690,38 +707,57 @@ export class RunService {
 
   // Boot recovery for an interrupted standalone run. adopted = a result harvested from the still-alive backend
   // job (settle it directly — zero re-run); else re-drive from the persisted caseSpec; legacy records without
-  // one return false and keep the tombstone path. docs/architecture/batch-resilience.md
-  async resume(record: RunRecord, adopted?: CaseResult): Promise<boolean> {
+  // one are `unresumable` and keep the tombstone path. docs/architecture/batch-resilience.md
+  //
+  // FAILED TO RESUME IS NOT "THE WORK FAILED" (arch-review 31 P0). This used to answer `boolean`, which
+  // collapsed two opposite outcomes into one word: "there is nothing here to re-drive" and "somebody else
+  // finished it while I was asking". A caller reading `false` as the first meaning tombstones the second —
+  // and one did, over a run that had SUCCEEDED, with no CAS to stop it. The distinction is the whole point,
+  // so it is in the type: only `unresumable` may be settled by the caller.
+  async resume(record: RunRecord, adopted?: CaseResult): Promise<ResumeResult> {
     // A CAS GUARD PRESENT IS NOT A CAS AUTHORITY CONSUMED (arch-review 28 P1). Both writes below were
     // correctly fenced and both ignored the answer — so a recovery that LOST the race still reported success
     // and, worse, still dispatched. The guard stopped the row from being corrupted and did nothing about the
     // second execution it then paid for. Authority to act downstream comes from the transition that
     // COMMITTED, never from the code path that attempted one.
     const run = Run.from(record);
+    const settledElsewhere = async (): Promise<ResumeResult> => ({
+      kind: "already_settled",
+      record: (await this.deps.store.get(record.id)) ?? record,
+    });
     if (adopted) {
-      if (!run.canAdopt()) return false; // already settled — never rewrite a terminal record
-      const claimed = await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch, undefined, {
-        expectNonTerminal: true,
-      });
-      // Lost: the run settled on its own, which is a resume nobody needs rather than one that succeeded.
-      return claimed !== undefined;
+      if (!run.canAdopt()) return settledElsewhere(); // already settled — never rewrite a terminal record
+      const claimed = await settleRun(this.deps.store, record.id, run.adopt(adopted, this.now()).patch);
+      // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
+      return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
     }
     const spec = record.caseSpec; // local narrow — canRedispatch() already requires it
-    if (!run.canRedispatch() || !spec) return false;
+    if (!run.canRedispatch() || !spec) return Run.from(record).isTerminal() ? settledElsewhere() : UNRESUMABLE;
     const redispatched = await this.deps.store.update(record.id, run.redispatch(this.now()).patch, undefined, {
       expectNonTerminal: true,
+      // …under the epoch this recovery claimed. Without it a second takeover between the claim and here would
+      // leave two replicas re-dispatching the same case, each holding a guard the other also satisfies.
+      // Absent is ZERO, never "unfenced": a claim raises `epoch + 1` from that same absent value, so proving
+      // 0 holds exactly while nobody has claimed and fails the moment somebody has.
+      expectOwnerEpoch: record.ownerEpoch ?? 0,
     });
     // …and the dispatch is DOWNSTREAM of that claim. Without this, a replica whose redispatch lost still
     // started a second execution of a case that already had an answer.
-    if (redispatched === undefined) return false;
-    void this.track(record.id, {
-      tenant: record.tenant,
-      harness: record.harness,
-      case: spec, // placement.target was injected before persisting — routes to the same runtime
-      ...(record.createdBy ? { submittedBy: record.createdBy } : {}),
-      ...(record.trigger ? { trigger: record.trigger } : {}),
-    });
-    return true;
+    if (redispatched === undefined) return settledElsewhere();
+    void this.track(
+      record.id,
+      {
+        tenant: record.tenant,
+        harness: record.harness,
+        case: spec, // placement.target was injected before persisting — routes to the same runtime
+        ...(record.createdBy ? { submittedBy: record.createdBy } : {}),
+        ...(record.trigger ? { trigger: record.trigger } : {}),
+      },
+      undefined,
+      // The epoch this recovery WON — `record` is the claim's own return value, not the row the sweep listed.
+      record.ownerEpoch ?? 0,
+    );
+    return { kind: "resumed" };
   }
 
   // Default is standalone runs (activity list); scorecardId → only that batch's child runs (scorecard-detail case
@@ -745,7 +781,21 @@ export class RunService {
     return this.withVerdicts(await this.deps.store.list(tenant, opts));
   }
 
-  private async track(id: string, input: SubmitInput, envelopeId?: string): Promise<void> {
+  // THE EPOCH THIS PROCESS IS DRIVING UNDER (arch-review 31 P1, mig 0170). Captured when the dispatch starts
+  // and proved on the settle, because a settle that re-READ the epoch would read the value its usurper just
+  // wrote and sail straight through — the displaced driver has to be measured against the number it held,
+  // not against the world as it now is.
+  private readonly driverEpoch = new Map<string, number>();
+
+  // The settle's authority, as this process holds it. Absent = a run this process never dispatched (a
+  // self-hosted lease reporting in, a legacy row) — unfenced exactly as before, never invented.
+  private fence(id: string): { epoch?: number } | undefined {
+    const epoch = this.driverEpoch.get(id);
+    return epoch === undefined ? undefined : { epoch };
+  }
+
+  private async track(id: string, input: SubmitInput, envelopeId?: string, epoch?: number): Promise<void> {
+    if (epoch !== undefined) this.driverEpoch.set(id, epoch);
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
     // An inline spec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) wins over the registry.
     // Built-ins (claude-code/scripted) aren't in the registry, so undefined → fall back to id branching.
@@ -945,7 +995,7 @@ export class RunService {
     const { patch } = run.settleAgent(outcome, message, this.now());
     // The settle CAS: `isTerminal()` above answers for THIS process, and an agent turn's settle races the
     // session sweep and the cancel path in others.
-    const settled = await settleRun(this.deps.store, id, patch);
+    const settled = await settleRun(this.deps.store, id, patch, undefined, this.fence(id));
     // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
     // cancel, not a hunt across N batches.
     //
@@ -1061,7 +1111,9 @@ export class RunService {
       id,
       patch,
       stamped.map((f) => f.record),
+      this.fence(id),
     );
+    this.driverEpoch.delete(id);
     // A CAS loser publishes nothing — the guarded write inserted no durable event, and this bus feeds agent
     // activation rather than a UI toast.
     if (settled !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);

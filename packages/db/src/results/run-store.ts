@@ -85,7 +85,14 @@ export class InMemoryRunStore implements RunStore {
     if (guard?.expectNotCancelled === true && cur.error?.code === CANCELLED_ERROR_CODE) return undefined;
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
       return undefined;
-    const next = { ...cur, ...patch, id: cur.id };
+    // The driver's fencing token (mig 0170) — a displaced loop's write fails against a number that moved.
+    if (guard?.expectOwnerEpoch !== undefined && (cur.ownerEpoch ?? 0) !== guard.expectOwnerEpoch) return undefined;
+    const next = {
+      ...cur,
+      ...patch,
+      ...(guard?.claimOwnership === true ? { ownerEpoch: (cur.ownerEpoch ?? 0) + 1 } : {}),
+      id: cur.id,
+    };
     this.runs.set(id, next);
     await this.appendEvents(events);
     return withRunUsage(next);

@@ -4315,12 +4315,21 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
     });
     gate.release();
-    await until(() => completed.length === 1); // the track loop has fully settled
+    // The loop's settle LOSES, so it notifies nobody — waiting on `onComplete` would wait forever, which is
+    // itself the claim (arch-review 31 P2: every effect of a settlement hangs off the settlement that
+    // committed, notifications included). So the wait is on the loop finishing its case instead.
+    await until(async () => ((await store.get("sc-race-ok"))?.steps?.length ?? 0) > 1);
+    await new Promise((r) => setTimeout(r, 50));
 
     const final = await store.get("sc-race-ok");
     expect(final?.status).toBe("superseded"); // pre-fix: the unguarded write revived it to succeeded
     expect(final?.error?.code).toBe("SUPERSEDED");
-    expect(final?.scorecard).toBeUndefined(); // the losing terminal write is a full skip, not a partial merge
+    expect(completed).toEqual([]); // …and a losing writer announces nothing — no completion notification either
+    // The loop no longer merely LOSES its final write here: its per-case authority proof fails against the
+    // terminal row and it stops before firing the case at all (arch-review 31 P1), then settles down the
+    // aborted path — which attaches whatever partials it did produce, on purpose. What must never happen is
+    // the status moving, and that is what the two assertions above hold to.
+    expect(final?.steps?.some((step) => step.message.includes("no longer owns the batch"))).toBe(true);
   });
 
   it("a late track failure cannot overwrite a superseded batch", async () => {
@@ -4367,11 +4376,15 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-next)" },
     });
     gate.release();
-    await until(() => completed.length === 1);
+    // Same reason as the success case: the losing settle notifies nobody, so the loop's progress is what
+    // tells us it finished.
+    await until(async () => ((await store.get("sc-race-fail"))?.steps?.length ?? 0) > 1);
+    await new Promise((r) => setTimeout(r, 50));
 
     const final = await store.get("sc-race-fail");
     expect(final?.status).toBe("superseded"); // pre-fix: the unguarded write flipped it to failed
     expect(final?.error?.code).toBe("SUPERSEDED"); // the judge failure never replaces the supersede marker
+    expect(completed).toEqual([]);
   });
 
   it("planBatch does not revive a superseded batch to running (Temporal activity racing the workflow cancel)", async () => {

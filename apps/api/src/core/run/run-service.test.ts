@@ -657,7 +657,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
     await store.update(rec.id, { status: "running" }); // simulate the interrupted state
 
     const adopted = resultFor({ evalCase: CASE, harness: { id: "s", version: "0" }, tenant: "t" });
-    expect(await svc.resume((await store.get(rec.id)) as RunRecord, adopted)).toBe(true);
+    expect(await svc.resume((await store.get(rec.id)) as RunRecord, adopted)).toEqual({ kind: "resumed" });
     expect(jobs).toHaveLength(0);
     const done = await store.get(rec.id);
     expect(done?.status).toBe("succeeded");
@@ -685,7 +685,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
     jobs.length = 0;
     await store.update(rec.id, { status: "queued" }); // interrupted before the first dispatch settled
 
-    expect(await svc.resume((await store.get(rec.id)) as RunRecord)).toBe(true);
+    expect(await svc.resume((await store.get(rec.id)) as RunRecord)).toEqual({ kind: "resumed" });
     await flush();
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.evalCase.id).toBe("c1");
@@ -694,7 +694,7 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
     expect(done?.status).toBe("succeeded");
   });
 
-  it("resume returns false for a legacy record with no caseSpec — the caller keeps the tombstone path", async () => {
+  it("resume reports `unresumable` for a legacy record with no caseSpec — the caller keeps the tombstone path", async () => {
     const store = new InMemoryRunStore();
     const jobs: CaseJob[] = [];
     const capture: Dispatcher = {
@@ -714,7 +714,9 @@ describe("RunService — single-run durability (P4, docs/architecture/batch-resi
       updatedAt: "2026-07-08T00:00:00.000Z",
     };
     await store.create(legacy);
-    expect(await svc.resume(legacy)).toBe(false);
+    // UNRESUMABLE, and it says so: this is the one outcome that licenses the caller to tombstone (the
+    // outcome the old boolean could not tell apart from "somebody else finished it" — arch-review 31 P0).
+    expect(await svc.resume(legacy)).toEqual({ kind: "unresumable" });
     expect(jobs).toHaveLength(0);
     expect((await store.get("legacy-1"))?.status).toBe("running"); // untouched — recovery tombstones it
   });
@@ -1029,7 +1031,7 @@ describe("RunService — terminal writes are domain-guarded (first terminal writ
     expect(final?.error).toBeUndefined();
   });
 
-  it("adoption refuses to rewrite an already-terminal run (resume returns false)", async () => {
+  it("adoption refuses to rewrite an already-terminal run (resume reports `already_settled`)", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
     const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
@@ -1038,7 +1040,9 @@ describe("RunService — terminal writes are domain-guarded (first terminal writ
     const before = await store.get(rec.id);
     const late = resultFor({ evalCase: CASE, harness: { id: "scripted", version: "0" }, tenant: "acme" } as CaseJob, 9);
     const outcome = await svc.resume(before as RunRecord, late);
-    expect(outcome).toBe(false);
+    // ALREADY_SETTLED — the run finished on its own, so this resume was unnecessary rather than failed. A
+    // caller that read this as "unresumable" would tombstone a successful run.
+    expect(outcome.kind).toBe("already_settled");
     expect(await store.get(rec.id)).toEqual(before); // untouched
   });
 });

@@ -945,8 +945,15 @@ export class ScorecardBatchService {
       stampedCompletion.map((f) => f.record),
       { over: "open" },
     );
-    if (finalized !== undefined && stampedCompletion.length > 0)
-      void this.deps.events?.pushPersisted?.(stampedCompletion);
+    // EVERY EFFECT OF A SETTLEMENT HANGS OFF THE SETTLEMENT THAT COMMITTED (arch-review 31 P2). The facts
+    // below the fold already did; the operator time series did not, so a CAS loser could leave a world where
+    // the database, the outbox and the live bus all say "this batch did not settle here" while the metrics
+    // say it did — a case counted twice, a verdict latency measured against somebody else's clock.
+    if (finalized === undefined) {
+      this.batchContexts.delete(id);
+      return; // the winner publishes, counts and notifies; this attempt does none of the three
+    }
+    if (stampedCompletion.length > 0) void this.deps.events?.pushPersisted?.(stampedCompletion);
     // Operator time series (catalog M0) — the Temporal driver settles through the SAME derivation as the
     // in-process loop (batchSettledEvent), so the two paths cannot drift.
     this.deps.onOrchestrationEvent?.(
@@ -1214,14 +1221,13 @@ export class ScorecardBatchService {
   // epoch it began under is no longer the record's, which is what a takeover leaves behind for a driver that
   // never noticed it was replaced.
   //
-  // No epoch = a record nobody has claimed (a single-replica install claims nothing), and demanding a token
-  // there would leave a batch nobody may drive. This fences takeovers, not solitude.
+  // A record nobody has claimed sits at epoch 0 and proves 0, which always holds — this fences takeovers,
+  // not solitude, and it does so by asking every time rather than by exempting the common case.
   private async proveAuthority(
     id: string,
-    fenced: { expectOwnerEpoch: number } | undefined,
+    fenced: { expectOwnerEpoch: number },
     controller: AbortController,
   ): Promise<boolean> {
-    if (!fenced) return true;
     const held = await this.deps.store
       .update(id, { updatedAt: this.now() }, undefined, { ...fenced, expectNonTerminal: true })
       .catch(() => undefined);
@@ -1356,19 +1362,34 @@ export class ScorecardBatchService {
     // under and proves it on the writes that drive the batch — a takeover raises the number, and the stale
     // driver's next write fails against a value that moved under it.
     //
-    // Absent = a deployment (or a record) with no epoch, which behaves exactly as before rather than
-    // refusing: this token fences a multi-replica takeover, and inventing one where none was claimed would
-    // turn a single-replica install into a batch nobody may settle.
-    const epoch = opening.ownerEpoch;
-    const fenced = epoch === undefined ? undefined : { expectOwnerEpoch: epoch };
-    const epochOpt = epoch === undefined ? {} : { epoch };
+    // ABSENT IS ZERO, NOT "UNFENCED" (arch-review 31 P1). The first version treated a record with no epoch as
+    // a batch nobody may fence, reasoning that inventing a token would strand a single-replica install. It
+    // strands nothing — a claim computes `epoch + 1` from that same absent value, so a driver holding 0 is
+    // fenced by the very first takeover, and a batch nobody claims stays at 0 and settles exactly as before.
+    // What the concession actually did was exempt EVERY batch submitted before a claim, which is all of them:
+    // the loop held `undefined`, `proveAuthority` returned true without asking, and a displaced driver ran
+    // the whole fan-out. The certification that covered this proved the store's CAS and never the loop.
+    const epoch = opening.ownerEpoch ?? 0;
+    const fenced = { expectOwnerEpoch: epoch };
+    const epochOpt = { epoch };
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
-    await this.deps.store.update(id, openingBatch.start(this.now()).patch, undefined, {
+    // A NON-TERMINAL CAS LOSER MUST TERMINATE ITS DOWNSTREAM AUTHORITY TOO (arch-review 31 P1). This write's
+    // answer used to be dropped, and the gap it left needs no second replica to open: a cancel that lands
+    // between the read above and this line settles the batch and calls `stopInFlight` before the controller
+    // was registered, so nothing aborts it — and this loop then went on to dispatch cases for a batch the
+    // user had already stopped. The row itself stays honest (every settle is fenced), but "cancel means stop
+    // new work" is an execution promise, not a bookkeeping one.
+    const started = await this.deps.store.update(id, openingBatch.start(this.now()).patch, undefined, {
       expectNonTerminal: true,
       ...fenced,
     });
+    if (started === undefined) {
+      controller.abort(); // whoever settled it owns this batch's ending; nothing here is ours to dispatch
+      this.inFlight.delete(id);
+      return;
+    }
     // Progress (step) timeline — append as the run proceeds + persist incrementally so the web shows "how far / what" it's doing.
     const steps: ScorecardStep[] = [];
     const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
@@ -1856,18 +1877,22 @@ export class ScorecardBatchService {
               ...epochOpt,
             },
           );
-          if (written !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-          // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
-          this.deps.onOrchestrationEvent?.(
-            batchSettledEvent(
-              tenant,
-              settled.createdAt,
-              scorecard,
-              settled.requested,
-              Date.parse(this.now()),
-              opts.verdictPolicy,
-            ),
-          );
+          // …and the metric hangs off the same commit as the facts (arch-review 31 P2) — a loser that still
+          // counted its settlement would report a case outcome the ledger never recorded.
+          if (written !== undefined) {
+            if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+            // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
+            this.deps.onOrchestrationEvent?.(
+              batchSettledEvent(
+                tenant,
+                settled.createdAt,
+                scorecard,
+                settled.requested,
+                Date.parse(this.now()),
+                opts.verdictPolicy,
+              ),
+            );
+          }
         }
         // else: a raced supersede settled the record before the abort signal reached this loop — first
         // terminal write wins, the late success is a no-op skip.

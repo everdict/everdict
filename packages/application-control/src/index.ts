@@ -529,6 +529,7 @@ export {
   type RunFsFile,
   type RunFsStatus,
   type RunFsTree,
+  type ResumeResult,
   RunService,
   type RunServiceDeps,
   type SubmitInput,

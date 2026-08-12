@@ -41,17 +41,20 @@ export async function settleScorecard(
   });
 }
 
-// A run's outcome. `expectOwnerReplica` rides along for the recovery claim — a settlement of ownership rather
-// than of outcome, and the one place both conditions are asked at once.
+// A run's outcome. `epoch` is the driver's fencing token (mig 0170), and it is the value the settler HELD —
+// captured when it dispatched, never re-read here, because a displaced driver re-reading would find its
+// usurper's number and pass. `expectOwnerReplica` rides along for the recovery claim, a settlement of
+// ownership rather than of outcome and the one place both conditions are asked at once.
 export async function settleRun(
   store: RunStore,
   id: string,
   patch: Partial<RunRecord>,
   events?: OutboxEvent[],
-  opts?: { expectOwnerReplica?: string | null },
+  opts?: { expectOwnerReplica?: string | null; epoch?: number },
 ): Promise<RunRecord | undefined> {
   return store.update(id, patch, events, {
     expectNonTerminal: true,
     ...(opts?.expectOwnerReplica !== undefined ? { expectOwnerReplica: opts.expectOwnerReplica } : {}),
+    ...(opts?.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
   });
 }

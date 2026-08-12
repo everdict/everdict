@@ -100,6 +100,17 @@ export interface RunUpdateGuard {
   // authority to drive the work are one transition: a string means "the owner must still be this one" (the
   // dead replica the recovery observed), `null` means "there must be no owner recorded".
   expectOwnerReplica?: string | null;
+  // …AND THE FENCE THAT REVOKES THE DRIVER IT REPLACED (arch-review 31 P1, mig 0170). The claim above is an
+  // ELECTION: it decides who may take a dead replica's run, and it is silent to the replica that was not
+  // actually dead. That one comes back holding an execution loop and settles the run on the strength of
+  // "the row is open", which is true for both. The epoch is the number its write fails against.
+  //
+  // The driver carries the value it won from `create` or from its claim — never a value re-read at settle
+  // time, which is exactly what a displaced driver would also read.
+  expectOwnerEpoch?: number;
+  // …and RAISES it in the same statement. A claim that stamped identity and left the token where it was would
+  // announce the takeover to nobody.
+  claimOwnership?: true;
 }
 
 export interface RunStore extends AdmissionLedger {

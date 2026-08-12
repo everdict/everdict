@@ -216,6 +216,12 @@ export const RunRecordSchema = z.object({
   // existed (or by the in-memory store), which recovery treats as unowned and reclaims as it always did.
   // A random per-boot id, never a hostname — it identifies a process, it does not describe the infrastructure.
   ownerReplica: z.string().optional(),
+  // …and the FENCING TOKEN that revokes the previous one (mig 0170). `ownerReplica` elects a driver; it does
+  // not stop the driver it replaced. A replica declared dead after a long pause returns with its dispatch
+  // loop intact and, reading only "the run is still open", settles a run somebody else now owns. The epoch
+  // rises on every claim and every write that DRIVES the run conditions on the value its driver won, so a
+  // displaced one fails against a number that moved. Absent = a row written before the column existed.
+  ownerEpoch: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
