@@ -74,7 +74,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
       description:
         "One product with every release and the visible slice of its imported version ledger — the read that " +
         "answers 'what composes this product and what has moved lately'.",
-      inputSchema: { id: z.string() },
+      inputSchema: { id: z.string().describe("the product's slug or its id — both address the same record") },
     },
     (a) => run(principal, "issues:read", async () => ok(await products.detail(ws, a.id))),
   );
@@ -165,12 +165,14 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
       description:
         "The product's time axis in one read: releases (past + planned), the windowed version ledger, each " +
         "watch series' scorecard points (oldest first, with pass rate and the triggering service version), " +
-        "and linked issues' lifecycle markers. Default window: the last 90 days through the product's " +
+        "and the lifecycle markers of the issues this product is about — the ones linked to it or to one of " +
+        "its releases, plus the ones its own watch-series scorecards are cited by or were closed with. " +
+        "Each carries `via` saying which of the three it is. Default window: the last 90 days through the product's " +
         "horizon — the window's `to` reaches the furthest PLANNED release's target date (so a planned ship " +
         "has a place on the axis) and `now` rides along as the boundary between what happened and what is " +
         "intended. This is the read that answers 'how has the product moved between releases'.",
       inputSchema: {
-        id: z.string(),
+        id: z.string().describe("the product's slug or its id — both address the same record"),
         from: z.string().datetime().optional(),
         to: z.string().datetime().optional(),
       },
@@ -240,6 +242,23 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
         if (!deps.productVersionSync) throw new Error("product sync not configured");
         return ok(await deps.productVersionSync.sync(ws, a.id, { subject: principal.subject }));
       }),
+  );
+
+  server.registerTool(
+    "run_product_series",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Evaluate a product's watch series NOW — sync_product_versions' counterpart: that one refreshes the " +
+        "version axis, this one the quality axis. Submits one scorecard per series; `keys` absent runs " +
+        "everything the product currently watches (the active planned release's selection, else every " +
+        "series), named keys run exactly those. Batches carry the same product/series/contract provenance an " +
+        "import fan-out stamps plus seriesTrigger=manual, and no serviceVersion (no import caused them). A " +
+        "series whose evaluation contract cannot be resolved is refused rather than run and reported in " +
+        "failedSeries. Ignores the auto-eval switch — that governs the automatic paths, and this is a request.",
+      inputSchema: { id: z.string(), keys: z.array(z.string().min(1)).min(1).optional() },
+    },
+    (a) => run(principal, "issues:write", async () => ok(await products.runSeries(ws, a.id, a.keys, actor))),
   );
 
   server.registerTool(

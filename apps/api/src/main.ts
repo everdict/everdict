@@ -10,6 +10,8 @@ import {
   ProductService,
   ProductVersionSync,
   ProjectService,
+  SeriesEvaluator,
+  type SeriesRunSubmitter,
   TaskService,
   TeamService,
   WorkflowStateService,
@@ -955,6 +957,28 @@ async function main(): Promise<void> {
   };
   const resolveSeriesContract = (tenant: string, series: ProductSeries): Promise<SeriesContractResolution> =>
     resolveSeriesContractFor(seriesContractDeps, tenant, series);
+  // Turning a watch series into a scorecard. ONE collaborator, three triggers (an import fan-out, the seed a
+  // declaration owes itself, a member asking) — so a batch is stamped by one piece of code whichever door it
+  // came through, and the submit seam below is the only place that knows about ScorecardService.
+  const submitSeriesRun: SeriesRunSubmitter = async (input) =>
+    scorecardService.submit({
+      tenant: input.tenant,
+      submittedBy: input.submittedBy,
+      dataset: { id: input.dataset.id, version: input.dataset.version ?? "latest" },
+      harness: { id: input.harness.id, version: input.harness.version ?? "latest" },
+      judges: input.judges.map((judge) => ({ id: judge.id, version: judge.version ?? "latest" })),
+      ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+      // The caller's resolution, held over submit's own seal (arch-review 16 P0-3).
+      ...(input.expectedContractDigest !== undefined ? { expectedContractDigest: input.expectedContractDigest } : {}),
+      origin: input.origin,
+    });
+  const seriesEvaluator = new SeriesEvaluator({
+    releases: releaseStore,
+    submitSeriesRun,
+    // The SAME resolver the readiness read uses — one function, so the stamp a batch carries and the contract
+    // a release compares it against can never be produced by two different answers.
+    resolveSeriesContract,
+  });
   const productService = new ProductService({
     store: productStore,
     // The capability resolution generations a ship's commit conditions on (mig 0163) — Postgres only, since
@@ -987,29 +1011,20 @@ async function main(): Promise<void> {
       hasJudge: async (tenant, id) => (await judgeRegistry.versions(tenant, id)).length > 0,
     },
     resolveSeriesContract,
+    // Declaring a series seeds its first evaluation, and a member can ask for one at any time — until this
+    // seam existed a series only ever ran off a genuinely new import, so one declared on an already-backfilled
+    // product stayed empty while the release gate read that emptiness as `not_evaluated`.
+    seriesEvaluator,
     events: platformEventService,
   });
   const productVersionSync = new ProductVersionSync({
-    // The SAME resolver the readiness read uses — one function, so the stamp a batch carries and the
-    // contract a release compares it against can never be produced by two different answers.
     resolveSeriesContract,
     products: productStore,
     releases: releaseStore,
     versions: productVersionStore,
     tokens: githubAppService,
     readers: githubVersionReaderFactory(),
-    submitSeriesRun: async (input) =>
-      scorecardService.submit({
-        tenant: input.tenant,
-        submittedBy: input.submittedBy,
-        dataset: { id: input.dataset.id, version: input.dataset.version ?? "latest" },
-        harness: { id: input.harness.id, version: input.harness.version ?? "latest" },
-        judges: input.judges.map((judge) => ({ id: judge.id, version: judge.version ?? "latest" })),
-        ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
-        // The caller's resolution, held over submit's own seal (arch-review 16 P0-3).
-        ...(input.expectedContractDigest !== undefined ? { expectedContractDigest: input.expectedContractDigest } : {}),
-        origin: input.origin,
-      }),
+    submitSeriesRun,
     events: platformEventService,
   });
   // The creation wizard's evidence read (docs/architecture/product-timeline.md §declaring by choosing): the

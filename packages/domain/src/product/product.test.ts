@@ -1,7 +1,7 @@
 import type { ProductServiceVersionRecord } from "@everdict/contracts";
 import { BadRequestError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { Product } from "./product.js";
+import { Product, seriesNeedingEvidence } from "./product.js";
 
 const NOW = "2026-08-08T00:00:00.000Z";
 const LATER = "2026-08-09T00:00:00.000Z";
@@ -142,5 +142,55 @@ describe("Product — the released thing several services compose", () => {
         prerelease: false,
       },
     });
+  });
+});
+
+// The key is the TREND's identity and is deliberately stable across every edit, which is exactly why it
+// cannot answer "does the evidence filed under it still answer the question".
+describe("seriesNeedingEvidence — which series a write leaves without an answer", () => {
+  const quality = {
+    key: "support-quality",
+    label: "Support quality",
+    dataset: { id: "support-cases" },
+    harness: { id: "copilot" },
+    judges: [{ id: "helpfulness" }],
+  };
+
+  it("names a newly declared series", () => {
+    const cost = { ...quality, key: "cost", label: "Cost" };
+    expect(seriesNeedingEvidence([quality], [quality, cost])).toEqual(["cost"]);
+  });
+
+  it("names a series re-pointed at another dataset, under the same key", () => {
+    const repointed = { ...quality, dataset: { id: "escalation-cases" } };
+    expect(seriesNeedingEvidence([quality], [repointed])).toEqual(["support-quality"]);
+  });
+
+  it("names a series whose ref stopped floating — `latest` and a pin are different questions", () => {
+    const pinned = { ...quality, harness: { id: "copilot", version: "2.1.0" } };
+    expect(seriesNeedingEvidence([quality], [pinned])).toEqual(["support-quality"]);
+    expect(seriesNeedingEvidence([pinned], [quality])).toEqual(["support-quality"]);
+  });
+
+  it("names a series that gained or lost a judge", () => {
+    const extra = { ...quality, judges: [{ id: "helpfulness" }, { id: "tone" }] };
+    expect(seriesNeedingEvidence([quality], [extra])).toEqual(["support-quality"]);
+  });
+
+  // How the question is SPELLED, and what we DO with its answer, are not what is asked.
+  it("names nothing for a relabel, a reordered judge selection, or a gate-policy change", () => {
+    const relabelled = { ...quality, label: "Answer quality" };
+    expect(seriesNeedingEvidence([quality], [relabelled])).toEqual([]);
+
+    const twoJudges = { ...quality, judges: [{ id: "helpfulness" }, { id: "tone" }] };
+    const reordered = { ...quality, judges: [{ id: "tone" }, { id: "helpfulness" }] };
+    expect(seriesNeedingEvidence([twoJudges], [reordered])).toEqual([]);
+
+    const notRequired = { ...quality, requiredForRelease: false, allowNoBaseline: true };
+    expect(seriesNeedingEvidence([quality], [notRequired])).toEqual([]);
+  });
+
+  it("names nothing for a series that was only removed — there is nothing left to run", () => {
+    expect(seriesNeedingEvidence([quality], [])).toEqual([]);
   });
 });

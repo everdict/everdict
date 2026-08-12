@@ -120,6 +120,18 @@ describe("InMemoryProductStore / InMemoryReleaseStore", () => {
     expect(await store.get("globex", "prod-1")).toBeUndefined();
   });
 
+  it("indexes a product by its SLUG as well as its id, and keeps the two workspaces apart", async () => {
+    // The slug is the URL's index; a read that starts from an address has to find the same record the id
+    // finds, and must never reach across the tenant boundary to do it.
+    const store = new InMemoryProductStore();
+    await store.create(product({ id: "prod-1", slug: "support-copilot" }));
+    await store.create(product({ id: "prod-2", tenant: "globex", slug: "support-copilot" }));
+
+    expect((await store.getBySlug("acme", "support-copilot"))?.id).toBe("prod-1");
+    expect((await store.getBySlug("globex", "support-copilot"))?.id).toBe("prod-2");
+    expect(await store.getBySlug("acme", "nothing-by-that-name")).toBeUndefined();
+  });
+
   it("update merges the patch but never lets it change identity, and carries the outbox", async () => {
     const store = new InMemoryProductStore();
     await store.create(product({}));

@@ -121,6 +121,12 @@ function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined)
     const { type, id } = filter.link;
     if (!record.links.some((link) => link.type === type && link.id === id)) return false;
   }
+  if (filter.scorecards !== undefined) {
+    const wanted = new Set(filter.scorecards);
+    const linked = record.links.some((link) => link.type === "scorecard" && wanted.has(link.id));
+    const closedBy = record.resolution?.scorecardId !== undefined && wanted.has(record.resolution.scorecardId);
+    if (!linked && !closedBy) return false;
+  }
   if (filter.query !== undefined) {
     // Case-insensitive substring over what the issue is CITED by — the identifier it answers to now, the ones
     // it used to, and the title (never the description; see the port).
@@ -540,6 +546,18 @@ export class PgIssueStore implements IssueStore {
       // Containment over the links array — id-level, version-agnostic (a cross-version regression is the signal).
       conds.push(`links @> ${next()}::jsonb`);
       params.push(JSON.stringify([{ type: filter.link.type, id: filter.link.id }]));
+    }
+    if (filter?.scorecards !== undefined) {
+      // Linked to one of these scorecards, or CLOSED by one. Containment cannot express "any of a set", so the
+      // link half unnests instead; the resolution half reads the column the close wrote its evidence into.
+      // An empty set is `= ANY('{}')`, which matches nothing — the reading the port declares.
+      const ids = next();
+      conds.push(
+        `(EXISTS (SELECT 1 FROM jsonb_array_elements(links) AS l
+                  WHERE l->>'type' = 'scorecard' AND l->>'id' = ANY(${ids}::text[]))
+          OR resolution->>'scorecardId' = ANY(${ids}::text[]))`,
+      );
+      params.push(filter.scorecards);
     }
     if (filter?.query !== undefined) {
       // What the issue is CITED by: the identifier it answers to now, the ones it used to answer to, and the

@@ -144,6 +144,35 @@ export const ProductAutoEvalSchema = z.object({
 });
 export type ProductAutoEval = z.infer<typeof ProductAutoEvalSchema>;
 
+// --- The product's ADDRESS ---
+// A product is read far more often than it is written, and it is read by people who arrived from a link. The
+// uuid in `/{workspace}/product/{id}` told the reader nothing about which product they were opening, so a
+// product carries a SLUG for the same reason a team carries its key and an issue its identifier: the URL should
+// read as the thing people name in conversation.
+//
+// Unicode is deliberately KEPT (`제품-타임라인` is a legitimate slug). What a slug must not contain is anything
+// that changes how a URL parses — a separator, a query/fragment marker, whitespace — so the shape is defined by
+// what survives: lowercase letters (any script), digits, and the `-` joining them.
+export const PRODUCT_SLUG_PATTERN = /^[\p{Ll}\p{Lo}\p{N}][\p{Ll}\p{Lo}\p{N}-]{0,63}$/u;
+export const ProductSlugSchema = z
+  .string()
+  .regex(
+    PRODUCT_SLUG_PATTERN,
+    "A product slug is lowercase letters, digits and dashes (1–64 characters, starting with a letter or digit).",
+  );
+
+// A uuid satisfies the slug shape (lowercase hex and dashes), so the two forms cannot be told apart by the slug
+// pattern alone — this is what tells a lookup which index to use, and why minting refuses to produce one.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Is this URL segment a slug, or the record's id? The discriminator is deliberately the ID's shape, not the
+// slug's: a stored slug this deployment's minting rule would no longer produce (a backfilled row, a locale
+// whose lowercasing the migration read differently) must still RESOLVE. Validation belongs where an address is
+// created; a read that revalidates it can only turn an addressable record into a 404.
+export function isProductSlugRef(ref: string): boolean {
+  return ref.length > 0 && !UUID_PATTERN.test(ref);
+}
+
 export const ProductRecordSchema = z.object({
   // Aggregate version (mig 0150) — bumped on every write, and the token a RELEASE decision commits against.
   // A release gate is evaluated under this product's series policy (which series gate, which pre-approve a
@@ -166,6 +195,16 @@ export const ProductRecordSchema = z.object({
   evaluationDefinitionDigest: z.string().optional(),
   id: z.string(),
   tenant: z.string(),
+  // How the product is ADDRESSED (mig 0169) — unique within the workspace, derived from the name at creation
+  // and immutable afterwards (a team's key precedent: an address that moves breaks every link that was ever
+  // shared). Optional because rows written before the column existed carry none; a reader falls back to the id,
+  // which still resolves.
+  //
+  // Read-permissive on purpose: `ProductSlugSchema` is the MINTING rule, applied where an address is created.
+  // Applying it here too would make a stored slug the current rule would not produce (the SQL backfill's
+  // lowercasing is the database's, not V8's) fail the whole record's parse — turning a cosmetic disagreement
+  // about an address into an unreadable product.
+  slug: z.string().min(1).optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   // One emoji — same affordance (and same reasoning) as an initiative's icon.

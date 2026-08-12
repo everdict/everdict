@@ -15,7 +15,15 @@ import { deleteProductAction } from '../api/products'
 
 // 프로덕트 헤더의 ⋯ 메뉴 — 수정은 라우팅된 편집 화면으로, 삭제는 확인을 거쳐서(릴리즈와 버전 원장이 함께
 // 사라진다는 사실을 말하고 지운다).
-export function ProductActionsMenu({ workspace, productId }: { workspace: string; productId: string }) {
+// `productRef` — 슬러그 또는 id. 편집 주소가 상세 주소와 같은 철자를 쓰도록 참조 그대로 받는다
+// (컨트롤 플레인은 둘 다 같은 레코드로 해석한다).
+export function ProductActionsMenu({
+  workspace,
+  productRef,
+}: {
+  workspace: string
+  productRef: string
+}) {
   const t = useTranslations('productPage')
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
@@ -25,7 +33,7 @@ export function ProductActionsMenu({ workspace, productId }: { workspace: string
     void (async () => {
       setPending(true)
       try {
-        const r = await deleteProductAction(productId)
+        const r = await deleteProductAction(productRef)
         if (!r.ok) {
           toast.error(r.error ?? t('deleteError'))
           return
@@ -56,12 +64,18 @@ export function ProductActionsMenu({ workspace, productId }: { workspace: string
       >
         <DropdownItem
           icon={<Pencil className="size-3.5" />}
-          onSelect={() => router.push(`/${workspace}/product/${encodeURIComponent(productId)}/edit`)}
+          onSelect={() =>
+            router.push(`/${workspace}/product/${encodeURIComponent(productRef)}/edit`)
+          }
         >
           {t('edit')}
         </DropdownItem>
         <DropdownSeparator />
-        <DropdownItem icon={<Trash2 className="size-3.5" />} tone="danger" onSelect={() => setConfirming(true)}>
+        <DropdownItem
+          icon={<Trash2 className="size-3.5" />}
+          tone="danger"
+          onSelect={() => setConfirming(true)}
+        >
           {t('delete')}
         </DropdownItem>
       </DropdownMenu>

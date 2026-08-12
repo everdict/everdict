@@ -6,7 +6,12 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { productHref, type ProductSeries, type ProductService } from '@/entities/product'
+import {
+  productHref,
+  productRef,
+  type ProductSeries,
+  type ProductService,
+} from '@/entities/product'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
@@ -172,7 +177,7 @@ export function ProductForm({
           toast.error(r.error ?? t(initial ? 'updateError' : 'createError'))
           return
         }
-        router.push(productHref(workspace, r.product.id))
+        router.push(productHref(workspace, productRef(r.product)))
       } finally {
         setPending(false)
       }

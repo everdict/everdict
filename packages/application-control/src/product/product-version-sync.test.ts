@@ -11,7 +11,8 @@ import type {
   ReleaseStore,
 } from "../index.js";
 import type { GithubRelease, GithubTag, GithubVersionReader } from "../ports/github-repo-writer.js";
-import { ProductVersionSync, type SeriesRunSubmitter } from "./product-version-sync.js";
+import { ProductVersionSync } from "./product-version-sync.js";
+import type { SeriesRunSubmitter } from "./series-evaluator.js";
 
 const NOW = "2026-08-08T00:00:00.000Z";
 
@@ -21,6 +22,9 @@ class FakeProductStore implements ProductStore {
   async create(): Promise<void> {}
   async get(tenant: string, id: string): Promise<ProductRecord | undefined> {
     return this.record.tenant === tenant && this.record.id === id ? this.record : undefined;
+  }
+  async getBySlug(tenant: string, slug: string): Promise<ProductRecord | undefined> {
+    return this.record.tenant === tenant && this.record.slug === slug ? this.record : undefined;
   }
   async list(_tenant: string, _filter?: ProductListFilter): Promise<ProductRecord[]> {
     return [this.record];

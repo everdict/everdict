@@ -61,6 +61,35 @@ describe("InMemoryIssueStore", () => {
     expect(await store.list("acme", { link: { type: "harness", id: "other" } })).toEqual([]);
   });
 
+  it("finds the issues a set of scorecards is about — LINKED to one, or CLOSED by one", async () => {
+    // Two halves of one question. A link is what somebody attached; `resolution.scorecardId` is the evidence
+    // a close STOOD ON, and it never becomes a link — so a link-only read misses exactly the issues whose
+    // relationship to the evidence is the strongest one there is.
+    const store = new InMemoryIssueStore();
+    await store.create(
+      issue({
+        id: "linked",
+        links: [{ type: "scorecard", id: "sc-1", addedBy: "dana", addedAt: "2026-07-31T00:00:00.000Z" }],
+      }),
+    );
+    await store.create(
+      issue({
+        id: "closed-by",
+        status: "done",
+        resolution: { at: "2026-08-01T00:00:00.000Z", by: "dana", scorecardId: "sc-2" },
+      }),
+    );
+    await store.create(issue({ id: "unrelated" }));
+
+    expect((await store.list("acme", { scorecards: ["sc-1", "sc-2"] })).map((r) => r.id).sort()).toEqual([
+      "closed-by",
+      "linked",
+    ]);
+    expect((await store.list("acme", { scorecards: ["sc-2"] })).map((r) => r.id)).toEqual(["closed-by"]);
+    // An empty set selects nothing — the caller asked for "any of these" and named none.
+    expect(await store.list("acme", { scorecards: [] })).toEqual([]);
+  });
+
   it("searches by what the issue is CALLED — identifier, a former identifier, or the title", async () => {
     const store = new InMemoryIssueStore();
     await store.create(issue({ id: "a", identifier: "ENG-12", title: "Agent drops the tool result on retry" }));
@@ -308,6 +337,13 @@ describe("PgIssueStore", () => {
     expect(queries[1]?.text).toContain("links @> $2::jsonb");
     expect(queries[1]?.text).toContain("(github->'sync'->>'pull') = 'true'");
     expect(queries[1]?.params?.[1]).toBe(JSON.stringify([{ type: "dataset", id: "regression-suite" }]));
+
+    // Containment cannot express "any of a set", so the link half unnests and the resolution half reads the
+    // column the close wrote — one statement, both halves, one bound array.
+    await store.list("acme", { scorecards: ["sc-1", "sc-2"] });
+    expect(queries[2]?.text).toContain("jsonb_array_elements(links)");
+    expect(queries[2]?.text).toContain("resolution->>'scorecardId' = ANY($2::text[])");
+    expect(queries[2]?.params).toEqual(["acme", ["sc-1", "sc-2"]]);
   });
 
   it("searches identifier, former identifiers and title with ONE bound needle", async () => {

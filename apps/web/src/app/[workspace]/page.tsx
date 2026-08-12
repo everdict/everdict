@@ -2,14 +2,15 @@ import { Suspense } from 'react'
 import { Package } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
+import { ProductTimelineView } from '@/widgets/product-timeline'
 import {
   newProductHref,
   productHref,
+  productRef,
   productsSchema,
   productTimelineSchema,
   type Product,
 } from '@/entities/product'
-import { ProductTimelineView } from '@/widgets/product-timeline'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
@@ -100,7 +101,7 @@ async function ProductTimelineSection({
       <SectionHeader
         title={
           <Link
-            href={productHref(workspace, product.id)}
+            href={productHref(workspace, productRef(product))}
             className="flex items-center gap-2 transition-colors hover:text-primary"
           >
             {product.icon && <span aria-hidden>{product.icon}</span>}
@@ -109,14 +110,20 @@ async function ProductTimelineSection({
         }
         action={
           <Link
-            href={productHref(workspace, product.id)}
+            href={productHref(workspace, productRef(product))}
             className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
           >
             {t('openProduct')}
           </Link>
         }
       />
-      <ProductTimelineView workspace={workspace} timeline={timeline} />
+      {/* 홈은 요약이라 행동은 걸지 않는다 — 시리즈를 돌리는 건 프로덕트 자신의 화면에서 한다. */}
+      <ProductTimelineView
+        workspace={workspace}
+        productId={product.id}
+        timeline={timeline}
+        canWrite={false}
+      />
     </section>
   )
 }

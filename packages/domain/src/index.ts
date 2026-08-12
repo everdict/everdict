@@ -271,8 +271,11 @@ export {
   type NewProductInput,
   Product,
   type ProductEditInput,
+  productSlugStem,
   type ProductTransition,
   sameSourceCoordinates,
+  seriesNeedingEvidence,
+  seriesQuestion,
   serviceStreamKey,
 } from "./product/product.js";
 export {

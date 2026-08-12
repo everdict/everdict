@@ -48,15 +48,23 @@ export const ProductTimelineSeriesSchema = z.object({
 });
 export type ProductTimelineSeries = z.infer<typeof ProductTimelineSeriesSchema>;
 
-// One linked issue's lifecycle on the axis: when it arrived, whether (and when) it was resolved, and where it
-// stands now — enough to draw a marker and link out, never the whole record.
+// One issue's lifecycle on the axis: when it arrived, whether (and when) it was resolved, and where it stands
+// now — enough to draw both markers and link out, never the whole record.
 export const ProductTimelineIssueSchema = z.object({
   id: z.string(),
   identifier: z.string(),
   title: z.string(),
   status: z.string(),
+  // HOW this issue reached the timeline. Three relationships, and only the first two are declared by a person:
+  // `product`/`release` are explicit links, while `evidence` means the issue is about a scorecard this
+  // product's own watch series produced (linked to one, or closed by one). The reader is told which, because
+  // "we filed this against the 2026.3 release" and "this happens to cite a batch of ours" are different claims
+  // and a lane that draws them identically is asserting the stronger one.
+  via: z.enum(["product", "release", "evidence"]),
   createdAt: z.string(),
   resolvedAt: z.string().optional(),
+  // The evidence the close stood on, when there was any — what makes "resolved" a claim somebody can check.
+  resolvedByScorecardId: z.string().optional(),
   // Which release the issue is linked to, when it is release-linked rather than product-linked.
   releaseId: z.string().optional(),
 });
@@ -149,3 +157,12 @@ export const ProductSyncResponseSchema = z.object({
   failedSeries: z.array(z.object({ key: z.string(), error: z.string() })).optional(),
 });
 export type ProductSyncResponse = z.infer<typeof ProductSyncResponseSchema>;
+
+// POST /products/:id/series/run — the quality axis's manual door, next to Sync's version axis. One entry per
+// series that submitted, and one per series that could not: a fan-out that swallowed a failure would read as
+// "we asked and the answer was nothing".
+export const ProductSeriesRunResponseSchema = z.object({
+  triggered: z.array(z.string()),
+  failedSeries: z.array(z.object({ key: z.string(), error: z.string() })),
+});
+export type ProductSeriesRunResponse = z.infer<typeof ProductSeriesRunResponseSchema>;

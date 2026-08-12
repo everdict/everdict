@@ -25,6 +25,10 @@ export class InMemoryProductStore implements ProductStore {
     return record && record.tenant === tenant ? record : undefined;
   }
 
+  async getBySlug(tenant: string, slug: string): Promise<ProductRecord | undefined> {
+    return [...this.byId.values()].find((record) => record.tenant === tenant && record.slug === slug);
+  }
+
   async list(tenant: string, filter?: ProductListFilter): Promise<ProductRecord[]> {
     const rows = [...this.byId.values()]
       .filter((record) => record.tenant === tenant)
@@ -107,6 +111,7 @@ interface ProductRow extends TrackerRow {
   version?: string | number | null;
   release_policy_digest?: string | null;
   evaluation_definition_digest?: string | null;
+  slug?: string | null;
   name: string;
   description: string | null;
   icon: string | null;
@@ -116,14 +121,15 @@ interface ProductRow extends TrackerRow {
 }
 
 const PRODUCT_COLUMNS =
-  "(id, tenant, name, description, icon, services, series, auto_eval, history, created_by, created_at, updated_at, release_policy_digest, evaluation_definition_digest)";
+  "(id, tenant, slug, name, description, icon, services, series, auto_eval, history, created_by, created_at, updated_at, release_policy_digest, evaluation_definition_digest)";
 const PRODUCT_VALUES =
-  "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::timestamptz,$12::timestamptz,$13,$14)";
+  "($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::timestamptz,$13::timestamptz,$14,$15)";
 
 function insertParams(record: ProductRecord): unknown[] {
   return [
     record.id,
     record.tenant,
+    record.slug ?? null,
     record.name,
     record.description ?? null,
     record.icon ?? null,
@@ -148,6 +154,7 @@ function rowToRecord(row: ProductRow): ProductRecord {
     ...(row.evaluation_definition_digest ? { evaluationDefinitionDigest: row.evaluation_definition_digest } : {}),
     id: row.id,
     tenant: row.tenant,
+    ...(row.slug ? { slug: row.slug } : {}),
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     ...(row.icon !== null ? { icon: row.icon } : {}),
@@ -185,6 +192,14 @@ export class PgProductStore implements ProductStore {
       tenant,
       id,
     ]);
+    return rows[0] ? rowToRecord(rows[0]) : undefined;
+  }
+
+  async getBySlug(tenant: string, slug: string): Promise<ProductRecord | undefined> {
+    const { rows } = await this.client.query<ProductRow>(
+      "SELECT * FROM everdict_products WHERE tenant=$1 AND slug=$2",
+      [tenant, slug],
+    );
     return rows[0] ? rowToRecord(rows[0]) : undefined;
   }
 

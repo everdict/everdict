@@ -234,8 +234,15 @@ export {
   type ProductVersionSyncDeps,
   type ProductSyncResult,
   type ProductSyncServiceOutcome,
-  type SeriesRunSubmitter,
 } from "./product/product-version-sync.js";
+export {
+  SeriesEvaluator,
+  type SeriesEvaluatorDeps,
+  type SeriesRunInput,
+  type SeriesRunOutcome,
+  type SeriesRunSubmitter,
+  type SeriesRunTrigger,
+} from "./product/series-evaluator.js";
 export { ProductDiscovery, type ProductDiscoveryDeps } from "./product/product-discovery.js";
 export { type SeriesContractDeps, resolveSeriesContract } from "./product/series-contract.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";

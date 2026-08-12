@@ -20,6 +20,8 @@ export interface ProductTransition {
 export interface NewProductInput {
   id: string;
   tenant: string;
+  // The address (mig 0169). Minted by the service, which is the only layer that can see whether it is free.
+  slug?: string;
   name: string;
   description?: string;
   icon?: string;
@@ -98,11 +100,61 @@ export function serviceStreamKey(
   return JSON.stringify([service.host ?? "", service.repository, service.source, service.tagPrefix ?? ""]);
 }
 
+// The slug a product's NAME wants (mig 0169) — the stem, before uniqueness is settled. Pure and total: it
+// always returns something addressable, because the caller is minting an address and "no answer" is not one of
+// the options a create can take.
+//
+// Unicode survives on purpose (`제품 타임라인` → `제품-타임라인`): stripping to ASCII would turn every product
+// named in the workspace's own language into `product-1`, `product-2`, which is a worse address than the uuid
+// this replaces. What is removed is everything that would change how a URL parses.
+export function productSlugStem(name: string): string {
+  const stem = name
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{Ll}\p{Lo}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/g, ""); // the 64-char cut may land mid-separator
+  // A name made entirely of characters a URL cannot carry (punctuation, emoji) leaves nothing to address by.
+  // `product` then reads as what it is, and the service's collision loop makes it unique.
+  return stem.length > 0 ? stem : "product";
+}
+
 export function sameSourceCoordinates(
   a: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
   b: Pick<ProductService, "repository" | "source" | "host" | "tagPrefix">,
 ): boolean {
   return serviceStreamKey(a) === serviceStreamKey(b);
+}
+
+// WHAT A SERIES ASKS, as a comparable value. `key` is the TREND's identity and deliberately survives every
+// edit, which is exactly why it cannot answer "does the evidence under this key still answer the question":
+// a series re-pointed at another dataset keeps its key and keeps its chart, while every point on it now
+// answers something else.
+//
+// Judges are order-insensitive (the schema already refuses a repeated id), because reordering a selection
+// asks nothing new. `label`, `requiredForRelease` and `allowNoBaseline` are excluded on purpose: the first is
+// how the question is spelled and the other two are what we DO with its answer, none of them what is asked.
+//
+// Deliberately NOT the resolved contract digest. That one needs the registries and sees a floating `latest`
+// move underneath an unchanged declaration, which is why the RELEASE GATE compares it; this is the pure half
+// a WRITE can recognize with no I/O, and its job is narrower — deciding whether a declaration owes a run.
+export function seriesQuestion(series: ProductSeries): string {
+  return JSON.stringify([
+    [series.dataset.id, series.dataset.version ?? ""],
+    [series.harness.id, series.harness.version ?? ""],
+    [...(series.judges ?? [])].sort((a, b) => a.id.localeCompare(b.id)).map((judge) => [judge.id, judge.version ?? ""]),
+  ]);
+}
+
+// The series a write leaves with NO evidence answering them — newly declared ones, and ones whose question
+// changed under a stable key. One fact from the gate's point of view: a required series with no current
+// answer BLOCKS a release ("not evaluated is never green", and a stale contract digest reads the same way), so
+// both are what the declaration owes a first run. Keys, not rows, because the caller re-reads the series it
+// persisted rather than the ones it was handed.
+export function seriesNeedingEvidence(prior: readonly ProductSeries[], next: readonly ProductSeries[]): string[] {
+  const asked = new Map(prior.map((series) => [series.key, seriesQuestion(series)]));
+  return next.filter((series) => asked.get(series.key) !== seriesQuestion(series)).map((series) => series.key);
 }
 
 export class Product {
@@ -120,6 +172,7 @@ export class Product {
     return {
       id: input.id,
       tenant: input.tenant,
+      ...(input.slug !== undefined ? { slug: input.slug } : {}),
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.icon !== undefined ? { icon: input.icon } : {}),

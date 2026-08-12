@@ -1,17 +1,20 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { GitBranch } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
-import { ProductTimelineView } from '@/widgets/product-timeline'
+import { ProductTimelineView, ProductVersionLedger } from '@/widgets/product-timeline'
 import {
   AutoEvalToggle,
   PlanReleaseButton,
   ProductActionsMenu,
+  RunSeriesButton,
   SyncProductButton,
 } from '@/features/manage-product'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
 import {
   productDetailSchema,
+  productHref,
+  productRef,
   productTimelineSchema,
   releaseHref,
   ReleaseStatusBadge,
@@ -22,7 +25,6 @@ import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -53,6 +55,10 @@ export default async function ProductPage({
   } catch {
     notFound()
   }
+  // 주소는 하나로 모은다 — 컨트롤 플레인은 슬러그와 id 를 둘 다 같은 레코드로 해석하지만(옛 링크가
+  // 깨지지 않는다), 화면에 남는 주소는 슬러그여야 한다. 이슈 상세가 `ENG-12` 로 정규화하는 것과 같은
+  // 규칙이고, 여기가 그 정규화가 일어나는 유일한 지점이다(릴리즈 상세의 뒤로가기는 productId 를 쓴다).
+  if (id !== productRef(product)) redirect(productHref(workspace, productRef(product)))
   // 히스토리 행의 배우 이름 — 실패해도 화면은 뜬다(주체가 subject 문자열로 남을 뿐).
   let members: Member[] = []
   try {
@@ -85,11 +91,14 @@ export default async function ProductPage({
                   : {})}
               />
               <SyncProductButton productId={product.id} />
+              {/* 품질 축의 수동 문 — Sync 는 버전을 당기고, 이건 시리즈를 지금 돌린다. 시리즈가 하나도
+                  없으면 누를 이유가 없으므로 숨긴다(빈 섹션 숨김과 같은 규칙). */}
+              {product.series.length > 0 && <RunSeriesButton productId={product.id} />}
               <PlanReleaseButton
                 productId={product.id}
                 seriesOptions={product.series.map((s) => ({ key: s.key, label: s.label }))}
               />
-              <ProductActionsMenu workspace={workspace} productId={product.id} />
+              <ProductActionsMenu workspace={workspace} productRef={productRef(product)} />
             </div>
           ) : null
         }
@@ -150,7 +159,12 @@ export default async function ProductPage({
         </section>
       )}
 
-      <ProductTimelineView workspace={workspace} timeline={timeline} />
+      <ProductTimelineView
+        workspace={workspace}
+        productId={product.id}
+        timeline={timeline}
+        canWrite={canWrite}
+      />
 
       {/* 릴리즈 목록 — 최근 계획부터. 준비도(게이트)는 릴리즈 자신의 페이지가 답한다(팬아웃 read 라 목록엔 없다). */}
       {product.releases.length > 0 && (
@@ -186,45 +200,12 @@ export default async function ProductPage({
         </section>
       )}
 
-      {/* 버전 원장 — 원격(GitHub) 시계 기준 최신부터. 프리릴리즈는 그렇게 표시된 채로 남는다(사실만). */}
-      {product.versions.length > 0 && (
+      {/* 버전 원장 — 서비스별로. 한 표에 시간순으로 섞으면 "이 서비스는 지금 어디까지 왔나"에 답할 수
+          없다. 원격(GitHub) 시계 기준 최신부터, 프리릴리즈는 그렇게 표시된 채로 남는다(사실만). */}
+      {(product.versions.length > 0 || product.services.length > 0) && (
         <section className="space-y-2.5">
           <SectionHeader title={t('versionsHeading')} />
-          <div className="overflow-x-auto rounded-lg border bg-card shadow-raise">
-            <table className="w-full text-[12.5px]">
-              <tbody>
-                {product.versions.slice(0, 30).map((version) => (
-                  <tr key={version.id} className="border-b border-border/60 last:border-b-0">
-                    <td className="px-3 py-1.5 font-[510]">{version.service}</td>
-                    <td className="px-3 py-1.5 font-mono">
-                      {version.url ? (
-                        <a
-                          href={version.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:text-primary hover:underline"
-                        >
-                          {version.version}
-                        </a>
-                      ) : (
-                        version.version
-                      )}
-                      {version.prerelease && (
-                        <Badge tone="warning" className="ml-2">
-                          {t('prerelease')}
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">
-                      {new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }).format(
-                        new Date(version.publishedAt)
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ProductVersionLedger services={product.services} versions={product.versions} />
         </section>
       )}
 

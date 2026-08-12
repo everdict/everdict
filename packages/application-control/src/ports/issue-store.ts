@@ -32,6 +32,13 @@ export interface IssueListFilter {
   // Issues that point at a given capability — powers "which issues watch this harness" and the regression
   // watch's candidate lookup (id-level, version-agnostic: a cross-version regression is exactly the signal).
   link?: { type: IssueLinkType; id: string };
+  // Issues CONNECTED TO a set of scorecards — linked to one, or closed by one. Both halves are the same
+  // question ("did this evidence have anything to do with this issue"), and answering only the link half would
+  // miss exactly the issues that matter most: the ones a scorecard PROVED, which record their evidence in
+  // `resolution.scorecardId` and get no link from it. A set rather than a value because the caller (the product
+  // timeline) holds a batch of scorecards and one query is not the same cost as one query per batch. An empty
+  // array selects nothing, the same reading the set-per-facet filters below take.
+  scorecards?: string[];
   // Free-text search over what an issue is CITED by — its identifier (`ENG-12`, including the ones it used to
   // answer to) and its title. Not the description: a picker that has to say why a row matched cannot show a
   // paragraph, and "the title contains it" is the one match a person can verify at a glance. Case-insensitive,

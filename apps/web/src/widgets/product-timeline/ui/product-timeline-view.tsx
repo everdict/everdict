@@ -1,12 +1,12 @@
 'use client'
 
 import { useMemo } from 'react'
-import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
+import { useLocale, useTranslations } from 'next-intl'
 
-import { releaseHref, type ProductTimeline } from '@/entities/product'
-import { ReleaseStatusBadge } from '@/entities/product'
+import { RunSeriesButton } from '@/features/manage-product'
 import { issueHref } from '@/entities/issue'
+import { releaseHref, ReleaseStatusBadge, type ProductTimeline } from '@/entities/product'
 import { LineChart, seriesColorAt } from '@/shared/ui/charts'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
@@ -19,17 +19,34 @@ import { TimelineLanes } from './timeline-lanes'
 // 같은 축의 사건이라 차트 위아래에 스트립/피드로 눕는다 — 측정이 없던 지점은 null 로 선이 끊긴다(0 이 아니다).
 export function ProductTimelineView({
   workspace,
+  productId,
   timeline,
+  canWrite,
 }: {
   workspace: string
+  productId: string
   timeline: ProductTimeline
+  canWrite: boolean
 }) {
   const t = useTranslations('productPage')
   const locale = useLocale()
   const router = useRouter()
 
   const dayLabel = useMemo(() => {
-    const format = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+    const format = new Intl.DateTimeFormat(locale, {
+      month: 'numeric',
+      day: 'numeric',
+      timeZone: 'UTC',
+    })
+    return (iso: string) => format.format(new Date(iso))
+  }, [locale])
+  // 호버 카드의 전체 시각 — 축 눈금과 같은 UTC 로 읽는다(레인의 규칙과 동일).
+  const stamp = useMemo(() => {
+    const format = new Intl.DateTimeFormat(locale, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    })
     return (iso: string) => format.format(new Date(iso))
   }, [locale])
   const fmtPct = useMemo(() => {
@@ -39,7 +56,9 @@ export function ProductTimelineView({
 
   // 릴리즈 마커: 시리즈 차트 위에 눕는 스트립. 계획된 릴리즈는 목표일, 나간 릴리즈는 출하 시각으로 정렬.
   const releaseStrip = [...timeline.releases].sort((a, b) =>
-    (a.releasedAt ?? a.targetDate ?? a.createdAt).localeCompare(b.releasedAt ?? b.targetDate ?? b.createdAt)
+    (a.releasedAt ?? a.targetDate ?? a.createdAt).localeCompare(
+      b.releasedAt ?? b.targetDate ?? b.createdAt
+    )
   )
 
   return (
@@ -84,11 +103,24 @@ export function ProductTimelineView({
           <section key={series.key} className="space-y-2.5">
             <SectionHeader
               title={series.label}
-              action={<span className="font-mono text-xs text-muted-foreground">{series.key}</span>}
+              action={
+                <span className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-muted-foreground">{series.key}</span>
+                  {/* 이 시리즈를 지금 평가한다 — 새 버전 임포트만이 유일한 계기이던 시절, 시리즈를 선언해 놓고
+                      업스트림이 릴리즈할 때까지 아무 점도 생기지 않던 자리다. */}
+                  {canWrite && <RunSeriesButton productId={productId} seriesKey={series.key} />}
+                </span>
+              }
             />
             <div className="rounded-lg border bg-card p-3.5 shadow-raise">
               {series.points.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">{t('seriesEmpty')}</p>
+                // 비어 있음은 두 가지 사실이다 — "이 기간에 평가가 없다"와 "무엇이 이걸 돌리는가". 후자를
+                // 적어 두지 않으면 선언만 해 놓고 기다리는 사람이 무엇을 기다리는지 알 수 없다(그리고 필수
+                // 시리즈라면 그동안 릴리즈가 막혀 있다).
+                <div className="space-y-1.5 py-6 text-center">
+                  <p className="text-sm text-muted-foreground">{t('seriesEmpty')}</p>
+                  <p className="text-xs text-muted-foreground">{t('seriesEmptyHint')}</p>
+                </div>
               ) : (
                 <LineChart
                   x={series.points.map((point) => point.createdAt)}
@@ -102,6 +134,22 @@ export function ProductTimelineView({
                   onSelect={(columnIndex) => {
                     const point = series.points[columnIndex]
                     if (point) router.push(`/${workspace}/scorecard/${point.scorecardId}`)
+                  }}
+                  // 점 하나가 무엇인지 — 통과율만으로는 "이 점은 왜 생겼나"에 답할 수 없다. 이 배치를
+                  // 돌게 만든 서비스 버전과 배치의 종결 상태를 같은 카드에 적는다.
+                  renderPointDetail={(columnIndex) => {
+                    const point = series.points[columnIndex]
+                    if (!point) return null
+                    return (
+                      <div className="mt-1.5 space-y-0.5 border-t pt-1.5 text-[11.5px] text-muted-foreground">
+                        <p className="truncate">{stamp(point.createdAt)}</p>
+                        {point.serviceVersion && (
+                          <p className="truncate font-mono">{point.serviceVersion}</p>
+                        )}
+                        <p className="truncate">{t('pointStatus', { status: point.status })}</p>
+                        <p className="truncate">{t('pointOpen')}</p>
+                      </div>
+                    )
                   }}
                 />
               )}

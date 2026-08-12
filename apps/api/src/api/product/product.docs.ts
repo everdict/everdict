@@ -3,6 +3,7 @@ import {
   ProductDetailResponseSchema,
   ProductListResponseSchema,
   ProductRepoDiscoveryResponseSchema,
+  ProductSeriesRunResponseSchema,
   ProductSyncResponseSchema,
   ProductTimelineResponseSchema,
   ReleaseDetailResponseSchema,
@@ -13,6 +14,7 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateProductBodySchema } from "./request/create-product.js";
 import { CreateReleaseBodySchema, UpdateReleaseBodySchema } from "./request/create-release.js";
 import { DiscoverRepoBodySchema } from "./request/discover-repo.js";
+import { RunProductSeriesBodySchema } from "./request/run-product-series.js";
 import { SetReleaseStatusBodySchema } from "./request/set-release-status.js";
 import { UpdateProductBodySchema } from "./request/update-product.js";
 
@@ -33,6 +35,7 @@ export const productDocs: Record<
   | "update"
   | "delete"
   | "sync"
+  | "runSeries"
   | "createRelease"
   | "listReleases"
   | "getRelease"
@@ -69,7 +72,9 @@ export const productDocs: Record<
     summary: "Get one product with its releases and recent versions",
     description:
       "The record plus every release and the visible slice of the imported version ledger. The per-series " +
-      "trend is GET /products/:id/timeline (windowed). Requires issues:read.",
+      "trend is GET /products/:id/timeline (windowed). `:id` takes either form — the product's SLUG (what a " +
+      "URL carries) or its id (what stored pointers carry); the two index the same record. Requires " +
+      "issues:read.",
     tags: ["product"],
     params: toJsonSchema(z.object({ id: z.string() })),
     response: {
@@ -180,6 +185,25 @@ export const productDocs: Record<
     response: {
       200: { description: "What the pull did, per service", ...toJsonSchema(ProductSyncResponseSchema) },
       ...errorResponses(401, 403, 404, 502),
+    },
+  },
+  runSeries: {
+    summary: "Evaluate the product's watch series now",
+    description:
+      "Sync's counterpart: that refreshes the VERSION axis, this one the QUALITY axis. Submits one scorecard " +
+      "per series — `keys` absent means everything the product currently watches (the active planned " +
+      "release's selection, else every series), named keys run exactly those. Each batch is stamped with the " +
+      "same product/series/contract provenance an import fan-out carries, plus seriesTrigger=manual, and " +
+      "carries no serviceVersion (no imported version caused it). A series whose evaluation contract cannot " +
+      "be resolved is refused rather than run, and reported in `failedSeries` — one broken series never sinks " +
+      "the rest. Unlike the automatic paths this ignores the auto-eval switch: a person asked. Requires " +
+      "issues:write.",
+    tags: ["product"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(RunProductSeriesBodySchema),
+    response: {
+      200: { description: "What was submitted", ...toJsonSchema(ProductSeriesRunResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   createRelease: {

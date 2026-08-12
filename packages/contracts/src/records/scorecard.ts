@@ -427,6 +427,15 @@ export const ScorecardOriginSchema = z.object({
   // series as it stands now. Absent = a batch from before this existed, or one whose contract could not be
   // resolved: evidence whose contract cannot be named, which a release must not count as current.
   seriesContractDigest: z.string().optional(),
+  // WHY this batch ran, which is not the same question as which series it belongs to. A point produced by a
+  // version import says "this release moved the trend"; one produced by declaring the series says "we
+  // established a baseline"; one somebody pressed says "we asked again". Drawing them identically asserts the
+  // strongest of the three — the same reason the timeline's issue lane carries `via`. Absent = a batch from
+  // before this existed (every one of which was a version import).
+  seriesTrigger: z.enum(["version_import", "series_declared", "manual"]).optional(),
+  // The ledger row that CAUSED the run — only ever stamped by a version import, because only that trigger has
+  // one. A manual or seed run deliberately carries none rather than the newest version it happened to stand
+  // beside: "ran because of v2.1.0" and "ran while v2.1.0 was current" are different claims.
   serviceVersion: z.string().optional(),
   // Lineage of a retry-failed run — the source scorecard this record re-ran the failed cases of (passing results
   // carried over verbatim). The source record itself is never mutated. docs/architecture/batch-resilience.md

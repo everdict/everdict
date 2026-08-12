@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server'
 import {
   newProductHref,
   productHref,
+  productRef,
   productsSchema,
   type Product,
 } from '@/entities/product'
@@ -62,7 +63,7 @@ export default async function ProductsPage({ params }: { params: Promise<{ works
           {products.map((product) => (
             <Link
               key={product.id}
-              href={productHref(workspace, product.id)}
+              href={productHref(workspace, productRef(product))}
               className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
             >
               <div className="min-w-0 flex-1">
@@ -77,7 +78,9 @@ export default async function ProductsPage({ params }: { params: Promise<{ works
                 )}
               </div>
               {product.services.length > 0 && (
-                <Badge tone="outline">{t('serviceCount', { count: product.services.length })}</Badge>
+                <Badge tone="outline">
+                  {t('serviceCount', { count: product.services.length })}
+                </Badge>
               )}
               {product.series.length > 0 && (
                 <Badge tone="outline">{t('seriesCount', { count: product.series.length })}</Badge>

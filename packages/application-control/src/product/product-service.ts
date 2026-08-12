@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   BadRequestError,
   ConflictError,
@@ -19,6 +20,7 @@ import {
   type ScorecardRecord,
   type ShippedComponent,
   UpstreamError,
+  isProductSlugRef,
 } from "@everdict/contracts";
 import type {
   ProductDetailResponse,
@@ -45,10 +47,12 @@ import {
   productEvaluationDefinitionDigest,
   productPolicyDigest,
   productReleasePolicyDigest,
+  productSlugStem,
   releasePolicyDocument,
   releaseReadiness,
   resolveWatchedSeries,
   seriesContractDigest,
+  seriesNeedingEvidence,
   watchedSeries,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -57,6 +61,8 @@ import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ProductStore, ProductVersionStore, ReleaseStore } from "../ports/product-store.js";
 import type { CapabilityGenerationStore } from "../ports/product-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import { findProductByRef } from "./product-ref.js";
+import type { SeriesEvaluator, SeriesRunOutcome } from "./series-evaluator.js";
 
 // The product timeline's facade (docs/architecture/product-timeline.md): products + releases + the derived
 // readiness. Stores are injected directly (never peer services) so the release gate's read is one fan-out.
@@ -72,6 +78,9 @@ const DETAIL_VERSION_LIMIT = 100;
 
 // The timeline's default window when the caller names none — a quarter, the span a release conversation looks at.
 const TIMELINE_DEFAULT_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+// How many times a slug mint retries against the uniqueness index before giving up (see mintSlug).
+const SLUG_MINT_ATTEMPTS = 6;
 
 // How far ahead the axis reaches: the furthest date the product still INTENDS to hit, or the present instant
 // when it intends nothing. Only a PLANNED release counts — a cancelled one is a date nobody is working toward,
@@ -165,6 +174,11 @@ export interface ProductServiceDeps {
   // ABSTAINS for every series. That is the honest degradation: an unenforceable invariant we can name beats
   // a made-up one. It is also what keeps unit paths (and any deployment without registries) working.
   resolveSeriesContract?: (tenant: string, series: ProductSeries) => Promise<SeriesContractResolution>;
+  // Turning a watch series into a scorecard — the SAME collaborator the version sync fans out through, so a
+  // batch a member asked for and a batch an import produced are stamped by one piece of code. Absent = this
+  // deployment cannot run a series on demand: declaring one seeds nothing and the on-demand route is refused,
+  // which is the honest reading of a control plane with no eval plane behind it.
+  seriesEvaluator?: SeriesEvaluator;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -203,6 +217,7 @@ export class ProductService {
     const record = Product.newProduct({
       id: this.newId(),
       tenant: input.tenant,
+      slug: await this.mintSlug(input.tenant, input.name),
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.icon !== undefined ? { icon: input.icon } : {}),
@@ -218,6 +233,11 @@ export class ProductService {
       stamped.map((s) => s.record),
     );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    await this.seedDeclaredSeries(
+      record,
+      record.series.map((series) => series.key),
+      input.createdBy,
+    );
     return record;
   }
 
@@ -225,30 +245,113 @@ export class ProductService {
     return this.deps.store.list(tenant);
   }
 
-  async get(tenant: string, id: string): Promise<ProductRecord> {
-    const record = await this.deps.store.get(tenant, id);
-    if (!record) throw new NotFoundError("NOT_FOUND", { id }, `product '${id}' not found.`);
+  // THE ADDRESS IS FREE, THE NAME IS NOT (mig 0169). A slug is derived from the name and must be unique within
+  // the workspace, so minting is a read the domain cannot do: the stem is a pure function of the name, and
+  // whether it is taken is a question only the store can answer.
+  //
+  // The discriminator is random rather than a counter. `-2` looks tidier and is a read-modify-write: two
+  // creates racing on the same stem both see `-2` free and one of them loses to the unique index. Random hex
+  // makes the retry independent, which is what lets the loop be short.
+  private async mintSlug(tenant: string, name: string): Promise<string> {
+    const stem = productSlugStem(name);
+    for (let attempt = 0; attempt < SLUG_MINT_ATTEMPTS; attempt++) {
+      const candidate = attempt === 0 ? stem : `${stem.slice(0, 55)}-${randomBytes(4).toString("hex")}`;
+      // A candidate that reads as an id would shadow one index with the other, and no name should be able to
+      // claim an address that belongs to the id space.
+      if (isProductSlugRef(candidate) && (await this.deps.store.getBySlug(tenant, candidate)) === undefined)
+        return candidate;
+    }
+    // The loop only exhausts if the store is answering "taken" for random 32-bit suffixes, which is not a
+    // collision — it is a store that cannot be trusted to say what is free. Refusing beats minting an address
+    // the unique index will reject anyway, with the create half-done.
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { tenant, name },
+      "Could not mint a free address for this product — the slug index kept reporting every candidate as taken.",
+    );
+  }
+
+  // A product answers to two names: its slug (what a URL carries) and its id (what every stored pointer
+  // carries). Resolution lives in the SERVICE rather than in the routes, so HTTP, MCP and every headless
+  // caller accept both forms without any of them learning the rule — the team-key precedent.
+  async get(tenant: string, ref: string): Promise<ProductRecord> {
+    const record = await findProductByRef(this.deps.store, tenant, ref);
+    if (!record) throw new NotFoundError("NOT_FOUND", { id: ref }, `product '${ref}' not found.`);
     return record;
   }
 
   // The record plus what its screen opens on: the releases (every one — a product has a handful) and the
   // visible slice of the version ledger. The trend itself is the timeline read's job (heavier, windowed).
-  async detail(tenant: string, id: string): Promise<ProductDetailResponse> {
-    const record = await this.get(tenant, id);
+  async detail(tenant: string, ref: string): Promise<ProductDetailResponse> {
+    const record = await this.get(tenant, ref);
+    // Children are keyed by the product's ID, never by the ref the caller happened to address it with.
     const [releases, versions] = await Promise.all([
-      this.deps.releases.list(tenant, { productId: id }),
-      this.deps.versions.list(tenant, { productId: id, limit: DETAIL_VERSION_LIMIT }),
+      this.deps.releases.list(tenant, { productId: record.id }),
+      this.deps.versions.list(tenant, { productId: record.id, limit: DETAIL_VERSION_LIMIT }),
     ]);
     return { ...record, releases, versions };
   }
 
-  async update(tenant: string, id: string, fields: ProductEditInput, actor: ProductActor): Promise<ProductRecord> {
-    const record = await this.get(tenant, id);
+  async update(tenant: string, ref: string, fields: ProductEditInput, actor: ProductActor): Promise<ProductRecord> {
+    const record = await this.get(tenant, ref);
     if (fields.series !== undefined) {
       await this.assertSeriesRefs(tenant, fields.series);
-      await this.assertNoPlannedReleaseLosesItsGate(tenant, id, fields.series);
+      await this.assertNoPlannedReleaseLosesItsGate(tenant, record.id, fields.series);
     }
-    return this.applyTransition(record, Product.from(record).update(fields, actor.subject, this.now()));
+    // WHAT THIS EDIT OWES A RUN, decided against the record we are replacing — after the write there is
+    // nothing left to compare against, and the answer is the whole point of seeding.
+    const owed = fields.series === undefined ? [] : seriesNeedingEvidence(record.series, fields.series);
+    const updated = await this.applyTransition(record, Product.from(record).update(fields, actor.subject, this.now()));
+    await this.seedDeclaredSeries(updated, owed, actor.subject);
+    return updated;
+  }
+
+  // A DECLARATION OWES ITSELF A FIRST ANSWER. Nothing but a version import used to fan a series out, so a
+  // series declared on a product whose history was already backfilled had no evidence until upstream shipped
+  // again — while the release gate read that same emptiness as `not_evaluated` and blocked the ship. Declaring
+  // a series is the act that says "this is how we judge the product from now on", and the run belongs to that
+  // act, not to whatever happens to arrive next.
+  //
+  // Best-effort ON PURPOSE, and the one place in this file where that is not a silent failure: the write has
+  // already landed and must not be undone by a batch that could not be submitted, and the failure is VISIBLE —
+  // the series draws an empty trend beside an explicit run control, and a required one blocks the release with
+  // `not_evaluated` until somebody presses it. `autoEval.enabled` gates it because this is the automatic half;
+  // the on-demand run below is a person asking and honours no such switch.
+  private async seedDeclaredSeries(product: ProductRecord, keys: readonly string[], by: string): Promise<void> {
+    if (keys.length === 0 || !product.autoEval.enabled || this.deps.seriesEvaluator === undefined) return;
+    await this.deps.seriesEvaluator
+      .run(product.tenant, product, { submittedBy: by, trigger: "series_declared", keys })
+      .catch(() => undefined);
+  }
+
+  // Run a product's watch series NOW, because somebody asked. The counterpart to Sync: that one refreshes the
+  // version axis, this one refreshes the QUALITY axis, and until it existed the second had no manual door at
+  // all. Absent keys = everything the product currently watches; a named key that the product does not
+  // declare is a 404 rather than a silently empty fan-out.
+  async runSeries(
+    tenant: string,
+    ref: string,
+    keys: readonly string[] | undefined,
+    actor: ProductActor,
+  ): Promise<SeriesRunOutcome> {
+    const product = await this.get(tenant, ref);
+    if (this.deps.seriesEvaluator === undefined)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { product: product.id },
+        "This deployment has no evaluation plane, so a series cannot be run.",
+      );
+    if (product.series.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { product: product.id },
+        "This product declares no watch series, so there is nothing to evaluate. Declare one first.",
+      );
+    return this.deps.seriesEvaluator.run(tenant, product, {
+      submittedBy: actor.subject,
+      trigger: "manual",
+      ...(keys !== undefined ? { keys } : {}),
+    });
   }
 
   // The SECOND layer of the release-scope fix (arch-review 12 P0). The readiness check is fail-closed — a
@@ -289,12 +392,12 @@ export class ProductService {
     }
   }
 
-  async remove(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
-    const record = await this.get(tenant, id);
+  async remove(tenant: string, ref: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
+    const record = await this.get(tenant, ref);
     if (record.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError(
         "FORBIDDEN",
-        { id, action: "products:delete" },
+        { id: record.id, action: "products:delete" },
         "You are not allowed to delete this product (creator or workspace admin only).",
       );
     // Releases and the version ledger exist only under their product (unlike the tracker's shared entities),
@@ -305,17 +408,17 @@ export class ProductService {
     // release under a product that no longer exists and that nothing ever collects. The schema has no foreign
     // keys by choice, which means the aggregate boundary is a transaction's job, and imitating a cascade from
     // application code is exactly where that obligation went missing.
-    await this.deps.store.removeAggregate(tenant, id);
+    await this.deps.store.removeAggregate(tenant, record.id);
   }
 
   async listVersions(
     tenant: string,
-    productId: string,
+    ref: string,
     filter?: { service?: string; limit?: number },
   ): Promise<ProductServiceVersionRecord[]> {
-    await this.get(tenant, productId); // 404 for another workspace's product before serving its ledger
+    const product = await this.get(tenant, ref); // 404 for another workspace's product before serving its ledger
     return this.deps.versions.list(tenant, {
-      productId,
+      productId: product.id,
       ...(filter?.service !== undefined ? { service: filter.service } : {}),
       ...(filter?.limit !== undefined ? { limit: filter.limit } : {}),
     });
@@ -333,10 +436,11 @@ export class ProductService {
   // axis that HAPPENED from the part that is intended.
   async timeline(
     tenant: string,
-    id: string,
+    ref: string,
     window?: { from?: string; to?: string },
   ): Promise<ProductTimelineResponse> {
-    const product = await this.get(tenant, id);
+    const product = await this.get(tenant, ref);
+    const id = product.id; // children are keyed by the id, whichever form the caller addressed the product with
     const now = this.now();
     const releases = await this.deps.releases.list(tenant, { productId: id });
     const to = window?.to ?? timelineHorizon(now, releases);
@@ -375,7 +479,7 @@ export class ProductService {
     const issues: ProductTimelineIssue[] = [];
     if (this.deps.issues !== undefined) {
       const seen = new Set<string>();
-      const collect = (rows: readonly IssueRecord[], releaseId?: string): void => {
+      const collect = (rows: readonly IssueRecord[], via: ProductTimelineIssue["via"], releaseId?: string): void => {
         for (const issue of rows) {
           if (seen.has(issue.id)) continue;
           seen.add(issue.id);
@@ -384,15 +488,31 @@ export class ProductService {
             identifier: issue.identifier,
             title: issue.title,
             status: issue.status,
+            via,
             createdAt: issue.createdAt,
             ...(issue.resolution?.at !== undefined ? { resolvedAt: issue.resolution.at } : {}),
+            ...(issue.resolution?.scorecardId !== undefined
+              ? { resolvedByScorecardId: issue.resolution.scorecardId }
+              : {}),
             ...(releaseId !== undefined ? { releaseId } : {}),
           });
         }
       };
-      collect(await this.deps.issues.list(tenant, { link: { type: "product", id } }));
+      collect(await this.deps.issues.list(tenant, { link: { type: "product", id } }), "product");
       for (const release of releases)
-        collect(await this.deps.issues.list(tenant, { link: { type: "release", id: release.id } }), release.id);
+        collect(
+          await this.deps.issues.list(tenant, { link: { type: "release", id: release.id } }),
+          "release",
+          release.id,
+        );
+      // …AND the issues this product's own EVIDENCE is about (the third relationship, and the one nobody has to
+      // remember to declare). A workspace files an issue against a regression, links the scorecard that shows
+      // it, and closes it with the scorecard that proves the fix — none of which touches the product record, so
+      // a timeline reading explicit links alone drew an empty issue lane on exactly the products with the most
+      // to say. The scorecards are the ones already collected for the trend above, so the extra cost is one
+      // query, and the window that bounds the trend bounds this too.
+      const evidence = [...new Set(series.flatMap((entry) => entry.points.map((point) => point.scorecardId)))];
+      if (evidence.length > 0) collect(await this.deps.issues.list(tenant, { scorecards: evidence }), "evidence");
     }
     return { window: { from, to, now }, releases, versions, series, issues };
   }
@@ -404,7 +524,10 @@ export class ProductService {
     const record = Release.newRelease({
       id: this.newId(),
       tenant: input.tenant,
-      productId: input.productId,
+      // The RESOLVED id, never the caller's ref: a release addressed through the product's slug would
+      // otherwise store the slug as its parent key, and every read that joins on `productId` — the gate's
+      // issue count included — would miss it. An address is for arriving; a stored pointer is for joining.
+      productId: product.id,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
@@ -426,8 +549,9 @@ export class ProductService {
 
   // The workspace's releases, optionally one product's. A product filter is 404-scoped first so another
   // workspace's product id cannot be probed through its releases.
-  async listReleases(tenant: string, productId?: string): Promise<ReleaseRecord[]> {
-    if (productId !== undefined) await this.get(tenant, productId);
+  async listReleases(tenant: string, ref?: string): Promise<ReleaseRecord[]> {
+    // Resolved first, then filtered on the resolved id — the 404 scope and the join key are the same read.
+    const productId = ref !== undefined ? (await this.get(tenant, ref)).id : undefined;
     return this.deps.releases.list(tenant, productId !== undefined ? { productId } : undefined);
   }
 

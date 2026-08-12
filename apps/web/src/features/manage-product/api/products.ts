@@ -5,11 +5,13 @@ import { z } from 'zod'
 import {
   productRepoDiscoverySchema,
   productSchema,
+  productSeriesRunResultSchema,
   productSyncResultSchema,
   releaseSchema,
   type Product,
   type ProductRepoDiscovery,
   type ProductSeries,
+  type ProductSeriesRunResult,
   type ProductService,
   type ProductSyncResult,
   type Release,
@@ -107,6 +109,23 @@ export async function syncProductAction(
   const ctx = await authContext()
   try {
     const result = productSyncResultSchema.parse(await controlPlane.syncProduct(ctx, id))
+    return { ok: true, result }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 시리즈를 지금 평가한다 — Sync 의 짝. 시리즈를 선언해도 새 버전이 임포트되기 전까지는 아무 배치도 돌지
+// 않아 추이가 영원히 비어 있었고, 릴리즈 게이트는 그 공백을 not_evaluated 로 읽어 출하를 막았다.
+export async function runProductSeriesAction(
+  id: string,
+  keys?: string[]
+): Promise<{ ok: boolean; result?: ProductSeriesRunResult; error?: string }> {
+  const ctx = await authContext()
+  try {
+    const result = productSeriesRunResultSchema.parse(
+      await controlPlane.runProductSeries(ctx, id, keys)
+    )
     return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

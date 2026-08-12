@@ -6025,7 +6025,38 @@
     "deleteConfirm": "프로덕트 삭제",
     "deleteError": "프로덕트를 삭제하지 못했습니다.",
     "autoEval": "자동 평가",
-    "autoEvalError": "자동 평가 설정을 바꾸지 못했습니다."
+    "autoEvalError": "자동 평가 설정을 바꾸지 못했습니다.",
+    "versionKind": {
+      "release": "릴리즈",
+      "tag": "태그"
+    },
+    "versionCount": "{count}개",
+    "noVersionsYet": "아직 임포트된 버전이 없습니다.",
+    "showAllVersions": "{count}개 더 보기",
+    "untracked": "추적 안 함",
+    "untrackedHint": "이 이름의 서비스는 지금 프로덕트 구성에 없습니다 — 이름이 바뀌었거나 제거된 서비스의 과거 임포트입니다.",
+    "tipReleasedAt": "{at} 출하",
+    "tipTargetDate": "목표 {at}",
+    "tipPublishedAt": "{at} 발행",
+    "tipOpenSource": "누르면 원격 릴리즈로 이동합니다",
+    "tipRaisedAt": "{at} 발생",
+    "tipResolvedAt": "{at} 해결",
+    "tipStillOpen": "아직 열려 있음",
+    "tipVia": {
+      "product": "이 프로덕트에 링크됨",
+      "release": "이 프로덕트의 릴리즈에 링크됨",
+      "evidence": "이 프로덕트의 평가 증거와 연결됨"
+    },
+    "momentRaised": "발생",
+    "momentResolved": "해결",
+    "pointStatus": "배치 {status}",
+    "pointOpen": "누르면 스코어카드로 이동합니다",
+    "seriesEmptyHint": "새 버전이 임포트되거나 「지금 평가」를 누르면 여기에 점이 찍힙니다.",
+    "runSeriesNow": "지금 평가",
+    "runSeriesDone": "평가 {triggered}건을 제출했습니다.",
+    "runSeriesNone": "실행할 시리즈가 없습니다.",
+    "runSeriesPartial": "{triggered}건 제출, 제출하지 못한 시리즈: {failed}",
+    "runSeriesError": "시리즈를 실행하지 못했습니다."
   },
   "releasePage": {
     "backToProduct": "프로덕트로 돌아가기",

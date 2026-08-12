@@ -5,6 +5,7 @@ import { productDocs } from "./product.docs.js";
 import { CreateProductBodySchema } from "./request/create-product.js";
 import { CreateReleaseBodySchema, UpdateReleaseBodySchema } from "./request/create-release.js";
 import { DiscoverRepoBodySchema } from "./request/discover-repo.js";
+import { RunProductSeriesBodySchema } from "./request/run-product-series.js";
 import { SetReleaseStatusBodySchema } from "./request/set-release-status.js";
 import { UpdateProductBodySchema } from "./request/update-product.js";
 
@@ -254,6 +255,37 @@ export function registerProductRoutes(app: FastifyInstance, deps: ServerDeps): v
       return sendError(reply, err);
     }
   });
+
+  // Evaluate the watch series NOW. Sync's counterpart: that one refreshes the VERSION axis, this one the
+  // QUALITY axis. Until it existed a series only ever ran off a genuinely new import, so declaring one on a
+  // product whose history was already backfilled left it empty until upstream shipped again — while the
+  // release gate read that emptiness as `not_evaluated` and blocked the ship.
+  app.post<{ Params: { id: string } }>(
+    "/products/:id/series/run",
+    { schema: productDocs.runSeries },
+    async (req, reply) => {
+      if (!deps.productService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "product service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const parsed = RunProductSeriesBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await deps.productService.runSeries(principal.workspace, req.params.id, parsed.data.keys, {
+            subject: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // --- Releases ---------------------------------------------------------------------------------------------
 

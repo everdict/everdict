@@ -4,6 +4,7 @@ export {
   deleteProductAction,
   deleteReleaseAction,
   discoverRepoAction,
+  runProductSeriesAction,
   setReleaseStatusAction,
   syncProductAction,
   updateProductAction,
@@ -17,4 +18,5 @@ export { ProductWizard } from './ui/product-wizard'
 export { ReleaseActionsMenu } from './ui/release-actions-menu'
 export { ReleaseComponentsEditor } from './ui/release-components-editor'
 export { ReleaseStatusControl } from './ui/release-status-control'
+export { RunSeriesButton } from './ui/run-series-button'
 export { SyncProductButton } from './ui/sync-button'

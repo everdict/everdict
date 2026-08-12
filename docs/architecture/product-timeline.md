@@ -15,6 +15,16 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
 
 - **Product** (`records/product.ts`, aggregate in `@everdict/domain` `product/product.ts`) — mutable state,
   tracker-shaped (NOT a registry entity: it has no immutable versions of its own).
+  - `slug` — how it is ADDRESSED (mig 0169). Derived from the name at creation (`productSlugStem`, unicode
+    kept — a workspace naming its products in its own language would otherwise get `product-1`, `product-2`,
+    a worse address than the uuid this replaces) and immutable afterwards, for the reason a team key is: an
+    address that follows a rename breaks every link that was ever shared. Unique per workspace, and the
+    service mints it because uniqueness is a question only the store can answer. Resolution lives in
+    `ProductService.get`, so HTTP, MCP and every headless caller take **either form** without learning the
+    rule; the discriminator is the ID's shape (uuid → id, anything else → slug), never the slug's, because a
+    stored slug today's minting rule would not produce must still resolve. The web canonicalizes at the
+    detail route (an id-spelled URL redirects to the slug), the same normalization the issue detail does for
+    `ENG-12`.
   - `services[]` — the tracked composition. Each names a GitHub repository (`host` for GHE), a `source`
     (`releases` | `tags`), an optional `tagPrefix` (monorepos release several services from one repo) and an
     optional `path` (where the service lives inside the repository). The NAME is the timeline's key; changing
@@ -131,9 +141,43 @@ active planned release's selection, else every series — via the `SeriesRunSubm
 declaration's author, not whoever pressed Sync). Failed submits ride the sync outcome (`failedSeries`) —
 a silently missing batch would read as "the product got worse".
 
+**A series has THREE triggers, and only one of them used to exist.** The import fan-out was the only thing that
+ever turned a series into a scorecard, so a series declared on a product whose history was already backfilled
+produced nothing at all until upstream happened to ship again — the sync imports no new row, `inserted` is
+empty, and the fan-out is skipped. The trend drew "no evaluations in this window" forever, and the same
+emptiness reached the release gate as `not_evaluated`, which blocks a required series. A declaration that
+silently disables shipping and offers no way to satisfy itself is a missing trigger, not a missing feature.
+The fan-out therefore lives in `SeriesEvaluator` (`application-control` `product/series-evaluator.ts`) with
+three callers, distinguished by `origin.seriesTrigger`:
+
+```
+version_import    the sync's fan-out, on genuinely new post-watermark rows  → submitted as the product's CREATOR
+series_declared   the seed a create/edit owes a series it left unanswered   → submitted as the EDITOR
+manual            POST /products/:id/series/run — a person asked            → submitted as the CALLER
+```
+
+The seed is decided by `seriesNeedingEvidence` (`@everdict/domain`, pure): a series is owed a run when it is
+NEW, or when `seriesQuestion` — dataset · harness · judge refs, judges order-insensitive — changed under a
+stable key. That second half is the same fact the gate calls `contract_stale`: the key is the TREND's identity
+and survives every edit, so it cannot say whether the evidence filed under it still answers the question.
+`label`, `requiredForRelease` and `allowNoBaseline` are excluded on purpose — the first is how the question is
+spelled, the other two are what we do with its answer. It is deliberately NOT the resolved contract digest:
+that one needs the registries and catches a floating `latest` moving under an unchanged declaration, which is
+why the *gate* compares it; this is the pure half a WRITE can recognize with no I/O.
+
+The seed is best-effort and `autoEval.enabled` gates it (it is the automatic half); the write has already
+landed and must not be undone by a batch that could not be submitted. That is not a silent failure here, which
+is the whole reason it is allowed to be soft: the series draws an empty trend beside an explicit run control,
+and a required one keeps blocking the release until somebody presses it. The manual run honours no such
+switch — auto-eval governs what happens *without* a person, and a control that quietly does nothing is worse
+than no control. A named key the product does not declare is a 404, never a silently empty fan-out.
+
 **Provenance is the trend's x-axis key**: `ScorecardOrigin` gains `productId` / `releaseId?` / `seriesKey` /
-`serviceVersion` (`"<service>@<version>"`, the newest arrival of that sync). `ScorecardListFilter` gains
-`productId`/`seriesKey` (expression-indexed, mig 0138), so a series chart is a list filter, not a join table.
+`seriesTrigger` / `serviceVersion` (`"<service>@<version>"`, the newest arrival of that sync — stamped ONLY by
+an import, because only that trigger has a cause; "ran because of v2.1.0" and "ran while v2.1.0 was current"
+are different claims, and a lane drawing them identically asserts the stronger one). `ScorecardListFilter`
+gains `productId`/`seriesKey` (expression-indexed, mig 0138), so a series chart is a list filter, not a join
+table.
 
 Harness pins are deliberately untouched: image freshness is the merge→re-pin CI flow's job
 (docs/architecture/github-actions-trigger.md); the series runs `harness@latest` and naturally evaluates the
@@ -338,7 +382,18 @@ regression watch's, and an issue it reopened blocks the release through the link
 
 - `GET /products/:id/timeline?from&to` — the axis in one read (the pulse's treatment: composed from stores
   server-side, drawn by the web): releases + windowed version ledger + per-series points (oldest first, with
-  pass rate via `headlinePassRate` and the triggering `serviceVersion`) + linked issues' lifecycle markers.
+  pass rate via `headlinePassRate` and the triggering `serviceVersion`) + the issues' lifecycle markers.
+
+  **An issue reaches the axis three ways, and only two of them are declared by a person.** `product` and
+  `release` are explicit links; `evidence` is an issue that one of this product's own watch-series scorecards
+  is cited by (`links[].type: "scorecard"`) or was **closed with** (`resolution.scorecardId` — which never
+  becomes a link, so a link-only read misses the strongest relationship there is). Reading the explicit links
+  alone drew an empty issue lane on exactly the products with the most to say: a workspace files against a
+  regression, links the batch that shows it, closes with the batch that proves the fix, and never touches the
+  product record. The extra cost is ONE query (`IssueListFilter.scorecards`, both halves in one statement)
+  over the scorecards the trend already collected, so the window that bounds the trend bounds this too. Each
+  row carries `via` — "we filed this against 2026.3" and "this cites a batch of ours" are different claims,
+  and a lane drawing them identically asserts the stronger one.
   The default window is **the last 90 days through the product's HORIZON** — `to` reaches the furthest
   *planned* release's `targetDate` (end of that day), not the present instant, because a release is planned
   before it ships and an axis stopping at `now` cannot place the one marker the planning conversation is about
@@ -349,22 +404,46 @@ regression watch's, and an issue it reopened blocks the release through the link
   between the part of the axis that happened and the part that is intended, and what an open-ended span (an
   unresolved issue) ends at. The web draws the future half as a pressed-back band with a "today" line
   (`widgets/product-timeline`); it does not compute the boundary from the browser clock (SSR would disagree).
+- `POST /products/:id/series/run` (MCP `run_product_series`) — Sync's counterpart: that refreshes the VERSION
+  axis, this one the QUALITY axis. `keys` absent = everything the product currently watches; an empty array is
+  refused rather than read as absent, because "run these, and there are none" is a caller's bug and reading it
+  as "run everything" turns it into a batch storm.
 - HTTP + MCP full parity in the `api/product` slice; authz reuses the ISSUE pair (`issues:read`/`issues:write`
   — the timeline is the same planning workflow, one axis over); delete = creator-or-admin in the service;
   product deletion cascades releases + ledger (they exist only under their product).
 - Web: `/products` (+`/products/new`, a four-step WIZARD: basics → services (read a repository, tick the
-  proposals, live prefix preview) → series → review+sync), `/product/[id]` (services + subpaths + sync state,
-  release strip with each release's composition, one `LineChart` per series — points click through to their
-  scorecard — version table, history), `/product/[id]/edit` (the flat form, for editing an existing
-  declaration), `/release/[id]` (readiness card + gate UI: a 409 becomes an explicit forced-ship confirmation;
-  plus the composition editor, versions picked from the ledger). `entities/product` carries the zod mirrors +
-  drift guards; the tracker history renderer gained the `released` event.
+  proposals, live prefix preview) → series → review+sync), `/product/[slug]` (services + subpaths + sync
+  state, release strip with each release's composition, one `LineChart` per series — points click through to
+  their scorecard, each series header carrying its own "evaluate now" and an empty one saying what would fill
+  it, so a declared-but-unrun series is never a dead chart — the version ledger, history),
+  `/product/[slug]/edit` (the flat form, for editing an
+  existing declaration), `/release/[id]` (readiness card + gate UI: a 409 becomes an explicit forced-ship
+  confirmation; plus the composition editor, versions picked from the ledger). `entities/product` carries the
+  zod mirrors + drift guards and the ONE href builder (`productRef` picks slug-or-id); the tracker history
+  renderer gained the `released` event.
+- **The version ledger's axis is the SERVICE, not time.** A product assembles several services whose versions
+  move on independent streams, and one table sorted by `publishedAt` answers no question anybody has: reading
+  "where is api now" out of it means scrolling and filtering by eye. It is one card per tracked service
+  (declared order, newest first, collapsed past six), with the streams the product no longer declares kept
+  visible at the end rather than dropped — a renamed or repointed service's history disappearing silently
+  reads as "the import broke".
+- **A mark on the axis says what it is when you hover it** (`widgets/product-timeline`). Native `title` was
+  what the marks had, and it is the wrong instrument for this screen: it waits a second, renders multi-line
+  text differently in every browser, and is unavailable to the person trying to tell apart two dots 2px away
+  from each other. Releases, version dots and both issue moments now draw a hover card in the same layer as
+  the mark, and the series chart's tooltip takes a `renderPointDetail` slot (the triggering service version,
+  the batch's status) plus a header spelled by `formatX` — it used to print the raw x value, so an ISO instant
+  appeared verbatim in the one place a reader is asking a simple question.
+- **An issue's lane draws two MOMENTS over a lifespan, not one bar.** Occurrence (◆ at `createdAt`) and
+  resolution (● at `resolvedAt`) are what people look for on a timeline; a bar alone reads as "something was
+  open in early August" and stops there. An unresolved issue gets no end marker — its span still stops at
+  `now`, because a bar reaching into the future is a prediction rather than a fact.
 
 ## Where the code lives
 
 contracts `records/product.ts` + `wire/product/product.ts` · domain
 `product/{product,release,readiness,discovery}.ts` · application-control
-`product/{product-service,product-version-sync,product-discovery}.ts` + `ports/product-store.ts` +
-`ports/github-repo-writer.ts` (version reader + tree reader) · db `product/*` + mig `0138`/`0162` ·
+`product/{product-service,product-version-sync,series-evaluator,product-discovery}.ts` + `ports/product-store.ts` +
+`ports/github-repo-writer.ts` (version reader + tree reader) · db `product/*` + mig `0138`/`0162`/`0169` ·
 api `api/product/*` + `infrastructure/github/repo-writer.ts` · web `entities/product` +
 `features/manage-product` (wizard + composition editor) + `widgets/product-timeline` + the routes.

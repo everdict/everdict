@@ -11,7 +11,8 @@ import type {
   ReleaseStore,
 } from "../index.js";
 import type { GithubRelease, GithubVersionReader } from "../ports/github-repo-writer.js";
-import { ProductVersionSync, type SeriesRunSubmitter } from "./product-version-sync.js";
+import { ProductVersionSync } from "./product-version-sync.js";
+import type { SeriesRunSubmitter } from "./series-evaluator.js";
 
 // Trust suite (docs/trust-certification.md) — TRUST-59 · TRUST-60 · TRUST-68 · TRUST-100.
 //
@@ -36,6 +37,9 @@ class FakeProductStore implements ProductStore {
     const record = this.reads[Math.min(this.at, this.reads.length - 1)];
     this.at += 1;
     return record;
+  }
+  async getBySlug(tenant: string, slug: string): Promise<ProductRecord | undefined> {
+    return this.reads.find((record) => record.tenant === tenant && record.slug === slug);
   }
   async list(_tenant: string, _filter?: ProductListFilter): Promise<ProductRecord[]> {
     return this.reads.slice(0, 1);

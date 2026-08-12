@@ -12,6 +12,7 @@ import type {
 import type {
   ProductDetailResponse as WireProductDetailResponse,
   ProductRepoDiscoveryResponse as WireProductRepoDiscoveryResponse,
+  ProductSeriesRunResponse as WireProductSeriesRunResponse,
   ProductServiceSuggestion as WireProductServiceSuggestion,
   ProductSyncResponse as WireProductSyncResponse,
   ProductTimelineResponse as WireProductTimelineResponse,
@@ -75,6 +76,9 @@ export const productAutoEvalSchema = z.object({
 export const productSchema = z.object({
   id: z.string(),
   tenant: z.string(),
+  // URL 이 실어 나르는 주소 — 이름에서 생성되고 이후 불변(mig 0169). 컬럼이 생기기 전에 쓰인 행은 없을
+  // 수 있고, 그때는 id 로 주소된다(`productRef`).
+  slug: z.string().optional(),
   name: z.string(),
   description: z.string().optional(),
   icon: z.string().optional(),
@@ -237,8 +241,12 @@ export const productTimelineSchema = z.object({
       identifier: z.string(),
       title: z.string(),
       status: z.string(),
+      // 이 이슈가 타임라인에 올라온 경로 — 명시 링크(product/release)인지, 이 프로덕트의 평가 증거를
+      // 인용/근거로 삼은 것(evidence)인지. 둘은 서로 다른 주장이라 레인도 다르게 그린다.
+      via: z.enum(['product', 'release', 'evidence']),
       createdAt: z.string(),
       resolvedAt: z.string().optional(),
+      resolvedByScorecardId: z.string().optional(),
       releaseId: z.string().optional(),
     })
   ),
@@ -306,6 +314,13 @@ export const productSyncResultSchema = z.object({
   failedSeries: z.array(z.object({ key: z.string(), error: z.string() })).optional(),
 })
 
+// 시리즈 온디맨드 실행의 결과 — 제출된 배치와, 제출되지 못한 시리즈. 후자를 삼키면 "물어봤는데 아무 답도
+// 없었다"로 읽힌다.
+export const productSeriesRunResultSchema = z.object({
+  triggered: z.array(z.string()),
+  failedSeries: z.array(z.object({ key: z.string(), error: z.string() })),
+})
+
 // Drift guard — mutually assignable with the wire contract in both directions.
 type AssertAssignable<A extends B, B> = A
 type WebProduct = z.infer<typeof productSchema>
@@ -351,6 +366,14 @@ type _discoveryBack = AssertAssignable<
   WireProductRepoDiscoveryResponse,
   z.infer<typeof productRepoDiscoverySchema>
 >
+type _seriesRunFwd = AssertAssignable<
+  z.infer<typeof productSeriesRunResultSchema>,
+  WireProductSeriesRunResponse
+>
+type _seriesRunBack = AssertAssignable<
+  WireProductSeriesRunResponse,
+  z.infer<typeof productSeriesRunResultSchema>
+>
 type _syncFwd = AssertAssignable<z.infer<typeof productSyncResultSchema>, WireProductSyncResponse>
 type _syncBack = AssertAssignable<WireProductSyncResponse, z.infer<typeof productSyncResultSchema>>
 type _timelineFwd = AssertAssignable<
@@ -365,6 +388,7 @@ export type ProductDetail = WireProductDetailResponse
 export type ProductTimeline = WireProductTimelineResponse
 export type ProductVersion = WireProductServiceVersionRecord
 export type ProductSyncResult = WireProductSyncResponse
+export type ProductSeriesRunResult = WireProductSeriesRunResponse
 export type ProductRepoDiscovery = WireProductRepoDiscoveryResponse
 export type ProductServiceSuggestion = WireProductServiceSuggestion
 export type RepoPackage = WireRepoPackage

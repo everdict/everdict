@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 
 import {
   productHref,
+  productRef,
   type ProductRepoDiscovery,
   type ProductSeries,
   type ProductService,
@@ -223,7 +224,7 @@ export function ProductWizard({
           const sync = await syncProductAction(r.product.id)
           if (!sync.ok) toast.error(sync.error ?? t('syncError'))
         }
-        router.push(productHref(workspace, r.product.id))
+        router.push(productHref(workspace, productRef(r.product)))
       } finally {
         setPending(false)
       }

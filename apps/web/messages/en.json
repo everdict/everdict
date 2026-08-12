@@ -6025,7 +6025,38 @@
     "deleteConfirm": "Delete product",
     "deleteError": "Failed to delete the product.",
     "autoEval": "Auto-eval",
-    "autoEvalError": "Failed to change auto-eval."
+    "autoEvalError": "Failed to change auto-eval.",
+    "versionKind": {
+      "release": "Release",
+      "tag": "Tag"
+    },
+    "versionCount": "{count}",
+    "noVersionsYet": "No versions imported yet.",
+    "showAllVersions": "Show {count} more",
+    "untracked": "Untracked",
+    "untrackedHint": "No service by this name is part of the product right now — these are the imports of a service that was renamed or removed.",
+    "tipReleasedAt": "Shipped {at}",
+    "tipTargetDate": "Target {at}",
+    "tipPublishedAt": "Published {at}",
+    "tipOpenSource": "Opens the release on the remote",
+    "tipRaisedAt": "Raised {at}",
+    "tipResolvedAt": "Resolved {at}",
+    "tipStillOpen": "Still open",
+    "tipVia": {
+      "product": "Linked to this product",
+      "release": "Linked to a release of this product",
+      "evidence": "Connected to this product's evaluation evidence"
+    },
+    "momentRaised": "Raised",
+    "momentResolved": "Resolved",
+    "pointStatus": "Batch {status}",
+    "pointOpen": "Opens the scorecard",
+    "seriesEmptyHint": "A point lands here when a new version is imported, or when you press Evaluate now.",
+    "runSeriesNow": "Evaluate now",
+    "runSeriesDone": "Submitted {triggered} evaluation(s).",
+    "runSeriesNone": "There is no series to run.",
+    "runSeriesPartial": "Submitted {triggered}; could not submit: {failed}",
+    "runSeriesError": "Could not run the series."
   },
   "releasePage": {
     "backToProduct": "Back to product",

@@ -1,4 +1,4 @@
-export { newProductHref, productHref, productsHref, releaseHref } from './lib/href'
+export { newProductHref, productHref, productRef, productsHref, releaseHref } from './lib/href'
 export { ReleaseStatusBadge } from './ui/release-status-badge'
 export {
   PRODUCT_SERVICE_SOURCES,
@@ -8,6 +8,7 @@ export {
   productDetailSchema,
   productRepoDiscoverySchema,
   productSchema,
+  productSeriesRunResultSchema,
   productSeriesSchema,
   productServiceSchema,
   productServiceSourceSchema,
@@ -29,6 +30,7 @@ export {
   type ProductDetail,
   type ProductRepoDiscovery,
   type ProductSeries,
+  type ProductSeriesRunResult,
   type ProductService,
   type ProductServiceSuggestion,
   type ProductSyncResult,

@@ -1,4 +1,11 @@
-import { ProductDiscovery, ProductService, ProductVersionSync, RunService } from "@everdict/application-control";
+import {
+  ProductDiscovery,
+  ProductService,
+  ProductVersionSync,
+  RunService,
+  SeriesEvaluator,
+  type SeriesRunSubmitter,
+} from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { IssueRecord, ScorecardRecord } from "@everdict/contracts";
 import {
@@ -27,7 +34,18 @@ function build() {
   const versionStore = new InMemoryProductVersionStore();
   const issueStore = new InMemoryIssueStore();
   const scorecardStore = new InMemoryScorecardStore();
+  // The submit seam, recorded rather than executed: what these tests care about is WHICH series were fanned
+  // out and how each batch was stamped, which is exactly what crosses this boundary.
+  const submittedRuns: Array<Parameters<SeriesRunSubmitter>[0]> = [];
+  const seriesEvaluator = new SeriesEvaluator({
+    releases: releaseStore,
+    submitSeriesRun: async (input) => {
+      submittedRuns.push(input);
+      return { id: `sc-auto-${submittedRuns.length}` };
+    },
+  });
   const productService = new ProductService({
+    seriesEvaluator,
     store: productStore,
     releases: releaseStore,
     versions: versionStore,
@@ -145,7 +163,7 @@ function build() {
     productVersionSync,
     productDiscovery,
   });
-  return { app, issueStore, scorecardStore };
+  return { app, issueStore, scorecardStore, submittedRuns };
 }
 
 async function createProduct(app: ReturnType<typeof build>["app"], payload?: Record<string, unknown>) {
@@ -490,6 +508,231 @@ describe("product routes", () => {
     });
     expect(named.json().window.to).toBe("2026-08-01T00:00:00.000Z");
     expect(named.json().window.from).toBe("2026-05-03T00:00:00.000Z");
+  });
+
+  it("addresses a product by its SLUG, minted from the name and unique per workspace", async () => {
+    const { app } = build();
+    const product = await createProduct(app);
+    // The URL should read as the thing people name in conversation, so the name mints the address…
+    expect(product.slug).toBe("support-copilot");
+
+    // …and that address resolves the same record the id does (an old link never stops working).
+    const bySlug = await app.inject({ method: "GET", url: "/products/support-copilot", headers: H });
+    expect(bySlug.statusCode).toBe(200);
+    expect(bySlug.json().id).toBe(product.id);
+
+    // A second product wanting the same address gets its own — an address two records answer to is not one.
+    const twin = await createProduct(app, { name: "Support Copilot" });
+    expect(twin.slug).not.toBe(product.slug);
+    expect((await app.inject({ method: "GET", url: `/products/${twin.slug}`, headers: H })).json().id).toBe(twin.id);
+
+    // Every route that takes `:id` takes the address too — including the WRITE paths, where the resolved id
+    // is what has to reach storage: a release created through the slug must still point at the product by id,
+    // or the gate's own reverse queries would never find it.
+    const planned = await app.inject({
+      method: "POST",
+      url: "/products/support-copilot/releases",
+      headers: H,
+      payload: { name: "2026.4" },
+    });
+    expect(planned.statusCode).toBe(201);
+    expect(planned.json().productId).toBe(product.id);
+    const synced = await app.inject({ method: "POST", url: "/products/support-copilot/sync", headers: H });
+    expect(synced.statusCode).toBe(200);
+
+    // And the slug is scoped to the workspace, exactly like every other read.
+    const otherWorkspace = await app.inject({
+      method: "GET",
+      url: "/products/support-copilot",
+      headers: { "x-everdict-tenant": "globex" },
+    });
+    expect(otherWorkspace.statusCode).toBe(404);
+  });
+
+  it("puts an issue on the axis when this product's own EVIDENCE is what it is about", async () => {
+    // The three relationships an issue can have with a product, and only two of them are declared by a
+    // person. Reading the explicit links alone drew an empty issue lane on exactly the products with the
+    // most to say: a workspace files against a regression, links the batch that shows it, closes with the
+    // batch that proves the fix — and never touches the product record.
+    const { app, issueStore, scorecardStore } = build();
+    const product = await createProduct(app);
+    await scorecardStore.create(
+      seriesBatch("sc-evidence", 0.7, "2026-08-01T00:00:00.000Z", { productId: product.id, seriesKey: "quality" }),
+    );
+    const base = openIssue("unused-release");
+    await issueStore.create({
+      ...base,
+      id: "iss-linked",
+      identifier: "ENG-2",
+      links: [{ type: "scorecard", id: "sc-evidence", addedBy: "dana", addedAt: NOW }],
+    });
+    await issueStore.create({
+      ...base,
+      id: "iss-closed",
+      identifier: "ENG-3",
+      status: "done",
+      links: [],
+      // Closed BY the evidence — the half a link-only read misses, and the half that carries a resolution date.
+      resolution: { at: "2026-08-02T00:00:00.000Z", by: "dana", scorecardId: "sc-evidence" },
+    });
+
+    const timeline = (await app.inject({ method: "GET", url: `/products/${product.id}/timeline`, headers: H })).json();
+    const rows = [...timeline.issues].sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
+    expect(rows).toMatchObject([
+      { identifier: "ENG-3", via: "evidence", resolvedAt: "2026-08-02T00:00:00.000Z" },
+      { identifier: "ENG-2", via: "evidence" },
+    ]);
+    // Both moments are on the row, which is what lets the lane draw an occurrence AND a resolution rather
+    // than one undifferentiated bar.
+    expect(rows[0].createdAt).toBe(NOW);
+    expect(rows[0].resolvedByScorecardId).toBe("sc-evidence");
+    expect(rows[1].resolvedAt).toBeUndefined();
+  });
+
+  // A DECLARATION OWES ITSELF A FIRST ANSWER. Only a genuinely new version import used to fan a series out,
+  // so declaring one on a product whose history was already backfilled left its trend empty until upstream
+  // shipped again — while the release gate read that same emptiness as `not_evaluated` and blocked the ship.
+  it("declaring a watch series submits its first evaluation, stamped as the declaration's own", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app);
+
+    expect(submittedRuns.map((run) => run.origin.seriesKey)).toEqual(["quality"]);
+    expect(submittedRuns[0]?.origin.seriesTrigger).toBe("series_declared");
+    // No import caused it, so it names none: "ran because of v2.1.0" and "ran while v2.1.0 was current" are
+    // different claims and the trend draws them differently.
+    expect(submittedRuns[0]?.origin.serviceVersion).toBeUndefined();
+    expect(submittedRuns[0]?.origin.productId).toBe(product.id);
+  });
+
+  it("adding a series to an existing product seeds only the new one", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app);
+    submittedRuns.length = 0;
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/products/${product.id}`,
+      headers: H,
+      payload: {
+        series: [
+          {
+            key: "quality",
+            label: "Quality",
+            dataset: { id: "support-cases" },
+            harness: { id: "copilot" },
+            judges: [],
+          },
+          { key: "cost", label: "Cost", dataset: { id: "support-cases" }, harness: { id: "copilot" }, judges: [] },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(submittedRuns.map((run) => run.origin.seriesKey)).toEqual(["cost"]);
+  });
+
+  // The key is the TREND's identity and survives every edit, which is exactly why it cannot say whether the
+  // evidence under it still answers the question: re-pointing a series at another dataset keeps its chart
+  // while every point on it now answers something else (the gate calls that `contract_stale`).
+  it("re-pointing a series at another dataset re-seeds it, while renaming its label does not", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app);
+    submittedRuns.length = 0;
+
+    const relabel = await app.inject({
+      method: "PATCH",
+      url: `/products/${product.id}`,
+      headers: H,
+      payload: {
+        series: [
+          {
+            key: "quality",
+            label: "Answer quality",
+            dataset: { id: "support-cases" },
+            harness: { id: "copilot" },
+            judges: [],
+          },
+        ],
+      },
+    });
+    expect(relabel.statusCode).toBe(200);
+    expect(submittedRuns).toEqual([]);
+
+    const repoint = await app.inject({
+      method: "PATCH",
+      url: `/products/${product.id}`,
+      headers: H,
+      payload: {
+        series: [
+          {
+            key: "quality",
+            label: "Answer quality",
+            dataset: { id: "escalation-cases" },
+            harness: { id: "copilot" },
+            judges: [],
+          },
+        ],
+      },
+    });
+    expect(repoint.statusCode).toBe(200);
+    expect(submittedRuns.map((run) => run.origin.seriesKey)).toEqual(["quality"]);
+    expect(submittedRuns[0]?.dataset.id).toBe("escalation-cases");
+  });
+
+  it("evaluates the watch series on demand — sync's counterpart on the quality axis", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app);
+    submittedRuns.length = 0;
+
+    const res = await app.inject({ method: "POST", url: `/products/${product.id}/series/run`, headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ triggered: ["sc-auto-1"], failedSeries: [] });
+    expect(submittedRuns[0]?.origin.seriesTrigger).toBe("manual");
+    expect(submittedRuns[0]?.submittedBy).toBe("dev"); // the person who asked, not the standing author
+  });
+
+  it("runs only the series named, and refuses a key the product does not declare", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app);
+    submittedRuns.length = 0;
+
+    const ghost = await app.inject({
+      method: "POST",
+      url: `/products/${product.id}/series/run`,
+      headers: H,
+      payload: { keys: ["ghost"] },
+    });
+    // Not an empty fan-out: "run the ghost series" answered by running nothing is indistinguishable from a
+    // series that submitted and produced no batch.
+    expect(ghost.statusCode).toBe(404);
+    expect(submittedRuns).toEqual([]);
+
+    const named = await app.inject({
+      method: "POST",
+      url: `/products/${product.id}/series/run`,
+      headers: H,
+      payload: { keys: ["quality"] },
+    });
+    expect(named.statusCode).toBe(200);
+    expect(submittedRuns.map((run) => run.origin.seriesKey)).toEqual(["quality"]);
+  });
+
+  // Auto-eval governs the AUTOMATIC paths (the import fan-out, the declaration seed). A member pressing the
+  // button is not one of them, and a control that silently does nothing is worse than no control.
+  it("runs on demand even with auto-eval switched off, and seeds nothing while it is off", async () => {
+    const { app, submittedRuns } = build();
+    const product = await createProduct(app, { autoEval: { enabled: false } });
+    expect(submittedRuns).toEqual([]);
+
+    const res = await app.inject({ method: "POST", url: `/products/${product.id}/series/run`, headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(submittedRuns.map((run) => run.origin.seriesKey)).toEqual(["quality"]);
+  });
+
+  it("refuses to run the series of a product that declares none", async () => {
+    const { app } = build();
+    const product = await createProduct(app, { series: [] });
+    const res = await app.inject({ method: "POST", url: `/products/${product.id}/series/run`, headers: H });
+    expect(res.statusCode).toBe(400);
   });
 
   it("refuses a release watching a series the product never declared", async () => {

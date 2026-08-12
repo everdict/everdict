@@ -950,6 +950,13 @@ export const controlPlane = {
   // 지금 GitHub 을 당겨온다 — 첫 싱크는 백필(조용), 그 뒤의 새 버전이 워치 시리즈를 돌린다.
   syncProduct: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/products/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+  // 품질 축의 수동 문 — Sync 가 버전 축을 당긴다면 이쪽은 시리즈를 지금 평가한다. keys 없음 = 프로덕트가
+  // 지금 지켜보는 전부.
+  runProductSeries: <T>(auth: AuthContext, id: string, keys?: string[]) =>
+    call<T>(auth, `/products/${encodeURIComponent(id)}/series/run`, {
+      method: 'POST',
+      body: JSON.stringify(keys !== undefined ? { keys } : {}),
+    }),
   createRelease: <T>(auth: AuthContext, productId: string, body: unknown) =>
     call<T>(auth, `/products/${encodeURIComponent(productId)}/releases`, {
       method: 'POST',

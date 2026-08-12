@@ -6,18 +6,14 @@ import {
   type ProductService as ProductServiceEntry,
   type ProductServiceVersionRecord,
 } from "@everdict/contracts";
-import {
-  Product,
-  type SeriesContractResolution,
-  sameSourceCoordinates,
-  serviceStreamKey,
-  watchedSeries,
-} from "@everdict/domain";
+import { Product, type SeriesContractResolution, sameSourceCoordinates, serviceStreamKey } from "@everdict/domain";
 import type { GithubRepositoryTokenSource } from "../issue/github-issue-sync.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { GithubVersionReaderFactory } from "../ports/github-repo-writer.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ProductStore, ProductVersionStore, ReleaseStore } from "../ports/product-store.js";
+import { findProductByRef } from "./product-ref.js";
+import { SeriesEvaluator, type SeriesRunOutcome, type SeriesRunSubmitter } from "./series-evaluator.js";
 
 // GitHub release/tag import for the product timeline (docs/architecture/product-timeline.md). Everdict stays
 // the client — a pull happens when a member presses Sync (later: the sweep), never by webhook, the same stance
@@ -50,31 +46,6 @@ export interface ProductSyncResult {
   // silently missing batch would read as "the product got worse" — so the failure is part of the outcome.
   failedSeries?: Array<{ key: string; error: string }>;
 }
-
-// The submit seam — what the auto-eval needs from the scorecard plane, as a function so this collaborator
-// depends on behaviour (the composition root closes it over ScorecardService.submit). Versions are refs:
-// absent = latest at run time, which is what a standing series means.
-export type SeriesRunSubmitter = (input: {
-  tenant: string;
-  submittedBy: string;
-  dataset: { id: string; version?: string };
-  harness: { id: string; version?: string };
-  judges: Array<{ id: string; version?: string }>;
-  runtime?: string;
-  // The contract digest this caller resolved — submit re-seals and REFUSES on a mismatch (arch-review 16
-  // P0-3), so a `latest` moving between resolution and seal costs a retry rather than a record whose origin
-  // and manifest name different questions.
-  expectedContractDigest?: string;
-  origin: {
-    source: "product";
-    productId: string;
-    releaseId?: string;
-    seriesKey: string;
-    // The concrete evaluation contract this run answers under — see ProductVersionSync.autoEval.
-    seriesContractDigest?: string;
-    serviceVersion?: string;
-  };
-}) => Promise<{ id: string }>;
 
 export interface ProductVersionSyncDeps {
   products: ProductStore;
@@ -113,18 +84,30 @@ function ceilingMessage(repository: string, backfill: boolean): string {
 export class ProductVersionSync {
   private readonly newId: () => string;
   private readonly now: () => string;
+  // The fan-out itself is not the sync's — it is the one shared by every trigger that runs a series
+  // (docs/architecture/product-timeline.md). Stateless, so composing it here from the seams this collaborator
+  // already holds is the same object the on-demand path runs through.
+  private readonly evaluator: SeriesEvaluator;
 
   constructor(private readonly deps: ProductVersionSyncDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.evaluator = new SeriesEvaluator({
+      releases: deps.releases,
+      ...(deps.submitSeriesRun !== undefined ? { submitSeriesRun: deps.submitSeriesRun } : {}),
+      ...(deps.resolveSeriesContract !== undefined ? { resolveSeriesContract: deps.resolveSeriesContract } : {}),
+    });
   }
 
   // Pull every tracked service's releases/tags into the ledger. Per-service soft-fail (the issue sync's
   // viewWithRepos stance): one repository the App cannot reach must not hide the others' versions — the error
   // is recorded on the service's sync state and reported in the outcome instead.
-  async sync(tenant: string, productId: string, actor: { subject: string }): Promise<ProductSyncResult> {
-    const initial = await this.deps.products.get(tenant, productId);
-    if (!initial) throw new NotFoundError("NOT_FOUND", { productId }, `product '${productId}' not found.`);
+  async sync(tenant: string, ref: string, actor: { subject: string }): Promise<ProductSyncResult> {
+    // Slug OR id, through the SAME resolver the service uses (mig 0169) — the screen shows the slug, so a
+    // Sync that only understood ids would refuse the one address anybody has in hand.
+    const initial = await findProductByRef(this.deps.products, tenant, ref);
+    if (!initial) throw new NotFoundError("NOT_FOUND", { productId: ref }, `product '${ref}' not found.`);
+    const productId = initial.id;
     // Fold the per-service sync-state transitions locally and write ONCE at the end — a patch per service
     // would be N read-modify-write races against ourselves.
     let record: ProductRecord = initial;
@@ -395,79 +378,23 @@ export class ProductVersionSync {
   // with the newest version that arrived — the timeline's link from the scorecard point back to what changed.
   // Watched = the active planned release's selection when one exists (that is what "this release watches these
   // axes" means), else every product series.
+  //
+  // The fan-out itself belongs to SeriesEvaluator, which the declaration seed and the manual run share: what
+  // is the SYNC's is only the trigger condition above it. A sync that imported nothing new has nothing to
+  // announce, and that is the whole of what this method decides.
   private async autoEval(
     tenant: string,
     product: ProductRecord,
     inserted: readonly ProductServiceVersionRecord[],
-  ): Promise<{ triggered: string[]; failedSeries: Array<{ key: string; error: string }> }> {
-    if (inserted.length === 0 || !product.autoEval.enabled || this.deps.submitSeriesRun === undefined)
-      return { triggered: [], failedSeries: [] };
-    const planned = (await this.deps.releases.list(tenant, { productId: product.id, status: "planned" }))[0];
-    const series: readonly ProductSeries[] = watchedSeries(product, planned);
-    if (series.length === 0) return { triggered: [], failedSeries: [] };
+  ): Promise<SeriesRunOutcome> {
+    if (inserted.length === 0 || !product.autoEval.enabled) return { triggered: [], failedSeries: [] };
     const newest = [...inserted].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt)).at(-1);
-    const serviceVersion = newest !== undefined ? `${newest.service}@${newest.version}` : undefined;
-    const triggered: string[] = [];
-    const failedSeries: Array<{ key: string; error: string }> = [];
-    for (const entry of series) {
-      try {
-        // WHICH QUESTION this batch is about to answer (arch-review 13 P0) — the series' concrete
-        // dataset/harness/judge closure, resolved NOW. Version-less refs mean "latest at run time", so the
-        // digest has to be taken over what the run will actually use, not over the refs as written; without
-        // it a release read cannot tell a batch that answered today's question from one that answered
-        // last month's under the same series key. Unresolvable → no stamp, which readiness treats as
-        // evidence whose question cannot be named (blocking, not silently current).
-        const contract = this.deps.resolveSeriesContract
-          ? await this.deps
-              .resolveSeriesContract(tenant, entry)
-              .catch((): SeriesContractResolution => ({ status: "unresolvable", reason: "resolver threw" }))
-          : ({ status: "unknown" } as SeriesContractResolution);
-        // A series whose current definition cannot be resolved must not be RUN either — an evaluation we
-        // cannot describe produces evidence nobody can place. The readiness side already blocks on this; the
-        // producer refusing keeps the two halves saying one thing.
-        if (contract.status === "unresolvable") {
-          failedSeries.push({ key: entry.key, error: `series definition unresolvable: ${contract.reason}` });
-          continue;
-        }
-        // `unknown` = this deployment has no resolver, so there is no plan to carry and the series runs from
-        // its declaration exactly as it always did — honestly unstamped, which readiness reads as evidence
-        // whose question cannot be named.
-        const plan = contract.status === "resolved" ? contract.contract : undefined;
-        const submitted = await this.deps.submitSeriesRun({
-          tenant,
-          // The schedule precedent: a machine-fired batch is submitted as the product's creator — the person
-          // who declared the standing evaluation, not whoever happened to press Sync.
-          submittedBy: product.createdBy,
-          // The RESOLVED plan, not the declaration (arch-review 14 P0). Submitting `entry.*` sent
-          // version-less refs that submit re-resolved — so a `latest` that moved between the stamp and the
-          // dispatch produced a scorecard whose recorded question and executed question were different
-          // versions. The digest above and these refs now come from ONE resolution.
-          dataset: plan?.dataset ?? entry.dataset,
-          harness: plan?.harness ?? entry.harness,
-          judges: plan?.judges ?? entry.judges,
-          // …and submit must SEAL the same one (arch-review 16 P0-3). Passing the resolved top-level refs
-          // closes the version race; it does not close the CLOSURE race, because submit re-resolves each
-          // spec's floating `{ref}` bindings itself. If a model's `latest` moved between this resolution and
-          // that seal, the record would carry an origin naming one question and a manifest answering
-          // another — so submit compares its own seal against this digest and refuses instead.
-          ...(contract.status === "resolved" ? { expectedContractDigest: contract.digest } : {}),
-          ...(product.autoEval.runtime !== undefined ? { runtime: product.autoEval.runtime } : {}),
-          origin: {
-            source: "product",
-            productId: product.id,
-            ...(planned !== undefined ? { releaseId: planned.id } : {}),
-            seriesKey: entry.key,
-            ...(contract.status === "resolved" ? { seriesContractDigest: contract.digest } : {}),
-            ...(serviceVersion !== undefined ? { serviceVersion } : {}),
-          },
-        });
-        triggered.push(submitted.id);
-      } catch (err) {
-        // One series' failed submit must not sink the others — the imports already landed; the missing batch
-        // rides the outcome so it never reads as "the product got worse".
-        failedSeries.push({ key: entry.key, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-    return { triggered, failedSeries };
+    return this.evaluator.run(tenant, product, {
+      // The schedule precedent: a machine-fired batch is submitted as the product's creator — the person who
+      // declared the standing evaluation, not whoever happened to press Sync.
+      submittedBy: product.createdBy,
+      trigger: "version_import",
+      ...(newest !== undefined ? { serviceVersion: `${newest.service}@${newest.version}` } : {}),
+    });
   }
 }

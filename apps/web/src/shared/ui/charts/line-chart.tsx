@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
 import {
   CHART,
@@ -55,6 +55,7 @@ export function LineChart({
   ariaLabel,
   emptyLabel,
   onSelect,
+  renderPointDetail,
 }: {
   x: string[]
   series: ChartSeries[]
@@ -67,6 +68,12 @@ export function LineChart({
   emptyLabel: string
   /** Drill into a bucket. The whole column is the hit target, and it is keyboard reachable. */
   onSelect?: (xIndex: number) => void
+  /**
+   * What ELSE this bucket is — the caller's own facts about the hovered point (which version triggered it,
+   * how the batch ended). The chart knows a number and a label; only the caller knows why the point exists,
+   * and "which of these dots is which" is the question a hover is usually asked.
+   */
+  renderPointDetail?: (xIndex: number) => ReactNode
 }) {
   const [wrapRef, width] = useMeasuredWidth()
   const [hovered, setHovered] = useState<number>()
@@ -204,7 +211,12 @@ export function LineChart({
 
       {hovered !== undefined && (
         <ChartTooltip left={clampTooltip(xOf(hovered), width)}>
-          <div className="mb-1.5 tabular-nums text-muted-foreground">{x[hovered]}</div>
+          {/* The bucket, spelled the way the AXIS spells it. It used to print the raw x string, so a chart
+              whose x is an ISO instant said `2026-08-12T04:31:07.918Z` in the one place a reader is asking
+              a simple question. `formatX` is the caller's own answer to "what is this bucket called". */}
+          <div className="mb-1.5 tabular-nums text-muted-foreground">
+            {formatX ? formatX(x[hovered] ?? '', hovered) : x[hovered]}
+          </div>
           <div className="space-y-1">
             {series.map((s, si) => {
               const v = values[si]?.[hovered]
@@ -219,6 +231,7 @@ export function LineChart({
               )
             })}
           </div>
+          {renderPointDetail?.(hovered)}
         </ChartTooltip>
       )}
 
