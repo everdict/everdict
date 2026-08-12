@@ -450,7 +450,17 @@ export function verifierFocus(raw: string | undefined): string | undefined {
 export type EvidenceIdentity =
   // The scoring ledger's newest entry — the coordinate a re-score moves, and the one the release fence
   // already conditions on. Absent on both = "this row has had no scoring pass", which is itself an identity.
-  | { kind: "scorecard"; scoringRevision?: number; scorePlaneDigest?: string }
+  //
+  // …PLUS a digest of the judged plane itself (arch-review 28 P0). IDENTITY PINS ONE PLANE IS NOT THE READER
+  // SERVES ONLY THAT PLANE: the ledger records what a scoring PASS did, and the plane can move without a pass
+  // — the batch write-back reflects each case's final result onto the row directly. A verdict that reasoned
+  // over those verdicts would have compared equal to a document whose verdicts had since changed.
+  //
+  // Computed over what a verifier actually reasons about — each case's id, trial and scores — and
+  // deliberately NOT over the whole record: a team move or a description edit changes bytes the reader
+  // displays and says nothing about the claim. Naming which bytes are evidence is the honest form of that
+  // boundary; pretending the whole document is evidence would make every rename a moved artifact.
+  | { kind: "scorecard"; scoringRevision?: number; scorePlaneDigest?: string; planeDigest?: string }
   // A run settles once, and its RESULT does not: a scoring pass rewrites the judgments inside that result in
   // place. `resultDigest` is the artifact itself — A MUTATION STAMP IS NOT AN EVIDENCE IDENTITY (arch-review
   // 27 P1), and an application-clock ISO timestamp is a stamp: two writes inside one millisecond, or two
@@ -497,17 +507,45 @@ export function observedEvidenceIdentity(type: string, document: unknown): Evide
   return undefined;
 }
 
-function scorecardCoordinates(doc: Record<string, unknown>): { scoringRevision?: number; scorePlaneDigest?: string } {
+function scorecardCoordinates(doc: Record<string, unknown>): {
+  scoringRevision?: number;
+  scorePlaneDigest?: string;
+  planeDigest?: string;
+} {
+  const plane = judgedPlane(doc);
   const scoring = doc.scoring;
-  if (!Array.isArray(scoring) || scoring.length === 0) return {};
+  if (!Array.isArray(scoring) || scoring.length === 0) return plane;
   const newest = scoring[scoring.length - 1];
-  if (newest === null || typeof newest !== "object") return {};
+  if (newest === null || typeof newest !== "object") return plane;
   const revision = (newest as { revision?: unknown }).revision;
   const digest = (newest as { scorePlaneDigest?: unknown }).scorePlaneDigest;
   return {
+    ...plane,
     ...(typeof revision === "number" ? { scoringRevision: revision } : {}),
     ...(typeof digest === "string" ? { scorePlaneDigest: digest } : {}),
   };
+}
+
+// THE JUDGED PLANE, projected to the fields that are the same on both sides of the boundary — the store the
+// plan resolves from and the document the reader serves. A projection is what makes the two comparable at
+// all: the served record carries derived enrichments (per-case evidence status, headline rates) that the
+// stored one does not, so a digest of the whole document could never match. What both sides do hold, byte
+// for byte, is each case's identity and its scores.
+//
+// A DIGEST IS NOT AN AGGREGATION: it never averages and it never reads a score's value as a number. The
+// unmeasured rows are part of the judgment record it identifies, which is exactly why they are included.
+export function judgedPlane(doc: Record<string, unknown>): { planeDigest?: string } {
+  const card = doc.scorecard;
+  if (card === null || typeof card !== "object") return {};
+  const results = (card as { results?: unknown }).results;
+  if (!Array.isArray(results)) return {};
+  const plane = results
+    .map((r) => {
+      const row = (r ?? {}) as Record<string, unknown>;
+      return { caseId: row.caseId, trial: row.trial, scores: row["scores"] };
+    })
+    .sort((a, b) => `${a.caseId}#${a.trial ?? ""}`.localeCompare(`${b.caseId}#${b.trial ?? ""}`));
+  return { planeDigest: contentDigest(plane) };
 }
 
 // Kept as the scorecard-only entry point the release vocabulary already speaks.
@@ -522,7 +560,9 @@ export function evidenceIdentityHolds(expected: EvidenceIdentity, observed: Evid
   if (expected.kind !== observed.kind) return false;
   if (expected.kind === "scorecard" && observed.kind === "scorecard")
     return (
-      expected.scoringRevision === observed.scoringRevision && expected.scorePlaneDigest === observed.scorePlaneDigest
+      expected.scoringRevision === observed.scoringRevision &&
+      expected.scorePlaneDigest === observed.scorePlaneDigest &&
+      expected.planeDigest === observed.planeDigest
     );
   if (expected.kind === "run" && observed.kind === "run")
     return (

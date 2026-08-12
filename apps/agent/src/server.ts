@@ -1368,6 +1368,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
               kind: z.literal("scorecard"),
               scoringRevision: z.number().int().nonnegative().optional(),
               scorePlaneDigest: z.string().optional(),
+              planeDigest: z.string().optional(),
             }),
             z.object({
               kind: z.literal("run"),

@@ -31,7 +31,7 @@ import type {
   WorkspaceSettingsStore,
 } from "@everdict/db";
 import type { EvidenceIdentity } from "@everdict/domain";
-import { contentDigest } from "@everdict/domain";
+import { contentDigest, judgedPlane } from "@everdict/domain";
 import type { CircuitBreaker } from "@everdict/domain";
 import type {
   BenchmarkRegistry,
@@ -325,6 +325,11 @@ export function buildCheckpoint(deps: {
               kind: "scorecard",
               ...(newest?.revision !== undefined ? { scoringRevision: newest.revision } : {}),
               ...(newest?.scorePlaneDigest !== undefined ? { scorePlaneDigest: newest.scorePlaneDigest } : {}),
+              // …and the JUDGED PLANE itself (arch-review 28 P0). The ledger records what a scoring PASS did;
+              // the plane can move without one, because the batch write-back reflects each case's final
+              // result onto the row directly. Computed from the same projection the reader's side computes,
+              // which is what makes the two comparable at all.
+              ...judgedPlane(record as unknown as Record<string, unknown>),
             },
           });
           continue;

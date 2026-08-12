@@ -268,6 +268,9 @@ export const VerificationDecisionSchema = z.object({
               kind: z.literal("scorecard"),
               scoringRevision: z.number().int().nonnegative().optional(),
               scorePlaneDigest: z.string().optional(),
+              // The judged plane itself — the ledger records what a scoring PASS did, and the plane can move
+              // without one (arch-review 28 P0).
+              planeDigest: z.string().optional(),
             }),
             z.object({
               kind: z.literal("run"),

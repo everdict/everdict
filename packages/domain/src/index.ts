@@ -335,6 +335,7 @@ export {
   type EvidenceIdentity,
   evidenceIdentityHolds,
   MAX_VERIFIER_FOCUS,
+  judgedPlane,
   observedEvidenceIdentity,
   observedScorecardIdentity,
   PINNABLE_EVIDENCE_KINDS,
