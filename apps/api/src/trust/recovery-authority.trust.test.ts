@@ -27,6 +27,19 @@ const run = (over: Partial<RunRecord> = {}): RunRecord =>
     ...over,
   }) as RunRecord;
 
+const batch = (over: Partial<ScorecardRecord> = {}): ScorecardRecord =>
+  ({
+    id: "sc-1",
+    tenant: "acme",
+    dataset: { id: "d", version: "1" },
+    harness: { id: "h", version: "1" },
+    status: "running",
+    ownerReplica: "cp-dead",
+    createdAt: "2026-08-12T00:00:00.000Z",
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    ...over,
+  }) as unknown as ScorecardRecord;
+
 describeTrust("TRUST-142 — only the writer that won the CAS may act on it", () => {
   it("an ownership claim is EXCLUSIVE — two replicas cannot both take one run", async () => {
     const store = new InMemoryRunStore();
@@ -56,19 +69,34 @@ describeTrust("TRUST-142 — only the writer that won the CAS may act on it", ()
     expect(claimed).toBeUndefined();
   });
 
+  // arch-review 29 P0: EXCLUSIVE RECOVERY CLAIM IS NOT A TERMINAL-STATE CLAIM. The owner condition asks "is
+  // the dead replica still the owner", and that stays TRUE after the work finished — so a batch that
+  // succeeded while a recovery was deciding got claimed, failed to resume (it is already done), and was
+  // tombstoned FAILED{INTERRUPTED}. A successful evaluation recorded in history as an infrastructure failure
+  // is the most direct way this platform can lie about a result.
+  it("a settled batch refuses BOTH the recovery claim and the tombstone that follows it", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(batch({ status: "succeeded" }));
+    const claimed = await store.update("sc-1", { ownerReplica: "cp-a" }, undefined, {
+      expectOwnerReplica: "cp-dead",
+      expectNonTerminal: true,
+    });
+    expect(claimed).toBeUndefined();
+    // …and the fallback the recovery would have written next is refused on its own terms, so the fence holds
+    // even if a caller forgets the claim.
+    const tombstoned = await store.update(
+      "sc-1",
+      { status: "failed", error: { code: "INTERRUPTED", message: "boot" } } as never,
+      undefined,
+      { expectNonTerminal: true },
+    );
+    expect(tombstoned).toBeUndefined();
+    expect((await store.get("sc-1"))?.status).toBe("succeeded");
+  });
+
   it("a scorecard recovery claim is exclusive too — the batch has one owner, not two drivers", async () => {
     const store = new InMemoryScorecardStore();
-    const card = {
-      id: "sc-1",
-      tenant: "acme",
-      dataset: { id: "d", version: "1" },
-      harness: { id: "h", version: "1" },
-      status: "running",
-      ownerReplica: "cp-dead",
-      createdAt: "2026-08-12T00:00:00.000Z",
-      updatedAt: "2026-08-12T00:00:00.000Z",
-    } as unknown as ScorecardRecord;
-    await store.create(card);
+    await store.create(batch());
     const first = await store.update("sc-1", { ownerReplica: "cp-a" }, undefined, {
       expectOwnerReplica: "cp-dead",
     });

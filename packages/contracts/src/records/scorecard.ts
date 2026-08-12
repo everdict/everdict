@@ -9,6 +9,17 @@ import { GateDecisionSchema } from "./gate.js";
 // cancelled = a terminal state where a user explicitly stopped this batch (remaining cases not fired, in-flight runtime jobs force-killed) — a deliberate stop, not a newer fire.
 // Both are neither failure nor success, so neither is counted in baseline/diff/leaderboard (succeeded only). The store keeps the record.
 export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "superseded", "cancelled"]);
+
+// SETTLED — the statuses whose outcome nothing may rewrite. Here rather than only in the aggregate that reads
+// it, for the reason the run's list is here: the STORE has to state the same rule in SQL. A batch is settled
+// by whichever process gets there first, and a booting replica reclaiming a dead one's work is by definition
+// looking at a snapshot — so "first terminal write wins" is a condition on the write or it is nothing.
+export const TERMINAL_SCORECARD_STATUSES = [
+  "succeeded",
+  "failed",
+  "superseded",
+  "cancelled",
+] as const satisfies readonly z.infer<typeof ScorecardStatusSchema>[];
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
 // phase = the failed pipeline stage (dispatch|judges|metrics|offload|persist) — for "at which stage" diagnosis (jsonb, so no migration needed).

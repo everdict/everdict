@@ -35,12 +35,28 @@ const ALLOWED = new Set<string>([
 // The rule covers non-terminal transitions too, and that is deliberate rather than collateral: starting or
 // adopting a run that another process has already settled is the same read-check-write, with the same last
 // writer winning. A transition is a claim about the run's current state; the CAS is what makes it one.
-const LIFECYCLE_WRITE = /status:\s*"(succeeded|failed|suspended)"|\.patch\b/;
+// A LIFECYCLE WRITE, by the two shapes one takes.
+//
+// ① A patch produced by a DOMAIN TRANSITION (`.patch`). This is the shape that matters most and the one a
+//    literal-only scanner would miss entirely — every settlement the reviews found unfenced was written this
+//    way. It is scanned for BOTH aggregates: the run lifecycle got its fence one review at a time and the
+//    BATCH that owns those runs never did, which is exactly the gap a scanner scoped to one of them keeps.
+//
+// ② A literal status. Narrower, because a nested marker's status is not the aggregate's — a scoring pass
+//    writes `scoringPass: { status: "failed" }` under its OWN fence, and demanding a lifecycle guard there
+//    would be the scanner asking for the wrong condition.
+const TRANSITION_WRITE = /\.patch\b/;
+const LITERAL_STATUS = /status:\s*"(succeeded|failed|suspended|superseded|cancelled)"/;
+const NESTED_MARKER = /scoringPass\s*:/;
 const CAS = /expectNonTerminal/;
-// WHOSE `update` is a run's. `runs`/`runStore` name themselves; a bare `store` is only a RunStore in a module
-// that says so in its own deps type — in a scorecard service `store.update` writes a scorecard, and a scanner
-// that could not tell the two apart would demand a run guard on a scoring-pass write.
-const RUN_STORE_RECEIVER = /\bstore\s*:\s*RunStore\b/;
+// WHOSE lifecycle this is. Only two aggregates have a terminal fence — the run and the batch that owns those
+// runs — so only they are scanned: a tracker record's `.patch` write is an ordinary edit, and demanding a
+// settle guard there would be the scanner asking for a condition that does not exist.
+//
+// A module qualifies by declaring the receiver's type, or by using the batch service's shared deps (whose
+// `store` IS the ScorecardStore — the declaration lives one file away, which is exactly how the batch
+// service's seventeen writes stayed invisible to the first version of this scan).
+const LIFECYCLE_STORE_RECEIVER = /\bstore\s*:\s*(RunStore|ScorecardStore)\b|\bScorecardServiceDeps\b/;
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -71,10 +87,7 @@ function codeOf(text: string): string {
 // means nothing.
 function updateCalls(code: string): string[] {
   const spans: string[] = [];
-  const receiver = RUN_STORE_RECEIVER.test(code)
-    ? /\b(?:runs|runStore|store)\.update\(/g
-    : /\b(?:runs|runStore)\.update\(/g;
-  for (const match of code.matchAll(receiver)) {
+  for (const match of code.matchAll(/\b(?:runs|runStore|scorecards|store)\.update\(/g)) {
     let depth = 0;
     let i = (match.index ?? 0) + match[0].length - 1;
     const start = i;
@@ -93,11 +106,13 @@ function updateCalls(code: string): string[] {
 describe("terminal-write guard — a settlement carries its CAS", () => {
   const root = join(__dirname, "..");
   const scanned = tsFilesUnder(root).filter((rel) => !ALLOWED.has(rel));
-  const settlements = scanned.flatMap((rel) =>
-    updateCalls(codeOf(readFileSync(join(root, rel), "utf8")))
-      .filter((span) => LIFECYCLE_WRITE.test(span))
-      .map((span) => ({ rel, span })),
-  );
+  const settlements = scanned.flatMap((rel) => {
+    const code = codeOf(readFileSync(join(root, rel), "utf8"));
+    if (!LIFECYCLE_STORE_RECEIVER.test(code)) return [];
+    return updateCalls(code)
+      .filter((span) => TRANSITION_WRITE.test(span) || (LITERAL_STATUS.test(span) && !NESTED_MARKER.test(span)))
+      .map((span) => ({ rel, span }));
+  });
 
   it("every settlement written through `update` passes expectNonTerminal", () => {
     expect(settlements.filter(({ span }) => !CAS.test(span)).map(({ rel }) => rel)).toEqual([]);

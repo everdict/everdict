@@ -259,9 +259,16 @@ export class ScorecardBatchService {
               if (settled?.result) {
                 seed.push(settled.result);
                 seedRunIds.push(c.id);
+                continue;
               }
-              // Terminal with no result (a real failure) — nothing to seed, and the re-dispatch below is not
-              // ours to make either: the case settled, and settled is settled.
+              // TERMINAL WITH NO RESULT IS UNFINISHED WORK, and this is the policy rather than an accident
+              // (arch-review 29 P1). A child can settle `failed` carrying nothing — a dispatch that never
+              // produced a case result, which is an infrastructure failure and exactly what a resume exists
+              // to recover. Seeding nothing leaves the case in `casesToRun`, so it is re-dispatched.
+              //
+              // The alternative reading — "settled is settled, never re-run it" — would turn every lost
+              // sandbox into a permanently unmeasured case, which is the outcome the retry vocabulary was
+              // built to avoid. Saying which of the two this is beats leaving it to whichever branch runs.
               continue;
             }
             const interrupted = await this.deps.runStore.update(
@@ -276,7 +283,8 @@ export class ScorecardBatchService {
             if (interrupted === undefined) {
               // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
               // and treating it as remaining work would re-run a case that already has an answer, so the
-              // persisted answer is seeded instead.
+              // persisted answer is seeded instead. A terminal child with no result falls through to the
+              // re-dispatch for the reason above: nothing settled means nothing to carry.
               const settled = await this.deps.runStore.get(c.id);
               if (settled?.result) {
                 seed.push(settled.result);

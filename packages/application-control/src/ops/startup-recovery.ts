@@ -92,6 +92,10 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
     if (claim) {
       const claimed = await deps.scorecards.update(c.id, claim, undefined, {
         expectOwnerReplica: c.ownerReplica ?? null,
+        // …and still OPEN (arch-review 29 P0). The owner condition asks "is the dead replica still the
+        // owner", which stays true after the work finished — so without this a batch that succeeded between
+        // the list and here was claimed, failed to resume (it is already done), and got tombstoned below.
+        expectNonTerminal: true,
       });
       if (claimed === undefined) {
         liveCount += 1; // another replica claimed it — its recovery, not ours
@@ -102,7 +106,18 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       resumedCount += 1;
       continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
     }
-    await deps.scorecards.update(c.id, { status: "failed", error: INTERRUPTED, updatedAt: now() });
+    // The tombstone that motivated the fence: a batch that settled while this recovery was deciding must not
+    // be recorded as an infrastructure failure. `undefined` = it settled; nothing here is ours to write.
+    const tombstoned = await deps.scorecards.update(
+      c.id,
+      { status: "failed", error: INTERRUPTED, updatedAt: now() },
+      undefined,
+      { expectNonTerminal: true },
+    );
+    if (tombstoned === undefined) {
+      liveCount += 1;
+      continue;
+    }
     scorecardCount += 1;
     if (!deps.runs) continue;
     const children = await deps.runs.list(c.tenant, { scorecardId: c.id });

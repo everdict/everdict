@@ -941,7 +941,13 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       if (r.id === newId) continue;
       const batch = ScorecardBatch.from(r);
       if (!batch.canSupersede({ repo, prNumber })) continue;
-      await this.deps.store.update(r.id, batch.supersede(newId, this.now()).patch);
+      // Under the aggregate's terminal CAS (arch-review 29 P0): a batch that finished between the candidate
+      // list and this write must not be re-labelled `superseded` — it produced a result somebody may already
+      // be reading. And the teardown is downstream of the commit, not of the attempt.
+      const superseded = await this.deps.store.update(r.id, batch.supersede(newId, this.now()).patch, undefined, {
+        expectNonTerminal: true,
+      });
+      if (superseded === undefined) continue;
       await this.stopInFlight(r);
     }
   }
@@ -996,11 +1002,16 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // aborted batches" is law, so the fact is born there) and persists atomically with the terminal write.
     const cancellation = ScorecardBatch.from(rec).cancel(this.now());
     const stamped = stampFacts(rec.tenant, cancellation.facts, { newId: this.newId, now: this.now });
-    await this.deps.store.update(
+    const cancelled = await this.deps.store.update(
       rec.id,
       cancellation.patch,
       stamped.map((f) => f.record),
+      { expectNonTerminal: true },
     );
+    // A cancel that lost to the batch's own completion publishes nothing and tears nothing down: the durable
+    // outbox already refused the fact, and stopping the work of a batch that finished is a cancellation of
+    // something that no longer exists (arch-review 29 P0).
+    if (cancelled === undefined) return (await this.get(rec.id)) ?? rec;
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     await this.stopInFlight(rec);
     return (await this.get(rec.id)) ?? rec;

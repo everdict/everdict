@@ -36,6 +36,14 @@ export interface ScorecardListFilter {
 // like a missing id — the caller just read the record, so undefined-under-guard IS the conflict signal
 // (retry-reread for gates, refuse for a scoring settle). Append tables are the named longer-term shape.
 export interface ScorecardUpdateGuard {
+  // FIRST TERMINAL WRITE WINS, FOR THE PARENT TOO (arch-review 29 P0). The run lifecycle got this fence one
+  // review at a time; the aggregate that owns those runs never did — so a booting replica whose `resume`
+  // read a batch that had SUCCEEDED in the meantime went on to tombstone it FAILED{INTERRUPTED}. That is not
+  // a lost race, it is a successful evaluation recorded in history as an infrastructure failure.
+  //
+  // An exclusive owner claim does not cover it: `expectOwnerReplica` asks "is the dead replica still the
+  // owner", which stays true after the work finished. Exclusive recovery claim is not a terminal-state claim.
+  expectNonTerminal?: true;
   // THE RECOVERY CLAIM (arch-review 28 P1). Two control planes booting together both see a batch whose owner
   // stopped heartbeating, both stamp themselves as the new owner, and both resume it — the child terminal CAS
   // stops the ROWS from being corrupted and does nothing about two replicas dispatching the same unfinished

@@ -1,5 +1,6 @@
 import { SCORING_PASS_STALE_MS } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/contracts";
+import { ScorecardBatch } from "@everdict/domain";
 
 import type {
   OutboxEvent,
@@ -34,6 +35,9 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectScoringCount !== undefined && (cur.scoring?.length ?? 0) !== guard.expectScoringCount)
       return undefined;
     if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;
+    // First terminal write wins for the aggregate too (arch-review 29 P0) — the dev store must not be the one
+    // place a settled batch can be rewritten.
+    if (guard?.expectNonTerminal === true && ScorecardBatch.from(cur).isTerminal()) return undefined;
     // The recovery claim (arch-review 28 P1): exactly one replica may take a dead one's work, and the loser
     // must not resume — which it can only know by this returning undefined.
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
