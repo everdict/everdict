@@ -121,6 +121,9 @@ export type {
   ReleaseStore,
   ReleaseDecisionContext,
 } from "./ports/product-store.js";
+export { ABORTABLE_SETTLE_STATUSES } from "./ports/scorecard-store.js";
+export { settleRun, settleScorecard } from "./ports/settle.js";
+export type { SettleOptions } from "./ports/scorecard-store.js";
 export type {
   ConstitutionApproval,
   ConstitutionApprovalMode,

@@ -34,6 +34,7 @@ import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { LiveSessionRow, RunStore } from "../ports/run-store.js";
 import type { ResolvedServiceConversation, ServiceConversation } from "../ports/service-conversation.js";
+import { settleRun } from "../ports/settle.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { WorkspaceImages } from "../ports/workspace-images.js";
 import { FrontDoorTurnRunner } from "./frontdoor-turn-runner.js";
@@ -1807,11 +1808,11 @@ export class SandboxSessionService {
     if (!current || Run.from(current).isTerminal()) return current;
     const transition = Run.from(current).closeSession(reason, this.now());
     const stamped = stampFacts(tenant, attributed(transition.facts, agent), { newId: this.newId, now: this.now });
-    const updated = await this.deps.store.update(
+    const updated = await settleRun(
+      this.deps.store,
       runId,
       transition.patch,
       stamped.map((f) => f.record),
-      { expectNonTerminal: true },
     );
     // A lost CAS means somebody else closed it first — their facts are the ones on the ledger, so this
     // close publishes nothing and reports the row as it now stands.

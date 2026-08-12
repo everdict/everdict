@@ -2,6 +2,7 @@ import { Run } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
+import { settleRun } from "../ports/settle.js";
 
 // The deployment-shape-independent half of the session-zombie safety net. The session lanes' own orphan
 // sweeps (SandboxSessionService.sweepOrphans, the browser equivalent) reap containers AND settle rows — but
@@ -41,11 +42,11 @@ export async function settleOrphanSessionRuns(deps: {
     // behind, so its read-check-write is not a theoretical race — it is the sweep's normal working condition.
     // A lane finishing the session between the read above and this write would have had `succeeded` replaced
     // by `orphaned`, and the run would be recorded as abandoned work that in fact completed.
-    const closed = await deps.store.update(
+    const closed = await settleRun(
+      deps.store,
       row.id,
       transition.patch,
       stamped.map((f) => f.record),
-      { expectNonTerminal: true },
     );
     // …and a lost CAS publishes nothing. The durable outbox already agreed (the guarded write inserts no
     // event when it matches no row); the live push is what would have told an agent that a session it is

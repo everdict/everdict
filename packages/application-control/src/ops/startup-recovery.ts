@@ -2,6 +2,7 @@ import type { RunRecord } from "@everdict/contracts";
 import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import { settleRun, settleScorecard } from "../ports/settle.js";
 
 // Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
 // (the single-process assumption, same as inFlight supersede / in-process rendezvous). So when the process restarts, the
@@ -112,11 +113,12 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
     }
     // The tombstone that motivated the fence: a batch that settled while this recovery was deciding must not
     // be recorded as an infrastructure failure. `undefined` = it settled; nothing here is ours to write.
-    const tombstoned = await deps.scorecards.update(
+    const tombstoned = await settleScorecard(
+      deps.scorecards,
       c.id,
       { status: "failed", error: INTERRUPTED, updatedAt: now() },
       undefined,
-      { expectNonTerminal: true },
+      { over: "open" },
     );
     if (tombstoned === undefined) {
       liveCount += 1;
@@ -130,12 +132,11 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // …under the settle CAS (arch-review 26 P1). A booting replica reclaiming a dead one's work reads a
       // snapshot; a late drain, a self-hosted runner reporting in, or the dying process's own last write can
       // land between that read and this one. Marking such a child INTERRUPTED would erase a real outcome.
-      const settled = await deps.runs.update(
-        child.id,
-        { status: "failed", error: INTERRUPTED, updatedAt: now() },
-        undefined,
-        { expectNonTerminal: true },
-      );
+      const settled = await settleRun(deps.runs, child.id, {
+        status: "failed",
+        error: INTERRUPTED,
+        updatedAt: now(),
+      });
       if (settled) runCount += 1;
     }
   }
@@ -180,12 +181,11 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         runsResumed += 1;
         continue;
       }
-      const settled = await deps.runs.update(
-        r.id,
-        { status: "failed", error: INTERRUPTED, updatedAt: now() },
-        undefined,
-        { expectNonTerminal: true },
-      );
+      const settled = await settleRun(deps.runs, r.id, {
+        status: "failed",
+        error: INTERRUPTED,
+        updatedAt: now(),
+      });
       if (settled) runCount += 1;
     }
   }

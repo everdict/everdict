@@ -62,6 +62,7 @@ import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
+import { settleRun, settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
@@ -84,11 +85,6 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
-
-// The statuses `settleAborted` may land on — the domain's rule ("legal over superseded/cancelled, never over
-// succeeded/failed") restated where the write happens, because the domain guard runs in one process and the
-// settle it races runs in another.
-const ABORTABLE_SETTLE_STATUSES = ["queued", "running", "cancelled", "superseded"] as const;
 
 export class ScorecardBatchService {
   private readonly newId: () => string;
@@ -282,14 +278,13 @@ export class ScorecardBatchService {
               // built to avoid. Saying which of the two this is beats leaving it to whichever branch runs.
               continue;
             }
-            const interrupted = await this.deps.runStore.update(
+            const interrupted = await settleRun(
+              this.deps.runStore,
               c.id,
               Run.from(c).fail(
                 { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
                 this.now(),
               ).patch,
-              undefined,
-              { expectNonTerminal: true },
             );
             if (interrupted === undefined) {
               // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
@@ -943,11 +938,12 @@ export class ScorecardBatchService {
     // Under the aggregate's terminal fence (arch-review 30 P0). This is the Temporal finalize, and it read
     // the record before doing the work — a user cancel or a supersede landing in between would have been
     // overwritten by a `succeeded` that arrives afterwards, with its completion fact published on top.
-    const finalized = await this.deps.store.update(
+    const finalized = await settleScorecard(
+      this.deps.store,
       id,
       settlement.patch,
       stampedCompletion.map((f) => f.record),
-      { expectNonTerminal: true },
+      { over: "open" },
     );
     if (finalized !== undefined && stampedCompletion.length > 0)
       void this.deps.events?.pushPersisted?.(stampedCompletion);
@@ -1244,7 +1240,7 @@ export class ScorecardBatchService {
     // other writer is in another process — a user's cancel in the control plane against a case drain landing
     // from a worker. Read-check-write made the LAST write win, which is the exact inverse of the rule this
     // method is named after.
-    await store.update(childId, settle(current), undefined, { expectNonTerminal: true });
+    await settleRun(store, childId, settle(current));
   }
 
   private async markChildRunning(childId: string): Promise<void> {
@@ -1365,6 +1361,7 @@ export class ScorecardBatchService {
     // turn a single-replica install into a batch nobody may settle.
     const epoch = opening.ownerEpoch;
     const fenced = epoch === undefined ? undefined : { expectOwnerEpoch: epoch };
+    const epochOpt = epoch === undefined ? {} : { epoch };
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
@@ -1719,7 +1716,8 @@ export class ScorecardBatchService {
         // (a legal re-write of a superseded record; the domain rejects it over succeeded/failed).
         const reclaimed = await this.deps.store.get(id);
         if (reclaimed)
-          await this.deps.store.update(
+          await settleScorecard(
+            this.deps.store,
             id,
             ScorecardBatch.from(reclaimed).settleAborted(
               {
@@ -1733,9 +1731,9 @@ export class ScorecardBatchService {
               this.now(),
             ).patch,
             undefined,
-            // Same rule as the other aborted settles, at the storage boundary: partials attach to a batch
-            // that was reclaimed, never to one that settled succeeded/failed.
-            { expectStatusIn: ABORTABLE_SETTLE_STATUSES, ...fenced },
+            // Same rule as the other aborted settles: partials attach to a batch that was reclaimed, never
+            // to one that settled succeeded/failed.
+            { over: "aborted", ...epochOpt },
           );
         this.inFlight.delete(id);
         return; // completion notification for a replaced batch is noise — skip
@@ -1819,11 +1817,11 @@ export class ScorecardBatchService {
         if (controller.signal.aborted) {
           // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
           // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
-          await this.deps.store.update(id, batch.settleAborted(extras, this.now()).patch, undefined, {
-            // The domain's own rule for this transition, at the storage boundary: it attaches an aborted
-            // batch's partials and must never land on one that settled succeeded/failed.
-            expectStatusIn: ABORTABLE_SETTLE_STATUSES,
-            ...fenced,
+          // The domain's own rule for this transition, at the storage boundary: it attaches an aborted
+          // batch's partials and must never land on one that settled succeeded/failed.
+          await settleScorecard(this.deps.store, id, batch.settleAborted(extras, this.now()).patch, undefined, {
+            over: "aborted",
+            ...epochOpt,
           });
         } else if (!batch.isTerminal()) {
           // E0 outbox: the completion fact rides the terminal transition and persists atomically with the settle.
@@ -1848,11 +1846,15 @@ export class ScorecardBatchService {
           // declared dead and came back must not settle a batch another replica now owns. The comment below
           // already described "first terminal write wins" for the supersede race; the epoch is what makes it
           // true for the race nobody could see — a paused process whose loop never noticed it was replaced.
-          const written = await this.deps.store.update(
+          const written = await settleScorecard(
+            this.deps.store,
             id,
             settlement.patch,
             stamped.map((f) => f.record),
-            { expectNonTerminal: true, ...fenced },
+            {
+              over: "open",
+              ...epochOpt,
+            },
           );
           if (written !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
           // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
@@ -1897,11 +1899,12 @@ export class ScorecardBatchService {
         const batch = ScorecardBatch.from(settled);
         if (controller.signal.aborted) {
           // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
-          await this.deps.store.update(
+          await settleScorecard(
+            this.deps.store,
             id,
             batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()).patch,
             undefined,
-            { expectStatusIn: ABORTABLE_SETTLE_STATUSES, ...fenced },
+            { over: "aborted", ...epochOpt },
           );
         } else if (!batch.isTerminal()) {
           // E0 outbox: the failure fact rides the terminal transition and persists atomically with the settle.
@@ -1910,11 +1913,15 @@ export class ScorecardBatchService {
           // "A late failure never overwrites it (first terminal write wins)" — said by the comment below,
           // enforced here (arch-review 30 P0). The `isTerminal()` above answers for this process; the cancel
           // it races is in another one.
-          const failed = await this.deps.store.update(
+          const failed = await settleScorecard(
+            this.deps.store,
             id,
             settlement.patch,
             stamped.map((f) => f.record),
-            { expectNonTerminal: true, ...fenced },
+            {
+              over: "open",
+              ...epochOpt,
+            },
           );
           if (failed !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
         }

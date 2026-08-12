@@ -14,17 +14,23 @@ import { describe, expect, it } from "vitest";
 // the exact inverse of the rule, in the one direction nobody notices until a cancelled batch's child is
 // recorded as succeeded.
 //
-// TypeScript cannot express "this patch settles a run, so it needs the CAS" without a discriminated
-// transition type the domain does not have yet (`RunStore.settle()` is the eventual shape — the review that
-// asked for it is right, and it is a deeper refactor than a guard). Until then this stands in: a file that
-// writes a terminal status through `update` must carry the guard, and a new writer that forgets fails here
-// rather than in production.
+// THE VERB NOW EXISTS, so the guard has two jobs rather than one. `settleRun` / `settleScorecard`
+// (`ports/settle.ts`) take the fence as a PARAMETER, which is the only version of this rule a caller cannot
+// forget — there is nothing to leave out. A settlement therefore does not go through `update` at all, and
+// this scan is what says so: writing one the old way fails here, whether or not it remembered the condition.
+//
+// The weaker rule stays for everything else. Non-terminal lifecycle transitions (start, adopt, redispatch,
+// extend) are still `update` calls — they are claims about the row's current state, and a claim that does not
+// travel with its condition is the same read-check-write, so they must carry the guard by hand.
 //
 // GETTING ON THE ALLOWLIST means the write is not a settlement — it patches metadata, or it is the fake in a
 // test double. It never means "this one is fine without the CAS".
 const ALLOWED = new Set<string>([
   // The RunStore ports/impls themselves: they DEFINE the guard rather than call it.
   "ports/run-store.ts",
+  // …and the verb, which is the one place a settlement is allowed to reach `update` — it is what the rest of
+  // the package calls INSTEAD of reaching it.
+  "ports/settle.ts",
 ]);
 
 // A LIFECYCLE WRITE, by the two shapes one takes: a literal status, or — far more common here, and the shape
@@ -66,6 +72,13 @@ const CAS = /expectNonTerminal|expectStatusIn|expectScoringCount|expectScoringPa
 // is driving that lifecycle, whatever it calls the store it writes through — and a file that stops
 // constructing them has stopped driving it.
 const DRIVES_LIFECYCLE = /\b(Run|ScorecardBatch)\.from\(/;
+// A SETTLEMENT, as opposed to a lifecycle write in general: the patch comes from a transition that ENDS the
+// aggregate, or it names a terminal status outright. These are the writes the verb exists for, so finding one
+// inside an `update(` span is a failure regardless of what guard it carries — the condition being present
+// this time is not the property being defended; being impossible to omit is.
+const SETTLE_TRANSITION = /\.(settleAgent|settleAborted|settle|fail|cancel|supersede|closeSession)\(|\bsettle\(/;
+// The verb itself. Counted so the scan cannot go green by matching nothing at all.
+const SETTLE_VERB = /\b(settleRun|settleScorecard)\(/;
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -94,8 +107,8 @@ function codeOf(text: string): string {
 // question — a service that filters a query by `status: "succeeded"` somewhere else in the file is not
 // settling a run, and a guard that cannot tell those apart teaches people to add allowlist entries until it
 // means nothing.
-function updateCalls(code: string): string[] {
-  const spans: string[] = [];
+function updateCalls(code: string): Array<{ span: string; context: string }> {
+  const spans: Array<{ span: string; context: string }> = [];
   for (const match of code.matchAll(/\b(?:runs|runStore|scorecards|store)\.update\(/g)) {
     let depth = 0;
     let i = (match.index ?? 0) + match[0].length - 1;
@@ -107,30 +120,60 @@ function updateCalls(code: string): string[] {
         if (depth === 0) break;
       }
     }
-    spans.push(code.slice(start, i + 1));
+    spans.push({ span: code.slice(start, i + 1), context: enclosingBody(code, start) + code.slice(start, i + 1) });
   }
   return spans;
+}
+
+// THE TRANSITION IS NOT IN THE ARGUMENT LIST. Almost every writer here builds its patch a few lines earlier
+// (`const transition = run.closeSession(…)`) and passes `transition.patch`, so a span-local test for a settle
+// verb sees nothing and calls a settlement ordinary. The first draft of this rule went green over exactly
+// that, which is the failure mode a structural guard is supposed to be immune to.
+//
+// So the question is asked of the ENCLOSING FUNCTION instead — from its declaration down to the write. That
+// is the unit in which one of these is authored, and widening further (the whole file) would let a settle in
+// the method above answer for the method below.
+function enclosingBody(code: string, at: number): string {
+  const before = code.slice(0, at);
+  let start = 0;
+  // A FUNCTION header, not any declaration: at most two spaces of indent (a top-level function or a class
+  // method). The first version accepted `const` at any indent and so stopped at the write's own line — which
+  // is how it went green over a settlement it was pointed straight at.
+  for (const header of before.matchAll(
+    /\n {0,2}(?:private |protected |public |export |async function |function |const \w+ = )/g,
+  )) {
+    start = header.index ?? 0;
+  }
+  return before.slice(start);
 }
 
 describe("terminal-write guard — a settlement carries its CAS", () => {
   const root = join(__dirname, "..");
   const scanned = tsFilesUnder(root).filter((rel) => !ALLOWED.has(rel));
-  const settlements = scanned.flatMap((rel) => {
-    const code = codeOf(readFileSync(join(root, rel), "utf8"));
+  const files = scanned.map((rel) => ({ rel, code: codeOf(readFileSync(join(root, rel), "utf8")) }));
+  const lifecycleWrites = files.flatMap(({ rel, code }) => {
     if (!DRIVES_LIFECYCLE.test(code)) return [];
     return updateCalls(code)
-      .filter((span) => TRANSITION_WRITE.test(span) || (LITERAL_STATUS.test(span) && !NESTED_MARKER.test(span)))
-      .map((span) => ({ rel, span }));
+      .filter(({ span }) => TRANSITION_WRITE.test(span) || (LITERAL_STATUS.test(span) && !NESTED_MARKER.test(span)))
+      .map((call) => ({ rel, ...call }));
+  });
+  const isSettlement = ({ span, context }: { span: string; context: string }): boolean =>
+    SETTLE_TRANSITION.test(context) || (LITERAL_STATUS.test(span) && !NESTED_MARKER.test(span));
+
+  it("a settlement goes through the settle verb, never through `update`", () => {
+    expect(lifecycleWrites.filter(isSettlement).map(({ rel }) => rel)).toEqual([]);
   });
 
-  it("every settlement written through `update` passes expectNonTerminal", () => {
-    expect(settlements.filter(({ span }) => !CAS.test(span)).map(({ rel }) => rel)).toEqual([]);
+  it("every other lifecycle write through `update` carries the guard by hand", () => {
+    expect(lifecycleWrites.filter(({ span }) => !CAS.test(span)).map(({ rel }) => rel)).toEqual([]);
   });
 
   it("the scanner still matches the writers it is meant to watch", () => {
     // A guard that silently stops matching is worse than no guard: it reports green forever. If a rename
     // moves the settle paths out of this package, this fails and someone has to point it at the new home
-    // rather than deleting it.
-    expect(settlements.length).toBeGreaterThan(0);
+    // rather than deleting it. Both halves are counted: the verb's callers AND the `update` writes the
+    // second rule polices, because either one going quiet hides a different half of the invariant.
+    expect(files.filter(({ code }) => SETTLE_VERB.test(code)).length).toBeGreaterThan(4);
+    expect(lifecycleWrites.length).toBeGreaterThan(0);
   });
 });

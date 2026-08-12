@@ -35,6 +35,32 @@ export interface ScorecardListFilter {
 // (WHERE jsonb_array_length guard on Pg, the same check in memory). A guard miss returns undefined exactly
 // like a missing id — the caller just read the record, so undefined-under-guard IS the conflict signal
 // (retry-reread for gates, refuse for a scoring settle). Append tables are the named longer-term shape.
+// ── THE VOCABULARY THE TERMINAL VERB SPEAKS ─────────────────────────────────────────────────────────
+//
+// Five reviews found a settlement written through `update` with the fence forgotten, in a different place
+// each time, and each fix was the same line added to one more caller. That is the shape of an API problem
+// rather than a discipline problem: a condition every caller must remember is a condition some caller will
+// not. `settleScorecard` / `settleRun` (`ports/settle.ts`) take the fence as a PARAMETER — there is nothing
+// to leave out — and these are the two values they translate into a guard.
+//
+//   over: "open"     — the ordinary settle. Refuses a record that is already terminal (first terminal write
+//                      wins), which is the rule every one of those callers meant.
+//   over: "aborted"  — `settleAborted`'s shape. It attaches a cancelled or superseded batch's partials on
+//                      purpose, and must never land on one that settled succeeded/failed — the domain's own
+//                      rule, restated where the write happens because the domain guard runs in one process
+//                      and the settle it races runs in another.
+//
+// `epoch` is the driver's fencing token, when the caller holds one (mig 0166). Absent = a record nobody has
+// claimed, which is a single-replica install and not a weaker guarantee.
+// The statuses an aborted settle may land on — the domain's rule ("legal over superseded/cancelled, never
+// over succeeded/failed") as a value both stores condition on.
+export const ABORTABLE_SETTLE_STATUSES = ["queued", "running", "cancelled", "superseded"] as const;
+
+export interface SettleOptions {
+  over: "open" | "aborted";
+  epoch?: number;
+}
+
 export interface ScorecardUpdateGuard {
   // FIRST TERMINAL WRITE WINS, FOR THE PARENT TOO (arch-review 29 P0). The run lifecycle got this fence one
   // review at a time; the aggregate that owns those runs never did — so a booting replica whose `resume`

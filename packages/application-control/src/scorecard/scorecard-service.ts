@@ -57,6 +57,7 @@ import { refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
+import { settleRun, settleScorecard } from "../ports/settle.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
@@ -944,9 +945,15 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       // Under the aggregate's terminal CAS (arch-review 29 P0): a batch that finished between the candidate
       // list and this write must not be re-labelled `superseded` — it produced a result somebody may already
       // be reading. And the teardown is downstream of the commit, not of the attempt.
-      const superseded = await this.deps.store.update(r.id, batch.supersede(newId, this.now()).patch, undefined, {
-        expectNonTerminal: true,
-      });
+      const superseded = await settleScorecard(
+        this.deps.store,
+        r.id,
+        batch.supersede(newId, this.now()).patch,
+        undefined,
+        {
+          over: "open",
+        },
+      );
       if (superseded === undefined) continue;
       await this.stopInFlight(r);
     }
@@ -986,7 +993,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       //
       // `undefined` = another terminal outcome won. That is a normal race result, not a failure: the child is
       // settled either way, which is all this loop needs.
-      await this.deps.runStore.update(c.id, stop.patch, undefined, { expectNonTerminal: true }).catch(() => {});
+      await settleRun(this.deps.runStore, c.id, stop.patch).catch(() => {});
     }
   }
 
@@ -1002,11 +1009,12 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // aborted batches" is law, so the fact is born there) and persists atomically with the terminal write.
     const cancellation = ScorecardBatch.from(rec).cancel(this.now());
     const stamped = stampFacts(rec.tenant, cancellation.facts, { newId: this.newId, now: this.now });
-    const cancelled = await this.deps.store.update(
+    const cancelled = await settleScorecard(
+      this.deps.store,
       rec.id,
       cancellation.patch,
       stamped.map((f) => f.record),
-      { expectNonTerminal: true },
+      { over: "open" },
     );
     // A cancel that lost to the batch's own completion publishes nothing and tears nothing down: the durable
     // outbox already refused the fact, and stopping the work of a batch that finished is a cancellation of

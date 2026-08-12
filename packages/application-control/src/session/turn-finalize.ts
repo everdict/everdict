@@ -3,6 +3,7 @@ import { Run, type RunTransition } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
+import { settleRun } from "../ports/settle.js";
 
 // Shared by the two per-task drivers (SessionTaskRunner = process harness, FrontDoorTurnRunner = service
 // conversation): the capped live buffer and the first-terminal-write-wins child settle.
@@ -55,11 +56,11 @@ export async function finalizeRun(
   if (!current || Run.from(current).isTerminal()) return false;
   const transition = fn(Run.from(current));
   const stamped = stampFacts(tenant, transition.facts, { newId: deps.newId, now: deps.now });
-  const settled = await deps.store.update(
+  const settled = await settleRun(
+    deps.store,
     runId,
     transition.patch,
     stamped.map((f) => f.record),
-    { expectNonTerminal: true },
   );
   if (settled === undefined) return false;
   if (stamped.length > 0) void deps.events?.pushPersisted?.(stamped);

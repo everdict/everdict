@@ -25,6 +25,7 @@ import {
   verdictSummaryOf,
 } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
+import { settleScorecard } from "../ports/settle.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
@@ -454,7 +455,7 @@ export class ScorecardIngestService {
     // onComplete/notification path ever ran here) — widening that coverage is an E2 decision, not a default.
     // Under the aggregate's terminal fence: `isTerminal()` above answers for this process, and an ingest
     // settling a batch a user cancelled meanwhile would overwrite their decision (arch-review 30 P0).
-    await this.deps.store.update(id, outcome(batch).patch, undefined, { expectNonTerminal: true });
+    await settleScorecard(this.deps.store, id, outcome(batch).patch, undefined, { over: "open" });
   }
 }
 

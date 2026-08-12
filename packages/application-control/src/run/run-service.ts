@@ -53,6 +53,7 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
+import { settleRun } from "../ports/settle.js";
 import {
   type TrajectorySegmentWire,
   type TrajectoryStore,
@@ -944,7 +945,7 @@ export class RunService {
     const { patch } = run.settleAgent(outcome, message, this.now());
     // The settle CAS: `isTerminal()` above answers for THIS process, and an agent turn's settle races the
     // session sweep and the cancel path in others.
-    const settled = await this.deps.store.update(id, patch, undefined, { expectNonTerminal: true });
+    const settled = await settleRun(this.deps.store, id, patch);
     // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
     // cancel, not a hunt across N batches.
     //
@@ -1055,11 +1056,11 @@ export class RunService {
     // a crash between "run settled" and "the world was told" is no longer expressible.
     const { patch, facts } = outcome(run);
     const stamped = this.stampFacts(current.tenant, facts);
-    const settled = await this.deps.store.update(
+    const settled = await settleRun(
+      this.deps.store,
       id,
       patch,
       stamped.map((f) => f.record),
-      { expectNonTerminal: true },
     );
     // A CAS loser publishes nothing — the guarded write inserted no durable event, and this bus feeds agent
     // activation rather than a UI toast.

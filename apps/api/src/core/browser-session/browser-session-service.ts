@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PlatformEventEmitter, RunStore } from "@everdict/application-control";
-import { stampFacts } from "@everdict/application-control";
+import { settleRun, stampFacts } from "@everdict/application-control";
 import { NotFoundError, RateLimitError } from "@everdict/contracts";
 import { type BudgetTracker, Run } from "@everdict/domain";
 import { type StorageState, captureStorageState } from "@everdict/topology";
@@ -147,13 +147,13 @@ export class BrowserSessionService {
         newId: this.newId,
         now: () => new Date(this.now()).toISOString(),
       });
-      const closed = await this.runs.update(
+      // The settle verb carries the CAS: `closeSessionTransition` refuses a terminal record in this
+      // process, and the sweep that expires sessions runs in every other one.
+      const closed = await settleRun(
+        this.runs,
         id,
         patch,
         stamped.map((f) => f.record),
-        // The settle CAS (arch-review 26 P1): `closeSessionTransition` refuses a terminal record in this
-        // process, and the sweep that expires sessions runs in every other one.
-        { expectNonTerminal: true },
       );
       // …and the loser announces nothing (arch-review 27 P1): the guarded write inserted no durable event, so
       // pushing the pre-stamped batch would put a settlement on the live bus that the ledger never recorded.

@@ -27,6 +27,7 @@ import { stampFacts } from "../platform-event/outbox.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
+import { settleRun } from "../ports/settle.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 
 // The member a run belongs to. An agent's `run_file` acts AS the member that delegated it, so the row's owner
@@ -274,13 +275,13 @@ export class FileExecutionService {
         newId: this.newId,
         now: this.now,
       });
-      const settled = await runs.update(
+      // The settle verb carries the CAS — the domain guard above refuses a terminal record in THIS
+      // process; the row can also be settled by another one.
+      const settled = await settleRun(
+        runs,
         runId,
         patch,
         stamped.map((f) => f.record),
-        // The settle CAS (arch-review 26 P1) — the domain guard above refuses a terminal record in THIS
-        // process; the row can also be settled by another one.
-        { expectNonTerminal: true },
       );
       // A CAS LOSER PUBLISHES NOTHING (arch-review 27 P1). `pushPersisted` means "these events are already in
       // the ledger" — and when the guarded write matches no row, the Pg adapter inserts none. Pushing the
