@@ -82,7 +82,22 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       liveCount += 1;
       continue;
     }
-    if (claim) await deps.scorecards.update(c.id, claim);
+    // THE CLAIM IS THE AUTHORITY (arch-review 28 P1). Two control planes booting together both see this
+    // batch's owner gone, and without an exclusive claim both stamped themselves and both resumed — the
+    // child terminal CAS keeps the ROWS honest and does nothing about two replicas dispatching the same
+    // unfinished cases. Ownership and the right to drive the work are one transition.
+    //
+    // The claim conditions on the owner the recovery OBSERVED, so exactly one replica wins; the loser is not
+    // this batch's recovery and does not touch it further.
+    if (claim) {
+      const claimed = await deps.scorecards.update(c.id, claim, undefined, {
+        expectOwnerReplica: c.ownerReplica ?? null,
+      });
+      if (claimed === undefined) {
+        liveCount += 1; // another replica claimed it — its recovery, not ours
+        continue;
+      }
+    }
     if (deps.resume && (await deps.resume(c.id).catch(() => false))) {
       resumedCount += 1;
       continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
@@ -129,9 +144,19 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         liveCount += 1;
         continue;
       }
-      // Claiming a run that settled since the list is claiming nothing — the CAS says so rather than
-      // stamping this replica's ownership onto a finished row.
-      if (claim) await deps.runs.update(r.id, claim, undefined, { expectNonTerminal: true });
+      // The same claim, for a standalone run: still open AND still owned by the replica this recovery saw.
+      // `expectNonTerminal` alone said "the run is open", which is true for both racing replicas — it is not
+      // an answer to "may I take it" (arch-review 28 P1).
+      if (claim) {
+        const claimed = await deps.runs.update(r.id, claim, undefined, {
+          expectNonTerminal: true,
+          expectOwnerReplica: r.ownerReplica ?? null,
+        });
+        if (claimed === undefined) {
+          liveCount += 1; // settled, or claimed by another replica — either way not ours to drive
+          continue;
+        }
+      }
       if (deps.resumeRun && (await deps.resumeRun(r).catch(() => false))) {
         runsResumed += 1;
         continue;

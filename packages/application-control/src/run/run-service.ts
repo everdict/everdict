@@ -691,19 +691,28 @@ export class RunService {
   // job (settle it directly — zero re-run); else re-drive from the persisted caseSpec; legacy records without
   // one return false and keep the tombstone path. docs/architecture/batch-resilience.md
   async resume(record: RunRecord, adopted?: CaseResult): Promise<boolean> {
+    // A CAS GUARD PRESENT IS NOT A CAS AUTHORITY CONSUMED (arch-review 28 P1). Both writes below were
+    // correctly fenced and both ignored the answer — so a recovery that LOST the race still reported success
+    // and, worse, still dispatched. The guard stopped the row from being corrupted and did nothing about the
+    // second execution it then paid for. Authority to act downstream comes from the transition that
+    // COMMITTED, never from the code path that attempted one.
     const run = Run.from(record);
     if (adopted) {
       if (!run.canAdopt()) return false; // already settled — never rewrite a terminal record
-      await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch, undefined, {
+      const claimed = await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch, undefined, {
         expectNonTerminal: true,
       });
-      return true;
+      // Lost: the run settled on its own, which is a resume nobody needs rather than one that succeeded.
+      return claimed !== undefined;
     }
     const spec = record.caseSpec; // local narrow — canRedispatch() already requires it
     if (!run.canRedispatch() || !spec) return false;
-    await this.deps.store.update(record.id, run.redispatch(this.now()).patch, undefined, {
+    const redispatched = await this.deps.store.update(record.id, run.redispatch(this.now()).patch, undefined, {
       expectNonTerminal: true,
     });
+    // …and the dispatch is DOWNSTREAM of that claim. Without this, a replica whose redispatch lost still
+    // started a second execution of a case that already had an answer.
+    if (redispatched === undefined) return false;
     void this.track(record.id, {
       tenant: record.tenant,
       harness: record.harness,
@@ -935,10 +944,16 @@ export class RunService {
     const { patch } = run.settleAgent(outcome, message, this.now());
     // The settle CAS: `isTerminal()` above answers for THIS process, and an agent turn's settle races the
     // session sweep and the cancel path in others.
-    await this.deps.store.update(id, patch, undefined, { expectNonTerminal: true });
+    const settled = await this.deps.store.update(id, patch, undefined, { expectNonTerminal: true });
     // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
-    // cancel, not a hunt across N batches. Best-effort: the settle above is already durable.
-    if (outcome === "cancelled") void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
+    // cancel, not a hunt across N batches.
+    //
+    // DOWNSTREAM OF THE COMMITTED SETTLEMENT, not of the attempt (arch-review 28 P1). A cancel that lost the
+    // race to the agent's own success used to cascade anyway, leaving a ledger where the parent SUCCEEDED
+    // and its children were cancelled "because the parent was cancelled" — a reason that never happened.
+    // Same shape as the live-push leak a review ago; the side effect here is real work being revoked.
+    if (settled !== undefined && outcome === "cancelled")
+      void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
   }
 
   // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route

@@ -36,6 +36,16 @@ export interface ScorecardListFilter {
 // like a missing id — the caller just read the record, so undefined-under-guard IS the conflict signal
 // (retry-reread for gates, refuse for a scoring settle). Append tables are the named longer-term shape.
 export interface ScorecardUpdateGuard {
+  // THE RECOVERY CLAIM (arch-review 28 P1). Two control planes booting together both see a batch whose owner
+  // stopped heartbeating, both stamp themselves as the new owner, and both resume it — the child terminal CAS
+  // stops the ROWS from being corrupted and does nothing about two replicas dispatching the same unfinished
+  // cases. Ownership and the authority to drive the work have to be one transition, not two.
+  //
+  //   a string — "the owner must still be this one" (the dead replica the recovery observed)
+  //   null     — "there must be no owner recorded"
+  //
+  // A miss returns undefined like any other guard, and the loser must NOT resume: it did not claim the work.
+  expectOwnerReplica?: string | null;
   expectScoringCount?: number;
   expectGatesCount?: number;
   // The scoring-pass FENCE (arch-review 9 P0): the pass that must still own the marker for this write to

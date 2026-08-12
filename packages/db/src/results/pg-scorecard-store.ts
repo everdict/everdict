@@ -345,6 +345,15 @@ export class PgScorecardStore implements ScorecardStore {
     // The FENCE. A UUID is never reused, so "the marker is still this pass" cannot be satisfied by a later
     // pass that happens to hold the same counter value — which is exactly what an epoch-only guard allowed
     // once a settle cleared the marker and the numbering restarted.
+    // THE RECOVERY CLAIM — exactly one replica may take a dead one's work (arch-review 28 P1).
+    if (guard?.expectOwnerReplica !== undefined) {
+      if (guard.expectOwnerReplica === null) guardSql += " AND owner_replica IS NULL";
+      else {
+        i++;
+        guardSql += ` AND owner_replica = $${i}`;
+        vals.push(guard.expectOwnerReplica);
+      }
+    }
     if (guard?.expectScoringPassId !== undefined) {
       if (guard.expectScoringPassId === null) {
         guardSql += " AND (scoring_pass IS NULL OR scoring_pass->>'passId' IS NULL)";

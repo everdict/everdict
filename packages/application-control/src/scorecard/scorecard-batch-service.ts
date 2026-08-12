@@ -233,18 +233,38 @@ export class ScorecardBatchService {
             const adoptable = this.deps.adoptCase
               ? await this.deps.adoptCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => undefined)
               : undefined;
+            // A REJECTED TRANSITION IS NOT REJECTED EVIDENCE (arch-review 28 P0). The CAS below correctly
+            // refuses to overwrite a child that settled on its own between the list above and this write —
+            // and the seed was pushed regardless, so the resumed batch could aggregate the harvested result
+            // while the LEDGER held the real one. The two are usually equal and nothing here proves it: the
+            // ledger row is what a reader sees a year later, so the ledger row is what the aggregate must be
+            // built from.
+            //
+            // So when the CAS loses, the persisted truth decides — re-read the child and follow it.
             if (adoptable) {
-              adopted += 1;
-              // Under the settle CAS: adopting a child that finished on its own between the list and here
-              // would rewrite a real outcome with a harvested one (arch-review 26 P1).
-              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()).patch, undefined, {
-                expectNonTerminal: true,
-              });
-              seed.push(adoptable);
-              seedRunIds.push(c.id);
+              const claimed = await this.deps.runStore.update(
+                c.id,
+                Run.from(c).adopt(adoptable, this.now()).patch,
+                undefined,
+                { expectNonTerminal: true },
+              );
+              if (claimed !== undefined) {
+                adopted += 1;
+                seed.push(adoptable);
+                seedRunIds.push(c.id);
+                continue;
+              }
+              const settled = await this.deps.runStore.get(c.id);
+              // It finished while we were harvesting: its own result is the evidence, not ours.
+              if (settled?.result) {
+                seed.push(settled.result);
+                seedRunIds.push(c.id);
+              }
+              // Terminal with no result (a real failure) — nothing to seed, and the re-dispatch below is not
+              // ours to make either: the case settled, and settled is settled.
               continue;
             }
-            await this.deps.runStore.update(
+            const interrupted = await this.deps.runStore.update(
               c.id,
               Run.from(c).fail(
                 { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
@@ -253,6 +273,16 @@ export class ScorecardBatchService {
               undefined,
               { expectNonTerminal: true },
             );
+            if (interrupted === undefined) {
+              // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
+              // and treating it as remaining work would re-run a case that already has an answer, so the
+              // persisted answer is seeded instead.
+              const settled = await this.deps.runStore.get(c.id);
+              if (settled?.result) {
+                seed.push(settled.result);
+                seedRunIds.push(c.id);
+              }
+            }
           }
         }
         // Only seed cases that are still in the selection (dataset edits between runs shrink, never corrupt).

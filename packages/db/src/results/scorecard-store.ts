@@ -34,6 +34,10 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectScoringCount !== undefined && (cur.scoring?.length ?? 0) !== guard.expectScoringCount)
       return undefined;
     if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;
+    // The recovery claim (arch-review 28 P1): exactly one replica may take a dead one's work, and the loser
+    // must not resume — which it can only know by this returning undefined.
+    if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
+      return undefined;
     // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that
     // already stamped one wins and this write is refused.
     // passId is the FENCE — never reused, so it cannot collide across passes the way an epoch can.

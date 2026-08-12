@@ -219,6 +219,14 @@ export class PgRunStore implements RunStore {
       vals.push(CANCELLED_ERROR_CODE);
       fenceSql += ` AND (error->>'code' IS DISTINCT FROM $${vals.length})`;
     }
+    // The recovery claim: exactly one replica takes a dead one's run.
+    if (guard?.expectOwnerReplica !== undefined) {
+      if (guard.expectOwnerReplica === null) fenceSql += " AND owner_replica IS NULL";
+      else {
+        vals.push(guard.expectOwnerReplica);
+        fenceSql += ` AND owner_replica = $${vals.length}`;
+      }
+    }
     const fence = guard?.scoring;
     if (fence) {
       const scorecardIdx = vals.length + 1;

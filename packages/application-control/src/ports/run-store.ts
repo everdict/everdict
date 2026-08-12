@@ -95,6 +95,11 @@ export interface RunUpdateGuard {
   // write-back is supposed to reflect. What must not be overwritten is the settlement that says the work was
   // abandoned.
   expectNotCancelled?: true;
+  // THE RECOVERY CLAIM (arch-review 28 P1). `expectNonTerminal` says the run is still open; it does not say
+  // WHO may take it, so two booting replicas both cleared it and both re-dispatched. Ownership and the
+  // authority to drive the work are one transition: a string means "the owner must still be this one" (the
+  // dead replica the recovery observed), `null` means "there must be no owner recorded".
+  expectOwnerReplica?: string | null;
 }
 
 export interface RunStore extends AdmissionLedger {
