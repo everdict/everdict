@@ -76,9 +76,10 @@ function fakePreferences(
     subject: "alice",
     tools,
     skills,
+    model: null,
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
-  return { get: async () => state, setEntry: async () => state };
+  return { get: async () => state, setEntry: async () => state, setModel: async () => state };
 }
 
 // A minimal SkillStore whose list() returns the given authored records.
@@ -375,6 +376,9 @@ describe("resolveAgentCapabilities", () => {
         throw new Error("db down");
       },
       setEntry: async () => {
+        throw new Error("db down");
+      },
+      setModel: async () => {
         throw new Error("db down");
       },
     };

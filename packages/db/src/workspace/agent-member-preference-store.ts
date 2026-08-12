@@ -7,16 +7,18 @@ import {
 
 import type { SqlClient } from "../client.js";
 
-// The per-MEMBER agent overlay (mig 0090) — two channels, tools and skills. Self-scoped by (tenant, subject): the
-// workspace AgentSpec + skill library are the shared baseline, this is one member's on/off on top of them. Setting an
-// entry to `null` DELETES the key rather than storing the baseline's current value — that is what keeps the member
-// following the workspace afterwards.
+// The per-MEMBER agent overlay (mig 0090) — three channels: the tools it can call, the skills it follows, and the
+// model it thinks with (mig 0167). Self-scoped by (tenant, subject): the workspace AgentSpec + skill library are the
+// shared baseline, this is one member's answer on top of them. Setting an entry (or the model) to `null` DELETES the
+// override rather than storing the baseline's current value — that is what keeps the member following the workspace
+// afterwards.
 
 const emptyPreferences = (tenant: string, subject: string, updatedAt: string): AgentMemberPreferences => ({
   tenant,
   subject,
   tools: {},
   skills: {},
+  model: null,
   updatedAt,
 });
 
@@ -37,6 +39,14 @@ export class InMemoryAgentMemberPreferenceStore implements AgentMemberPreference
 
   private clone(p: AgentMemberPreferences): AgentMemberPreferences {
     return { ...p, tools: { ...p.tools }, skills: { ...p.skills } };
+  }
+
+  async setModel(tenant: string, subject: string, model: string | null): Promise<AgentMemberPreferences> {
+    const now = new Date().toISOString();
+    const current = this.byMember.get(this.key(tenant, subject)) ?? emptyPreferences(tenant, subject, now);
+    const next: AgentMemberPreferences = { ...current, model, updatedAt: now };
+    this.byMember.set(this.key(tenant, subject), next);
+    return this.clone(next);
   }
 
   async get(tenant: string, subject: string): Promise<AgentMemberPreferences | undefined> {
@@ -68,6 +78,7 @@ interface PreferencesRow {
   subject: string;
   tools: unknown;
   skills: unknown;
+  model: string | null;
   updated_at: string | Date;
 }
 
@@ -79,10 +90,11 @@ const rowToRecord = (row: PreferencesRow): AgentMemberPreferences =>
     subject: row.subject,
     tools: row.tools,
     skills: row.skills,
+    model: row.model,
     updatedAt: iso(row.updated_at),
   });
 
-const COLUMNS = "tenant, subject, tools, skills, updated_at";
+const COLUMNS = "tenant, subject, tools, skills, model, updated_at";
 
 export class PgAgentMemberPreferenceStore implements AgentMemberPreferenceStore {
   constructor(private readonly client: SqlClient) {}
@@ -122,6 +134,23 @@ export class PgAgentMemberPreferenceStore implements AgentMemberPreferenceStore 
            RETURNING ${COLUMNS}`;
     const params = enabled === null ? [tenant, subject, key] : [tenant, subject, key, enabled];
     const r = await this.client.query<PreferencesRow>(sql, params);
+    const row = r.rows[0];
+    if (!row) return emptyPreferences(tenant, subject, new Date().toISOString());
+    return rowToRecord(row);
+  }
+
+  async setModel(tenant: string, subject: string, model: string | null): Promise<AgentMemberPreferences> {
+    // One statement, one column: a member picking their model never touches the tool/skill maps, so a picker and a
+    // toggle open in two tabs cannot clobber each other. NULL is the value that means "follow the workspace", so it is
+    // written as a value rather than deleted like a decision key.
+    const r = await this.client.query<PreferencesRow>(
+      `INSERT INTO everdict_agent_member_preferences (tenant, subject, model, updated_at)
+       VALUES ($1, $2, $3::text, now())
+       ON CONFLICT (tenant, subject) DO UPDATE
+         SET model = $3::text, updated_at = now()
+       RETURNING ${COLUMNS}`,
+      [tenant, subject, model],
+    );
     const row = r.rows[0];
     if (!row) return emptyPreferences(tenant, subject, new Date().toISOString());
     return rowToRecord(row);

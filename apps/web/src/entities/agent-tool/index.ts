@@ -7,6 +7,8 @@ export {
   agentToolProbeSchema,
   agentToolSecretSchema,
   agentToolTransportSchema,
+  agentModelPreferenceSchema,
+  type AgentModelPreference,
   type AgentToolScope,
   type AgentToolEntry,
   type AgentToolList,

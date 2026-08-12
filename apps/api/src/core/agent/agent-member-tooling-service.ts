@@ -2,6 +2,7 @@ import {
   type AgentCapabilitiesDeps,
   type AgentMemberPreferenceStore,
   type CapabilityStore,
+  type ModelRegistry,
   type ResolvedAgentSkill,
   type ResolvedAgentTool,
   type SecretStore,
@@ -19,6 +20,7 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import type {
+  AgentModelPreferenceResponse,
   AgentSkillEntry,
   AgentSkillListResponse,
   AgentToolDetailResponse,
@@ -63,6 +65,9 @@ export interface AgentMemberToolingDeps {
   // Live MCP connect (infrastructure/mcp) — turns "what functions does this tool have" from a declared list into the
   // server's real answer. Absent ⇒ probing is unavailable.
   probeMcp?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>;
+  // The workspace's registered models — what a member's default model pick is validated against (an id that resolves
+  // nowhere would be a conversation that cannot answer). Absent ⇒ picking a model is unavailable (reading still works).
+  models?: ModelRegistry;
 }
 
 export class AgentMemberToolingService {
@@ -198,6 +203,49 @@ export class AgentMemberToolingService {
     const { skills } = await this.resolve(tenant, subject);
     await this.record(tenant, subject, "skills", key, enabled, skills);
     return this.listSkills(tenant, subject);
+  }
+
+  // The member's own default LLM, next to what it replaces. A default only means something beside the baseline it
+  // stands in for, so the read carries both — that is what lets the picker say "workspace default (claude-opus)".
+  async getModel(tenant: string, subject: string): Promise<AgentModelPreferenceResponse> {
+    const [preferences, workspaceDefault] = await Promise.all([
+      this.deps.preferences.get(tenant, subject),
+      this.workspaceModel(tenant),
+    ]);
+    return { model: preferences?.model ?? null, workspaceDefault };
+  }
+
+  // Pick a model for MY conversations, or `null` to follow the workspace agent again. The id must be a REGISTERED
+  // model (the registry's owner-first + `_shared` resolution — the same lookup the agent server does at turn time), so
+  // a stale or invented id is refused HERE rather than becoming a conversation that cannot answer.
+  async setModel(tenant: string, subject: string, model: string | null): Promise<AgentModelPreferenceResponse> {
+    if (model !== null) {
+      const models = this.deps.models;
+      if (!models)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { model },
+          "this deployment has no model registry, so a member cannot pick a model to run on.",
+        );
+      try {
+        await models.get(tenant, model);
+      } catch {
+        throw new NotFoundError("NOT_FOUND", { model }, `no such registered model in this workspace: ${model}`);
+      }
+    }
+    await this.deps.preferences.setModel(tenant, subject, model);
+    return this.getModel(tenant, subject);
+  }
+
+  // What a member who picked nothing runs on: the workspace chat agent's own model override. Absent (or an
+  // unregistered agent) ⇒ null — the agent server's deployment default, which this surface does not know.
+  private async workspaceModel(tenant: string): Promise<string | null> {
+    try {
+      const spec = await this.deps.agents.get(tenant, AGENT_CHAT_CONFIG_ID, "latest");
+      return spec.model ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private async record(

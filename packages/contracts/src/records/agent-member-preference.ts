@@ -33,6 +33,12 @@ export const AgentMemberPreferencesSchema = z.object({
   subject: z.string(),
   tools: DecisionsSchema.default({}),
   skills: DecisionsSchema.default({}),
+  // The member's own default LLM for their conversations — a REGISTERED model id (`@everdict/registry` models), the
+  // same namespace an AgentSpec.model override names. The third channel of this overlay: the tools it can call, the
+  // skills it follows, and the model it thinks with. `null` = follow the workspace baseline (AgentSpec.model → the
+  // agent server's default), so a later workspace change still reaches them — exactly the reset semantics the
+  // decision maps have. A single conversation's own pick (AgentSessionRecord.model) still wins over this.
+  model: z.string().nullable().default(null),
   updatedAt: z.string(),
 });
 export type AgentMemberPreferences = z.infer<typeof AgentMemberPreferencesSchema>;

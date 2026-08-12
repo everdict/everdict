@@ -419,6 +419,11 @@ supports" — and each member overlays their own on/off on top of it.**
   enabled authored skills in one batched pass.
 - Shadowing is per channel: a tool and a skill may share a name (the model reaches them through different doors —
   a tool call vs `use_skill`). The workspace-wide default-tool toggles on Settings › Agent remain the admin baseline.
+- **A third channel rides the same overlay: the MODEL the member's agent thinks with** (`AgentMemberPreferences.model`,
+  mig 0167 — `GET/PUT /agent/model`, Account › Preferences). Not a capability decision, so it is not part of
+  `resolveAgentCapabilities`; it is read by the same profile resolver and follows the same reset rule (`null` = follow
+  the workspace's `AgentSpec.model`, never a frozen copy of it). Resolution order + the crafted-agent and verifier
+  exceptions: `docs/models.md` §"Which model a CONVERSATION runs on".
 
 ### The tool DETAIL (confirmed 2026-07-29)
 

@@ -1240,6 +1240,11 @@ export const controlPlane = {
   listAgentSkills: <T>(auth: AuthContext) => call<T>(auth, '/agent/skills'),
   setAgentSkill: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
     call<T>(auth, '/agent/skills', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
+  // The same overlay's model channel — MY default LLM (Account › Preferences). The read carries the workspace
+  // baseline beside the pick, and model=null clears the pick (= follow the workspace agent's model again).
+  getAgentModel: <T>(auth: AuthContext) => call<T>(auth, '/agent/model'),
+  setAgentModel: <T>(auth: AuthContext, model: string | null) =>
+    call<T>(auth, '/agent/model', { method: 'PUT', body: JSON.stringify({ model }) }),
   // Workspace Skills — SKILL.md-style procedures the members author for the conversational agent (dual-scoped
   // private|workspace). Read skills:read (viewer+); author/edit/share/delete skills:write (member+, creator-or-admin
   // for a specific skill). generateSkill drafts a skill from a description via the workspace's model (skill-generate).

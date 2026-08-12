@@ -1437,6 +1437,9 @@ async function main(): Promise<void> {
       // really serve) and the AgentSpec upsert (rebinding a tool's secret is an agent-config edit).
       agentService: new AgentService({ agents: agentRegistry }),
       probeMcp: probeMcpServer,
+      // A member's own default model is validated against the registered models — the same registry the agent server
+      // resolves the pick through at turn time.
+      models: modelRegistry,
     }),
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).

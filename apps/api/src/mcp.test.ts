@@ -2508,6 +2508,7 @@ describe("MCP — effect annotations (authorization is not effect semantics)", (
     "touch_sandbox",
     "set_agent_tool",
     "set_agent_skill",
+    "set_agent_model",
     "open_ci_setup_pr",
     "probe_agent_tool",
     "browser_session_ticket",

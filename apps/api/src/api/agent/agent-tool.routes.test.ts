@@ -10,7 +10,7 @@ import {
   InMemorySkillStore,
   aesGcmCipher,
 } from "@everdict/db";
-import { InMemoryAgentRegistry } from "@everdict/registry";
+import { InMemoryAgentRegistry, InMemoryModelRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { AgentMemberToolingService } from "../../core/agent/agent-member-tooling-service.js";
 import { AgentService } from "../../core/agent/agent-service.js";
@@ -65,6 +65,7 @@ async function build(
     skills?: SkillRecord[];
     secrets?: Record<string, string>; // workspace-tier secret name → value
     probe?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>;
+    models?: string[]; // registered model ids a member may pick as their default (absent = no registry wired)
   } = {},
 ) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
@@ -73,6 +74,9 @@ async function build(
   const skills = new InMemorySkillStore();
   const preferences = new InMemoryAgentMemberPreferenceStore();
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 7)));
+  const models = new InMemoryModelRegistry();
+  for (const id of opts.models ?? [])
+    await models.register("acme", { id, version: "1.0.0", provider: "anthropic", model: `${id}-underlying`, tags: [] });
   if (opts.spec) await agents.register("acme", opts.spec, "dev");
   for (const record of opts.capabilities ?? []) await capabilities.register(record);
   for (const record of opts.skills ?? []) await skills.create(record);
@@ -90,6 +94,7 @@ async function build(
             secrets: secretStore,
             agentService: new AgentService({ agents }),
             ...(opts.probe ? { probeMcp: opts.probe } : {}),
+            ...(opts.models ? { models } : {}),
           }),
         }),
   });
@@ -463,5 +468,69 @@ describe("agent skill routes", () => {
   it("returns 404 when the service is not configured", async () => {
     const { app } = await build({ wired: false });
     expect((await app.inject({ method: "GET", url: "/agent/skills", headers: H })).statusCode).toBe(404);
+  });
+});
+
+// The overlay's third channel — which model MY conversations think with. The workspace agent's model is one admin's
+// answer for everybody; this is each member's own, and it is why a picker in the chat is not the only way to change it.
+describe("agent model routes", () => {
+  it("a member who picked nothing follows the workspace agent's model", async () => {
+    const { app } = await build({ spec: agentSpec({ model: "team-llm" }), models: ["team-llm", "my-llm"] });
+    const res = await app.inject({ method: "GET", url: "/agent/model", headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ model: null, workspaceDefault: "team-llm" });
+  });
+
+  it("reports no baseline when the workspace registered no agent (the deployment default answers)", async () => {
+    const { app } = await build({ models: ["my-llm"] });
+    expect((await app.inject({ method: "GET", url: "/agent/model", headers: H })).json()).toEqual({
+      model: null,
+      workspaceDefault: null,
+    });
+  });
+
+  it("records the member's own default model and keeps the workspace baseline visible beside it", async () => {
+    const { app, preferences } = await build({
+      spec: agentSpec({ model: "team-llm" }),
+      models: ["team-llm", "my-llm"],
+    });
+    const res = await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: "my-llm" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ model: "my-llm", workspaceDefault: "team-llm" });
+    expect((await preferences.get("acme", "dev"))?.model).toBe("my-llm");
+  });
+
+  it("null clears the pick so the workspace baseline reaches the member again", async () => {
+    const { app, preferences } = await build({ spec: agentSpec({ model: "team-llm" }), models: ["my-llm"] });
+    await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: "my-llm" } });
+    const res = await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: null } });
+    expect(res.json()).toEqual({ model: null, workspaceDefault: "team-llm" });
+    expect((await preferences.get("acme", "dev"))?.model).toBeNull();
+  });
+
+  it("refuses a model this workspace never registered (404, nothing stored)", async () => {
+    // A stored id that resolves nowhere is a conversation that cannot answer — so the refusal belongs here.
+    const { app, preferences } = await build({ models: ["my-llm"] });
+    const res = await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: "ghost" } });
+    expect(res.statusCode).toBe(404);
+    expect((await preferences.get("acme", "dev"))?.model ?? null).toBeNull();
+  });
+
+  it("rejects a body that is neither a model id nor null", async () => {
+    const { app } = await build({ models: ["my-llm"] });
+    const res = await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: "" } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("cannot pick a model on a deployment with no model registry (400), while reading still works", async () => {
+    const { app } = await build({ spec: agentSpec({ model: "team-llm" }) });
+    expect((await app.inject({ method: "GET", url: "/agent/model", headers: H })).statusCode).toBe(200);
+    const res = await app.inject({ method: "PUT", url: "/agent/model", headers: H, payload: { model: "my-llm" } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 404 when the service is not configured", async () => {
+    const { app } = await build({ wired: false });
+    expect((await app.inject({ method: "GET", url: "/agent/model", headers: H })).statusCode).toBe(404);
   });
 });

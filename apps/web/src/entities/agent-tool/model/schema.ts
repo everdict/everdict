@@ -1,4 +1,5 @@
 import type {
+  AgentModelPreferenceResponse as ContractAgentModelPreference,
   AgentToolDetailResponse as ContractAgentToolDetail,
   AgentToolEntry as ContractAgentToolEntry,
   AgentToolFunction as ContractAgentToolFunction,
@@ -102,6 +103,16 @@ export const agentToolProbeSchema = z.object({
 })
 export type AgentToolProbe = z.infer<typeof agentToolProbeSchema>
 
+// ── 내 기본 모델 ──────────────────────────────────────────────────────────────────────────────────
+// 같은 오버레이의 세 번째 채널. 도구/스킬이 "내 에이전트가 무엇을 쓰는가"라면 이건 "무엇으로 생각하는가"다.
+// model=null 은 워크스페이스 기준선(AgentSpec.model → 서버 기본값)을 따르겠다는 뜻이고, 그래서 읽기가 기준선을
+// 함께 실어 준다 — 기본값은 대신하는 값 옆에서만 의미가 있다.
+export const agentModelPreferenceSchema = z.object({
+  model: z.string().nullable(),
+  workspaceDefault: z.string().nullable(),
+})
+export type AgentModelPreference = z.infer<typeof agentModelPreferenceSchema>
+
 // 드리프트 가드 — 계약 wire 타입이 바뀌면 웹 타입체크가 깨진다(양방향).
 type AssertAssignable<A extends B, B> = A
 type _Fwd = AssertAssignable<AgentToolEntry, ContractAgentToolEntry>
@@ -109,3 +120,5 @@ type _Back = AssertAssignable<ContractAgentToolEntry, AgentToolEntry>
 type _FnFwd = AssertAssignable<AgentToolFunction, ContractAgentToolFunction>
 type _DetailFwd = AssertAssignable<AgentToolDetail, ContractAgentToolDetail>
 type _ProbeFwd = AssertAssignable<AgentToolProbe, ContractAgentToolProbe>
+type _ModelFwd = AssertAssignable<AgentModelPreference, ContractAgentModelPreference>
+type _ModelBack = AssertAssignable<ContractAgentModelPreference, AgentModelPreference>

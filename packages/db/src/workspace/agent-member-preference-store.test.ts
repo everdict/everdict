@@ -43,6 +43,34 @@ describe("InMemoryAgentMemberPreferenceStore", () => {
     expect("skill:triage" in after.skills).toBe(false);
   });
 
+  it("a member's default model starts unset (null = follow the workspace baseline)", async () => {
+    const store = new InMemoryAgentMemberPreferenceStore();
+    const after = await store.setEntry("acme", "alice", "tools", "default:web-search", false);
+    expect(after.model).toBeNull();
+  });
+
+  it("records the member's own default model without disturbing their tools or skills", async () => {
+    const store = new InMemoryAgentMemberPreferenceStore();
+    await store.setEntry("acme", "alice", "tools", "default:web-search", false);
+    const after = await store.setModel("acme", "alice", "opus");
+    expect(after.model).toBe("opus");
+    expect(after.tools).toEqual({ "default:web-search": false });
+  });
+
+  it("null clears the model pick so the workspace baseline reaches the member again", async () => {
+    const store = new InMemoryAgentMemberPreferenceStore();
+    await store.setModel("acme", "alice", "opus");
+    expect((await store.setModel("acme", "alice", null)).model).toBeNull();
+  });
+
+  it("keeps two members' default models independent", async () => {
+    const store = new InMemoryAgentMemberPreferenceStore();
+    await store.setModel("acme", "alice", "opus");
+    await store.setModel("acme", "bob", "haiku");
+    expect((await store.get("acme", "alice"))?.model).toBe("opus");
+    expect((await store.get("acme", "bob"))?.model).toBe("haiku");
+  });
+
   it("keeps two members of the same workspace independent", async () => {
     const store = new InMemoryAgentMemberPreferenceStore();
     await store.setEntry("acme", "alice", "tools", "capability:acme/jira", false);
@@ -71,6 +99,7 @@ describe("PgAgentMemberPreferenceStore", () => {
     subject: "alice",
     tools: { "default:web-search": false },
     skills: {},
+    model: null,
     updated_at: new Date(0),
   };
 
@@ -108,6 +137,22 @@ describe("PgAgentMemberPreferenceStore", () => {
     expect(got?.tools).toEqual({ "default:web-search": false });
     expect(got?.skills).toEqual({ "skill:triage": true });
     expect(got?.updatedAt).toBe(new Date(0).toISOString());
+  });
+
+  it("writes the model into its own column so a concurrent tool toggle survives", async () => {
+    const client = fakeClient([{ ...row, model: "opus" }]);
+    const after = await new PgAgentMemberPreferenceStore(client).setModel("acme", "alice", "opus");
+    expect(client.calls[0]?.text).toContain("SET model = $3::text");
+    expect(client.calls[0]?.text).not.toContain("jsonb_set");
+    expect(client.calls[0]?.params).toEqual(["acme", "alice", "opus"]);
+    expect(after.model).toBe("opus");
+  });
+
+  it("writes NULL (not a deleted column) when the member goes back to the workspace default", async () => {
+    const client = fakeClient([{ ...row, model: null }]);
+    const after = await new PgAgentMemberPreferenceStore(client).setModel("acme", "alice", null);
+    expect(client.calls[0]?.params).toEqual(["acme", "alice", null]);
+    expect(after.model).toBeNull();
   });
 
   it("a member with no row is undefined", async () => {

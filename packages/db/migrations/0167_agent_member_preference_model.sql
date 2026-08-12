@@ -1,0 +1,12 @@
+-- 0167_agent_member_preference_model — additive (expand): the member's OWN default LLM.
+--
+-- The overlay already carried two channels of "which of what this workspace supports does MY agent carry": the tools
+-- it can call and the skills it follows. The model it thinks with was not one of them — a workspace had exactly one
+-- answer (AgentSpec.model, an admin's choice for everybody), and a member who wanted a different one had to re-pick it
+-- in every single conversation, because the only other knob was the per-conversation override.
+--
+-- `model` is a REGISTERED model id (the same namespace AgentSpec.model names), never a provider string and never a
+-- key. NULL is meaningful and is the default: it means "follow the workspace baseline", so an admin changing the
+-- workspace agent's model still reaches this member — the same reason the two decision maps drop a key on reset
+-- instead of writing today's baseline into the row.
+ALTER TABLE everdict_agent_member_preferences ADD COLUMN IF NOT EXISTS model text;

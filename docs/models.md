@@ -66,6 +66,36 @@ error. Managed and self-hosted paths behave identically (workspace secrets alrea
 A model judge (`JudgeSpec kind:"model"`) resolves `judge.model` through the same registry (provider/model/baseUrl);
 the provider key is read from the `SecretStore` at grade time (`judge-runner.ts` / `JudgeAuthDispatcher`).
 
+## Which model a CONVERSATION runs on (four tiers, narrowest first)
+The conversational agent (`apps/agent`) resolves its model per turn, and each tier is a narrower statement about
+whose conversation this is:
+
+| # | Where it is set | Who sets it | Stored as |
+|---|-----------------|-------------|-----------|
+| 1 | the chat header's model picker — THIS conversation | the member, per conversation | `AgentSessionRecord.model` (mig 0073) |
+| 2 | **Account › Preferences → Default agent model** — MY conversations | each member, for themselves | `AgentMemberPreferences.model` (mig 0167) |
+| 3 | Settings › Agent → the chat agent's model | an admin, for everybody | `AgentSpec.model` |
+| 4 | `AGENT_MODEL` / `AGENT_LLM_*` | the operator | deployment env |
+
+Tier 2 is the **member overlay's third channel**, beside the tools its agent may call and the skills it follows
+(`AgentMemberPreferenceStore`, self-scoped by `(tenant, subject)`) — so "the workspace picked one model for
+everybody" is no longer the only answer, and a member who prefers another one does not re-pick it in every
+conversation. `null` means *follow the workspace baseline*, so an admin moving tier 3 still reaches them (the same
+reset semantics the tool/skill decisions have — the pick is cleared, never frozen at today's baseline).
+Tiers 2 and 3 arrive at the loop already resolved as `AgentProfile.model` (the profile resolver picks between them);
+tier 1 is applied by `chat.ts`.
+
+Two deliberate exceptions:
+- **A crafted agent keeps the model it declares.** A trigger activation runs the agent that was registered — its
+  instructions/tools/model ARE its identity — so only the workspace CHAT agent consults tier 2.
+- **A verification's model is the PLATFORM's.** Under `contextPolicy: "evidence_only"` tiers 1–3 are all dropped:
+  a verifier is an instrument, and which model it thinks with is part of what its verdict means (arch-review 25 P1).
+
+Surface: `GET /agent/model` → `{ model, workspaceDefault }` (the pick beside the baseline it stands in for) ·
+`PUT /agent/model {model: string|null}` — self-scoped like personal secrets (membership is the gate, `agents:read`),
+MCP twins `get_agent_model` / `set_agent_model`. The options come from `GET /models`; an id that is not a registered
+model in this workspace is refused **here** (404) rather than becoming a conversation that cannot answer.
+
 ## Surface (BFF ↔ MCP parity)
 `POST /models` (register — explicit-version, programmatic/bundle path) · `POST /models/validate` (dry-run: schema +
 version conflict + `missingSecrets` warning) · `PUT /models/:id` (interactive **save/edit** upsert, version-free) ·

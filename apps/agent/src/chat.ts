@@ -1209,8 +1209,10 @@ export async function runChat(
       ...recordsToHistory(existing),
       { role: "user", content: userForModel },
     ];
-    // Which registered model powers this turn, in priority order: the conversation's own pick (session.model, set in
-    // the chat) → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
+    // Which registered model powers this turn, in priority order — narrowest statement first: the conversation's own
+    // pick (session.model, set in the chat) → this MEMBER's default (Settings › Preferences) → the workspace
+    // AgentSpec's model (Settings › Agent) → the agent server's default model. The middle two arrive already resolved
+    // as `profile.model` (the profile resolver picks between them).
     // (`spanRecorder` is declared at turn scope below the loop's block so the seal can reach it.)
     // …and the MODEL is the platform's for a verification (arch-review 25 P1). A conversation-level override
     // is a member's choice about their own chat; a verifier is an instrument, and which model it thinks with

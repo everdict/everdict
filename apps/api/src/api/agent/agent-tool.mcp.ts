@@ -120,4 +120,34 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
     ({ key, enabled }) =>
       run(principal, "agents:read", async () => ok(await tooling.setSkill(ws, principal.subject, key, enabled))),
   );
+
+  server.registerTool(
+    "get_agent_model",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "Which registered model YOUR conversations run on by default, beside the workspace baseline it stands in " +
+        "for: `model` is the calling member's own pick (null = they follow the workspace) and `workspaceDefault` is " +
+        "the workspace agent's model (null = the deployment default). Use list_models for what may be picked.",
+      inputSchema: {},
+    },
+    () => run(principal, "agents:read", async () => ok(await tooling.getModel(ws, principal.subject))),
+  );
+
+  server.registerTool(
+    "set_agent_model",
+    {
+      // NOT a read: durable self-modification — changes which model the member's future conversations think with.
+      annotations: { readOnlyHint: false },
+      description:
+        "Set the default model FOR THE CALLING MEMBER's conversations (a registered model id from list_models), or " +
+        "pass null to follow the workspace agent's model again. The workspace's agent configuration is untouched, a " +
+        "single conversation's own pick still wins over this, and a crafted agent keeps the model it declares. An " +
+        "unregistered id is NOT_FOUND. Returns the refreshed preference.",
+      inputSchema: {
+        model: z.string().nullable().describe("Registered model id · null = follow the workspace default"),
+      },
+    },
+    ({ model }) => run(principal, "agents:read", async () => ok(await tooling.setModel(ws, principal.subject, model))),
+  );
 }

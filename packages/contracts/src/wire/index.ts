@@ -4,6 +4,7 @@ export * from "./agent-session/agent-message-list.js";
 export * from "./agent-session/agent-session-list.js";
 export * from "./agent-session/agent-session.js";
 export * from "./agent/agent-list-entry.js";
+export * from "./agent/agent-model-preference.js";
 export * from "./agent/agent-skill-list.js";
 export * from "./agent/agent-tool-detail.js";
 export * from "./agent/agent-tool-list.js";

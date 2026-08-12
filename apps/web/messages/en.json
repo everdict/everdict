@@ -2957,6 +2957,14 @@
     "timezoneLabel": "Timezone",
     "timezoneHint": "The zone all dates and times are shown in (stored on this device)."
   },
+  "agentModelPreference": {
+    "label": "Default agent model",
+    "hint": "The model your own conversations start on. A single conversation can still pick another one.",
+    "followWorkspace": "Workspace default",
+    "serverDefault": "Server default",
+    "noModels": "No models registered in this workspace yet.",
+    "saveFailed": "Could not save your default model."
+  },
   "settingsNav": {
     "groupAccount": "Account",
     "groupWorkspace": "Workspace",
@@ -2966,7 +2974,7 @@
     "profile": "Profile",
     "profileDesc": "Your name and photo.",
     "preferences": "Preferences",
-    "preferencesDesc": "Theme, language, and timezone for this device.",
+    "preferencesDesc": "Theme, language, and timezone for this device, plus your default agent model.",
     "apiKeys": "API keys",
     "apiKeysDesc": "Personal keys that act with your permissions.",
     "personalSecrets": "Personal secrets",
@@ -3769,7 +3777,7 @@
     "history": "History",
     "live": "Reply in progress",
     "model": "Model",
-    "modelDefault": "Workspace default",
+    "modelDefault": "Default",
     "modelPick": "Select model",
     "permissions": "Permissions",
     "permissionsPick": "Select permission mode",

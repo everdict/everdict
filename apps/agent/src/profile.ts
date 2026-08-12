@@ -23,7 +23,10 @@ import type { Principal } from "./principal.js";
 // but per-workspace).
 export interface AgentProfile {
   systemPrompt: string;
-  model?: string; // registered model id override (else the agent server's default model)
+  // Registered model id override (else the agent server's default model). Two things can put one here, and the
+  // narrower wins: THIS member's own default (Settings › Preferences) over the workspace agent's `AgentSpec.model`.
+  // A crafted agent's declared model is not overridable this way — see the resolver.
+  model?: string;
   mcpServers: ResolvedMcpServer[];
   // Workspace skills the caller can use (workspace-shared + their own private drafts) — surfaced as the `use_skill`
   // tool (Claude-Code-style progressive disclosure). Members author these; they're not imported.
@@ -248,6 +251,22 @@ export function registryProfileResolver(opts: {
       spec = undefined; // no workspace agent registered (or lookup failed) → base persona + skills + defaults only
     }
 
+    // THIS member's own default model (Settings › Preferences) — the third channel of the same overlay the tools and
+    // skills come from, and the answer to "the workspace picked one model for everybody". It outranks the workspace
+    // agent's AgentSpec.model because it is the narrower statement about whose conversation this is; the conversation's
+    // own pick (session.model, applied by the caller) is narrower still.
+    // NOT for a crafted agent: a registered agent's model IS part of its identity (a trigger activation runs the agent
+    // that was declared, not the activating member's taste), so only the workspace CHAT agent consults the preference.
+    let memberModel: string | undefined;
+    const isChatAgent = agentId === undefined || agentId === opts.configId;
+    if (opts.preferences && isChatAgent) {
+      try {
+        memberModel = (await opts.preferences.get(principal.workspace, principal.subject))?.model ?? undefined;
+      } catch {
+        memberModel = undefined; // best-effort, like every other lookup here: the workspace baseline still applies
+      }
+    }
+
     // THIS member's agent — not the workspace's. The AgentSpec + the authored skill library are the shared baseline
     // (hand-wired servers, adopted capabilities, default opt-outs, the team's skills); the caller's own overrides sit
     // on top, so the same assistant answers two members of one workspace with different tools AND different
@@ -291,9 +310,10 @@ export function registryProfileResolver(opts: {
     );
 
     const hasWriteTools = mcpServers.some((s) => s.write);
+    const model = memberModel ?? spec?.model;
     return {
       systemPrompt: composeSystemPrompt(opts.baseSystemPrompt, spec?.instructions, hasWriteTools, skills.length > 0),
-      ...(spec?.model ? { model: spec.model } : {}),
+      ...(model ? { model } : {}),
       mcpServers,
       skills,
       codeTools,

@@ -97,11 +97,13 @@ function skillRecord(over: Partial<SkillRecord>): SkillRecord {
 function memberPreferences(
   tools: Record<string, boolean>,
   skills: Record<string, boolean> = {},
+  model: string | null = null,
 ): AgentMemberPreferenceStore {
-  const state = (tenant: string, subject: string) => ({ tenant, subject, tools, skills, updatedAt: "t" });
+  const state = (tenant: string, subject: string) => ({ tenant, subject, tools, skills, model, updatedAt: "t" });
   return {
     get: async (tenant, subject) => state(tenant, subject),
     setEntry: async (tenant, subject) => state(tenant, subject),
+    setModel: async (tenant, subject) => state(tenant, subject),
   };
 }
 
@@ -172,6 +174,42 @@ describe("registryProfileResolver", () => {
 
   it("surfaces the model override", async () => {
     const profile = await resolver(spec({ model: "agent-llm" }))(principal);
+    expect(profile.model).toBe("agent-llm");
+  });
+
+  it("the member's own default model outranks the workspace agent's", async () => {
+    const profile = await resolver(
+      spec({ model: "agent-llm" }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore(),
+      [],
+      memberPreferences({}, {}, "my-llm"),
+    )(principal);
+    expect(profile.model).toBe("my-llm");
+  });
+
+  it("a member who picked no model still follows the workspace agent's", async () => {
+    const profile = await resolver(
+      spec({ model: "agent-llm" }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore(),
+      [],
+      memberPreferences({}, {}, null),
+    )(principal);
+    expect(profile.model).toBe("agent-llm");
+  });
+
+  it("a CRAFTED agent keeps its declared model — its instrument is its identity, not the member's taste", async () => {
+    const profile = await resolver(
+      spec({ id: "triage-bot", model: "agent-llm" }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore(),
+      [],
+      memberPreferences({}, {}, "my-llm"),
+    )(principal, "triage-bot");
     expect(profile.model).toBe("agent-llm");
   });
 

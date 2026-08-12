@@ -1,4 +1,5 @@
 import {
+  AgentModelPreferenceResponseSchema,
   AgentSkillListResponseSchema,
   AgentToolDetailResponseSchema,
   AgentToolListResponseSchema,
@@ -7,6 +8,7 @@ import {
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { BindAgentToolSecretsBodySchema } from "./request/bind-agent-tool-secrets.js";
+import { SetAgentModelBodySchema } from "./request/set-agent-model.js";
 import { SetAgentToolBodySchema } from "./request/set-agent-tool.js";
 
 // The percent-encoded tool key every :key route takes (`capability:<owner>/<id>` carries a slash).
@@ -134,6 +136,37 @@ const docs = {
     body: toJsonSchema(SetAgentToolBodySchema),
     response: {
       200: { description: "The refreshed skill set", ...toJsonSchema(AgentSkillListResponseSchema) },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  getModel: {
+    summary: "Read the caller's default agent model",
+    description: [
+      "Which registered model the calling member's conversations run on by default, next to the workspace baseline it",
+      "stands in for: `model` is their own pick (null = they follow the workspace) and `workspaceDefault` is the",
+      "workspace agent's own model (null = the agent server's deployment default). The models a member may pick from",
+      "are GET /models.",
+      SELF_SCOPED,
+    ].join(" "),
+    tags: ["agent"],
+    response: {
+      200: { description: "The caller's default model", ...toJsonSchema(AgentModelPreferenceResponseSchema) },
+      ...errorResponses(401, 404),
+    },
+  },
+  setModel: {
+    summary: "Set the caller's default agent model",
+    description: [
+      "Picks the registered model the calling member's conversations run on by default, or clears it with null so they",
+      "follow the workspace agent's model again. A single conversation's own pick still wins over this, and a crafted",
+      "agent keeps the model it declares. An id that is not a registered model in this workspace is 404.",
+      SELF_SCOPED,
+      "Returns the refreshed preference.",
+    ].join(" "),
+    tags: ["agent"],
+    body: toJsonSchema(SetAgentModelBodySchema),
+    response: {
+      200: { description: "The refreshed preference", ...toJsonSchema(AgentModelPreferenceResponseSchema) },
       ...errorResponses(400, 401, 404),
     },
   },
