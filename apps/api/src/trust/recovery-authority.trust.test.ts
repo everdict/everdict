@@ -145,3 +145,57 @@ describeTrust("TRUST-142 — a rejected transition is not rejected evidence", ()
     expect((persisted?.result?.snapshot as { output?: string } | undefined)?.output).toBe("B");
   });
 });
+
+// …and the last shape of the same rule: OWNER IDENTITY CHANGED IS NOT STALE DRIVER FENCED.
+//
+// A replica that paused past the liveness threshold — a long GC, a partition — is declared dead and its
+// batch is claimed. Then it comes back with its in-memory execution loop intact. The database saying somebody
+// else owns the batch does not reach that process: it is not asking. Identity answers "who should be
+// driving"; the paused driver never posed the question.
+//
+// The epoch is what makes a takeover observable to the loser. It rises in the same statement as the claim
+// that wins it, the winner carries the value, and every write that DRIVES the batch proves it — so the stale
+// driver's next write fails against a number that moved under it, which is the only signal a process that
+// never noticed it was gone reliably gets.
+describeTrust("TRUST-142 — a takeover fences the driver it replaced", () => {
+  it("the stale driver's settle is refused against an epoch that moved", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(batch({ ownerReplica: "cp-a", ownerEpoch: 4 } as never));
+    // The paused driver began its loop under epoch 4 and still holds it.
+    const staleEpoch = 4;
+
+    // A recovery declares cp-a dead and claims the batch; the claim raises the token.
+    const claimed = await store.update("sc-1", { ownerReplica: "cp-b" }, undefined, {
+      expectOwnerReplica: "cp-a",
+      expectNonTerminal: true,
+      claimOwnership: true,
+    });
+    expect(claimed?.ownerEpoch).toBe(5);
+
+    // …and cp-a comes back and tries to settle the batch it thinks it owns.
+    const stale = await store.update("sc-1", { status: "succeeded" } as never, undefined, {
+      expectNonTerminal: true,
+      expectOwnerEpoch: staleEpoch,
+    });
+    expect(stale).toBeUndefined();
+    expect((await store.get("sc-1"))?.status).toBe("running");
+
+    // The new owner, driving under the epoch it won, settles normally.
+    const settled = await store.update("sc-1", { status: "succeeded" } as never, undefined, {
+      expectNonTerminal: true,
+      expectOwnerEpoch: claimed?.ownerEpoch,
+    });
+    expect(settled).toBeDefined();
+  });
+
+  it("a batch nobody has claimed drives without a token — the fence is for takeovers, not for solitude", async () => {
+    // A single-replica install claims nothing, so demanding a token there would leave a batch nobody may
+    // settle. The absent epoch behaves exactly as before.
+    const store = new InMemoryScorecardStore();
+    await store.create(batch({ ownerReplica: undefined } as never));
+    const settled = await store.update("sc-1", { status: "succeeded" } as never, undefined, {
+      expectNonTerminal: true,
+    });
+    expect(settled).toBeDefined();
+  });
+});

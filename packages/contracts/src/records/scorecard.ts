@@ -644,6 +644,10 @@ export const ScorecardRecordSchema = z.object({
   // DIED from one another live replica is still fanning out. Absent = unowned (pre-column rows, the in-memory
   // store), which recovery reclaims exactly as it always did.
   ownerReplica: z.string().optional(),
+  // …and WHICH TAKEOVER that ownership is (mig 0166). The replica id elects a driver; the epoch fences the
+  // previous one. A paused replica coming back finds its writes refused against a number that moved, which
+  // is the only signal a process that never noticed it was gone reliably gets.
+  ownerEpoch: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

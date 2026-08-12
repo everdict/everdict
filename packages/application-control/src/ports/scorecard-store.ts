@@ -54,6 +54,15 @@ export interface ScorecardUpdateGuard {
   //
   // A miss returns undefined like any other guard, and the loser must NOT resume: it did not claim the work.
   expectOwnerReplica?: string | null;
+  // THE FENCING TOKEN (mig 0166). Owner identity elects a driver; it does not fence the previous one — a
+  // replica that paused past the liveness threshold comes back with its execution loop still running, and
+  // the database saying somebody else owns the batch does not reach it. Every write that DRIVES a batch
+  // carries the epoch it won, so the stale driver's next write fails against a number that moved under it.
+  expectOwnerEpoch?: number;
+  // …and the ONE WRITE INSTRUCTION among the conditions, here for the reason `leaseSeconds` is: only the
+  // store can raise the epoch atomically with the claim that wins it. Claiming and being told which takeover
+  // you are cannot be two statements — that gap is the race this token exists to close.
+  claimOwnership?: true;
   expectScoringCount?: number;
   expectGatesCount?: number;
   // The scoring-pass FENCE (arch-review 9 P0): the pass that must still own the marker for this write to

@@ -96,6 +96,10 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         // owner", which stays true after the work finished — so without this a batch that succeeded between
         // the list and here was claimed, failed to resume (it is already done), and got tombstoned below.
         expectNonTerminal: true,
+        // …and the claim RAISES the fencing token in the same statement (mig 0166). The replica this
+        // recovery declared dead may be paused rather than gone, with its execution loop intact; identity
+        // alone never reaches that process, and a number that moved under its next write does.
+        claimOwnership: true,
       });
       if (claimed === undefined) {
         liveCount += 1; // another replica claimed it — its recovery, not ours

@@ -1317,10 +1317,24 @@ export class ScorecardBatchService {
     if (!opening) return;
     const openingBatch = ScorecardBatch.from(opening);
     if (openingBatch.isTerminal()) return;
+    // THE DRIVER'S FENCING TOKEN (mig 0166). Owner identity elects a driver and does not fence the previous
+    // one: a replica that paused past the liveness threshold comes back with THIS loop still running, and the
+    // database saying somebody else owns the batch never reaches it. So the loop carries the epoch it began
+    // under and proves it on the writes that drive the batch — a takeover raises the number, and the stale
+    // driver's next write fails against a value that moved under it.
+    //
+    // Absent = a deployment (or a record) with no epoch, which behaves exactly as before rather than
+    // refusing: this token fences a multi-replica takeover, and inventing one where none was claimed would
+    // turn a single-replica install into a batch nobody may settle.
+    const epoch = opening.ownerEpoch;
+    const fenced = epoch === undefined ? undefined : { expectOwnerEpoch: epoch };
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
-    await this.deps.store.update(id, openingBatch.start(this.now()).patch);
+    await this.deps.store.update(id, openingBatch.start(this.now()).patch, undefined, {
+      expectNonTerminal: true,
+      ...fenced,
+    });
     // Progress (step) timeline — append as the run proceeds + persist incrementally so the web shows "how far / what" it's doing.
     const steps: ScorecardStep[] = [];
     const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
@@ -1764,12 +1778,17 @@ export class ScorecardBatchService {
           });
           const settlement = batch.succeed({ ...extras, scoring }, this.now());
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
-          await this.deps.store.update(
+          // Under the aggregate's terminal fence AND this driver's own epoch (mig 0166): a replica that was
+          // declared dead and came back must not settle a batch another replica now owns. The comment below
+          // already described "first terminal write wins" for the supersede race; the epoch is what makes it
+          // true for the race nobody could see — a paused process whose loop never noticed it was replaced.
+          const written = await this.deps.store.update(
             id,
             settlement.patch,
             stamped.map((f) => f.record),
+            { expectNonTerminal: true, ...fenced },
           );
-          if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+          if (written !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
           // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
           this.deps.onOrchestrationEvent?.(
             batchSettledEvent(

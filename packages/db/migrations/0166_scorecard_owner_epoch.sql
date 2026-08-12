@@ -1,0 +1,15 @@
+-- 0166_scorecard_owner_epoch — additive (expand): a FENCING TOKEN on the batch's driver.
+--
+-- `owner_replica` elects a driver; it does not fence the previous one. A replica that paused past the
+-- liveness threshold — a long GC, a network partition — is declared dead, its batch is claimed by another,
+-- and then it comes back with its in-memory execution loop still running. The database now says the owner is
+-- B while A goes on dispatching cases and settling the batch it no longer owns. Owner identity changed is not
+-- stale driver fenced: identity answers "who should be driving", and A is not asking.
+--
+-- The epoch is what makes takeover observable to the loser. It rises on every claim, the claimant carries the
+-- value it won, and every write that DRIVES the batch conditions on it — so A's next write fails against a
+-- number that moved under it, which is the only signal a paused process reliably gets.
+--
+-- Starts at 0 for existing rows: a batch nobody has ever claimed is at the epoch its first claimant will
+-- raise, and 0 is that number's honest predecessor.
+ALTER TABLE everdict_scorecards ADD COLUMN IF NOT EXISTS owner_epoch bigint NOT NULL DEFAULT 0;

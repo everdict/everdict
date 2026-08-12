@@ -39,6 +39,7 @@ interface ScorecardRow {
   steps: unknown;
   run_ids: unknown;
   owner_replica: string | null; // which control-plane replica drives this batch (mig 0135)
+  owner_epoch?: string | number | null; // …and which takeover that is (mig 0166) — the driver's fencing token
   verdict_summary: unknown; // stamped-policy verdict aggregate (mig 0146) — what release-shaped surfaces read
   world: unknown; // the execution world cohort (mig 0161) — a comparison axis, NULL = no case reported one
   scoring_pass: unknown; // the LIVE scoring pass (mig 0147) — trust readers refuse while present
@@ -92,6 +93,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // detail-only lightweight reference (get only, like steps)
     // Lightweight — boot recovery reads the LIST, so the owner must ride it or the check cannot be made.
     ownerReplica: row.owner_replica ?? undefined,
+    ...(row.owner_epoch !== undefined && row.owner_epoch !== null ? { ownerEpoch: Number(row.owner_epoch) } : {}),
     // Lightweight — product readiness/timeline read the LIST, and this is the number they stand on.
     verdictSummary: (row.verdict_summary as ScorecardRecord["verdictSummary"]) ?? undefined,
     ...(row.world !== null && row.world !== undefined ? { world: row.world as ScorecardRecord["world"] } : {}),
@@ -188,6 +190,9 @@ export class PgScorecardStore implements ScorecardStore {
   ): Promise<ScorecardRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/summary/scorecard/error/steps/updatedAt).
     const sets: string[] = [];
+    // The epoch RISES in the same statement as the claim (mig 0166): being told which takeover you are and
+    // winning it cannot be two writes — that gap is the race the token exists to close.
+    if (guard?.claimOwnership === true) sets.push("owner_epoch = owner_epoch + 1");
     const vals: unknown[] = [];
     let i = 1;
     if (patch.status !== undefined) {
@@ -351,6 +356,12 @@ export class PgScorecardStore implements ScorecardStore {
       i++;
       guardSql += ` AND status <> ALL($${i}::text[])`;
       vals.push([...TERMINAL_SCORECARD_STATUSES]);
+    }
+    // THE FENCE the driver proves on every write that drives this batch (mig 0166).
+    if (guard?.expectOwnerEpoch !== undefined) {
+      i++;
+      guardSql += ` AND owner_epoch = $${i}`;
+      vals.push(guard.expectOwnerEpoch);
     }
     // THE RECOVERY CLAIM — exactly one replica may take a dead one's work (arch-review 28 P1).
     if (guard?.expectOwnerReplica !== undefined) {

@@ -42,6 +42,8 @@ export class InMemoryScorecardStore implements ScorecardStore {
     // must not resume — which it can only know by this returning undefined.
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
       return undefined;
+    // The driver's fencing token (mig 0166) — a stale loop's write fails against a number that moved.
+    if (guard?.expectOwnerEpoch !== undefined && (cur.ownerEpoch ?? 0) !== guard.expectOwnerEpoch) return undefined;
     // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that
     // already stamped one wins and this write is refused.
     // passId is the FENCE — never reused, so it cannot collide across passes the way an epoch can.
@@ -73,7 +75,13 @@ export class InMemoryScorecardStore implements ScorecardStore {
       const persisted = cur.scoringPass?.epoch ?? null;
       if (persisted !== guard.expectScoringPassEpoch) return undefined;
     }
-    const next = { ...cur, ...patch, id: cur.id };
+    const next = {
+      ...cur,
+      ...patch,
+      id: cur.id,
+      // The claim raises the epoch in the same act that wins it (mig 0166).
+      ...(guard?.claimOwnership === true ? { ownerEpoch: (cur.ownerEpoch ?? 0) + 1 } : {}),
+    };
     // The store stamps the lease's end (see the port) — one process, one clock, so this is trivially the
     // same clock the reclaimability check above reads. It still lives HERE rather than at the call site,
     // because the invariant being kept is "the lease is authored by whoever judges it", and an in-memory
