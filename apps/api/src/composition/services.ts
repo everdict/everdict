@@ -20,6 +20,7 @@ import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
 import { BrowserProfileService } from "@everdict/application-control";
 import type { Scheduler } from "@everdict/backends";
+import type { ScorecardRecord } from "@everdict/contracts";
 import type { AgentSpec } from "@everdict/contracts";
 import type {
   BrowserProfileStore,
@@ -256,6 +257,14 @@ export function buildCheckpoint(deps: {
   verificationDecisionStore?: VerificationDecisionStore;
   runStore: RunStore;
   scorecardStore: ScorecardStore;
+  // THE READ THE VERIFIER'S TOOL SERVES (arch-review 29 P0). SAME PROJECTION CODE IS NOT SAME PROJECTION
+  // SOURCE: a dispatched batch does not keep its results on the row — it stores `runIds` and the service
+  // hydrates the plane from the child runs on read. Pinning from the RAW store therefore computed a plane
+  // digest over a document with no plane at all, while the verifier's `get_scorecard` observed the hydrated
+  // one — so an ordinary production scorecard reported `evidence_moved` with nobody having touched it.
+  //
+  // One reader, both sides. This is the service's own hydrating get, which is what the tool calls.
+  readScorecardEvidence: (id: string) => Promise<ScorecardRecord | undefined>;
   issueStore?: IssueStore;
   workspaceFs?: WorkspaceFs;
   events?: PlatformEventEmitter;
@@ -313,7 +322,7 @@ export function buildCheckpoint(deps: {
       const pinned: Array<{ type: string; id: string; identity: EvidenceIdentity }> = [];
       for (const ref of refs) {
         if (ref.type === "scorecard") {
-          const record = await deps.scorecardStore.get(ref.id);
+          const record = await deps.readScorecardEvidence(ref.id);
           if (record?.tenant !== tenant) continue; // unresolvable → the service records it as unpinnable
           const newest = record.scoring?.[record.scoring.length - 1];
           pinned.push({

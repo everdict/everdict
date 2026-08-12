@@ -820,6 +820,9 @@ async function main(): Promise<void> {
       : {}),
     runStore: store,
     scorecardStore,
+    // The verifier pins evidence from the SAME read its tool serves — the service's hydrating get, which
+    // rebuilds a dispatched batch's plane from its child runs (arch-review 29 P0).
+    readScorecardEvidence: (id: string) => scorecardService.get(id),
     // issue + file are everdict-HELD records — resolvable, so "unverifiable" stays reserved for what we
     // genuinely cannot check (a tenant's git commit, a foreign platform's trace).
     issueStore,
