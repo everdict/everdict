@@ -45,6 +45,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
+import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot, refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -714,7 +715,13 @@ export class RunService {
   // finished it while I was asking". A caller reading `false` as the first meaning tombstones the second —
   // and one did, over a run that had SUCCEEDED, with no CAS to stop it. The distinction is the whole point,
   // so it is in the type: only `unresumable` may be settled by the caller.
-  async resume(record: RunRecord, adopted?: CaseResult): Promise<ResumeResult> {
+  async resume(record: RunRecord, adopted?: CaseResult, authority?: DriverAuthority): Promise<ResumeResult> {
+    // The epoch this recovery WON, or — for a caller with no claim behind it — the record's own. Every write
+    // below proves it, adoption included: `settleRun` has taken an epoch since mig 0170 and this branch was
+    // the one caller that never passed one, so a replica that had already been displaced could still decide
+    // a run's outcome (arch-review 32 P0). Adoption WAITS for the backend job, which is precisely the pause
+    // during which a takeover happens.
+    const epoch = authority?.epoch ?? record.ownerEpoch ?? 0;
     // A CAS GUARD PRESENT IS NOT A CAS AUTHORITY CONSUMED (arch-review 28 P1). Both writes below were
     // correctly fenced and both ignored the answer — so a recovery that LOST the race still reported success
     // and, worse, still dispatched. The guard stopped the row from being corrupted and did nothing about the
@@ -727,7 +734,9 @@ export class RunService {
     });
     if (adopted) {
       if (!run.canAdopt()) return settledElsewhere(); // already settled — never rewrite a terminal record
-      const claimed = await settleRun(this.deps.store, record.id, run.adopt(adopted, this.now()).patch);
+      const claimed = await settleRun(this.deps.store, record.id, run.adopt(adopted, this.now()).patch, undefined, {
+        epoch,
+      });
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
       return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
     }
@@ -739,7 +748,7 @@ export class RunService {
       // leave two replicas re-dispatching the same case, each holding a guard the other also satisfies.
       // Absent is ZERO, never "unfenced": a claim raises `epoch + 1` from that same absent value, so proving
       // 0 holds exactly while nobody has claimed and fails the moment somebody has.
-      expectOwnerEpoch: record.ownerEpoch ?? 0,
+      expectOwnerEpoch: epoch,
     });
     // …and the dispatch is DOWNSTREAM of that claim. Without this, a replica whose redispatch lost still
     // started a second execution of a case that already had an answer.
@@ -754,8 +763,8 @@ export class RunService {
         ...(record.trigger ? { trigger: record.trigger } : {}),
       },
       undefined,
-      // The epoch this recovery WON — `record` is the claim's own return value, not the row the sweep listed.
-      record.ownerEpoch ?? 0,
+      // The epoch this recovery WON — handed over by the claim, not read back off the row.
+      epoch,
     );
     return { kind: "resumed" };
   }
@@ -871,9 +880,19 @@ export class RunService {
           result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}`);
         } catch {}
       }
+      // SETTLEMENT AUTHORITY GOVERNS EVIDENCE PUBLICATION, NOT ONLY THE ROW (arch-review 32 P0). Notification
+      // and metrics already hung off the committed settle; the trajectory and the replay recording did not,
+      // and they are the two artifacts every later judgment stands on. The trajectory store keeps the FIRST
+      // seal (immutable evidence, a re-offer never rewrites it), so a displaced driver that lost the row and
+      // sealed anyway left the run reading `result = B, trajectory = A`: one artifact, two executions, and
+      // nothing on the record to say so.
+      //
+      // So the settle happens FIRST and everything downstream of it derives from the answer. The ordering is
+      // the fix — the loser now seals nothing, which leaves the winner's own seal the first and only one.
+      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
       // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:
       // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
-      if (this.deps.recordingStore) {
+      if (committed && this.deps.recordingStore) {
         try {
           // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the recording before sealing.
           await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result);
@@ -881,14 +900,18 @@ export class RunService {
             envKind: input.case.env.kind,
             dispatch: dispatchManifest(result.harness, input.case.fixtures),
           });
-          if (ref) result.recordingRef = ref;
+          // The ref is attached to the settled row in a follow-up patch: the settle above is what earned the
+          // right to publish this recording, so the reference to it lands after, on the row this driver owns.
+          if (ref) {
+            result.recordingRef = ref;
+            await this.deps.store.update(id, { result }, undefined, { expectNotCancelled: true }).catch(() => {});
+          }
         } catch {}
       }
-      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
       // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
       // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.
-      if (result.trace.length > 0)
+      if (committed && result.trace.length > 0)
         void this.sealPlanes(id, input.tenant, result.trace, {
           ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
         });
@@ -903,8 +926,9 @@ export class RunService {
       // single run with no "why" once the orchestrator job was GC'd.
       const failed = failedCaseResult(job, err);
       committed = (await this.finalize(id, (run) => run.fail(error, this.now(), failed))) !== undefined;
-      // Dual-write parity with the success path: the evidence trace seals as the run's own trajectory.
-      if (failed.trace.length > 0)
+      // Dual-write parity with the success path, including the part that matters: a settle that lost publishes
+      // no evidence either, so the winner's trajectory is the one the run keeps.
+      if (committed && failed.trace.length > 0)
         void this.sealPlanes(id, input.tenant, failed.trace, {
           ...(failed.traceT0 !== undefined ? { t0: failed.traceT0 } : {}),
         });
@@ -990,9 +1014,19 @@ export class RunService {
     // The turn's evidence inherits the turn's audience (a member's transcript stays that member's), and its
     // relative clock is anchored at the run's own start — the turn opened when the record was created, so the
     // trajectory can be laid on a wall-clock axis without the agent service having to ship one.
-    if (spans && spans.length > 0) void this.sealRecordedSpans(id, current.tenant, spans, current);
-    else if (trace && trace.length > 0)
-      void this.sealPlanes(id, current.tenant, pricedTrace(trace), { record: current, t0: current.createdAt });
+    //
+    // …but only from the driver that still HOLDS this run (arch-review 32 P0). The healing case is the same
+    // driver re-reporting its own turn; a DIFFERENT driver — one displaced by a takeover, whose settle below
+    // is about to be refused — sealing here would leave the run's outcome and the trajectory every judgment
+    // reads describing two different executions, with the store's first-write-wins keeping the wrong one.
+    // Holding the row's current epoch is what tells those two apart.
+    const held = this.driverEpoch.get(id);
+    const owns = held === undefined || held === (current.ownerEpoch ?? 0);
+    if (owns) {
+      if (spans && spans.length > 0) void this.sealRecordedSpans(id, current.tenant, spans, current);
+      else if (trace && trace.length > 0)
+        void this.sealPlanes(id, current.tenant, pricedTrace(trace), { record: current, t0: current.createdAt });
+    }
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());

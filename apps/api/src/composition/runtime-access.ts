@@ -270,7 +270,8 @@ export async function runStartupRecovery(deps: {
     runs: store,
     owner,
     replicas,
-    resume: (id) => scorecardService.resume(id),
+    // The claim's own answer travels with the call — recovery never asks the row what it is allowed to do.
+    resume: (id, authority) => scorecardService.resume(id, authority),
     // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
     // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
     // Claim the run for resume and adopt IN THE BACKGROUND — adopting a still-running run waits for its alloc to
@@ -285,19 +286,25 @@ export async function runStartupRecovery(deps: {
     // finish) was recorded as an infrastructure failure. Two things were wrong and both are fixed: the
     // service now says WHICH of the two happened, and the write goes through `settleRun`, which cannot be
     // called without the terminal fence.
-    resumeRun: async (r) => {
+    resumeRun: async (r, authority) => {
       void (async () => {
         const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
         // A resume that THREW told us nothing, and the claim is binding — so it falls to the tombstone, which
         // is now fenced: if the run settled in the meantime the write simply loses and history keeps the real
         // outcome. That is the difference between guessing safely and guessing.
-        const outcome = await service.resume(r, adopted).catch((): ResumeResult => ({ kind: "unresumable" }));
+        const outcome = await service
+          .resume(r, adopted, authority)
+          .catch((): ResumeResult => ({ kind: "unresumable" }));
         if (outcome.kind !== "unresumable") return; // resumed, or already settled by whoever finished it
-        await settleRun(store, r.id, {
-          status: "failed",
-          error: INTERRUPTED,
-          updatedAt: new Date().toISOString(),
-        }).catch((err) => {
+        // …and the tombstone is fenced by the epoch this recovery HOLDS, not merely by the row being open —
+        // "open" is exactly what makes it a successor's to finish (arch-review 32 P0).
+        await settleRun(
+          store,
+          r.id,
+          { status: "failed", error: INTERRUPTED, updatedAt: new Date().toISOString() },
+          undefined,
+          { epoch: authority.epoch },
+        ).catch((err) => {
           console.warn(
             `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,
           );

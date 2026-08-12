@@ -60,6 +60,7 @@ import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js"
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
+import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
@@ -184,7 +185,11 @@ export class ScorecardBatchService {
   // tombstoning the batch. Returns false when the record can't be faithfully resumed (no orchestration field — pre-mig
   // records — or the dataset/subset no longer resolves); the caller falls back to the old INTERRUPTED tombstone.
   // docs/architecture/batch-resilience.md
-  async resume(id: string): Promise<boolean> {
+  // `authority` is what the recovery WON when it claimed this batch (arch-review 32 P0). It is threaded to
+  // `track` and never re-derived: a replica that reads the row for its epoch reads whatever number the
+  // replica that displaced it wrote, and then drives beside it holding an identical token. Absent = nobody
+  // claimed anything (a manual re-drive in a single-replica install), which drives under the record's own.
+  async resume(id: string, authority?: DriverAuthority): Promise<boolean> {
     const rec = await this.deps.store.get(id);
     if (!rec) return false;
     const batch = ScorecardBatch.from(rec);
@@ -249,11 +254,16 @@ export class ScorecardBatchService {
             //
             // So when the CAS loses, the persisted truth decides — re-read the child and follow it.
             if (adoptable) {
-              const claimed = await this.deps.runStore.update(
+              // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
+              // this call remembered its fence is not the property being kept — being unable to forget it is.
+              // The scan walked past this one for a wrapper's worth of reason (`Run.from(c).adopt(…)` opens
+              // with `from`), which is the exact shape of false green a structural guard exists to refuse.
+              const claimed = await settleRun(
+                this.deps.runStore,
                 c.id,
                 Run.from(c).adopt(adoptable, this.now()).patch,
                 undefined,
-                { expectNonTerminal: true },
+                { epoch: c.ownerEpoch ?? 0 },
               );
               if (claimed !== undefined) {
                 adopted += 1;
@@ -357,6 +367,7 @@ export class ScorecardBatchService {
         ...(plan.modelPins ? { modelPins: plan.modelPins } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
         ...(orch.oomAutoBoost ? { oomAutoBoost: true } : {}),
+        ...(authority ? { authority } : {}),
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
       },
     );
@@ -1347,6 +1358,10 @@ export class ScorecardBatchService {
       sealedJudges?: SealedJudgeClosure[];
       // The manifest's model DOCUMENT pins, carried onto every job this loop dispatches (arch-review 20 P0-2).
       modelPins?: CaseJob["modelPins"];
+      // THE FENCING TOKEN THIS LOOP WAS HANDED (arch-review 32 P0), from the claim that won it. Absent = a
+      // submit, which drives under the epoch the record was created with. What must never happen is this
+      // loop deciding its own authority by reading the row — see the note where it is consumed.
+      authority?: DriverAuthority;
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1369,7 +1384,15 @@ export class ScorecardBatchService {
     // What the concession actually did was exempt EVERY batch submitted before a claim, which is all of them:
     // the loop held `undefined`, `proveAuthority` returned true without asking, and a displaced driver ran
     // the whole fan-out. The certification that covered this proved the store's CAS and never the loop.
-    const epoch = opening.ownerEpoch ?? 0;
+    // CARRIED, NOT RE-READ (arch-review 32 P0). The row's current epoch is the wrong answer for a driver
+    // that has been away: three replicas are enough to show it. B claims (epoch 1) and pauses; C claims
+    // (epoch 2) and starts driving; B wakes, reads the row, adopts C's token as its own and drives beside it
+    // — no race won, nothing overwritten, just a number read. A fencing token that can be looked up is not a
+    // token, so the only value trusted here is the one the claim handed over.
+    //
+    // Absent = a submit rather than a recovery: this process created the record, so the epoch it was created
+    // with IS the one it holds.
+    const epoch = opts.authority?.epoch ?? opening.ownerEpoch ?? 0;
     const fenced = { expectOwnerEpoch: epoch };
     const epochOpt = { epoch };
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.

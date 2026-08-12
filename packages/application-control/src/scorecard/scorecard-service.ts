@@ -52,6 +52,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
+import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
@@ -1261,8 +1262,8 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   }
 
   // --- Batch lifecycle — delegated to ScorecardBatchService (resume/retry + Batch-on-Temporal internals).
-  resume(id: string): Promise<boolean> {
-    return this.batch.resume(id);
+  resume(id: string, authority?: DriverAuthority): Promise<boolean> {
+    return this.batch.resume(id, authority);
   }
 
   retryFailed(input: {

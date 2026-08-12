@@ -230,8 +230,12 @@ describe("terminal-write guard — a settlement carries its CAS", () => {
   // lines up) does the enclosing function get asked.
   const isSettlement = ({ span, context }: { span: string; context: string }): boolean => {
     if (isLiteralSettlement(span)) return true;
-    const inline = /\.(\w+)\([^;]*?\)\.patch/.exec(span);
-    if (inline) return SETTLING.includes(inline[1] ?? "");
+    // EVERY method in the chain, not the first one. `Run.from(c).adopt(…).patch` opens with `from`, which
+    // settles nothing — so a scan that read the first name called this an ordinary write and went green over
+    // a raw terminal update sitting in the resume path. The transition is the LAST call before `.patch`, and
+    // asking about all of them costs nothing and cannot be fooled by another wrapper appearing in front.
+    const inline = span.match(/\.(\w+)\(/g);
+    if (inline && /\)\.patch\b/.test(span)) return inline.some((call) => SETTLING.includes(call.slice(1, -1)));
     return SETTLE_TRANSITION.test(context);
   };
 

@@ -32,15 +32,29 @@ const ACTIVE = new Set(["queued", "running"]);
 // "we could not read who is alive" — distinct from "nobody is alive", which would clear every owned record.
 const UNKNOWN = "unknown" as const;
 
+// WHAT A RECOVERY WON, as a value it carries rather than a state it looks up. `epoch` is the fencing token
+// the claim raised; every write that drives the record proves it. Re-reading it from the row is the one thing
+// that must never happen — the number there a moment later belongs to whoever displaced this replica.
+export interface DriverAuthority {
+  readonly ownerReplica: string;
+  readonly epoch: number;
+}
+
 export interface RecoveryDeps {
   scorecards: ScorecardStore;
   runs?: RunStore;
   // ScorecardService.resume — re-drive an interrupted batch from its finished child results. Returns false when the
   // record can't be resumed (then we tombstone). Optional so recovery still works in stores-only wiring/tests.
-  resume?: (id: string) => Promise<boolean>;
+  //
+  // THE AUTHORITY TRAVELS AS AN ARGUMENT (arch-review 32 P0). It used to take an id, and everything
+  // downstream re-read the record to find out which epoch it was driving under — which is not a fencing
+  // token, it is a lease check wearing one's clothes. Three replicas are enough to show why: B claims (epoch
+  // 1) and pauses, C claims (epoch 2) and starts driving, B wakes, re-reads, adopts C's OWN token and drives
+  // beside it. Nobody had to win a race; B only had to read.
+  resume?: (id: string, authority: DriverAuthority) => Promise<boolean>;
   // RunService.resume (adopt-first) — re-drive an interrupted STANDALONE run (adopt the still-alive backend job
   // or re-dispatch from the persisted caseSpec). false = legacy record → tombstone as before.
-  resumeRun?: (record: RunRecord) => Promise<boolean>;
+  resumeRun?: (record: RunRecord, authority: DriverAuthority) => Promise<boolean>;
   // WHO this process is. Records it claims are re-stamped with it; records already stamped with it are ours to
   // reclaim (a replica whose identity is pinned across restarts must still recover its own interrupted work).
   owner?: string;
@@ -83,6 +97,10 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       liveCount += 1;
       continue;
     }
+    // What this recovery is entitled to do to this batch. Replaced by the CLAIM's own answer below when a
+    // claim is made; with no owner configured (single-process wiring) it is the record's own epoch, which is
+    // the same value nobody else is racing for.
+    let authority: DriverAuthority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: c.ownerEpoch ?? 0 };
     // THE CLAIM IS THE AUTHORITY (arch-review 28 P1). Two control planes booting together both see this
     // batch's owner gone, and without an exclusive claim both stamped themselves and both resumed — the
     // child terminal CAS keeps the ROWS honest and does nothing about two replicas dispatching the same
@@ -106,19 +124,25 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         liveCount += 1; // another replica claimed it — its recovery, not ours
         continue;
       }
+      // The token this recovery WON. Carried from here to every write that drives the batch; never looked up
+      // again, because the value in the row a minute from now is whoever displaced us.
+      authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: claimed.ownerEpoch ?? 0 };
     }
-    if (deps.resume && (await deps.resume(c.id).catch(() => false))) {
+    if (deps.resume && (await deps.resume(c.id, authority).catch(() => false))) {
       resumedCount += 1;
       continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
     }
     // The tombstone that motivated the fence: a batch that settled while this recovery was deciding must not
     // be recorded as an infrastructure failure. `undefined` = it settled; nothing here is ours to write.
+    // …UNDER THE EPOCH THIS RECOVERY HOLDS (arch-review 32 P0). Without it, a replica that lost the batch to
+    // a later takeover could still tombstone the OPEN batch its successor is driving: `expectNonTerminal`
+    // says the row is open, which is exactly what makes it the successor's to finish.
     const tombstoned = await settleScorecard(
       deps.scorecards,
       c.id,
       { status: "failed", error: INTERRUPTED, updatedAt: now() },
       undefined,
-      { over: "open" },
+      { over: "open", epoch: authority.epoch },
     );
     if (tombstoned === undefined) {
       liveCount += 1;
@@ -132,11 +156,13 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // …under the settle CAS (arch-review 26 P1). A booting replica reclaiming a dead one's work reads a
       // snapshot; a late drain, a self-hosted runner reporting in, or the dying process's own last write can
       // land between that read and this one. Marking such a child INTERRUPTED would erase a real outcome.
-      const settled = await settleRun(deps.runs, child.id, {
-        status: "failed",
-        error: INTERRUPTED,
-        updatedAt: now(),
-      });
+      const settled = await settleRun(
+        deps.runs,
+        child.id,
+        { status: "failed", error: INTERRUPTED, updatedAt: now() },
+        undefined,
+        { epoch: child.ownerEpoch ?? 0 },
+      );
       if (settled) runCount += 1;
     }
   }
@@ -173,6 +199,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // run proves that number — so the replica this recovery declared dead, if it was only paused, fails
       // against a value that moved instead of settling a run it no longer owns.
       let driving = r;
+      let runAuthority: DriverAuthority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: r.ownerEpoch ?? 0 };
       if (claim) {
         const claimed = await deps.runs.update(r.id, claim, undefined, {
           expectNonTerminal: true,
@@ -184,16 +211,21 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
           continue;
         }
         driving = claimed;
+        runAuthority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: claimed.ownerEpoch ?? 0 };
       }
-      if (deps.resumeRun && (await deps.resumeRun(driving).catch(() => false))) {
+      if (deps.resumeRun && (await deps.resumeRun(driving, runAuthority).catch(() => false))) {
         runsResumed += 1;
         continue;
       }
-      const settled = await settleRun(deps.runs, r.id, {
-        status: "failed",
-        error: INTERRUPTED,
-        updatedAt: now(),
-      });
+      const settled = await settleRun(
+        deps.runs,
+        r.id,
+        { status: "failed", error: INTERRUPTED, updatedAt: now() },
+        undefined,
+        // Under the epoch this recovery claimed — a replica displaced by a later takeover must not tombstone
+        // the open run its successor is now driving.
+        { epoch: runAuthority.epoch },
+      );
       if (settled) runCount += 1;
     }
   }
