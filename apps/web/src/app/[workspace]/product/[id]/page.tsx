@@ -76,7 +76,7 @@ export default async function ProductPage({
         description={product.description}
         actions={
           canWrite ? (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <AutoEvalToggle
                 productId={product.id}
                 enabled={product.autoEval.enabled}
@@ -101,14 +101,23 @@ export default async function ProductPage({
           <SectionHeader title={t('servicesHeading')} />
           <div className="grid gap-2 @md:grid-cols-2 @3xl:grid-cols-3">
             {product.services.map((service) => (
-              <Card key={service.name} className="space-y-1 p-3">
-                <p className="flex items-center gap-1.5 text-[13px] font-[510]">
-                  <GitBranch className="size-3.5 text-muted-foreground" />
-                  {service.name}
-                  <Badge tone="outline">{t(`source.${service.source}`)}</Badge>
-                  {service.tagPrefix && <Badge tone="neutral">{service.tagPrefix}*</Badge>}
+              // 카드는 그리드 트랙(1fr)에 갇힌다 — 안쪽 줄이 하나라도 안 줄어들면 트랙이 밀려 카드가
+              // 화면 밖으로 나간다. 그래서 모든 줄이 min-w-0 + truncate 이고, 아이콘만 shrink-0 다.
+              <Card key={service.name} className="min-w-0 space-y-1 p-3">
+                <p className="flex min-w-0 items-center gap-1.5 text-[13px] font-[510]">
+                  <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate" title={service.name}>
+                    {service.name}
+                  </span>
                 </p>
-                <p className="truncate font-mono text-xs text-muted-foreground">
+                <p
+                  className="truncate font-mono text-xs text-muted-foreground"
+                  title={
+                    service.path !== undefined
+                      ? `${service.repository}/${service.path}`
+                      : service.repository
+                  }
+                >
                   {service.repository}
                   {/* 모노레포에서 이 서비스가 사는 자리 — 같은 레포의 형제 서비스들과 구분되는 지점. */}
                   {service.path !== undefined && (
@@ -166,7 +175,7 @@ export default async function ProductPage({
                   </span>
                 )}
                 {release.targetDate && (
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                     {release.targetDate}
                   </span>
                 )}

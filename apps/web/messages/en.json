@@ -5997,10 +5997,6 @@
   },
   "productPage": {
     "servicesHeading": "Tracked services",
-    "source": {
-      "releases": "releases",
-      "tags": "tags"
-    },
     "syncFailed": "Sync failed: {message}",
     "lastSynced": "Synced {at}",
     "neverSynced": "Never synced — press Sync to backfill.",

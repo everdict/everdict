@@ -5997,10 +5997,6 @@
   },
   "productPage": {
     "servicesHeading": "추적 서비스",
-    "source": {
-      "releases": "릴리즈",
-      "tags": "태그"
-    },
     "syncFailed": "싱크 실패: {message}",
     "lastSynced": "{at} 싱크됨",
     "neverSynced": "아직 싱크된 적 없음 — 싱크를 누르면 과거를 채웁니다.",
