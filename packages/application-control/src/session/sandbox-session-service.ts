@@ -1036,7 +1036,9 @@ export class SandboxSessionService {
     const current = await this.deps.store.get(runId);
     if (current) {
       const transition = Run.from(current).extendSession(ttlSec, this.now());
-      await this.deps.store.update(runId, transition.patch, []);
+      // Under the settle CAS: extending a session another process closed between the read and this write
+      // would re-open a settled row (arch-review 27's guard found this one).
+      await this.deps.store.update(runId, transition.patch, [], { expectNonTerminal: true });
       const patched = transition.patch.session;
       if (patched?.expiresAt !== undefined) expiresAt = patched.expiresAt;
     }
@@ -1713,12 +1715,15 @@ export class SandboxSessionService {
         newId: this.newId,
         now: this.now,
       });
-      await this.deps.store.update(
+      const written = await this.deps.store.update(
         input.runId,
         transition.patch,
         stamped.map((f) => f.record),
+        { expectNonTerminal: true },
       );
-      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      // …and a lost CAS announces nothing: the guarded write inserted no durable event, so pushing the
+      // pre-stamped batch would put a fact on the live bus the ledger never recorded.
+      if (written !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     }
     // Retention runs AFTER the publish and never blocks it: the snapshot the caller asked for already
     // exists, and a registry that refuses a delete must not turn that success into a failure. What it
@@ -1806,8 +1811,11 @@ export class SandboxSessionService {
       runId,
       transition.patch,
       stamped.map((f) => f.record),
+      { expectNonTerminal: true },
     );
-    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    // A lost CAS means somebody else closed it first — their facts are the ones on the ledger, so this
+    // close publishes nothing and reports the row as it now stands.
+    if (updated !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     return updated ?? (await this.deps.store.get(runId));
   }
 

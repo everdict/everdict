@@ -352,6 +352,24 @@ process-kill scenario that quietly degrades into an in-process one certifies not
 - ~~**The agent loop's own refusals.**~~ Done — TRUST-134 drives the real loop against a faked transport, the
   harness this item was waiting for (`apps/agent`'s verification turn built it).
 
+## The structural guards — invariants a reviewer should never have to find twice
+
+Several rules here are conditions a call site must remember, and every review in this series found one of them
+forgotten somewhere new. A guard that lives only in a comment is a guard that will be missing from the next
+writer, so the recurring ones are now scanned in `pnpm test` — the push gate, not the nightly, because they
+are about code that has not shipped yet.
+
+| Guard | What it refuses | Where |
+| --- | --- | --- |
+| terminal-write | A run lifecycle write (a domain transition, or a literal terminal status) that does not carry `expectNonTerminal`. Non-terminal transitions are covered too, deliberately: starting or adopting a run another process settled is the same read-check-write | `packages/application-control/src/ports/terminal-write-guard.test.ts` |
+| CAS-loser | A guarded write followed by a live `pushPersisted` whose answer was never bound — a write nobody COULD have read, so the push after it is unconditional by construction | `packages/application-control/src/platform-event/cas-loser-guard.test.ts` |
+| self-skip | A trust scenario that prints its own SKIP and returns. Vitest reports that as passed, the runner counts it, and the certification prints PASS over a claim nothing exercised — the one door the "no skipped scenario" rule cannot watch | `apps/api/src/trust/self-skip-guard.test.ts` |
+
+Each one was written against a defect that had already shipped, and each was verified to FAIL when that defect
+is reintroduced — a guard nobody has watched fail is a guard nobody knows the shape of. They also assert that
+their own scanner still matches something: a scan whose glob goes stale reports green forever, which is worse
+than not having it.
+
 ## Producing the contract step's evidence
 
 `stagePromotionReadiness` answers `observed: 0, ready: false` until passes have actually recorded a

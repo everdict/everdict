@@ -694,12 +694,16 @@ export class RunService {
     const run = Run.from(record);
     if (adopted) {
       if (!run.canAdopt()) return false; // already settled — never rewrite a terminal record
-      await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch);
+      await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch, undefined, {
+        expectNonTerminal: true,
+      });
       return true;
     }
     const spec = record.caseSpec; // local narrow — canRedispatch() already requires it
     if (!run.canRedispatch() || !spec) return false;
-    await this.deps.store.update(record.id, run.redispatch(this.now()).patch);
+    await this.deps.store.update(record.id, run.redispatch(this.now()).patch, undefined, {
+      expectNonTerminal: true,
+    });
     void this.track(record.id, {
       tenant: record.tenant,
       harness: record.harness,
@@ -858,7 +862,9 @@ export class RunService {
     try {
       const rec = await this.deps.store.get(id);
       if (!rec || rec.status !== "queued") return;
-      await this.deps.store.update(id, Run.from(rec).start(this.now()).patch);
+      await this.deps.store.update(id, Run.from(rec).start(this.now()).patch, undefined, {
+        expectNonTerminal: true,
+      });
     } catch {
       // Best-effort visibility flip.
     }
@@ -927,7 +933,9 @@ export class RunService {
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());
-    await this.deps.store.update(id, patch);
+    // The settle CAS: `isTerminal()` above answers for THIS process, and an agent turn's settle races the
+    // session sweep and the cancel path in others.
+    await this.deps.store.update(id, patch, undefined, { expectNonTerminal: true });
     // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
     // cancel, not a hunt across N batches. Best-effort: the settle above is already durable.
     if (outcome === "cancelled") void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
@@ -1032,12 +1040,15 @@ export class RunService {
     // a crash between "run settled" and "the world was told" is no longer expressible.
     const { patch, facts } = outcome(run);
     const stamped = this.stampFacts(current.tenant, facts);
-    await this.deps.store.update(
+    const settled = await this.deps.store.update(
       id,
       patch,
       stamped.map((f) => f.record),
+      { expectNonTerminal: true },
     );
-    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    // A CAS loser publishes nothing — the guarded write inserted no durable event, and this bus feeds agent
+    // activation rather than a UI toast.
+    if (settled !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
   }
 
   // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same
