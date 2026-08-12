@@ -295,6 +295,10 @@ export class ScorecardBatchService {
                 { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
                 this.now(),
               ).patch,
+              undefined,
+              // …under the child's own epoch: a child somebody claimed since this list read is not this
+              // recovery's to tombstone, even though the row is still open.
+              { epoch: c.ownerEpoch ?? 0 },
             );
             if (interrupted === undefined) {
               // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
@@ -788,6 +792,14 @@ export class ScorecardBatchService {
       // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
       if (caseEnvelope && caseUsd > 0) void this.deps.envelopes?.settle(caseEnvelope.id, ctx.tenant, caseUsd);
       // P5 dual-write: the case's trajectory seals in the OWNED store under its child run id (idempotent).
+      //
+      // WHY THIS ONE SEALS BEFORE ITS SETTLE, unlike the standalone run's (arch-review 32 P0). The judges
+      // below score onto this result and their own executions seal as `judge:<id>` planes on the child's
+      // trajectory — so the execution plane has to exist first, and the child's settle carries what the
+      // judges produced. The bound that makes this safe is the one above it: the loop proves its authority
+      // before it dispatches, so a displaced driver reaches this point for at most the case already in
+      // flight, and that case's execution really did happen. Two drivers seal one child only through the
+      // dispatch-intent window named at `proveAuthority`.
       if (child && result.trace.length > 0)
         if (this.deps.trajectories)
           void sealExecutionPlanes(this.deps.trajectories, {
@@ -1257,7 +1269,10 @@ export class ScorecardBatchService {
     // other writer is in another process — a user's cancel in the control plane against a case drain landing
     // from a worker. Read-check-write made the LAST write win, which is the exact inverse of the rule this
     // method is named after.
-    await settleRun(store, childId, settle(current));
+    // …under the epoch the CHILD carries. The batch loop proves its own authority before it dispatches; this
+    // write lands afterwards, on a row of its own, and a driver that was displaced in between has no more
+    // right to settle the child than it has to settle the parent.
+    await settleRun(store, childId, settle(current), undefined, { epoch: current.ownerEpoch ?? 0 });
   }
 
   private async markChildRunning(childId: string): Promise<void> {
