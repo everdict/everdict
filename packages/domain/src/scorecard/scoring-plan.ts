@@ -347,3 +347,39 @@ export function sealGrading(
     gradingCases: Object.fromEntries(selectedCases.map((c) => [c.id, contentDigest(c.graders)])),
   };
 }
+
+// ── EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3) ───────────────────────────────────────────────
+//
+// A child went terminal when the judge PROMISE was done, which is not the same claim as "the judges
+// answered". The Temporal driver swallowed a top-level judge failure outright (`.catch(() => {})`) and the
+// in-process one settled regardless of what the judge stream had made of its tasks — so an unexpected judge
+// infrastructure error could leave a case whose evidence is terminal and whose selected judge is simply not
+// mentioned. Absent reads as "no judge was selected", which is a different fact and a strictly nicer one.
+//
+// The invariant at the commit point is about SHAPE, so it is satisfied by stating the absence rather than by
+// blocking the batch: a judge that did not answer gets an explicit unmeasured row, retryable, so a re-score
+// can pick it up and every aggregate keeps counting it out. Pure and total — a caller that already has full
+// coverage gets its own array back.
+export function completeJudgeCoverage(
+  scores: readonly Score[],
+  judges: ReadonlyArray<{ id: string }>,
+  detail = "the judge did not report a verdict for this case",
+): Score[] {
+  const missing = judges.filter((j) => !scores.some((s) => isJudgeMetricOf(s.metric, j.id)));
+  if (missing.length === 0) return [...scores];
+  return [
+    ...scores,
+    ...missing.map(
+      (j): Score => ({
+        graderId: j.id,
+        metric: `judge:${j.id}`,
+        status: "unmeasured",
+        // Not `unsupported`: nothing about the configuration says this judge cannot run — it was selected,
+        // it was asked, and no answer arrived. That is an error, and a re-score is exactly the recovery.
+        reason: "grader_error",
+        retryable: true,
+        detail,
+      }),
+    ),
+  ];
+}

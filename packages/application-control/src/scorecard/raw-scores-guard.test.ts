@@ -16,6 +16,9 @@ const ALLOWED = new Set([
   "scorecard/scorecard-score-service.ts", // re-score worklist — strips/replaces whole judge families, never averages
   "scorecard/scorecard-observability.ts", // gated: batchSettledEvent tallies the FAILURES on purpose (caseReason moved to @everdict/domain scoring-plan)
   "trace-sink/trace-sink-service.ts", // gated via measuredScores before anything leaves for a platform
+  // producer — completes a case's judge coverage before its terminal commit: a selected judge that never
+  // answered leaves an explicit unmeasured row rather than no row at all (review 39 P0-3)
+  "scorecard/scorecard-batch-service.ts",
 ]);
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {

@@ -2878,6 +2878,44 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     updatedAt: "2026-07-08T00:00:00.000Z",
   });
 
+  // ── A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3) ──────────────────────
+  it("reports settled:false when the child commit is refused, and the finalizer still counts the case missing", async () => {
+    const store = new InMemoryScorecardStore();
+    const backing = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    // The child settle loses — a takeover, or a per-case cancel. The activity used to mark the case done,
+    // emit its completion fact and answer settled:true anyway, and the finalizer's missing-case check then
+    // consulted that same in-memory set: a case with no result on the ledger passed the check meant to catch it.
+    const runs = new Proxy(backing, {
+      get(target, prop, receiver) {
+        if (prop !== "update") return Reflect.get(target, prop, receiver);
+        return async (id: string, patch: unknown, events: unknown, opts: unknown): Promise<unknown> =>
+          (patch as { status?: string })?.status === "succeeded"
+            ? undefined
+            : backing.update(id, patch as never, events as never, opts as never);
+      },
+    });
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return ok(job.evalCase.id);
+        },
+      },
+      store,
+      datasets,
+      runStore: runs,
+      newId: () => `t-${n++}`,
+    });
+    await datasets.register("acme", threeCases);
+    await store.create(record());
+    await service.planBatch("sc-t");
+
+    expect(await service.runBatchCase("sc-t", "c1")).toEqual({ settled: false });
+    // …and the finalizer refuses to summarize over a batch whose case never reached the ledger.
+    await expect(service.finalizeBatch("sc-t")).rejects.toThrow(/no result on the ledger/);
+  });
+
   it("the full workflow loop — plan lists remaining cases (sharded targets), each case settles once, finalize aggregates", async () => {
     const seen: Array<{ id: string; target?: string }> = [];
     const dispatcher: Dispatcher = {

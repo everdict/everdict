@@ -32,6 +32,7 @@ import {
   caseOutcome,
   caseVerdict,
   classifyFailure,
+  completeJudgeCoverage,
   modelBindingLabel,
   newScorecardChildRun,
   newSeededScorecardChildRun,
@@ -797,12 +798,26 @@ export class ScorecardBatchService {
         // arrives as ConflictError, the same shape the proof gives, so the loop aborts the way it already does.
         await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch: ctx.driverEpoch } });
       }
+      // THIS CASE'S ATTEMPT, ON THIS DRIVER TOO (review 39 P0-2/P0-3). The in-process loop opens one at
+      // dispatch intent; this path opened none at all, so a Temporal-driven case had no attempt to fence and
+      // its producers wrote under whatever number the receiving process held. A reset that throws is a fence
+      // we could not raise, not a fence that was unnecessary — the case still runs, knowing its replay is not
+      // canonical (`unisolated`).
+      const executionId = `evd-${id}-${caseId}`;
+      let generation: number | undefined;
+      let unisolated = false;
+      if (this.deps.recordingStore) {
+        generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
+        if (generation === undefined) unisolated = true;
+        else this.deps.onAttempt?.(executionId, generation);
+      }
       const baseJob: CaseJob = {
         evalCase,
         harness: { id: ctx.harnessId, version: ctx.harnessVersion },
         tenant: ctx.tenant,
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
-        runId: `evd-${id}-${caseId}`, // trace correlation (Temporal path parity — no trial fan-out here)
+        runId: executionId, // trace correlation (Temporal path parity — no trial fan-out here)
+        ...(generation !== undefined ? { recordingGeneration: generation } : {}),
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
         ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
@@ -936,17 +951,42 @@ export class ScorecardBatchService {
             () => this.holdsBatch(id, ctx.driverEpoch),
           )
           .catch(() => {});
+        // …AND EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3). The catch above keeps a judge outage from
+        // failing the case — which is right — but "the judge promise finished" is not "the judges answered",
+        // and a terminal child whose selected judge is simply not mentioned reads as a case nobody chose to
+        // judge. The absence is stated instead, retryably, so a re-score can still pick it up.
+        result = { ...result, scores: completeJudgeCoverage(result.scores, ctx.judges) };
       }
+      // THE SAME TERMINAL CHILD ON BOTH DRIVERS (review 39 P0-3). The in-process path assembles the case's
+      // evidence — the snapshot offload and the recording seal — BEFORE the one terminal write, because
+      // "judged but not assembled" is not finished. This path called settleChild directly, so the same
+      // sentence meant two different things depending on which driver a deployment happened to run: a
+      // Temporal-terminal child could carry inline base64 and no recording ref.
       if (runStore && child)
-        await this.settleChild(
-          child.id,
-          (cur) => ({
-            ...Run.from(cur).succeed(result, this.now()).patch,
-            // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-            ...(ranOn ? { runtime: ranOn } : {}),
-          }),
-          { scorecardId: id, epoch: ctx.driverEpoch },
-        );
+        await this.assembleCaseEvidence(result, {
+          scorecardId: id,
+          executionId,
+          generation: generation ?? 0,
+          ...(unisolated ? { unisolated: true } : {}),
+        });
+      const committed =
+        runStore && child
+          ? await this.settleChild(
+              child.id,
+              (cur) => ({
+                ...Run.from(cur).succeed(result as CaseResult, this.now()).patch,
+                // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+                ...(ranOn ? { runtime: ranOn } : {}),
+              }),
+              { scorecardId: id, epoch: ctx.driverEpoch },
+            )
+          : undefined;
+      // …AND A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3). The settle's answer
+      // was discarded: `doneIds` was marked, the completion fact was emitted and `{settled:true}` was
+      // returned even when the write was refused (a takeover) or failed (the store). The workflow then moved
+      // on, and the finalizer's missing-case check consults `doneIds` first — so a case with no result on the
+      // ledger could pass the very check that exists to catch it.
+      if (runStore && child && committed === undefined) return { settled: false }; // not ours to end, or not written — either way this activity did not settle it
       ctx.doneIds.add(caseId);
       const v = caseVerdict(result, ctx.verdictPolicy);
       const reason = caseReason(result);
@@ -992,7 +1032,13 @@ export class ScorecardBatchService {
     // The expected set is the plan's, which the workflow drives case by case: a batch whose children do not
     // account for it is unfinished, not smaller. Failing here leaves it open for recovery — the same choice
     // the in-process loop makes for an unwritten case.
-    const missing = [...ctx.caseIndex.keys()].filter((cid) => !ctx.doneIds.has(cid) && !latest.get(cid)?.result);
+    // …AND THE LEDGER IS THE ONLY WITNESS (review 39 P0-3/P0-5). This asked `doneIds` first — a set in THIS
+    // process's memory, marked by the activity that ran the case. So a case whose child commit was refused or
+    // failed, and which nevertheless marked itself done, passed the very check that exists to catch it; and a
+    // rebuilt context (another worker, a restart) has an empty set, which made the same batch answer
+    // differently depending on where the finalizer happened to run. A case is accounted for when a row on the
+    // ledger carries its result, and by nothing else.
+    const missing = [...ctx.caseIndex.keys()].filter((cid) => !latest.get(cid)?.result);
     if (missing.length > 0)
       throw new InternalError(
         "UPSTREAM_ERROR",

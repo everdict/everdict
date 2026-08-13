@@ -51,6 +51,7 @@ export {
   childKey,
   hasMeasuredJudgeVerdict,
   judgeAttemptsOf,
+  completeJudgeCoverage,
   duplicateJudgeIds,
   judgePending,
   type JudgeProgress,
