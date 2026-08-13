@@ -734,3 +734,138 @@ describeTrust("TRUST-154 — a recovered run's ending is announced, and its call
     expect(refuseUnsafeCallback("https://localhost:8080/hook", true).hostname).toBe("localhost");
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-155.
+//
+// HOLDING AN EPOCH IN A CONTEXT IS NOT PROVING ONE.
+//
+// The Temporal driver's batch context has carried its `driverEpoch` since the fence was built, and the write
+// that decides the batch's answer — the finalize, the canonical parent outcome every reader treats as THE
+// result — never proved it. A takeover raises the epoch and leaves the batch OPEN, which is exactly the state
+// `over: "open"` accepts, so a paused finalizer woke up and settled a batch it no longer owned, beating its
+// successor to the outcome. Not a duplicate notification: the parent's verdict itself, written by the loser.
+//
+// …and the same driver's judges published without the post-judge probe the in-process loop had just been
+// given, so the race the fix was named after stayed open on the driver an operator running Temporal uses.
+describeTrust("TRUST-155 — the Temporal finalize settles under the epoch its context holds", () => {
+  it("a displaced finalizer cannot write the batch's outcome", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create({
+      id: "sc-final",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "running",
+      ownerReplica: "cp-a",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z",
+    } as never);
+
+    // A's activity context holds epoch 0 and pauses on its way to the finalize.
+    const heldByA = (await store.get("sc-final"))?.ownerEpoch ?? 0;
+    expect(heldByA).toBe(0);
+
+    // B declares A stale and claims the batch. The row stays OPEN — a takeover is not a settlement.
+    const claimed = await store.update("sc-final", { ownerReplica: "cp-b" }, undefined, {
+      expectNonTerminal: true,
+      claimOwnership: true,
+    });
+    expect(claimed?.ownerEpoch).toBe(1);
+    expect(claimed?.status).toBe("running");
+
+    // A wakes and finalizes. Terminal fence alone lets this through — the batch IS open — which is exactly
+    // how a displaced driver used to win the outcome.
+    const { settleScorecard } = await import("@everdict/application-control");
+    const stale = await settleScorecard(
+      store,
+      "sc-final",
+      { status: "succeeded", updatedAt: "2026-08-13T00:01:00.000Z" },
+      undefined,
+      { over: "open", epoch: heldByA },
+    );
+    expect(stale).toBeUndefined();
+    expect((await store.get("sc-final"))?.status).toBe("running");
+
+    // …and B, holding what it won, finalizes normally.
+    const settled = await settleScorecard(
+      store,
+      "sc-final",
+      { status: "succeeded", updatedAt: "2026-08-13T00:01:01.000Z" },
+      undefined,
+      { over: "open", epoch: claimed?.ownerEpoch ?? 0 },
+    );
+    expect(settled?.status).toBe("succeeded");
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-156.
+//
+// A TERMINAL CAS WON IS NOT A TERMINAL PAYLOAD IMMUTABLE.
+//
+// Every terminal write on a child proves the child's epoch AND the parent's driver. Then the batch's
+// write-back — the amendment that reflects judged/offloaded results onto the children — ran with neither,
+// carrying only "not cancelled". So a driver that LOST the settle could still land its result on the row
+// afterwards: the winner's status beside the loser's evidence. `parent judgment = B, child evidence = A`,
+// the same split three reviews have now chased through four different artifacts, arriving this time through
+// the one write that was never about status.
+describeTrust("TRUST-156 — a losing driver cannot amend the winner's child result", () => {
+  it("the write-back proves the parent's driver, so a stale result does not land", async () => {
+    const scorecards = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    runs.attachScorecards(scorecards);
+    await scorecards.create({
+      id: "sc-wb",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "running",
+      ownerReplica: "cp-a",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z",
+    } as never);
+    await runs.create({
+      id: "child-wb",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "succeeded",
+      parentScorecardId: "sc-wb",
+      result: { ...result("c1"), snapshot: { kind: "prompt", output: "B's answer" } },
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+
+    // B takes the batch: the parent's token moves, the child's does not.
+    const claimed = await scorecards.update("sc-wb", { ownerReplica: "cp-b" }, undefined, {
+      expectNonTerminal: true,
+      claimOwnership: true,
+    });
+    expect(claimed?.ownerEpoch).toBe(1);
+
+    // A's write-back arrives late, under the epoch it held. The row is terminal and not cancelled, which is
+    // everything the old condition asked.
+    const stale = await runs.update(
+      "child-wb",
+      {
+        result: { ...result("c1"), snapshot: { kind: "prompt", output: "A's stale answer" } },
+        updatedAt: "2026-08-13T00:02:00.000Z",
+      },
+      undefined,
+      { expectNotCancelled: true, parentDriver: { scorecardId: "sc-wb", epoch: 0 } },
+    );
+    expect(stale).toBeUndefined();
+    expect((await runs.get("child-wb"))?.result?.snapshot).toMatchObject({ output: "B's answer" });
+
+    // …and B's own write-back lands, because the amendment is the batch's to make.
+    const amended = await runs.update(
+      "child-wb",
+      {
+        result: { ...result("c1"), snapshot: { kind: "prompt", output: "B's amended answer" } },
+        updatedAt: "2026-08-13T00:02:01.000Z",
+      },
+      undefined,
+      { expectNotCancelled: true, parentDriver: { scorecardId: "sc-wb", epoch: 1 } },
+    );
+    expect(amended?.result?.snapshot).toMatchObject({ output: "B's amended answer" });
+  }, 20_000);
+});

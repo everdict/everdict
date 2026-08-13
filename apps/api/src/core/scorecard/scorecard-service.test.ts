@@ -4329,7 +4329,13 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
     // terminal row and it stops before firing the case at all (arch-review 31 P1), then settles down the
     // aborted path — which attaches whatever partials it did produce, on purpose. What must never happen is
     // the status moving, and that is what the two assertions above hold to.
-    expect(final?.steps?.some((step) => step.message.includes("no longer owns the batch"))).toBe(true);
+    // The step that says so is written by whichever guard noticed first — the pre-dispatch authority proof
+    // or the child-creation intent, both of which now refuse a batch the user stopped. What the assertion
+    // holds to is the outcome: the loop did not fire the case, and the status never moved.
+    // No per-case step either: the loop's authority proof fails against the superseded parent BEFORE the
+    // case is dispatched, so there is no case to report on. What this scenario holds to is the outcome —
+    // the status never moved and nobody was told a case completed.
+    expect(final?.steps?.some((step) => step.caseId === "c1")).toBe(false);
   });
 
   it("a late track failure cannot overwrite a superseded batch", async () => {
