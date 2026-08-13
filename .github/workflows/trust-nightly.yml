@@ -16,6 +16,16 @@ concurrency:
   group: trust-nightly-${{ github.ref }}
   cancel-in-progress: true
 
+# The Temporal the durability scenarios run against, NAMED — image AND version.
+#
+# Two nightly certifications failed here in a row, and the cause was not a flake: `temporalio/cli` stopped
+# existing. The CLI image is published as `temporalio/temporal` now, and the old name answers "repository does
+# not exist" — which a `latest` tag reports the same way it reports every other pull failure, at 03:00, to
+# nobody. This suite spends its whole effort refusing moving references in what it EVALUATES; the thing it
+# evaluates WITH was pulled from one. Bump deliberately, like any other pin.
+env:
+  TEMPORAL_CLI_IMAGE: "temporalio/temporal:1.8.2"
+
 jobs:
   trust:
     name: trust certification (real Postgres + MinIO)
@@ -64,15 +74,28 @@ jobs:
       # This is not optional garnish. Without it the durability scenario has nothing to run against, and the
       # suite's own rule is that a scenario which certified nothing is a FAILED certification — so a nightly
       # missing this line does not silently drop the claim, it fails.
+      #
+      # PINNED, and the wait ASSERTS. Two nightlies in a row failed here, on `latest` — this repository spends
+      # its whole effort refusing moving references in what it EVALUATES, and then pulled the one piece of
+      # infrastructure its durability claim rests on from a tag that moves under it. The version is named now,
+      # and a readiness loop that runs out of attempts says so and fails the job, instead of falling through
+      # to a suite that would meet an address nobody is listening on.
       - name: Start Temporal
         run: |
+          set -euo pipefail
           docker run -d --name temporal -p 7233:7233 \
-            temporalio/cli:latest server start-dev --ip 0.0.0.0 --namespace default
+            "${TEMPORAL_CLI_IMAGE}" server start-dev --ip 0.0.0.0 --namespace default
           for i in $(seq 1 60); do
-            docker run --rm --network host temporalio/cli:latest operator namespace describe default \
-              --address 127.0.0.1:7233 >/dev/null 2>&1 && break
+            if docker run --rm --network host "${TEMPORAL_CLI_IMAGE}" \
+                 operator namespace describe default --address 127.0.0.1:7233 >/dev/null 2>&1; then
+              echo "▶ temporal ready after $((i * 2))s"
+              exit 0
+            fi
             sleep 2
           done
+          echo "✗ temporal never became ready — the durability scenarios have nothing to run against" >&2
+          docker logs temporal 2>&1 | tail -40 >&2
+          exit 1
 
       # The trust suite proper. The runner REFUSES to certify a suite whose scenarios skipped, so a broken
       # database connection fails the job instead of quietly reporting green over an empty run.
