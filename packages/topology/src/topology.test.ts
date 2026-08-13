@@ -3130,3 +3130,131 @@ describe("ServiceTopologyBackend — capacity() follows the live session pool", 
     expect(counts.polls).toBe(before + 1); // the dead coordinate was dropped after ONE failed probe
   });
 });
+
+// ── A NON-SERVICE JOB IS REFUSED BY NAME (downstream report 3.2) ─────────────────────────────────────
+describe("ServiceTopologyBackend — what it will not be handed", () => {
+  it("refuses a command harness routed here, instead of failing as a registry miss", async () => {
+    const backend = new ServiceTopologyBackend({
+      runtime: {
+        id: "mock",
+        async ensureTopology() {
+          throw new Error("the topology must never be stood up for a process job");
+        },
+        async provisionBrowserEnv() {
+          throw new Error("no browser for a process job either");
+        },
+        async teardown() {},
+      },
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      // The existing guard read the spec the REGISTRY returned, so it never fired for a job whose id is in no
+      // registry — a co-located code judge's synthetic `judge-<id>`, which is exactly the job that lands here.
+      specFor: () => {
+        throw new Error("harness instance not found");
+      },
+      submit: async () => ({}),
+    });
+    const job: CaseJob = {
+      harness: { id: "judge-correctness", version: "1.0.0" },
+      harnessSpec: {
+        kind: "command",
+        id: "judge-correctness",
+        version: "1.0.0",
+        setup: [],
+        command: "true",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+      },
+      evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    };
+    await expect(backend.dispatch(job)).rejects.toThrow(/needs this runtime's ordinary compute backend/);
+  });
+});
+
+// ── A SKIPPED BEST-EFFORT SEAM SAYS THAT IT SKIPPED (downstream report 5.2) ──────────────────────────
+describe("ServiceTopologyBackend — profile injection is reported either way", () => {
+  const runtimeWithoutCdp: TopologyRuntime = {
+    id: "mock",
+    async ensureTopology() {
+      return { endpoints: { "agent-server": "http://agent-server:8000" } };
+    },
+    async provisionBrowserEnv() {
+      return {
+        wiring: { target_cdp_url: "ws://browser/ctx" },
+        async snapshot(): Promise<BrowserSnapshot> {
+          return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+        },
+        async dispose() {},
+      };
+    },
+    // No browserCdpBase: the browser belongs to the service, which is the case where injection has no channel.
+  };
+  const withProfile: ServiceHarnessSpec = SPEC.target
+    ? { ...SPEC, target: { ...SPEC.target, profile: "acme-login" } }
+    : SPEC;
+  const caseJob = {
+    harness: { id: "browser-use-langgraph", version: "1.0.0" },
+    evalCase: {
+      id: "c1",
+      env: { kind: "browser" as const, startUrl: "https://x" },
+      task: "go",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    },
+  };
+
+  it("marks the trajectory when the login could NOT be injected — the eval browsed anonymously", async () => {
+    const backend = new ServiceTopologyBackend({
+      runtime: runtimeWithoutCdp,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => withProfile,
+      submit: async () => {},
+      seedProfile: async () => {
+        throw new Error("seedProfile must not even be reachable without a cdp base");
+      },
+      newRunId: () => "fixed",
+    });
+    const result = await backend.dispatch(caseJob);
+    const marks = result.trace.filter((e) => e.kind === "infra" && e.event === "profile_not_injected");
+    // Without this the run is indistinguishable from an authenticated one that failed: the login wall in the
+    // screenshot reads as the agent's failure, and the measurement is quietly wrong.
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.kind === "infra" && marks[0].message).toContain("UNAUTHENTICATED");
+  });
+
+  it("marks the success path too, so the reviewer can tell the two apart", async () => {
+    const seeded: string[] = [];
+    const backend = new ServiceTopologyBackend({
+      runtime: {
+        ...runtimeWithoutCdp,
+        async browserCdpBase() {
+          return "http://browser:9222";
+        },
+      },
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => withProfile,
+      submit: async () => {},
+      seedProfile: async (profileId) => {
+        seeded.push(profileId);
+      },
+      newRunId: () => "fixed",
+    });
+    const result = await backend.dispatch(caseJob);
+    expect(seeded).toEqual(["acme-login"]);
+    expect(result.trace.some((e) => e.kind === "infra" && e.event === "profile_seeded")).toBe(true);
+    expect(result.trace.some((e) => e.kind === "infra" && e.event === "profile_not_injected")).toBe(false);
+  });
+});

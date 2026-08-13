@@ -450,3 +450,96 @@ describe("RuntimeDispatcher", () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+// ── ONE RUNTIME, TWO JOB SHAPES (downstream report 3.2) ──────────────────────────────────────────────
+describe("RuntimeDispatcher — a cluster serves a service topology and a plain job at the same time", () => {
+  const cluster: RuntimeSpec = {
+    kind: "nomad",
+    id: "dev-cluster",
+    version: "1.0.0",
+    addr: "http://nomad:4646",
+    image: "everdict/job-runner:1",
+    traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    tags: [],
+  };
+
+  const serviceJob: CaseJob = {
+    ...job("dev-cluster"),
+    harness: { id: "aegra", version: "1.0.0" },
+    harnessSpec: {
+      kind: "service",
+      id: "aegra",
+      version: "1.0.0",
+      services: [{ name: "agent", image: "aegra:1", needs: [], perRun: [], replicas: 1, env: {} }],
+      dependencies: [],
+      frontDoor: { service: "agent", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    },
+  };
+  // What a CO-LOCATED CODE JUDGE dispatches: a no-op command harness beside the case it grades, on the case's
+  // own runtime. Handed to the topology deployer it died as "harness instance not found".
+  const judgeJob: CaseJob = {
+    ...job("dev-cluster"),
+    harness: { id: "judge-correctness", version: "1.0.0" },
+    harnessSpec: {
+      kind: "command",
+      id: "judge-correctness",
+      version: "1.0.0",
+      setup: [],
+      command: "true",
+      env: {},
+      params: {},
+      trace: { kind: "none" },
+    },
+  };
+
+  function dispatcherWithFlavours() {
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const runtimes = new InMemoryRuntimeRegistry();
+    const built: Array<{ id: string; flavour?: string }> = [];
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes,
+      secretsFor: async () => ({}),
+      buildBackend: (spec, opts) => {
+        built.push({ id: spec.id, ...(opts.flavour ? { flavour: opts.flavour } : {}) });
+        return {
+          async dispatch() {
+            return result;
+          },
+          async capacity() {
+            return { total: 1, used: 0 };
+          },
+        };
+      },
+    });
+    return { d, runtimes, backends, built, seen };
+  }
+
+  it("classifies each job and caches the two backends apart — neither evicts the other", async () => {
+    const ctx = dispatcherWithFlavours();
+    await ctx.runtimes.register("acme", cluster);
+
+    await ctx.d.dispatch(serviceJob);
+    await ctx.d.dispatch(judgeJob);
+
+    expect(ctx.built).toEqual([
+      { id: "dev-cluster", flavour: "service" },
+      { id: "dev-cluster", flavour: "process" },
+    ]);
+    // Two entries, so a second service case still gets the topology backend rather than whatever the judge left.
+    expect(ctx.backends.has("rt:acme:dev-cluster@1.0.0#service")).toBe(true);
+    expect(ctx.backends.has("rt:acme:dev-cluster@1.0.0#process")).toBe(true);
+    expect(ctx.seen[1]?.evalCase.placement?.target).toBe("rt:acme:dev-cluster@1.0.0#process");
+  });
+
+  it("a job that declares no spec keeps the runtime-shaped default — nothing to classify, nothing changed", async () => {
+    const ctx = dispatcherWithFlavours();
+    await ctx.runtimes.register("acme", cluster);
+    await ctx.d.dispatch(job("dev-cluster"));
+    expect(ctx.built).toEqual([{ id: "dev-cluster" }]);
+    expect(ctx.backends.has("rt:acme:dev-cluster@1.0.0")).toBe(true);
+  });
+});

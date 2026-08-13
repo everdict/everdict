@@ -519,6 +519,17 @@ export class ServiceTopologyBackend
     // the registry got the RAW spec back, placeholders and all, and the deploy went out missing exactly the
     // variables that matter. The registry stays the fallback for a job that carries no spec.
     const carried = job.harnessSpec?.kind === "service" ? job.harnessSpec : undefined;
+    // A NON-SERVICE JOB IS REFUSED HERE, BY NAME (downstream report 3.2). One cluster serves both shapes, so a
+    // plain process job — a co-located code judge being the everyday case — can be routed to this backend by a
+    // caller that did not classify it. The existing guard inspects the spec the REGISTRY returned, which fires
+    // only after a successful lookup, and a judge's synthetic harness id is in no registry: the miss surfaced as
+    // "harness instance not found", pointing the operator at a registration nobody was ever supposed to make.
+    if (job.harnessSpec && job.harnessSpec.kind !== "service")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { harness: job.harness.id, kind: job.harnessSpec.kind },
+        `The service-topology backend was handed a "${job.harnessSpec.kind}" harness ("${job.harness.id}"). That job needs this runtime's ordinary compute backend, not its topology deployer.`,
+      );
     const registered =
       carried ?? (await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version));
     // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
@@ -651,7 +662,29 @@ export class ServiceTopologyBackend
         // runs logged-out and scores as a capability failure.
         const cdpBase =
           target?.cdpBase ?? (await this.opts.runtime.browserCdpBase?.(runId, zone).catch(() => undefined));
-        if (cdpBase) await this.opts.seedProfile(spec.target.profile, cdpBase, job).catch(() => undefined);
+        // A BEST-EFFORT SEAM MAY SKIP ITS EFFECT, NOT THE FACT THAT IT DID (downstream report 5.2). With no
+        // reachable CDP there is no channel to seed the login through, and the `if` simply did not fire: no
+        // warning, no trace event, no mention in the result. The eval then browsed anonymously and the login
+        // wall in its screenshot read as the agent failing the task. Both outcomes are marked, so the reviewer
+        // opening the trajectory is told which of the two they are looking at.
+        if (cdpBase) {
+          const seeded = await this.opts.seedProfile(spec.target.profile, cdpBase, job).then(
+            () => true,
+            (err: unknown) => {
+              mark(
+                "profile_not_injected",
+                `saved profile "${spec.target?.profile}" was NOT injected — seeding failed: ${err instanceof Error ? err.message : String(err)}. This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
+              );
+              return false;
+            },
+          );
+          if (seeded) mark("profile_seeded", `saved profile "${spec.target.profile}" injected into the case browser`);
+        } else {
+          mark(
+            "profile_not_injected",
+            `saved profile "${spec.target.profile}" was NOT injected — this control plane has no reachable CDP for the case browser (a service-acquired target declares acquire.cdpBase to provide one). This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
+          );
+        }
       }
 
       // Start the environment recorder now the per-case browser is up — it runs IN PARALLEL with the agent (not on its

@@ -447,6 +447,7 @@ export {
   defaultRuntimeCapabilities,
   requiredCapabilities,
   requiredCapabilitiesForHarness,
+  jobFlavour,
   requiredCapabilitiesForJob,
   requiredCapabilitiesForTopology,
   runtimeSpecWithCapabilities,

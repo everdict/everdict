@@ -178,9 +178,18 @@ export function buildDispatch(deps: {
   // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
   const runtimeBuildBackend = (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[]; tenant?: string },
+    opts: {
+      secretEnv?: Record<string, string>;
+      registryAuths?: RegistryAuth[];
+      tenant?: string;
+      // What the JOB is, when the caller knows (see `jobFlavour`). A topology-capable runtime also runs plain
+      // process jobs — a co-located code judge is one — and handing those to the topology deployer made them
+      // fail as "harness instance not found". `undefined` = the caller has no job (the connection probe), so
+      // the runtime's own shape decides, exactly as before.
+      flavour?: "service" | "process";
+    },
   ) =>
-    (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
+    (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource && opts.flavour !== "process"
       ? new ServiceTopologyBackend(topologyEnvironmentFor(opts.tenant ?? "default", spec, opts))
       : buildRuntimeBackend(spec, { ...opts, ...(deps.trustZones ? { trustZones: deps.trustZones } : {}) });
   // The front-door conversation lane's entry to the SAME shared environment: tenant runtime ref → the memoized

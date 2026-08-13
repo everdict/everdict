@@ -231,3 +231,42 @@ describe("assertPortable", () => {
     expect(() => assertPortable({ kind: "process", id: "cc", version: "1" })).not.toThrow();
   });
 });
+
+// ── TWO CAPABILITIES THAT CANNOT BE COMBINED (downstream report 5.2) ─────────────────────────────────
+describe("profile-uninjectable — a declared login with no channel to inject it through", () => {
+  const target = (over: Partial<NonNullable<ServiceHarnessSpec["target"]>> = {}) =>
+    ({
+      kind: "browser" as const,
+      engine: "chromium" as const,
+      lifecycle: "per-case-instance" as const,
+      observe: ["dom" as const],
+      ...over,
+    }) as NonNullable<ServiceHarnessSpec["target"]>;
+
+  const sessionAcquire = {
+    mode: "service" as const,
+    service: "sessions",
+    open: "POST /sessions",
+    coordinates: { target_cdp_url: "cdp_url" },
+  };
+
+  it("warns when a profile rides a service-acquired target with no cdpBase — it would be silently ignored", () => {
+    const s = spec([svc({ name: "sessions", port: 8000 })], {
+      target: target({ profile: "acme-login", acquire: sessionAcquire }),
+    });
+    const issue = checkPortability(s).find((i) => i.rule === "profile-uninjectable");
+    expect(issue?.severity).toBe("warning"); // the topology IS portable; the login is not, and that may be intended
+    expect(issue?.message).toContain("acquire.cdpBase");
+    // …and it must not block a registration: an author may well intend the agent to log itself in.
+    expect(() => assertPortable(s)).not.toThrow();
+  });
+
+  it("says nothing when the session response declares a cdpBase, or when the browser is ours to provision", () => {
+    const withBase = spec([svc({ name: "sessions", port: 8000 })], {
+      target: target({ profile: "acme-login", acquire: { ...sessionAcquire, cdpBase: "cdp_http" } }),
+    });
+    expect(rules(withBase)).not.toContain("profile-uninjectable");
+    const provisioned = spec([svc({ name: "agent", port: 8000 })], { target: target({ profile: "acme-login" }) });
+    expect(rules(provisioned)).not.toContain("profile-uninjectable");
+  });
+});

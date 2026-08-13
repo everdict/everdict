@@ -17,6 +17,7 @@ import {
 } from "@everdict/contracts";
 import {
   capabilityKind,
+  jobFlavour,
   registryAuthsForImages,
   requiredCapabilitiesForJob,
   runtimeSatisfies,
@@ -35,7 +36,14 @@ export interface RuntimeDispatcherDeps {
     spec: RuntimeSpec,
     // `tenant` keys the shared topology-environment memo (rt:<tenant>:<id>@<version>) so the eval lane and
     // the front-door conversation lane hold ONE TopologyRuntime per tenant runtime (one warm pool, one sweeper).
-    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[]; tenant?: string },
+    opts: {
+      secretEnv?: Record<string, string>;
+      registryAuths?: RegistryAuth[];
+      tenant?: string;
+      // What THIS job is (see jobFlavour) — one cluster serves both shapes, so the runtime's own shape cannot
+      // be the whole answer.
+      flavour?: "service" | "process";
+    },
   ) => Backend;
   // Image pull credentials for the job's images (best-effort) — carried into the topology backend build for
   // authenticated service-image pulls. Image-scoped for the same reason executeCase's is: a managed grant is
@@ -223,7 +231,11 @@ export class RuntimeDispatcher implements Dispatcher {
             `Runtime "${spec.id}" can't run this job — it lacks required capabilities [${required.join(", ")}] (it advertises [${(spec.capabilities ?? []).join(", ")}]). Choose a runtime whose nodes provide them (e.g. an os-windows-capable cluster for a Windows service).`,
           );
         }
-        const name = `rt:${tenant}:${spec.id}@${spec.version}`; // one backend instance per tenant·version (reused)
+        // One backend instance per tenant·version AND PER JOB SHAPE: the same cluster serves a service topology
+        // and a plain process job, and a single cache entry meant whichever arrived first decided what the other
+        // one got — the second shape either evicted it or silently inherited the wrong backend.
+        const flavour = jobFlavour(job);
+        const name = `rt:${tenant}:${spec.id}@${spec.version}${flavour ? `#${flavour}` : ""}`;
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
           // Image pull credentials — bake the ones covering this job's images into the backend (the backend is built
@@ -235,7 +247,12 @@ export class RuntimeDispatcher implements Dispatcher {
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
           this.deps.backends.register(
             name,
-            build(spec, { secretEnv, tenant, ...(registryAuths.length > 0 ? { registryAuths } : {}) }),
+            build(spec, {
+              secretEnv,
+              tenant,
+              ...(flavour ? { flavour } : {}),
+              ...(registryAuths.length > 0 ? { registryAuths } : {}),
+            }),
           );
         }
         routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };

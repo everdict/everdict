@@ -151,3 +151,24 @@ export function runtimeSpecWithCapabilities(spec: RuntimeSpec): RuntimeSpec {
   const merged = new Set<CapabilityName>([...defaultRuntimeCapabilities(spec), ...(spec.capabilities ?? [])]);
   return { ...spec, capabilities: [...merged] };
 }
+
+// ── ONE RUNTIME SERVES TWO JOB SHAPES ────────────────────────────────────────────────────────────────
+//
+// Placement is independent of what is placed — that is the architecture's own line between a Backend and a
+// Driver. But the tenant-runtime path picked its backend from the RUNTIME's shape alone: a nomad/k8s runtime
+// carrying a traceSource became a topology deployer for EVERY job routed to it. A cluster legitimately serves
+// two shapes at once: a `kind:"service"` harness needs the topology deployer, and a plain process/command job
+// on the same cluster needs the ordinary compute backend.
+//
+// A CO-LOCATED CODE JUDGE is exactly the second one. It dispatches a no-op `command` harness beside the case
+// it grades, inheriting the case's runtime — and was handed the topology deployer, which looked its harness id
+// up in the harness registry, missed, and failed with "harness instance not found": a judge that cannot run,
+// reported as a missing registration nobody ever made.
+//
+// So the flavour is read off the JOB. `undefined` means the job did not say (it carries no inline spec), and
+// the caller keeps its runtime-shaped default — which is what the connection probe, having no job at all,
+// must also do.
+export function jobFlavour(job: CaseJob): "service" | "process" | undefined {
+  if (!job.harnessSpec) return undefined;
+  return job.harnessSpec.kind === "service" ? "service" : "process";
+}

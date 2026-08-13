@@ -15,7 +15,8 @@ export type PortabilityRule =
   | "unique-ports" // two services share a port — the co-located Nomad shared netns forbids it
   | "artifact-store-internal" // an internal object store — artifacts referenced by its URL won't reach the judge
   | "inject-shadowed-literal" // a service.env literal under the same key as a dependency inject mapping — dead config
-  | "store-by-literal"; // a bare container/store DNS host:port hardcoded in service env — resolves only under Docker
+  | "store-by-literal" // a bare container/store DNS host:port hardcoded in service env — resolves only under Docker
+  | "profile-uninjectable"; // a saved profile declared on a target whose browser this control plane cannot reach
 
 // Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
 // front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
@@ -50,6 +51,9 @@ const SEVERITY: Record<PortabilityRule, "error" | "warning"> = {
   "artifact-store-internal": "warning",
   "inject-shadowed-literal": "warning",
   "store-by-literal": "warning",
+  // The topology IS portable; the LOGIN is not. An author may well intend the agent to authenticate itself, so
+  // this is surfaced, never blocked.
+  "profile-uninjectable": "warning",
 };
 
 // Only the issues that hard-block a new registration (used by the registry register + the validate route).
@@ -108,6 +112,23 @@ function referencesServiceLiterally(value: string, name: string): boolean {
 
 export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue[] {
   const issues: Omit<PortabilityIssue, "severity">[] = [];
+
+  // ── TWO CAPABILITIES THAT ARE MUTUALLY EXCLUSIVE IN PRACTICE ──────────────────────────────────────
+  //
+  // Profile injection has exactly one channel: CDP into a browser this control plane can reach. That holds for
+  // `acquire: "provision"` and fails for `acquire: "service"`, where the browser belongs to the service —
+  // possibly on another machine — and only the session-open response could carry an address (`acquire.cdpBase`).
+  // Both capabilities are offered independently and nothing in the model knew they cannot be combined, so the
+  // declaration was accepted and then silently did nothing: the eval browsed anonymously, and every downstream
+  // signal (an unauthenticated page, an empty answer, a login wall in the screenshot) read as THE AGENT FAILING
+  // THE TASK. An infrastructure skip reported as a task failure is measurement corruption, which is precisely
+  // what this check exists to catch before a run rather than after one.
+  if (spec.target?.profile && spec.target.acquire?.mode === "service" && spec.target.acquire.cdpBase === undefined)
+    issues.push({
+      rule: "profile-uninjectable",
+      field: "target.profile",
+      message: `Target profile "${spec.target.profile}" cannot be injected: the browser is acquired from service "${spec.target.acquire.service}" and the session-open response declares no cdpBase, so this control plane has no browser to seed the login into. Declare acquire.cdpBase, or expect the agent to authenticate itself.`,
+    });
   const names = new Set(spec.services.map((s) => s.name));
   const byName = new Map(spec.services.map((s) => [s.name, s]));
 
