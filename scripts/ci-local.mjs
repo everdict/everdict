@@ -54,6 +54,7 @@ run("pnpm cone", "pnpm", ["cone"]);
 run("pnpm web-imports", "pnpm", ["web-imports"]);
 run("pnpm migrations", "pnpm", ["migrations"]);
 run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
+run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 

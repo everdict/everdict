@@ -1,9 +1,15 @@
 # Running Codex
 
-Codex is supported as an **agent under test**, not as a driver.
+Codex meets Everdict from two directions, and they are independent:
 
-There is no Codex plugin — the integration path is a declarative `command` harness, which is how any
-CLI agent joins Everdict. No adapter code, no package, just a spec:
+- as the **agent under test** — the whole of this page's first half;
+- as a **client that drives Everdict** — the plugin plus an MCP server, see
+  [Driving Everdict from Codex](#driving-everdict-from-codex) at the bottom.
+
+## Codex as the agent under test
+
+The integration path is a declarative `command` harness, which is how any CLI agent joins Everdict.
+No adapter code, no package, just a spec:
 
 ```json
 {
@@ -95,6 +101,44 @@ own row — swapping the model produces a different row rather than overwriting 
 Give a CLI agent its own `version` whenever the *command* changes, and pin the model. Two runs whose
 command differs are not two runs of the same agent, and the leaderboard is only meaningful if the row
 identity is honest.
+:::
+
+## Driving Everdict from Codex
+
+The other direction: a Codex session that *runs* evals. The repo is a Codex plugin marketplace as
+well as a Claude Code one, so the `everdict` plugin installs verbatim —
+
+```bash
+codex plugin marketplace add everdict/everdict
+codex plugin add everdict@everdict
+```
+
+That gives Codex the `everdict` **skill** (domain model + eval workflows). It deliberately does
+**not** bundle an MCP server: Codex does not expand `${VAR}` inside a plugin's `.mcp.json`, so a
+bundled `"url": "${EVERDICT_MCP_URL}"` would reach the client as that literal string and fail with
+`invalid MCP server URL`. Register the server yourself instead — one command, and the URL is
+explicit:
+
+```bash
+export EVERDICT_API_KEY=ak_…    # web app → Account → API keys
+codex mcp add everdict --url https://everdict.your-company.com/mcp \
+  --bearer-token-env-var EVERDICT_API_KEY
+```
+
+`codex mcp list` should then show the server with `Auth = Bearer token`. Ask Codex to list your
+harnesses to confirm the tools are live.
+
+:::warning OAuth login needs an HTTPS authorization server
+`codex mcp login everdict` (browser OAuth instead of an API key) works only when the workspace's
+authorization server is reachable over **HTTPS**, or is on loopback. Codex silently discards a
+plaintext-HTTP authorization server on any other host, falls back to treating the control plane
+itself as the authorization server, and fails at `POST /register` with
+`Registration failed: HTTP 404 Not Found`. A local dev stack that advertises
+`KEYCLOAK_ISSUER=http://<lan-ip>:8081/realms/everdict` hits exactly that — use an API key there.
+
+With HTTPS in place, pass the realm's pre-registered public client so Codex skips dynamic
+registration (Keycloak's *Trusted Hosts* policy rejects it by default):
+`codex mcp add … --oauth-client-id everdict-mcp`.
 :::
 
 ## See also

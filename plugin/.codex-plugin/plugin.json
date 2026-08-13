@@ -1,0 +1,15 @@
+{
+  "name": "everdict",
+  "version": "0.1.0",
+  "description": "Evaluate, benchmark, and regression-test your agent with Everdict — the domain model and eval workflows, so any Codex session can drive an eval end-to-end.",
+  "author": {
+    "name": "Everdict",
+    "url": "https://github.com/everdict/everdict"
+  },
+  "homepage": "https://github.com/everdict/everdict",
+  "repository": "https://github.com/everdict/everdict",
+  "license": "Apache-2.0",
+  "keywords": ["everdict", "evaluation", "eval", "benchmark", "agent", "scorecard", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-plugin/mcp.json"
+}

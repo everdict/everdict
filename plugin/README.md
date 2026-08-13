@@ -1,8 +1,8 @@
-# Everdict — Claude Code plugin
+# Everdict — Claude Code / Codex plugin
 
 Bring the [Everdict](https://github.com/everdict/everdict) agent-evaluation runtime into **any**
-Claude Code session. Everdict runs an agent harness (Claude Code, Codex, any CLI, or a multi-service
-topology) and **scores** it — repeatably, with regression tracking and leaderboards.
+Claude Code or Codex session. Everdict runs an agent harness (Claude Code, Codex, any CLI, or a
+multi-service topology) and **scores** it — repeatably, with regression tracking and leaderboards.
 
 This plugin gives a session that has **no** Everdict context two things:
 
@@ -27,6 +27,13 @@ claude plugin marketplace add everdict/everdict --scope user
 claude plugin install everdict@everdict --scope user
 ```
 
+**Codex** installs the same marketplace, and gets the skill:
+
+```bash
+codex plugin marketplace add everdict/everdict
+codex plugin add everdict@everdict
+```
+
 ## Configure
 
 The bundled `everdict` MCP server reads its endpoint from an environment variable — set it to your
@@ -48,11 +55,28 @@ Run `/everdict:setup` for the guided version, then `/everdict:eval` to evaluate 
 project's agent. See [`docs/mcp.md`](https://github.com/everdict/everdict/blob/main/docs/mcp.md) for
 the full tool reference.
 
+### Codex — register the MCP server yourself
+
+The plugin bundles no MCP server **for Codex**, on purpose: Codex does not expand `${VAR}` inside a
+plugin's `.mcp.json`, so a bundled `"url": "${EVERDICT_MCP_URL}"` would arrive as that literal string
+and fail with `invalid MCP server URL`. One command, and the URL is explicit:
+
+```bash
+export EVERDICT_API_KEY=ak_…
+codex mcp add everdict --url "$EVERDICT_MCP_URL" --bearer-token-env-var EVERDICT_API_KEY
+```
+
+Browser OAuth (`codex mcp login everdict`) works only against an **HTTPS** authorization server —
+see [Running Codex](https://github.com/everdict/everdict/blob/main/docs/guide/integrations/codex.md#driving-everdict-from-codex).
+
 ## What's inside
 
 ```
 plugin/
-├── .claude-plugin/plugin.json   # manifest
+├── .claude-plugin/plugin.json   # Claude Code manifest
+├── .codex-plugin/
+│   ├── plugin.json              # Codex manifest (skills only)
+│   └── mcp.json                 # empty — keeps Codex off the ${…} URL below
 ├── .mcp.json                    # the everdict MCP server (url via ${EVERDICT_MCP_URL})
 ├── skills/everdict/
 │   ├── SKILL.md                 # the flagship context: mental model + entities + workflow

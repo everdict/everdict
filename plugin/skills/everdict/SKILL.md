@@ -14,11 +14,11 @@ description: >-
 Everdict (**eval + verdict**) is a harness-agnostic, infra-agnostic runtime that **runs** an
 agent harness (Claude Code, Codex, any CLI, or a multi-service topology) and **scores** it —
 repeatably, with regression tracking and leaderboards. You talk to it through the **Everdict MCP
-server** (bundled by this plugin as the `everdict` MCP server). Humans use the web dashboard;
-agents and CI (you) use these MCP tools.
+server** (the `everdict` MCP server — bundled by this plugin in Claude Code, registered with
+`codex mcp add` in Codex). Humans use the web dashboard; agents and CI (you) use these MCP tools.
 
 Your job when this skill is active: help the user **evaluate their agent** by driving the Everdict
-MCP tools end-to-end. If the MCP tools are not connected yet, point them at `/everdict:setup`.
+MCP tools end-to-end. If the MCP tools are not connected yet, see "Connecting & auth" below.
 
 ## The one-sentence mental model
 
@@ -99,8 +99,19 @@ If the user already ran their agent elsewhere and has traces, skip execution and
 
 The `everdict` MCP server points at the user's Everdict control plane (`…/mcp`). Auth is
 "login like Linear": on first use, an interactive client does a **browser OAuth login** (Keycloak);
-headless agents/CI use an **API key** (`Authorization: Bearer ak_…`). If tools aren't showing up,
-run **`/everdict:setup`**. Guided evaluation of the current project: **`/everdict:eval`**.
+headless agents/CI use an **API key** (`Authorization: Bearer ak_…`).
+
+If the tools aren't showing up:
+
+- **Claude Code** — the server is bundled and reads `${EVERDICT_MCP_URL}` at launch. Run
+  **`/everdict:setup`**; guided evaluation of the current project is **`/everdict:eval`**.
+- **Codex** — nothing is bundled (Codex does not expand `${VAR}` in a plugin's `.mcp.json`).
+  Register it once, with the URL spelled out:
+  ```bash
+  codex mcp add everdict --url "$EVERDICT_MCP_URL" --bearer-token-env-var EVERDICT_API_KEY
+  ```
+  `codex mcp login` instead of a key needs an **HTTPS** authorization server — against a
+  plaintext-HTTP one Codex fails with `Registration failed: HTTP 404 Not Found`.
 
 ## References (read on demand)
 
