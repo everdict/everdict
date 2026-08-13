@@ -62,6 +62,10 @@ export function buildScorecard(deps: {
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   recordingStore?: RecordingStore;
+  // Told when a case opens a new attempt, so this process's recorder stamps the generation the store fences
+  // on (mig 0173). Without it a re-driven case's producers keep sending the previous number and every one of
+  // their appends is refused — the fence turning into a silent recording outage.
+  onAttempt?: (executionId: string, generation: number) => void;
   // The receipts constitutional declarations leave (mig 0165) — submit refuses an unapproved one.
   constitutionApprovals?: ConstitutionApprovalStore;
   meteredDispatcher: CoreDispatcher;
@@ -98,6 +102,7 @@ export function buildScorecard(deps: {
     runStore,
     scoringStageStore,
     recordingStore,
+    onAttempt,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -290,6 +295,7 @@ export function buildScorecard(deps: {
       }
     },
     ...(recordingStore ? { recordingStore } : {}),
+    ...(onAttempt ? { onAttempt } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,

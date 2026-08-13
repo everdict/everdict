@@ -37,24 +37,29 @@ describe("PgRecordingStore", () => {
     expect(calls[0]?.params).toEqual(["evd-run-1", "frames", JSON.stringify({ t: 1000, ref: "s3://f" }), 0]);
   });
 
-  it("seal derives t0 + effectiveFidelity from the accumulated tracks and freezes them", async () => {
-    // Given accumulated tracks (a frame + an earlier log) returned by the SELECT
-    const tracks = {
-      frames: [{ t: 2000, ref: "s3://f2" }],
-      logs: [{ t: 1000, stream: "stdout", text: "x" }],
-    };
-    const { client, calls } = fakeClient((text) =>
-      text.includes("SELECT tracks") ? { rows: [{ tracks }] } : { rows: [] },
-    );
+  it("seal freezes the row in ONE statement, conditioned on the attempt and on not already being sealed", async () => {
+    // Given the row is this attempt's and still open (the UPDATE matches and returns it)
+    const { client, calls } = fakeClient(() => ({ rows: [{ run_id: "evd-run-1" }] }));
     const store = new PgRecordingStore(client);
 
-    // When sealed
     const ref = await store.seal("evd-run-1", { envKind: "browser" }, 0);
 
-    // Then it UPDATEs with t0=earliest(1000) + effectiveFidelity="frames" and returns a pg ref
     expect(ref?.ref).toBe("pg://recording/evd-run-1");
     const update = calls.find((c) => c.text.includes("UPDATE everdict_recordings"));
-    expect(update?.params).toEqual(["evd-run-1", 1000, "browser", "frames", null]);
+    // t0 and effectiveFidelity are DERIVED INSIDE the write, over the row it is claiming — the read-then-
+    // write version let a reset land in between and stamp one attempt's metadata onto another's recording.
+    expect(update?.text).toContain("generation = $2");
+    expect(update?.text).toContain("sealed = false");
+    expect(update?.text).toContain("MIN((e->>'t')::bigint)");
+    expect(update?.params).toEqual(["evd-run-1", 0, "browser", null]);
+  });
+
+  it("seal returns undefined when the row is another attempt's or already sealed", async () => {
+    // The conditional UPDATE matches nothing — the same answer for "not ours" and "already frozen", which is
+    // right: in both cases there is no ref that is this attempt's to hand back.
+    const { client } = fakeClient(() => ({ rows: [] }));
+    const store = new PgRecordingStore(client);
+    expect(await store.seal("evd-run-1", { envKind: "browser" }, 0)).toBeUndefined();
   });
 
   it("seal returns undefined when nothing was recorded for the run", async () => {

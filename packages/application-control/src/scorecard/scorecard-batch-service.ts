@@ -105,6 +105,8 @@ interface PendingChildSettle {
   // ATTEMPT under that id (mig 0173), which every append and the seal must carry.
   executionId: string;
   generation: number;
+  // This attempt could not isolate its recording buffer — it runs, but its replay is not claimed as ours.
+  unisolated?: boolean;
 }
 
 export class ScorecardBatchService {
@@ -295,8 +297,14 @@ export class ScorecardBatchService {
               // So the judges run here too, over the SAME sealed closure the batch was submitted under, and
               // the child settles with what they produced. Re-judging costs a provider call; seeding
               // unjudged evidence costs a verdict.
+              // A JUDGE THAT FAILED AT THE TOP LEVEL IS NOT A JUDGED CASE (arch-review 38 P0). Swallowing it
+              // here would terminalize the adopted result as finished evidence with no judge row at all —
+              // the very shape re-judging on recovery was introduced to prevent. A per-judge failure still
+              // becomes an `unmeasured` row inside the stream; this catch is for the stream itself dying,
+              // and then the case is left OPEN for the next attempt rather than sealed as complete.
+              let judged = true;
               if (orch.judges.length > 0)
-                await this.scoring
+                judged = await this.scoring
                   .applyJudges(
                     rec.tenant,
                     dataset,
@@ -309,7 +317,9 @@ export class ScorecardBatchService {
                     // …publishable only while this recovery still holds the batch it is recovering.
                     parentDriver ? () => this.holdsBatch(id, parentDriver.epoch) : undefined,
                   )
-                  .catch(() => {});
+                  .then(() => true)
+                  .catch(() => false);
+              if (!judged) continue; // left active: the resume below re-dispatches it
               // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
               // this call remembered its fence is not the property being kept — being unable to forget it is.
               // The scan walked past this one for a wrapper's worth of reason (`Run.from(c).adopt(…)` opens
@@ -961,6 +971,21 @@ export class ScorecardBatchService {
       .map((c) => c.result)
       .filter((r): r is CaseResult => r !== undefined)
       .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0));
+    // A FILTER IS NOT AN ACCOUNTING (arch-review 38 P0). `filter(r => r !== undefined)` silently turns "this
+    // case has no result on the ledger" into "this batch has fewer cases", and the Temporal driver then
+    // summarized, scored and settled SUCCEEDED over the remainder. Every earlier fix in this file protects the
+    // case that WAS written; this is the one that notices a case that was not.
+    //
+    // The expected set is the plan's, which the workflow drives case by case: a batch whose children do not
+    // account for it is unfinished, not smaller. Failing here leaves it open for recovery — the same choice
+    // the in-process loop makes for an unwritten case.
+    const missing = [...ctx.caseIndex.keys()].filter((cid) => !ctx.doneIds.has(cid) && !latest.get(cid)?.result);
+    if (missing.length > 0)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { scorecard: id, missing: missing.slice(0, 20), count: missing.length },
+        `${missing.length} case(s) have no result on the ledger — the batch cannot be summarized over the ones that do`,
+      );
     const scorecard: Scorecard = {
       suiteId: rec.dataset.id,
       harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
@@ -1384,17 +1409,27 @@ export class ScorecardBatchService {
   // Best-effort by contract: a failed offload or an unsealed recording must never cost a case its verdict.
   private async assembleCaseEvidence(
     result: CaseResult,
-    where: { scorecardId: string; executionId: string; generation: number },
+    where: { scorecardId: string; executionId: string; generation: number; unisolated?: boolean },
   ): Promise<void> {
     if (this.deps.artifacts) {
       try {
         // Keyed by the ATTEMPT, not by the case (arch-review 37 P0). `scorecards/<id>/<caseId>` gave every
         // trial of a case one object key, so trial 1 overwrote the bytes trial 0's result still points at —
         // an execution id was stamped on the row and then not used for the artifact it names.
-        result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `attempts/${where.executionId}`);
+        // Keyed by the attempt, GENERATION INCLUDED (arch-review 38 P0). `attempts/<executionId>` is stable
+        // across a re-drive by construction — that is what an execution id is for — so a stale attempt's
+        // offload overwrote the bytes the winner's result already points at. The generation is the part that
+        // differs between two attempts of one case.
+        result.snapshot = await offloadSnapshot(
+          result.snapshot,
+          this.deps.artifacts,
+          `attempts/${where.executionId}/g${where.generation}`,
+        );
       } catch {}
     }
-    if (this.deps.recordingStore) {
+    // …unless this attempt could not isolate its buffer (see `unisolated`): sealing then would publish an
+    // earlier attempt's frames as this result's replay, which is worse than having none.
+    if (this.deps.recordingStore && !where.unisolated) {
       try {
         await foldEnvDeltas(this.deps.recordingStore, where.executionId, result, where.generation);
         const ref = await this.deps.recordingStore.seal(
@@ -1414,11 +1449,13 @@ export class ScorecardBatchService {
   // reader can find, because the aggregate was built from this process's memory and the ledger disagrees.
   private async settleJudgedChild(
     pending: Map<string, PendingChildSettle>,
+    finalized: Set<string>,
     result: CaseResult,
   ): Promise<"committed" | "lost" | "unwritten"> {
     const key = childKey(result.caseId, result.trial);
+    if (finalized.has(key)) return "committed"; // this loop already ended it, down the failure exit
     const entry = pending.get(key);
-    if (!entry) return "lost"; // already settled by this loop, or never ours
+    if (!entry) return "lost"; // never ours, or a second call for one case
     pending.delete(key);
     // No child to settle (a batch with no run store) is not a lost authority — the case really did finish.
     if (!entry.childId || !this.deps.runStore) return "committed";
@@ -1435,6 +1472,7 @@ export class ScorecardBatchService {
       scorecardId: entry.parentDriver.scorecardId,
       executionId: entry.executionId,
       generation: entry.generation,
+      ...(entry.unisolated ? { unisolated: true } : {}),
     });
     const settled = await this.settleChild(
       entry.childId,
@@ -1621,6 +1659,13 @@ export class ScorecardBatchService {
     // scorecard re-drive was the one path where a returning producer still wrote into its successor's
     // recording — the standalone run had been given this and the batch had not.
     const attemptGeneration = new Map<string, number>();
+    // Cases whose recording could not be ISOLATED for this attempt — the fence read or the reset failed. They
+    // execute; their replay is simply not claimed as this attempt's, because the buffer may still hold an
+    // earlier one's frames and nothing here can tell.
+    const unisolated = new Set<string>();
+    // Cases this loop finalized down the FAILURE exit. The judged exit consults it so a case that ended one
+    // way is not later reported as taken by somebody else.
+    const finalizedByFailure = new Set<string>();
     const epoch = opts.authority?.epoch ?? opening.ownerEpoch ?? 0;
     const fenced = { expectOwnerEpoch: epoch };
     const epochOpt = { epoch };
@@ -1763,10 +1808,20 @@ export class ScorecardBatchService {
       // this process's recorder.
       if (this.deps.recordingStore) {
         const executionId = executionIdOf(job, id);
-        const prior = await this.deps.recordingStore.peek(executionId).catch(() => undefined);
-        if (prior) {
+        // FAIL-CLOSED, both reads (arch-review 38 P0). A `peek` that threw used to read as "no earlier
+        // attempt" and a `reset` that threw as "isolation not needed" — the same sentence this suite has
+        // refused everywhere else: an unreadable fence is not an absent one. A case whose recording could
+        // not be isolated still RUNS (the evaluation is what the user asked for), but it runs knowing its
+        // replay is not canonical, which is what `unisolated` records.
+        const prior = await this.deps.recordingStore.peek(executionId).then(
+          (r) => ({ ok: true as const, value: r }),
+          () => ({ ok: false as const, value: undefined }),
+        );
+        if (!prior.ok) unisolated.add(executionId);
+        else if (prior.value) {
           const generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
-          if (generation !== undefined) {
+          if (generation === undefined) unisolated.add(executionId);
+          else {
             attemptGeneration.set(executionId, generation);
             this.deps.onAttempt?.(executionId, generation);
           }
@@ -1834,12 +1889,17 @@ export class ScorecardBatchService {
         // The Temporal driver already had it right (it awaits `applyJudges` before settling), so the same
         // recovery rule was reading two different meanings depending on which driver a deployment used. The
         // settle is now deferred to `onResult`, after the judges land — see `settleJudgedChild`.
-        pendingChildSettle.set(childKey(result.caseId, result.trial), {
+        // Keyed by the JOB's (case, trial) — the same key `caseToChild` uses. Keying it by the harness RESULT
+        // looked equivalent and was not: `runSuite` stamps the trial onto the result AFTER dispatch returns,
+        // so all N trials of a case registered under `#0`, the first settle consumed the entry and the rest
+        // read as somebody else's. A trialled case is N cases everywhere else in this file; here too.
+        pendingChildSettle.set(childKey(job.evalCase.id, job.trial), {
           childId: child?.id,
           ...(ranOn ? { ranOn } : {}),
           parentDriver: { scorecardId: id, epoch },
           executionId: executionIdOf(job, id),
           generation: attemptGeneration.get(executionIdOf(job, id)) ?? 0,
+          ...(unisolated.has(executionIdOf(job, id)) ? { unisolated: true } : {}),
         });
         return result;
       } catch (err) {
@@ -1852,7 +1912,18 @@ export class ScorecardBatchService {
             scorecardId: id,
             epoch,
           });
+          // …and this case is FINALIZED by this exit. The dispatch registered a pending entry; leaving it
+          // would have `settleJudgedChild` meet an already-terminal child later and report `lost` —
+          // "somebody else took this case" about a case this very loop just settled, which then aborted the
+          // whole batch (arch-review 38 P1). One case, one finalization, whichever exit it leaves by.
         }
+        // …and this case is FINALIZED by this exit, child row or none. The dispatch may not have reached the
+        // registration below (a throw skips it), and the judged exit meets the failed result later either
+        // way — without this it reads "somebody else took this case" about one this loop just ended, and
+        // that answer aborts the whole batch (arch-review 38 P1). One case, one finalization, either exit.
+        const finalizedKey = childKey(job.evalCase.id, job.trial);
+        pendingChildSettle.delete(finalizedKey);
+        finalizedByFailure.add(finalizedKey);
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }
     };
@@ -2015,7 +2086,7 @@ export class ScorecardBatchService {
           // a row left running forever because the thing that was going to settle it was cancelled.
           if (controller.signal.aborted) {
             childSettles.push(
-              this.settleJudgedChild(pendingChildSettle, r).then((outcome) => {
+              this.settleJudgedChild(pendingChildSettle, finalizedByFailure, r).then((outcome) => {
                 if (outcome === "committed") announce();
                 return outcome;
               }),
@@ -2032,7 +2103,7 @@ export class ScorecardBatchService {
             // by "case completed" on the live bus and an export to the tenant's platform anyway — a case
             // announced and shipped by the one process whose result the ledger just declined.
             const settleJudged = (): Promise<"committed" | "lost" | "unwritten"> =>
-              this.settleJudgedChild(pendingChildSettle, r).then((outcome) => {
+              this.settleJudgedChild(pendingChildSettle, finalizedByFailure, r).then((outcome) => {
                 if (outcome !== "committed") return outcome;
                 announce();
                 // Case-completion chaining: export only after the case is BOTH judged and committed — and
@@ -2122,6 +2193,12 @@ export class ScorecardBatchService {
       // A `lost` case is not a failure: it means a takeover or a cancel took it, and whoever owns the batch
       // now owns the case too.
       const settlements = await Promise.all(childSettles);
+      // A LOST CASE ENDS THIS DRIVER, not just this case (arch-review 38 P1). `lost` means the batch was
+      // taken over or cancelled while the case was in flight — and this loop was then going on to offload
+      // artifacts, export to the tenant's sink, write the analysis object and attempt the parent settle. The
+      // final CAS refuses the STATUS; it does not un-send an export or un-write an object. The abort here is
+      // what stops the rest, and the settle below finds an aborted batch and takes the partial path.
+      if (settlements.includes("lost")) controller.abort();
       const unwritten = settlements.filter((outcome) => outcome === "unwritten").length;
       if (unwritten > 0)
         throw new InternalError(

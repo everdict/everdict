@@ -744,6 +744,10 @@ async function main(): Promise<void> {
     scorecardStore,
     runStore: store,
     ...(recordingStore ? { recordingStore } : {}),
+    // The SAME handoff the standalone driver gets (mig 0173). It was wired there and not here, so a batch's
+    // re-driven case raised the generation and then its producers went on stamping the old one — every
+    // append refused, the recording silently empty. A fence only one caller knows about is an outage.
+    onAttempt: (executionId, generation) => caseRecorder.serves(executionId, generation),
     meteredDispatcher,
     scheduler,
     runnerHub,

@@ -29,7 +29,12 @@ export class PgRecordingStore implements RecordingStore {
     //
     // …and the WHERE on the conflict path is what revokes a producer from an earlier attempt (mig 0173): a
     // reset raised the generation, and a recorder still stamping the number it was started with writes
-    // nothing from that moment. Absent generation = a producer nobody has told, which appends as before.
+    // nothing from that moment.
+    //
+    // A SEALED RECORDING IS FINAL (arch-review 38 P0). It had no such condition, so a late report — and the
+    // self-hosted lane's frame/log reports are fire-and-forget, so late is ORDINARY, not exceptional — kept
+    // appending after the seal. The recording a reader is served then disagrees with its own metadata: frames
+    // in the tracks, `effectiveFidelity: "final"` beside them, and a t0 computed before either arrived.
     await this.client.query(
       `INSERT INTO everdict_recordings (run_id, tracks, updated_at)
        VALUES ($1, jsonb_build_object($2::text, jsonb_build_array($3::jsonb)), now())
@@ -41,29 +46,33 @@ export class PgRecordingStore implements RecordingStore {
            true
          ),
          updated_at = now()
-       WHERE everdict_recordings.generation = $4::int`,
+       WHERE everdict_recordings.generation = $4::int AND everdict_recordings.sealed = false`,
       [runId, item.track, JSON.stringify(item.entry), generation],
     );
   }
 
   async seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined> {
-    // …and the seal is this attempt's to make: refusing a stale producer's appends while letting it freeze
-    // the buffer would fence the writing and not the publishing.
-    const { rows } = await this.client.query<{ tracks: unknown }>(
-      "SELECT tracks FROM everdict_recordings WHERE run_id = $1 AND generation = $2",
-      [runId, generation],
+    // ONE STATEMENT (arch-review 38 P0). This used to read the tracks, derive the metadata, and then UPDATE
+    // by run_id alone — so a reset landing in between let an attempt freeze a row it had not read: the
+    // metadata of generation N stamped onto generation N+1's recording. The derivation happens inside the
+    // write now, over the row the write is claiming, under both conditions that make it this attempt's:
+    // the generation it holds, and not already sealed.
+    const { rows } = await this.client.query<{ run_id: string }>(
+      `UPDATE everdict_recordings SET
+         t0 = (SELECT MIN((e->>'t')::bigint) FROM jsonb_each(tracks) lane, jsonb_array_elements(lane.value) e),
+         env_kind = $3,
+         effective_fidelity = CASE
+           WHEN jsonb_array_length(COALESCE(tracks -> 'frames', '[]'::jsonb)) > 0 THEN 'frames' ELSE 'final' END,
+         dispatch = $4::jsonb,
+         sealed = true,
+         updated_at = now()
+       WHERE run_id = $1 AND generation = $2 AND sealed = false
+         AND EXISTS (SELECT 1 FROM jsonb_each(tracks) lane, jsonb_array_elements(lane.value) e)
+       RETURNING run_id`,
+      [runId, generation, meta.envKind, meta.dispatch ? JSON.stringify(meta.dispatch) : null],
     );
-    const row = rows[0];
-    if (!row) return undefined; // nothing was recorded for this run → no ref to attach
-    const times = allEntryTimes(row.tracks);
-    if (times.length === 0) return undefined;
-    const t0 = times.reduce((m, t) => Math.min(m, t), Number.POSITIVE_INFINITY);
-    const effectiveFidelity: Fidelity = hasFramesLane(row.tracks) ? "frames" : "final";
-    await this.client.query(
-      "UPDATE everdict_recordings SET t0 = $2, env_kind = $3, effective_fidelity = $4, dispatch = $5::jsonb, sealed = true, updated_at = now() WHERE run_id = $1",
-      [runId, t0, meta.envKind, effectiveFidelity, meta.dispatch ? JSON.stringify(meta.dispatch) : null],
-    );
-    return { ref: `pg://recording/${runId}` };
+    // Nothing recorded, another attempt's row, or already frozen — in every case there is no ref that is ours.
+    return rows.length > 0 ? { ref: `pg://recording/${runId}` } : undefined;
   }
 
   // A re-drive starts a fresh recording (arch-review 33 P1) — see the port for why this is a reset and not a

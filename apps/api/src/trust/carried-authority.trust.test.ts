@@ -1047,3 +1047,49 @@ describeTrust("TRUST-159 — a case that could not be written refuses the batch"
     expect(failedOnce).toBe(true);
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-160.
+//
+// A SEALED RECORDING IS FINAL, AND SEALING IT IS ONE DECISION.
+//
+// Two holes sat under the generation fence. The seal read the tracks, derived t0 and fidelity from them, and
+// then wrote by run id alone — so a reset landing in between let an attempt freeze a row it had never read,
+// stamping one attempt's metadata onto another's recording. And `append` never asked whether the row was
+// already sealed, which matters because the self-hosted lane reports frames and logs fire-and-forget: an
+// append arriving after the settle is ORDINARY, not exceptional. One that lands leaves a recording
+// disagreeing with its own metadata — frames in the tracks, `final` beside them, a t0 from before either.
+describeTrust("TRUST-160 — a sealed recording cannot be appended to, and a seal is one statement", () => {
+  it("an append after the seal changes nothing, at the generation that sealed it", async () => {
+    const { InMemoryRecordingStore } = await import("@everdict/db");
+    const recordings = new InMemoryRecordingStore();
+    await recordings.append("evd-run-sealed", { track: "logs", entry: { t: 1, stream: "stdout", text: "a" } }, 0);
+    expect(await recordings.seal("evd-run-sealed", { envKind: "repo" }, 0)).toBeDefined();
+
+    // The runner's last log arrives after the settle, which is the normal order for a fire-and-forget report.
+    await recordings.append("evd-run-sealed", { track: "logs", entry: { t: 9, stream: "stdout", text: "late" } }, 0);
+    expect((await recordings.get("evd-run-sealed"))?.tracks.logs?.map((l) => l.text)).toEqual(["a"]);
+  }, 20_000);
+
+  it("a second seal is refused — the first one is the recording's identity", async () => {
+    const { InMemoryRecordingStore } = await import("@everdict/db");
+    const recordings = new InMemoryRecordingStore();
+    await recordings.append("evd-run-twice", { track: "logs", entry: { t: 1, stream: "stdout", text: "a" } }, 0);
+    expect(await recordings.seal("evd-run-twice", { envKind: "repo" }, 0)).toBeDefined();
+    expect(await recordings.seal("evd-run-twice", { envKind: "browser" }, 0)).toBeUndefined();
+    expect((await recordings.get("evd-run-twice"))?.envKind).toBe("repo");
+  }, 20_000);
+
+  it("a reset re-opens the recording — the next attempt writes into a buffer of its own", async () => {
+    const { InMemoryRecordingStore } = await import("@everdict/db");
+    const recordings = new InMemoryRecordingStore();
+    await recordings.append("evd-run-again", { track: "logs", entry: { t: 1, stream: "stdout", text: "a" } }, 0);
+    await recordings.seal("evd-run-again", { envKind: "repo" }, 0);
+    const next = await recordings.reset("evd-run-again");
+    expect(next).toBe(1);
+    // The previous attempt's producer keeps its number and writes nothing; the new one owns the buffer.
+    await recordings.append("evd-run-again", { track: "logs", entry: { t: 2, stream: "stdout", text: "stale" } }, 0);
+    await recordings.append("evd-run-again", { track: "logs", entry: { t: 3, stream: "stdout", text: "b" } }, 1);
+    await recordings.seal("evd-run-again", { envKind: "repo" }, 1);
+    expect((await recordings.get("evd-run-again"))?.tracks.logs?.map((l) => l.text)).toEqual(["b"]);
+  }, 20_000);
+});

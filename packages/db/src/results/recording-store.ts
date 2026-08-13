@@ -17,6 +17,10 @@ export class InMemoryRecordingStore implements RecordingStore {
     // EXACTLY the attempt this row is on (mig 0173). Not "at least": a producer holding a number from either
     // side of the current attempt is not writing this recording.
     if (generation !== rec.generation) return;
+    // …and a SEALED recording is final (arch-review 38 P0). The self-hosted lane reports frames and logs
+    // fire-and-forget, so an append arriving after the settle is ordinary rather than exceptional — and one
+    // that lands leaves a recording disagreeing with its own metadata.
+    if (rec.sealed) return;
     appendEntry(rec.tracks, item);
     this.recordings.set(runId, rec);
   }
@@ -25,6 +29,7 @@ export class InMemoryRecordingStore implements RecordingStore {
     const rec = this.recordings.get(runId);
     if (!rec) return undefined; // nothing was recorded for this run → no ref to attach
     if (generation !== rec.generation) return undefined; // not this attempt's recording to freeze
+    if (rec.sealed) return undefined; // already frozen — a second seal is not this attempt's to make
     rec.sealed = {
       t0: earliestT(rec.tracks),
       envKind: meta.envKind,
