@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
+import { describeNomadPlacementFailure, extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
+import type { NomadPlacementMetrics } from "@everdict/contracts";
 import {
   AppError,
   BadRequestError,
@@ -1508,28 +1509,16 @@ export class NomadBackend
       if (res.status >= 300) return undefined;
       const evals = JSON.parse(res.text) as Array<{
         Status?: string;
-        FailedTGAllocs?: Record<
-          string,
-          {
-            NodesEvaluated?: number;
-            DimensionExhausted?: Record<string, number>;
-            ClassExhausted?: Record<string, number>;
-          }
-        > | null;
+        FailedTGAllocs?: Record<string, NomadPlacementMetrics> | null;
       }>;
       const failed = evals.find((e) => e.FailedTGAllocs && Object.keys(e.FailedTGAllocs).length > 0);
       const blocked = evals.some((e) => e.Status === "blocked") || failed !== undefined;
-      if (!blocked || !failed?.FailedTGAllocs) return blocked ? "no eligible node (blocked evaluation)" : undefined;
-      const parts: string[] = [];
-      for (const [group, metrics] of Object.entries(failed.FailedTGAllocs)) {
-        const dims = Object.entries(metrics.DimensionExhausted ?? {})
-          .map(([dim, n]) => `${dim} exhausted on ${n} node(s)`)
-          .join(", ");
-        parts.push(
-          `${group}: ${dims || "no eligible node"}${metrics.NodesEvaluated !== undefined ? ` (${metrics.NodesEvaluated} evaluated)` : ""}`,
-        );
-      }
-      return parts.join("; ");
+      // The renderer is shared with the topology runtime and reads EVERY reason the scheduler records —
+      // constraint and class filters included. Reading only the exhausted dimensions is why an unplaceable
+      // job ("no node has this driver") used to report as an empty "no eligible node (blocked evaluation)".
+      const described = describeNomadPlacementFailure(failed?.FailedTGAllocs);
+      if (described) return described;
+      return blocked ? "no eligible node (blocked evaluation)" : undefined;
     } catch {
       return undefined;
     }

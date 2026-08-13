@@ -1,5 +1,29 @@
+import type { CdpSocket } from "@everdict/topology";
 import { describe, expect, it, vi } from "vitest";
 import { PooledBrowserProvisioner } from "./pooled-browser-provisioner.js";
+
+// A page socket that ANSWERS the liveness probe (see ensureLivePageTarget) — the shape a real, open target has.
+function answeringSocket(answers = true): (url: string) => CdpSocket {
+  return () => {
+    const listeners: Record<string, Array<(ev?: unknown) => void>> = { open: [], message: [], error: [] };
+    const socket: CdpSocket = {
+      send: () => {
+        if (answers)
+          setTimeout(() => {
+            for (const cb of listeners.message ?? []) cb({ data: '{"id":1,"result":{}}' });
+          }, 0);
+      },
+      close: () => {},
+      addEventListener: (type: string, cb: (ev?: unknown) => void) => {
+        const bucket = listeners[type] ?? [];
+        listeners[type] = bucket;
+        bucket.push(cb);
+        if (type === "open") setTimeout(() => cb(), 0);
+      },
+    } as unknown as CdpSocket;
+    return socket;
+  };
+}
 
 // A fetch that reports every member's CDP as up, with one existing page target (so no /json/new is needed).
 const okFetch = (async (url: string) => {
@@ -11,7 +35,12 @@ const okFetch = (async (url: string) => {
 
 describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
   it("leases a free member and returns its reachable CDP base — no docker socket involved", async () => {
-    const p = new PooledBrowserProvisioner({ pool: ["http://browser:9222"], fetch: okFetch, reset: async () => {} });
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://browser:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset: async () => {},
+    });
     const browser = await p.provision();
     expect(browser.cdpBase).toBe("http://browser:9222");
   });
@@ -20,6 +49,7 @@ describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
     const p = new PooledBrowserProvisioner({
       pool: ["http://b1:9222", "http://b2:9222"],
       fetch: okFetch,
+      connect: answeringSocket(),
       reset: async () => {},
     });
     const a = await p.provision();
@@ -28,14 +58,24 @@ describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
   });
 
   it("429s once every member is leased (composes with the S8 caps)", async () => {
-    const p = new PooledBrowserProvisioner({ pool: ["http://b1:9222"], fetch: okFetch, reset: async () => {} });
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset: async () => {},
+    });
     await p.provision();
     await expect(p.provision()).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
   it("wipes a member on dispose and returns it to the pool for re-lease", async () => {
     const reset = vi.fn(async () => {});
-    const p = new PooledBrowserProvisioner({ pool: ["http://b1:9222"], fetch: okFetch, reset });
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset,
+    });
     const first = await p.provision();
     await first.dispose();
     expect(reset).toHaveBeenCalledWith("http://b1:9222");
@@ -47,14 +87,63 @@ describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
     const reset = vi.fn(async () => {
       throw new Error("reset failed");
     });
-    const p = new PooledBrowserProvisioner({ pool: ["http://b1:9222"], fetch: okFetch, reset });
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset,
+      log: () => {},
+    });
     const first = await p.provision();
     await first.dispose(); // reset throws → member quarantined, not freed
-    await expect(p.provision()).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    // The next lease re-runs the WIPE rather than handing the dirty browser over. It still fails, so nobody
+    // gets it — and the refusal says the pool is broken, not busy: waiting fixes congestion and never fixes this.
+    const err = await p.provision().catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect(String(err)).toMatch(/quarantined and could not be wiped clean/);
+  });
+
+  // ── A QUARANTINE IS A STATE TO LEAVE, NOT A GRAVE (§5.4/§7.3) ──────────────────────────────────────
+  it("returns a quarantined member to service once its wipe succeeds — one bad release is not the pool's death", async () => {
+    let attempt = 0;
+    const reset = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("a tab closed mid-reset"); // the transient failure that used to be permanent
+    });
+    const logged: string[] = [];
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset,
+      log: (m) => logged.push(m),
+    });
+    await (await p.provision()).dispose(); // quarantined
+    const second = await p.provision(); // re-wiped, proven clean, handed over
+    expect(second.cdpBase).toBe("http://b1:9222");
+    expect(reset).toHaveBeenCalledTimes(2); // it was PROVEN clean, not simply forgiven
+    expect(logged.some((m) => m.includes("returned to service"))).toBe(true);
+  });
+
+  it("refuses a member whose only page target is a ghost — a listed target that never answers", async () => {
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(false), // opens in ~2ms, then silence — exactly what a just-closed target does
+      reset: async () => {},
+      log: () => {},
+    });
+    // Previously `some(t => t.type === "page")` was the whole check, so this member was handed out unusable.
+    await expect(p.provision()).rejects.toThrow(/none of them answers/);
   });
 
   it("rejects a geo-proxied request rather than running the login un-proxied", async () => {
-    const p = new PooledBrowserProvisioner({ pool: ["http://b1:9222"], fetch: okFetch, reset: async () => {} });
+    const p = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset: async () => {},
+    });
     await expect(p.provision({ proxyServer: "http://proxy:8080" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
@@ -68,9 +157,14 @@ describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
       reset: async () => {},
       readyTimeoutMs: 30,
     });
-    await expect(p.provision()).rejects.toThrow(/did not respond/);
+    await expect(p.provision()).rejects.toThrow(/did not become ready/);
     // the lease was freed (not stuck) — a later provision can retry the same member
-    const okAgain = new PooledBrowserProvisioner({ pool: ["http://b1:9222"], fetch: okFetch, reset: async () => {} });
+    const okAgain = new PooledBrowserProvisioner({
+      pool: ["http://b1:9222"],
+      fetch: okFetch,
+      connect: answeringSocket(),
+      reset: async () => {},
+    });
     expect((await okAgain.provision()).cdpBase).toBe("http://b1:9222");
   });
 

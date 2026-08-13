@@ -359,11 +359,14 @@ services:
   browser:
     image: ${EVERDICT_BROWSER_IMAGE:-chromedp/headless-shell@sha256:7f8ec4782f1b138c30900e65ae53795d5966fbf52168b8fc062843db3e6d5be5}
     profiles: ["browser"]
+    # NEVER name the debugging port here. This image publishes 9222 through a socat relay to Chrome on 9223
+    # (`run.sh`: `socat TCP4-LISTEN:9222 → 127.0.0.1:9223`), because Chrome's DevTools listener binds loopback
+    # only — and the script ends in `$@`, so anything below is APPENDED to its own flags and the later one wins.
+    # `--remote-debugging-port=9222` therefore took the port socat needs: socat died with `bind() failed: 98`,
+    # Chrome announced `ws://[::1]:9222`, and the pool that this stack recommends could not lease a browser at
+    # all. `--remote-debugging-address=0.0.0.0` does not rescue it. Flags that do not touch the port are safe.
     command:
-      - "--remote-debugging-address=0.0.0.0"
-      - "--remote-debugging-port=9222"
       - "--remote-allow-origins=*"
-      - "--no-sandbox"
       - "--disable-dev-shm-usage"
       - "--window-size=1280,800"
     # Chromium wants more than the default 64MB /dev/shm for real pages (belt-and-suspenders with --disable-dev-shm-usage).
@@ -501,6 +504,11 @@ services:
     environment:
       <<: *runtime-proxy-env
       CONTROL_PLANE_URL: http://api:8787
+      # …which is the address the WEB SERVER dials, and unreachable from a browser. The live sockets (browser
+      # session, run screen, run terminal) are opened by the BROWSER, so unset here the web rebases the host
+      # onto the incoming request host — correct for the ordinary single-host deploy. Set this to the public
+      # wss:// origin when the control plane is published somewhere else (a reverse proxy, another host).
+      CONTROL_PLANE_WS_URL: ${CONTROL_PLANE_WS_URL:-}
       # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
       AGENT_URL: http://agent:8790
       # Loopback default is fine: the web rebases a loopback host onto the browser's request host at render

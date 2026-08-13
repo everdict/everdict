@@ -36,3 +36,22 @@ export async function resolveRunnerApiUrl(): Promise<string> {
   }
   return base.toString().replace(/\/+$/, '')
 }
+
+// ── AN ADDRESS THE SERVER DIALS IS NOT AN ADDRESS THE BROWSER DIALS ──────────────────────────────────
+//
+// The WS base for the live browser/screen/terminal sockets was `CONTROL_PLANE_WS_URL ?? CONTROL_PLANE_URL
+// with http→ws`. Those routes run SERVER-SIDE, where CONTROL_PLANE_URL is internal by design
+// (`http://api:8787` in this stack's own compose file) — and swapping four characters of scheme leaves the
+// host untouched. So the browser was handed `ws://api:8787` and failed at DNS: the profile wizard, the run
+// screen and the run terminal, on every deployment where the browser is not inside the compose network.
+//
+// It is a type error expressed in strings: two `string`s, one internal and one client-facing, and nothing
+// objects when the first is used as the second. The repair already existed for exactly this distinction
+// (resolveRunnerApiUrl, which rebases an internal host onto the incoming request host) — this reuses it
+// rather than re-deriving it, so the conversion from "the base this server dials" to "the base a client
+// dials" happens in ONE place. `CONTROL_PLANE_WS_URL` stays the explicit override and still wins verbatim.
+export async function resolveClientWsBase(): Promise<string> {
+  if (env.CONTROL_PLANE_WS_URL) return env.CONTROL_PLANE_WS_URL.replace(/\/+$/, '')
+  const httpBase = await resolveRunnerApiUrl()
+  return httpBase.replace(/^http/, 'ws').replace(/\/+$/, '')
+}

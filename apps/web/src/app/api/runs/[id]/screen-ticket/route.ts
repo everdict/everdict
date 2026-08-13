@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 
 import { authContext } from '@/shared/auth/principal'
-import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { resolveClientWsBase } from '@/shared/lib/runner-api-url'
 
 // Interactive run-screen ticket BFF (observability ⑦b) — taking over the browser a case is driving, to get it past
 // a login wall or a captcha. Same shape as the terminal ticket: the control plane mints it (creator-or-admin,
@@ -14,10 +14,7 @@ export async function POST(
 ): Promise<Response> {
   const ctx = await authContext()
   const { id } = await params
-  const wsBase = (env.CONTROL_PLANE_WS_URL ?? env.CONTROL_PLANE_URL.replace(/^http/, 'ws')).replace(
-    /\/$/,
-    ''
-  )
+  const wsBase = await resolveClientWsBase()
   try {
     const { ticket } = await controlPlane.runScreenTicket<{ ticket: string }>(ctx, id)
     return NextResponse.json({ ticket, wsUrl: `${wsBase}/runs/${encodeURIComponent(id)}/screen` })

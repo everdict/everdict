@@ -32,9 +32,12 @@ billing and integration boundary, because every issue list becomes everyone's is
 
 A team is the smallest thing that fixes it, and deliberately no bigger:
 
-- **It owns issues, and only issues.** Projects and initiatives stay workspace-level, so a goal several teams
-  contribute to still has ONE progress read. Scoping a project to a team would make "how far along is this goal"
-  unanswerable at exactly the moment it matters.
+- **It owns issues — and, since the ownership axis landed, every eval asset and result beside them** (harness ·
+  dataset · judge · rubric · runtime · model · agent · scorecard · run all carry a `teamId`; migration `0106`,
+  and the stores filter on it — see `docs/auth.md` "The team axis"). What stays workspace-level is PROJECTS and
+  INITIATIVES, so a goal several teams contribute to still has ONE progress read: scoping a project to a team
+  would make "how far along is this goal" unanswerable at exactly the moment it matters. A project names several
+  teams (`teamIds`) rather than belonging to one.
 - **It names them.** `key` (`ENG`) + a per-team counter → `ENG-12`, stored on the issue. The key is immutable
   after creation because it is baked into every identifier the team has already minted, and those get pasted
   into pull requests and chat. Allocation is a single conditional `UPDATE … RETURNING` on the team's counter, so

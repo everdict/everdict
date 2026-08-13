@@ -1,6 +1,7 @@
 import { UpstreamError } from "@everdict/contracts";
 import type { CaptureCdpOptions, CdpSocket, CdpTarget } from "./capture-cdp.js";
 import { reachableWsUrl } from "./cdp-ws.js";
+import { pickLivePageTarget } from "./live-target.js";
 
 // Wipe a running browser's login state over CDP so a POOLED headless-shell can be safely re-leased to the NEXT
 // interactive session (browser-profiles remote provisioner). A pool member is a whole dedicated browser handed to
@@ -19,11 +20,16 @@ export async function resetBrowserState(cdpHttpBase: string, opts: CaptureCdpOpt
   const targets = (await listRes.json()) as Array<CdpTarget & { id?: string }>;
   const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
   // Keep exactly one page to drive the reset commands on; close every other tab/popup the session left behind.
-  const keep = pages[0];
+  // The kept one must ANSWER: `/json` advertises a closed target for ~205ms after its close returns 200, and a
+  // socket to that ghost opens and then says nothing — so the reset hung to its full timeout and the caller
+  // quarantined a member whose only fault was that the session closed a tab on its way out (§5.4).
+  const keep = await pickLivePageTarget(pages, cdpHttpBase, opts);
   const wsUrl = keep?.webSocketDebuggerUrl;
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target to reset the browser on.");
-  for (const extra of pages.slice(1)) {
-    if (extra.id) await fetchImpl(`${cdpHttpBase}/json/close/${extra.id}`).catch(() => undefined);
+  // Everything that is not the kept page goes — by identity, not by position: the kept one is now whichever
+  // answered, so closing `slice(1)` would close the page the reset is about to run on.
+  for (const extra of pages) {
+    if (extra !== keep && extra.id) await fetchImpl(`${cdpHttpBase}/json/close/${extra.id}`).catch(() => undefined);
   }
 
   await new Promise<void>((resolve, reject) => {

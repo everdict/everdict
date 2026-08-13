@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import {
   BadRequestError,
   type BrowserSnapshot,
+  type NomadPlacementMetrics,
   type RegistryAuth,
   type ServiceHarnessSpec,
   type ServiceReadiness,
   type StoreReadQuery,
   type TrustZone,
   UpstreamError,
+  describeNomadPlacementFailure,
 } from "@everdict/contracts";
 import type { TopologyServiceStatus, TopologyStatus } from "@everdict/contracts/wire";
 import {
@@ -956,6 +958,9 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   private async waitForGroupRunning(jobId: string, group: string, namespace?: string): Promise<AllocLike> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 150;
+    // The last thing the SCHEDULER said about this job, kept so a wait that runs out can quote it instead of
+    // reporting a timeout with no cause (see placementFailure).
+    let placement: string | undefined;
     for (let i = 0; i < maxPolls; i++) {
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${this.nsq(namespace, "?")}`);
       if (res.status < 300) {
@@ -971,14 +976,38 @@ export class NomadTopologyRuntime implements TopologyRuntime {
           const full = await this.http.request("GET", `/v1/allocation/${current.ID}${this.nsq(namespace, "?")}`);
           if (full.status < 300) return JSON.parse(full.text) as AllocLike;
         }
+        // ── NO ALLOCATION IS AN ANSWER, NOT A SILENCE ────────────────────────────────────────────────
+        //
+        // An unplaceable job creates no allocation at all, so this loop burned its whole budget (five minutes
+        // by default) and then reported a timeout — for a verdict the scheduler reached in under a second and
+        // recorded on the evaluation, naming the exhausted dimension or the constraint that filtered every
+        // node. The wait KEEPS its budget (capacity frees up when another run finishes, and an autoscaled
+        // pool can grow a node that fits), so the reason is carried, not acted on.
+        if (!current) placement = (await this.placementFailure(jobId, namespace)) ?? placement;
       }
       await new Promise((r) => setTimeout(r, interval));
     }
     throw new UpstreamError(
       "UPSTREAM_ERROR",
-      { jobId, group },
-      "Timed out waiting for the topology alloc to become running",
+      { jobId, group, ...(placement ? { placement } : {}) },
+      placement
+        ? `Timed out waiting for the topology alloc to become running — Nomad never placed it: ${placement}`
+        : "Timed out waiting for the topology alloc to become running",
     );
+  }
+
+  // What the job's evaluations say about why nothing was placed. Best-effort: an evaluations API error reads
+  // as "no verdict yet" and the caller keeps polling, exactly as it did before this existed.
+  private async placementFailure(jobId: string, namespace?: string): Promise<string | undefined> {
+    try {
+      const res = await this.http.request("GET", `/v1/job/${jobId}/evaluations${this.nsq(namespace, "?")}`);
+      if (res.status >= 300) return undefined;
+      const evals = JSON.parse(res.text) as Array<{ FailedTGAllocs?: Record<string, NomadPlacementMetrics> | null }>;
+      const failed = evals.find((e) => e.FailedTGAllocs && Object.keys(e.FailedTGAllocs).length > 0);
+      return describeNomadPlacementFailure(failed?.FailedTGAllocs);
+    } catch {
+      return undefined;
+    }
   }
 
   // Poll until the endpoint returns an HTTP response (5xx / connection refused are retried).

@@ -947,3 +947,54 @@ describe("NomadTopologyRuntime — store probe is best-effort", () => {
     ).resolves.toBeDefined();
   });
 });
+
+// ── AN UNPLACEABLE JOB IS A VERDICT, NOT A TIMEOUT ───────────────────────────────────────────────────
+describe("NomadTopologyRuntime — the scheduler's placement verdict reaches the caller", () => {
+  // A dedicated-store deploy whose store group is never placed: allocations stays empty, and the evaluation
+  // carries the reason. Before this fix the runtime polled its whole budget and reported only a timeout.
+  function unplaceable(failed: Record<string, unknown>): { http: NomadHttp; polls: () => number } {
+    let allocPolls = 0;
+    return {
+      polls: () => allocPolls,
+      http: {
+        async request(method, path) {
+          if (method === "POST") return { status: 200, text: "{}" };
+          if (path.includes("/evaluations")) return { status: 200, text: JSON.stringify([{ FailedTGAllocs: failed }]) };
+          if (path.includes("/allocations")) {
+            allocPolls += 1;
+            return { status: 200, text: "[]" }; // nothing was ever placed
+          }
+          return { status: 200, text: "[]" };
+        },
+      },
+    };
+  }
+
+  const SILO_ZONE: TrustZone = {
+    id: "acme",
+    isolationRuntime: "runsc",
+    network: "deny-cross-tenant",
+    trusted: false,
+    storeIsolation: "silo",
+  };
+
+  it("names the scheduler's reason instead of reporting a bare timeout", async () => {
+    const { http } = unplaceable({
+      "everdict-store-postgres": { NodesEvaluated: 3, ConstraintFiltered: { 'missing drivers "docker"': 3 } },
+    });
+    const { exec } = fakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 3 });
+    // The wait keeps its own budget — capacity can free up and a fitting node can join — but the failure it
+    // reports is the one Nomad recorded, not "it did not start in time".
+    await expect(rt.ensureTopology(SPEC, SILO_ZONE)).rejects.toThrow(/never placed it.*missing drivers/s);
+  });
+
+  it("still reports the plain timeout when the orchestrator offers no reason", async () => {
+    const { http } = unplaceable({});
+    const { exec } = fakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 2 });
+    await expect(rt.ensureTopology(SPEC, SILO_ZONE)).rejects.toThrow(
+      /Timed out waiting for the topology alloc to become running$/,
+    );
+  });
+});

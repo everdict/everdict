@@ -150,6 +150,12 @@ export {
 } from "./front-door/cdp-recorder.js";
 export { reachableWsUrl } from "./front-door/cdp-ws.js";
 export { resetBrowserState } from "./front-door/reset-browser.js";
+export {
+  ensureLivePageTarget,
+  pickLivePageTarget,
+  targetAnswers,
+  type LiveTargetOptions,
+} from "./front-door/live-target.js";
 export { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 export {
   captureStorageState,

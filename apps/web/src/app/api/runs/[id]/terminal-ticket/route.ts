@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 
 import { authContext } from '@/shared/auth/principal'
-import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { resolveClientWsBase } from '@/shared/lib/runner-api-url'
 
 // Interactive-terminal ticket BFF (observability ⑥) — mints a short-lived ticket at the control plane (creator-or-
 // admin, enforced there) and returns it plus the WS base the browser should connect to. The browser opens the
@@ -13,10 +13,7 @@ export async function POST(
 ): Promise<Response> {
   const ctx = await authContext()
   const { id } = await params
-  const wsBase = (env.CONTROL_PLANE_WS_URL ?? env.CONTROL_PLANE_URL.replace(/^http/, 'ws')).replace(
-    /\/$/,
-    ''
-  )
+  const wsBase = await resolveClientWsBase()
   try {
     const { ticket } = await controlPlane.terminalTicket<{ ticket: string }>(ctx, id)
     return NextResponse.json({ ticket, wsUrl: `${wsBase}/runs/${encodeURIComponent(id)}/terminal` })

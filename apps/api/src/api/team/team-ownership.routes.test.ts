@@ -1,6 +1,6 @@
 import { IssueService, RunService, TeamService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryIssueStore, InMemoryRunStore, InMemoryTeamStore } from "@everdict/db";
+import { InMemoryIssueStore, InMemoryRunStore, InMemoryTeamStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -36,6 +36,28 @@ function serverFor(ctx: Awaited<ReturnType<typeof build>>, roles: string[], team
     authenticator: {
       async authenticate() {
         return { subject, workspace: "acme", roles, via: "oidc" as const, teams };
+      },
+    },
+  });
+}
+
+// The same server, but with the principal's ROSTER left to the auth chain — the authenticator returns no
+// `teams` at all, which is what a real authenticator does (OIDC and API keys carry a subject, not a roster).
+// Every other case here injects `teams` directly, so none of them exercises `withTeams`: the union of the
+// workspace's default team into the loaded roster could be deleted and the suite would stay green. A test
+// that cannot fail for the reason it exists is not covering it, so this one drives the seam itself.
+function serverForRealRoster(ctx: Awaited<ReturnType<typeof build>>, roles: string[], subject = "u") {
+  return buildServer({
+    service: new RunService({ dispatcher: ctx.unusedDispatcher, store: new InMemoryRunStore() }),
+    teamService: ctx.teamService,
+    judgeRegistry: ctx.judgeRegistry,
+    // The roster is loaded during active-workspace resolution, which only runs with a membership store — so a
+    // suite without one silently skips the very seam this case exists to cover.
+    workspaceStore: new InMemoryWorkspaceStore(),
+    requireAuth: true,
+    authenticator: {
+      async authenticate() {
+        return { subject, workspace: "acme", roles, via: "oidc" as const };
       },
     },
   });
@@ -80,6 +102,40 @@ describe("team ownership — an eval asset belongs to a team, and writes respect
     expect(res.statusCode).toBe(201);
     // WEB is the workspace's first team, so it is the default.
     expect(await ctx.judgeRegistry.teamOfVersion?.("acme", "orphan", "1.0.0")).toBe(ctx.web.id);
+    await app.close();
+  });
+
+  it("loads the roster from the control plane — a member on nobody's roster still reaches the default team", async () => {
+    // Given: a member who was never written into any team's roster (which is every member of a workspace whose
+    // admin has not got around to rostering anyone), naming the workspace's DEFAULT team explicitly — what the
+    // registration form does when it preselects the owner.
+    const ctx = await build();
+    const app = serverForRealRoster(ctx, ["member"], "newcomer");
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: bearer,
+      payload: { ...judge("house"), teamId: ctx.web.id }, // WEB is the workspace's default team
+    });
+    // Then: allowed. The default team is not a team someone chose to be on — it is where unowned work lands and
+    // where the ownership migration put everything predating the axis, so a roster that omits it hides the
+    // workspace's own assets from its own members. An explicit claim is gated, so this is the union being read.
+    expect(res.statusCode).toBe(201);
+    await app.close();
+  });
+
+  it("keeps a rostered member's OWN teams as well — the default is a union, not a replacement", async () => {
+    const ctx = await build();
+    await ctx.teamService.addMember("acme", ctx.mobile.id, "mobiledev", { subject: "system" });
+    const app = serverForRealRoster(ctx, ["member"], "mobiledev");
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: bearer,
+      payload: { ...judge("mobile-quality"), teamId: ctx.mobile.id },
+    });
+    expect(res.statusCode).toBe(201); // an explicit claim on the team they are actually on
+    expect(await ctx.judgeRegistry.teamOfVersion?.("acme", "mobile-quality", "1.0.0")).toBe(ctx.mobile.id);
     await app.close();
   });
 
