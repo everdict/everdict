@@ -38,6 +38,7 @@ class FakeSession implements BrowserSessionHandle {
   private frameCb?: (f: ScreencastFrame) => void;
   private errCb?: (e: Error) => void;
   private closeCb?: () => void;
+  private navErrCb?: (info: { url: string; message: string }) => void;
   onFrame(cb: (f: ScreencastFrame) => void): void {
     this.frameCb = cb;
   }
@@ -46,6 +47,12 @@ class FakeSession implements BrowserSessionHandle {
   }
   onClose(cb: () => void): void {
     this.closeCb = cb;
+  }
+  onNavigationError(cb: (info: { url: string; message: string }) => void): void {
+    this.navErrCb = cb;
+  }
+  failNavigation(url: string, message: string): void {
+    this.navErrCb?.({ url, message });
   }
   mouse(input: unknown): void {
     this.mice.push(input);

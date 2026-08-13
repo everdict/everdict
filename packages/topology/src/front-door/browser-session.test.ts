@@ -131,3 +131,63 @@ describe("openBrowserSession (interactive CDP: screencast out + input in)", () =
     ).rejects.toThrow(/no cdp page target/i);
   });
 });
+
+// ── THE FAR SIDE GOING AWAY, AND A PAGE THAT NEVER LOADED (downstream report 5.3 / 5.5) ──────────────
+describe("openBrowserSession — what the viewer is told when the picture stops meaning anything", () => {
+  const TARGETS = [{ type: "page", url: "https://x/", webSocketDebuggerUrl: "ws://b/devtools/page/1" }];
+
+  async function session() {
+    const socket = new FakeSocket();
+    const handle = await openBrowserSession("http://b:9222", {
+      fetch: fakeFetch(TARGETS),
+      connect: () => socket as unknown as CdpSocket,
+    });
+    socket.emit("open");
+    return { socket, handle };
+  }
+
+  it("propagates a far-side close — an open relay socket over a dead browser is a green dot on a frozen frame", async () => {
+    const { socket, handle } = await session();
+    let closes = 0;
+    handle.onClose(() => {
+      closes += 1;
+    });
+    socket.emit("close");
+    expect(closes).toBe(1);
+  });
+
+  it("tells the caller ONCE — close() echoes back through the socket, and twice is a lie about two events", async () => {
+    const { socket, handle } = await session();
+    let closes = 0;
+    handle.onClose(() => {
+      closes += 1;
+    });
+    handle.close();
+    socket.emit("close"); // the real socket's own close event, arriving after our close()
+    expect(closes).toBe(1);
+  });
+
+  it("names a navigation that RESOLVED to an error page — the session is alive, the page is not", async () => {
+    const { socket, handle } = await session();
+    const failures: Array<{ url: string; message: string }> = [];
+    handle.onNavigationError((info) => failures.push(info));
+    handle.navigate("https://intranet.corp/login");
+    const navigate = socket.sent.find((m) => m.method === "Page.navigate");
+    socket.emit("message", {
+      data: JSON.stringify({ id: navigate?.id, result: { errorText: "net::ERR_NAME_NOT_RESOLVED" } }),
+    });
+    // Without this the canvas shows Chrome's error page and says nothing: on a restricted network that is the
+    // ordinary outcome, and it is indistinguishable from an agent that did nothing.
+    expect(failures).toEqual([{ url: "https://intranet.corp/login", message: "net::ERR_NAME_NOT_RESOLVED" }]);
+  });
+
+  it("says nothing when the navigation succeeded", async () => {
+    const { socket, handle } = await session();
+    const failures: unknown[] = [];
+    handle.onNavigationError((info) => failures.push(info));
+    handle.navigate("https://ok.example/");
+    const navigate = socket.sent.find((m) => m.method === "Page.navigate");
+    socket.emit("message", { data: JSON.stringify({ id: navigate?.id, result: { frameId: "f1" } }) });
+    expect(failures).toEqual([]);
+  });
+});

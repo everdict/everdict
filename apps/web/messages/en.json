@@ -4232,6 +4232,7 @@
   },
   "interactiveBrowser": {
     "connecting": "Connecting…",
+    "navigationFailed": "Could not load {url} — {message}. The session is fine; the page is not (check DNS, the proxy, or the certificate).",
     "live": "Live",
     "closed": "Disconnected",
     "disconnected": "The session ended. Close the wizard and start again.",

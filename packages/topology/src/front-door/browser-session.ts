@@ -53,6 +53,9 @@ export interface BrowserSessionHandle {
   onFrame(cb: (frame: ScreencastFrame) => void): void;
   onError(cb: (err: Error) => void): void;
   onClose(cb: () => void): void;
+  // A navigation that RESOLVED to an error page (DNS, proxy, certificate). The session is alive and the canvas
+  // is streaming, so nothing else in the pipe can tell the viewer why the page is empty.
+  onNavigationError(cb: (info: { url: string; message: string }) => void): void;
   mouse(input: MouseInput): void;
   key(input: KeyInput): void;
   // Insert a composed string as-is (CDP Input.insertText) — the IME path: a client composes Korean/Japanese/… locally
@@ -106,6 +109,18 @@ export async function openBrowserSession(
   const frameCbs: Array<(f: ScreencastFrame) => void> = [];
   const errCbs: Array<(e: Error) => void> = [];
   const closeCbs: Array<() => void> = [];
+  const navErrCbs: Array<(info: { url: string; message: string }) => void> = [];
+  // At most once: the handle's own close() closes the socket, which echoes back as a `close` event — a caller
+  // that tears down on close must not be told twice.
+  let notifiedClosed = false;
+  const notifyClosed = (): void => {
+    if (notifiedClosed) return;
+    notifiedClosed = true;
+    for (const cb of closeCbs) cb();
+  };
+  // What a `Page.navigate` was ASKED to load — kept per command id so an error reply can name the URL that
+  // failed rather than reporting a bare message about nothing in particular.
+  const navigating = new Map<number, string>();
   // A caller may issue commands before the socket has opened; queue until open (Node's WebSocket throws
   // "Sent before connected" otherwise), then flush after the screencast is subscribed.
   let opened = false;
@@ -113,6 +128,7 @@ export async function openBrowserSession(
   let id = 0;
   const send = (method: string, params: Record<string, unknown> = {}): void => {
     id += 1;
+    if (method === "Page.navigate" && typeof params.url === "string") navigating.set(id, params.url);
     const payload = JSON.stringify({ id, method, params });
     if (opened) ws.send(payload);
     else backlog.push(payload);
@@ -131,11 +147,30 @@ export async function openBrowserSession(
     for (const payload of backlog.splice(0)) ws.send(payload);
   });
   ws.addEventListener("message", (ev) => {
-    let msg: { method?: string; params?: { data?: string; metadata?: ScreencastMetadata; sessionId?: number } };
+    let msg: {
+      id?: number;
+      result?: { errorText?: string };
+      method?: string;
+      params?: { data?: string; metadata?: ScreencastMetadata; sessionId?: number };
+    };
     try {
       msg = JSON.parse(String(ev.data));
     } catch {
       return; // ignore non-JSON
+    }
+    // ── A NAVIGATION THAT RESOLVED TO AN ERROR PAGE (downstream report 5.5) ────────────────────────
+    //
+    // A live browser landing on a DNS/proxy/certificate failure renders an error page, and the relay streams
+    // it faithfully: a blank-looking canvas under a green "live" dot with no statement of what happened. The
+    // session IS alive, so the teardown propagation above does not cover it — and the framework had no way to
+    // say "session fine, navigation failed", which is the ordinary state on any restricted network. CDP has
+    // said so all along: the reply to Page.navigate carries `errorText`.
+    if (msg.id !== undefined && navigating.has(msg.id)) {
+      const url = navigating.get(msg.id) ?? "";
+      navigating.delete(msg.id);
+      const errorText = msg.result?.errorText;
+      if (errorText) for (const cb of navErrCbs) cb({ url, message: errorText });
+      return;
     }
     if (msg.method !== "Page.screencastFrame") return; // command replies / other events are ignored by the session
     const data = msg.params?.data;
@@ -148,11 +183,20 @@ export async function openBrowserSession(
   ws.addEventListener("error", () => {
     for (const cb of errCbs) cb(new Error("CDP browser session socket error."));
   });
+  // ── A CLOSED BROWSER IS NEWS, AND IT TRAVELS ─────────────────────────────────────────────────────
+  //
+  // Only `open`/`message`/`error` were registered, so a FAR-SIDE close reached nobody: the handle's onClose
+  // fired only from its own close(). The client treats an open socket as "live" (the canvas sets that state on
+  // WS open and never revisits it), so a browser that went away left a green dot over a frozen frame — and
+  // with the pooled provisioner, where release RESETS the browser instead of killing it, the socket survives
+  // to about:blank and the relay faithfully streams a blank page.
+  ws.addEventListener("close", () => notifyClosed());
 
   return {
     onFrame: (cb) => frameCbs.push(cb),
     onError: (cb) => errCbs.push(cb),
     onClose: (cb) => closeCbs.push(cb),
+    onNavigationError: (cb) => navErrCbs.push(cb),
     mouse: (input) => send("Input.dispatchMouseEvent", { ...input }),
     key: (input) => send("Input.dispatchKeyEvent", { ...input }),
     insertText: (text) => send("Input.insertText", { text }),
@@ -167,7 +211,7 @@ export async function openBrowserSession(
       } catch {
         // best-effort
       }
-      for (const cb of closeCbs) cb();
+      notifyClosed();
     },
   };
 }

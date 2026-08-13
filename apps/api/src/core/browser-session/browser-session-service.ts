@@ -74,6 +74,15 @@ export interface BrowserSessionServiceOptions {
 // The WS relay (server.ts) is the only caller of cdpBaseFor(); everything else stays behind the ticket + owner gate.
 export class BrowserSessionService {
   private readonly sessions = new Map<string, BrowserSessionEntry>();
+  // ── A RESOURCE'S LIFETIME IS PUBLISHED, NOT INFERRED ─────────────────────────────────────────────
+  //
+  // `dispose` deleted the entry and told nobody, so every consumer of a session had to notice its death by
+  // itself — and the one consumer that exists, the relay socket, could not: with the pooled provisioner
+  // release RESETS the browser rather than killing it, so the socket survives to about:blank and keeps
+  // streaming a blank page under a green "live" dot. Rather than teach that one consumer a trick, the
+  // lifetime is announced here; the next consumer (a recorder, a second viewer, an agent-side attach) then
+  // does not reproduce the same discovery.
+  private readonly teardownObservers = new Map<string, Set<() => void>>();
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly newId: () => string;
@@ -352,6 +361,23 @@ export class BrowserSessionService {
     }
   }
 
+  // Be told when this session is torn down. Returns the unsubscribe. Watching a session that is ALREADY gone
+  // fires immediately — a caller that registered a moment too late must not wait forever for an event that has
+  // already happened.
+  onTeardown(id: string, cb: () => void): () => void {
+    if (!this.sessions.has(id)) {
+      cb();
+      return () => {};
+    }
+    const set = this.teardownObservers.get(id) ?? new Set<() => void>();
+    this.teardownObservers.set(id, set);
+    set.add(cb);
+    return () => {
+      set.delete(cb);
+      if (set.size === 0) this.teardownObservers.delete(id);
+    };
+  }
+
   private async dispose(id: string): Promise<void> {
     const entry = this.sessions.get(id);
     if (!entry) return;
@@ -361,6 +387,18 @@ export class BrowserSessionService {
       entry.recorder?.stop();
     } catch {
       // best-effort
+    }
+    // …then the watchers, BEFORE the browser is released. The order is a real contract, and this is the half
+    // that was missing: notifying afterwards hands the client frames of a reset, blank page — which is the bug
+    // itself. Synchronous and best-effort, so a throwing observer can neither delay nor strand the release.
+    const observers = this.teardownObservers.get(id);
+    this.teardownObservers.delete(id);
+    for (const observe of observers ?? []) {
+      try {
+        observe();
+      } catch {
+        // an observer's failure is its own
+      }
     }
     // The BROWSER goes first. Releasing a scarce resource must not queue behind a bookkeeping write — a slow
     // or failing run store would otherwise hold a live container open, which is the opposite of what the

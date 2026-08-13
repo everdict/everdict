@@ -160,6 +160,11 @@ export function attachBrowserSessionWs(
     opened.onClose(() => {
       if (ws.readyState === OPEN) ws.close();
     });
+    // "The session is fine; the page is not." Without this the canvas shows an error page it cannot name — a
+    // blank-looking view under a live indicator, which on a restricted network is the ordinary outcome.
+    opened.onNavigationError(({ url, message }) => {
+      if (ws.readyState === OPEN) ws.send(JSON.stringify({ type: "navigation-error", url, message }));
+    });
     for (const buffered of pending) relay(opened, buffered); // flush what the client sent before the session was ready
     pending.length = 0;
   })();

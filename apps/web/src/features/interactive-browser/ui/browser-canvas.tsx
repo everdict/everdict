@@ -18,6 +18,10 @@ import { Input } from '@/shared/ui/input'
 // - Wheel events forward as CDP mouseWheel (native listener — React's onWheel is passive, preventDefault would warn).
 // - Keyboard goes through a hidden textarea (the IME proxy): ASCII keys forward per keystroke, while composed input
 //   (Korean/Japanese/…) commits as ONE `insertText` on compositionend — per-key char events cannot express Hangul.
+// `connecting` now covers "the socket is open but no picture has arrived yet", which had no state at all: the
+// canvas went green the instant the WS opened and never revisited it, so a browser that died behind the relay,
+// and a page that never loaded, both looked exactly like a healthy session. A stream that has not produced a
+// frame is not live — it is still connecting.
 type ConnState = 'connecting' | 'live' | 'closed'
 
 interface Frame {
@@ -80,6 +84,9 @@ export function BrowserCanvas({
 }) {
   const t = useTranslations('interactiveBrowser')
   const [state, setState] = useState<ConnState>('connecting')
+  // A navigation that resolved to an error page. Held beside the connection state because it is a DIFFERENT
+  // fact: the session is fine.
+  const [navError, setNavError] = useState<{ url: string; message: string } | undefined>(undefined)
   const [url, setUrl] = useState('')
   // Kept in a ref so the socket effect (keyed on sessionId only) reads the latest value without reconnecting.
   const initialUrlRef = useRef(initialUrl)
@@ -151,9 +158,12 @@ export function BrowserCanvas({
     let stopped = false
     ;(async () => {
       try {
-        const res = await fetch(ticketPath ?? `/api/browser-sessions/${encodeURIComponent(sessionId)}/ticket`, {
-          method: 'POST',
-        })
+        const res = await fetch(
+          ticketPath ?? `/api/browser-sessions/${encodeURIComponent(sessionId)}/ticket`,
+          {
+            method: 'POST',
+          }
+        )
         if (!res.ok) {
           setState('closed')
           return
@@ -163,7 +173,8 @@ export function BrowserCanvas({
         ws = new WebSocket(`${wsUrl}?ticket=${encodeURIComponent(ticket)}`)
         wsRef.current = ws
         ws.addEventListener('open', () => {
-          setState('live')
+          // Deliberately NOT 'live' here: an open socket proves the control plane answered, not that a browser
+          // is drawing. The first frame is what promotes it (see the frame branch below).
           measureRef.current() // fit the remote viewport to the canvas before the first real frame
           // Warm re-login: land on the profile's site (cookies were already seeded server-side) so the user
           // immediately sees whether the saved login still holds. The relay buffers this until the CDP session is up.
@@ -175,7 +186,10 @@ export function BrowserCanvas({
         })
         ws.addEventListener('message', async (ev) => {
           const text = typeof ev.data === 'string' ? ev.data : await (ev.data as Blob).text()
-          let msg: Frame | { type: 'error'; message: string }
+          let msg:
+            | Frame
+            | { type: 'error'; message: string }
+            | { type: 'navigation-error'; url: string; message: string }
           try {
             msg = JSON.parse(text)
           } catch {
@@ -185,7 +199,15 @@ export function BrowserCanvas({
             setState('closed')
             return
           }
+          // The session is alive and the page is not: a DNS/proxy/certificate failure renders an error page the
+          // relay streams faithfully, so without this the viewer sees an empty canvas and is told nothing.
+          if (msg.type === 'navigation-error') {
+            setNavError({ url: msg.url, message: msg.message })
+            return
+          }
           if (msg.type !== 'frame') return
+          setState('live') // the first frame is what makes it live
+          setNavError(undefined) // a page that drew is a page that loaded
           pendingFrameRef.current = msg
           void drawPending()
         })
@@ -382,6 +404,11 @@ export function BrowserCanvas({
           )}
         </div>
 
+        {navError && state !== 'closed' && (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11.5px] text-amber-300">
+            {t('navigationFailed', { url: navError.url, message: navError.message })}
+          </div>
+        )}
         {state === 'closed' ? (
           <div className="p-6 text-center text-[12px] text-neutral-500">{t('disconnected')}</div>
         ) : (

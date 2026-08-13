@@ -4234,6 +4234,7 @@
     "connecting": "연결 중…",
     "live": "라이브",
     "closed": "연결 종료",
+    "navigationFailed": "{url} 을(를) 열지 못했습니다 — {message}. 세션은 정상이고, 페이지가 열리지 않았습니다 (DNS·프록시·인증서를 확인하세요).",
     "disconnected": "세션이 종료되었습니다. 위자드를 닫고 다시 시작하세요.",
     "urlPlaceholder": "주소 입력 (Enter로 이동)",
     "go": "이동",

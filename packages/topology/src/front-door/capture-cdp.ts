@@ -37,6 +37,10 @@ export interface CdpSocket {
   addEventListener(type: "message", cb: (ev: { data: unknown }) => void): void;
   addEventListener(type: "open", cb: () => void): void;
   addEventListener(type: "error", cb: (ev: unknown) => void): void;
+  // The FAR SIDE going away. Declared because a browser that closes is news the caller has to be able to hear:
+  // a session relay whose socket stays open over a dead browser shows the client a green "live" dot above a
+  // frozen last frame (downstream report 5.3).
+  addEventListener(type: "close", cb: () => void): void;
 }
 
 export interface CaptureCdpOptions {

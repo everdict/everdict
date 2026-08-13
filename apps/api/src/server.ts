@@ -429,7 +429,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         socket.destroy();
         return;
       }
-      wss.handleUpgrade(request, socket, head, (ws) => attachBrowserSessionWs(ws, cdpBase));
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        attachBrowserSessionWs(ws, cdpBase);
+        // The session's own lifetime closes this socket. The relay already reacts to the BROWSER's socket
+        // closing, which never happens on the pooled provisioner (release resets the browser instead of
+        // killing it) — so the client kept a live-looking view of a blank page until its 15-minute TTL, the
+        // ordinary way to get there being an SSO login that took too long.
+        const stopWatching = sessions.onTeardown(sessionId, () => ws.close());
+        ws.on("close", stopWatching);
+      });
     });
   }
 

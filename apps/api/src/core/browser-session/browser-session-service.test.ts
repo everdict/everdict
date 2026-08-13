@@ -394,3 +394,58 @@ describe("BrowserSessionService — replay recording (the browser-session lane)"
     expect(sealed).toEqual([`evd-run-${view.id}`]);
   });
 });
+
+// ── A RESOURCE'S LIFETIME IS PUBLISHED (downstream report 5.3) ───────────────────────────────────────
+describe("BrowserSessionService.onTeardown — the session says when it ends", () => {
+  it("notifies watchers BEFORE the browser is released — the other order streams a blank page at them", async () => {
+    const order: string[] = [];
+    const provisioner: BrowserSessionProvisioner = {
+      async provision(): Promise<ProvisionedBrowser> {
+        return {
+          cdpBase: "http://127.0.0.1:9000",
+          dispose: async () => {
+            order.push("browser-released");
+          },
+        };
+      },
+    };
+    const s = svc(provisioner);
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+    s.onTeardown(view.id, () => order.push("observer"));
+    await s.close(view.id, "alice");
+    // With the pooled provisioner "release" RESETS the browser rather than killing it, so a watcher told
+    // afterwards is handed frames of about:blank — the very "live dot over a blank page" this fixes.
+    expect(order).toEqual(["observer", "browser-released"]);
+  });
+
+  it("unsubscribes cleanly, and a watcher of an already-gone session fires at once", async () => {
+    const p = new FakeProvisioner();
+    const s = svc(p);
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+    let fired = 0;
+    const off = s.onTeardown(view.id, () => {
+      fired += 1;
+    });
+    off();
+    await s.close(view.id, "alice");
+    expect(fired).toBe(0); // the socket that already closed must not be told about a session it left
+
+    // Registering a moment too late must not wait forever for an event that has already happened.
+    let late = 0;
+    s.onTeardown(view.id, () => {
+      late += 1;
+    });
+    expect(late).toBe(1);
+  });
+
+  it("a throwing observer neither strands the session nor blocks the release", async () => {
+    const p = new FakeProvisioner();
+    const s = svc(p);
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+    s.onTeardown(view.id, () => {
+      throw new Error("a dead socket");
+    });
+    await expect(s.close(view.id, "alice")).resolves.toBeUndefined();
+    expect(p.disposed).toHaveLength(1);
+  });
+});
