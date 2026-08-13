@@ -80,3 +80,17 @@ export class UpstreamError extends AppError {
 export class InternalError extends AppError {
   readonly status = 500;
 }
+
+// ── THIS DRIVER IS NO LONGER THE ONE (review 39 P1) ──────────────────────────────────────────────────
+//
+// Not a failure and not a success: the work was taken over or cancelled, and whoever owns it now owns its
+// ending too. It is a THROWN result rather than a flag because the only correct response is to stop — the
+// previous shape marked an AbortController and then carried straight on to offload artifacts, export to the
+// tenant's platform, write the analysis object and attempt the settle. The final CAS refuses the STATUS; it
+// does not un-send an export or un-write an object, so "the loser cannot publish" was true of exactly one of
+// the things a loser was doing.
+//
+// 409 because that is what it is at any boundary that reports it: someone else's write got there first.
+export class AuthorityLostError extends AppError {
+  readonly status = 409;
+}

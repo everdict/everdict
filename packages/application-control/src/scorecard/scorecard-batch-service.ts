@@ -1,5 +1,6 @@
 import {
   AppError,
+  AuthorityLostError,
   BadRequestError,
   CURRENT_EVIDENCE_VERSION,
   type CaseJob,
@@ -2208,12 +2209,21 @@ export class ScorecardBatchService {
       // A `lost` case is not a failure: it means a takeover or a cancel took it, and whoever owns the batch
       // now owns the case too.
       const settlements = await Promise.all(childSettles);
-      // A LOST CASE ENDS THIS DRIVER, not just this case (arch-review 38 P1). `lost` means the batch was
-      // taken over or cancelled while the case was in flight — and this loop was then going on to offload
-      // artifacts, export to the tenant's sink, write the analysis object and attempt the parent settle. The
-      // final CAS refuses the STATUS; it does not un-send an export or un-write an object. The abort here is
-      // what stops the rest, and the settle below finds an aborted batch and takes the partial path.
-      if (settlements.includes("lost")) controller.abort();
+      // A LOST CASE ENDS THIS DRIVER — actually ends it (arch-review 38 P1, review 39 P1). `lost` means the
+      // batch was taken over or cancelled while the case was in flight. Aborting the controller was not
+      // enough and reading it as "ends this driver" was wrong: an AbortController stops FUTURE dispatches and
+      // some stream pushes, while every line below runs by direct call — offload the artifacts, export to the
+      // tenant's platform, write the analysis object, write back the children, attempt the settle. The final
+      // CAS refuses the STATUS and nothing else; an export cannot be un-sent and an object cannot be
+      // un-written. So the loss is THROWN, and the catch below returns without touching anything.
+      if (settlements.includes("lost")) {
+        controller.abort(); // stop the sibling lanes too — they are working under the same lost authority
+        throw new AuthorityLostError(
+          "CONFLICT",
+          { scorecard: id },
+          "another driver owns this batch — this one stops without publishing anything",
+        );
+      }
       const unwritten = settlements.filter((outcome) => outcome === "unwritten").length;
       if (unwritten > 0)
         throw new InternalError(
@@ -2351,6 +2361,10 @@ export class ScorecardBatchService {
         // terminal write wins, the late success is a no-op skip.
       }
     } catch (err) {
+      // …and here is where "stop" means stop. A driver that lost its authority publishes NOTHING: no
+      // write-back, no partial settle, no failure record. The batch is someone else's, including its ending —
+      // recording a failure on it would be this process's last act of writing to a record it no longer owns.
+      if (err instanceof AuthorityLostError) return;
       const base =
         err instanceof AppError
           ? { code: err.code, message: err.message }
