@@ -18,6 +18,10 @@ export interface TraceSinkCase {
   scores: TraceSinkScore[];
   // present = attach mode (flow ② — attach scores only to an existing trace), absent = create mode (flow ① — create the trace + attach).
   externalId?: string;
+  // The platform trace this case was SCORED FROM, when it was scored from one. Distinct from `externalId`: the
+  // export writes into whatever project/experiment the workspace configured, which is not necessarily where the
+  // trace was pulled from — so this travels as a link back to the judged evidence, never as an id to write to.
+  sourceTraceId?: string;
 }
 
 // Export context — carried in the platform-side trace name/tags/metadata.

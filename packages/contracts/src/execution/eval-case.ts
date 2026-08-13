@@ -253,6 +253,10 @@ export const CaseResultSchema = z.object({
   // Evidence extracted from a pulled trace (mapping evidence slots) — the carrier that brings CUSTOM named slots
   // to the judges (GradeContext.evidence); the fixed slots also synthesize the browser snapshot above.
   evidence: TraceEvidenceSchema.optional(),
+  // The platform trace this result was scored FROM (pull-ingest / a topology harness whose trace is pulled).
+  // Carried so the judged result can point back at the evidence it judged — the export writes a link to it
+  // rather than assuming its own external id addresses the same place.
+  sourceTraceId: z.string().optional(),
   // Object-store pointer to the sealed replay recording (frames/env/runtime tracks on a shared t0 clock) — sibling of
   // traceRef, coordinates never bytes. Absent unless recording was requested. docs/architecture/replay.md
   recordingRef: RecordingRefSchema.optional(),

@@ -909,3 +909,27 @@ describe("a judge that declares what it needs is not asked to answer without it"
     expect(score?.value).toBe(1);
   });
 });
+
+// ── A DECLARATION BELONGS TO EVERY JUDGE KIND (downstream report 1.1) ────────────────────────────────
+describe("a judge's inputs come from what it declared, not from its kind", () => {
+  it("refuses a CODE judge whose declared evidence is missing — it used to grade text-only and say nothing", async () => {
+    const dispatch = vi.fn(() => Promise.reject(new Error("the judge job must not be dispatched")));
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: dispatch as never,
+    });
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "pixel-check",
+      version: "1.0.0",
+      language: "python",
+      code: "print('[]')",
+      timeoutSec: 30,
+      requires: [{ kind: "screenshot" }],
+      tags: [],
+    };
+    const [score] = await runner.run(codeSpec, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:pixel-check", status: "unmeasured", reason: "missing_evidence" });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});

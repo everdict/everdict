@@ -52,6 +52,7 @@ export function phoenixSpans(
         "openinference.span.kind": "CHAIN",
         "everdict.scorecard_id": ctx.scorecardId,
         "everdict.harness": ctx.harness,
+        ...(c.sourceTraceId ? { "everdict.source_trace_id": c.sourceTraceId } : {}),
       },
       events: [],
     },

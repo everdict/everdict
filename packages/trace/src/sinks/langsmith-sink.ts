@@ -51,7 +51,12 @@ export function langsmithRunBody(
       events: c.trace.length,
       ...(lastAssistant?.kind === "message" ? { output: lastAssistant.text } : {}),
     },
-    extra: { metadata: { scorecardId: ctx.scorecardId } },
+    extra: {
+      metadata: {
+        scorecardId: ctx.scorecardId,
+        ...(c.sourceTraceId ? { sourceTraceId: c.sourceTraceId } : {}),
+      },
+    },
     ...(project ? { session_name: project } : {}),
   };
 }

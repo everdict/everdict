@@ -68,6 +68,7 @@ export function mlflowTraceBody(
           "everdict.dataset": ctx.dataset,
           "everdict.harness": ctx.harness,
           "everdict.caseId": c.caseId,
+          ...(c.sourceTraceId ? { "everdict.sourceTraceId": c.sourceTraceId } : {}),
         },
         tags: {},
       },

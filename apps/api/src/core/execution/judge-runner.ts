@@ -489,8 +489,30 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
       // context carries no url refs. `ctx` below is the resolved view for every downstream path.
-      const wantsImage = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+      // ── WHAT A JUDGE DECLARED, NOT WHAT KIND IT IS ─────────────────────────────────────────────
+      //
+      // The image was resolved only for a MODEL judge naming `screenshot` in `inputs`, so a code judge — which
+      // is the main tier, and routinely calls a vision model from its own script — received
+      // `evidence.screenshot === undefined` and graded on text alone, without recording that it had. `requires`
+      // is the declaration that exists for exactly this, and it belongs to every kind.
+      const requires = spec.requires ?? [];
+      const wantsImage =
+        (spec.kind === "model" && (spec.inputs ?? []).includes("screenshot")) ||
+        requires.some((r) => r.kind === "screenshot");
       const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
+      // …and a declaration the run cannot satisfy stops the grading rather than colouring it: a judge asked to
+      // answer without the evidence it named answers anyway, and that verdict is indistinguishable downstream
+      // from one made on the real thing. Applied here, before the kind branches, so every tier obeys it.
+      if (requires.length > 0) {
+        const assessment = assessEvidence(requires, ctx);
+        if (assessment.missing.length > 0)
+          return skip(
+            spec,
+            "missing_evidence",
+            `this run is missing evidence the judge declared it needs — ${assessment.warnings.join(" ")}`,
+            true,
+          );
+      }
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
       if (spec.kind === "code")
         return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen);
@@ -634,26 +656,6 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
       try {
         const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
-        // ── A DECLARED REQUIREMENT DECIDES THE RUN, NOT JUST THE PREVIEW ────────────────────────────
-        //
-        // `requires` was checked in the preview and nowhere else, so a judge that stated what it needs was
-        // still asked to answer on a run that did not carry it — and a model asked to grade evidence it
-        // cannot see answers anyway. That verdict is indistinguishable from a real one downstream: it lands
-        // as a measured score, aggregates, moves a trend, and closes an issue.
-        //
-        // Unmet requirements are therefore UNMEASURED, naming what was missing, which is the same grammar
-        // every other unrunnable grader uses (missing secret, unresolvable rubric). Re-scorable, because the
-        // evidence may exist on the next run — that is precisely the case `missing_evidence` is for.
-        if (spec.requires?.length) {
-          const assessment = assessEvidence(spec.requires, ctx);
-          if (assessment.missing.length > 0)
-            return skip(
-              spec,
-              "missing_evidence",
-              `this run is missing evidence the judge declared it needs — ${assessment.warnings.join(" ")}`,
-              true,
-            );
-        }
         const grader: Grader = new JudgeGrader(modelJudge(complete), {
           id: spec.id,
           ...(rubricText ? { rubric: rubricText } : {}),

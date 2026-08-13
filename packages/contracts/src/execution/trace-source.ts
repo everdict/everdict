@@ -160,6 +160,12 @@ export type TraceInspectResult = z.infer<typeof TraceInspectResultSchema>;
 export interface FetchedTrace {
   events: TraceEvent[];
   evidence?: TraceEvidence;
+  // WHICH trace on the platform this came from. The adapters have always known it (a tag-correlated MLflow pull
+  // resolves a trace id before it reads a single span) and every hop discarded it, so a scored eval had no route
+  // back to the trace it judged. `externalId` cannot stand in: an export writes into whatever project or
+  // experiment the workspace configured, which is not necessarily the one the trace was pulled from — the point
+  // of carrying this is a LINK, not an identifier to re-use.
+  traceId?: string;
 }
 
 // A TraceSource that can also enumerate its recent traces and inspect one (raw spans + re-normalize with a supplied

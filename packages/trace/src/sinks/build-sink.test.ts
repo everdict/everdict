@@ -353,3 +353,30 @@ describe("buildTraceSink · pure builder", () => {
     expect((ann.result as Record<string, unknown>).label).toBe("fail");
   });
 });
+
+// ── THE ROUTE BACK FROM A VERDICT TO THE EVIDENCE IT JUDGED (downstream report 1.4) ──────────────────
+describe("a scored export links to the trace it was scored from", () => {
+  const ctx = { scorecardId: "sc1", dataset: "d@1", harness: "h@1" };
+  const kase = {
+    caseId: "c1",
+    trace: [{ t: 0, kind: "message" as const, role: "assistant" as const, text: "done" }],
+    scores: [{ name: "judge:quality", value: 1 }],
+    sourceTraceId: "tr-42",
+  };
+
+  it("carries the source trace id on every sink's own metadata slot", async () => {
+    const bodies: string[] = [];
+    const fetchImpl = (async (_u: unknown, init?: RequestInit) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    for (const kind of ["mlflow", "langfuse", "langsmith", "phoenix"] as const) {
+      bodies.length = 0;
+      const sink = buildTraceSink({ kind, endpoint: "http://x", project: "p", fetchImpl });
+      await sink.export(ctx, [kase]).catch(() => undefined); // the adapters' own failures are not the point here
+      // `externalId` cannot stand in for this: the export writes into the workspace's configured project, which
+      // is not necessarily where the trace was pulled from.
+      expect(bodies.join(" ")).toContain("tr-42");
+    }
+  });
+});

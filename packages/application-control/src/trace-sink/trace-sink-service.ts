@@ -109,6 +109,9 @@ export class TraceSinkService {
           ...(renderScoreDetail(sc.detail) !== "" ? { comment: renderScoreDetail(sc.detail) } : {}),
         })),
         ...(externalId ? { externalId } : {}),
+        // …and where the judged evidence lives, so a verdict on the tenant's platform has a route back to the
+        // trace it was rendered from rather than being a score with no provenance.
+        ...(r.sourceTraceId ? { sourceTraceId: r.sourceTraceId } : {}),
       };
     };
 

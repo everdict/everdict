@@ -412,6 +412,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
       ...(evidence ? { evidence } : {}),
+      traceId: runId, // this source addresses a trace by the id it was asked with
     };
   }
 

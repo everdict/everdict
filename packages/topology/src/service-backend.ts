@@ -895,6 +895,9 @@ export class ServiceTopologyBackend
       const wantsTraceEvidence = spec.target?.delivery?.mode === "trace" && !inline;
       let trace: TraceEvent[];
       let traceEvidence: TraceEvidence | undefined;
+      // Which platform trace this case was scored from — the route back from a verdict to the evidence it
+      // judged (downstream report 1.4).
+      let sourceTraceId: string | undefined;
       try {
         if (inline) {
           trace = extractInlineTrace(outcome.response, inline.path);
@@ -909,6 +912,7 @@ export class ServiceTopologyBackend
             const detailed = await source.fetchDetailed(traceKey);
             trace = detailed.events;
             traceEvidence = detailed.evidence;
+            sourceTraceId = detailed.traceId;
           } else {
             trace = await source.fetch(traceKey);
           }
@@ -939,6 +943,7 @@ export class ServiceTopologyBackend
         getJson: this.opts.getJson ?? fetchJson,
         wiring: { ...wiring, run_id: outcome.traceRef },
         ...(traceEvidence ? { evidence: traceEvidence } : {}),
+        ...(sourceTraceId ? { sourceTraceId } : {}),
       });
       // The observations (trace + snapshot) are in hand, so the target (browser etc.) is no longer needed — release it early
       // so it isn't held during grading (judge LLM etc.). docs/architecture/streaming-case-pipeline.md
@@ -1015,6 +1020,7 @@ export class ServiceTopologyBackend
         // on the other, from the same harness: not a gap, a harness whose grading depends on where it ran.
         // `CaseResult.evidence` has declared this slot all along, naming GradeContext.evidence as its reader.
         ...(traceEvidence ? { evidence: traceEvidence } : {}),
+        ...(sourceTraceId ? { sourceTraceId } : {}),
         // The agent's clock started when the drive was submitted — the declared anchor that lets an inline
         // trace carrying only relative `t` land on the same wall-clock axis as the placement marks. Events
         // that stamp their own `at` (a pulled platform trace) are unaffected: `at` wins per event.

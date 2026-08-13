@@ -78,6 +78,10 @@ export async function collectDeferredTrace(
   // The judge's evidence slots, extracted by the source from the trace's own spans. Declared on CaseResult
   // (whose comment names GradeContext.evidence as the consumer) and discarded at this hop.
   let evidence: FetchedTrace["evidence"];
+  // …and WHICH platform trace it came from, so the judged result can point back at the evidence it judged
+  // (downstream report 1.4). Under tag correlation this is not derivable from `ref.runId` — the adapter
+  // resolved it, and only it knows.
+  let sourceTraceId: string | undefined;
   if (deps.buildTraceSource) {
     try {
       // Auth: authSecret name → tenant SecretStore value → Authorization header (pull-ingest convention). A plain secret
@@ -115,6 +119,7 @@ export async function collectDeferredTrace(
           const detailed = await source.fetchDetailed(ref.runId);
           events = detailed.events;
           if (detailed.evidence) evidence = detailed.evidence;
+          if (detailed.traceId) sourceTraceId = detailed.traceId;
         } else {
           events = await source.fetch(ref.runId); // a source without extraction — events only, as before
         }
@@ -149,7 +154,13 @@ export async function collectDeferredTrace(
       ),
       "collect",
     );
-    return { ...result, trace, failure, ...(evidence ? { evidence } : {}) };
+    return {
+      ...result,
+      trace,
+      failure,
+      ...(evidence ? { evidence } : {}),
+      ...(sourceTraceId ? { sourceTraceId } : {}),
+    };
   }
 
   // 2) Score the observations the job deferred — the separation rule matches the agent (needsCompute=true was already scored in the job).
@@ -196,5 +207,12 @@ export async function collectDeferredTrace(
     const { failure: _recovered, ...rest } = result;
     return { ...rest, trace, scores, traceSealed: true, ...(evidence ? { evidence } : {}) };
   }
-  return { ...result, trace, scores, traceSealed: true, ...(evidence ? { evidence } : {}) };
+  return {
+    ...result,
+    trace,
+    scores,
+    traceSealed: true,
+    ...(evidence ? { evidence } : {}),
+    ...(sourceTraceId ? { sourceTraceId } : {}),
+  };
 }

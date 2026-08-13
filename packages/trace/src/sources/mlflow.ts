@@ -378,6 +378,9 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
       ...(evidence ? { evidence } : {}),
+      // The resolved platform id — under tag correlation this is NOT the runId the caller asked with, which is
+      // exactly why it has to travel: nothing downstream could reconstruct it.
+      traceId,
     };
   }
 

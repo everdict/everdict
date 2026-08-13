@@ -60,7 +60,13 @@ export function langfuseBatch(
         name: `${ctx.dataset}#${c.caseId}`,
         ...(firstUser?.kind === "message" ? { input: firstUser.text } : {}),
         ...(lastAssistant?.kind === "message" ? { output: lastAssistant.text } : {}),
-        metadata: { scorecardId: ctx.scorecardId, dataset: ctx.dataset, harness: ctx.harness, caseId: c.caseId },
+        metadata: {
+          scorecardId: ctx.scorecardId,
+          dataset: ctx.dataset,
+          harness: ctx.harness,
+          caseId: c.caseId,
+          ...(c.sourceTraceId ? { sourceTraceId: c.sourceTraceId } : {}),
+        },
       });
       for (const e of c.trace) {
         if (e.kind === "llm_call") {
