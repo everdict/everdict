@@ -244,6 +244,30 @@ export class ScorecardBatch {
     return { cause, ...(record.createdBy ? { actor: record.createdBy } : {}) };
   }
 
+  // ── WHICH CHILD IS THE CASE'S ANSWER (review 39 P0) ────────────────────────────────────────────────
+  //
+  // Preferred over `latestChildPerCase` wherever receipts exist: the receipt records which attempt EARNED the
+  // commit (a database constraint decided it), while "latest updatedAt" answers which row was touched last —
+  // a late metadata write on a superseded attempt was enough to change the answer after the fact.
+  //
+  // Falls back per case, not per batch: a batch that started before receipts existed, or a case whose commit
+  // predates them, still resolves the old way. Mixing them is deliberate — the alternative is to declare
+  // older batches unreadable, which is a worse answer to "who won" than the one they already have.
+  static canonicalChildPerCase(
+    children: RunRecord[],
+    receipts: ReadonlyArray<{ caseId: string; childRunId: string }>,
+  ): Map<string, RunRecord> {
+    const byId = new Map(children.map((c) => [c.id, c]));
+    const canonical = ScorecardBatch.latestChildPerCase(children);
+    for (const receipt of receipts) {
+      const committed = byId.get(receipt.childRunId);
+      // A receipt naming a child this batch cannot see is not a reason to drop the case — it is a
+      // disagreement, and the caller states it (see the parity check). Here the fallback stands.
+      if (committed) canonical.set(receipt.caseId, committed);
+    }
+    return canonical;
+  }
+
   // Latest child per case — a batch resumed more than once has several children for a re-run case; the newest
   // write wins. Keyed by caseId: child records don't persist a trial axis, and every caller path is single-trial
   // by construction (resume refuses multi-trial batches; the Temporal driver never fans trials out).

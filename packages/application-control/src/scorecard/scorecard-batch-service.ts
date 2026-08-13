@@ -1036,7 +1036,11 @@ export class ScorecardBatchService {
     const rec = await this.deps.store.get(id);
     if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
     const children = this.deps.runStore ? await this.deps.runStore.list(ctx.tenant, { scorecardId: id }) : [];
-    const latest = ScorecardBatch.latestChildPerCase(children);
+    // WHICH CHILD IS THE CASE'S ANSWER (review 39 P0). The receipt says which attempt earned the commit; the
+    // fallback — largest updatedAt — answers which row was touched last, which is a different question and was
+    // the only one this could ask. Per case, so a batch that predates receipts still resolves the old way.
+    const committed = await this.deps.caseReceipts?.list(id).catch(() => []);
+    const latest = ScorecardBatch.canonicalChildPerCase(children, committed ?? []);
     const order = new Map([...ctx.caseIndex.keys()].map((cid, i) => [cid, i] as const));
     const results = [...latest.values()]
       .map((c) => c.result)

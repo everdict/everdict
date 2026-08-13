@@ -1,4 +1,4 @@
-import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
+import { BadRequestError, type CaseResult, ConflictError, type RunRecord } from "@everdict/contracts";
 import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { newScorecardChildRun, newSeededScorecardChildRun } from "../run/scorecard-child.js";
@@ -492,5 +492,45 @@ describe("ScorecardBatch child runs — the universal-run shape (P0)", () => {
         createdBy: "alice",
       }),
     ).toEqual({ cause: "run", causedByRunId: "run-a1", actor: "alice" });
+  });
+});
+
+// ── WHICH CHILD IS THE CASE'S ANSWER (review 39 P0) ──────────────────────────────────────────────────
+describe("canonicalChildPerCase — the receipt decides, not the clock", () => {
+  const child = (id: string, caseId: string, updatedAt: string): RunRecord =>
+    ({
+      id,
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId,
+      status: "succeeded",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt,
+    }) as RunRecord;
+
+  it("prefers the committed attempt even when a LATER row exists for the same case", () => {
+    // Two physical attempts of one case — a speculative duplicate, a spillover, a recovery. Both rows are
+    // real. The one that earned the commit is `A`; `B` was merely touched afterwards, which is exactly the
+    // way a superseded attempt used to take over a settled batch's canonical result.
+    const rows = [child("A", "c1", "2026-08-14T00:00:01.000Z"), child("B", "c1", "2026-08-14T00:00:09.000Z")];
+    expect(ScorecardBatch.latestChildPerCase(rows).get("c1")?.id).toBe("B"); // the old answer
+    expect(ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "A" }]).get("c1")?.id).toBe("A");
+  });
+
+  it("falls back PER CASE, so a batch that predates receipts still resolves", () => {
+    const rows = [
+      child("A", "c1", "2026-08-14T00:00:01.000Z"),
+      child("B", "c1", "2026-08-14T00:00:09.000Z"),
+      child("C", "c2", "2026-08-14T00:00:02.000Z"),
+    ];
+    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "A" }]);
+    expect(canonical.get("c1")?.id).toBe("A"); // decided
+    expect(canonical.get("c2")?.id).toBe("C"); // no receipt — the old rule stands rather than dropping the case
+  });
+
+  it("a receipt naming a child this batch cannot see leaves the fallback in place", () => {
+    // Not a reason to drop the case: it is a disagreement, and the caller states it (the parity check).
+    const rows = [child("A", "c1", "2026-08-14T00:00:01.000Z")];
+    expect(ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "gone" }]).get("c1")?.id).toBe("A");
   });
 });
