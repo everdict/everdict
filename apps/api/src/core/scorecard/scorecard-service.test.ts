@@ -6422,7 +6422,11 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
     // (arch-review 8 P0): two passes can target one revision number and both freeze BEFORE the ledger CAS
     // picks a winner, so a revision-keyed object let the loser's bytes land under the winner's revision.
     // Each entry therefore records its own durable key, and the two are DIFFERENT objects.
-    expect(scored.scoring?.[0]?.analysisKey).toBe(`analyses/${record.id}/passes/initial.json`);
+    // …the INITIAL pass included (review 39 P0-6): a batch settles once but its finalizer does not, so its
+    // key carries the bundle's own digest rather than the literal that let two finalizers share one object.
+    expect(scored.scoring?.[0]?.analysisKey).toMatch(
+      new RegExp(`^analyses/${record.id}/passes/initial-[0-9a-f]{16}\\.json$`),
+    );
     expect(scored.scoring?.[1]?.analysisKey).toMatch(new RegExp(`^analyses/${record.id}/passes/.+\\.json$`));
     expect(scored.scoring?.[1]?.analysisKey).not.toBe(scored.scoring?.[0]?.analysisKey);
     expect(scored.scoring?.[0]?.analysisRef).toContain(`analyses/${record.id}/passes/`);

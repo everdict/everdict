@@ -959,7 +959,19 @@ export class RunService {
       // Offload os-use screenshots (embedded base64) to object storage → the record keeps only the URL (slim). On failure the run still succeeds (fallback: keep base64).
       if (this.deps.artifacts && result.snapshot) {
         try {
-          result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}`);
+          // ── KEYED BY THE ATTEMPT, NOT BY THE RUN (review 39 P0-6) ────────────────────────────────
+          //
+          // `runs/<id>` is the same key for every attempt of a run, and this write happens BEFORE the
+          // terminal CAS. So a displaced attempt that loses the row still writes its bytes there — an object
+          // store has no compare-and-set — and the ledger ends up holding the winner's result beside the
+          // loser's screenshot. The batch path already keys per attempt; this one did not, which is the same
+          // defect wearing the standalone lane's clothes.
+          const attempt = this.attempt.get(`evd-run-${id}`) ?? 0;
+          result.snapshot = await offloadSnapshot(
+            result.snapshot,
+            this.deps.artifacts,
+            `attempts/evd-run-${id}/g${attempt}`,
+          );
         } catch {}
       }
       // SETTLEMENT AUTHORITY GOVERNS EVIDENCE PUBLICATION, NOT ONLY THE ROW (arch-review 32 P0). Notification

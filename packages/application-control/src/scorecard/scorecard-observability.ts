@@ -9,6 +9,7 @@ import {
   measuredScores,
 } from "@everdict/contracts";
 import { type ScorecardOutcomes, caseVerdict, scorecardOutcomes } from "@everdict/domain";
+import { contentDigest } from "@everdict/domain";
 import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 
@@ -161,6 +162,24 @@ export const analysisPassKey = (id: string, passId: string): string =>
 // — but it still deserves a frozen artifact, and giving it a stable synthetic id keeps every revision in one
 // key family instead of splitting history across two schemes.
 export const INITIAL_PASS_ID = "initial";
+
+// ── …AND THE INITIAL PASS HAS COMPETING WRITERS TOO (review 39 P0-6) ────────────────────────────────
+//
+// The reasoning above — two passes, one revision number, an object store with no compare-and-set — was
+// applied to re-scoring passes and then contradicted one line later by giving the INITIAL pass a literal id.
+// A batch settles once, but its FINALIZER does not: a Temporal activity is at-least-once, an in-process
+// driver can race a recovery, and both freeze a bundle before the ledger decides which of them settles. Under
+// one shared key the loser's bytes simply replace the winner's, and the ledger then names a revision whose
+// artifact describes a pass that did not happen.
+//
+// Keying by the bundle's own digest makes the collision impossible rather than unlikely: identical bundles
+// share one object (which is correct — they are the same evidence), and different ones cannot overwrite each
+// other. The winner's ledger entry points at its own key; the loser's object is an orphan nobody references.
+export function initialPassId(bundle: AnalysisBundle): string {
+  return `${INITIAL_PASS_ID}-${contentDigest(bundle)
+    .replace(/^sha256:/, "")
+    .slice(0, 16)}`;
+}
 // (legacy) the revision-keyed artifact — kept for reading pre-passId revisions, never written anymore.
 export const analysisRevisionKey = (id: string, revision: number): string =>
   `${ANALYSIS_KEY_PREFIX}${id}/scoring/${revision}.json`;

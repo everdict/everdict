@@ -29,7 +29,7 @@ import { settleScorecard } from "../ports/settle.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
-import { INITIAL_PASS_ID, analysisBundle, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
+import { analysisBundle, initialPassId, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
 import type {
   IngestScorecardBody,
   IngestScorecardInput,
@@ -361,16 +361,15 @@ export class ScorecardIngestService {
           .catch(() => undefined)
       : undefined;
     const summary = summarizeScorecard(scorecard);
-    const analysis = await offloadAnalysis(
-      this.deps,
-      id,
-      analysisBundle(
-        { scorecardId: id, dataset: `${effectiveDataset.id}@${effectiveDataset.version}`, harness: harnessLabel },
-        summary,
-        results,
-      ),
-      INITIAL_PASS_ID, // an ingest record is freshly minted — one writer, its initial revision is 1
+    const initialBundle = analysisBundle(
+      { scorecardId: id, dataset: `${effectiveDataset.id}@${effectiveDataset.version}`, harness: harnessLabel },
+      summary,
+      results,
     );
+    // Digest-keyed like every other pass (review 39 P0-6). An ingest record is freshly minted and has one
+    // writer today — but "one writer" is a property of the caller, not of the key, and this is the same
+    // literal that let two batch finalizers write one object.
+    const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
     // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
     // judge axis: ingest has no inline judge, so only the models of the applied registered judges.

@@ -74,10 +74,10 @@ import { type Dispatch, runSuite } from "../run-suite.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
-  INITIAL_PASS_ID,
   analysisBundle,
   batchSettledEvent,
   exportStepMessage,
+  initialPassId,
   offloadAnalysis,
   offloadResults,
 } from "./scorecard-observability.js";
@@ -1062,17 +1062,15 @@ export class ScorecardBatchService {
       this.batchContexts.delete(id);
       return;
     }
-    const analysis = await offloadAnalysis(
-      this.deps,
-      id,
-      analysisBundle(
-        { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
-        summary,
-        results,
-        ctx.verdictPolicy,
-      ),
-      INITIAL_PASS_ID,
+    const initialBundle = analysisBundle(
+      { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
+      summary,
+      results,
+      ctx.verdictPolicy,
     );
+    // …under a key only THESE bytes can own (review 39 P0-6): a Temporal activity is at-least-once, so two
+    // finalizers can freeze a bundle before the ledger decides which one settles.
+    const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
     // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
     const exported = this.deps.exportResults
       ? await this.deps
@@ -2320,17 +2318,13 @@ export class ScorecardBatchService {
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
       // (the settle below re-reads race-tight as before; initial settles are revision 1 in practice).
       const priorScoring = (await this.deps.store.get(id))?.scoring;
-      const analysis = await offloadAnalysis(
-        this.deps,
-        id,
-        analysisBundle(
-          { scorecardId: id, dataset: exportCtx.dataset, harness: exportCtx.harness },
-          summary,
-          scorecard.results,
-          opts.verdictPolicy,
-        ),
-        INITIAL_PASS_ID,
+      const initialBundle = analysisBundle(
+        { scorecardId: id, dataset: exportCtx.dataset, harness: exportCtx.harness },
+        summary,
+        scorecard.results,
+        opts.verdictPolicy,
       );
+      const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const models = scorecardModels(scorecard, declared);
