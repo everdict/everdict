@@ -695,12 +695,27 @@ export class RunService {
   async recording(id: string): Promise<{ record: RunRecord; recording: CaseRecording | undefined } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    // Sealed recording first; while the run still executes, fall back to the live tail (peek) — live is a replay
-    // that has not finished, so the player can scrub back mid-run off the same read. docs/architecture/replay.md.
+    // ── A TERMINAL RUN IS READ THROUGH ITS OWN REF, NEVER OFF THE LOGICAL KEY (review 39 P0-5) ────────
+    //
+    // The recording buffer is keyed by the run's live-CORRELATION id, which a re-drive deliberately reuses.
+    // So a settled run whose own attempt sealed nothing — a fence that could not be raised, an attempt that
+    // recorded nothing, a reset that failed — was served the recording sitting under that key: some OTHER
+    // attempt's, presented as this result's replay. The result itself says whether it has one, in the ref it
+    // carries; a terminal run with no ref has no replay, and answering with the neighbouring attempt's is
+    // worse than answering with nothing.
+    //
+    // While the run is still going there is no result to consult and the live tail IS the answer, so the
+    // logical read stays exactly where it was correct.
     const runId = RunService.runIdFor(record);
-    const recording = this.deps.recordingStore
-      ? ((await this.deps.recordingStore.get(runId)) ?? (await this.deps.recordingStore.peek(runId)))
-      : undefined;
+    const terminal = Run.from(record).isTerminal();
+    const recording =
+      this.deps.recordingStore === undefined
+        ? undefined
+        : terminal
+          ? record.result?.recordingRef
+            ? await this.deps.recordingStore.get(runId)
+            : undefined
+          : ((await this.deps.recordingStore.get(runId)) ?? (await this.deps.recordingStore.peek(runId)));
     // The player draws every frame straight from its ref, so this read is display-only by nature — re-mint them
     // (same reason as getForDisplay). Frames dedup by ref, so re-sign each distinct one once.
     if (!recording?.tracks.frames?.length || !this.deps.artifacts) return { record, recording };

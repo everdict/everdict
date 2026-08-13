@@ -876,17 +876,69 @@ describeTrust("TRUST-156 — a losing driver cannot amend the winner's child res
     expect(stale).toBeUndefined();
     expect((await runs.get("child-wb"))?.result?.snapshot).toMatchObject({ output: "B's answer" });
 
-    // …and B's own write-back lands, because the amendment is the batch's to make.
-    const amended = await runs.update(
-      "child-wb",
-      {
-        result: { ...result("c1"), snapshot: { kind: "prompt", output: "B's amended answer" } },
-        updatedAt: "2026-08-13T00:02:01.000Z",
+    // …and NEITHER DOES B'S (review 39 P1). The store still permits it — the fence answers "who", and the
+    // owner is genuinely B — so this asserts what the CALLER does with that permission: the write-back fills a
+    // child that published nothing and leaves a published payload alone. Amending it would be a second version
+    // of a fact a reader may already hold, and a crash between the two leaves whichever landed first.
+    const store = new InMemoryRunStore();
+    await store.create({
+      id: "child-published",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "succeeded",
+      parentScorecardId: "sc-wb",
+      result: { ...result("c1"), snapshot: { kind: "prompt", output: "the published answer" } },
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+    await store.create({
+      id: "child-empty",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c2",
+      status: "failed",
+      parentScorecardId: "sc-wb",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:01.000Z",
+    } as never);
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("no dispatch in this scenario");
+        },
       },
-      undefined,
-      { expectNotCancelled: true, parentDriver: { scorecardId: "sc-wb", epoch: 1 } },
+      store: scorecards,
+      runStore: store,
+      datasets: new InMemoryDatasetRegistry(),
+    } as never);
+    // The private write-back, reached the way the failure path reaches it.
+    await (
+      service as unknown as {
+        batch: {
+          writeBackResults: (
+            id: string,
+            map: Map<string, string>,
+            results: unknown[],
+            driver?: unknown,
+          ) => Promise<void>;
+        };
+      }
+    ).batch.writeBackResults(
+      "sc-wb",
+      // The write-back is keyed by (case, trial) — a single-run case collapses to "<caseId>#0".
+      new Map([
+        ["c1#0", "child-published"],
+        ["c2#0", "child-empty"],
+      ]),
+      [
+        { ...result("c1"), snapshot: { kind: "prompt", output: "a later restatement" } },
+        { ...result("c2"), snapshot: { kind: "prompt", output: "the hole is filled" } },
+      ],
+      { scorecardId: "sc-wb", epoch: 1 },
     );
-    expect(amended?.result?.snapshot).toMatchObject({ output: "B's amended answer" });
+    expect((await store.get("child-published"))?.result?.snapshot).toMatchObject({ output: "the published answer" });
+    expect((await store.get("child-empty"))?.result?.snapshot).toMatchObject({ output: "the hole is filled" });
   }, 20_000);
 });
 
@@ -956,15 +1008,20 @@ describeTrust("TRUST-158 — a terminal child carries its assembled evidence, no
       dispatcher: {
         async dispatch(job: CaseJob) {
           // A frame teed under the id this case was DISPATCHED with — which is what the child stamps (mig 0172).
-          // The case's attempt is opened by the dispatch itself (a reset that returns the generation it
-          // owns), and a producer stamps what it was told — 0 here, the number a first attempt owns.
-          await recordings.append(job.runId ?? "", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
+          // The case's attempt is opened by the dispatch itself, and the number it opened RIDES ON THE JOB
+          // (review 39 P0-1), so a producer stamps the attempt it was handed rather than one it assumed.
+          await recordings.append(
+            job.runId ?? "",
+            { track: "frames", entry: { t: 1, ref: "memory://f" } },
+            job.recordingGeneration ?? 0,
+          );
           return result(job.evalCase.id);
         },
       },
       store,
       runStore,
       recordingStore: recordings,
+      onAttempt: () => {},
       datasets,
       harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
     } as never);

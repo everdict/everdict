@@ -1628,6 +1628,20 @@ export class ScorecardBatchService {
       // `expectNotCancelled` stays: a case past the point of no return when the user stopped the batch must
       // not have its cancellation overwritten by the result it produced anyway. It was never the whole
       // condition, only the half that had a name.
+      // ── AND A TERMINAL PAYLOAD IS NOT AMENDED AT ALL (review 39 P1) ────────────────────────────────
+      //
+      // Even under the right driver, this rewrote the RESULT of a child that had already published one. The
+      // fence made the amendment the current owner's to make; it did not ask whether an amendment should
+      // exist. It should not: the case's evidence is assembled and its judges are applied BEFORE its one
+      // terminal write now (`settleJudgedChild`), so anything this would change is a second version of a fact
+      // a reader may already have fetched — and a crash between the two versions leaves the ledger holding
+      // whichever half landed first.
+      //
+      // What remains is filling a HOLE: a child that settled with no result at all (the failure/partial path
+      // writes results onto children the loop never got to settle). So the write is conditional on the row
+      // having none, which is the difference between completing a record and revising one.
+      const current = await store.get(childId);
+      if (current?.result) continue; // already published its evidence — this is not ours to restate
       await store.update(childId, { result: r, updatedAt: this.now() }, undefined, {
         expectNotCancelled: true,
         ...(parentDriver ? { parentDriver } : {}),

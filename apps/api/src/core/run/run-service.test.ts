@@ -1170,7 +1170,11 @@ describe("RunService — display reads re-mint artifact refs", () => {
     });
     await recordings.append("evd-run-r2", frame(1), 0);
     await recordings.append("evd-run-r2", frame(2), 0);
-    await recordings.seal("evd-run-r2", { envKind: "browser" }, 0);
+    const ref = await recordings.seal("evd-run-r2", { envKind: "browser" }, 0);
+    // A settled run states its own replay in the result — a terminal read follows THAT, never the logical key
+    // (review 39 P0-5), so a fixture without it is a run that recorded nothing.
+    const withRef = shotRun("r2");
+    await store.update("r2", { result: { ...(withRef.result as CaseResult), ...(ref ? { recordingRef: ref } : {}) } });
     const mint = vi.spyOn(artifacts, "publicUrlFor");
     const svc = new RunService({ dispatcher: okDispatcher, store, recordingStore: recordings, artifacts, newId: ids });
 
@@ -1181,5 +1185,28 @@ describe("RunService — display reads re-mint artifact refs", () => {
     ]);
     expect(mint).toHaveBeenCalledTimes(1); // deduped by ref — a static screen is one object, not one per frame
     mint.mockRestore();
+  });
+});
+
+// ── A TERMINAL RUN IS READ THROUGH ITS OWN REF (review 39 P0-5) ──────────────────────────────────────
+describe("RunService.recording — whose replay a settled run serves", () => {
+  it("serves nothing when the settled result carries no ref, even with a recording under the logical key", async () => {
+    // Given: a previous attempt of the same run left a SEALED recording under the correlation id — the key a
+    // re-drive reuses on purpose — and this attempt sealed none of its own (its fence could not be raised, or
+    // it recorded nothing at all).
+    const store = new InMemoryRunStore();
+    const recordingStore = new InMemoryRecordingStore();
+    await recordingStore.append("evd-run-ghost", { track: "frames", entry: { t: 1, ref: "memory://old" } }, 0);
+    await recordingStore.seal("evd-run-ghost", { envKind: "browser" }, 0);
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "ghost", recordingStore });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    // The settled result must carry no ref for this to be the question — an empty own recording seals to none.
+    const settled = await svc.get(rec.id);
+    expect(settled?.result?.recordingRef).toBeUndefined();
+
+    // Then: no replay. Serving the neighbouring attempt's is worse than serving nothing — a reviewer would be
+    // scrubbing an execution whose settlement was refused while reading this one's verdict.
+    expect((await svc.recording(rec.id))?.recording).toBeUndefined();
   });
 });
