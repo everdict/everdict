@@ -28,6 +28,7 @@ import {
   JUDGE_OVERALL_METRIC,
   type JudgeCompletion,
   JudgeGrader,
+  assessEvidence,
   harnessComplete,
   modelJudge,
   transportComplete,
@@ -633,12 +634,34 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
       try {
         const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+        // ── A DECLARED REQUIREMENT DECIDES THE RUN, NOT JUST THE PREVIEW ────────────────────────────
+        //
+        // `requires` was checked in the preview and nowhere else, so a judge that stated what it needs was
+        // still asked to answer on a run that did not carry it — and a model asked to grade evidence it
+        // cannot see answers anyway. That verdict is indistinguishable from a real one downstream: it lands
+        // as a measured score, aggregates, moves a trend, and closes an issue.
+        //
+        // Unmet requirements are therefore UNMEASURED, naming what was missing, which is the same grammar
+        // every other unrunnable grader uses (missing secret, unresolvable rubric). Re-scorable, because the
+        // evidence may exist on the next run — that is precisely the case `missing_evidence` is for.
+        if (spec.requires?.length) {
+          const assessment = assessEvidence(spec.requires, ctx);
+          if (assessment.missing.length > 0)
+            return skip(
+              spec,
+              "missing_evidence",
+              `this run is missing evidence the judge declared it needs — ${assessment.warnings.join(" ")}`,
+              true,
+            );
+        }
         const grader: Grader = new JudgeGrader(modelJudge(complete), {
           id: spec.id,
           ...(rubricText ? { rubric: rubricText } : {}),
           ...(criteria?.length ? { criteria } : {}),
           ...(promptTemplate ? { promptTemplate } : {}),
           useScreenshot,
+          ...(spec.kind === "model" && spec.inputs?.length ? { modalities: spec.inputs } : {}),
+          ...(spec.requires?.length ? { requires: spec.requires } : {}),
         });
         // Artifact URLs (screenshot bytes, url evidence slots) are already resolved to real data at the top of run().
         const graded = toScores(await grader.grade(ctx));

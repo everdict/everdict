@@ -869,3 +869,43 @@ describe("judge execution evidence + metering", () => {
     expect(deps.seals).toHaveLength(0);
   });
 });
+
+// ── A DECLARED REQUIREMENT DECIDES THE RUN, NOT JUST THE PREVIEW ─────────────────────────────────────
+describe("a judge that declares what it needs is not asked to answer without it", () => {
+  const needsToolCall: JudgeSpec = { ...modelSpec, requires: [{ kind: "tool_call", name: "submit_order" }] };
+
+  it("scores UNMEASURED, names the missing evidence, and never calls the provider", async () => {
+    const fetchImpl = vi.fn(() => Promise.reject(new Error("the provider must not be called")));
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    // Before this fix the run below produced a confident measured verdict — the model was handed a trace with
+    // no `submit_order` in it and answered anyway, and that number aggregated like any other.
+    const [score] = await runner.run(needsToolCall, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:correctness", status: "unmeasured", reason: "missing_evidence" });
+    expect(score?.detail).toContain("submit_order");
+    expect(measuredScores(score ? [score] : [])).toHaveLength(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    // Re-scorable: the evidence may exist on the next run, which is what missing_evidence means.
+    expect(score).toMatchObject({ retryable: true });
+  });
+
+  it("…and grades normally once the run carries it", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ content: [{ text: '{"pass":true,"score":1,"reason":"ok"}' }] }), { status: 200 }),
+      ),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const withCall: GradeContext = {
+      ...ctx,
+      trace: [...ctx.trace, { t: 1, kind: "tool_call", id: "1", name: "submit_order", args: { id: "A-1" } }],
+    };
+    const [score] = measuredScores(await runner.run(needsToolCall, "acme", withCall));
+    expect(score?.value).toBe(1);
+  });
+});

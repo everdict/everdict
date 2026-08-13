@@ -1,4 +1,5 @@
-import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
+import { shouldBypassProxy } from "@everdict/contracts";
+import { Agent, Dispatcher, EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 
 // Standard outbound-proxy env, read case-insensitively (both HTTP_PROXY and http_proxy are conventional). Pure — no
 // side effects, so the decision (whether a proxy is configured) is unit-testable without touching global state.
@@ -38,14 +39,53 @@ export function installProxyDispatcher(
   const p = proxyEnv(env);
   if (!p.httpProxy && !p.httpsProxy) return undefined; // no proxy configured → leave the default dispatcher in place
   setGlobalDispatcher(
-    new EnvHttpProxyAgent({
-      ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),
-      ...(p.httpsProxy ? { httpsProxy: p.httpsProxy } : {}),
-      ...(p.noProxy ? { noProxy: p.noProxy } : {}),
-    }),
+    proxyRoutingDispatcher(
+      new EnvHttpProxyAgent({
+        ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),
+        ...(p.httpsProxy ? { httpsProxy: p.httpsProxy } : {}),
+        ...(p.noProxy ? { noProxy: p.noProxy } : {}),
+      }),
+      p.noProxy,
+    ),
   );
   return {
     ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),
     ...(p.httpsProxy ? { httpsProxy: p.httpsProxy } : {}),
   };
+}
+
+// ── THE BYPASS LIST IS THE OPERATOR'S, NOT THE TRANSPORT LIBRARY'S ───────────────────────────────────
+//
+// `EnvHttpProxyAgent` reads NO_PROXY in its own narrow dialect: exact hostnames and dot suffixes. An
+// operator who writes `10.0.0.0/8` or `192.168.` — both conventional, both what curl and every Python
+// client accept — gets a file that says one thing and a process that does another, and every internal
+// host is tunnelled through the corporate proxy. That is not a slower path, it is a different failure:
+// a 75 KB span upload sat in the proxy for 120s and was DROPPED while small requests to the same host
+// succeeded, so the export reported healthy and produced traces with no spans.
+//
+// So the routing decision is ours (`shouldBypassProxy`, in contracts, stated and tested) and the agent
+// keeps its own list as well — the union, since either saying "bypass" sends the request direct.
+// Mirror of packages/orchestrator/src/proxy-dispatcher.ts.
+export function proxyRoutingDispatcher(
+  proxied: Dispatcher,
+  noProxy: string | undefined,
+  // The non-proxied pool. Injected so a test can watch WHERE a request went, which is the only observable
+  // that matters here — the bug being fixed is a request arriving at the wrong one.
+  injectedDirect?: Dispatcher,
+): Dispatcher {
+  if (!noProxy) return proxied; // nothing to bypass → no indirection, no second connection pool
+  const direct = injectedDirect ?? new Agent();
+  // Only `dispatch` is overridden: it is the whole of the seam Node's fetch uses, and the two pools are
+  // process-lifetime (the global dispatcher is installed at boot and never swapped), so there is no
+  // close/destroy path to forward. The handler type is read off the base method rather than named, because
+  // undici renamed it between minor versions and this file must compile against whichever one is resolved.
+  class ProxyRouter extends Dispatcher {
+    override dispatch(options: Dispatcher.DispatchOptions, handler: Parameters<Dispatcher["dispatch"]>[1]): boolean {
+      const origin = typeof options.origin === "string" ? options.origin : (options.origin?.href ?? "");
+      return shouldBypassProxy(origin, noProxy)
+        ? direct.dispatch(options, handler)
+        : proxied.dispatch(options, handler);
+    }
+  }
+  return new ProxyRouter();
 }

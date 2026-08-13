@@ -9,6 +9,17 @@ import type { CriterionVerdict, Judge, JudgeImage, JudgeInput, JudgeVerdict } fr
 export type JudgeCompletion = (prompt: string, image?: JudgeImage, signal?: AbortSignal) => Promise<string>;
 
 const MAX_CHARS = 6000; // Trace/DOM can be large, so truncate to protect the context.
+// The task was the one section with no bound, on the reasoning that it is the instruction rather than evidence.
+// A benchmark that ships its world INSIDE the task (TravelPlanner carries the whole flight/hotel/restaurant
+// table, up to 44k chars) then built a prompt the model answered with nothing at all — and an empty completion
+// lands as `unmeasured`, so the largest cases in a suite were the ones that silently never got a verdict.
+// Bounded far above the evidence cap because a truncated instruction is a worse failure than a truncated
+// exhibit, and marked when it bites: a judge that reads a cut-off task must know the cut happened.
+const TASK_MAX_CHARS = 24_000;
+
+function withTruncationNotice(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
+}
 
 // Agent final answer = the text of the last assistant message in the trace. The final answer is usually at the very end of the trace array,
 // so truncating with JSON.stringify(trace).slice(0, MAX) cuts it off → the judge misjudges it as "no final answer". Extract it into a dedicated section.
@@ -52,6 +63,9 @@ function renderTemplate(template: string, input: JudgeInput): string {
     final_answer: finalAnswer.slice(0, MAX_CHARS),
     response: input.response ? input.response.slice(0, MAX_CHARS) : "",
     trace: input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "",
+    required_evidence: (input.requiredEvidence ?? [])
+      .map(({ label, text }) => `${label}:\n${text.slice(0, MAX_CHARS)}`)
+      .join("\n\n"),
     verdict_instruction: verdictInstruction(input.criteria),
   };
   for (const [name, value] of Object.entries(input.custom ?? {})) {
@@ -69,12 +83,14 @@ const BUILTIN_PLACEHOLDERS = new Set([
   "rubric",
   "criteria",
   "dom",
+  "diff",
   "expected",
   "final_answer",
   "response",
   "trace",
   "verdict_instruction",
   "screenshot",
+  "required_evidence",
 ]);
 export function customPlaceholdersOf(template: string | undefined): string[] {
   if (!template) return [];
@@ -98,11 +114,16 @@ function buildPrompt(input: JudgeInput): string {
   const trace = input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "(none)";
   return [
     "You are a strict evaluation judge for an AI agent's run. Judge ONLY from the evidence below.",
-    `TASK:\n${input.task}`,
+    `TASK:\n${withTruncationNotice(input.task, TASK_MAX_CHARS)}`,
     input.rubric ? `RUBRIC:\n${input.rubric}` : "",
     criteria ? `CRITERIA (score each):\n${criteria}` : "",
     input.expected ? `EXPECTED OUTPUT (reference):\n${input.expected.slice(0, MAX_CHARS)}` : "",
     input.dom ? `FINAL DOM (truncated):\n${input.dom.slice(0, MAX_CHARS)}` : "",
+    // What the agent PRODUCED in a repo-env case. Named as the work itself, not as a code review, because the same
+    // channel carries a written answer (a plan, a report) whenever the task asks for a file instead of a sentence.
+    input.diff
+      ? `FILES THE AGENT PRODUCED OR CHANGED (git diff vs the seeded baseline, truncated):\n${input.diff.slice(0, MAX_CHARS)}`
+      : "",
     input.screenshot
       ? "A SCREENSHOT of the final UI/desktop state is attached. Judge whether it shows the task's goal state."
       : "",
@@ -110,6 +131,10 @@ function buildPrompt(input: JudgeInput): string {
     response ? `AGENT FINAL RESPONSE (result channel):\n${response.slice(0, MAX_CHARS)}` : "",
     // Custom evidence slots (mapping-authored) get their own sections — usable without a custom template.
     ...Object.entries(input.custom ?? {}).map(([name, value]) => `EVIDENCE ${name}:\n${value.slice(0, MAX_CHARS)}`),
+    // What the judge DECLARED it needs, lifted out of the trace. Above the trace section on purpose: the trace
+    // is serialized whole and cut at a character budget, so on a long run the required evidence was exactly
+    // what fell off the end — and the judge answered anyway.
+    ...(input.requiredEvidence ?? []).map(({ label, text }) => `${label}:\n${text.slice(0, MAX_CHARS)}`),
     // Since the trace JSON may be truncated, tell it to look at the section above even if the final answer is cut off.
     `EXECUTION TRACE (JSON, truncated${finalAnswer ? "; see AGENT FINAL ANSWER above" : ""}):\n${trace}`,
     verdictInstruction(input.criteria),
@@ -132,7 +157,16 @@ export interface JudgePreview {
 }
 
 // Text placeholders that carry run evidence (task/verdict_instruction are structural, always present).
-const EVIDENCE_PLACEHOLDERS = ["rubric", "criteria", "expected", "final_answer", "response", "trace", "dom"] as const;
+const EVIDENCE_PLACEHOLDERS = [
+  "rubric",
+  "criteria",
+  "expected",
+  "final_answer",
+  "response",
+  "trace",
+  "dom",
+  "diff",
+] as const;
 
 // Zero-cost preview: render the exact judging prompt for an assembled input and report per-placeholder coverage
 // + warnings, WITHOUT calling the model. buildPrompt is reused verbatim, so the preview is what the judge sees.
@@ -153,6 +187,7 @@ export function previewJudge(input: JudgeInput): JudgePreview {
     response: coverage(input.response ?? ""),
     trace: coverage(traceJson),
     dom: coverage(input.dom ?? ""),
+    diff: coverage(input.diff ?? ""),
     screenshot: { present: input.screenshot !== undefined, chars: 0, truncated: false },
   };
   // Custom evidence slots — resolved slots report coverage; template-referenced names count even when unresolved
@@ -172,8 +207,13 @@ export function previewJudge(input: JudgeInput): JudgePreview {
       }
     }
   }
+  // The task IS sliced now (TASK_MAX_CHARS), so its truncation must reach the preview like every other slot —
+  // exempting it is what let a dry-run read green while the real call came back empty.
+  if (input.task.length > TASK_MAX_CHARS) {
+    warnings.push(`task is truncated to ${TASK_MAX_CHARS} chars in the prompt (${input.task.length} total).`);
+  }
   for (const [key, c] of Object.entries(evidence)) {
-    if (key === "task") continue; // task is never sliced in the prompt — no truncation to warn about
+    if (key === "task") continue; // reported just above against its own, larger cap
     if (c.truncated) warnings.push(`${key} is truncated to ${MAX_CHARS} chars in the prompt (${c.chars} total).`);
   }
   return { prompt: buildPrompt(input), evidence, warnings };

@@ -68,3 +68,43 @@ export function assessEvidence(requires: EvidenceRequirement[], ctx: GradeContex
   }
   return { satisfied, missing, warnings };
 }
+
+// ── A DECLARED REQUIREMENT IS DELIVERED, NOT HOPED FOR ───────────────────────────────────────────────
+//
+// `requires` used to be a preview-only annotation: it told a user, before committing, whether the target
+// harness produces the evidence — and then the real grade ignored it. So the evidence a judge said it needs
+// reached the model only if it happened to survive inside the trace JSON, which is serialized whole and cut
+// at a character budget. On a long browser run the required `tool_call` sat past the cut, and the judge
+// answered anyway: a confident verdict rendered on evidence that was not in the prompt.
+//
+// So every satisfied requirement is HOISTED into its own section (rendered before the trace, so truncation
+// cannot reach it), and the unsatisfied ones are what the caller refuses on. `final_answer`, `dom` and
+// `screenshot` are omitted here because each already has a dedicated section of its own — hoisting them
+// again would just duplicate the evidence inside its own prompt.
+export interface HoistedEvidence {
+  label: string;
+  text: string;
+}
+
+export function hoistRequiredEvidence(requires: EvidenceRequirement[], trace: TraceEvent[]): HoistedEvidence[] {
+  const out: HoistedEvidence[] = [];
+  for (const req of requires) {
+    if (req.kind === "tool_call") {
+      const events = trace.filter((e) => e.kind === "tool_call" && (req.name === undefined || e.name === req.name));
+      if (events.length > 0)
+        out.push({ label: req.name ? `REQUIRED TOOL CALLS (${req.name})` : "REQUIRED TOOL CALLS", text: json(events) });
+    } else if (req.kind === "artifact") {
+      const events = trace.filter((e) => e.kind === "artifact" && (req.role === undefined || e.role === req.role));
+      if (events.length > 0)
+        out.push({ label: req.role ? `REQUIRED ARTIFACTS (${req.role})` : "REQUIRED ARTIFACTS", text: json(events) });
+    } else if (req.kind === "span") {
+      const events = trace.filter((e) => e.kind === "span" && e.name === req.name);
+      if (events.length > 0) out.push({ label: `REQUIRED SPAN (${req.name})`, text: json(events) });
+    }
+  }
+  return out;
+}
+
+function json(events: TraceEvent[]): string {
+  return JSON.stringify(events);
+}

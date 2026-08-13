@@ -148,3 +148,24 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
     await expect(store.get("acme", "r1")).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
   });
 });
+
+describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the configured database", () => {
+  it("creates the database and QUALIFIES every schema statement, so reads find what boot created", async () => {
+    const { calls, fetchImpl } = fakeClickHouse(() => "");
+    await new ClickHouseTrajectoryStore({ url: "http://ch:8123", database: "everdict" }, fetchImpl).ensureSchema();
+    expect(calls[0]?.sql).toBe("CREATE DATABASE IF NOT EXISTS everdict");
+    // Unqualified DDL lands in the connection's default database while every read says `everdict.…`: boot
+    // reports success and the first seal fails with UNKNOWN_TABLE.
+    for (const { sql } of calls.slice(1)) expect(sql).toContain("everdict.everdict_trajectories");
+    expect(calls.some(({ sql }) => sql.startsWith("CREATE TABLE IF NOT EXISTS everdict.everdict_trajectories"))).toBe(
+      true,
+    );
+    expect(calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).length).toBeGreaterThan(0);
+  });
+
+  it("refuses a database name that is not a plain identifier — it becomes SQL text, not a bound param", async () => {
+    const { fetchImpl } = fakeClickHouse(() => "");
+    const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123", database: "ever;DROP" }, fetchImpl);
+    await expect(store.ensureSchema()).rejects.toThrow(/not a plain identifier/);
+  });
+});

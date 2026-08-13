@@ -130,7 +130,9 @@ export class JudgePreviewService {
     // code judge — there is no prompt to render (the code builds its own calls); the preview is the evidence
     // coverage the code will receive plus the declared-requirement check. "Run once" (try) is the real preview.
     if (spec.kind === "code") {
-      const input = await assembleJudgeInput(ctx, {});
+      const input = await assembleJudgeInput(ctx, {
+        ...(spec.requires?.length ? { requires: spec.requires } : {}),
+      });
       const preview = previewJudge(input);
       const requirements = spec.requires?.length ? assessEvidence(spec.requires, ctx) : undefined;
       return {
@@ -160,6 +162,10 @@ export class JudgePreviewService {
       ...(criteria?.length ? { criteria } : {}),
       ...(effective.promptTemplate ? { promptTemplate: effective.promptTemplate } : {}),
       ...(useScreenshot ? { useScreenshot: true } : {}),
+      // The declaration shapes a real grade's prompt, so it shapes the preview's — that is the whole point of
+      // one constructor. A judge whose `inputs` exclude the trace must SEE that its preview has no trace.
+      ...(spec.kind === "model" && spec.inputs?.length ? { modalities: spec.inputs } : {}),
+      ...(spec.requires?.length ? { requires: spec.requires } : {}),
     });
     const preview = previewJudge(input);
     // If the judge declares required evidence, check it against THIS run — the missing set is what the user must

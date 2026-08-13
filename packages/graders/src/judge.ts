@@ -2,6 +2,7 @@ import type {
   ComputeHandle,
   EnvSnapshot,
   EvalCase,
+  EvidenceRequirement,
   GradeContext,
   Grader,
   JudgeCriterion,
@@ -9,6 +10,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/contracts";
+import { type HoistedEvidence, hoistRequiredEvidence } from "./assess-evidence.js";
 
 export interface CriterionVerdict {
   pass: boolean;
@@ -39,8 +41,16 @@ export interface JudgeInput {
   screenshotRef?: string; // External ref such as a browser snapshot (model transport uses screenshot)
   screenshot?: JudgeImage; // Image bytes resolved for VLM input
   response?: string; // Final response from the result channel (prompt snapshot output) — the only evidence when the trace has no assistant message
+  // The repo environment's final diff vs the seeded baseline — WHAT THE AGENT PRODUCED, for a case whose answer is a
+  // file rather than a sentence. Without it a repo-env case could only be judged on what the agent happened to SAY in
+  // its trace, so an agent that did the work and stayed quiet was indistinguishable from one that did nothing.
+  diff?: string;
   expected?: string; // the case's reference output (EvalCase.expected) — EXPECTED OUTPUT evidence
   custom?: Record<string, string>; // resolved custom evidence slots (mapping-authored) → the template's {<name>} placeholders
+  // The evidence the judge DECLARED it needs (`requires`), lifted out of the trace into sections of its own so
+  // that trace truncation cannot remove the one thing the verdict was supposed to rest on. See
+  // hoistRequiredEvidence — the trace still ships whole; this is the part that is guaranteed to arrive.
+  requiredEvidence?: HoistedEvidence[];
   rubric?: string;
   criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
   promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
@@ -117,19 +127,41 @@ async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Pr
 // os-use with only a ref, the compute file; in a preview (no compute) an os-use ref simply resolves to absent.
 export async function assembleJudgeInput(
   ctx: GradeContext,
-  opts: { rubric?: string; criteria?: JudgeCriterion[]; promptTemplate?: string; useScreenshot?: boolean } = {},
+  opts: {
+    rubric?: string;
+    criteria?: JudgeCriterion[];
+    promptTemplate?: string;
+    useScreenshot?: boolean;
+    // The modalities the judge DECLARED (`inputs`). Absent = every modality this run carries, which is what
+    // an inline judge with no declaration means. Present and missing `trace`/`dom` is a judge that asked NOT
+    // to see it: `inputs` was decorative before — only `screenshot` was ever read — so a judge registered to
+    // grade a screenshot alone was silently shown the whole execution trace as well, and its verdict was not
+    // the one its author specified. The sections that are not modalities (the task, the rubric, the result
+    // channel's response, the case's expected output, the repo diff, the custom slots) always ride: they are
+    // what a verdict is ABOUT, not a channel to be selected. The agent's final answer rides WITH the trace,
+    // being the last assistant message in it.
+    modalities?: readonly ("trace" | "dom" | "screenshot")[];
+    // The evidence the judge declared it NEEDS. Satisfied requirements are hoisted into their own sections;
+    // whether an unsatisfied one is fatal is the caller's decision (the runner refuses; the preview reports).
+    requires?: EvidenceRequirement[];
+  } = {},
 ): Promise<JudgeInput> {
   const snap = ctx.snapshot;
+  const wants = (modality: "trace" | "dom" | "screenshot"): boolean =>
+    opts.modalities === undefined || opts.modalities.includes(modality);
   const screenshot = opts.useScreenshot ? await resolveScreenshot(snap, ctx.compute) : undefined;
+  const required = opts.requires?.length ? hoistRequiredEvidence(opts.requires, ctx.trace) : [];
   return {
     task: ctx.case.task,
-    trace: ctx.trace,
-    ...(snap.kind === "browser" ? { dom: snap.dom } : {}),
+    ...(wants("trace") ? { trace: ctx.trace } : {}),
+    ...(required.length > 0 ? { requiredEvidence: required } : {}),
+    ...(snap.kind === "browser" && wants("dom") ? { dom: snap.dom } : {}),
     ...(snap.kind === "browser" && opts.useScreenshot && snap.screenshotRef
       ? { screenshotRef: snap.screenshotRef }
       : {}),
     ...(screenshot ? { screenshot } : {}),
     ...(snap.kind === "prompt" && snap.output ? { response: snap.output } : {}),
+    ...(snap.kind === "repo" && snap.diff ? { diff: snap.diff } : {}),
     ...(ctx.case.expected ? { expected: ctx.case.expected } : {}),
     // Custom evidence slots ride GradeContext.evidence (pulled-trace extraction); fixed slots already ride the
     // snapshot/trace, so only `custom` crosses here.
@@ -204,6 +236,12 @@ export class JudgeGrader implements Grader {
       // Set only by `makeGraders` for the inline construction; the registered runner and the code-judge
       // wrapper apply their own rewrite, and a second namespace here would double it.
       namespaceCriteria?: boolean;
+      // What the judge DECLARED (JudgeSpec.inputs / JudgeSpec.requires) — forwarded to assembleJudgeInput so
+      // the declaration shapes the prompt the model actually sees. Whether an UNMET requirement is fatal is
+      // decided above this grader (the runner refuses; the preview reports), because only the caller knows
+      // whether it is scoring a run or previewing one.
+      modalities?: readonly ("trace" | "dom" | "screenshot")[];
+      requires?: EvidenceRequirement[];
     } = {},
   ) {
     this.id = opts.id ?? "judge";
@@ -217,6 +255,8 @@ export class JudgeGrader implements Grader {
       ...(criteria.length ? { criteria } : {}),
       ...(this.opts.promptTemplate ? { promptTemplate: this.opts.promptTemplate } : {}),
       ...(this.opts.useScreenshot ? { useScreenshot: true } : {}),
+      ...(this.opts.modalities ? { modalities: this.opts.modalities } : {}),
+      ...(this.opts.requires ? { requires: this.opts.requires } : {}),
     });
     // The signal rides from safeGrade's per-grader controller: when this grader's slice of the case budget
     // runs out, the provider call is told to stop rather than left to finish unheard.

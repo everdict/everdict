@@ -27,7 +27,18 @@ import { bodyOf, formatOf } from "./trajectory-body.js";
 //
 // The multi-plane rung needs no new table here — a segment IS a row, keyed by (run_id, emitter). The row
 // that sealed first is the trajectory's header; the rest are its other planes.
-const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS everdict_trajectories (
+// ── THE DDL NAMES THE SAME TABLE THE READS DO ────────────────────────────────────────────────────────
+//
+// Every read and write qualifies the table with the configured database (`<db>.everdict_trajectories`), but
+// the schema statements used to be UNQUALIFIED — so on a deployment configured with a database of its own,
+// `ensureSchema` created the table in whatever the connection's default database is (ClickHouse: `default`)
+// and every subsequent statement addressed a table that did not exist. Boot reported success; the first seal
+// failed with UNKNOWN_TABLE, in a store whose whole job is holding evidence.
+//
+// The database itself is created too. An operator who sets `EVERDICT_CLICKHOUSE_DATABASE` has NAMED the
+// database; requiring them to also have created it by hand is a second, undocumented step whose omission
+// looks exactly like the bug above.
+const schemaSql = (table: string): string => `CREATE TABLE IF NOT EXISTS ${table} (
   run_id String,
   tenant String,
   source String,
@@ -44,19 +55,23 @@ const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS everdict_trajectories (
 ) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
 
 // Additive DDL for installs created before the multi-plane rung (idempotent, like the CREATE above).
-const ADD_EMITTER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS emitter String DEFAULT ''";
-const ADD_T0_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS t0 String DEFAULT ''";
+const ADD_EMITTER_SQL = (table: string): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS emitter String DEFAULT ''`;
+const ADD_T0_SQL = (table: string): string => `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS t0 String DEFAULT ''`;
 // Whose evidence a trajectory is (mig 0116's rung-2 twin). '' = the workspace's. No backfill here: unlike
 // Postgres this store has no run ledger beside it to read an owner from, and it is opt-in + new.
-const ADD_OWNER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS owner String DEFAULT ''";
+const ADD_OWNER_SQL = (table: string): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS owner String DEFAULT ''`;
 // What the body holds (N6's rung-2 twin of mig 0118). '' reads as 'events' — which is what every row written
 // before spans became the record actually is. No backfill: sealed evidence is not rewritten.
-const ADD_BODY_FORMAT_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS body_format String DEFAULT ''";
+const ADD_BODY_FORMAT_SQL = (table: string): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS body_format String DEFAULT ''`;
 // What a piece of evidence IS, and what to call it on a browse row (mig 0124's rung-2 twin). '' = evidence
 // that arrived with no run to name it. No backfill, for the same reason the owner column has none: this store
 // has no run ledger beside it to read from.
-const ADD_KIND_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS kind String DEFAULT ''";
-const ADD_LABEL_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS label String DEFAULT ''";
+const ADD_KIND_SQL = (table: string): string => `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS kind String DEFAULT ''`;
+const ADD_LABEL_SQL = (table: string): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS label String DEFAULT ''`;
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -119,13 +134,11 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // Idempotent DDL — called once by the composition root (one table; a migration framework would be
   // ceremony). Additive changes ship as new IF-NOT-EXISTS statements here.
   async ensureSchema(): Promise<void> {
-    await this.command(SCHEMA_SQL, {});
-    await this.command(ADD_EMITTER_SQL, {});
-    await this.command(ADD_T0_SQL, {});
-    await this.command(ADD_OWNER_SQL, {});
-    await this.command(ADD_BODY_FORMAT_SQL, {});
-    await this.command(ADD_KIND_SQL, {});
-    await this.command(ADD_LABEL_SQL, {});
+    const table = this.table();
+    await this.command(`CREATE DATABASE IF NOT EXISTS ${this.database()}`, {});
+    await this.command(schemaSql(table), {});
+    for (const alter of [ADD_EMITTER_SQL, ADD_T0_SQL, ADD_OWNER_SQL, ADD_BODY_FORMAT_SQL, ADD_KIND_SQL, ADD_LABEL_SQL])
+      await this.command(alter(table), {});
   }
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -321,7 +334,21 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   }
 
   private table(): string {
-    return `${this.opts.database ?? "default"}.everdict_trajectories`;
+    return `${this.database()}.everdict_trajectories`;
+  }
+
+  // A database name reaches SQL as an IDENTIFIER — it cannot ride the `param_` binding every value uses. So
+  // it is checked instead of trusted: the operator's env var is the one string in this store that becomes SQL
+  // text, and a name that is not a plain identifier is refused at construction rather than concatenated.
+  private database(): string {
+    const name = this.opts.database ?? "default";
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { store: "clickhouse", database: name },
+        `ClickHouse database name "${name}" is not a plain identifier — set EVERDICT_CLICKHOUSE_DATABASE to [A-Za-z_][A-Za-z0-9_]*`,
+      );
+    return name;
   }
 
   private async select<T>(sql: string, params: Record<string, string>): Promise<T[]> {
