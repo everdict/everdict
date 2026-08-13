@@ -2,6 +2,7 @@ import { safeGrade } from "@everdict/application-execution";
 import {
   type CaseResult,
   type EvalCase,
+  type FetchedTrace,
   type GradeContext,
   type Grader,
   type GraderSpec,
@@ -74,6 +75,9 @@ export async function collectDeferredTrace(
   const trace = [...result.trace];
   let pullFailed: string | undefined;
   let gotEvents = false;
+  // The judge's evidence slots, extracted by the source from the trace's own spans. Declared on CaseResult
+  // (whose comment names GradeContext.evidence as the consumer) and discarded at this hop.
+  let evidence: FetchedTrace["evidence"];
   if (deps.buildTraceSource) {
     try {
       // Auth: authSecret name → tenant SecretStore value → Authorization header (pull-ingest convention). A plain secret
@@ -100,9 +104,20 @@ export async function collectDeferredTrace(
       });
       const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
       let events: Awaited<ReturnType<TraceSource["fetch"]>> = [];
+      // EVIDENCE COMPUTED IS EVIDENCE DELIVERED (downstream report 1.2). This called bare `fetch`, so the
+      // source's evidence extraction — the judge's declared slots, resolved from the trace's own spans —
+      // was never even REQUESTED here, while the self-hosted collector asks for it and delivers it. The same
+      // harness therefore graded differently depending on where it ran, which is a product-correctness bug
+      // rather than a gap: a judge that declared a screenshot got one on one lane and text-only on the other.
       for (let attempt = 0; attempt < COLLECT_ATTEMPTS; attempt++) {
         if (attempt > 0) await sleep(2000);
-        events = await source.fetch(ref.runId);
+        if (source.fetchDetailed) {
+          const detailed = await source.fetchDetailed(ref.runId);
+          events = detailed.events;
+          if (detailed.evidence) evidence = detailed.evidence;
+        } else {
+          events = await source.fetch(ref.runId); // a source without extraction — events only, as before
+        }
         if (events.length > 0) break;
       }
       gotEvents = events.length > 0;
@@ -134,7 +149,7 @@ export async function collectDeferredTrace(
       ),
       "collect",
     );
-    return { ...result, trace, failure };
+    return { ...result, trace, failure, ...(evidence ? { evidence } : {}) };
   }
 
   // 2) Score the observations the job deferred — the separation rule matches the agent (needsCompute=true was already scored in the job).
@@ -179,7 +194,7 @@ export async function collectDeferredTrace(
   // collected case could never read "complete" under the positive-seal rule.
   if (recovering) {
     const { failure: _recovered, ...rest } = result;
-    return { ...rest, trace, scores, traceSealed: true };
+    return { ...rest, trace, scores, traceSealed: true, ...(evidence ? { evidence } : {}) };
   }
-  return { ...result, trace, scores, traceSealed: true };
+  return { ...result, trace, scores, traceSealed: true, ...(evidence ? { evidence } : {}) };
 }

@@ -513,7 +513,14 @@ export class ServiceTopologyBackend
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled run
     opts?.onStarted?.(); // past the Scheduler's wait queue — we're standing up the topology now → flip the run to running
-    const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
+    // THE RESOLVED SPEC IS THE ONE THE JOB CARRIES (downstream report 5.1). The control plane resolves
+    // `{secretRef}` env values BEFORE dispatch and attaches the resolved copy to the job — that is what
+    // `CaseJob.harnessSpec` is for, since the runtime is not trusted with the SecretStore. Re-fetching from
+    // the registry got the RAW spec back, placeholders and all, and the deploy went out missing exactly the
+    // variables that matter. The registry stays the fallback for a job that carries no spec.
+    const carried = job.harnessSpec?.kind === "service" ? job.harnessSpec : undefined;
+    const registered =
+      carried ?? (await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version));
     // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
     // so the warm pool separates into a distinct identity (the same topology can be evaluated as service X v1 ↔ v2).
     const spec = applyImagePins(registered, job.imagePins);
@@ -969,6 +976,12 @@ export class ServiceTopologyBackend
         trace: [...trace, ...infraMarks, ...targetInfra, ...infra, ...serviceLogEvents],
         snapshot,
         scores,
+        // EVIDENCE COMPUTED IS EVIDENCE DELIVERED (downstream report 1.2). The pulled trace's evidence was
+        // extracted here, handed to the observation synthesizer, and then left out of the result — while the
+        // self-hosted lane carries it. A judge that declared a screenshot got one on one lane and text-only
+        // on the other, from the same harness: not a gap, a harness whose grading depends on where it ran.
+        // `CaseResult.evidence` has declared this slot all along, naming GradeContext.evidence as its reader.
+        ...(traceEvidence ? { evidence: traceEvidence } : {}),
         // The agent's clock started when the drive was submitted — the declared anchor that lets an inline
         // trace carrying only relative `t` land on the same wall-clock axis as the placement marks. Events
         // that stamp their own `at` (a pulled platform trace) are unaffected: `at` wins per event.

@@ -12,9 +12,12 @@ describe("flattenEnv", () => {
     expect(out).toEqual({ LOG_LEVEL: "debug", OPENAI_API_KEY: "sk-live" });
   });
 
-  it("drops unresolved refs (no lookup entry) — never emits [object Object]", () => {
-    const out = flattenEnv({ A: "1", MISSING: { secretRef: "NOPE" } });
-    expect(out).toEqual({ A: "1" });
+  it("REFUSES an unresolved ref rather than dropping it — a half-populated env is nobody's intent", () => {
+    // Dropping it made the key ABSENT, which reads exactly like "never declared": a topology deployed green
+    // with the variables that matter missing, and the agent's provider 401 pointed nowhere near dispatch.
+    expect(() => flattenEnv({ A: "1", MISSING: { secretRef: "NOPE" } })).toThrow(/NOPE/);
+    // …and the resolved path is unchanged: a literal, or a ref the caller CAN resolve.
+    expect(flattenEnv({ A: "1", K: { secretRef: "OK" } }, { OK: "sk-live" })).toEqual({ A: "1", K: "sk-live" });
   });
 });
 

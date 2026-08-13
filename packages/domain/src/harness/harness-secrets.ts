@@ -10,10 +10,19 @@ import {
 // shape (@everdict/contracts); the resolution/visibility rules live here (single owner).
 
 // Flatten an env map to a string map — substitute {secretRef} with its value from lookup.
-// For narrowing the type at consumption points (CommandHarness / topology runtime): silently drop unresolved references
-// (either the control plane already resolved them via resolveHarnessSecrets, or the secret is missing → that env is unset).
+//
+// AN UNRESOLVED REFERENCE IS A REFUSAL, NOT AN OMISSION (downstream report 5.1). This used to drop what it
+// could not resolve, so the key came out ABSENT — indistinguishable from "never declared". A topology then
+// deployed green with exactly the variables that matter missing, the agent failed at its first authenticated
+// call, and the operator read a provider 401 that pointed nowhere near dispatch. Two harness registrations
+// differing only in inlined-vs-referenced secrets behaved completely differently and nothing said why.
+//
+// No caller wants a half-populated env: either the control plane already resolved these before dispatch
+// (the normal path, and then `lookup` is irrelevant because the values are literals), or something upstream
+// went wrong and the deploy must not proceed pretending otherwise.
 export function flattenEnv(env: Record<string, EnvValue>, lookup: Record<string, string> = {}): Record<string, string> {
   const out: Record<string, string> = {};
+  const unresolved: string[] = [];
   for (const [k, v] of Object.entries(env)) {
     if (typeof v === "string") {
       out[k] = v;
@@ -21,7 +30,14 @@ export function flattenEnv(env: Record<string, EnvValue>, lookup: Record<string,
     }
     const val = lookup[v.secretRef];
     if (val !== undefined) out[k] = val;
+    else unresolved.push(`${k}={secretRef:${v.secretRef}}`);
   }
+  if (unresolved.length > 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { unresolved },
+      `Unresolved secret reference(s): ${unresolved.join(", ")} — the control plane resolves these before dispatch, so reaching here means the resolved spec was not the one used.`,
+    );
   return out;
 }
 
