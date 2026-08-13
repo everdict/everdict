@@ -164,7 +164,15 @@ function modelJudgeEvents(calls: JudgeLlmCall[]): TraceEvent[] {
 // lifecycle — a meter/seal failure never fails the verdict.
 async function reportJudgeExecution(
   deps: DefaultJudgeRunnerDeps,
-  input: { spec: JudgeSpec; tenant: string; events: TraceEvent[]; t0: string; runId?: string; billing?: CaseResult },
+  input: {
+    spec: JudgeSpec;
+    tenant: string;
+    events: TraceEvent[];
+    t0: string;
+    runId?: string;
+    billing?: CaseResult;
+    publishWhen?: () => Promise<boolean>;
+  },
 ): Promise<void> {
   if (input.events.length === 0) return;
   try {
@@ -189,6 +197,11 @@ async function reportJudgeExecution(
     // metering is best-effort — never fail the verdict over it
   }
   if (input.runId !== undefined && deps.trajectories) {
+    // …and only if this driver may still publish (arch-review 34 P1). The provider call above is the longest
+    // thing in a case; authority proved before it started is a statement about a moment that has passed. A
+    // trajectory keeps the FIRST segment per emitter, so a displaced driver sealing here would make its judge
+    // plane the permanent one and cost the successor's re-drive its own.
+    if (input.publishWhen && !(await input.publishWhen().catch(() => false))) return;
     await deps.trajectories
       .seal({
         runId: input.runId,
@@ -423,6 +436,7 @@ async function runCodeJudge(
   placement?: Placement,
   submittedBy?: string,
   runId?: string,
+  publishWhen?: () => Promise<boolean>,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -448,6 +462,7 @@ async function runCodeJudge(
       events: result.trace,
       t0: startedAt,
       ...(runId !== undefined ? { runId } : {}),
+      ...(publishWhen ? { publishWhen } : {}),
       billing: result,
     });
     if (result.failure) {
@@ -468,7 +483,7 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins) {
+    async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen) {
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
@@ -476,7 +491,8 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       const wantsImage = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
       const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId);
+      if (spec.kind === "code")
+        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
@@ -659,6 +675,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           events,
           t0: judgeStartedAt,
           ...(runId !== undefined ? { runId } : {}),
+          ...(publishWhen ? { publishWhen } : {}),
           ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
         });
       }

@@ -38,5 +38,12 @@ export interface JudgeRunner {
     // What this pass pinned beneath the judge document. Absent = nothing was pinned (a pass sealed before
     // digests existed, or a facet with no document behind it) — the runner reads as it always did.
     pins?: NestedDocumentPins,
+    // MAY THIS STILL BE PUBLISHED? Asked immediately before the judge's own execution is sealed as a
+    // `judge:<id>` plane, and only then — a judge call is the longest thing in a case, so proving authority
+    // before it starts answers a question about a moment that has passed by the time the answer is used
+    // (arch-review 34 P1). A driver displaced mid-judge would otherwise plant the permanent judge plane of a
+    // case whose child settle is refused a moment later, and the successor's re-drive loses its own seal to
+    // it. Absent = nothing to prove (ingest, a single-replica install), and the plane seals as before.
+    publishWhen?: () => Promise<boolean>,
   ): Promise<Score[]>;
 }

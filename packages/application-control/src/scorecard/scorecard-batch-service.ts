@@ -293,6 +293,8 @@ export class ScorecardBatchService {
                     rec.createdBy,
                     () => c.id,
                     plan.sealedJudges,
+                    // …publishable only while this recovery still holds the batch it is recovering.
+                    parentDriver ? () => this.holdsBatch(id, parentDriver.epoch) : undefined,
                   )
                   .catch(() => {});
               // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
@@ -1803,6 +1805,9 @@ export class ScorecardBatchService {
         owner,
         (cid, trial) => caseToChild.get(childKey(cid, trial)),
         opts.sealedJudges,
+        // …and each judge's own evidence plane seals only while this loop still holds the batch. Asked after
+        // the judge call, because the judge call is where a takeover has time to happen (arch-review 34 P1).
+        () => this.holdsBatch(id, epoch),
       );
       // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
       // (live visibility + whatever went out survives even if the batch dies midway). If not wired,

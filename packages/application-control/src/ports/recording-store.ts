@@ -24,6 +24,13 @@ export interface RecordingStore {
   // NOT a time-based filter at seal: the lanes carry different clocks (frames and logs are wall-clock, the
   // folded env deltas are trace-relative offsets), so "older than the attempt" is not a question the entries
   // can all answer. "Start again" is.
+  //
+  // WHAT THIS DOES NOT DO, precisely: a reset removes history, it does not REVOKE a producer. The paused
+  // replica whose return is the reason fencing exists at all can wake after the reset and append into the new
+  // attempt's buffer, because `append` carries no attempt identity — the self-hosted recorder reports a runId
+  // and nothing else. Closing that needs a generation on the wire (`append(runId, generation, item)`), stamped
+  // by whichever recorder serves an attempt and refused by the store when it is stale. That is a change to
+  // what PRODUCERS say, so it belongs to a change of its own rather than being half-built here with no caller.
   reset(runId: string): Promise<void>;
   get(runId: string): Promise<CaseRecording | undefined>;
   // The recording as it stands RIGHT NOW, sealed or not — the live tail behind "replay while it runs"

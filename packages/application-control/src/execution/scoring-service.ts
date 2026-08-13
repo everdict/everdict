@@ -275,6 +275,8 @@ export class ScoringService {
     runtime?: string, // the producing run's runtime (for co-locate). The ingest path has no producing run, so undefined.
     submittedBy?: string, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
     runId?: string, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
+    // Asked immediately before that seal, never before the judge starts — see the port's note.
+    publishWhen?: () => Promise<boolean>,
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -296,7 +298,9 @@ export class ScoringService {
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
     for (const judge of specs) {
-      result.scores.push(...(await runner.run(judge.spec, tenant, ctx, runPlacement, submittedBy, runId, judge.pins)));
+      result.scores.push(
+        ...(await runner.run(judge.spec, tenant, ctx, runPlacement, submittedBy, runId, judge.pins, publishWhen)),
+      );
     }
   }
 
@@ -314,6 +318,8 @@ export class ScoringService {
     runIdOf?: (caseId: string, trial?: number) => string | undefined,
     // The pass's sealed closure (manifest.judges / ScoringPass.judges) — the concretization source (I6).
     sealed?: SealedJudgeClosure[],
+    // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
+    publishWhen?: () => Promise<boolean>,
   ): Promise<JudgeStream> {
     const { specs, unresolved } = await this.resolveJudges(tenant, judges, sealed);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
@@ -350,7 +356,7 @@ export class ScoringService {
         result.scores.push(...unresolvedScores());
         const runId = runIdOf?.(result.caseId, result.trial);
         const task = limit(() =>
-          this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy, runId),
+          this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy, runId, publishWhen),
         ).catch((err) => {
           // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
           firstError ??= err;
@@ -377,8 +383,19 @@ export class ScoringService {
     submittedBy?: string,
     runIdOf?: (caseId: string, trial?: number) => string | undefined,
     sealed?: SealedJudgeClosure[],
+    // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
+    publishWhen?: () => Promise<boolean>,
   ): Promise<void> {
-    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy, runIdOf, sealed);
+    const stream = await this.createJudgeStream(
+      tenant,
+      dataset,
+      judges,
+      runtime,
+      submittedBy,
+      runIdOf,
+      sealed,
+      publishWhen,
+    );
     for (const result of results) stream.push(result);
     await stream.settle();
   }
