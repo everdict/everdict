@@ -2,6 +2,7 @@ import type { Score } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   MAX_JUDGE_ATTEMPTS_PER_PASS,
+  completeJudgeCoverage,
   hasMeasuredJudgeVerdict,
   judgeAttemptsOf,
   judgePending,
@@ -124,5 +125,38 @@ describe("pendingJudgesFor — the retry's unit is the judge that is actually pe
     const done = { scores: [measured("a"), terminal("b")] };
     expect(pendingJudgesFor(done, judges)).toEqual([]);
     expect(judgePending(done, judges)).toBe(false);
+  });
+});
+
+// ── EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3) ───────────────────────────────────────────────
+describe("completeJudgeCoverage — a judge that never answered says so", () => {
+  const scored = { graderId: "quality", metric: "judge:quality", value: 1 };
+
+  it("adds an explicit unmeasured row for a selected judge with none, and leaves the rest alone", () => {
+    // A child used to go terminal when the judge PROMISE was done. An unexpected judge infrastructure error
+    // then left the case's evidence terminal with its selected judge simply unmentioned — which reads as a
+    // judge nobody chose, a different and nicer fact than "the judge did not answer".
+    const out = completeJudgeCoverage([scored], [{ id: "quality" }, { id: "safety" }]);
+    expect(out).toHaveLength(2);
+    const filled = out.find((s) => s.metric === "judge:safety");
+    expect(filled).toMatchObject({ status: "unmeasured", reason: "grader_error", retryable: true });
+    expect(out.find((s) => s.metric === "judge:quality")).toBe(scored); // untouched
+  });
+
+  it("counts a criterion row as coverage — a judge's family is its verdict AND its children", () => {
+    const criterion = { graderId: "safety", metric: "judge:safety:harm", value: 0 };
+    expect(completeJudgeCoverage([criterion], [{ id: "safety" }])).toHaveLength(1);
+  });
+
+  it("is a no-op when every judge already reported, however it reported", () => {
+    const unmeasured = {
+      graderId: "safety",
+      metric: "judge:safety",
+      status: "unmeasured" as const,
+      reason: "missing_secret" as const,
+      retryable: true,
+    };
+    expect(completeJudgeCoverage([scored, unmeasured], [{ id: "quality" }, { id: "safety" }])).toHaveLength(2);
+    expect(completeJudgeCoverage([], [])).toEqual([]);
   });
 });

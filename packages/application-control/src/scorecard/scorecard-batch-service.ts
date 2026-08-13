@@ -109,6 +109,9 @@ interface PendingChildSettle {
   generation: number;
   // This attempt could not isolate its recording buffer — it runs, but its replay is not claimed as ours.
   unisolated?: boolean;
+  // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
+  // rather than leaving the row silent about it (review 39 P0-3) — the same invariant the Temporal path holds.
+  judges: ReadonlyArray<{ id: string }>;
 }
 
 export class ScorecardBatchService {
@@ -1516,6 +1519,13 @@ export class ScorecardBatchService {
     pending.delete(key);
     // No child to settle (a batch with no run store) is not a lost authority — the case really did finish.
     if (!entry.childId || !this.deps.runStore) return "committed";
+    // EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3). "The judge stream finished" is not "the judges
+    // answered": a task that died of something unexpected leaves the case's evidence terminal with its
+    // selected judge simply unmentioned, which reads as a judge nobody chose. The absence is stated instead,
+    // retryably, so a re-score can still pick it up — and the same helper runs on the Temporal path, so the
+    // two drivers cannot disagree about what a judged case looks like.
+    const covered =
+      entry.judges.length > 0 ? { ...result, scores: completeJudgeCoverage(result.scores, entry.judges) } : result;
     // TERMINAL MEANS FINALIZED, AND FINALIZED INCLUDES THE ARTIFACTS (arch-review 36 P1). The child stopped
     // going terminal before its judges landed two reviews ago; everything ELSE a case produces still happened
     // after — the screenshot offload and the replay seal ran later in the batch pipeline, so a crash in
@@ -1525,7 +1535,7 @@ export class ScorecardBatchService {
     // Both are best-effort by contract and stay that way: a failed offload or an unsealed recording must
     // never cost the case its verdict. What changes is that they happen BEFORE the one terminal write, so
     // whatever they produced is part of it.
-    await this.assembleCaseEvidence(result, {
+    await this.assembleCaseEvidence(covered, {
       scorecardId: entry.parentDriver.scorecardId,
       executionId: entry.executionId,
       generation: entry.generation,
@@ -1534,7 +1544,7 @@ export class ScorecardBatchService {
     const settled = await this.settleChild(
       entry.childId,
       (cur) => ({
-        ...Run.from(cur).succeed(result, this.now()).patch,
+        ...Run.from(cur).succeed(covered, this.now()).patch,
         // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         ...(entry.ranOn ? { runtime: entry.ranOn } : {}),
       }),
@@ -1974,6 +1984,7 @@ export class ScorecardBatchService {
           executionId: executionIdOf(job, id),
           generation: attemptGeneration.get(executionIdOf(job, id)) ?? 0,
           ...(unisolated.has(executionIdOf(job, id)) ? { unisolated: true } : {}),
+          judges, // …and what this batch asked of the case, so its commit can state a judge that never answered
         });
         return result;
       } catch (err) {
