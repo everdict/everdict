@@ -18,6 +18,43 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       principal.runnerId ? { owner: principal.subject, runnerId: principal.runnerId } : undefined;
     const NEED_RUNNER = "FORBIDDEN: runner credentials (rnr_ pairing token) required.";
 
+    // ── EVIDENCE IS AUTHORIZED BY THE LEASE, AND THE RUN IS READ FROM IT ─────────────────────────────
+    //
+    // Every report below used to take the caller's `runId` on trust: a valid runner credential plus any run id
+    // the runner happened to know was enough to push frames, logs and DURABLE track entries onto that run —
+    // including a run it no longer held, since an expired lease is requeued under the same job id and nothing
+    // told the previous holder it had been replaced. The receiving process then stamped whatever attempt IT
+    // knew about, so a stale producer's report was not merely accepted: it was RE-LABELLED as the successor's.
+    //
+    // The attempt token fixes the identity at its source. `runId` comes from the leased job, never from the
+    // request. A token that does not match a current lease is refused outright.
+    //
+    // A runner too old to send one keeps its LIVE view (an ephemeral frame is not evidence) but is refused the
+    // durable half, because "no token" and "the right token" must not lead to the same place — that equivalence
+    // is what made the fence decorative in the first place. Rolling upgrades therefore lose recordings from
+    // stale runners, visibly, instead of recording them under the wrong attempt.
+    const attemptFields = { jobId: z.string().min(1).optional(), leaseEpoch: z.number().int().min(1).optional() };
+    type Reported = { runId: string; jobId?: string; leaseEpoch?: number };
+    // Returns the run this report may write to, and whether the DURABLE path is open.
+    const authorize = async (
+      key: SelfHostedKey,
+      input: Reported,
+    ): Promise<{ runId: string; durable: boolean; generation?: number; reason?: string }> => {
+      if (input.jobId === undefined || input.leaseEpoch === undefined)
+        return { runId: input.runId, durable: false, reason: "no attempt token (update the runner)" };
+      const authority = await hub.authorizeAttempt(key, { jobId: input.jobId, leaseEpoch: input.leaseEpoch });
+      if (!authority) return { runId: input.runId, durable: false, reason: "the attempt token is not a current lease" };
+      // The lease decides which run this is about. A job with no runId (a dispatch that minted none) has no
+      // durable destination either — there is nothing for the evidence to belong to.
+      if (!authority.runId) return { runId: input.runId, durable: false, reason: "this job carries no run id" };
+      // …and which ATTEMPT's recording it may write into. The number rode in on the job this runner leased.
+      return {
+        runId: authority.runId,
+        durable: true,
+        ...(authority.recordingGeneration !== undefined ? { generation: authority.recordingGeneration } : {}),
+      };
+    };
+
     server.registerTool(
       "lease_job",
       {
@@ -124,16 +161,21 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         {
           description:
             "Push the latest live-screen frame (base64 PNG) for a running case, keyed by its runId — the run detail page serves it as the live screen. Only meaningful for a harness that declares liveScreen; best-effort (drop failures).",
-          inputSchema: { runId: z.string().min(1), frame: z.string().min(1).max(12_000_000) },
+          inputSchema: { runId: z.string().min(1), frame: z.string().min(1).max(12_000_000), ...attemptFields },
         },
-        ({ runId, frame }) =>
+        ({ runId, frame, jobId, leaseEpoch }) =>
           plain(async () => {
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
-            frames.put(runId, frame);
+            const auth = await authorize(key, {
+              runId,
+              ...(jobId ? { jobId } : {}),
+              ...(leaseEpoch ? { leaseEpoch } : {}),
+            });
+            frames.put(auth.runId, frame); // the live view is ephemeral — it may run ahead of the durable fence
             // Durable replay tee (best-effort) — persist the frame so the run can be replayed after it settles.
-            await deps.caseRecorder?.recordFrame(runId, frame);
-            return ok({ ok: true });
+            if (auth.durable) await deps.caseRecorder?.recordFrame(auth.runId, frame, auth.generation);
+            return ok({ ok: true, durable: auth.durable, ...(auth.reason ? { reason: auth.reason } : {}) });
           }),
       );
     }
@@ -149,16 +191,21 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         {
           description:
             "Append a log line for a running case, keyed by its runId — the run detail page streams it as the live execution log. Only meaningful for a self-hosted runner (managed backends read logs from the job directly); best-effort (drop failures).",
-          inputSchema: { runId: z.string().min(1), line: z.string().max(16_000) },
+          inputSchema: { runId: z.string().min(1), line: z.string().max(16_000), ...attemptFields },
         },
-        ({ runId, line }) =>
+        ({ runId, line, jobId, leaseEpoch }) =>
           plain(async () => {
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
-            logs.append(runId, line);
+            const auth = await authorize(key, {
+              runId,
+              ...(jobId ? { jobId } : {}),
+              ...(leaseEpoch ? { leaseEpoch } : {}),
+            });
+            logs.append(auth.runId, line);
             // Durable replay tee (best-effort) — persist the log line onto the recording's logs lane.
-            await deps.caseRecorder?.recordLog(runId, line);
-            return ok({ ok: true });
+            if (auth.durable) await deps.caseRecorder?.recordLog(auth.runId, line, auth.generation);
+            return ok({ ok: true, durable: auth.durable, ...(auth.reason ? { reason: auth.reason } : {}) });
           }),
       );
     }
@@ -174,13 +221,22 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         {
           description:
             "Push a batch of drained TraceEvents for a running case, keyed by its runId — the run detail page shows the trajectory accumulating live. Only meaningful for a self-hosted runner (managed jobs print event-sentinel stdout lines instead); best-effort (drop failures).",
-          inputSchema: { runId: z.string().min(1), events: z.array(TraceEventSchema).min(1).max(500) },
+          inputSchema: {
+            runId: z.string().min(1),
+            events: z.array(TraceEventSchema).min(1).max(500),
+            ...attemptFields,
+          },
         },
-        ({ runId, events }) =>
+        ({ runId, events, jobId, leaseEpoch }) =>
           plain(async () => {
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
-            traces.append(runId, events);
+            const auth = await authorize(key, {
+              runId,
+              ...(jobId ? { jobId } : {}),
+              ...(leaseEpoch ? { leaseEpoch } : {}),
+            });
+            traces.append(auth.runId, events); // live only — the sealed result stays the durable record
             return ok({ ok: true });
           }),
       );
@@ -197,14 +253,22 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         {
           description:
             "Push one prepared replay track entry (network/console/nav/dom/runtime/custom — byte-heavy entries carry an offloaded ref) for a running case, keyed by its runId. The deep-capture twin of report_case_screen/report_case_log; best-effort.",
-          inputSchema: { runId: z.string().min(1), item: TrackEntrySchema },
+          inputSchema: { runId: z.string().min(1), item: TrackEntrySchema, ...attemptFields },
         },
-        ({ runId, item }) =>
+        ({ runId, item, jobId, leaseEpoch }) =>
           plain(async () => {
             const key = runnerKey();
             if (!key) return fail(NEED_RUNNER);
-            await recorder.recordTrack(runId, item);
-            return ok({ ok: true });
+            const auth = await authorize(key, {
+              runId,
+              ...(jobId ? { jobId } : {}),
+              ...(leaseEpoch ? { leaseEpoch } : {}),
+            });
+            // This tool has no ephemeral half at all — a track entry IS durable evidence, so an unauthorized
+            // one is not written anywhere and the refusal is stated rather than swallowed.
+            if (!auth.durable) return ok({ ok: false, durable: false, reason: auth.reason });
+            await recorder.recordTrack(auth.runId, item, auth.generation);
+            return ok({ ok: true, durable: true });
           }),
       );
     }

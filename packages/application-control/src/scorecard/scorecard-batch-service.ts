@@ -140,6 +140,18 @@ export class ScorecardBatchService {
     this.breaker = shared.breaker;
     this.inFlight = shared.inFlight;
     this.getRecord = shared.getRecord;
+    // ── A FENCE NOBODY IS TOLD ABOUT REFUSES EVERYONE ────────────────────────────────────────────────
+    //
+    // Every dispatch now opens an attempt, so a producer that was never handed the generation stamps 0 and
+    // has every append refused. That is correct — and silent, if a composition wires a recording store and
+    // forgets the handoff. It is not a condition to discover from an empty replay weeks later, so the
+    // wiring is refused at construction instead.
+    if (deps.recordingStore && !deps.onAttempt)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { missing: "onAttempt" },
+        "A recordingStore was wired without onAttempt: every dispatch opens an attempt, so a recorder that is never told which attempt it serves has all of its writes refused. Wire onAttempt (composition: hand it to the CaseRecorder).",
+      );
   }
 
   // Runtime speed signal from history — RELATIVE, not absolute. Absolute per-runtime medians keyed by harness
@@ -1798,39 +1810,42 @@ export class ScorecardBatchService {
         await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch } });
         caseToChild.set(childKey(job.evalCase.id, job.trial), child.id);
       }
-      // This case's ATTEMPT (mig 0173) — opened whether or not there is a child row, because the producers
-      // that report frames and logs key off the execution id, not the child.
+      // ── AN ATTEMPT IS OPENED BY THE DISPATCH, NOT BY WHETHER ANYONE HAPPENED TO RECORD ──────────────
       //
-      // A FIRST attempt owns generation 0 and opens nothing: there is no earlier producer to revoke, and
-      // resetting anyway would make every recording depend on the `onAttempt` wiring being present, which is
-      // a way to lose recordings quietly in any deployment that has not wired it. A re-drive of the same
-      // execution id — a resume, a retry — DOES have someone to revoke, so it raises the number and tells
-      // this process's recorder.
+      // This used to `peek` first and open a new attempt only when the buffer already held something. But the
+      // existence of a PHYSICAL EXECUTION and the existence of a recording entry are not the same fact, and
+      // the gap between them is the ordinary case: an attempt that has been dispatched but has not yet
+      // emitted a frame or a log is invisible to `peek`. A recovery arriving in that window opened no new
+      // attempt, so both executions wrote under the same generation and the fence they were both standing on
+      // separated nothing. (The two adapters even disagreed about what an empty buffer looks like, which is
+      // the same statement from the other side: the question was being asked of the wrong thing.)
+      //
+      // So the attempt opens HERE, unconditionally, because this is the moment a physical execution begins.
+      // A first attempt therefore owns generation 1 rather than 0, and a producer that was never told a
+      // number stamps 0 and is refused — which is the intended reading of "no attempt", not an exemption.
+      // That is also why `onAttempt` is no longer optional in the presence of a recording store: see the
+      // check in the constructor.
       if (this.deps.recordingStore) {
         const executionId = executionIdOf(job, id);
-        // FAIL-CLOSED, both reads (arch-review 38 P0). A `peek` that threw used to read as "no earlier
-        // attempt" and a `reset` that threw as "isolation not needed" — the same sentence this suite has
-        // refused everywhere else: an unreadable fence is not an absent one. A case whose recording could
-        // not be isolated still RUNS (the evaluation is what the user asked for), but it runs knowing its
-        // replay is not canonical, which is what `unisolated` records.
-        const prior = await this.deps.recordingStore.peek(executionId).then(
-          (r) => ({ ok: true as const, value: r }),
-          () => ({ ok: false as const, value: undefined }),
-        );
-        if (!prior.ok) unisolated.add(executionId);
-        else if (prior.value) {
-          const generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
-          if (generation === undefined) unisolated.add(executionId);
-          else {
-            attemptGeneration.set(executionId, generation);
-            this.deps.onAttempt?.(executionId, generation);
-          }
+        // FAIL-CLOSED (arch-review 38 P0). A `reset` that throws is not "isolation was unnecessary" — it is a
+        // fence we could not raise. The case still RUNS (the evaluation is what the user asked for), knowing
+        // its replay is not canonical, which is what `unisolated` records.
+        const generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
+        if (generation === undefined) unisolated.add(executionId);
+        else {
+          attemptGeneration.set(executionId, generation);
+          this.deps.onAttempt?.(executionId, generation);
         }
       }
       try {
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
         const childId = child?.id;
-        const { result, target: ranOn } = await this.runResilientCase(enriched, {
+        // The attempt opened above travels WITH the job (review 39 P0-1), so a producer in another process
+        // stamps the generation IT was leased rather than whatever the receiving process last heard about.
+        const openedGeneration = attemptGeneration.get(executionIdOf(job, id));
+        const dispatchable: CaseJob =
+          openedGeneration === undefined ? enriched : { ...enriched, recordingGeneration: openedGeneration };
+        const { result, target: ranOn } = await this.runResilientCase(dispatchable, {
           owner,
           targets,
           tenant,

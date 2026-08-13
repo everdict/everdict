@@ -8,10 +8,13 @@ import type { CaseJob, CaseResult } from "@everdict/contracts";
 // specific-runner job whose caps a runner lacks is simply never claimed and idle-times-out (no_runner) rather than the
 // in-memory hub's immediate capability_mismatch — a deliberate simplification of the store path.
 
-// A claimed job handed to a runner.
+// A claimed job handed to a runner. `leaseEpoch` is minted by the claim and is the physical attempt's identity:
+// a requeued job is claimed again under a HIGHER epoch, so the previous holder's token stops matching even
+// though the job id it was given never changed.
 export interface RunnerJobLease {
   jobId: string;
   job: CaseJob;
+  leaseEpoch: number;
 }
 
 // What the parking replica polls to resolve/reject its dispatch promise.
@@ -49,6 +52,10 @@ export interface RunnerJobStore {
   claim(input: ClaimInput): Promise<RunnerJobLease | null>;
   // Liveness — refresh activity_at; returns whether the job is still queued/leased and the control-plane cancel flag.
   touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }>;
+  // Is this token the CURRENT lease, held by this runner? Returns the job it authorizes (so the caller reads the
+  // run id from the lease instead of accepting one from the request), or null. Durable and therefore
+  // cross-replica: the evidence a runner pushes is authorized by the same row every replica claims through.
+  authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null>;
   complete(jobId: string, result: CaseResult, ranBy: string): Promise<boolean>;
   fail(jobId: string, message: string): Promise<boolean>;
   // Mark a still-pending job as an idle-timeout casualty (the parking replica calls this when activity_at is stale).

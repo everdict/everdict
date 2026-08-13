@@ -33,7 +33,11 @@ export class CaseRecorder {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  async recordFrame(runId: string, frameBase64: string): Promise<void> {
+  // `generation` is the attempt the CALLER was authorized under (the number that rode in on the leased job).
+  // Passing it is what makes a cross-process producer stamp its own attempt instead of this process's guess;
+  // the in-process managed path omits it and uses the map, which is correct there because the process that
+  // opened the attempt is the one recording.
+  async recordFrame(runId: string, frameBase64: string, generation?: number): Promise<void> {
     const artifacts = this.artifacts;
     if (!artifacts) return; // frames need an object store to offload; without one, skip them (logs still record)
     try {
@@ -47,18 +51,22 @@ export class CaseRecorder {
         ref = await artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
         this.lastFrame.set(runId, { hash, ref });
       }
-      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, this.attempt.get(runId) ?? 0);
+      await this.recordings.append(
+        runId,
+        { track: "frames", entry: { t, ref, hash } },
+        generation ?? this.attempt.get(runId) ?? 0,
+      );
     } catch {
       // best-effort — a recording failure must never affect the run
     }
   }
 
-  async recordLog(runId: string, line: string): Promise<void> {
+  async recordLog(runId: string, line: string, generation?: number): Promise<void> {
     try {
       await this.recordings.append(
         runId,
         { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } },
-        this.attempt.get(runId) ?? 0,
+        generation ?? this.attempt.get(runId) ?? 0,
       );
     } catch {
       // best-effort
@@ -68,9 +76,9 @@ export class CaseRecorder {
   // Append a pre-prepared deep-capture entry (network/console/nav/dom/stateDeltas/runtime/custom). Byte-heavy
   // entries (dom-event batches) carry an object-store ref the PRODUCER already offloaded, so this is a pure
   // append — the deep-track twin of recordFrame (which offloads a raw frame). Frames still go through recordFrame.
-  async recordTrack(runId: string, item: TrackEntry): Promise<void> {
+  async recordTrack(runId: string, item: TrackEntry, generation?: number): Promise<void> {
     try {
-      await this.recordings.append(runId, item, this.attempt.get(runId) ?? 0);
+      await this.recordings.append(runId, item, generation ?? this.attempt.get(runId) ?? 0);
     } catch {
       // best-effort — a recording failure must never affect the run
     }

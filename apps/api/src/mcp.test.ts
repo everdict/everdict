@@ -480,22 +480,110 @@ describe("MCP — live trace push (report_case_trace)", () => {
   });
 });
 
+// A minimal parkable job — the lease is what mints the attempt token these pushes are authorized by.
+function parkableJob(): CaseJob {
+  return {
+    evalCase: {
+      id: "c1",
+      env: { kind: "repo", source: { files: {} } },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    },
+    harness: { id: "scripted", version: "0" },
+    tenant: "acme",
+  };
+}
+
 describe("MCP — deep track push (report_case_track)", () => {
   const withRecorder = (recordings: InMemoryRecordingStore) => ({
     ...harness(),
     caseRecorder: new CaseRecorder(recordings, new InMemoryArtifactStore()),
   });
 
-  it("a runner pushes a prepared deep-track entry; it is appended to the recording under the run id", async () => {
+  // ── DURABLE EVIDENCE IS AUTHORIZED BY THE LEASE (review 39 P0-1) ──────────────────────────────────
+  const trackItem = { track: "network", entry: { t: 1, method: "GET", url: "https://x" } };
+
+  it("a runner pushes a track under the attempt IT HOLDS; the run comes from the lease, not the request", async () => {
+    const recordings = new InMemoryRecordingStore();
+    const deps = withRecorder(recordings);
+    // The job is parked and leased, which is what mints the attempt token.
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    // The dispatcher OPENS the attempt (every dispatch does now) and the job carries its number, so the
+    // producer stamps its own attempt rather than whatever this process last heard about.
+    const generation = await recordings.reset("evd-run-42");
+    void deps.runnerHub
+      .enqueue(key, { ...parkableJob(), runId: "evd-run-42", recordingGeneration: generation })
+      .catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const runner = await connectRunner(deps, "laptop");
+    const res = await runner.callTool({
+      name: "report_case_track",
+      // A DIFFERENT run id than the leased job's — it must be ignored in favour of the lease's.
+      arguments: { runId: "evd-run-someone-else", item: trackItem, jobId: leased?.jobId, leaseEpoch: 1 },
+    });
+    expect(res.isError).toBeFalsy();
+    await recordings.seal("evd-run-42", { envKind: "browser" }, generation);
+    expect((await recordings.get("evd-run-42"))?.tracks.network?.[0]?.url).toBe("https://x");
+    expect(await recordings.get("evd-run-someone-else")).toBeUndefined();
+  });
+
+  it("REFUSES a track with no attempt token — a runner credential is not a claim on a run", async () => {
     const recordings = new InMemoryRecordingStore();
     const runner = await connectRunner(withRecorder(recordings), "laptop");
     const res = await runner.callTool({
       name: "report_case_track",
-      arguments: { runId: "evd-run-42", item: { track: "network", entry: { t: 1, method: "GET", url: "https://x" } } },
+      arguments: { runId: "evd-run-42", item: trackItem },
     });
+    // Not an error — the runner's push is best-effort — but the refusal is STATED and nothing is written.
     expect(res.isError).toBeFalsy();
-    await recordings.seal("evd-run-42", { envKind: "browser" }, 0);
-    expect((await recordings.get("evd-run-42"))?.tracks.network?.[0]?.url).toBe("https://x");
+    expect(JSON.stringify(res.content)).toContain("no attempt token");
+    expect(await recordings.get("evd-run-42")).toBeUndefined();
+  });
+
+  it("a PAUSED attempt returning late writes nothing into its successor's recording", async () => {
+    // The race the whole token exists for: runner A leases, goes quiet, the lease expires, runner B takes the
+    // same job id, and A comes back. Before this, A's report was accepted AND STAMPED with B's attempt by the
+    // receiving process — the stale producer did not merely slip past the fence, it was handed the key.
+    const recordings = new InMemoryRecordingStore();
+    const deps = withRecorder(recordings);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    const first = await recordings.reset("evd-run-42");
+    void deps.runnerHub
+      .enqueue(key, { ...parkableJob(), runId: "evd-run-42", recordingGeneration: first })
+      .catch(() => {});
+    const leaseA = deps.runnerHub.lease(key);
+    const runner = await connectRunner(deps, "laptop");
+
+    // The recovery opens attempt 2 and re-leases the same job id (a requeue mints a new epoch).
+    const second = await recordings.reset("evd-run-42");
+    expect(second).toBe(first + 1);
+    const res = await runner.callTool({
+      name: "report_case_track",
+      arguments: { runId: "evd-run-42", item: trackItem, jobId: leaseA?.jobId, leaseEpoch: leaseA?.attempt.leaseEpoch },
+    });
+    // A's token is still the current lease here (the hub was not re-leased in this test), so the write is
+    // authorized — but it is stamped with A's OWN generation, which the store no longer accepts.
+    expect(res.isError).toBeFalsy();
+    await recordings.seal("evd-run-42", { envKind: "browser" }, second);
+    expect((await recordings.get("evd-run-42"))?.tracks.network ?? []).toHaveLength(0);
+  });
+
+  it("REFUSES a token whose lease was taken over — the stale attempt cannot write into its successor", async () => {
+    const recordings = new InMemoryRecordingStore();
+    const deps = withRecorder(recordings);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, { ...parkableJob(), runId: "evd-run-42" }).catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const runner = await connectRunner(deps, "laptop");
+    const res = await runner.callTool({
+      name: "report_case_track",
+      // Epoch 2 was never issued for this job; the holder of epoch 1 quoting anything else is not current.
+      arguments: { runId: "evd-run-42", item: trackItem, jobId: leased?.jobId, leaseEpoch: 2 },
+    });
+    expect(JSON.stringify(res.content)).toContain("not a current lease");
+    expect(await recordings.get("evd-run-42")).toBeUndefined();
   });
 
   it("regular (non-runner) credentials cannot push a track — FORBIDDEN", async () => {

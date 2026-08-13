@@ -116,6 +116,18 @@ export const CaseJobSchema = z.object({
   // runCase uses it instead of self-minting; absent (tests/CLI) = the old in-job mint. Stable across spillover/
   // retries of the same record — a re-attempt's spans land under the same id (more evidence, same address).
   runId: z.string().optional(),
+  // ── WHICH ATTEMPT'S RECORDING THIS JOB MAY WRITE INTO (review 39 P0-1) ─────────────────────────────
+  //
+  // The run id above is stable across spillover and retries ON PURPOSE — it is a correlation id, not the
+  // identity of one physical execution. The recording fence, however, is per attempt, and the number was known
+  // only to the process that opened it: a runner reported evidence with no generation at all, and the RECEIVING
+  // process stamped whatever attempt its own local map happened to hold. A stale producer's frames were
+  // therefore not merely accepted — they were re-labelled as its successor's.
+  //
+  // So the generation travels WITH THE JOB the producer leased. A producer that was never given one stamps 0,
+  // which no opened attempt owns, and the store refuses it. Absent = a dispatch that opened no attempt (an
+  // in-job collection with no recording store), which has nothing to write into either.
+  recordingGeneration: z.number().int().nonnegative().optional(),
   // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
   // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =
   // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md

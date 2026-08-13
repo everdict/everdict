@@ -382,6 +382,8 @@ export {
   type MattermostReply,
 } from "./mattermost/mattermost-command-service.js";
 export {
+  type AttemptAuthority,
+  type AttemptToken,
   type EnqueueResult,
   type LeasedJob,
   POOL_RUNNER,

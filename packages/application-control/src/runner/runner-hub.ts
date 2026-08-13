@@ -36,6 +36,35 @@ export function requiredRunnerCapabilities(job: CaseJob): string[] {
 export interface LeasedJob {
   jobId: string;
   job: CaseJob;
+  // ── THE TOKEN THAT SAYS WHICH PHYSICAL ATTEMPT THIS IS ─────────────────────────────────────────────
+  //
+  // `jobId` is not enough and never was: an expired lease is requeued by clearing `leasedAt`, so the SAME
+  // job id is handed to the next runner while the previous one is still alive and still believes it holds
+  // the work. Runner A's late report and runner B's live report are then indistinguishable — both quote a
+  // job id both were given.
+  //
+  // The epoch is minted per LEASE. It is what makes a report attributable to one physical attempt, which is
+  // the whole of the identity the evidence path needs from the producer side.
+  attempt: AttemptToken;
+}
+
+// The producer's proof that it is the current attempt. Carried on every evidence report a runner makes.
+export interface AttemptToken {
+  jobId: string;
+  leaseEpoch: number;
+}
+
+// What the control plane recovers from a token, having refused to take the caller's word for any of it. The
+// runId is READ FROM THE JOB rather than accepted from the request: a valid runner credential used to be
+// enough to push frames, logs and durable track entries onto ANY run id it happened to know.
+export interface AttemptAuthority {
+  runId?: string;
+  tenant?: string;
+  runnerId: string;
+  // The recording generation THIS job was dispatched under. It comes off the leased job, so the number a
+  // producer's evidence is stamped with is the one its own dispatch opened — not whatever the receiving
+  // process last heard about, which is how a stale attempt's frames used to be re-labelled as its successor's.
+  recordingGeneration?: number;
 }
 
 // enqueue result — the job result + the id of the runner that actually completed it (ranBy). For a pool (self:ws) job we don't
@@ -55,6 +84,10 @@ interface PendingEntry {
   onLease?: () => void;
   onLeaseFired?: boolean;
   leasedAt?: number; // time the runner took it (undefined = waiting). Slice 6's expiry/requeue looks at this.
+  // Bumped on EVERY lease, including a re-lease after a requeue — so the previous holder's token no longer
+  // matches and its late evidence is refused rather than re-labelled as the current attempt's.
+  leaseEpoch: number;
+  leasedBy?: string; // the runnerId currently holding it — a token is only honoured for its own holder
   // The control plane asked to stop this job (user cancel / supersede). Its promise is already rejected; the entry
   // lingers ONLY so the runner's next heartbeat is told to abort (freeing the runtime). Never leasable/requeuable.
   cancelRequested?: boolean;
@@ -154,6 +187,7 @@ export class RunnerHub {
     const entry: PendingEntry = {
       jobId,
       job,
+      leaseEpoch: 0, // 0 = never leased; the first lease mints 1, so no report can ride an unleased job
       resolve,
       reject,
       ...(onLease ? { onLease } : {}),
@@ -303,11 +337,13 @@ export class RunnerHub {
         continue; // try the next job (in fairness order)
       }
       entry.leasedAt = now;
+      entry.leaseEpoch += 1; // a new physical attempt on the same job — the previous holder's token stops matching
+      entry.leasedBy = key.runnerId;
       this.markServed(ownName, entry); // advance the group rotation so the next lease prefers a different batch/user
       this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(key, entry); // runner took it → reset idle timeout (heartbeat now keeps it alive)
       this.touchByRunner(key, capabilities); // taking a job proves the runner is alive → keep the jobs IT COULD run from expiring
-      return { jobId: entry.jobId, job: entry.job };
+      return { jobId: entry.jobId, job: entry.job, attempt: { jobId: entry.jobId, leaseEpoch: entry.leaseEpoch } };
     }
     // 2) Owner pool queue (jobs submitted as self:ws, no specific runner) — on capability mismatch **skip, don't reject**
     //    (so another capable runner can take it). If nobody can, the idle timeout eventually rejects it. A pool job stays in the pool queue
@@ -326,11 +362,13 @@ export class RunnerHub {
         : [];
       if (missing.length > 0) continue; // this runner can't run it → skip and leave it for another runner (not a rejection)
       entry.leasedAt = now;
+      entry.leaseEpoch += 1;
+      entry.leasedBy = key.runnerId;
       this.markServed(poolName, entry); // advance the group rotation within the pool too
       this.fireOnLease(entry); // first lease → flip the run record queued→running (the case actually started)
       this.rearm(poolKey, entry); // the timer is keyed to the pool queue (so remove finds it in the pool)
       this.touchByRunner(key, capabilities); // draining one pool job proves the runner is alive → keep the rest of the pool IT COULD run from expiring
-      return { jobId: entry.jobId, job: entry.job };
+      return { jobId: entry.jobId, job: entry.job, attempt: { jobId: entry.jobId, leaseEpoch: entry.leaseEpoch } };
     }
     return null;
   }
@@ -356,6 +394,34 @@ export class RunnerHub {
       if (pooled) return { entry: pooled, key: poolKey };
     }
     return undefined;
+  }
+
+  // ── AN EVIDENCE REPORT IS AUTHORIZED BY ITS LEASE, NOT BY ITS CREDENTIAL ─────────────────────────
+  //
+  // Returns what the control plane may believe about a report carrying this token: nothing at all when the
+  // token does not match a CURRENT lease held by this runner. Before this existed, a valid runner credential
+  // plus any run id the runner happened to know was enough to write frames, logs and durable track entries
+  // onto that run — and a runner whose lease had expired kept that power indefinitely, because the requeue
+  // changes nothing a stale holder can observe.
+  //
+  // `undefined` is a refusal, and the caller must treat it as one. Note what it is NOT: a way to tell a
+  // report from an unknown replica apart from a forged one — this hub is in-process, so a control plane
+  // running several replicas can only verify the reports that reach the replica holding the lease. That is
+  // the boundary a durable lease store moves; until then the caller fails closed on the durable path.
+  // Async to match the store-backed hub, which answers from the database — one shape for both, so the caller
+  // never learns which deployment it is in.
+  async authorizeAttempt(key: SelfHostedKey, token: AttemptToken): Promise<AttemptAuthority | undefined> {
+    const loc = this.locate(key, token.jobId);
+    const entry = loc?.entry;
+    if (!entry || entry.leaseEpoch === 0) return undefined;
+    if (entry.leaseEpoch !== token.leaseEpoch) return undefined; // a superseded attempt — its lease was taken
+    if (entry.leasedBy !== key.runnerId) return undefined; // the token belongs to another runner's lease
+    return {
+      ...(entry.job.runId ? { runId: entry.job.runId } : {}),
+      ...(entry.job.tenant ? { tenant: entry.job.tenant } : {}),
+      ...(entry.job.recordingGeneration !== undefined ? { recordingGeneration: entry.job.recordingGeneration } : {}),
+      runnerId: key.runnerId,
+    };
   }
 
   // long-poll lease — if there's no job to take immediately, wait until the next enqueue (or the waitMs timeout) then return one (null if none).

@@ -889,6 +889,12 @@ export class RunService {
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),
+      // The attempt this dispatch owns, carried to the producer (review 39 P0-1). A re-drive opened a new
+      // generation before calling here; a first dispatch has none, and a producer with none stamps 0 — which
+      // is what an unopened attempt is, not a way past the fence.
+      ...(this.attempt.get(`evd-run-${id}`) !== undefined
+        ? { recordingGeneration: this.attempt.get(`evd-run-${id}`) as number }
+        : {}),
     };
     // Did THIS driver's settlement land? Everything after the fork below hangs off it (arch-review 31 P2).
     let committed = false;

@@ -23,6 +23,7 @@ interface Entry {
   status: "queued" | "leased" | "completed" | "failed";
   cancelRequested: boolean;
   leasedBy?: string;
+  leaseEpoch?: number; // minted per claim — the physical attempt's identity (see the port)
   activityAt: number;
   result?: CaseResult;
   error?: string;
@@ -74,8 +75,16 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     if (!e) return null;
     e.status = "leased";
     e.leasedBy = input.runnerId;
+    e.leaseEpoch = (e.leaseEpoch ?? 0) + 1; // a new physical attempt on the same job
     e.activityAt = input.now;
-    return { jobId: e.jobId, job: e.job };
+    return { jobId: e.jobId, job: e.job, leaseEpoch: e.leaseEpoch };
+  }
+
+  async authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null> {
+    const e = this.jobs.get(jobId);
+    if (!e || e.status !== "leased" || e.leasedBy !== runnerId) return null;
+    if (!e.leaseEpoch || e.leaseEpoch !== leaseEpoch) return null;
+    return e.job;
   }
 
   async touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }> {
@@ -176,8 +185,9 @@ export class PgRunnerJobStore implements RunnerJobStore {
       [input.owner, input.now, input.leaseTtlMs / 1000],
     );
     // Own queue before the owner pool (ORDER BY runner_id <> '*' DESC), FIFO; capability gate via array containment.
-    const res = await this.client.query<{ job_id: string; job: unknown }>(
-      `UPDATE everdict_runner_jobs SET status = 'leased', leased_by = $2, activity_at = to_timestamp($5 / 1000.0)
+    const res = await this.client.query<{ job_id: string; job: unknown; lease_epoch: number }>(
+      `UPDATE everdict_runner_jobs SET status = 'leased', leased_by = $2, lease_epoch = lease_epoch + 1,
+              activity_at = to_timestamp($5 / 1000.0)
        WHERE job_id = (
          SELECT job_id FROM everdict_runner_jobs
          WHERE owner = $1 AND (runner_id = $2 OR runner_id = $3) AND status = 'queued'
@@ -186,12 +196,25 @@ export class PgRunnerJobStore implements RunnerJobStore {
          LIMIT 1
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING job_id, job`,
+       RETURNING job_id, job, lease_epoch`,
       [input.owner, input.runnerId, POOL_RUNNER, input.advertisedCaps ?? null, input.now],
     );
     const row = res.rows[0];
     if (!row) return null;
-    return { jobId: row.job_id, job: CaseJobSchema.parse(row.job) };
+    return { jobId: row.job_id, job: CaseJobSchema.parse(row.job), leaseEpoch: Number(row.lease_epoch) };
+  }
+
+  // The authorization read, in ONE statement so it cannot see a lease that a concurrent claim has already
+  // moved on from. `status = 'leased'` matters as much as the epoch: a completed job's holder has no further
+  // right to publish evidence under it.
+  async authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null> {
+    const res = await this.client.query<{ job: unknown }>(
+      `SELECT job FROM everdict_runner_jobs
+       WHERE job_id = $1 AND leased_by = $2 AND lease_epoch = $3 AND status = 'leased' AND lease_epoch > 0`,
+      [jobId, runnerId, leaseEpoch],
+    );
+    const row = res.rows[0];
+    return row ? CaseJobSchema.parse(row.job) : null;
   }
 
   async touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }> {
@@ -251,7 +274,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
   }
 
   async cancel(match: (job: CaseJob) => boolean): Promise<number> {
-    const res = await this.client.query<{ job_id: string; job: unknown }>(
+    const res = await this.client.query<{ job_id: string; job: unknown; lease_epoch: number }>(
       `SELECT job_id, job FROM everdict_runner_jobs WHERE status IN ('queued', 'leased') AND NOT cancel_requested`,
     );
     const ids = res.rows.filter((r) => match(CaseJobSchema.parse(r.job))).map((r) => r.job_id);

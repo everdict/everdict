@@ -33,7 +33,9 @@ describe("RunnerHub", () => {
     const dispatched = hub.enqueue(keyA, job("c1")); // parked (not resolved yet)
 
     const leased = hub.lease(keyA);
-    expect(leased).toEqual({ jobId: "j-0", job: job("c1") });
+    // The lease also mints the ATTEMPT — the identity a report is authorized by. Epoch 1 on the first lease:
+    // 0 means "never leased", which no evidence may ride.
+    expect(leased).toEqual({ jobId: "j-0", job: job("c1"), attempt: { jobId: "j-0", leaseEpoch: 1 } });
     expect(hub.lease(keyA)).toBeNull(); // already leased → none left
 
     expect(hub.complete(keyA, "j-0", result)).toBe(true);
@@ -590,5 +592,54 @@ describe("RunnerHub — requestCancel (user stop / supersede)", () => {
     const hub = new RunnerHub({ newJobId: () => "j" });
     hub.enqueue(keyA, withBatch("c1", "sc-3")).catch(() => {});
     expect(hub.requestCancel((j) => j.batchId === "other")).toBe(0);
+  });
+});
+
+// ── EVIDENCE IS AUTHORIZED BY THE LEASE, AND A REQUEUE REVOKES IT (review 39 P0-1) ───────────────────
+describe("RunnerHub.authorizeAttempt — which physical attempt a report belongs to", () => {
+  // Two runners on ONE owner's pool — the arrangement where a requeued job legitimately changes hands.
+  const runnerA: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
+  const runnerB: SelfHostedKey = { owner: "u-alice", runnerId: "desktop" };
+
+  it("re-leasing a requeued job mints a NEW epoch, and the previous holder's token stops being current", async () => {
+    let n = 0;
+    let clock = 1_000;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}`, leaseTtlMs: 50, now: () => clock });
+    void hub.enqueue(poolKeyFor("u-alice"), job("c1")).catch(() => {});
+    const first = hub.lease(runnerA);
+    expect(first?.attempt.leaseEpoch).toBe(1);
+    // …runner A goes quiet, the lease expires, and runner B takes the SAME job id.
+    clock += 1_000;
+    const second = hub.lease(runnerB);
+    expect(second?.jobId).toBe(first?.jobId); // the id a requeue never changes — which is the whole problem
+    expect(second?.attempt.leaseEpoch).toBe(2);
+
+    // A's token was current a moment ago and is not now. Before this, A's late frames and logs were accepted
+    // and re-labelled as B's attempt by whichever process received them.
+    expect(await hub.authorizeAttempt(runnerA, first?.attempt ?? { jobId: "x", leaseEpoch: 1 })).toBeUndefined();
+    const authority = await hub.authorizeAttempt(runnerB, second?.attempt ?? { jobId: "x", leaseEpoch: 2 });
+    expect(authority?.runnerId).toBe("desktop");
+  });
+
+  it("refuses another runner's token, an unleased job, and an id nobody holds", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    void hub.enqueue(keyA, job("c1")).catch(() => {});
+    // Never leased: epoch 0 is not a token, it is the absence of one.
+    expect(await hub.authorizeAttempt(keyA, { jobId: "j-0", leaseEpoch: 0 })).toBeUndefined();
+    const leased = hub.lease(keyA);
+    const token = leased?.attempt ?? { jobId: "j-0", leaseEpoch: 1 };
+    expect(await hub.authorizeAttempt(runnerB, token)).toBeUndefined(); // a valid token, the wrong runner
+    expect(await hub.authorizeAttempt(keyA, { jobId: "nope", leaseEpoch: 1 })).toBeUndefined();
+    expect(await hub.authorizeAttempt(keyA, token)).toBeDefined();
+  });
+
+  it("hands back the run id from the LEASED JOB — the caller's own runId is never taken on trust", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    void hub.enqueue(keyA, { ...job("c1"), runId: "run-owned" }).catch(() => {});
+    const leased = hub.lease(keyA);
+    const authority = await hub.authorizeAttempt(keyA, leased?.attempt ?? { jobId: "j-0", leaseEpoch: 1 });
+    expect(authority?.runId).toBe("run-owned");
   });
 });

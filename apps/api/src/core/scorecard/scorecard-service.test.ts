@@ -2310,7 +2310,9 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
           await recordingStore.append(
             job.runId ?? "",
             { track: "frames", entry: { t: 1, ref: "memory://f" } },
-            0, // a first attempt owns generation 0, said explicitly
+            // …stamped with the attempt THE JOB CARRIES (review 39 P0-1). Every dispatch opens one now, so a
+            // producer that made its own number up — 0, say — is refused, which is the point.
+            job.recordingGeneration ?? 0,
           );
           return okDispatch.dispatch(job);
         },
@@ -2318,6 +2320,8 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       store,
       runStore,
       recordingStore,
+      // Wiring a recording store without this is refused at construction: an unnamed attempt records nothing.
+      onAttempt: () => {},
       datasets,
       newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = submitted-fact event id (E0), sc-2 = child run of case c1
     });

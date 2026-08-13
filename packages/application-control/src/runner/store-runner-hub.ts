@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import type { RunnerJobStore } from "../ports/runner-job-store.js";
 import {
+  type AttemptAuthority,
+  type AttemptToken,
   type EnqueueResult,
   type LeasedJob,
   type RunnerHub,
@@ -116,11 +118,25 @@ export class StoreRunnerHub {
         leaseTtlMs: this.leaseTtlMs,
         now: this.now(),
       });
-      if (claimed) return claimed;
+      if (claimed) return { ...claimed, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
       const remaining = deadline - this.now();
       if (remaining <= 0) return null;
       await this.sleep(Math.min(this.pollMs, remaining));
     }
+  }
+
+  // The durable, CROSS-REPLICA authorization read (see RunnerJobStore.authorize). The in-memory hub can only
+  // answer for leases its own process holds; this one answers for the deployment, which is why a control plane
+  // that runs several replicas should be on the store-backed hub before it trusts pushed evidence.
+  async authorizeAttempt(key: SelfHostedKey, token: AttemptToken): Promise<AttemptAuthority | undefined> {
+    const job = await this.store.authorize(token.jobId, key.runnerId, token.leaseEpoch).catch(() => null);
+    if (!job) return undefined;
+    return {
+      ...(job.runId ? { runId: job.runId } : {}),
+      ...(job.tenant ? { tenant: job.tenant } : {}),
+      ...(job.recordingGeneration !== undefined ? { recordingGeneration: job.recordingGeneration } : {}),
+      runnerId: key.runnerId,
+    };
   }
 
   // Liveness + the control plane's cancel decision (carried back to the runner's next heartbeat), same as the in-memory hub.

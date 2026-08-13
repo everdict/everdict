@@ -154,6 +154,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         continue;
       }
       const jobId = String(leased.jobId);
+      // ── THE TOKEN THAT SAYS WHICH ATTEMPT THIS IS ────────────────────────────────────────────────
+      //
+      // Every evidence push below carries it. A lease that expires is requeued under the SAME job id, so
+      // without this a runner that pauses and comes back is indistinguishable from the one that took over —
+      // and the control plane, having no way to tell, used to relabel the late report as the current
+      // attempt's. An older control plane returns no token; the pushes then go out without one and the
+      // control plane refuses the DURABLE half rather than guessing (the live view still works).
+      const attempt = leased.attempt as { jobId: string; leaseEpoch: number } | undefined;
+      const attemptFields = attempt ? { jobId: attempt.jobId, leaseEpoch: attempt.leaseEpoch } : {};
       const parsed = CaseJobSchema.safeParse(leased.job); // boundary validation
       if (!parsed.success) {
         // A job the control plane LEASED but this bundle can't parse is, by construction, a contract mismatch — the CP
@@ -191,13 +200,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       // the job carries a runId (control-plane dispatch); runJob only calls it when the harness declares liveScreen.
       const runId = parsed.data.runId;
       const reportScreen = runId
-        ? (frame: string): Promise<void> => deps.callJson("report_case_screen", { runId, frame }).then(() => {})
+        ? (frame: string): Promise<void> =>
+            deps.callJson("report_case_screen", { runId, frame, ...attemptFields }).then(() => {})
         : undefined;
       // Live execution log: push this runner's per-case lifecycle lines to the control plane keyed by the CP-minted
       // runId, so the run detail page's live-log panel shows what THIS runner is doing (a self-hosted runner has no
       // backend the CP can tail). Best-effort — a push failure must never affect the run. Only wired with a runId.
       const reportLog = runId
-        ? (line: string): void => void deps.callJson("report_case_log", { runId, line }).catch(() => {})
+        ? (line: string): void =>
+            void deps.callJson("report_case_log", { runId, line, ...attemptFields }).catch(() => {})
         : undefined;
       // Environment-plane record sink (replay ②) — a topology browser case's CDP recorder (inside ServiceTopologyBackend)
       // streams the browser's network/console/nav through report_case_track and its screencast frames through
@@ -205,15 +216,17 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       // runId (CP dispatch); every push is best-effort — a failure must never affect the run.
       const recordSink: EnvRecordSink | undefined = runId
         ? {
-            track: (item) => void deps.callJson("report_case_track", { runId, item }).catch(() => {}),
-            frame: (frame) => void deps.callJson("report_case_screen", { runId, frame }).catch(() => {}),
+            track: (item) => void deps.callJson("report_case_track", { runId, item, ...attemptFields }).catch(() => {}),
+            frame: (frame) =>
+              void deps.callJson("report_case_screen", { runId, frame, ...attemptFields }).catch(() => {}),
           }
         : undefined;
       // Live trace (observability ⑨): push the drained TraceEvent batches to the control plane's live-trace store,
       // keyed by the CP-minted runId — the run detail page shows the trajectory accumulating while the case runs.
       // Best-effort like every push; the sealed result stays the durable record. Only wired with a runId.
       const reportTrace = runId
-        ? (events: TraceEvent[]): Promise<void> => deps.callJson("report_case_trace", { runId, events }).then(() => {})
+        ? (events: TraceEvent[]): Promise<void> =>
+            deps.callJson("report_case_trace", { runId, events, ...attemptFields }).then(() => {})
         : undefined;
       // Run-workbench fs servicing (self-hosted parity): the control plane cannot exec into this runner's sandbox,
       // so it PARKS repo reads; the in-case loop polls them here and answers from inside the case. Only with a
