@@ -5,6 +5,7 @@ export * from "./agent-session.js";
 export * from "./agent-task.js";
 export * from "./agent-member-preference.js";
 export * from "./analysis-artifact.js";
+export * from "./case-commit-receipt.js";
 export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";

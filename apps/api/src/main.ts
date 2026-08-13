@@ -182,6 +182,7 @@ async function main(): Promise<void> {
   const {
     store,
     recordingStore,
+    caseReceiptStore,
     scorecardStore,
     scoringStageStore,
     keyStore,
@@ -748,6 +749,9 @@ async function main(): Promise<void> {
     // re-driven case raised the generation and then its producers went on stamping the old one — every
     // append refused, the recording silently empty. A fence only one caller knows about is an outage.
     onAttempt: (executionId, generation) => caseRecorder.serves(executionId, generation),
+    // Where a case's canonical outcome is decided (mig 0175) — claimed at the commit, compared against the
+    // ledger at the finalize while both are written.
+    caseReceipts: caseReceiptStore,
     meteredDispatcher,
     scheduler,
     runnerHub,

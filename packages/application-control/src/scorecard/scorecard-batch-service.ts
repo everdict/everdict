@@ -33,6 +33,7 @@ import {
   caseVerdict,
   classifyFailure,
   completeJudgeCoverage,
+  contentDigest,
   modelBindingLabel,
   newScorecardChildRun,
   newSeededScorecardChildRun,
@@ -960,6 +961,20 @@ export class ScorecardBatchService {
         // judge. The absence is stated instead, retryably, so a re-score can still pick it up.
         result = { ...result, scores: completeJudgeCoverage(result.scores, ctx.judges) };
       }
+      // …AND THE CASE IS CLAIMED HERE TOO (review 39 P0). A Temporal activity is at-least-once and a case can
+      // legitimately be executed twice; the receipt is what decides which of those executions is the case's
+      // answer, on both drivers, by the same constraint.
+      if (
+        runStore &&
+        child &&
+        !(await this.claimCase(id, result, {
+          childId: child.id,
+          executionId,
+          generation: generation ?? 0,
+          judges: ctx.judges,
+        }))
+      )
+        return { settled: false }; // another attempt owns this case — this one publishes nothing
       // THE SAME TERMINAL CHILD ON BOTH DRIVERS (review 39 P0-3). The in-process path assembles the case's
       // evidence — the snapshot offload and the recording seal — BEFORE the one terminal write, because
       // "judged but not assembled" is not finished. This path called settleChild directly, so the same
@@ -1054,6 +1069,7 @@ export class ScorecardBatchService {
       results,
     };
     await offloadResults(this.deps, id, results);
+    await this.checkReceiptParity(id, results);
     const summary = summarizeScorecard(scorecard);
     // Read-guarded terminal write, checked BEFORE the artifact/export writes: a supersede that raced the
     // workflow's finalize already settled the record — never revive it to succeeded (first terminal write
@@ -1526,6 +1542,11 @@ export class ScorecardBatchService {
     // two drivers cannot disagree about what a judged case looks like.
     const covered =
       entry.judges.length > 0 ? { ...result, scores: completeJudgeCoverage(result.scores, entry.judges) } : result;
+    // …and the case is CLAIMED before any of it is published (see claimCase). An attempt that lost the claim
+    // is not this case's outcome, so it publishes nothing and reports the loss the way every other lost
+    // authority is reported here.
+    if (!(await this.claimCase(entry.parentDriver.scorecardId, covered, { ...entry, childId: entry.childId })))
+      return "lost";
     // TERMINAL MEANS FINALIZED, AND FINALIZED INCLUDES THE ARTIFACTS (arch-review 36 P1). The child stopped
     // going terminal before its judges landed two reviews ago; everything ELSE a case produces still happened
     // after — the screenshot offload and the replay seal ran later in the batch pipeline, so a crash in
@@ -1552,6 +1573,80 @@ export class ScorecardBatchService {
     ).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (settled instanceof Error) return "unwritten"; // the store could not take it — the batch must not pass
     return settled === undefined ? "lost" : "committed";
+  }
+
+  // ── CLAIM THE CASE, THEN COMMIT THE CHILD (review 39 P0) ─────────────────────────────────────────────
+  //
+  // The receipt is where "at most one canonical outcome per case" becomes a fact of the database instead of a
+  // comparison the parent makes afterwards over rows that are all equally real. It is claimed BEFORE the
+  // child's terminal write, because the order is what makes it a decision: an attempt that lost the claim
+  // must not go on to publish evidence as though it were the case's answer.
+  //
+  // Losing is not a failure. Another physical attempt of the same case — a speculative duplicate, a
+  // spillover, a recovery — got there first, and its evidence is the case's. This attempt's rows stay where
+  // they are; what it does not get is the right to be counted.
+  //
+  // With no receipt store wired (a deployment that has not migrated) the answer is `true`: the ledger stays
+  // the only witness, exactly as before. A claim that THROWS is a store fault, and it is reported as one
+  // rather than silently treated as a win — an unreadable decision is not a decision made in our favour.
+  private async claimCase(
+    scorecardId: string,
+    result: CaseResult,
+    entry: { childId?: string; executionId: string; generation: number; judges: ReadonlyArray<{ id: string }> },
+  ): Promise<boolean> {
+    const receipts = this.deps.caseReceipts;
+    if (!receipts || !entry.childId) return true;
+    const outcome = await receipts.commit({
+      scorecardId,
+      caseId: result.caseId,
+      trial: result.trial ?? 0,
+      childRunId: entry.childId,
+      executionId: entry.executionId,
+      generation: entry.generation,
+      resultDigest: contentDigest(result),
+      ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
+      committedAt: this.now(),
+    });
+    return outcome.kind === "committed" || outcome.receipt.childRunId === entry.childId;
+  }
+
+  // ── THE LEDGER AND THE RECEIPTS MUST AGREE (review 39, Phase 1 parity) ───────────────────────────────
+  //
+  // Both are being written while the cutover is in progress: the parent still aggregates the children it can
+  // see, and the receipts record which attempt was entitled to be counted. A disagreement means the summary
+  // was built over a different set of executions than the one that committed — the exact defect that
+  // "latest updatedAt wins" makes invisible — so it is STATED on the batch's own step timeline rather than
+  // resolved silently in favour of whichever half the reader happens to trust.
+  //
+  // It never fails the batch. With no receipt store wired there is nothing to compare, and a comparison that
+  // cannot be made is not a mismatch.
+  private async checkReceiptParity(id: string, counted: CaseResult[]): Promise<void> {
+    const receipts = this.deps.caseReceipts;
+    if (!receipts) return;
+    try {
+      const committed = await receipts.list(id);
+      if (committed.length === 0) return; // nothing claimed (a batch that predates the store) — nothing to say
+      const ledgerKeys = new Set(counted.map((r) => childKey(r.caseId, r.trial)));
+      const receiptKeys = new Set(committed.map((r) => childKey(r.caseId, r.trial)));
+      const uncounted = [...receiptKeys].filter((k) => !ledgerKeys.has(k));
+      const unclaimed = [...ledgerKeys].filter((k) => !receiptKeys.has(k));
+      // …and the DIGESTS, not just the keys: counting the right case with another attempt's result is the
+      // subtler half of the same disagreement.
+      const byKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r]));
+      const divergent = counted.filter((r) => {
+        const receipt = byKey.get(childKey(r.caseId, r.trial));
+        return receipt !== undefined && receipt.resultDigest !== contentDigest(r);
+      });
+      if (uncounted.length === 0 && unclaimed.length === 0 && divergent.length === 0) return;
+      await this.appendBatchStep(id, {
+        phase: "persist",
+        status: "info",
+        message: `receipt parity: ${uncounted.length} committed case(s) not counted, ${unclaimed.length} counted case(s) with no receipt, ${divergent.length} counted with another attempt's result`,
+      });
+    } catch {
+      // A parity read that fails says nothing about the batch — it is a diagnostic, and a diagnostic that
+      // breaks the thing it observes is worse than no diagnostic.
+    }
   }
 
   private async settleChild(
@@ -2325,6 +2420,7 @@ export class ScorecardBatchService {
           : undefined;
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
+      await this.checkReceiptParity(id, scorecard.results);
       const summary = summarizeScorecard(scorecard);
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
       // (the settle below re-reads race-tight as before; initial settles are revision 1 in practice).

@@ -20,6 +20,7 @@ import type {
 } from "@everdict/domain";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { ConstitutionApprovalStore } from "../ports/constitution-approval-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -203,6 +204,16 @@ export interface ScorecardServiceDeps {
   trajectories?: TrajectoryStore;
   // Durable replay recording (optional) — at child write-back, seal the frames/logs teed under the child's runId and attach the ref.
   recordingStore?: RecordingStore;
+  // ── WHERE A CASE'S CANONICAL OUTCOME IS DECIDED (review 39 P0) ─────────────────────────────────────
+  //
+  // Several physical attempts of one case are ordinary (spillover, an OOM re-run, a speculative duplicate, a
+  // recovery), and which of their child rows the parent counted was decided by "largest updatedAt" — an
+  // answer to a different question than "which attempt earned the commit". The receipt is that decision, and
+  // its uniqueness is a database constraint rather than a comparison made afterwards.
+  //
+  // Optional while both live side by side: the parent still aggregates from the ledger and the receipts are
+  // written beside it, so a disagreement surfaces as a stated diagnostic instead of a silent choice.
+  caseReceipts?: CaseReceiptStore;
   concurrency?: number;
   // Policy gate: if true, a batch without a runtime is rejected 400 at submit (no local fallback). The API (main.ts) always sets true.
   // Unset (tests: inject a mock dispatcher directly) = no gate. Not an env toggle — a deployment's fixed policy.
@@ -257,6 +268,7 @@ export type ScorecardBatchDeps = Pick<
   | "trajectories"
   | "recordingStore"
   | "onAttempt"
+  | "caseReceipts"
   | "artifacts"
   | "exportResults"
   | "exportStreamFor"

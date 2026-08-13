@@ -1,5 +1,6 @@
 import type {
   CapabilityGenerationStore,
+  CaseReceiptStore,
   ConstitutionApprovalStore,
   ConstitutionalPublisher,
   HandoffCheckpointStore,
@@ -8,7 +9,7 @@ import type {
   ScoringStageStore,
   VerificationDecisionStore,
 } from "@everdict/application-control";
-import { soleLeader, soloReplicas } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, soleLeader, soloReplicas } from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
@@ -98,6 +99,7 @@ import {
   PgCallbackStore,
   PgCapabilityGenerationStore,
   PgCapabilityStore,
+  PgCaseReceiptStore,
   PgCommentStore,
   PgConstitutionApprovalStore,
   PgCycleStore,
@@ -207,6 +209,9 @@ export interface Persistence {
   // yet read (expand step, docs/architecture/scoring-plane-revisions.md).
   scoringStageStore: ScoringStageStore;
   recordingStore: RecordingStore; // durable replay recording (frames/logs/env/runtime tracks) — persistent by default
+  // Where a case's canonical outcome is decided (mig 0175): one receipt per (scorecard, case, trial), claimed
+  // by the attempt that commits. Written beside the ledger while the two are compared.
+  caseReceiptStore: CaseReceiptStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
@@ -359,6 +364,7 @@ export async function makePersistence(): Promise<Persistence> {
       store: inMemoryRuns,
       scoringStageStore: new InMemoryScoringStageStore(),
       recordingStore: new InMemoryRecordingStore(),
+      caseReceiptStore: new InMemoryCaseReceiptStore(),
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
@@ -427,6 +433,7 @@ export async function makePersistence(): Promise<Persistence> {
     store: new PgRunStore(client, REPLICA_ID),
     scoringStageStore: new PgScoringStageStore(client),
     recordingStore: new PgRecordingStore(client),
+    caseReceiptStore: new PgCaseReceiptStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,
