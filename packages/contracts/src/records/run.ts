@@ -227,6 +227,12 @@ export const RunRecordSchema = z.object({
   // is taken over, leaves a caller waiting on a POST nobody can still make. On the record it is an intent the
   // NEXT driver can honour, delivered off the terminal fact rather than fired inline.
   webhookUrl: z.string().url().optional(),
+  // THE CORRELATION ID THIS RUN WAS DISPATCHED WITH (mig 0172) — the key its frames, logs, live trajectory
+  // and replay buffer are written under. Stamped at creation rather than re-derived, because the derivation
+  // is lossy exactly where it matters: a multi-trial case dispatches `…-c1-t0/-t1/-t2` and every one of those
+  // rows re-derives `…-c1`, so two of the three point at evidence that is not theirs. Absent = a row from
+  // before the column, which keeps the derivation as its fallback.
+  executionId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

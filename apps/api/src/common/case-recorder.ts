@@ -10,6 +10,20 @@ import type { TrackEntry } from "@everdict/contracts";
 // (RunService), not here. docs/architecture/replay.md D3.
 export class CaseRecorder {
   private readonly lastFrame = new Map<string, { hash: string; ref: string }>();
+  // WHICH ATTEMPT THIS PROCESS IS RECORDING (mig 0173). A re-driven run keeps its correlation id — that is
+  // what lets an observer find it without a lookup — so two attempts write into one buffer, and clearing the
+  // buffer on re-drive removes history without revoking the recorder that has not noticed it was replaced.
+  // The generation is stamped on every append, and the store refuses one from an earlier attempt.
+  //
+  // Unset for a run this process was never told about (the ordinary first attempt): the append carries no
+  // generation and is accepted, exactly as it always was.
+  private readonly attempt = new Map<string, number>();
+
+  // The re-drive tells the recorder which attempt it is now serving; the value comes from the reset that
+  // began it, so a recorder cannot invent one.
+  serves(runId: string, generation: number): void {
+    this.attempt.set(runId, generation);
+  }
   constructor(
     private readonly recordings: RecordingStore,
     // Optional: frames need an object store to offload. Without one, logs still record (they carry no bytes).
@@ -31,7 +45,7 @@ export class CaseRecorder {
         ref = await artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
         this.lastFrame.set(runId, { hash, ref });
       }
-      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } });
+      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, this.attempt.get(runId));
     } catch {
       // best-effort — a recording failure must never affect the run
     }
@@ -39,7 +53,11 @@ export class CaseRecorder {
 
   async recordLog(runId: string, line: string): Promise<void> {
     try {
-      await this.recordings.append(runId, { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } });
+      await this.recordings.append(
+        runId,
+        { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } },
+        this.attempt.get(runId),
+      );
     } catch {
       // best-effort
     }
@@ -50,7 +68,7 @@ export class CaseRecorder {
   // append — the deep-track twin of recordFrame (which offloads a raw frame). Frames still go through recordFrame.
   async recordTrack(runId: string, item: TrackEntry): Promise<void> {
     try {
-      await this.recordings.append(runId, item);
+      await this.recordings.append(runId, item, this.attempt.get(runId));
     } catch {
       // best-effort — a recording failure must never affect the run
     }

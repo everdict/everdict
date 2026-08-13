@@ -7,10 +7,16 @@ type SealedMeta = { t0: number; envKind: string; effectiveFidelity: Fidelity; di
 // t0 + effectiveFidelity from the tracks) and hands back a memory:// ref. Interchangeable with the Postgres +
 // object-store impl behind RecordingStore (S4).
 export class InMemoryRecordingStore implements RecordingStore {
-  private readonly recordings = new Map<string, { tracks: CaseRecording["tracks"]; sealed?: SealedMeta }>();
+  private readonly recordings = new Map<
+    string,
+    { tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number }
+  >();
 
-  async append(runId: string, item: TrackEntry): Promise<void> {
-    const rec = this.recordings.get(runId) ?? { tracks: {} };
+  async append(runId: string, item: TrackEntry, generation?: number): Promise<void> {
+    const rec = this.recordings.get(runId) ?? { tracks: {}, generation: 0 };
+    // A producer from an earlier attempt is not writing this recording (mig 0173) — the reset raised the
+    // number and it is still sending the one it started with.
+    if (generation !== undefined && generation < rec.generation) return;
     appendEntry(rec.tracks, item);
     this.recordings.set(runId, rec);
   }
@@ -30,8 +36,10 @@ export class InMemoryRecordingStore implements RecordingStore {
 
   // A re-drive starts a fresh recording — the previous attempt produced no outcome, so its frames are not
   // this run's replay (arch-review 33 P1).
-  async reset(runId: string): Promise<void> {
-    this.recordings.delete(runId);
+  async reset(runId: string): Promise<number> {
+    const generation = (this.recordings.get(runId)?.generation ?? 0) + 1;
+    this.recordings.set(runId, { tracks: {}, generation });
+    return generation;
   }
 
   async get(runId: string): Promise<CaseRecording | undefined> {

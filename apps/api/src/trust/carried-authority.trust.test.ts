@@ -474,6 +474,17 @@ describeTrust("TRUST-151 — a re-driven run's replay is its own attempt, not th
     const sealed = await recordings.get("evd-run-r-redrive");
     expect(sealed?.tracks.logs?.map((l) => l.text)).toEqual(["attempt B"]);
     expect(sealed?.tracks.frames ?? []).toHaveLength(0);
+
+    // …AND THE PREVIOUS ATTEMPT'S RECORDER IS REVOKED, not merely erased (mig 0173). The paused replica whose
+    // return is the entire reason fencing exists wakes AFTER the reset and goes on writing under the
+    // generation it was started with. A reset that only cleared history would accept this and interleave two
+    // executions in the replay the winner seals.
+    await recordings.append(
+      "evd-run-r-redrive",
+      { track: "logs", entry: { t: 9_000, stream: "stdout", text: "attempt A, still going" } },
+      0,
+    );
+    expect((await recordings.get("evd-run-r-redrive"))?.tracks.logs?.map((l) => l.text)).toEqual(["attempt B"]);
   }, 20_000);
 });
 
@@ -867,5 +878,102 @@ describeTrust("TRUST-156 — a losing driver cannot amend the winner's child res
       { expectNotCancelled: true, parentDriver: { scorecardId: "sc-wb", epoch: 1 } },
     );
     expect(amended?.result?.snapshot).toMatchObject({ output: "B's amended answer" });
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-157.
+//
+// A HOSTNAME IS NOT A DESTINATION.
+//
+// The callback's SSRF check read the hostname the tenant wrote, which is the string, not the place. A name
+// its owner controls resolves to whatever their DNS says — `https://hook.attacker.example/` answering
+// `169.254.169.254` passes every literal test and then reads a credential from the metadata service, from
+// inside a network the submitter is not in.
+//
+// So the name is resolved and the ADDRESSES are judged, and the address that passed is PINNED into the
+// request — a name that answers publicly once and privately a moment later would otherwise be a check that
+// proved nothing. The Host header keeps the original name so TLS and the receiver's routing still see what
+// was configured.
+describeTrust("TRUST-157 — a callback is judged by where its name goes, not by how it reads", () => {
+  it("a public name that resolves privately is refused", async () => {
+    const { refuseUnsafeCallback, resolvePublicTarget } = await import("@everdict/application-control");
+    const url = refuseUnsafeCallback("https://hook.attacker.example/cb", false); // the literal check passes…
+    await expect(resolvePublicTarget(url, async () => ["169.254.169.254"])).rejects.toThrow(/private address/);
+    await expect(resolvePublicTarget(url, async () => ["10.0.0.7"])).rejects.toThrow(/private address/);
+    // …and a name that resolves nowhere is a delivery that cannot be made, said out loud.
+    await expect(resolvePublicTarget(url, async () => [])).rejects.toThrow(/resolves to nothing/);
+  }, 20_000);
+
+  it("a public name is dialled at the address that passed, under its own Host", async () => {
+    const { refuseUnsafeCallback, resolvePublicTarget } = await import("@everdict/application-control");
+    const url = refuseUnsafeCallback("https://hooks.example.com/cb?token=abc", false);
+    const target = await resolvePublicTarget(url, async () => ["93.184.216.34"]);
+    // Pinned: the connection goes to the address the check judged, closing the rebinding window between them.
+    expect(target.url.hostname).toBe("93.184.216.34");
+    expect(target.url.pathname + target.url.search).toBe("/cb?token=abc");
+    // …and the receiver is still addressed by the name it was configured with.
+    expect(target.host).toBe("hooks.example.com");
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-158.
+//
+// TERMINAL MEANS FINALIZED, AND FINALIZED INCLUDES THE ARTIFACTS.
+//
+// The child stopped going terminal before its judges landed two reviews ago, and everything ELSE a case
+// produces still happened afterwards: the screenshot offload and the replay seal ran later in the batch
+// pipeline. A crash in between left a row recovery reads as finished evidence — do not re-run, do not
+// re-judge — whose snapshot was still inline base64 and whose replay had no ref. Judged is not assembled.
+//
+// The artifacts are assembled before the ONE terminal write now, so whatever they produced is part of it.
+// Both remain best-effort by contract: a failed offload or an unsealed recording must never cost a case its
+// verdict — what changed is when they happen, not whether they can fail.
+describeTrust("TRUST-158 — a terminal child carries its assembled evidence, not just its verdict", () => {
+  it("the child's own terminal write already holds the replay ref", async () => {
+    const { InMemoryRecordingStore } = await import("@everdict/db");
+    const recordings = new InMemoryRecordingStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    runStore.attachScorecards(store);
+
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          // A frame teed under the id this case was DISPATCHED with — which is what the child stamps (mig 0172).
+          await recordings.append(job.runId ?? "", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      recordingStore: recordings,
+      datasets,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 600));
+
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    expect(children).toHaveLength(1);
+    const child = children[0];
+    // The row a recovery would read as finished evidence: terminal, judged, AND assembled.
+    expect(child?.status).toBe("succeeded");
+    expect(child?.result?.recordingRef).toBeDefined();
+    // …and it names the id the case actually ran under, which a trialled case cannot re-derive.
+    expect(child?.executionId).toBe(`evd-${record.id}-c1`);
   }, 20_000);
 });

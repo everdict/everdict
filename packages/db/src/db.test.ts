@@ -416,7 +416,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
 
     await new PgRunStore(client, "cp-abc").create(queued);
 
-    expect(calls[0]?.text).toMatch(/session, owner_replica, visibility, webhook_url, created_at/);
+    expect(calls[0]?.text).toMatch(/session, owner_replica, visibility, webhook_url, execution_id, created_at/);
     expect(calls[0]?.params?.[25]).toBe("cp-abc");
   });
 

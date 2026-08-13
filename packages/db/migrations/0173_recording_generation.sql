@@ -1,0 +1,13 @@
+-- 0173_recording_generation — additive (expand): the ATTEMPT a recording belongs to.
+--
+-- A re-driven run keeps its live-correlation id on purpose: an observer derives `evd-run-<id>` from the
+-- record with no lookup, which is what makes live observation work at all. The cost is that two attempts of
+-- one run append into one buffer, and clearing that buffer when a re-drive begins removes HISTORY without
+-- revoking a PRODUCER: the paused replica whose return is the entire reason fencing exists can wake after the
+-- reset and go on writing frames into its successor's recording. The winner then seals a replay in which two
+-- executions are interleaved, with nothing marking the seam.
+--
+-- The generation is what a stale producer cannot argue with. It rises on every reset, each recorder stamps
+-- the value its attempt was started with, and an append carrying an older one is dropped rather than merged.
+-- Existing rows start at 0, which is the generation every producer that has not been told otherwise sends.
+ALTER TABLE everdict_recordings ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0;

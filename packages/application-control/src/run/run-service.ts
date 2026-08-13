@@ -260,6 +260,9 @@ export interface RunServiceDeps {
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // for the webhook (test injection)
+  // "this process now records attempt N for this run" — the composition hands it to the CaseRecorder, which
+  // stamps it on every append so the store can refuse the previous attempt's producer (mig 0173).
+  onAttempt?: (runId: string, generation: number) => void;
 }
 
 // Price the model calls of a reported trace before it is sealed. The agent counts tokens (it is the only one
@@ -715,6 +718,10 @@ export class RunService {
   // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame + pushed-log lookups (both keyed by
   // the runId the runner reports with).
   private static runIdFor(record: RunRecord): string {
+    // The STAMPED id first (mig 0172). The derivation below is the fallback for rows written before the
+    // column, and it is lossy where it matters: a multi-trial case dispatches `…-c1-t0/-t1/-t2` and all three
+    // rows derive `…-c1`, so two of them read evidence that belongs to a sibling.
+    if (record.executionId) return record.executionId;
     return record.parentScorecardId ? `evd-${record.parentScorecardId}-${record.caseId}` : `evd-run-${record.id}`;
   }
 
@@ -780,7 +787,11 @@ export class RunService {
     // holding the frames of an execution whose settlement was refused, and a reader scrubbing that timeline
     // watches two runs. The claim above is what earns the right to do this: only the driver that won the
     // re-drive clears the buffer.
-    await this.deps.recordingStore?.reset(RunService.runIdFor(record)).catch(() => {});
+    const attempt = await this.deps.recordingStore?.reset(RunService.runIdFor(record)).catch(() => undefined);
+    // …and the recorder serving this process is told which attempt it is now on (mig 0173). Clearing the
+    // buffer removes history; this is what stops the PREVIOUS attempt's recorder — which has not noticed it
+    // was replaced — from writing into the one that took its place.
+    if (attempt !== undefined) this.deps.onAttempt?.(RunService.runIdFor(record), attempt);
     void this.track(
       record.id,
       {

@@ -108,6 +108,9 @@ export function buildRun(deps: {
   liveTraces: LiveTraceStore;
   // Durable replay recording (optional) — RunService seals it at finalize and attaches the ref to the result.
   recordingStore?: RecordingStore;
+  // Told when a re-drive begins a new attempt, so its appends carry the generation the store fences on
+  // (mig 0173) — the previous attempt's recorder keeps the number it was started with and is refused.
+  onAttempt?: (runId: string, generation: number) => void;
   // Run-workbench fs rendezvous (self-hosted lane) — parked reads the runner's in-case servicing loop answers.
   caseFsRequests?: CaseFsRequestHub;
 }) {
@@ -135,6 +138,7 @@ export function buildRun(deps: {
     liveLogs,
     liveTraces,
     recordingStore,
+    onAttempt,
   } = deps;
   const {
     readCaseLogsFn,
@@ -205,6 +209,7 @@ export function buildRun(deps: {
     preflightPlacement, // submit-time capability gate: reject a harness/runtime mismatch (e.g. Windows topology → Linux cluster) at 400
     ...(artifacts ? { artifacts } : {}),
     ...(recordingStore ? { recordingStore } : {}),
+    ...(onAttempt ? { onAttempt } : {}),
     // Declarative harness: resolve template+pins from the instance registry and embed the spec in the job (built-in fallback if absent).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
     // Resolve harness env {secretRef} (shared + personal secrets) just before dispatch (no plaintext stored in the registry). Same as scorecard.

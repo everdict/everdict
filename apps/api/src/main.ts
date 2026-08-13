@@ -1,3 +1,5 @@
+import { lookup as lookupDnsCb } from "node:dns";
+import { promisify } from "node:util";
 import {
   CycleService,
   GithubIssueSync,
@@ -576,7 +578,13 @@ async function main(): Promise<void> {
   // A run's completion callback (mig 0171): recorded at submit, delivered off the run's own terminal fact.
   // On the durable cursor rather than inline in the settling process, so a refused settle calls nobody and a
   // restart between dispatch and settlement does not silently drop the caller's answer.
-  eventConsumers.register(runWebhookConsumer({ runs: store }));
+  eventConsumers.register(
+    runWebhookConsumer({
+      runs: store,
+      // The resolver the SSRF check judges (see the consumer): a tenant-supplied name is not a destination.
+      lookup: async (host) => (await lookupDns(host, { all: true, verbatim: true })).map((a) => a.address),
+    }),
+  );
   eventConsumers.start();
 
   // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members
@@ -720,6 +728,9 @@ async function main(): Promise<void> {
     liveTraces,
     caseFsRequests,
     ...(recordingStore ? { recordingStore } : {}),
+    // A re-drive begins a new attempt; the recorder serving this process stamps it from here on, and the
+    // store refuses the previous attempt's appends (mig 0173).
+    onAttempt: (runId, generation) => caseRecorder.serves(runId, generation),
   });
 
   const scorecardService = buildScorecard({
@@ -1561,3 +1572,6 @@ main().catch((err) => {
   console.error("everdict-api failed to start:", err);
   process.exit(1);
 });
+
+// Node's DNS lookup as a promise — the resolver the run-webhook SSRF check judges.
+const lookupDns = promisify(lookupDnsCb);

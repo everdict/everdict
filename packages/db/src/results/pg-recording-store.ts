@@ -23,9 +23,13 @@ interface RecordingRow {
 export class PgRecordingStore implements RecordingStore {
   constructor(private readonly client: SqlClient) {}
 
-  async append(runId: string, item: TrackEntry): Promise<void> {
+  async append(runId: string, item: TrackEntry, generation?: number): Promise<void> {
     // Create the row + lane on first sight; on conflict append to the lane. jsonb_set under the row lock makes
     // concurrent appends for the same run safe.
+    //
+    // …and the WHERE on the conflict path is what revokes a producer from an earlier attempt (mig 0173): a
+    // reset raised the generation, and a recorder still stamping the number it was started with writes
+    // nothing from that moment. Absent generation = a producer nobody has told, which appends as before.
     await this.client.query(
       `INSERT INTO everdict_recordings (run_id, tracks, updated_at)
        VALUES ($1, jsonb_build_object($2::text, jsonb_build_array($3::jsonb)), now())
@@ -36,8 +40,9 @@ export class PgRecordingStore implements RecordingStore {
            COALESCE(everdict_recordings.tracks -> $2, '[]'::jsonb) || jsonb_build_array($3::jsonb),
            true
          ),
-         updated_at = now()`,
-      [runId, item.track, JSON.stringify(item.entry)],
+         updated_at = now()
+       WHERE $4::int IS NULL OR everdict_recordings.generation <= $4::int`,
+      [runId, item.track, JSON.stringify(item.entry), generation ?? null],
     );
   }
 
@@ -61,8 +66,22 @@ export class PgRecordingStore implements RecordingStore {
 
   // A re-drive starts a fresh recording (arch-review 33 P1) — see the port for why this is a reset and not a
   // filter at seal time.
-  async reset(runId: string): Promise<void> {
-    await this.client.query("DELETE FROM everdict_recordings WHERE run_id = $1", [runId]);
+  async reset(runId: string): Promise<number> {
+    // Clear the buffer AND raise the attempt (mig 0173) — the previous recorder keeps writing under the
+    // number it was started with, and `append` refuses it from here on. One statement, so a producer can
+    // never see an emptied buffer that still accepts its writes.
+    const { rows } = await this.client.query<{ generation: number }>(
+      `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
+       VALUES ($1, '{}'::jsonb, 1, now())
+       ON CONFLICT (run_id) DO UPDATE
+         SET tracks = '{}'::jsonb,
+             generation = everdict_recordings.generation + 1,
+             t0 = NULL, env_kind = NULL, effective_fidelity = NULL, dispatch = NULL, sealed = false,
+             updated_at = now()
+       RETURNING generation`,
+      [runId],
+    );
+    return Number(rows[0]?.generation ?? 0);
   }
 
   async get(runId: string): Promise<CaseRecording | undefined> {

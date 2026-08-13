@@ -62,6 +62,7 @@ import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
@@ -87,11 +88,20 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
 
+// The correlation id a case is DISPATCHED with — the key its frames, logs, live trajectory and replay are
+// written under. One function, so the id the job carries and the id the child row stamps cannot drift.
+function executionIdOf(job: { evalCase: { id: string }; trial?: number; batchId?: string }, batchId?: string): string {
+  const parent = job.batchId ?? batchId ?? "";
+  return `evd-${parent}-${job.evalCase.id}${job.trial !== undefined ? `-t${job.trial}` : ""}`;
+}
+
 // A case whose execution is done and whose child row is deliberately still open until its judges land.
 interface PendingChildSettle {
   childId?: string;
   ranOn?: string;
   parentDriver: { scorecardId: string; epoch: number };
+  // The id this case was dispatched with — the key its replay buffer is written under (mig 0172).
+  executionId: string;
 }
 
 export class ScorecardBatchService {
@@ -749,6 +759,7 @@ export class ScorecardBatchService {
           harness: { id: ctx.harnessId, version: ctx.harnessVersion },
           caseId,
           parentScorecardId: id,
+          executionId: `evd-${id}-${caseId}`, // Temporal parity — one attempt per case, no trial fan-out here
           ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
           ...(current ? { origin: ScorecardBatch.childRunOrigin(current) } : {}),
           ...(caseEnvelope ? { envelope: caseEnvelope } : {}),
@@ -1368,6 +1379,34 @@ export class ScorecardBatchService {
     pending.delete(key);
     // No child to settle (a batch with no run store) is not a lost authority — the case really did finish.
     if (!entry.childId || !this.deps.runStore) return true;
+    // TERMINAL MEANS FINALIZED, AND FINALIZED INCLUDES THE ARTIFACTS (arch-review 36 P1). The child stopped
+    // going terminal before its judges landed two reviews ago; everything ELSE a case produces still happened
+    // after — the screenshot offload and the replay seal ran later in the batch pipeline, so a crash in
+    // between left a row recovery reads as finished evidence whose snapshot was still inline base64 and whose
+    // replay had no ref. Judged but not assembled is not finished.
+    //
+    // Both are best-effort by contract and stay that way: a failed offload or an unsealed recording must
+    // never cost the case its verdict. What changes is that they happen BEFORE the one terminal write, so
+    // whatever they produced is part of it.
+    if (this.deps.artifacts) {
+      try {
+        result.snapshot = await offloadSnapshot(
+          result.snapshot,
+          this.deps.artifacts,
+          `scorecards/${entry.parentDriver.scorecardId}/${result.caseId}`,
+        );
+      } catch {}
+    }
+    if (this.deps.recordingStore) {
+      try {
+        await foldEnvDeltas(this.deps.recordingStore, entry.executionId, result);
+        const ref = await this.deps.recordingStore.seal(entry.executionId, {
+          envKind: result.snapshot.kind,
+          dispatch: dispatchManifest(result.harness),
+        });
+        if (ref) result.recordingRef = ref;
+      } catch {}
+    }
     const settled = await this.settleChild(
       entry.childId,
       (cur) => ({
@@ -1449,10 +1488,12 @@ export class ScorecardBatchService {
       if (this.deps.recordingStore) {
         try {
           // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the child's recording before sealing.
-          await foldEnvDeltas(this.deps.recordingStore, `evd-${scorecardId}-${r.caseId}`, r);
-          // runId parity with dispatch (baseJob.runId = evd-<scorecardId>-<caseId>; RunService.runIdFor for a child).
+          // The id this case was DISPATCHED with (mig 0172) — a trialled case's key carries `-t<n>`, and
+          // deriving it back from the scorecard + caseId hands all three trials one recording.
+          const recordingKey = `evd-${scorecardId}-${r.caseId}${r.trial !== undefined ? `-t${r.trial}` : ""}`;
+          await foldEnvDeltas(this.deps.recordingStore, recordingKey, r);
           // envKind = the observation kind. Empty recording → seal returns undefined → no ref attached.
-          const ref = await this.deps.recordingStore.seal(`evd-${scorecardId}-${r.caseId}`, {
+          const ref = await this.deps.recordingStore.seal(recordingKey, {
             envKind: r.snapshot.kind,
             // Harness-only manifest here (the case's fixtures aren't threaded into write-back yet); RunService seals the
             // fixtures hash for single runs. docs/architecture/dependency-store-roles.md P2.
@@ -1655,7 +1696,7 @@ export class ScorecardBatchService {
         tenant,
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
         // Trace correlation, derivable by observers: evd-<batchId>-<caseId>[-t<n>] (live-observability).
-        runId: `evd-${id}-${job.evalCase.id}${job.trial !== undefined ? `-t${job.trial}` : ""}`,
+        runId: executionIdOf(job, id),
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),
@@ -1679,6 +1720,9 @@ export class ScorecardBatchService {
           harness: { id: harnessId, version: harnessVersion },
           caseId: job.evalCase.id,
           parentScorecardId: id,
+          // The id its evidence will be keyed by, stamped rather than left to be re-derived (mig 0172) —
+          // the derivation drops the trial, and a trialled case has one child per trial.
+          executionId: executionIdOf(job, id),
           ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
           ...(childOrigin ? { origin: childOrigin } : {}),
           ...(childEnv ? { envelope: childEnv } : {}),
@@ -1754,6 +1798,7 @@ export class ScorecardBatchService {
           childId: child?.id,
           ...(ranOn ? { ranOn } : {}),
           parentDriver: { scorecardId: id, epoch },
+          executionId: executionIdOf(job, id),
         });
         return result;
       } catch (err) {

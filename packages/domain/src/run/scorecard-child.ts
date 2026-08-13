@@ -17,6 +17,9 @@ export interface NewChildRunInput {
   harness: { id: string; version: string };
   caseId: string;
   parentScorecardId: string;
+  // The exact correlation id the dispatch will carry (`evd-<batchId>-<caseId>[-t<n>]`). Stamped here because
+  // deriving it back from the row loses the trial (mig 0172).
+  executionId?: string;
   runtime?: string; // the assigned runtime lane (batch runtime or per-case shard target)
   origin?: RunOrigin; // the batch's WHY, carried onto each case (schedule/member/api — execution-model.md P0)
   envelope?: RunEnvelope; // the delegated budget this case draws from (§5.2 — {id} of the causer's envelope)
@@ -46,6 +49,7 @@ export function newScorecardChildRun(input: NewChildRunInput): RunRecord {
     status: "queued",
     parentScorecardId: input.parentScorecardId,
     trigger: "scorecard",
+    ...(input.executionId ? { executionId: input.executionId } : {}),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...childRunShape(input),
     createdAt: input.now,

@@ -1,0 +1,11 @@
+-- 0172_run_execution_id — additive (expand): the correlation id a run was ACTUALLY dispatched with.
+--
+-- Everything that observes a live run — pushed frames, pushed logs, the live trajectory, the replay buffer —
+-- is keyed by the id the control plane minted at dispatch. Readers re-derived that id from the record
+-- (`evd-<batchId>-<caseId>`), and for a multi-trial case the derivation is LOSSY: trials 0, 1 and 2 dispatch
+-- as `…-c1-t0`, `…-c1-t1`, `…-c1-t2` and all three rows re-derive `…-c1`. Two of the three then point at
+-- evidence that is not theirs, and the third at evidence shared with its siblings.
+--
+-- A record should not have to reconstruct its own history from a projection of itself. The id is stamped
+-- where it is minted. NULL = a row written before this column existed, and the derivation stays its fallback.
+ALTER TABLE everdict_runs ADD COLUMN IF NOT EXISTS execution_id text;
