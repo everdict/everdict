@@ -15,8 +15,10 @@ export class CaseRecorder {
   // buffer on re-drive removes history without revoking the recorder that has not noticed it was replaced.
   // The generation is stamped on every append, and the store refuses one from an earlier attempt.
   //
-  // Unset for a run this process was never told about (the ordinary first attempt): the append carries no
-  // generation and is accepted, exactly as it always was.
+  // Unset for a run this process was never told about — which reads as 0, the generation a recording starts
+  // at. It used to read as "no generation", and the store waved that through: the producer that matters most
+  // (the FIRST attempt's, the one that pauses and comes back) had never been told a number, so the fence let
+  // it write into its successor's recording. A default is not the same as an exemption (arch-review 37 P0).
   private readonly attempt = new Map<string, number>();
 
   // The re-drive tells the recorder which attempt it is now serving; the value comes from the reset that
@@ -45,7 +47,7 @@ export class CaseRecorder {
         ref = await artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
         this.lastFrame.set(runId, { hash, ref });
       }
-      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, this.attempt.get(runId));
+      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, this.attempt.get(runId) ?? 0);
     } catch {
       // best-effort — a recording failure must never affect the run
     }
@@ -56,7 +58,7 @@ export class CaseRecorder {
       await this.recordings.append(
         runId,
         { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } },
-        this.attempt.get(runId),
+        this.attempt.get(runId) ?? 0,
       );
     } catch {
       // best-effort
@@ -68,7 +70,7 @@ export class CaseRecorder {
   // append — the deep-track twin of recordFrame (which offloads a raw frame). Frames still go through recordFrame.
   async recordTrack(runId: string, item: TrackEntry): Promise<void> {
     try {
-      await this.recordings.append(runId, item, this.attempt.get(runId));
+      await this.recordings.append(runId, item, this.attempt.get(runId) ?? 0);
     } catch {
       // best-effort — a recording failure must never affect the run
     }

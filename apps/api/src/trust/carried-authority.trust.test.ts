@@ -441,23 +441,32 @@ describeTrust("TRUST-151 — a re-driven run's replay is its own attempt, not th
       createdAt: "2026-08-12T00:00:00.000Z",
       updatedAt: "2026-08-12T00:00:00.000Z",
     } as never);
-    await recordings.append("evd-run-r-redrive", {
-      track: "logs",
-      entry: { t: 1_000, stream: "stdout", text: "attempt A" },
-    });
-    await recordings.append("evd-run-r-redrive", { track: "frames", entry: { t: 1_100, ref: "a://1", hash: "h1" } });
+    // Attempt A wrote under the generation a first attempt owns — 0, said explicitly, which is what the
+    // production recorder now sends (it used to send nothing, and the store waved that through).
+    await recordings.append(
+      "evd-run-r-redrive",
+      { track: "logs", entry: { t: 1_000, stream: "stdout", text: "attempt A" } },
+      0,
+    );
+    await recordings.append("evd-run-r-redrive", { track: "frames", entry: { t: 1_100, ref: "a://1", hash: "h1" } }, 0);
 
     let dispatched = 0;
+    let attemptB = 0;
     const service = new RunService({
       store,
       recordingStore: recordings,
+      onAttempt: (_runId: string, generation: number) => {
+        attemptB = generation;
+      },
       dispatcher: {
         async dispatch(job: CaseJob) {
           dispatched += 1;
-          await recordings.append("evd-run-r-redrive", {
-            track: "logs",
-            entry: { t: 5_000, stream: "stdout", text: "attempt B" },
-          });
+          await recordings.append(
+            "evd-run-r-redrive",
+            { track: "logs", entry: { t: 5_000, stream: "stdout", text: "attempt B" } },
+            // The generation the re-drive opened — what `onAttempt` hands this process's recorder.
+            attemptB,
+          );
           return result(job.evalCase.id);
         },
       },
@@ -896,23 +905,23 @@ describeTrust("TRUST-156 — a losing driver cannot amend the winner's child res
 // was configured.
 describeTrust("TRUST-157 — a callback is judged by where its name goes, not by how it reads", () => {
   it("a public name that resolves privately is refused", async () => {
-    const { refuseUnsafeCallback, resolvePublicTarget } = await import("@everdict/application-control");
+    const { refuseUnsafeCallback, assertPublicTarget } = await import("@everdict/application-control");
     const url = refuseUnsafeCallback("https://hook.attacker.example/cb", false); // the literal check passes…
-    await expect(resolvePublicTarget(url, async () => ["169.254.169.254"])).rejects.toThrow(/private address/);
-    await expect(resolvePublicTarget(url, async () => ["10.0.0.7"])).rejects.toThrow(/private address/);
+    await expect(assertPublicTarget(url, async () => ["169.254.169.254"])).rejects.toThrow(/private address/);
+    await expect(assertPublicTarget(url, async () => ["10.0.0.7"])).rejects.toThrow(/private address/);
     // …and a name that resolves nowhere is a delivery that cannot be made, said out loud.
-    await expect(resolvePublicTarget(url, async () => [])).rejects.toThrow(/resolves to nothing/);
+    await expect(assertPublicTarget(url, async () => [])).rejects.toThrow(/resolves to nothing/);
   }, 20_000);
 
-  it("a public name is dialled at the address that passed, under its own Host", async () => {
-    const { refuseUnsafeCallback, resolvePublicTarget } = await import("@everdict/application-control");
+  it("a public name keeps its NAME — a verified address is not a substitute for TLS identity", async () => {
+    const { refuseUnsafeCallback, assertPublicTarget } = await import("@everdict/application-control");
     const url = refuseUnsafeCallback("https://hooks.example.com/cb?token=abc", false);
-    const target = await resolvePublicTarget(url, async () => ["93.184.216.34"]);
-    // Pinned: the connection goes to the address the check judged, closing the rebinding window between them.
-    expect(target.url.hostname).toBe("93.184.216.34");
-    expect(target.url.pathname + target.url.search).toBe("/cb?token=abc");
-    // …and the receiver is still addressed by the name it was configured with.
-    expect(target.host).toBe("hooks.example.com");
+    const target = await assertPublicTarget(url, async () => ["93.184.216.34"]);
+    // The first version of this substituted the resolved IP into the URL and put the name in a `Host` header.
+    // That is not pinning: TLS verifies the certificate against the URL's host, and `Host` is sent after the
+    // handshake — so every ordinary callback would have failed verification. The name is what gets dialled.
+    expect(target.hostname).toBe("hooks.example.com");
+    expect(target.href).toBe("https://hooks.example.com/cb?token=abc");
   }, 20_000);
 });
 
@@ -947,7 +956,9 @@ describeTrust("TRUST-158 — a terminal child carries its assembled evidence, no
       dispatcher: {
         async dispatch(job: CaseJob) {
           // A frame teed under the id this case was DISPATCHED with — which is what the child stamps (mig 0172).
-          await recordings.append(job.runId ?? "", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+          // The case's attempt is opened by the dispatch itself (a reset that returns the generation it
+          // owns), and a producer stamps what it was told — 0 here, the number a first attempt owns.
+          await recordings.append(job.runId ?? "", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
           return result(job.evalCase.id);
         },
       },
@@ -975,5 +986,64 @@ describeTrust("TRUST-158 — a terminal child carries its assembled evidence, no
     expect(child?.result?.recordingRef).toBeDefined();
     // …and it names the id the case actually ran under, which a trialled case cannot re-derive.
     expect(child?.executionId).toBe(`evd-${record.id}-c1`);
+  }, 20_000);
+});
+
+// Trust suite (docs/trust-certification.md) — TRUST-159.
+//
+// A SUMMARY IS BUILT FROM THE LEDGER'S CASES, NOT FROM THIS PROCESS'S MEMORY.
+//
+// The batch aggregates the results it holds in memory; the ledger is what a reader sees a year later. When a
+// child's terminal write failed — a transient store error, not a lost race — the failure was swallowed and
+// the parent went on to summarize, score and settle SUCCEEDED. The disagreement is permanent: the batch is
+// terminal, so nothing re-drives it, and its summary counts a case no reader can find.
+//
+// A case that never reached the ledger now fails the batch instead, into a state recovery can pick up again.
+// A case LOST to a takeover or a cancel is not that: it means somebody else owns it, and they own the batch.
+describeTrust("TRUST-159 — a case that could not be written refuses the batch", () => {
+  it("a child settle that fails on infrastructure does not become a succeeded scorecard", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    runStore.attachScorecards(store);
+    // The child's terminal write fails the way a database does: not a refusal, an outage.
+    const realUpdate = runStore.update.bind(runStore);
+    let failedOnce = false;
+    runStore.update = (async (id: string, patch: never, events: never, guard: never) => {
+      if (!failedOnce && (patch as { status?: string }).status === "succeeded") {
+        failedOnce = true;
+        throw new Error("connection terminated unexpectedly");
+      }
+      return realUpdate(id, patch, events, guard);
+    }) as typeof runStore.update;
+
+    const service = new ScorecardService({
+      dispatcher: { dispatch: async (job: CaseJob) => result(job.evalCase.id) },
+      store,
+      runStore,
+      datasets,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 800));
+
+    const settled = await store.get(record.id);
+    // Pre-fix: `succeeded`, with a summary counting a case whose row says otherwise — forever, because a
+    // terminal batch is never re-driven.
+    expect(settled?.status).toBe("failed");
+    expect(failedOnce).toBe(true);
   }, 20_000);
 });

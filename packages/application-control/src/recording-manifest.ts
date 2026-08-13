@@ -20,12 +20,18 @@ export function dispatchManifest(harness: string, fixtures?: StoreFixture[]): Di
 // finalize (standalone RunService + batch write-back), so it works self-hosted AND managed (the deltas ride the
 // CaseResult back, not a self-hosted-only push channel). Best-effort. After folding, the deltas are cleared from the
 // result so they are not double-stored on the persisted record (they now live on the recording). docs/architecture/replay.md.
-export async function foldEnvDeltas(store: RecordingStore, runId: string, result: CaseResult): Promise<void> {
+export async function foldEnvDeltas(
+  store: RecordingStore,
+  runId: string,
+  result: CaseResult,
+  // The attempt this fold belongs to — the store refuses a producer from another one (mig 0173).
+  generation: number,
+): Promise<void> {
   const deltas = result.envDeltas;
   if (!deltas || deltas.length === 0) return;
   for (const d of deltas) {
     try {
-      await store.append(runId, { track: "custom", entry: { t: d.t, name: d.kind, text: d.text } });
+      await store.append(runId, { track: "custom", entry: { t: d.t, name: d.kind, text: d.text } }, generation);
     } catch {
       // best-effort — a recording failure never affects the run
     }

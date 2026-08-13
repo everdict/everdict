@@ -787,11 +787,18 @@ export class RunService {
     // holding the frames of an execution whose settlement was refused, and a reader scrubbing that timeline
     // watches two runs. The claim above is what earns the right to do this: only the driver that won the
     // re-drive clears the buffer.
-    const attempt = await this.deps.recordingStore?.reset(RunService.runIdFor(record)).catch(() => undefined);
-    // …and the recorder serving this process is told which attempt it is now on (mig 0173). Clearing the
-    // buffer removes history; this is what stops the PREVIOUS attempt's recorder — which has not noticed it
-    // was replaced — from writing into the one that took its place.
-    if (attempt !== undefined) this.deps.onAttempt?.(RunService.runIdFor(record), attempt);
+    // A NEW ATTEMPT IS OPENED AND NAMED (mig 0173). `reset` clears the buffer AND returns the generation this
+    // attempt owns; the recorder serving this process is told, and every producer that reports through it
+    // stamps that number. The previous attempt's recorder keeps the one it was started with and is refused —
+    // clearing history alone never stopped it writing.
+    // …and a re-drive is exactly the case that HAS an earlier producer to revoke, which is why this one
+    // always opens a new attempt while a first dispatch opens none (see the batch's note).
+    const runId = RunService.runIdFor(record);
+    const attempt = await this.deps.recordingStore?.reset(runId).catch(() => undefined);
+    if (attempt !== undefined) {
+      this.attempt.set(runId, attempt);
+      this.deps.onAttempt?.(runId, attempt);
+    }
     void this.track(
       record.id,
       {
@@ -846,6 +853,9 @@ export class RunService {
   // wrote and sail straight through — the displaced driver has to be measured against the number it held,
   // not against the world as it now is.
   private readonly driverEpoch = new Map<string, number>();
+  // …and the recording ATTEMPT it is serving (mig 0173). Every append and the seal carry it; the store
+  // refuses a producer holding any other number, which is what revokes an attempt that came back.
+  private readonly attempt = new Map<string, number>();
 
   // The settle's authority, as this process holds it. Absent = a run this process never dispatched (a
   // self-hosted lease reporting in, a legacy row) — unfenced exactly as before, never invented.
@@ -944,25 +954,25 @@ export class RunService {
       // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:
       // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
       //
-      // KNOWN, BOUNDED, AND NOT FIXED HERE (arch-review 33 P1): the SEAL is winner-gated, the buffer is not.
-      // Frames, logs and resource samples are appended DURING execution under `job.runId`, which is derived
-      // from the record alone (`evd-run-<id>`) so a live observer needs no lookup — and a re-driven run keeps
-      // that same key. Two attempts of one run therefore append into one row, and the winner seals a
-      // recording that also contains the loser's frames. The trajectory (what judgments read) is clean; the
-      // replay artifact is not.
-      //
-      // Fixing it means giving the ATTEMPT its own identity on the wire — a recording key distinct from the
-      // live-correlation id, threaded through the dispatcher, the self-hosted recorder and the managed
-      // sampler, with the read following the sealed `recordingRef` rather than re-deriving a key. That is a
-      // contract change across three producers and is not something to slip into a fix for something else.
+      // THE ATTEMPT IS NAMED, SO THE SEAL IS THIS ATTEMPT'S (mig 0173). The buffer is shared by construction —
+      // a re-driven run keeps its live-correlation id, which is what lets an observer find it with no lookup
+      // — and what separates the attempts is the generation every producer stamps. A returning attempt holds
+      // the number it was started with and is refused, at the append and at the seal alike.
       if (committed && this.deps.recordingStore) {
         try {
           // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the recording before sealing.
-          await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result);
-          const ref = await this.deps.recordingStore.seal(`evd-run-${id}`, {
-            envKind: input.case.env.kind,
-            dispatch: dispatchManifest(result.harness, input.case.fixtures),
-          });
+          // Read from the map, not from a value the settle may already have cleared: the seal is downstream
+          // of the settlement, and the settlement is what releases this run's driver state.
+          const generation = this.attempt.get(`evd-run-${id}`) ?? 0;
+          await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result, generation);
+          const ref = await this.deps.recordingStore.seal(
+            `evd-run-${id}`,
+            {
+              envKind: input.case.env.kind,
+              dispatch: dispatchManifest(result.harness, input.case.fixtures),
+            },
+            generation,
+          );
           // The ref is attached to the settled row in a follow-up patch: the settle above is what earned the
           // right to publish this recording, so the reference to it lands after, on the row this driver owns.
           if (ref) {
@@ -996,6 +1006,7 @@ export class RunService {
           ...(failed.traceT0 !== undefined ? { t0: failed.traceT0 } : {}),
         });
     }
+    this.attempt.delete(`evd-run-${id}`); // this process is done recording for this run
     // Completion notification (Mattermost etc.) — with the latest record, and only for the writer whose
     // settlement COMMITTED. Failure is independent of the run result (swallow). Independent of the webhook.
     if (committed && this.deps.onComplete) {

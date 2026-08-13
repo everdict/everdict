@@ -6,7 +6,7 @@ describe("InMemoryRecordingStore", () => {
   it("returns undefined for a recording that was never sealed", async () => {
     // Given a store with only appended (in-progress) entries
     const store = new InMemoryRecordingStore();
-    await store.append("run-1", { track: "logs", entry: { t: 1, stream: "stdout", text: "start" } });
+    await store.append("run-1", { track: "logs", entry: { t: 1, stream: "stdout", text: "start" } }, 0);
     // When/Then an unsealed recording is not yet a complete CaseRecording
     expect(await store.get("run-1")).toBeUndefined();
   });
@@ -15,7 +15,7 @@ describe("InMemoryRecordingStore", () => {
     // Given a run with nothing appended
     const store = new InMemoryRecordingStore();
     // When/Then there is no recording to seal → no RecordingRef to attach
-    expect(await store.seal("run-x", { envKind: "repo" })).toBeUndefined();
+    expect(await store.seal("run-x", { envKind: "repo" }, 0)).toBeUndefined();
     expect(await store.get("run-x")).toBeUndefined();
   });
 
@@ -28,10 +28,10 @@ describe("InMemoryRecordingStore", () => {
       { track: "frames", entry: { t: 2000, ref: "memory://f2" } },
       { track: "runtime", entry: { t: 1500, memBytes: 128 } },
     ];
-    for (const entry of entries) await store.append("run-1", entry);
+    for (const entry of entries) await store.append("run-1", entry, 0);
 
     // When the recording is sealed with its env kind + audit manifest
-    const ref = await store.seal("run-1", { envKind: "browser", dispatch: { harness: "claude-code@1.0.0" } });
+    const ref = await store.seal("run-1", { envKind: "browser", dispatch: { harness: "claude-code@1.0.0" } }, 0);
 
     // Then the ref points at the recording and get() returns the assembled, ordered tracks
     expect(ref?.ref).toBe("memory://recording/run-1");
@@ -48,8 +48,8 @@ describe("InMemoryRecordingStore", () => {
   it("derives effectiveFidelity=final for a logs-only recording (no frame series)", async () => {
     // Given only log lines (a run with no live screen)
     const store = new InMemoryRecordingStore();
-    await store.append("run-2", { track: "logs", entry: { t: 5, stream: "stdout", text: "started" } });
-    await store.seal("run-2", { envKind: "repo" });
+    await store.append("run-2", { track: "logs", entry: { t: 5, stream: "stdout", text: "started" } }, 0);
+    await store.seal("run-2", { envKind: "repo" }, 0);
     // Then the recording is `final` fidelity — the final snapshot is the only visual
     expect((await store.get("run-2"))?.effectiveFidelity).toBe("final");
   });
@@ -57,8 +57,8 @@ describe("InMemoryRecordingStore", () => {
   it("peek serves the live tail of an unsealed recording with provisional metadata", async () => {
     // Given a still-running run whose frames/logs are streaming in (nothing sealed yet)
     const store = new InMemoryRecordingStore();
-    await store.append("run-live", { track: "frames", entry: { t: 3000, ref: "memory://f1" } });
-    await store.append("run-live", { track: "logs", entry: { t: 2500, stream: "stdout", text: "working" } });
+    await store.append("run-live", { track: "frames", entry: { t: 3000, ref: "memory://f1" } }, 0);
+    await store.append("run-live", { track: "logs", entry: { t: 2500, stream: "stdout", text: "working" } }, 0);
 
     // When the player peeks mid-run
     const rec = await store.peek("run-live");
@@ -71,17 +71,17 @@ describe("InMemoryRecordingStore", () => {
     // And a run nothing was recorded for peeks as undefined
     expect(await store.peek("run-none")).toBeUndefined();
     // And once sealed, peek answers exactly what get answers
-    await store.seal("run-live", { envKind: "browser" });
+    await store.seal("run-live", { envKind: "browser" }, 0);
     expect(await store.peek("run-live")).toEqual(await store.get("run-live"));
   });
 
   it("keeps recordings separate per runId", async () => {
     // Given entries for two runs
     const store = new InMemoryRecordingStore();
-    await store.append("run-a", { track: "frames", entry: { t: 1, ref: "memory://a" } });
-    await store.append("run-b", { track: "frames", entry: { t: 1, ref: "memory://b" } });
-    await store.seal("run-a", { envKind: "os-use" });
-    await store.seal("run-b", { envKind: "os-use" });
+    await store.append("run-a", { track: "frames", entry: { t: 1, ref: "memory://a" } }, 0);
+    await store.append("run-b", { track: "frames", entry: { t: 1, ref: "memory://b" } }, 0);
+    await store.seal("run-a", { envKind: "os-use" }, 0);
+    await store.seal("run-b", { envKind: "os-use" }, 0);
 
     // Then each recording holds only its own frames
     expect((await store.get("run-a"))?.tracks.frames?.map((f) => f.ref)).toEqual(["memory://a"]);

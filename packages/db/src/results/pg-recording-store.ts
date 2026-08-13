@@ -23,7 +23,7 @@ interface RecordingRow {
 export class PgRecordingStore implements RecordingStore {
   constructor(private readonly client: SqlClient) {}
 
-  async append(runId: string, item: TrackEntry, generation?: number): Promise<void> {
+  async append(runId: string, item: TrackEntry, generation: number): Promise<void> {
     // Create the row + lane on first sight; on conflict append to the lane. jsonb_set under the row lock makes
     // concurrent appends for the same run safe.
     //
@@ -41,15 +41,17 @@ export class PgRecordingStore implements RecordingStore {
            true
          ),
          updated_at = now()
-       WHERE $4::int IS NULL OR everdict_recordings.generation <= $4::int`,
-      [runId, item.track, JSON.stringify(item.entry), generation ?? null],
+       WHERE everdict_recordings.generation = $4::int`,
+      [runId, item.track, JSON.stringify(item.entry), generation],
     );
   }
 
-  async seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined> {
+  async seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined> {
+    // …and the seal is this attempt's to make: refusing a stale producer's appends while letting it freeze
+    // the buffer would fence the writing and not the publishing.
     const { rows } = await this.client.query<{ tracks: unknown }>(
-      "SELECT tracks FROM everdict_recordings WHERE run_id = $1",
-      [runId],
+      "SELECT tracks FROM everdict_recordings WHERE run_id = $1 AND generation = $2",
+      [runId, generation],
     );
     const row = rows[0];
     if (!row) return undefined; // nothing was recorded for this run → no ref to attach

@@ -66,6 +66,9 @@ export interface ScorecardServiceDeps {
   // nested model documents seal no digest, which a verifier reads as "never pinned", never as agreement.
   models?: Pick<ModelRegistry, "get">;
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
+  // "this process now records attempt N for this execution id" (mig 0173). The composition hands it to the
+  // CaseRecorder, which stamps it on every append, so the store can refuse a producer from another attempt.
+  onAttempt?: (executionId: string, generation: number) => void;
   // The receipts constitutional declarations leave (arch-review 23 P1). Submit REFUSES a dataset whose
   // graders declare ground_truth without one — see the check in ScorecardService.submit for why an absent
   // receipt is not a legacy allowance.
@@ -253,6 +256,7 @@ export type ScorecardBatchDeps = Pick<
   // evidence + export
   | "trajectories"
   | "recordingStore"
+  | "onAttempt"
   | "artifacts"
   | "exportResults"
   | "exportStreamFor"

@@ -1152,7 +1152,8 @@ async function main(): Promise<void> {
           return { stop: () => rec.stop() };
         },
         ...(recordingStore
-          ? { sealRecording: (runId: string) => recordingStore.seal(runId, { envKind: "browser" }) }
+          ? // A browser session records once — its own attempt is 0, said out loud rather than left absent.
+            { sealRecording: (runId: string) => recordingStore.seal(runId, { envKind: "browser" }, 0) }
           : {}),
       })
     : undefined;

@@ -24,7 +24,7 @@ describe("CaseRecorder", () => {
     await recorder.recordFrame("evd-run-1", "AAAA");
 
     // Then the frame is offloaded (bytes in the artifact store) and appended with an object ref
-    await recordings.seal("evd-run-1", { envKind: "browser" });
+    await recordings.seal("evd-run-1", { envKind: "browser" }, 0);
     const rec = await recordings.get("evd-run-1");
     expect(rec?.tracks.frames).toHaveLength(1);
     expect(rec?.tracks.frames?.[0]?.ref).toMatch(/^memory:\/\/artifacts\/recordings\/evd-run-1\//);
@@ -43,7 +43,7 @@ describe("CaseRecorder", () => {
     await recorder.recordFrame("evd-run-1", "CHANGED");
 
     // Then all four frames are recorded (the timeline is complete) but only TWO objects were uploaded
-    await recordings.seal("evd-run-1", { envKind: "browser" });
+    await recordings.seal("evd-run-1", { envKind: "browser" }, 0);
     const frames = (await recordings.get("evd-run-1"))?.tracks.frames ?? [];
     expect(frames).toHaveLength(4);
     expect(new Set(frames.map((f) => f.ref)).size).toBe(2); // the 3 identical frames share one ref
@@ -59,7 +59,7 @@ describe("CaseRecorder", () => {
     await recorder.recordLog("evd-run-1", "Completed");
 
     // Then they land on the logs track in order
-    await recordings.seal("evd-run-1", { envKind: "repo" });
+    await recordings.seal("evd-run-1", { envKind: "repo" }, 0);
     const logs = (await recordings.get("evd-run-1"))?.tracks.logs ?? [];
     expect(logs.map((l) => l.text)).toEqual(["Started", "Completed"]);
   });
@@ -74,7 +74,7 @@ describe("CaseRecorder", () => {
     await recorder.recordLog("evd-run-1", "Started");
 
     // Then the log is recorded and the frame is skipped
-    await recordings.seal("evd-run-1", { envKind: "repo" });
+    await recordings.seal("evd-run-1", { envKind: "repo" }, 0);
     const rec = await recordings.get("evd-run-1");
     expect(rec?.tracks.logs?.map((l) => l.text)).toEqual(["Started"]);
     expect(rec?.tracks.frames).toBeUndefined();
@@ -90,7 +90,7 @@ describe("CaseRecorder", () => {
     await recorder.recordTrack("evd-run-1", { track: "console", entry: { t: 6, level: "error", text: "boom" } });
 
     // Then each lands on its own lane, appended as-is (no offload)
-    await recordings.seal("evd-run-1", { envKind: "browser" });
+    await recordings.seal("evd-run-1", { envKind: "browser" }, 0);
     const rec = await recordings.get("evd-run-1");
     expect(rec?.tracks.network?.[0]?.url).toBe("https://x");
     expect(rec?.tracks.console?.[0]?.text).toBe("boom");
@@ -115,7 +115,7 @@ describe("CaseRecorder", () => {
     // When a frame is reported, recordFrame resolves (best-effort) without throwing
     await expect(recorder.recordFrame("evd-run-1", "AAAA")).resolves.toBeUndefined();
     // And nothing was appended (the offload failed before the append)
-    await recordings.seal("evd-run-1", { envKind: "browser" });
+    await recordings.seal("evd-run-1", { envKind: "browser" }, 0);
     expect(await recordings.get("evd-run-1")).toBeUndefined();
   });
 });

@@ -29,7 +29,7 @@ describe("foldEnvDeltas — in-run env deltas → recording custom lane", () => 
       ],
     } as unknown as CaseResult;
 
-    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result);
+    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result, 0);
 
     expect(appended).toHaveLength(2);
     expect(appended[0]).toMatchObject({
@@ -53,7 +53,7 @@ describe("foldEnvDeltas — in-run env deltas → recording custom lane", () => 
       scores: [],
     } as unknown as CaseResult;
 
-    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result);
+    await foldEnvDeltas(capturingStore(appended), "evd-run-1", result, 0);
 
     expect(appended).toHaveLength(0);
   });

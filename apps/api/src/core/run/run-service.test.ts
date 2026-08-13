@@ -62,7 +62,7 @@ describe("RunService", () => {
     // Given a recording store with a frame teed under the run's derived runId (evd-run-<id>)
     const store = new InMemoryRunStore();
     const recordingStore = new InMemoryRecordingStore();
-    await recordingStore.append("evd-run-rec1", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+    await recordingStore.append("evd-run-rec1", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec1", recordingStore });
 
     // When the run finalizes
@@ -97,7 +97,7 @@ describe("RunService", () => {
     // Given a run whose recording was teed + sealed under its derived runId (evd-run-<id>)
     const store = new InMemoryRunStore();
     const recordingStore = new InMemoryRecordingStore();
-    await recordingStore.append("evd-run-rec3", { track: "frames", entry: { t: 1, ref: "memory://f" } });
+    await recordingStore.append("evd-run-rec3", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec3", recordingStore });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
@@ -116,7 +116,7 @@ describe("RunService", () => {
     const hang: Dispatcher = { dispatch: () => new Promise(() => undefined) };
     const svc = new RunService({ dispatcher: hang, store, newId: () => "rec-live", recordingStore });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
-    await recordingStore.append("evd-run-rec-live", { track: "frames", entry: { t: 1000, ref: "memory://f" } });
+    await recordingStore.append("evd-run-rec-live", { track: "frames", entry: { t: 1000, ref: "memory://f" } }, 0);
 
     // When the player asks mid-run, the unsealed tail scrubs with provisional metadata
     const out = await svc.recording(rec.id);
@@ -1168,9 +1168,9 @@ describe("RunService — display reads re-mint artifact refs", () => {
       track: "frames" as const,
       entry: { t, ref: "http://minio:9000/bucket/recordings/a.png" },
     });
-    await recordings.append("evd-run-r2", frame(1));
-    await recordings.append("evd-run-r2", frame(2));
-    await recordings.seal("evd-run-r2", { envKind: "browser" });
+    await recordings.append("evd-run-r2", frame(1), 0);
+    await recordings.append("evd-run-r2", frame(2), 0);
+    await recordings.seal("evd-run-r2", { envKind: "browser" }, 0);
     const mint = vi.spyOn(artifacts, "publicUrlFor");
     const svc = new RunService({ dispatcher: okDispatcher, store, recordingStore: recordings, artifacts, newId: ids });
 

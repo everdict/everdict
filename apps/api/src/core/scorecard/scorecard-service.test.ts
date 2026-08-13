@@ -2300,11 +2300,21 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     const store = new InMemoryScorecardStore();
     const runStore = new InMemoryRunStore();
     const recordingStore = new InMemoryRecordingStore();
-    // A frame teed under the child's derived runId (evd-<scorecardId>-<caseId>) while the case ran.
-    await recordingStore.append("evd-sc-0-c1", { track: "frames", entry: { t: 1, ref: "memory://f" } });
     let n = 0;
     const service = new ScorecardService({
-      dispatcher: okDispatch,
+      // The frame is teed DURING the case, which is when a runner reports one — and after the dispatch has
+      // opened this case's attempt, which clears whatever an earlier attempt of the same execution id left.
+      // Seeding it beforehand would be recording a case that had not started (arch-review 37).
+      dispatcher: {
+        async dispatch(job) {
+          await recordingStore.append(
+            job.runId ?? "",
+            { track: "frames", entry: { t: 1, ref: "memory://f" } },
+            0, // a first attempt owns generation 0, said explicitly
+          );
+          return okDispatch.dispatch(job);
+        },
+      },
       store,
       runStore,
       recordingStore,

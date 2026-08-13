@@ -70,26 +70,29 @@ export function refuseUnsafeCallback(raw: string, allowPrivateHosts: boolean): U
   return url;
 }
 
-// …AND WHERE THE NAME ACTUALLY GOES (arch-review 36 P1, security). The literal check reads the hostname the
-// tenant wrote, and a hostname is not a destination: `https://hook.attacker.example/` resolves to whatever
-// its owner's DNS says, including `169.254.169.254`. So the name is resolved and the ADDRESSES are judged.
+// …AND WHERE THE NAME ACTUALLY GOES (arch-review 36/37 P1, security). The literal check reads the hostname
+// the tenant wrote, and a hostname is not a destination: `https://hook.attacker.example/` resolves to
+// whatever its owner's DNS says, including `169.254.169.254`. So the name is resolved and the ADDRESSES are
+// judged before anything is dialled.
 //
-// The resolved address is then PINNED into the request, which closes the rebinding window between the check
-// and the connection — a name that answered publicly once and privately a moment later would otherwise be a
-// check that proved nothing. The Host header carries the original name so TLS and the receiver's routing
-// still see what the tenant configured.
-export async function resolvePublicTarget(
-  url: URL,
-  lookup: (host: string) => Promise<string[]>,
-): Promise<{ url: URL; host: string }> {
+// WHAT THIS DELIBERATELY DOES NOT DO ANY MORE: put the resolved IP into the URL. That version looked like
+// pinning and was a broken request — TLS verifies the certificate against the host in the URL, and the HTTP
+// `Host` header is sent AFTER the handshake, so it cannot stand in for SNI. Every ordinary callback
+// (a certificate for `hooks.example.com`, dialled as `https://93.184.216.34/`) would have failed
+// verification or gone out without SNI. A security control that breaks the feature it protects is not a
+// control; it is an outage with a rationale.
+//
+// So the URL keeps its name and the residual is stated instead of papered over: between this check and the
+// connection, the name could answer differently (DNS rebinding). Closing THAT needs the connection itself to
+// use the verified address — a custom dispatcher/agent whose lookup returns only addresses this check
+// approved, with the TLS servername left as the hostname — which is a transport-layer change and belongs
+// with the outbound-proxy work rather than inside a consumer.
+export async function assertPublicTarget(url: URL, lookup: (host: string) => Promise<string[]>): Promise<URL> {
   const addresses = await lookup(url.hostname);
   if (addresses.length === 0) throw new Error(`run webhook ${url.href} resolves to nothing`);
   const offender = addresses.find((address) => isPrivateAddress(address));
   if (offender) throw new Error(`run webhook ${url.href} resolves to a private address (${offender})`);
-  const pinned = new URL(url.href);
-  const first = addresses[0] ?? url.hostname;
-  pinned.hostname = first.includes(":") ? `[${first}]` : first;
-  return { url: pinned, host: url.host };
+  return url;
 }
 
 // The terminal facts a standalone run emits. A batch's children emit none (`terminalRunFacts` returns [] for
@@ -112,16 +115,13 @@ export function runWebhookConsumer(deps: RunWebhookDeps): PlatformEventConsumer 
       const checked = refuseUnsafeCallback(record.webhookUrl, deps.allowPrivateHosts === true);
       // …and the name is resolved before it is dialled, unless this deployment says its network is its own.
       const target =
-        deps.allowPrivateHosts === true || !deps.lookup
-          ? { url: checked, host: checked.host }
-          : await resolvePublicTarget(checked, deps.lookup);
+        deps.allowPrivateHosts === true || !deps.lookup ? checked : await assertPublicTarget(checked, deps.lookup);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetchImpl(target.url, {
+        const res = await fetchImpl(target, {
           method: "POST",
-          // The pinned address is what we connect to; the Host header is what the receiver was told to be.
-          headers: { "content-type": "application/json", "x-everdict-event": event.id, host: target.host },
+          headers: { "content-type": "application/json", "x-everdict-event": event.id },
           // The record MINUS the callback: the receiver already knows the URL it gave us, and echoing a
           // credential-shaped value into a request body is how it ends up in somebody's access log.
           body: JSON.stringify({ ...record, webhookUrl: undefined }),

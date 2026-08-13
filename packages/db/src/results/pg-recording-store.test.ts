@@ -25,7 +25,7 @@ describe("PgRecordingStore", () => {
 
     // When a frame is appended
     const item: TrackEntry = { track: "frames", entry: { t: 1000, ref: "s3://f" } };
-    await store.append("evd-run-1", item);
+    await store.append("evd-run-1", item, 0);
 
     // Then it INSERTs with an ON CONFLICT jsonb append, carrying [runId, track, entry-json, generation]
     expect(calls[0]?.text).toContain("INSERT INTO everdict_recordings");
@@ -33,8 +33,8 @@ describe("PgRecordingStore", () => {
     expect(calls[0]?.text).toContain("jsonb_set");
     // …and the attempt this producer serves (mig 0173). NULL = a producer nobody has told, which is every
     // first attempt; a recorder still stamping an earlier attempt's number writes nothing.
-    expect(calls[0]?.text).toContain("everdict_recordings.generation <= $4");
-    expect(calls[0]?.params).toEqual(["evd-run-1", "frames", JSON.stringify({ t: 1000, ref: "s3://f" }), null]);
+    expect(calls[0]?.text).toContain("everdict_recordings.generation = $4");
+    expect(calls[0]?.params).toEqual(["evd-run-1", "frames", JSON.stringify({ t: 1000, ref: "s3://f" }), 0]);
   });
 
   it("seal derives t0 + effectiveFidelity from the accumulated tracks and freezes them", async () => {
@@ -49,7 +49,7 @@ describe("PgRecordingStore", () => {
     const store = new PgRecordingStore(client);
 
     // When sealed
-    const ref = await store.seal("evd-run-1", { envKind: "browser" });
+    const ref = await store.seal("evd-run-1", { envKind: "browser" }, 0);
 
     // Then it UPDATEs with t0=earliest(1000) + effectiveFidelity="frames" and returns a pg ref
     expect(ref?.ref).toBe("pg://recording/evd-run-1");
@@ -61,7 +61,7 @@ describe("PgRecordingStore", () => {
     // Given no row for the run
     const { client } = fakeClient(() => ({ rows: [] }));
     const store = new PgRecordingStore(client);
-    expect(await store.seal("evd-run-x", { envKind: "repo" })).toBeUndefined();
+    expect(await store.seal("evd-run-x", { envKind: "repo" }, 0)).toBeUndefined();
   });
 
   it("get maps a sealed row to a validated CaseRecording", async () => {

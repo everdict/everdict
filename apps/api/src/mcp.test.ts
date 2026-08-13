@@ -494,7 +494,7 @@ describe("MCP — deep track push (report_case_track)", () => {
       arguments: { runId: "evd-run-42", item: { track: "network", entry: { t: 1, method: "GET", url: "https://x" } } },
     });
     expect(res.isError).toBeFalsy();
-    await recordings.seal("evd-run-42", { envKind: "browser" });
+    await recordings.seal("evd-run-42", { envKind: "browser" }, 0);
     expect((await recordings.get("evd-run-42"))?.tracks.network?.[0]?.url).toBe("https://x");
   });
 

@@ -12,11 +12,16 @@ export interface RecordingSeal {
 // nothing was recorded for the run (no ref to attach). In-memory (dev/test) or Postgres + object-store (production),
 // swapped behind this interface. docs/architecture/replay.md D4.
 export interface RecordingStore {
-  // `generation` is the ATTEMPT this producer is serving (mig 0173). An append carrying an older one than the
-  // row's is DROPPED: a reset removes history, and only this revokes a producer that has not noticed it was
-  // replaced. Absent = a producer nobody has told, which is every single-attempt run and reads as 0.
-  append(runId: string, item: TrackEntry, generation?: number): Promise<void>;
-  seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined>;
+  // `generation` is the ATTEMPT this producer is serving (mig 0173) — REQUIRED, and the first attempt says 0
+  // rather than saying nothing (arch-review 37 P0). It was optional for one review, and optional is how the
+  // fence became decorative: the store let a missing generation through, and the producer that actually
+  // matters — the FIRST attempt's recorder, the one that pauses and comes back — had never been told a
+  // number, so it sent none and was waved past. A guarantee with a hole shaped like its most common caller
+  // is not a guarantee. An append whose generation is not the row's current one is DROPPED.
+  append(runId: string, item: TrackEntry, generation: number): Promise<void>;
+  // …and the SEAL proves it too: refusing a stale producer's appends while letting it freeze the buffer
+  // would fence the writing and not the publishing.
+  seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined>;
   // A NEW ATTEMPT OPENS A NEW RECORDING (arch-review 33 P1). A re-driven run keeps its live-correlation id —
   // observers derive `evd-run-<id>` from the record with no lookup, which is what makes live observation work
   // — so both attempts append into one buffer, and the winner would otherwise seal a replay containing an

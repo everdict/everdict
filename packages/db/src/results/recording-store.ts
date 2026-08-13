@@ -12,18 +12,19 @@ export class InMemoryRecordingStore implements RecordingStore {
     { tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number }
   >();
 
-  async append(runId: string, item: TrackEntry, generation?: number): Promise<void> {
+  async append(runId: string, item: TrackEntry, generation: number): Promise<void> {
     const rec = this.recordings.get(runId) ?? { tracks: {}, generation: 0 };
-    // A producer from an earlier attempt is not writing this recording (mig 0173) — the reset raised the
-    // number and it is still sending the one it started with.
-    if (generation !== undefined && generation < rec.generation) return;
+    // EXACTLY the attempt this row is on (mig 0173). Not "at least": a producer holding a number from either
+    // side of the current attempt is not writing this recording.
+    if (generation !== rec.generation) return;
     appendEntry(rec.tracks, item);
     this.recordings.set(runId, rec);
   }
 
-  async seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined> {
+  async seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined> {
     const rec = this.recordings.get(runId);
     if (!rec) return undefined; // nothing was recorded for this run → no ref to attach
+    if (generation !== rec.generation) return undefined; // not this attempt's recording to freeze
     rec.sealed = {
       t0: earliestT(rec.tracks),
       envKind: meta.envKind,
