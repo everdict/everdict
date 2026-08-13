@@ -3,6 +3,7 @@ import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
+import { tombstoneInterrupted } from "./tombstone.js";
 
 // Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
 // (the single-process assumption, same as inFlight supersede / in-process rendezvous). So when the process restarts, the
@@ -62,6 +63,9 @@ export interface RecoveryDeps {
   // orphan — exactly the previous behavior.
   replicas?: ReplicaRegistry;
   now?: () => string;
+  // Fact identity for the tombstones this sweep writes (a terminal row that told nobody is how a completion
+  // callback goes missing — see `tombstoneInterrupted`). Absent in stores-only wiring/tests.
+  newId?: () => string;
 }
 
 export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
@@ -75,6 +79,8 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   live: number;
 }> {
   const now = deps.now ?? (() => new Date().toISOString());
+  // The clock + fact identity the tombstones write under (see `tombstoneInterrupted`).
+  const clock = { now, newId: deps.newId ?? (() => `evt-${Math.random().toString(36).slice(2)}`) };
   let scorecardCount = 0;
   let resumedCount = 0;
   let runCount = 0;
@@ -156,13 +162,10 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // …under the settle CAS (arch-review 26 P1). A booting replica reclaiming a dead one's work reads a
       // snapshot; a late drain, a self-hosted runner reporting in, or the dying process's own last write can
       // land between that read and this one. Marking such a child INTERRUPTED would erase a real outcome.
-      const settled = await settleRun(
-        deps.runs,
-        child.id,
-        { status: "failed", error: INTERRUPTED, updatedAt: now() },
-        undefined,
-        { epoch: child.ownerEpoch ?? 0 },
-      );
+      // Through the DOMAIN transition, so the tombstone emits the terminal fact a normal failure emits
+      // (arch-review 34 P1) — a row nobody was told about is how a completion callback goes missing for
+      // exactly the runs a recovery is cleaning up.
+      const settled = await tombstoneInterrupted(deps.runs, child, clock, { epoch: child.ownerEpoch ?? 0 });
       if (settled) runCount += 1;
     }
   }
@@ -217,15 +220,9 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         runsResumed += 1;
         continue;
       }
-      const settled = await settleRun(
-        deps.runs,
-        r.id,
-        { status: "failed", error: INTERRUPTED, updatedAt: now() },
-        undefined,
-        // Under the epoch this recovery claimed — a replica displaced by a later takeover must not tombstone
-        // the open run its successor is now driving.
-        { epoch: runAuthority.epoch },
-      );
+      // …and the same transition here, under the epoch this recovery claimed: a replica displaced by a later
+      // takeover must not tombstone the open run its successor is now driving.
+      const settled = await tombstoneInterrupted(deps.runs, r, clock, { epoch: runAuthority.epoch });
       if (settled) runCount += 1;
     }
   }

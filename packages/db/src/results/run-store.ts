@@ -22,7 +22,7 @@ import type {
   RunStore,
   RunUpdateGuard,
 } from "@everdict/application-control";
-import { ConflictError } from "@everdict/contracts";
+import { ConflictError, TERMINAL_SCORECARD_STATUSES } from "@everdict/contracts";
 
 // Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
 // offset unset/0 = from the newest; limit unset = to the end.
@@ -50,7 +50,9 @@ export class InMemoryRunStore implements RunStore {
   // would break every unrelated test into attaching a stub that always says yes, which is a fence that
   // certifies nothing. The boundary this invariant protects is the Postgres one.
   attachScorecards(owner: {
-    peek(id: string): { scoringPass?: { passId?: string; status?: string } | null; ownerEpoch?: number } | undefined;
+    peek(
+      id: string,
+    ): { scoringPass?: { passId?: string; status?: string } | null; ownerEpoch?: number; status?: string } | undefined;
   }): void {
     // A TERMINAL pass is not an owner (arch-review 17 P0-3) — the Pg fence adds `status = 'running'` to the
     // same EXISTS, so the twin resolves an owner only while the marker is live. Answering the passId of a
@@ -61,16 +63,27 @@ export class InMemoryRunStore implements RunStore {
     };
     // …and the parent's fencing token, which the child's own epoch cannot stand in for.
     this.parentDriverEpoch = (scorecardId) => owner.peek(scorecardId)?.ownerEpoch ?? 0;
+    // …and whether that parent still ADMITS work: a cancel settles it terminal without touching the epoch,
+    // so an epoch-only condition would let a proved loop open a case for a batch the user stopped.
+    this.parentStatus = (scorecardId) => owner.peek(scorecardId)?.status;
+  }
+
+  // The dispatch intent's whole question: mine, and still open.
+  private parentAdmitsWork(parent: { scorecardId: string; epoch: number }): boolean {
+    if (this.parentDriverEpoch?.(parent.scorecardId) !== parent.epoch) return false;
+    const status = this.parentStatus?.(parent.scorecardId);
+    return status === undefined || !TERMINAL_SCORECARD_STATUSES.includes(status as never);
   }
 
   private scoringPassOwner?: (scorecardId: string) => string | undefined;
   private parentDriverEpoch?: (scorecardId: string) => number | undefined;
+  private parentStatus?: (scorecardId: string) => string | undefined;
 
   async create(record: RunRecord, events?: OutboxEvent[], guard?: RunCreateGuard): Promise<void> {
     // The dispatch intent's condition, on the same terms as the update fence: with the scorecard pair wired,
     // a parent epoch that moved refuses the insert; unpaired, this store is not part of a batch topology.
     const parent = guard?.parentDriver;
-    if (this.parentDriverEpoch && parent && this.parentDriverEpoch(parent.scorecardId) !== parent.epoch)
+    if (this.parentDriverEpoch && parent && !this.parentAdmitsWork(parent))
       throw new ConflictError(
         "CONFLICT",
         { scorecard: parent.scorecardId, run: record.id },

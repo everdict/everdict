@@ -645,3 +645,92 @@ describeTrust("TRUST-153 — a run's callback survives the process that started 
     ).rejects.toThrow(/503/);
   }, 20_000);
 });
+
+// Trust suite (docs/trust-certification.md) — TRUST-154.
+//
+// A TERMINAL ROW IS NOT A TERMINAL FACT, AND A CALLBACK IS NOT A PUBLIC FIELD.
+//
+// The durable callback hangs off the run's terminal fact, which made two silences suddenly matter. Recovery
+// wrote its outcomes as raw patches carrying no facts — an adopted result settled `succeeded`, an unresumable
+// run settled `failed`, and neither told anybody. So the callback fired for runs that ended normally and
+// stayed silent for exactly the runs it was built for: the ones whose original process died.
+//
+// The second half is what durability cost. A webhook URL is routinely the credential itself
+// (`…/hook/<secret>`), and it had been added to the record every workspace member can read through
+// `GET /runs/:id`, the list, and the MCP tools that hand an agent the whole record. Storing it and serving it
+// are two decisions and only the first was needed.
+describeTrust("TRUST-154 — a recovered run's ending is announced, and its callback is not published", () => {
+  it("an adopted recovery emits the terminal fact the callback rides on", async () => {
+    const { RunService } = await import("@everdict/application-control");
+    const store = new InMemoryRunStore();
+    const pushed: Array<{ kind: string }> = [];
+    const service = new RunService({
+      store,
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return result(job.evalCase.id);
+        },
+      },
+      events: {
+        pushPersisted: (facts: Array<{ record: { kind: string } }>) => pushed.push(...facts.map((f) => f.record)),
+      },
+      newId: () => `evt-${pushed.length + 1}`,
+    } as never);
+
+    await store.create({
+      id: "run-adopted",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      status: "running",
+      webhookUrl: "https://hook.example/cb",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z",
+    } as never);
+
+    const record = await store.get("run-adopted");
+    const outcome = await service.resume(record as never, result("c1"));
+    expect(outcome.kind).toBe("resumed");
+    expect((await store.get("run-adopted"))?.status).toBe("succeeded");
+    // Pre-fix `adopt` returned `facts: []`, so the run ended and the world was never told — and the callback,
+    // which is delivered off exactly this fact, never fired for the one case it exists for.
+    expect(pushed.map((f) => f.kind)).toContain("run.completed");
+  }, 20_000);
+
+  it("the callback is stored but never served — it is a delivery target, not a run property", async () => {
+    const { RunService } = await import("@everdict/application-control");
+    const store = new InMemoryRunStore();
+    const service = new RunService({
+      store,
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return result(job.evalCase.id);
+        },
+      },
+    } as never);
+    const submitted = await service.submit({
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      case: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      webhookUrl: "https://hook.example/cb-with-secret",
+    } as never);
+
+    // Stored, because the callback must outlive the process that took the request…
+    expect((await store.get(submitted.id))?.webhookUrl).toBe("https://hook.example/cb-with-secret");
+    // …and absent from what a reader gets, because the URL is frequently the credential.
+    expect((await service.get(submitted.id))?.webhookUrl).toBeUndefined();
+    expect((await service.list("acme")).every((r) => r.webhookUrl === undefined)).toBe(true);
+  }, 20_000);
+
+  it("a callback pointing inside our own network is refused rather than dialled", async () => {
+    const { refuseUnsafeCallback } = await import("@everdict/application-control");
+    // The control plane sits in a network the submitter does not: this is SSRF in its plainest form.
+    expect(() => refuseUnsafeCallback("http://169.254.169.254/latest/meta-data/", false)).toThrow();
+    expect(() => refuseUnsafeCallback("https://169.254.169.254/latest/meta-data/", false)).toThrow(/private/);
+    expect(() => refuseUnsafeCallback("https://localhost:8080/hook", false)).toThrow(/private/);
+    expect(() => refuseUnsafeCallback("https://10.0.0.5/hook", false)).toThrow(/private/);
+    expect(refuseUnsafeCallback("https://hooks.example.com/cb", false).hostname).toBe("hooks.example.com");
+    // …and a single-tenant install that genuinely posts inside its own network can say so.
+    expect(refuseUnsafeCallback("https://localhost:8080/hook", true).hostname).toBe("localhost");
+  }, 20_000);
+});

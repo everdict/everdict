@@ -26,6 +26,38 @@ export interface RunWebhookDeps {
   runs: RunStore;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number; // per-POST budget (default 10s)
+  // Escape hatch for a deployment that genuinely posts to a host inside its own network (a single-tenant
+  // install, a dev loop). Off by default, because the default deployment is multi-tenant and the URL comes
+  // from whoever submitted the run.
+  allowPrivateHosts?: boolean;
+}
+
+// ── A TENANT-SUPPLIED URL IS A REQUEST THIS SERVER MAKES ─────────────────────────────────────────────
+//
+// The control plane sits inside a network the submitter does not: cluster APIs, metadata services, the
+// database. A callback URL is the one place a tenant can name a destination and have US dial it, which is
+// server-side request forgery in its plainest form — `http://169.254.169.254/…` is not a webhook, it is a
+// credential read. So the scheme is HTTPS and the host is public, and a URL that is neither is refused
+// LOUDLY (a thrown delivery the runner dead-letters) rather than dropped, because a callback that silently
+// never happens is the failure mode this whole feature was built to remove.
+const PRIVATE_HOST = /^(localhost|.*\.local|.*\.internal)$/i;
+const PRIVATE_IPV4 =
+  /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
+
+export function refuseUnsafeCallback(raw: string, allowPrivateHosts: boolean): URL {
+  const url = new URL(raw);
+  if (url.protocol !== "https:") throw new Error(`run webhook ${raw} is not https`);
+  if (allowPrivateHosts) return url;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const unsafe =
+    PRIVATE_HOST.test(host) ||
+    PRIVATE_IPV4.test(host) ||
+    host === "::1" ||
+    host.startsWith("fc") ||
+    host.startsWith("fd") ||
+    host.startsWith("fe80");
+  if (unsafe) throw new Error(`run webhook ${raw} points at a private address`);
+  return url;
 }
 
 // The terminal facts a standalone run emits. A batch's children emit none (`terminalRunFacts` returns [] for
@@ -43,13 +75,19 @@ export function runWebhookConsumer(deps: RunWebhookDeps): PlatformEventConsumer 
       const record = await deps.runs.get(event.subject.id);
       // No URL is the ordinary case — almost every run is submitted without one.
       if (!record?.webhookUrl) return;
+      // …to a destination this server is willing to dial (see above). `redirect: "error"` closes the same
+      // door one hop later: a public URL that 302s to the metadata service is the same request.
+      const target = refuseUnsafeCallback(record.webhookUrl, deps.allowPrivateHosts === true);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetchImpl(record.webhookUrl, {
+        const res = await fetchImpl(target, {
           method: "POST",
           headers: { "content-type": "application/json", "x-everdict-event": event.id },
-          body: JSON.stringify(record),
+          // The record MINUS the callback: the receiver already knows the URL it gave us, and echoing a
+          // credential-shaped value into a request body is how it ends up in somebody's access log.
+          body: JSON.stringify({ ...record, webhookUrl: undefined }),
+          redirect: "error",
           signal: controller.signal,
         });
         // A non-2xx is a FAILED delivery, so the runner retries and eventually dead-letters it. Swallowing it

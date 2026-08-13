@@ -1,9 +1,9 @@
+import { randomUUID } from "node:crypto";
 import {
-  INTERRUPTED,
   type ReplicaRegistry,
   type ResumeResult,
   recoverInterrupted,
-  settleRun,
+  tombstoneInterrupted,
 } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
@@ -296,14 +296,18 @@ export async function runStartupRecovery(deps: {
           .resume(r, adopted, authority)
           .catch((): ResumeResult => ({ kind: "unresumable" }));
         if (outcome.kind !== "unresumable") return; // resumed, or already settled by whoever finished it
-        // …and the tombstone is fenced by the epoch this recovery HOLDS, not merely by the row being open —
-        // "open" is exactly what makes it a successor's to finish (arch-review 32 P0).
-        await settleRun(
+        // …and the tombstone goes through the domain transition, so it emits the terminal FACT a normal
+        // failure emits (arch-review 34 P1) — the run's completion callback hangs off that fact, and a
+        // recovery that settled a row silently left the caller waiting on exactly the run this leg exists
+        // for. Fenced by the epoch this recovery HOLDS, not merely by the row being open: "open" is what
+        // makes it a successor's to finish (arch-review 32 P0).
+        await tombstoneInterrupted(
           store,
-          r.id,
-          { status: "failed", error: INTERRUPTED, updatedAt: new Date().toISOString() },
-          undefined,
-          { epoch: authority.epoch },
+          r,
+          { now: () => new Date().toISOString(), newId: () => randomUUID() },
+          {
+            epoch: authority.epoch,
+          },
         ).catch((err) => {
           console.warn(
             `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,

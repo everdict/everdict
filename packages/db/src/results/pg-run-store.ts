@@ -8,7 +8,13 @@ import type {
   RunUpdateGuard,
 } from "@everdict/application-control";
 import { ConflictError } from "@everdict/contracts";
-import { CANCELLED_ERROR_CODE, type RunRecord, RunRecordSchema, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
+import {
+  CANCELLED_ERROR_CODE,
+  type RunRecord,
+  RunRecordSchema,
+  TERMINAL_RUN_STATUSES,
+  TERMINAL_SCORECARD_STATUSES,
+} from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
@@ -158,9 +164,15 @@ export class PgRunStore implements RunStore {
     // same cross-row condition the child's later writes carry, asked at the moment the batch commits to
     // spending compute. A displaced driver inserts nothing, and a case with no child row is never dispatched.
     const parentSql = guard
-      ? ` SELECT ${base.map((_, n) => `$${n + 1}`).join(", ")} WHERE EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${base.length + 1} AND s.owner_epoch = $${base.length + 2})`
+      ? ` SELECT ${base.map((_, n) => `$${n + 1}`).join(", ")} WHERE EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${base.length + 1} AND s.owner_epoch = $${base.length + 2} AND s.status <> ALL($${base.length + 3}::text[]))`
       : undefined;
-    const parentParams = guard ? [guard.parentDriver.scorecardId, guard.parentDriver.epoch] : [];
+    // "IS IT STILL MINE" IS NOT "MAY I STILL SPEND" (arch-review 34 P1). A user's cancel settles the parent
+    // terminal and does NOT raise its epoch — cancelling is not a takeover — so an epoch-only condition let a
+    // loop that had already proved itself open a case for a batch the user had stopped. The dispatch intent
+    // asks both halves, in one statement: this batch is mine, and it is still one that admits work.
+    const parentParams = guard
+      ? [guard.parentDriver.scorecardId, guard.parentDriver.epoch, [...TERMINAL_SCORECARD_STATUSES]]
+      : [];
     if (events && events.length > 0) {
       // One statement, two writes (E0): the run insert and its facts commit or roll back together.
       const ev = eventValuesClause(events, base.length + parentParams.length + 1);

@@ -87,6 +87,13 @@ import { embedHarnessSpec, pinHarnessSpecToClosure } from "./scorecard-plan.js";
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
 
+// A case whose execution is done and whose child row is deliberately still open until its judges land.
+interface PendingChildSettle {
+  childId?: string;
+  ranOn?: string;
+  parentDriver: { scorecardId: string; epoch: number };
+}
+
 export class ScorecardBatchService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -262,6 +269,32 @@ export class ScorecardBatchService {
             //
             // So when the CAS loses, the persisted truth decides — re-read the child and follow it.
             if (adoptable) {
+              // WHAT A BACKEND HANDS BACK IS A RECOVERED EXECUTION, NOT FINISHED EVIDENCE (arch-review 34 P0).
+              //
+              // The in-process loop stopped terminalizing a child before its judges landed, and this branch —
+              // the one that runs precisely when a control plane died mid-batch — went on adopting the raw
+              // result straight into `succeeded` and seeding it. A seeded case is never re-dispatched and
+              // never re-judged, so a batch recovered from a crash could complete with a case that met no
+              // judge its own manifest names: no score, and no `unmeasured` row accounting for the absence.
+              // The rule "terminal + result = finished evidence" was true again on one path and false on the
+              // other, which is how it was wrong the first time.
+              //
+              // So the judges run here too, over the SAME sealed closure the batch was submitted under, and
+              // the child settles with what they produced. Re-judging costs a provider call; seeding
+              // unjudged evidence costs a verdict.
+              if (orch.judges.length > 0)
+                await this.scoring
+                  .applyJudges(
+                    rec.tenant,
+                    dataset,
+                    [adoptable],
+                    orch.judges,
+                    rec.runtime,
+                    rec.createdBy,
+                    () => c.id,
+                    plan.sealedJudges,
+                  )
+                  .catch(() => {});
               // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
               // this call remembered its fence is not the property being kept — being unable to forget it is.
               // The scan walked past this one for a wrapper's worth of reason (`Run.from(c).adopt(…)` opens
@@ -271,7 +304,11 @@ export class ScorecardBatchService {
                 c.id,
                 Run.from(c).adopt(adoptable, this.now()).patch,
                 undefined,
-                { epoch: c.ownerEpoch ?? 0 },
+                // …AND the parent's driver, which is the authority this preprocessing acts under
+                // (arch-review 34 P0). The variable existed and was never passed, so the defect it was
+                // introduced to close stayed open: `resume` touches children BEFORE `track` proves anything,
+                // and a child's own epoch does not move when the BATCH is taken over.
+                { epoch: c.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
               );
               if (claimed !== undefined) {
                 adopted += 1;
@@ -304,9 +341,9 @@ export class ScorecardBatchService {
                 this.now(),
               ).patch,
               undefined,
-              // …under the child's own epoch: a child somebody claimed since this list read is not this
-              // recovery's to tombstone, even though the row is still open.
-              { epoch: c.ownerEpoch ?? 0 },
+              // …under the child's own epoch AND the parent's driver: one refuses a child somebody claimed
+              // directly, the other refuses a recovery that has lost the batch it is recovering.
+              { epoch: c.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
             );
             if (interrupted === undefined) {
               // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
@@ -1301,30 +1338,31 @@ export class ScorecardBatchService {
     return held !== undefined;
   }
 
-  // Cases whose execution finished and whose child is deliberately still OPEN until its judges land. Keyed
-  // by (caseId, trial) like every other per-case map here, because a trialled case has one child per trial.
-  private readonly pendingChildSettle = new Map<
-    string,
-    { childId?: string; ranOn?: string; parentDriver: { scorecardId: string; epoch: number } }
-  >();
-
   // The child's ONE terminal write, carrying the result as it now stands — execution plus whatever the judges
   // attached to it (a failed judge leaves its `unmeasured` row, which is evidence too). Idempotent: the entry
   // is consumed, so a second call after a retried stream does nothing.
-  private async settleJudgedChild(result: CaseResult): Promise<void> {
+  //
+  // THE PENDING MAP IS THE BATCH'S, NOT THE SERVICE'S (arch-review 34 P0). It was an instance field keyed by
+  // `caseId#trial` — no tenant, no scorecard — and one `ScorecardService` drives every batch in the process.
+  // Two batches with a case of the same name (`c1`, which is what half the datasets in the world call their
+  // first case) overwrote each other's entry: one child settled with the OTHER batch's result, under the
+  // OTHER batch's parent fence, and the second settle found nothing pending and never settled at all. Across
+  // workspaces, that is one tenant's evidence written onto another tenant's row. The state is per-batch
+  // because the thing it describes is: it now lives in the `track` call that owns those cases.
+  private async settleJudgedChild(pending: Map<string, PendingChildSettle>, result: CaseResult): Promise<void> {
     const key = childKey(result.caseId, result.trial);
-    const pending = this.pendingChildSettle.get(key);
-    if (!pending) return;
-    this.pendingChildSettle.delete(key);
-    if (!pending.childId || !this.deps.runStore) return;
+    const entry = pending.get(key);
+    if (!entry) return;
+    pending.delete(key);
+    if (!entry.childId || !this.deps.runStore) return;
     await this.settleChild(
-      pending.childId,
+      entry.childId,
       (cur) => ({
         ...Run.from(cur).succeed(result, this.now()).patch,
         // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        ...(pending.ranOn ? { runtime: pending.ranOn } : {}),
+        ...(entry.ranOn ? { runtime: entry.ranOn } : {}),
       }),
-      pending.parentDriver,
+      entry.parentDriver,
     ).catch(() => {});
   }
 
@@ -1485,6 +1523,9 @@ export class ScorecardBatchService {
     //
     // Absent = a submit rather than a recovery: this process created the record, so the epoch it was created
     // with IS the one it holds.
+    // Cases whose execution finished and whose child is deliberately still OPEN until its judges land —
+    // keyed by (caseId, trial), which is unique WITHIN a batch and nowhere else (arch-review 34 P0).
+    const pendingChildSettle = new Map<string, PendingChildSettle>();
     const epoch = opts.authority?.epoch ?? opening.ownerEpoch ?? 0;
     const fenced = { expectOwnerEpoch: epoch };
     const epochOpt = { epoch };
@@ -1676,7 +1717,7 @@ export class ScorecardBatchService {
         // The Temporal driver already had it right (it awaits `applyJudges` before settling), so the same
         // recovery rule was reading two different meanings depending on which driver a deployment used. The
         // settle is now deferred to `onResult`, after the judges land — see `settleJudgedChild`.
-        this.pendingChildSettle.set(childKey(result.caseId, result.trial), {
+        pendingChildSettle.set(childKey(result.caseId, result.trial), {
           childId: child?.id,
           ...(ranOn ? { ranOn } : {}),
           parentDriver: { scorecardId: id, epoch },
@@ -1818,35 +1859,50 @@ export class ScorecardBatchService {
         ...(trials > 1 ? { trials } : {}), // fan each case into N trials (pass@k / flakiness)
         signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
-          const v = caseVerdict(r, opts.verdictPolicy);
-          const reason = caseReason(r);
-          const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
-          pushStep(
-            "case",
-            v === false ? "failed" : "ok",
-            `${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
-            r.caseId,
-          );
-          void flushSteps();
-          // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
-          void this.deps.events?.emit({
-            workspace: tenant,
-            kind: "scorecard.case.completed",
-            subject: { type: "scorecard", id },
-            recipient: owner,
-            payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
-            message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
-          });
+          // A CASE IS "COMPLETED" WHEN ITS VERDICT IS FINAL, NOT WHEN ITS HARNESS RETURNS (arch-review 34 P1).
+          //
+          // The step and the fact used to be written here, carrying a verdict computed from the execution
+          // scores alone — and then the judges ran, and `judge:<id>` is pass-deciding under the default
+          // ladder. A watching agent (this fact's whole purpose: reacting MID-batch) could be told PASS about
+          // a case the scorecard then records as FAIL. When the settle moved behind the judges, this stayed
+          // where it was, so the code's own new invariant and its vocabulary disagreed.
+          //
+          // Both now happen where the child settles: after the judges, from the result they wrote into.
+          const announce = (): void => {
+            const v = caseVerdict(r, opts.verdictPolicy);
+            const reason = caseReason(r);
+            const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
+            pushStep(
+              "case",
+              v === false ? "failed" : "ok",
+              `${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+              r.caseId,
+            );
+            void flushSteps();
+            // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
+            void this.deps.events?.emit({
+              workspace: tenant,
+              kind: "scorecard.case.completed",
+              subject: { type: "scorecard", id },
+              recipient: owner,
+              payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
+              message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+            });
+          };
           // A reclaimed batch fires no judges, so its child settles now with what it has — the alternative is
           // a row left running forever because the thing that was going to settle it was cancelled.
-          if (controller.signal.aborted) childSettles.push(this.settleJudgedChild(r));
+          if (controller.signal.aborted) {
+            childSettles.push(this.settleJudgedChild(pendingChildSettle, r));
+            announce();
+          }
           // After supersede, skip firing judges too (don't spend more LLM cost on a reclaimed batch).
           if (!controller.signal.aborted) {
             const judged = judgeStream.push(r);
             // …and the child settles HERE, once its judges have landed — terminal means finalized (P0 above).
             // `then(x, x)`: a judge that failed still produced its `unmeasured` row, and a child left running
             // by a rejected stream would be a zombie nothing settles.
-            const settleJudged = (): Promise<void> => this.settleJudgedChild(r);
+            const settleJudged = (): Promise<void> =>
+              this.settleJudgedChild(pendingChildSettle, r).finally(() => announce());
             childSettles.push(judged.then(settleJudged, settleJudged));
             // Case-completion chaining: export the case only 'after' its judge score is attached — skip new fires after abort
             // (already-fired exports complete naturally; the supersede path joins them and records a partial outcome).

@@ -294,6 +294,14 @@ export type ResumeResult =
 
 const UNRESUMABLE: ResumeResult = { kind: "unresumable" };
 
+// The record as a reader may see it: everything the run is, minus where to call back. See the note in
+// `RunService` for why this is a read-boundary rule rather than a per-transport one.
+function withoutCallback<T extends { webhookUrl?: string }>(record: T): T {
+  if (record.webhookUrl === undefined) return record;
+  const { webhookUrl: _dropped, ...rest } = record;
+  return rest as T;
+}
+
 export class RunService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -372,7 +380,9 @@ export class RunService {
   async get(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    return this.withLiveTrace(withAttachChannels(await this.withTrajectoryUsage(await this.withVerdict(record))));
+    return this.withLiveTrace(
+      withAttachChannels(await this.withTrajectoryUsage(await this.withVerdict(withoutCallback(record)))),
+    );
   }
 
   // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step). Identical to
@@ -736,9 +746,19 @@ export class RunService {
     });
     if (adopted) {
       if (!run.canAdopt()) return settledElsewhere(); // already settled — never rewrite a terminal record
-      const claimed = await settleRun(this.deps.store, record.id, run.adopt(adopted, this.now()).patch, undefined, {
-        epoch,
-      });
+      // …with its FACTS (arch-review 34 P1). An adopted settle used to persist the row and nothing else, so
+      // the run's completion callback — which now hangs off that fact — never fired for exactly the runs the
+      // durable callback exists for: the ones whose original process died.
+      const adoption = run.adopt(adopted, this.now());
+      const stampedAdoption = this.stampFacts(record.tenant, adoption.facts);
+      const claimed = await settleRun(
+        this.deps.store,
+        record.id,
+        adoption.patch,
+        stampedAdoption.map((f) => f.record),
+        { epoch },
+      );
+      if (claimed !== undefined && stampedAdoption.length > 0) void this.deps.events?.pushPersisted?.(stampedAdoption);
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
       return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
     }
@@ -782,6 +802,18 @@ export class RunService {
   // runnerId → runs a self-hosted runner executed (runner-detail activity feed), offset-paginated by limit (newest first).
   // `viewer` (the member asking) drops another member's personal executions in the QUERY — a transport always
   // passes it; an internal sweep leaves it unset.
+  // ── A DELIVERY TARGET IS NOT A RUN PROPERTY ANYONE MAY READ (arch-review 34 P1, security) ───────────
+  //
+  // The completion callback had to become durable — a URL that lives only in the submit request belongs to
+  // one process, which is the defect the durable intent fixed. What it must NOT become is part of the run
+  // every workspace member can read: a webhook URL is routinely the credential itself
+  // (`…/hook/<secret>`, `…?token=<secret>`), and the served RunRecord goes to `GET /runs/:id`, to the list,
+  // and to the MCP tools that hand an agent the whole record. Storing it and serving it are two decisions,
+  // and only the first one was needed.
+  //
+  // Stripped at the read boundary rather than at each transport, because "every caller remembers to remove
+  // it" is the shape of rule this codebase has already watched fail several times. The consumer that
+  // actually delivers reads the STORE, not this.
   async list(
     tenant?: string,
     opts?: {
@@ -795,7 +827,7 @@ export class RunService {
   ): Promise<RunRecord[]> {
     // Verdicts attach here for the same reason as get(): the policy that judged a child is its parent's,
     // which the store cannot know. Batched — one parent-policy resolution per distinct scorecard in the page.
-    return this.withVerdicts(await this.deps.store.list(tenant, opts));
+    return this.withVerdicts((await this.deps.store.list(tenant, opts)).map(withoutCallback));
   }
 
   // THE EPOCH THIS PROCESS IS DRIVING UNDER (arch-review 31 P1, mig 0170). Captured when the dispatch starts

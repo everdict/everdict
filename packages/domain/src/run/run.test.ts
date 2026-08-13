@@ -80,8 +80,15 @@ describe("Run — the run lifecycle domain model", () => {
     // Creation: standalone announces run.submitted; a child does not.
     expect(Run.creationFacts(queued({ submittedBy: "alice" }))[0]?.kind).toBe("run.submitted");
     expect(Run.creationFacts({ ...queued(), parentScorecardId: "sc-1" })).toEqual([]);
-    // Adoption settles without a fact (the old path bypassed onComplete — preserved).
-    expect(Run.from(queued({ submittedBy: "alice" })).adopt(RESULT, "t1").facts).toEqual([]);
+    // Adoption announces the SAME terminal fact a normal settle does (arch-review 34 P1). It used to emit
+    // none — behaviour-preserving until the run's completion callback started hanging off that fact, and then
+    // it meant a run adopted by a REPLACEMENT control plane ended without telling anybody: silence for
+    // exactly the runs the durable callback was built for.
+    const adoptFact = Run.from(queued({ submittedBy: "alice" })).adopt(RESULT, "t1").facts[0];
+    expect(adoptFact?.kind).toBe("run.completed");
+    expect(adoptFact?.actor).toBe("alice");
+    // …and a CHILD still announces nothing: a scorecard's case is the scorecard's news, not its own.
+    expect(Run.from({ ...queued(), parentScorecardId: "sc-1" }).adopt(RESULT, "t1").facts).toEqual([]);
   });
 
   it("start flips a queued run to running (compute began) and is refused once terminal", () => {

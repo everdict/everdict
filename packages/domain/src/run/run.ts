@@ -634,9 +634,15 @@ export class Run {
         { run: this.record.id, status: this.record.status },
         `run is already terminal (${this.record.status}) — adopt rejected`,
       );
-    // Behavior-preserving: an adopted settle emitted no fact on the old path (resume bypassed onComplete) —
-    // widening that is an E2 coverage decision.
-    return { patch: { status: "succeeded", result, updatedAt: now }, facts: [] };
+    // …AND IT EMITS THE SAME TERMINAL FACT A NORMAL SETTLE DOES (arch-review 34 P1). It used to emit none,
+    // which was behaviour-preserving right up until the run's completion callback started hanging off that
+    // fact: a control plane that died and whose replacement ADOPTED the finished backend job settled the run
+    // `succeeded` and told nobody — the exact situation the durable callback was built for. A run that ends
+    // is news whichever process was there to see it end.
+    return {
+      patch: { status: "succeeded", result, updatedAt: now },
+      facts: terminalRunFacts(this.record, "succeeded"),
+    };
   }
 
   // Boot-recovery re-drive: back onto the queue's running path before re-dispatch.
