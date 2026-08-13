@@ -136,9 +136,10 @@ export interface NomadTopologyOptions {
   storeConfigs?: Record<string, EffectiveStoreConfig>;
 }
 
-// The default host.docker.internal target — the Docker-CLI `--add-host … :host-gateway` magic keyword. Overridable per
+// The Docker-CLI `--add-host … :host-gateway` magic keyword. NOT a default any more (a keyword is not an
+// address — see where it is consulted); named so every renderer can recognise and refuse it. Overridable per
 // runtime (NomadTopologyOptions.hostGatewayAddr / K8sTopologyOptions.hostGatewayAddr) where the keyword isn't honored.
-export const DEFAULT_HOST_GATEWAY = "host-gateway";
+export const HOST_GATEWAY_KEYWORD = "host-gateway";
 
 // Connect group service (sidecar + upstream). A standalone building block for the live Consul-Connect enforcement
 // proof (scripts/live/connect-enforce-nomad.mjs). NOT wired by buildNomadTopologyJob anymore: co-located services
@@ -461,9 +462,16 @@ function serviceConfig(
   if (svc.volumes && svc.volumes.length > 0) config.volumes = svc.volumes;
   // host.docker.internal → the docker host gateway (Docker 20.10+), so a service that calls a host-local model gateway
   // (LiteLLM etc.) reaches it — parity with the Docker/DockerDriver paths. Both topology group builders start from this;
-  // the co-located builder appends peer loopback aliases on top. Configurable (gap 5): a Nomad docker driver that does
-  // not translate the `host-gateway` magic keyword takes the concrete gateway IP via opts.hostGatewayAddr.
-  config.extra_hosts = [`host.docker.internal:${opts.hostGatewayAddr ?? DEFAULT_HOST_GATEWAY}`];
+  // the co-located builder appends peer loopback aliases on top.
+  //
+  // A KEYWORD IS NOT AN ADDRESS. `host-gateway` is Compose/Docker-CLI magic, and Nomad's docker driver
+  // validates the right-hand side as an IP: the alias does not degrade, the TASK is rejected, and because it
+  // is rendered onto every task in the group the whole topology dies as a driver failure rather than a config
+  // error. The override was configurable and the DEFAULT was still dialect, so every non-Compose target
+  // inherits the rejection — the K8s builder had already reached the right judgement one layer down and
+  // simply drops the alias when the value is that keyword. Same rule here: an address or nothing.
+  const gateway = opts.hostGatewayAddr;
+  if (gateway && gateway !== HOST_GATEWAY_KEYWORD) config.extra_hosts = [`host.docker.internal:${gateway}`];
   return config;
 }
 

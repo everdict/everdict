@@ -188,6 +188,12 @@ export const WorkspaceSettingsSchema = z.object({
         // Base URL for ROOT-RELATIVE artifact refs inside pulled traces (evidence slots) — without it the judge
         // receives the raw path string instead of the resolved bytes/text. Pull-only detail.
         artifactBaseUrl: z.string().url().optional(),
+        // The tag key `correlate:"tag"` searches — default `everdict.run_id`. A HarnessSpec's inline source
+        // has always been able to name a controlled coordinate (`mlflow.trace.session`, paired with
+        // frontDoor.contextId); this row could not, and per-harness SELECTION wins over the inline spec — so
+        // choosing a registered source silently downgraded correlation to the tag the agent can overwrite,
+        // and the pull found nothing. A record that re-describes a spec has to be able to say what it says.
+        correlateTag: z.string().min(1).optional(),
       }),
     )
     .optional(),

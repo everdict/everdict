@@ -36,6 +36,7 @@ export * from "./harness/judge-diff.js";
 export * from "./harness/model-spec.js";
 export * from "./harness/agent-spec.js";
 export * from "./infra/runtime-spec.js";
+export * from "./infra/spec-transport.js";
 export * from "./execution/git-auth.js";
 export * from "./execution/shell.js";
 export * from "./records/index.js";

@@ -5,6 +5,9 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
   type TraceSourceConfig,
+  k8sTopologyTransport,
+  nomadTopologyTransport,
+  traceSourceTransport,
 } from "@everdict/contracts";
 import type { TrustZonePolicy } from "@everdict/domain";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
@@ -66,35 +69,26 @@ export function buildTopologyEnvironment(
     spec.kind === "nomad"
       ? new NomadTopologyRuntime({
           addr: spec.addr,
-          ...(spec.namespace ? { namespace: spec.namespace } : {}),
-          ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
-          // host.docker.internal → a concrete IP. Live-found gap: the knob existed on the runtime but nothing
-          // threaded it from a REGISTERED runtime, so a Nomad whose docker driver builds /etc/hosts itself
-          // (bridge networking rejects the `host-gateway` keyword) failed every topology alloc.
-          ...(spec.hostGatewayAddr ? { hostGatewayAddr: spec.hostGatewayAddr } : {}),
+          // TRANSPORTED, not transcribed (downstream report 2.1). This literal listed fields by hand and had
+          // silently stopped at three of them: no `datacenters` meant Nomad's own `["dc1"]` default and a
+          // cluster named anything else had no eligible node, ever. The receiving options are all optional,
+          // so nothing objected. `nomadTopologyTransport` is the named total transfer, and its conformance
+          // test fails the day a spec grows a field this boundary does not forward.
+          ...nomadTopologyTransport(spec),
           ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         })
       : new K8sTopologyRuntime({
           ...(spec.context ? { context: spec.context } : {}),
-          ...(spec.namespace ? { namespacePrefix: spec.namespace } : {}),
-          ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
-          ...(spec.hostGatewayAddr ? { hostGatewayAddr: spec.hostGatewayAddr } : {}),
+          ...k8sTopologyTransport(spec),
           ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         });
   // Build the full fixed source from the runtime spec (G1: 5 kinds + auth/correlate/scope). authSecret → the verbatim
   // auth-header value from the tenant SecretStore; otel/mlflow read it from headers.authorization and the newer three
   // inherit it as `auth` (buildTraceSource), so the single headers.authorization mapping covers all five kinds.
+  // …and the same for the trace source, which had dropped `mapping` — the span overrides AND the judge's
+  // evidence slots, so a harness's judges graded on less evidence than its trace held.
   const tsAuth = ts.authSecret ? deps.secretEnv?.[ts.authSecret] : undefined;
-  const traceSource = buildTraceSource({
-    kind: ts.kind,
-    endpoint: ts.endpoint,
-    ...(tsAuth ? { headers: { authorization: tsAuth } } : {}),
-    ...(ts.correlate ? { correlate: ts.correlate } : {}),
-    ...(ts.correlateTag ? { correlateTag: ts.correlateTag } : {}), // controlled-coordinate tag search (pairs with frontDoor.contextId)
-    ...(ts.service ? { service: ts.service } : {}),
-    ...(ts.project ? { project: ts.project } : {}),
-    ...(ts.artifactBaseUrl ? { artifactBaseUrl: ts.artifactBaseUrl } : {}), // resolve root-relative evidence refs
-  });
+  const traceSource = buildTraceSource(traceSourceTransport(ts, tsAuth));
   // Resolve the harness's selected workspace source per-dispatch → build a full TraceSource (auth/correlate/scope).
   const resolve = deps.resolveTraceSource;
   const traceSourceFor = resolve

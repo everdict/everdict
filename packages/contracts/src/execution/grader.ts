@@ -31,6 +31,47 @@ const ScoreIdentitySchema = {
   detail: z.unknown().optional(),
 };
 
+// ── THE REASON, AS A READER GETS IT ──────────────────────────────────────────────────────────────────
+//
+// `detail` is `unknown` on purpose: a threshold grader writes a sentence, a model judge writes an object
+// (`{reasoning, evidence, failure_analysis}`), a code judge writes whatever its script returned. Every
+// consumer that wants one line therefore has to decide what an object looks like — and the one that did it
+// inline decided by narrowing to `string`, so every judge verdict left the building with no stated reason at
+// all. The export was a score with no explanation, and nothing said it had dropped one.
+//
+// One total rendering, next to the contract that made the field open, so a sink/report/UI never invents its
+// own. No I/O, no store, total over every input — the admission test for living here.
+export function renderScoreDetail(detail: unknown, maxLength = 4_000): string {
+  const text = detailText(detail);
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function detailText(detail: unknown): string {
+  if (detail === undefined || detail === null) return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "number" || typeof detail === "boolean") return String(detail);
+  if (Array.isArray(detail))
+    return detail
+      .map((entry) => detailText(entry))
+      .filter(Boolean)
+      .join("\n");
+  if (typeof detail === "object") {
+    // The readable fields a judge actually writes, in the order a reader wants them — the verdict's own
+    // words first, then what it based them on. Anything else falls through to JSON rather than vanishing.
+    const record = detail as Record<string, unknown>;
+    const named = ["reasoning", "reason", "explanation", "summary", "failure_analysis", "evidence", "comment"]
+      .filter((key) => record[key] !== undefined && record[key] !== "")
+      .map((key) => `${key}: ${detailText(record[key])}`);
+    if (named.length > 0) return named.join("\n");
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail); // circular or otherwise unserialisable — a shape is better than silence
+    }
+  }
+  return String(detail);
+}
+
 // A real measurement of the agent. `status` is OPTIONAL here (absent ⇒ measured) because that is what a
 // grader literally writes — `{graderId, metric, value, pass}` — and what every row persisted before the
 // field exists says. Read-time normalization stamps it explicitly, so anything that came off a wire or a

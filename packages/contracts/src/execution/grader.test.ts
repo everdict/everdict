@@ -7,6 +7,7 @@ import {
   isMeasured,
   measuredScores,
   normalizeScore,
+  renderScoreDetail,
   sanitizeScore,
 } from "./grader.js";
 
@@ -240,5 +241,37 @@ describe("sanitizeScore — the producer-side twin of the invalid branch", () =>
     });
     expect(out).toMatchObject({ status: "invalid", metric: "g" });
     expect("value" in out).toBe(false);
+  });
+});
+
+describe("renderScoreDetail — an open field still has to reach a reader", () => {
+  it("renders every shape a grader actually writes", () => {
+    // A threshold grader writes a sentence…
+    expect(renderScoreDetail("below 0.8")).toBe("below 0.8");
+    // …a model judge writes an object, which is what the narrowing consumer dropped entirely.
+    expect(renderScoreDetail({ reasoning: "the agent never opened the form", evidence: "step 4" })).toBe(
+      "reasoning: the agent never opened the form\nevidence: step 4",
+    );
+    // …a code judge writes whatever its script returned. A shape is better than silence.
+    expect(renderScoreDetail({ exitCode: 3 })).toBe('{"exitCode":3}');
+    expect(renderScoreDetail([{ reason: "a" }, { reason: "b" }])).toBe("reason: a\nreason: b");
+    // Absence is absence — the caller omits the field rather than exporting an empty comment.
+    expect(renderScoreDetail(undefined)).toBe("");
+    expect(renderScoreDetail(null)).toBe("");
+    expect(renderScoreDetail("")).toBe("");
+  });
+
+  it("is total — an unserialisable detail still renders something", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(renderScoreDetail(circular).length).toBeGreaterThan(0);
+    expect(renderScoreDetail(123)).toBe("123");
+    expect(renderScoreDetail(false)).toBe("false");
+  });
+
+  it("truncates rather than exporting an unbounded blob", () => {
+    const rendered = renderScoreDetail("x".repeat(9_000));
+    expect(rendered.length).toBe(4_000);
+    expect(rendered.endsWith("…")).toBe(true);
   });
 });

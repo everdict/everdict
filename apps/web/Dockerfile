@@ -15,6 +15,15 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && corepack enable
+# …AND THE RUNTIME TRUSTS IT TOO. `update-ca-certificates` fills the OS store, which apt and curl read and
+# Node does NOT — so an image built with a corporate CA still failed every outbound HTTPS call it made at
+# runtime, and a Python code judge failed the same way for the same reason. The operator-facing half of the
+# contract was accepted; this is the half that was left to be rediscovered per image.
+#
+# Harmless when CA_CERT is unset: each runtime ignores a path that does not exist.
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/corp-proxy.crt \
+    SSL_CERT_FILE=/usr/local/share/ca-certificates/corp-proxy.crt \
+    REQUESTS_CA_BUNDLE=/usr/local/share/ca-certificates/corp-proxy.crt
 WORKDIR /app
 
 # ---- dev: source is bind-mounted by compose, next dev hot reload ----

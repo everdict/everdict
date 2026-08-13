@@ -1,6 +1,6 @@
 import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardExport, TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/contracts";
-import { measuredScores } from "@everdict/contracts";
+import { measuredScores, renderScoreDetail } from "@everdict/contracts";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
@@ -102,7 +102,11 @@ export class TraceSinkService {
           name: sc.metric,
           value: sc.value,
           ...(sc.pass !== undefined ? { pass: sc.pass } : {}),
-          ...(typeof sc.detail === "string" && sc.detail !== "" ? { comment: sc.detail } : {}),
+          // The reason as a READER gets it, whatever shape the grader wrote (arch-review: downstream 1.3).
+          // Narrowing `detail` to `string` here dropped every judge verdict's explanation — they are objects
+          // — and exported a score with nothing saying why. `renderScoreDetail` lives next to the contract
+          // that made the field open, so no sink decides this for itself again.
+          ...(renderScoreDetail(sc.detail) !== "" ? { comment: renderScoreDetail(sc.detail) } : {}),
         })),
         ...(externalId ? { externalId } : {}),
       };

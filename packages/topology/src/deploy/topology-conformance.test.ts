@@ -154,9 +154,16 @@ describe("cross-runtime conformance — host.docker.internal gateway is configur
     return (dep?.spec as K8sPodSpec | undefined)?.template.spec.hostAliases;
   };
 
-  it("Nomad defaults host.docker.internal to the host-gateway keyword and takes a concrete IP override", () => {
-    expect(nomadExtraHosts({})).toContain("host.docker.internal:host-gateway");
+  it("NO builder renders the host-gateway KEYWORD — an address or no alias at all", () => {
+    // The keyword is Compose/Docker-CLI magic. Nomad's docker driver validates the right-hand side as an IP
+    // and rejects the TASK — every task in the group, as an unrecoverable driver failure rather than a config
+    // error — so a default of `host-gateway` handed that rejection to every non-Compose target by
+    // construction. The K8s builder had already reached this judgement; it is the shared rule now.
+    expect(nomadExtraHosts({}).some((h) => h.startsWith("host.docker.internal:"))).toBe(false);
+    expect(nomadExtraHosts({ hostGatewayAddr: "host-gateway" }).some((h) => h.includes("host-gateway"))).toBe(false);
     expect(nomadExtraHosts({ hostGatewayAddr: "172.17.0.1" })).toContain("host.docker.internal:172.17.0.1");
+    expect(k8sHostAliases({})).toBeUndefined();
+    expect(k8sHostAliases({ hostGatewayAddr: "host-gateway" })).toBeUndefined();
   });
 
   it("K8s adds no hostAlias by default (no docker host), and one when a concrete IP is configured", () => {

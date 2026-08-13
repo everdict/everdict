@@ -96,12 +96,12 @@ describe("buildNomadTopologyJob", () => {
     expect(agent?.Env.PG_URL).toBe("x");
   });
 
-  it("maps every service name → 127.0.0.1 via extra_hosts (peers reachable by <name>:<port> over loopback), after the host-gateway alias", () => {
+  it("maps every service name → 127.0.0.1 via extra_hosts (peers reachable by <name>:<port> over loopback)", () => {
     const job = buildNomadTopologyJob(SPEC);
     for (const task of job.Job.TaskGroups[0]?.Tasks ?? []) {
-      // host.docker.internal (host model gateway reachability) is prepended by serviceConfig, then the peer loopback aliases.
+      // No host.docker.internal alias without a configured ADDRESS: the Docker-CLI `host-gateway` keyword is
+      // rejected by Nomad's docker driver as a non-IP, and it took the whole group down with it.
       expect(task.Config.extra_hosts).toEqual([
-        "host.docker.internal:host-gateway",
         "agent-server:127.0.0.1",
         "browser-mcp:127.0.0.1",
         "action-stream:127.0.0.1",

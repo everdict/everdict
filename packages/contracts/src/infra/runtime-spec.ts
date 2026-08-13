@@ -51,6 +51,11 @@ const topologyConfig = {
   // networking rejects the keyword as "invalid IP address" — live-found: every topology deploy on such a cluster
   // fails at alloc) and on K8s (hostAliases takes IPs only). e.g. "172.17.0.1" (the docker0 gateway).
   hostGatewayAddr: z.string().optional(),
+  // Store isolation when there is NO trust zone (single-tenant / dev): true → deploy the topology's declared
+  // dependency stores as a dedicated silo, false → external (BYO, reached via the runtime's store env). The
+  // runtimes have taken this option since they were written and no REGISTERED runtime could express it, so a
+  // zone-less topology came up without the stores it declared and the harness failed at its first query.
+  provisionDependencies: z.boolean().optional(),
 };
 
 // Runtime-side placement binding (operator-owned; docs/architecture/heterogeneous-topology-placement.md).

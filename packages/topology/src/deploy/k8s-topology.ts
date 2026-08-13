@@ -18,7 +18,7 @@ import {
   storeArgs,
 } from "./dependencies.js";
 import { dependencyInjectEnv } from "./inject-env.js";
-import { interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
+import { HOST_GATEWAY_KEYWORD, interpolateServiceEnv, staticWiringEnv } from "./nomad-topology.js";
 import { k8sPeerHost } from "./peer-resolver.js";
 
 // ServiceResources → k8s container resources (requests=limits). cpu 1000 = 1 core (millicores), memoryMb → Mi. Includes only what is defined.
@@ -222,7 +222,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
               : {}),
             // host.docker.internal parity (gap 5) — opt-in: only when a concrete gateway IP is configured (the Docker
             // "host-gateway" keyword is not a valid K8s hostAliases IP, so it is skipped).
-            ...(opts.hostGatewayAddr && opts.hostGatewayAddr !== "host-gateway"
+            ...(opts.hostGatewayAddr && opts.hostGatewayAddr !== HOST_GATEWAY_KEYWORD
               ? { hostAliases: [{ ip: opts.hostGatewayAddr, hostnames: ["host.docker.internal"] }] }
               : {}),
             containers: [

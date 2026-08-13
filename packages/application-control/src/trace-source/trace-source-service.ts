@@ -11,6 +11,7 @@ import {
   type TraceProbeResult,
   type TraceSourceConfig,
   type WorkspaceSettings,
+  traceSourceTransport,
 } from "@everdict/contracts";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { traceAuthorizationCredential } from "./authorization-credential.js";
@@ -256,14 +257,12 @@ export class TraceSourceService {
         );
       auth = traceAuthorizationCredential(source.kind, value);
     }
+    // Transported, not transcribed (downstream report 2.1) — the same named transfer the runtime-spec lane
+    // uses, so this row and an inline spec cannot disagree about which fields a source has. `correlateTag`
+    // was the one this literal could not carry even after the row learned to hold it.
     return {
-      kind: source.kind,
-      endpoint: source.endpoint,
-      ...(auth ? { headers: { authorization: auth } } : {}),
+      ...traceSourceTransport(source, auth),
       correlate: source.correlate,
-      ...(source.service ? { service: source.service } : {}),
-      ...(source.project ? { project: source.project } : {}),
-      ...(source.artifactBaseUrl ? { artifactBaseUrl: source.artifactBaseUrl } : {}), // root-relative evidence refs
     };
   }
 

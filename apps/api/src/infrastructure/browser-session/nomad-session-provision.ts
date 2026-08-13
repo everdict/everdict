@@ -1,3 +1,4 @@
+import { nomadTopologyTransport } from "@everdict/contracts";
 import { BadRequestError, ServiceHarnessSpecSchema, UpstreamError } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE, NomadTopologyRuntime } from "@everdict/topology";
@@ -43,8 +44,11 @@ export function runtimeSessionProvision(): (
       // Control-plane↔cluster auth from the tenant's own secret store (spec.authSecret). This lane could not
       // carry one at all before, so a browser session on an ACL-enabled Nomad simply 403'd.
       ...(apiToken ? { apiToken } : {}),
-      ...(spec.namespace ? { namespace: spec.namespace } : {}),
-      ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
+      // …and the rest of what the runtime SAYS about itself, transported rather than transcribed (downstream
+      // report 2.1). This was the second hand-written literal for the same construction and it stopped two
+      // fields earlier than the first: a browser session on a cluster with named datacenters had no eligible
+      // node, which is the same defect the topology lane had, found separately.
+      ...nomadTopologyTransport(spec),
     });
     const handle = await runtime.provisionBrowserEnv(sessionSpec(), sessionId, zone);
     const cdpBase = await runtime.browserCdpBase(sessionId, zone).catch(() => undefined);

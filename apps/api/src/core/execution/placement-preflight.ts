@@ -31,12 +31,18 @@ export function buildPlacementPreflight(deps: {
     const required = requiredCapabilitiesForHarness(spec);
     if (required.length === 0) return; // non-topology harness — nothing to gate at submit
     if (runtimeSatisfies(runtime.capabilities, required)) return;
+    // A REFUSAL NAMES THE THING TO CHANGE. The message used to list the whole required set, so a runtime
+    // advertising `docker` + `topology` and lacking only `os-windows` was told it lacks BOTH — sending the
+    // operator to re-check a component that was fine. The payload keeps the full sets for the API surface;
+    // the sentence carries the difference, which is the part somebody has to act on.
+    const advertised = new Set(runtime.capabilities ?? []);
+    const missing = required.filter((capability) => !advertised.has(capability));
     throw new BadRequestError(
       "BAD_REQUEST",
-      { runtime: target, need: required, have: runtime.capabilities ?? [] },
-      `Runtime "${target}" can't run harness "${harness.id}" — it lacks required capabilities [${required.join(", ")}]${
+      { runtime: target, need: required, missing, have: runtime.capabilities ?? [] },
+      `Runtime "${target}" can't run harness "${harness.id}" — it lacks [${missing.join(", ")}]${
         runtime.capabilities
-          ? ` (it advertises [${runtime.capabilities.join(", ")}])`
+          ? ` (it advertises [${runtime.capabilities.join(", ")}]; the harness needs [${required.join(", ")}])`
           : " (label the runtime's capabilities, e.g. os-windows, to enable this gate)"
       }. Choose a runtime whose nodes provide them.`,
     );
