@@ -5,6 +5,7 @@ import {
   type RegistryAuth,
   type ServiceHarnessSpec,
   type TopologyService,
+  normalizeExecArtifact,
   resolvePlacementOs,
   serviceIsHostExec,
 } from "@everdict/contracts";
@@ -53,7 +54,15 @@ interface NomadTopoTask {
   // Rendered templates (peer address discovery for the per-service-group model — Nomad-native service catalog → env).
   Templates?: NomadTemplate[];
   // Pre-start artifact fetch (host-exec services) — e.g. a zip/exe the raw_exec command runs from the task dir.
-  Artifacts?: Array<{ GetterSource: string }>;
+  // GetterOptions carries the CHECKSUM (Nomad verifies it and refuses a mismatch) and GetterHeaders the auth a
+  // private artifact repository needs — the two properties an image ref has and a URL did not.
+  Artifacts?: Array<{
+    GetterSource: string;
+    GetterOptions?: Record<string, string>;
+    GetterHeaders?: Record<string, string>;
+  }>;
+  // Prestart lifecycle — a node-preparation step that must finish before the service task starts (see exec.provision).
+  Lifecycle?: { Hook: "prestart"; Sidecar: boolean };
 }
 // Nomad template stanza — renders the service catalog into an env file so a service reaches its peers by address
 // (the Nomad-native, no-Consul analog of K8s Service DNS). ChangeMode "restart" re-resolves on a peer reschedule.
@@ -556,6 +565,14 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
     const template: NomadTemplate | undefined = body
       ? { EmbeddedTmpl: body, DestPath: "local/peers.env", Envvars: true, ChangeMode: "restart" }
       : undefined;
+    const artifact = normalizeExecArtifact(svc.exec?.artifact);
+    // Header values are literals by the time a spec reaches a runtime (a `{secretRef}` is resolved before
+    // dispatch, like every other env value); an unresolved one is dropped rather than sent as "[object Object]".
+    const artifactHeaders = artifact?.headers
+      ? Object.fromEntries(
+          Object.entries(artifact.headers).filter((e): e is [string, string] => typeof e[1] === "string"),
+        )
+      : undefined;
     const task: NomadTopoTask = {
       Name: svc.name,
       Driver: hostExec ? "raw_exec" : "docker",
@@ -565,8 +582,19 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
       Env: { ...staticEnv, ...opts.storeEnv, ...dependencyInjectEnv(spec, opts.storeValues ?? {}, svc.name) },
       Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
       ...(template ? { Templates: [template] } : {}),
-      // Pre-start artifact fetch (host-exec) — a zip/exe the raw_exec command runs from the task dir.
-      ...(hostExec && svc.exec?.artifact ? { Artifacts: [{ GetterSource: svc.exec.artifact }] } : {}),
+      // Pre-start artifact fetch (host-exec) — a zip/exe the raw_exec command runs from the task dir, pinned by
+      // checksum and authenticated by header when the spec says so.
+      ...(hostExec && artifact
+        ? {
+            Artifacts: [
+              {
+                GetterSource: artifact.source,
+                ...(artifact.checksum ? { GetterOptions: { checksum: artifact.checksum } } : {}),
+                ...(artifactHeaders ? { GetterHeaders: artifactHeaders } : {}),
+              },
+            ],
+          }
+        : {}),
     };
     // Windows/macOS groups can't use the Linux bridge netns — omit Mode (host networking) there.
     // A host-exec process has no port mapping at all: it binds its DECLARED port directly on the node, so that port
@@ -578,6 +606,25 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
           ? { DynamicPorts: [], ReservedPorts: [{ Label: label, Value: svc.port }] }
           : { ...(kernel === "linux" ? { Mode: "bridge" } : {}), DynamicPorts: [{ Label: label, To: svc.port }] }
         : undefined;
+    // ── A NODE IS PREPARED FOR THIS VERSION, NOT ASSUMED TO BE ────────────────────────────────────
+    //
+    // A host-exec program runs on whatever the node happens to have, and nothing maintained "this node has
+    // what this program needs" — the assumption lived out of band, which is why a correctly PLACED raw_exec
+    // task dies with "the file does not exist". A declared `provision` becomes a prestart task in this
+    // service's own group: it must finish before the service starts, and its KEY rides in the env so that
+    // changing it changes the rendered job — which is what makes Nomad run it again rather than reuse a node
+    // prepared for the previous version.
+    const provision = hostExec ? svc.exec?.provision : undefined;
+    const provisionTask: NomadTopoTask | undefined = provision
+      ? {
+          Name: `${svc.name}-provision`,
+          Driver: "raw_exec",
+          Config: { command: provision.command[0] ?? "", args: provision.command.slice(1) },
+          Env: { EVERDICT_PROVISION_KEY: provisionKey(provision, artifact) },
+          Resources: { CPU: 500, MemoryMB: 512 },
+          Lifecycle: { Hook: "prestart", Sidecar: false },
+        }
+      : undefined;
     return {
       Name: perServiceGroupName(svc.name),
       Count: svc.replicas,
@@ -586,9 +633,20 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
       ...(svc.port !== undefined
         ? { Services: [{ Name: nomadServiceName(spec, svc.name, opts.zoneId), PortLabel: label, Provider: "nomad" }] }
         : {}),
-      Tasks: [task],
+      Tasks: provisionTask ? [provisionTask, task] : [task],
     };
   });
+}
+
+// The identity of a node preparation. An explicit `key` is the author's own versioning; without one it is
+// derived from the inputs, which is the honest default — the same command fetching the same bytes prepares the
+// same node, and nothing needs to re-run.
+function provisionKey(
+  provision: { command: string[]; key?: string },
+  artifact: { source: string; checksum?: string } | undefined,
+): string {
+  if (provision.key) return provision.key;
+  return JSON.stringify({ command: provision.command, source: artifact?.source, checksum: artifact?.checksum });
 }
 
 // --- per-case browser (target env II): a fresh headful/headless Chromium + CDP. ---

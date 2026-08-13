@@ -1,5 +1,5 @@
 import { BadRequestError } from "@everdict/contracts";
-import { CommandHarnessSpecSchema, ServiceHarnessSpecSchema } from "@everdict/contracts";
+import { CommandHarnessSpecSchema, type HarnessSpec, ServiceHarnessSpecSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { flattenEnv, harnessAuthEnv, referencesUserSecret, resolveHarnessSecrets } from "./harness-secrets.js";
 
@@ -157,5 +157,54 @@ describe("harnessAuthEnv", () => {
 
   it("is empty when neither tier carries an auth var (the container will run loginless and fail honestly)", () => {
     expect(harnessAuthEnv({ workspace: { OTHER: "x" } })).toEqual({});
+  });
+});
+
+// ── A FETCHED PROGRAM'S AUTH IS A SECRET LIKE ANY OTHER (downstream report 3.3) ──────────────────────
+describe("resolveHarnessSecrets — a host-exec artifact's headers", () => {
+  const hostSpec = (artifact: unknown): HarnessSpec =>
+    ({
+      kind: "service",
+      id: "native",
+      version: "1.0.0",
+      services: [
+        {
+          name: "win-ui",
+          port: 9515,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          requires: { os: "windows" },
+          exec: { kind: "host", command: ["driver.exe"], artifact },
+        },
+      ],
+      dependencies: [],
+      frontDoor: { service: "win-ui", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://x" },
+    }) as HarnessSpec;
+
+  it("resolves a {secretRef} header, so no token is ever written into the registry", () => {
+    const resolved = resolveHarnessSecrets(
+      hostSpec({ source: "https://dl.corp/ui.zip", headers: { authorization: { secretRef: "ARTIFACT_TOKEN" } } }),
+      { workspace: { ARTIFACT_TOKEN: "Bearer real" } },
+    );
+    const artifact = resolved.kind === "service" ? resolved.services[0]?.exec?.artifact : undefined;
+    expect(artifact).toEqual({ source: "https://dl.corp/ui.zip", headers: { authorization: "Bearer real" } });
+  });
+
+  it("refuses when the secret is not registered — the fetch would otherwise go out unauthenticated", () => {
+    expect(() =>
+      resolveHarnessSecrets(
+        hostSpec({ source: "https://dl.corp/ui.zip", headers: { authorization: { secretRef: "ARTIFACT_TOKEN" } } }),
+        { workspace: {} },
+      ),
+    ).toThrow(/ARTIFACT_TOKEN/);
+  });
+
+  it("leaves the bare-string form untouched", () => {
+    const resolved = resolveHarnessSecrets(hostSpec("https://dl.corp/ui.zip"), { workspace: {} });
+    const artifact = resolved.kind === "service" ? resolved.services[0]?.exec?.artifact : undefined;
+    expect(artifact).toBe("https://dl.corp/ui.zip");
   });
 });

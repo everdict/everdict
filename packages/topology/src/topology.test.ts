@@ -2519,6 +2519,69 @@ describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
   it("K8s declines a host-exec service fail-fast (containers only — no silent imageless Deployment)", () => {
     expect(() => buildK8sManifests(HOST_SPEC)).toThrow(/cannot run on K8s/);
   });
+
+  // ── A FETCHED PROGRAM IS PINNED AND AUTHENTICATED, LIKE AN IMAGE (downstream report 3.3) ─────────
+  const pinned = (over: Record<string, unknown>): ServiceHarnessSpec => ({
+    ...HOST_SPEC,
+    services: HOST_SPEC.services.map((s) =>
+      s.name === "win-ui" ? { ...s, exec: { ...s.exec, kind: "host" as const, ...over } } : s,
+    ),
+  });
+  const winUiTasks = (spec: ServiceHarnessSpec) =>
+    buildNomadTopologyJob(spec).Job.TaskGroups.find((g) => g.Name.includes(servicePortLabel("win-ui")))?.Tasks ?? [];
+
+  it("carries the checksum and the auth headers, so a harness version cannot resolve to different bytes", () => {
+    const tasks = winUiTasks(
+      pinned({
+        artifact: {
+          source: "https://dl.example.com/ui-driver.zip",
+          checksum: "sha256:abc123",
+          headers: { authorization: "Bearer resolved-token" },
+        },
+      }),
+    );
+    expect(tasks[0]?.Artifacts).toEqual([
+      {
+        GetterSource: "https://dl.example.com/ui-driver.zip",
+        GetterOptions: { checksum: "sha256:abc123" },
+        GetterHeaders: { authorization: "Bearer resolved-token" },
+      },
+    ]);
+  });
+
+  it("keeps the bare-string form working — the widening is a union, not a replacement", () => {
+    expect(winUiTasks(HOST_SPEC)[0]?.Artifacts).toEqual([{ GetterSource: "https://dl.example.com/ui-driver.zip" }]);
+  });
+
+  it("readies the node before the service starts, and a CHANGED key re-renders the job so it runs again", () => {
+    const withProvision = (key?: string) =>
+      pinned({
+        artifact: "https://dl.example.com/ui-driver.zip",
+        provision: { command: ["powershell", "-File", "C:/provision/ui-driver.ps1"], ...(key ? { key } : {}) },
+      });
+    const tasks = winUiTasks(withProvision("v3"));
+    // The prestart task comes FIRST and is not a sidecar: the service must not start on an unprepared node,
+    // which is how a correctly placed raw_exec task ends up dying with "the file does not exist".
+    expect(tasks[0]?.Name).toBe("win-ui-provision");
+    expect(tasks[0]?.Lifecycle).toEqual({ Hook: "prestart", Sidecar: false });
+    expect(tasks[0]?.Config.command).toBe("powershell");
+    expect(tasks[0]?.Env.EVERDICT_PROVISION_KEY).toBe("v3");
+    expect(tasks[1]?.Name).toBe("win-ui");
+
+    // A changed key changes the rendered job, which is what makes Nomad prepare the node again rather than
+    // reuse one readied for the previous version.
+    expect(winUiTasks(withProvision("v4"))[0]?.Env.EVERDICT_PROVISION_KEY).toBe("v4");
+    // …and with no key declared it is derived from the inputs: same command + same bytes, same key.
+    const derived = winUiTasks(withProvision())[0]?.Env.EVERDICT_PROVISION_KEY;
+    expect(derived).toBe(winUiTasks(withProvision())[0]?.Env.EVERDICT_PROVISION_KEY);
+    expect(derived).toContain("ui-driver.ps1");
+  });
+
+  it("renders no provision task for a containerized service — its image IS the prepared node", () => {
+    const job = buildNomadTopologyJob(HOST_SPEC);
+    const agent = job.Job.TaskGroups.find((g) => g.Name.includes("agent"));
+    expect(agent?.Tasks.every((task) => task.Lifecycle === undefined)).toBe(true);
+  });
 });
 
 // Topology observability — the backend exposes the runtime's structured health roster + service log tail,

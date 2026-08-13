@@ -39,6 +39,38 @@ export const EnvValueSchema = z.union([
 ]);
 export type EnvValue = z.infer<typeof EnvValueSchema>;
 
+// ── A PROGRAM FETCHED BY URL IS PINNED AND AUTHENTICATED, LIKE AN IMAGE ──────────────────────────────
+//
+// `:latest` is banned for an image because reproducibility means identifying the BYTES. A host-exec service
+// fetches its program over a URL, where the same argument holds exactly: without a checksum "the same harness
+// version" can run different bytes tomorrow, and the eval that proved something is no longer the eval that
+// runs. And a private repository is rarely anonymous, so the fetch needs headers — which must be
+// `{secretRef}`, or a token ends up sitting in the registry in plaintext.
+//
+// A UNION rather than a replacement: the bare string stays valid (every existing spec keeps parsing) and the
+// object form adds what was missing. `normalizeExecArtifact` is the one reader, so no consumer has to know
+// which form was authored.
+export const ExecArtifactSchema = z.union([
+  z.string().min(1),
+  z
+    .object({
+      source: z.string().min(1),
+      // Content hash, in the getter's own grammar (e.g. "sha256:ab12…"). Absent = unpinned, which is what
+      // every artifact was before this existed.
+      checksum: z.string().min(1).optional(),
+      headers: z.record(EnvValueSchema).optional(), // literal or {secretRef} — resolved just before execution
+    })
+    .strict(),
+]);
+export type ExecArtifact = z.infer<typeof ExecArtifactSchema>;
+
+export function normalizeExecArtifact(
+  artifact: ExecArtifact | undefined,
+): { source: string; checksum?: string; headers?: Record<string, EnvValue> } | undefined {
+  if (artifact === undefined) return undefined;
+  return typeof artifact === "string" ? { source: artifact } : artifact;
+}
+
 // Service readiness polling — how long / how often to wait until an HTTP endpoint responds.
 // Slow-booting services (first image pull·DB migration etc.) get longer. Unset = runtime default (60s/1s).
 export const ServiceReadinessSchema = z.object({
@@ -104,7 +136,22 @@ export const TopologyServiceSchema = z.object({
     .object({
       kind: z.enum(["container", "host"]),
       command: z.array(z.string()).optional(), // host: the program + args to run on the node
-      artifact: z.string().optional(), // host: optional artifact URL (zip/exe) fetched into the task dir before start
+      // host: the program to fetch into the task dir before start. Delivery existed; two properties an image
+      // has did not (see ExecArtifactSchema).
+      artifact: ExecArtifactSchema.optional(),
+      // What readies a NODE for THIS harness version. Nothing maintained "this node has what this program
+      // needs" — an out-of-band assumption, and why a correctly PLACED raw_exec task dies with "the file does
+      // not exist". Declaring it makes the assumption executable: the command runs as a prestart step in the
+      // service's own group, and `key` is what makes it re-run — change it (a new dependency, a new version)
+      // and the rendered job changes, so the node is prepared again before the task starts. Absent `key` is
+      // derived from the command + artifact, which is the honest default: the same inputs need no re-run.
+      provision: z
+        .object({
+          command: z.array(z.string()).min(1),
+          key: z.string().min(1).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .strict()
     .optional(),

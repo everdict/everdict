@@ -1,9 +1,11 @@
 import {
   BadRequestError,
   type EnvValue,
+  type ExecArtifact,
   HARNESS_AUTH_ENV_VARS,
   type HarnessSpec,
   isPulledCommandTrace,
+  normalizeExecArtifact,
 } from "@everdict/contracts";
 
 // Harness secret-resolution semantics — the {secretRef} env vocabulary is defined by the HarnessSpec
@@ -80,6 +82,11 @@ export function resolveEnvValues(
 export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretMaps): HarnessSpec {
   const missing = new Set<string>();
   const resolve = (env: Record<string, EnvValue>): Record<string, string> => resolveEnvValues(env, secrets, missing);
+  const resolveArtifact = (artifact: ExecArtifact): ExecArtifact => {
+    const normalized = normalizeExecArtifact(artifact);
+    if (!normalized?.headers) return artifact;
+    return { ...normalized, headers: resolve(normalized.headers) };
+  };
 
   // command's trace.authSecret (workspace secret name) → transient trace.auth value — in-job (collect=job) pull uses it
   // as the auth header (the agent can't reach SecretStore, so it's resolved just before dispatch like env).
@@ -97,7 +104,20 @@ export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretM
     spec.kind === "command"
       ? { ...spec, env: resolve(spec.env), trace: resolveTrace(spec.trace) }
       : spec.kind === "service"
-        ? { ...spec, services: spec.services.map((s) => ({ ...s, env: resolve(s.env) })) }
+        ? {
+            ...spec,
+            services: spec.services.map((s) => ({
+              ...s,
+              env: resolve(s.env),
+              // A host-exec service's artifact headers are the same kind of value under a different key: a
+              // private artifact repository needs auth, and a token written literally into a spec would sit in
+              // the registry in plaintext. Resolved here, with the same collector, so an unresolvable one is
+              // refused by name beside every other missing secret rather than dropped at render time.
+              ...(s.exec?.artifact !== undefined
+                ? { exec: { ...s.exec, artifact: resolveArtifact(s.exec.artifact) } }
+                : {}),
+            })),
+          }
         : spec;
 
   if (missing.size > 0) {
