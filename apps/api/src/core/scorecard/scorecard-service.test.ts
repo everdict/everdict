@@ -55,7 +55,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
   async dispatch() {
@@ -3315,6 +3315,62 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     expect(child?.status).toBe("succeeded"); // the same child settles with the harvested result (no INTERRUPTED)
     expect(child?.result?.caseId).toBe("c2");
     expect(rec.steps?.some((s) => s.phase === "resume" && s.message.includes("adopted"))).toBe(true);
+  });
+
+  // ── A RECOVERY IS A THIRD PATH TO A TERMINAL CHILD (review 39) ────────────────────────────────────
+  it("an ADOPTED case leaves a receipt naming its child, like a case ended by either driver", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, runs, datasets } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    const receipts = new InMemoryCaseReceiptStore();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      caseReceipts: receipts,
+      newId: () => `adr-${n++}`,
+      adoptCase: async (_tenant, _runtime, caseId) => (caseId === "c2" ? passResult("c2") : undefined),
+    });
+    await store.create({
+      id: "sc-adopt-receipt",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCaseDataset),
+      status: "running",
+      runtime: "nomad-local",
+      orchestration: { judges: [], concurrency: 2, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    await runs.create({
+      id: "child-adopted",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c2",
+      status: "running",
+      runtime: "nomad-local",
+      parentScorecardId: "sc-adopt-receipt",
+      executionId: "evd-sc-adopt-receipt-c2",
+      createdAt: "2026-07-08T00:00:01.000Z",
+      updatedAt: "2026-07-08T00:00:01.000Z",
+    });
+
+    expect(await service.resume("sc-adopt-receipt")).toBe(true);
+    await waitTerminal(store, "sc-adopt-receipt");
+
+    // Every case the batch counted has a receipt — the adopted one included, so the parity check has nothing
+    // to report about a batch that recovered normally.
+    const committed = await receipts.list("sc-adopt-receipt");
+    expect(committed.map((r) => r.caseId).sort()).toEqual(["c1", "c2", "c3"]);
+    const adopted = committed.find((r) => r.caseId === "c2");
+    expect(adopted?.childRunId).toBe("child-adopted");
+    expect(adopted?.executionId).toBe("evd-sc-adopt-receipt-c2");
+    // …and it does not claim to know an attempt number it never opened.
+    expect(adopted?.generation).toBeUndefined();
+    expect(dispatched.sort()).toEqual(["c1", "c3"]);
   });
 
   it("resume refuses records it cannot faithfully re-drive (terminal status / no orchestration)", async () => {

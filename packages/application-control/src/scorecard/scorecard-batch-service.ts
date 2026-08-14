@@ -338,6 +338,27 @@ export class ScorecardBatchService {
                   .then(() => true)
                   .catch(() => false);
               if (!judged) continue; // left active: the resume below re-dispatches it
+              // THE SAME TWO INVARIANTS A COMMIT CARRIES ON EITHER DRIVER (review 39). A recovery is a third
+              // path to a terminal child, and it held neither: an adopted case could go terminal with a
+              // selected judge unmentioned, and with no receipt saying which attempt the batch counted — so
+              // the parity check would report every recovered case as a disagreement, which is exactly the
+              // kind of noise that makes a diagnostic useless.
+              //
+              // The evidence assembly is NOT repeated here: this result came back from a backend that
+              // produced its own artifacts under an attempt this process never opened, and re-keying them
+              // under a generation it would have to invent is worse than leaving them where they are.
+              const adoptedResult =
+                orch.judges.length > 0
+                  ? { ...adoptable, scores: completeJudgeCoverage(adoptable.scores, orch.judges) }
+                  : adoptable;
+              if (
+                !(await this.claimCase(id, adoptedResult, {
+                  childId: c.id,
+                  ...(c.executionId ? { executionId: c.executionId } : {}),
+                  judges: orch.judges,
+                }))
+              )
+                continue; // another attempt owns this case — the recovery does not adopt it
               // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
               // this call remembered its fence is not the property being kept — being unable to forget it is.
               // The scan walked past this one for a wrapper's worth of reason (`Run.from(c).adopt(…)` opens
@@ -345,7 +366,7 @@ export class ScorecardBatchService {
               const claimed = await settleRun(
                 this.deps.runStore,
                 c.id,
-                Run.from(c).adopt(adoptable, this.now()).patch,
+                Run.from(c).adopt(adoptedResult, this.now()).patch,
                 undefined,
                 // …AND the parent's driver, which is the authority this preprocessing acts under
                 // (arch-review 34 P0). The variable existed and was never passed, so the defect it was
@@ -355,7 +376,7 @@ export class ScorecardBatchService {
               );
               if (claimed !== undefined) {
                 adopted += 1;
-                seed.push(adoptable);
+                seed.push(adoptedResult);
                 seedRunIds.push(c.id);
                 continue;
               }
@@ -1548,7 +1569,15 @@ export class ScorecardBatchService {
   private async claimCase(
     scorecardId: string,
     result: CaseResult,
-    entry: { childId?: string; executionId: string; generation: number; judges: ReadonlyArray<{ id: string }> },
+    // `generation` is optional because one caller genuinely does not know it: a RECOVERY adopting a result
+    // from a backend never opened the attempt that produced it. An unknown attempt number is recorded as
+    // absent rather than as 0 — 0 is a real generation, and claiming to know is worse than saying nothing.
+    entry: {
+      childId?: string;
+      executionId?: string;
+      generation?: number;
+      judges: ReadonlyArray<{ id: string }>;
+    },
   ): Promise<boolean> {
     const receipts = this.deps.caseReceipts;
     if (!receipts || !entry.childId) return true;
@@ -1557,8 +1586,8 @@ export class ScorecardBatchService {
       caseId: result.caseId,
       trial: result.trial ?? 0,
       childRunId: entry.childId,
-      executionId: entry.executionId,
-      generation: entry.generation,
+      ...(entry.executionId !== undefined ? { executionId: entry.executionId } : {}),
+      ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
       resultDigest: contentDigest(result),
       ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
       committedAt: this.now(),
