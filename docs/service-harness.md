@@ -1399,3 +1399,59 @@ Three more, all live:
   Huggingface, Allrecipes, Amazon, Booking, Google Flights/Map/Search, Apple). On that set the failures are the
   agent's to own — exactly what a benchmark should measure. (`ArXiv / Cambridge / Coursera / ESPN / Wolfram`
   passed; `Wolfram` even returned the correct derivative `11.2`.)
+
+## Node provisioning BEFORE the job exists — the seam's shape (downstream report §5.2, design decision)
+
+`exec.provision` renders as a **prestart task inside the service's own alloc** today, and that is the right
+default: it covers every case where the runtime the preparation needs already exists on the node. What it
+cannot cover is preparation that IS what makes the runtime exist — a Windows node with no interpreter yet, a
+fresh host that must install the browser stack — because a prestart task runs *on the node it is preparing,
+using the very capability it is supposed to create*.
+
+**Decision: the out-of-band form is `exec.provision`'s second variant, not a separate declaration.**
+
+```ts
+provision?:
+  | { mode?: "prestart"; /* today's shape — the default, rendered into the alloc */ }
+  | { mode: "node"; /* control-plane-side: runs BEFORE job registration */ }
+```
+
+Reasons, in order of weight:
+
+1. **The declaration stays with the thing it provisions.** A separate top-level declaration re-creates the
+   two-halves-never-meet class this same report names in §3.2 (`frontDoor.contextId` vs the trace source's
+   `correlateTag`): one document, two fields, no rule connecting them. A union at the exec site keeps "what
+   this service needs before it can run" one sentence.
+2. **Renderers already narrow per form** — the current fork pattern. The Nomad/K8s builders render the
+   `prestart` variant into the alloc exactly as today and ignore `mode:"node"` BY TYPE; the control-plane
+   provisioner consumes `mode:"node"` and never sees the prestart shape. Neither can silently half-handle
+   the other.
+3. **The §3 invariant gets its rule for free**: `mode:"node"` declared against a runtime with no provisioner
+   wired is a declaration the framework cannot act on → a `portability` warning at registration
+   (`node-provision-unwired`), never a silent alloc-time death.
+
+**The seam** (control-plane side, called by the backend before `registerJob`):
+
+```ts
+interface NodeProvisioner {
+  // Idempotent per (node-class, key): re-runs only when the KEY changes.
+  ensure(key: NodeProvisionKey, declaration: NodeProvisionSpec): Promise<void>;
+}
+type NodeProvisionKey = {
+  harnessId: string;
+  harnessVersion: string;
+  provisionDigest: string; // contentDigest of the declaration — a changed declaration re-provisions
+  nodeClass: string;       // the placement constraint the job will carry (never "the whole cluster")
+};
+```
+
+Keying by `(harness version, contentDigest(declaration))` is the same idiom the manifest pins use: the
+declaration's bytes are the identity, so an edited declaration re-runs and an identical one never does. The
+ledger of what ran where is the provisioner impl's (an Ansible-shaped impl keeps its own inventory; a bare
+SSH impl keeps a per-node marker file) — the seam's contract is only *ensure-before-register, keyed by
+content*. What tool executes it is deliberately out of scope, exactly as `Backend` does not say what runs
+the alloc.
+
+**Tests the implementation must ship** (from the report): a node whose provision key changed is re-prepared
+before the next task starts; a `prestart`-form spec renders a prestart task and never calls the out-of-band
+provisioner; and the reverse.

@@ -438,6 +438,22 @@ describe("BrowserSessionService.onTeardown — the session says when it ends", (
     expect(late).toBe(1);
   });
 
+  it("closeOwned (a second session evicting the first) notifies the first session's observers", async () => {
+    // Eviction is a teardown like any other: creating a new session disposes the owner's previous one via
+    // closeOwned, and a watcher of the evicted session must be told — not left streaming a dead browser.
+    const p = new FakeProvisioner();
+    const s = svc(p);
+    const first = await s.create({ tenant: "acme", createdBy: "alice" });
+    let fired = 0;
+    s.onTeardown(first.id, () => {
+      fired += 1;
+    });
+    await s.create({ tenant: "acme", createdBy: "alice" }); // evicts the first session
+    expect(fired).toBe(1); // the first session's observer was notified
+    expect(p.disposed).toEqual([p.provisioned[0]]); // and its browser was the one released
+    expect(s.get(first.id, "alice")).toBeUndefined();
+  });
+
   it("a throwing observer neither strands the session nor blocks the release", async () => {
     const p = new FakeProvisioner();
     const s = svc(p);

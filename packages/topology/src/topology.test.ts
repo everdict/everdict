@@ -10,7 +10,7 @@ import type {
 import { InternalError, RateLimitError, measuredScores } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 import { buildSharedStoreManifests } from "./deploy/dependencies.js";
 import { buildK8sManifests } from "./deploy/k8s-topology.js";
@@ -207,6 +207,15 @@ describe("buildNomadTopologyJob", () => {
     // each task references its own port label.
     expect(group?.Tasks[0]?.Config.ports).toEqual(["agent_server"]);
     expect(group?.Tasks[1]?.Config.ports).toEqual(["browser_mcp"]);
+  });
+
+  it("defaults Job.Datacenters to ['dc1'] and keeps an explicit datacenters list verbatim", () => {
+    // No opts → the Nomad default datacenter; an operator's explicit placement list survives untouched.
+    expect(buildNomadTopologyJob(SPEC).Job.Datacenters).toEqual(["dc1"]);
+    expect(buildNomadTopologyJob(SPEC, { datacenters: ["dc-eu1", "dc-eu2"] }).Job.Datacenters).toEqual([
+      "dc-eu1",
+      "dc-eu2",
+    ]);
   });
 });
 
@@ -849,6 +858,69 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.thread_id).toBe(keysFor("fixed").threadId);
     expect(recorded[0]?.browser_cdp_url).toBe("ws://browser/ctx");
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
+  });
+
+  it("dispatch uses the SECRET-RESOLVED spec the job carries, never re-fetching the registry", async () => {
+    // The control plane resolves {secretRef} env values BEFORE dispatch and attaches the resolved copy to the
+    // job (CaseJob.harnessSpec) — the runtime is not trusted with the SecretStore. Re-fetching the registry got
+    // the RAW spec back, placeholders and all, and the deploy went out missing exactly the variables that matter.
+    const carriedSpec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: SPEC.services.map((s) =>
+        s.name === "agent-server" ? { ...s, env: { AGENT_API_KEY: "resolved-literal" } } : s,
+      ),
+    };
+    const rawRegistrySpec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: SPEC.services.map((s) =>
+        s.name === "agent-server" ? { ...s, env: { AGENT_API_KEY: { secretRef: "agent-key" } } } : s,
+      ),
+    };
+    const ensured: ServiceHarnessSpec[] = [];
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology(spec) {
+        ensured.push(spec);
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://browser/ctx" },
+          async snapshot(): Promise<BrowserSnapshot> {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+          },
+          async dispose() {},
+        };
+      },
+    };
+    const specFor = vi.fn(() => rawRegistrySpec);
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [{ t: 0, kind: "message", role: "assistant", text: "done" } satisfies TraceEvent];
+        },
+      },
+      specFor,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      harnessSpec: carriedSpec,
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    await backend.dispatch(job);
+    expect(specFor).not.toHaveBeenCalled(); // the carried spec IS the spec — no registry round trip
+    const agentServer = ensured[0]?.services.find((s) => s.name === "agent-server");
+    expect(agentServer?.env).toEqual({ AGENT_API_KEY: "resolved-literal" }); // the literal reached the deploy
   });
 
   // Infra-plane recording — a topology case never submits an orchestrator job per case, so the backend itself
@@ -2535,7 +2607,7 @@ describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
       pinned({
         artifact: {
           source: "https://dl.example.com/ui-driver.zip",
-          checksum: "sha256:abc123",
+          checksum: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
           headers: { authorization: "Bearer resolved-token" },
         },
       }),
@@ -2543,7 +2615,7 @@ describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
     expect(tasks[0]?.Artifacts).toEqual([
       {
         GetterSource: "https://dl.example.com/ui-driver.zip",
-        GetterOptions: { checksum: "sha256:abc123" },
+        GetterOptions: { checksum: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" },
         GetterHeaders: { authorization: "Bearer resolved-token" },
       },
     ]);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ExecArtifactSchema,
   FrontDoorSpecSchema,
   ServiceHarnessSpecSchema,
   TopologyDependencySchema,
@@ -125,5 +126,41 @@ describe("TopologyService exec — the host-exec pairing rules (validateServiceE
     expect(
       ServiceHarnessSpecSchema.safeParse(spec({ name: "s", needs: [], perRun: [], replicas: 1, env: {} })).success,
     ).toBe(false);
+  });
+});
+
+// ── A MALFORMED PIN FAILS AT REGISTRATION, NOT AT ALLOC TIME (downstream report 3.3) ─────────────────
+describe("ExecArtifactSchema.checksum — the go-getter pin grammar is validated at parse", () => {
+  const artifact = (checksum: string) => ({ source: "https://dl.example.com/ui-driver.zip", checksum });
+  const hex = (length: number) => "deadbeef".repeat(Math.ceil(length / 8)).slice(0, length);
+
+  it.each([
+    ["md5", 32],
+    ["sha1", 40],
+    ["sha256", 64],
+    ["sha512", 128],
+  ] as const)('accepts "%s:<hex>" with the algorithm\'s own digest length (%d hex chars)', (algo, length) => {
+    expect(ExecArtifactSchema.safeParse(artifact(`${algo}:${hex(length)}`)).success).toBe(true);
+  });
+
+  it("refuses a bare hex with no algorithm prefix, telling the author the expected form", () => {
+    const res = ExecArtifactSchema.safeParse(artifact("deadbeef"));
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error.issues.map((i) => i.message).join(" ")).toContain('"<algo>:<hex>"');
+  });
+
+  it("refuses an unknown algorithm — the getter grammar is a closed vocabulary", () => {
+    expect(ExecArtifactSchema.safeParse(artifact("sha999:ff")).success).toBe(false);
+  });
+
+  it("refuses a known algorithm with a truncated digest — a shortened hash pins nothing", () => {
+    const res = ExecArtifactSchema.safeParse(artifact("sha256:abc123"));
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error.issues.map((i) => i.message).join(" ")).toContain("64 hex characters");
+  });
+
+  it("keeps the unpinned forms parsing — the bare string and the object with no checksum (back-compat)", () => {
+    expect(ExecArtifactSchema.safeParse("https://dl.example.com/ui-driver.zip").success).toBe(true);
+    expect(ExecArtifactSchema.safeParse({ source: "https://dl.example.com/ui-driver.zip" }).success).toBe(true);
   });
 });

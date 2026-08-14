@@ -1,6 +1,6 @@
 import { BadRequestError, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type PortabilityRule, assertPortable, checkPortability } from "./portability.js";
+import { type PortabilityRule, assertPortable, checkPortability, contextIdUnread } from "./portability.js";
 
 const svc = (over: Partial<TopologyService> & { name: string }): TopologyService => ({
   image: "img:1",
@@ -269,4 +269,140 @@ describe("profile-uninjectable — a declared login with no channel to inject it
     const provisioned = spec([svc({ name: "agent", port: 8000 })], { target: target({ profile: "acme-login" }) });
     expect(rules(provisioned)).not.toContain("profile-uninjectable");
   });
+});
+
+// ── A DECLARATION THE FRAMEWORK CANNOT ACT ON IS SURFACED, NEVER IGNORED (downstream report 3.1) ─────
+describe("host-program-undelivered — a host-exec service whose program nothing delivers", () => {
+  const hostSvc = (over: Partial<TopologyService> = {}): TopologyService => {
+    const base = svc({ name: "win-ui", port: 9515, exec: { kind: "host", command: ["C:/drivers/ui-driver.exe"] } });
+    const { image: _image, ...withoutImage } = base; // a host-exec service carries no image — nothing would run it
+    return { ...withoutImage, ...over };
+  };
+
+  it("warns when a host-exec service declares no exec.artifact — the program is assumed pre-installed on the node", () => {
+    const s = spec([hostSvc()]);
+    const issue = checkPortability(s).find((i) => i.rule === "host-program-undelivered");
+    expect(issue?.severity).toBe("warning"); // a golden image is a legitimate choice — visible, never blocked
+    expect(issue?.field).toBe("services[win-ui].exec.artifact");
+    expect(issue?.message).toMatch(/pre-installed/i);
+    expect(() => assertPortable(s)).not.toThrow();
+  });
+
+  it("says nothing when the artifact is declared (either form), or for a containerized service", () => {
+    const pinned = spec([
+      hostSvc({ exec: { kind: "host", command: ["x"], artifact: "https://dl.example.com/x.zip" } }),
+    ]);
+    expect(rules(pinned)).not.toContain("host-program-undelivered");
+    const container = spec([svc({ name: "web", port: 3000 })]); // its image IS the delivered program
+    expect(rules(container)).not.toContain("host-program-undelivered");
+  });
+});
+
+// ── A CONTROLLED COORDINATE NOBODY READS BACK (downstream report 3.2) ────────────────────────────────
+describe("context-id-unread — frontDoor.contextId with a traceSource that never searches by it", () => {
+  const withContext = (traceSource: ServiceHarnessSpec["traceSource"]) =>
+    spec([svc({ name: "web", port: 3000 })], {
+      frontDoor: { service: "web", submit: "POST /runs", contextId: "{{thread_id}}" },
+      traceSource,
+    });
+
+  it("warns when the traceSource correlates by id (the default) — the harness submits under one coordinate, the platform polls another", () => {
+    const s = withContext({ kind: "otel", endpoint: "http://otel.example.com" });
+    const issue = checkPortability(s).find((i) => i.rule === "context-id-unread");
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.field).toBe("frontDoor.contextId");
+    // The message names both halves and the symptom: the timeout reads as a slow agent, not a wiring gap.
+    expect(issue?.message).toContain("frontDoor.contextId");
+    expect(issue?.message).toContain('correlate: "tag"');
+    expect(issue?.message).toMatch(/slow agent/i);
+    expect(() => assertPortable(s)).not.toThrow();
+  });
+
+  it('says nothing when the traceSource searches by tag (correlate: "tag" + correlateTag), or when no contextId is declared', () => {
+    const paired = withContext({
+      kind: "mlflow",
+      endpoint: "http://mlflow.example.com",
+      correlate: "tag",
+      correlateTag: "mlflow.trace.session",
+    });
+    expect(rules(paired)).not.toContain("context-id-unread");
+    const noContext = spec([svc({ name: "web", port: 3000 })]);
+    expect(rules(noContext)).not.toContain("context-id-unread");
+  });
+
+  it("the warning and the shared predicate are the same decision — validation and behavior cannot fork", () => {
+    const unread = withContext({ kind: "otel", endpoint: "http://otel.example.com" });
+    const read = withContext({ kind: "otel", endpoint: "http://otel.example.com", correlate: "tag" });
+    for (const s of [unread, read]) expect(rules(s).includes("context-id-unread")).toBe(contextIdUnread(s));
+    // …and a template shape with no traceSource at all is still a total decision (unread).
+    expect(contextIdUnread({ frontDoor: { service: "web", submit: "POST /runs", contextId: "{{thread_id}}" } })).toBe(
+      true,
+    );
+  });
+});
+
+// ── THE ISSUE VOCABULARY, PARAMETERIZED — a new rule MUST place a producing fixture here ─────────────
+// `satisfies Record<PortabilityRule, …>` makes the typecheck refuse a rule nobody can produce: extending the
+// union without a fixture (or vice versa) fails to compile, so every rule in the vocabulary stays reachable.
+const PRODUCED_BY_RULE = {
+  "no-literal-host": spec([svc({ name: "web", port: 3000, env: { API_URL: "http://localhost:4000" } })]),
+  "peer-by-literal": spec([
+    svc({ name: "web", port: 3000, needs: ["api"], env: { API_URL: "http://api:4000" } }),
+    svc({ name: "api", port: 4000 }),
+  ]),
+  "needs-complete": spec([
+    svc({ name: "web", port: 3000, needs: [], env: { API_URL: "http://{{api}}" } }),
+    svc({ name: "api", port: 4000 }),
+  ]),
+  "addressed-has-port": spec([
+    svc({ name: "web", port: 3000, needs: ["api"], env: { API_URL: "http://{{api}}" } }),
+    svc({ name: "api" }),
+  ]),
+  "reference-not-address": spec([svc({ name: "web", port: 3000 })], {
+    frontDoor: { service: "gateway", submit: "POST /runs" },
+  }),
+  "unique-ports": spec([svc({ name: "web", port: 3000 }), svc({ name: "api", port: 3000 })]),
+  "artifact-store-internal": spec([svc({ name: "web", port: 3000 })], {
+    dependencies: [{ store: "minio", role: "artifacts", purpose: "plumbing", isolateBy: "object-prefix" }],
+  }),
+  "inject-shadowed-literal": spec([svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://stale:6379" } })], {
+    dependencies: [
+      { store: "redis", role: "queue", purpose: "plumbing", isolateBy: "key-prefix", inject: [{ env: "VALKEY_URL" }] },
+    ],
+  }),
+  "store-by-literal": spec([svc({ name: "app", port: 3000, env: { VALKEY_URL: "redis://super-spica-redis:6379" } })]),
+  "profile-uninjectable": spec([svc({ name: "sessions", port: 8000 })], {
+    target: {
+      kind: "browser",
+      engine: "chromium",
+      lifecycle: "per-case-instance",
+      observe: ["dom"],
+      profile: "acme-login",
+      acquire: {
+        mode: "service",
+        service: "sessions",
+        open: "POST /sessions",
+        coordinates: { target_cdp_url: "cdp_url" },
+      },
+    } as NonNullable<ServiceHarnessSpec["target"]>,
+  }),
+  "host-program-undelivered": spec([
+    svc({ name: "win-ui", image: undefined, port: 9515, exec: { kind: "host", command: ["driver.exe"] } }),
+  ]),
+  "context-id-unread": spec([svc({ name: "web", port: 3000 })], {
+    frontDoor: { service: "web", submit: "POST /runs", contextId: "{{thread_id}}" },
+  }),
+} satisfies Record<PortabilityRule, ServiceHarnessSpec>;
+
+describe("the issue vocabulary is fully reachable — every rule has a spec that produces it", () => {
+  it.each(Object.entries(PRODUCED_BY_RULE))(
+    "%s is produced by its fixture, with a severity stamped",
+    (rule, fixture) => {
+      const issue = checkPortability(fixture).find((i) => i.rule === rule);
+      expect(issue).toBeDefined();
+      expect(issue?.severity === "error" || issue?.severity === "warning").toBe(true);
+      expect(issue?.field.length).toBeGreaterThan(0);
+      expect(issue?.message.length).toBeGreaterThan(0);
+    },
+  );
 });

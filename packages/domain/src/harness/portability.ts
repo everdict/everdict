@@ -1,4 +1,10 @@
-import { BadRequestError, type HarnessSpec, type ServiceHarnessSpec, type TopologyService } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type HarnessSpec,
+  type ServiceHarnessSpec,
+  type TopologyService,
+  serviceIsHostExec,
+} from "@everdict/contracts";
 
 // Topology portability lint — a pure analyzer that rejects a service HarnessSpec that would resolve to DIFFERENT
 // (incompatible) addresses across runtimes, so "works on the self-hosted Docker runner, fails on Nomad/K8s" is caught
@@ -16,7 +22,9 @@ export type PortabilityRule =
   | "artifact-store-internal" // an internal object store — artifacts referenced by its URL won't reach the judge
   | "inject-shadowed-literal" // a service.env literal under the same key as a dependency inject mapping — dead config
   | "store-by-literal" // a bare container/store DNS host:port hardcoded in service env — resolves only under Docker
-  | "profile-uninjectable"; // a saved profile declared on a target whose browser this control plane cannot reach
+  | "profile-uninjectable" // a saved profile declared on a target whose browser this control plane cannot reach
+  | "host-program-undelivered" // a host-exec service with no exec.artifact — the program is assumed pre-installed on the node
+  | "context-id-unread"; // frontDoor.contextId is declared but the traceSource never searches by it (correlate !== "tag")
 
 // Portability is a purely STRUCTURAL check over a service topology's addressing (service names/ports/needs/env/wiring +
 // front-door/target/trace references) — it never reads a service `image`. So a template (image-less services) is checked
@@ -54,6 +62,12 @@ const SEVERITY: Record<PortabilityRule, "error" | "warning"> = {
   // The topology IS portable; the LOGIN is not. An author may well intend the agent to authenticate itself, so
   // this is surfaced, never blocked.
   "profile-uninjectable": "warning",
+  // The node MAY genuinely carry the program (a golden image is a legitimate choice) — the point is the choice
+  // is visible at registration, so surfaced, never blocked.
+  "host-program-undelivered": "warning",
+  // The declaration is inert, not runtime-divergent; an author mid-migration to tag correlation should not be
+  // blocked — surfaced so the wiring gap is fixed before it reads as a slow agent.
+  "context-id-unread": "warning",
 };
 
 // Only the issues that hard-block a new registration (used by the registry register + the validate route).
@@ -73,6 +87,19 @@ export function assertPortable(spec: HarnessSpec): void {
       { portabilityIssues: errors },
       `Harness is not portable across runtimes — fix and re-register: ${errors.map((e) => e.message).join(" ")}`,
     );
+}
+
+// ── A CONTROLLED COORDINATE NOBODY READS BACK ────────────────────────────────────────────────────────
+//
+// `frontDoor.contextId` makes every submit carry a coordinate everdict injects (a session/thread id the agent
+// cannot overwrite). That coordinate is only ever read back when the trace source SEARCHES BY TAG
+// (`traceSource.correlate: "tag"` + `correlateTag`); under id correlation (the default) the platform polls by
+// run id instead, so the two halves can never meet. This predicate is the ONE decision — the lint below and any
+// behavioral consumer share it, so validation and behavior cannot fork.
+export function contextIdUnread(
+  spec: Pick<PortabilityServiceSpec, "frontDoor"> & { traceSource?: PortabilityServiceSpec["traceSource"] },
+): boolean {
+  return spec.frontDoor.contextId !== undefined && spec.traceSource?.correlate !== "tag";
 }
 
 // A {{peer}} / {{peer.host}} / {{peer.port}} / {{peer.url}} token (double-brace, same convention as the front-door
@@ -232,6 +259,17 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
     }
     for (const w of svc.wiring ?? [])
       if (names.has(w.service)) checkPeerRef(svc, w.service, `services[${svc.name}].wiring`);
+    // A host-exec service with no artifact: the framework delivers nothing, so the program is assumed to be
+    // pre-installed on every node this harness can land on — an out-of-band assumption the registration would
+    // otherwise silently accept. A golden image is a legitimate choice — the point is the choice is VISIBLE at
+    // registration, so it is surfaced here instead of dying on some node as "the file does not exist".
+    if (serviceIsHostExec(svc) && svc.exec?.artifact === undefined)
+      issues.push({
+        rule: "host-program-undelivered",
+        service: svc.name,
+        field: `services[${svc.name}].exec.artifact`,
+        message: `Host-exec service "${svc.name}" declares no exec.artifact — nothing is delivered to the node, so the program is assumed pre-installed there (a golden image / provisioned node). If that is the intent, fine — the choice is now visible at registration. Otherwise declare exec.artifact (ideally with a checksum) so the runtime fetches and pins the program itself.`,
+      });
   }
 
   if (!names.has(spec.frontDoor.service))
@@ -239,6 +277,15 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
       rule: "reference-not-address",
       field: "frontDoor.service",
       message: `frontDoor.service "${spec.frontDoor.service}" is not a declared service — the front door must reference a service by name (its address is resolved per runtime), never a hardcoded URL.`,
+    });
+  // The lint half of contextIdUnread — the SAME predicate any behavioral consumer uses, so this warning and the
+  // runtime can never disagree. The local narrows contextId for the message; the decision is the predicate's.
+  const contextId = spec.frontDoor.contextId;
+  if (contextId !== undefined && contextIdUnread(spec))
+    issues.push({
+      rule: "context-id-unread",
+      field: "frontDoor.contextId",
+      message: `frontDoor.contextId ("${contextId}") injects a controlled trace coordinate, but traceSource.correlate is ${spec.traceSource.correlate === undefined ? "unset (id)" : `"${spec.traceSource.correlate}"`} — only correlate: "tag" (with correlateTag) searches by that coordinate, so the harness submits under one coordinate while the platform polls another and the trace is never found: every case waits out its completion timeout, which reads as a slow agent instead of the wiring gap it is. Set traceSource.correlate: "tag" + correlateTag, or drop contextId.`,
     });
   if (spec.frontDoor.request?.bodyTemplate)
     scanJson("frontDoor.request.bodyTemplate", spec.frontDoor.request.bodyTemplate);

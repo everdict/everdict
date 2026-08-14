@@ -1,4 +1,4 @@
-import type { HarnessSpec, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import { BadRequestError, type HarnessSpec, type RuntimeSpec, type ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildPlacementPreflight } from "./placement-preflight.js";
 
@@ -47,6 +47,14 @@ describe("buildPlacementPreflight — submit-time capability gate", () => {
   it("rejects a Windows-service topology on a runtime that doesn't advertise os-windows (400)", async () => {
     const { preflight } = make(nomad(["docker"]), winTopology);
     await expect(call(preflight, "cluster")).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    // A refusal names the thing to change: `missing` carries ONLY the gap (the runtime HAS docker), and the
+    // "it lacks […]" sentence names os-windows alone — never a capability the operator already provided.
+    const error = await call(preflight, "cluster").catch((e: unknown) => e);
+    if (!(error instanceof BadRequestError)) throw new Error("expected a BadRequestError");
+    expect(error.extra?.missing).toEqual(["os-windows"]);
+    const lacks = error.message.match(/it lacks \[([^\]]*)\]/)?.[1];
+    expect(lacks).toBe("os-windows");
+    expect(lacks).not.toContain("docker");
   });
 
   it("passes when the runtime advertises os-windows", async () => {

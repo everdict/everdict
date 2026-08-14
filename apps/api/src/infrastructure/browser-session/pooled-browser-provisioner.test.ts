@@ -171,4 +171,62 @@ describe("PooledBrowserProvisioner (browser-profiles remote pool)", () => {
   it("refuses an empty pool at construction", () => {
     expect(() => new PooledBrowserProvisioner({ pool: [] })).toThrow(/empty/);
   });
+
+  // ── THE FREE LIST IS A PRIORITY LIST — the lease WALKS the members instead of dying on the first (§5.1) ──
+  describe("walking the free members in pool order", () => {
+    // A fetch where members named "dead" are unreachable and everything else answers like okFetch — the
+    // heterogeneous pool: one sidecar the control plane cannot reach, the rest fine.
+    const partialFetch = (async (url: string) => {
+      const u = String(url);
+      if (u.includes("//dead")) throw new Error("connection refused");
+      return (okFetch as unknown as (u: string) => Promise<Response>)(u);
+    }) as unknown as typeof fetch;
+
+    it("leases the second member when the first is unreachable — a dead sidecar costs one short probe, not the provision", async () => {
+      const p = new PooledBrowserProvisioner({
+        pool: ["http://dead:9222", "http://live:9222"],
+        fetch: partialFetch,
+        connect: answeringSocket(),
+        reset: async () => {},
+        candidateProbeMs: 20, // keep the walk fast in the test; the default is 1.5s
+      });
+      const browser = await p.provision();
+      expect(browser.cdpBase).toBe("http://live:9222");
+    });
+
+    it("names how many candidates were tried when every free member is dead — and none of them is quarantined for it", async () => {
+      const downFetch = (async () => {
+        throw new Error("connection refused");
+      }) as unknown as typeof fetch;
+      const p = new PooledBrowserProvisioner({
+        pool: ["http://b1:9222", "http://b2:9222"],
+        fetch: downFetch,
+        reset: async () => {},
+        candidateProbeMs: 20,
+        readyTimeoutMs: 30, // the last candidate's full patience, shortened for the test
+      });
+      const err = await p.provision().catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: "UPSTREAM_ERROR" });
+      expect(String(err)).toMatch(/tried 2 of 2 free members/);
+      // The last attempt's diagnostics survive the walk — silence still reads as silence, not a blank.
+      expect(String(err)).toMatch(/did not become ready/);
+      // Unreachable is NOT dirty: a failed probe never quarantines, so a retry still sees a busy-free pool
+      // (both members walked again), not "every pooled browser is quarantined".
+      const again = await p.provision().catch((e: unknown) => e);
+      expect(String(again)).toMatch(/tried 2 of 2 free members/);
+      expect(String(again)).not.toMatch(/quarantined/);
+    });
+
+    it("keeps pool order as priority order — a healthy first member is chosen, no probing beyond it", async () => {
+      const p = new PooledBrowserProvisioner({
+        pool: ["http://live:9222", "http://dead:9222"],
+        fetch: partialFetch,
+        connect: answeringSocket(),
+        reset: async () => {},
+        candidateProbeMs: 20,
+      });
+      const browser = await p.provision();
+      expect(browser.cdpBase).toBe("http://live:9222");
+    });
+  });
 });

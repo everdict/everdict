@@ -50,14 +50,39 @@ export type EnvValue = z.infer<typeof EnvValueSchema>;
 // A UNION rather than a replacement: the bare string stays valid (every existing spec keeps parsing) and the
 // object form adds what was missing. `normalizeExecArtifact` is the one reader, so no consumer has to know
 // which form was authored.
+
+// The go-getter checksum grammar: "<algo>:<hex>" with the hex length the algorithm actually produces. Validated
+// at PARSE so a malformed pin is refused at registration with a message naming the expected form — not silently
+// carried to the node, where go-getter rejects it at alloc time as an opaque fetch failure.
+const CHECKSUM_HEX_LENGTH: Record<string, number> = { md5: 32, sha1: 40, sha256: 64, sha512: 128 };
+const CHECKSUM_RE = /^(md5|sha1|sha256|sha512):([0-9a-fA-F]+)$/;
+const ExecChecksumSchema = z.string().superRefine((value, ctx) => {
+  const match = CHECKSUM_RE.exec(value);
+  const algo = match?.[1];
+  const hex = match?.[2];
+  if (algo === undefined || hex === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `checksum must be "<algo>:<hex>" with algo one of md5|sha1|sha256|sha512 (e.g. "sha256:" + 64 hex chars) — got "${value}".`,
+    });
+    return;
+  }
+  const expected = CHECKSUM_HEX_LENGTH[algo];
+  if (expected !== undefined && hex.length !== expected)
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `checksum "${algo}" requires ${expected} hex characters (got ${hex.length}) — a truncated hash pins nothing.`,
+    });
+});
+
 export const ExecArtifactSchema = z.union([
   z.string().min(1),
   z
     .object({
       source: z.string().min(1),
-      // Content hash, in the getter's own grammar (e.g. "sha256:ab12…"). Absent = unpinned, which is what
-      // every artifact was before this existed.
-      checksum: z.string().min(1).optional(),
+      // Content hash, in the getter's own grammar ("<algo>:<hex>", syntax-checked above). Absent = unpinned,
+      // which is what every artifact was before this existed.
+      checksum: ExecChecksumSchema.optional(),
       headers: z.record(EnvValueSchema).optional(), // literal or {secretRef} — resolved just before execution
     })
     .strict(),
