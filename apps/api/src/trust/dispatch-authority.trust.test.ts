@@ -1,4 +1,4 @@
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
@@ -50,6 +50,7 @@ async function buildService(dispatch: (job: CaseJob) => Promise<CaseResult>) {
     dispatcher: { dispatch },
     store,
     runStore,
+    caseReceipts: new InMemoryCaseReceiptStore(),
     datasets,
     harnesses,
   });

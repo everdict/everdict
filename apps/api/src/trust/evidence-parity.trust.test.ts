@@ -1,4 +1,4 @@
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseResult, RunRecord, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { evidenceIdentityHolds, judgedPlane, observedEvidenceIdentity } from "@everdict/domain";
@@ -58,6 +58,7 @@ describeTrust("TRUST-144 — the evidence pin and the verifier's read see the sa
     const service = new ScorecardService({
       store: scorecards,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       dispatcher: {
         async dispatch() {
           throw new Error("this scenario never dispatches");

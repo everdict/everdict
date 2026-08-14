@@ -1,4 +1,4 @@
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { Dataset, HarnessSpec, JudgeSpec } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
@@ -146,6 +146,7 @@ describeTrust("TRUST-40 — the registry moving mid-pass cannot change what exec
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: {

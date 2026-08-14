@@ -1,4 +1,4 @@
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
@@ -88,6 +88,7 @@ describeTrust("TRUST-161 — a driver that lost its batch makes no external effe
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       harnesses,
       artifacts,

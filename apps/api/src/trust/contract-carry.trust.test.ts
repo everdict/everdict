@@ -1,4 +1,9 @@
-import { ScorecardService, type SeriesContractDeps, resolveSeriesContract } from "@everdict/application-control";
+import {
+  InMemoryCaseReceiptStore,
+  ScorecardService,
+  type SeriesContractDeps,
+  resolveSeriesContract,
+} from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/application-control";
 import { ConflictError, type Dataset, type HarnessSpec, type ProductSeries } from "@everdict/contracts";
 import { InMemoryScorecardStore } from "@everdict/db";
@@ -141,6 +146,8 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
           return undefined;
         },
       } as never,
+      // A run store means cases commit somewhere — the constructor refuses the pair without it.
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => "sc-budget",
     });
     await expect(
@@ -213,6 +220,7 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
           return { usd: 0, runs: 0 };
         },
       } as never,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => "sc-lost",
     });
     await expect(
@@ -292,6 +300,7 @@ describeTrust("TRUST-67 — a resolution that moved before submit is refused, ne
       harnesses: at3.harnesses,
       resolveModelBinding: at3.resolveModelBinding,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       envelopes,
       newId: () => "sc-ambiguous",
     });

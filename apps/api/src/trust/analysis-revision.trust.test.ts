@@ -1,4 +1,4 @@
-import { ScorecardService, analysisRevisionKey } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService, analysisRevisionKey } from "@everdict/application-control";
 import type { JudgeSpec } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
@@ -60,6 +60,7 @@ describeTrust("TRUST-41 — per-revision analysis artifacts are distinct, immuta
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: {

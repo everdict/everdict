@@ -1,3 +1,4 @@
+import { InMemoryCaseReceiptStore } from "@everdict/application-control";
 import type { CaseResult, JudgeSpec, RunRecord, Score, ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
@@ -208,6 +209,7 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
         },
       },
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
     };
     const svc = new ScorecardScoreService(deps, {
       newId: () => "id-1",

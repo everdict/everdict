@@ -1,4 +1,9 @@
-import { type DatasetRegistry, type JudgeRegistry, ScorecardService } from "@everdict/application-control";
+import {
+  type DatasetRegistry,
+  InMemoryCaseReceiptStore,
+  type JudgeRegistry,
+  ScorecardService,
+} from "@everdict/application-control";
 import type { JudgeSpec, RunRecord, Score, ScorecardRecord, ScoringPass } from "@everdict/contracts";
 import { PgRunStore, PgScorecardStore, PgScoringStageStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -154,6 +159,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
       },
       store: cards,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       // Two-method stand-ins for the registries: only `get`/`versions` are on this path, and the scenario is
       // about arbitration rather than resolution. The dataset get THROWS on purpose — `effectiveDataset` falls
       // back to shell cases, which is the state a re-score of an already-run batch is in anyway.

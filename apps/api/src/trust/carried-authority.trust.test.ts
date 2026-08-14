@@ -1,5 +1,6 @@
 import {
   type DriverAuthority,
+  InMemoryCaseReceiptStore,
   type ReplicaRegistry,
   ScorecardService,
   recoverInterrupted,
@@ -69,7 +70,15 @@ async function build(dispatch: (job: CaseJob) => Promise<CaseResult>) {
   const harnesses = new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry());
   const store = new InMemoryScorecardStore();
   const runStore = new InMemoryRunStore();
-  const service = new ScorecardService({ dispatcher: { dispatch }, store, runStore, datasets, harnesses });
+  const service = new ScorecardService({
+    dispatcher: { dispatch },
+    store,
+    runStore,
+    // A run store's cases commit through a receipt — that is what makes one of several attempts the answer.
+    caseReceipts: new InMemoryCaseReceiptStore(),
+    datasets,
+    harnesses,
+  });
   return { service, store, runStore };
 }
 
@@ -295,6 +304,7 @@ describeTrust("TRUST-149 — a child is terminal only once its judges have lande
       dispatcher: { dispatch: async (job: CaseJob) => result(job.evalCase.id) },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       // The judge that has not answered yet — the whole window this scenario is about.
@@ -544,6 +554,7 @@ describeTrust("TRUST-152 — a driver displaced mid-case publishes no evidence f
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       trajectories,
       datasets,
       harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
@@ -907,6 +918,7 @@ describeTrust("TRUST-156 — a losing driver cannot amend the winner's child res
       },
       store: scorecards,
       runStore: store,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets: new InMemoryDatasetRegistry(),
     } as never);
     // The private write-back, reached the way the failure path reaches it.
@@ -1017,6 +1029,7 @@ describeTrust("TRUST-158 — a terminal child carries its assembled evidence, no
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       recordingStore: recordings,
       datasets,
       harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
@@ -1080,6 +1093,7 @@ describeTrust("TRUST-159 — a case that could not be written refuses the batch"
       dispatcher: { dispatch: async (job: CaseJob) => result(job.evalCase.id) },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
     } as never);
