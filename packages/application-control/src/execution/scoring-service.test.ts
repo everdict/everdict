@@ -95,6 +95,50 @@ describe("ScoringService — applyJudgesToCase", () => {
     // The verdict still lands on the result.
     expect(result.scores.map((s) => s.metric)).toEqual(["judge:quality"]);
   });
+
+  it("a PRIOR judgment's judge:* spans never re-enter the next judge's input — a re-score cannot read revision N-1's verdict (arch-review 41 P0-verdict)", async () => {
+    // Given a stored trace that already carries a prior pass's judgment evidence (the drain above put it
+    // there). A re-score rebuilds its context from this stored trace — pre-fix, only `infra` was filtered,
+    // so the new judge read the old judge's verdict text as if the agent had said it.
+    const seen: GradeContext[] = [];
+    const service = new ScoringService({
+      judgeRunner: {
+        async run(_spec, _tenant, ctx) {
+          seen.push(ctx);
+          return [
+            {
+              graderId: "judge",
+              metric: "judge:quality",
+              value: 0,
+              pass: false,
+              traceEvents: [{ t: 50, kind: "span", name: "judge:quality:verdict", attributes: { text: "FAIL" } }],
+            },
+          ];
+        },
+      },
+    });
+    const result: CaseResult = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [
+        { t: 0, kind: "message", role: "assistant", text: "done" },
+        { t: 5, kind: "span", name: "checkout", attributes: {} }, // the agent's OWN structural span stays
+        { t: 9, kind: "span", name: "judge:quality:llm_call", attributes: { model: "m" } },
+        { t: 9, kind: "span", name: "judge:quality:verdict", attributes: { text: "PASS — clearly correct" } },
+      ],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+    };
+    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
+
+    // The judge saw the execution only: the agent's message + its own span — no prior judge:* span.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.trace.map((e) => (e.kind === "span" ? e.name : e.kind))).toEqual(["message", "checkout"]);
+    // The prior evidence is NOT erased from the stored trace (it is the record of revision N-1)…
+    const judgeSpans = result.trace.filter((e) => e.kind === "span" && e.name.startsWith("judge:"));
+    // …and the new pass appended its own verdict beside it (2 prior + 1 new).
+    expect(judgeSpans).toHaveLength(3);
+  });
 });
 
 describe("ScoringService — a SELECTED judge that cannot be resolved stays visible", () => {

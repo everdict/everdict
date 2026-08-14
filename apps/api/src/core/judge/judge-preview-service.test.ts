@@ -19,6 +19,24 @@ const CODE_JUDGE: Extract<JudgeSpec, { kind: "code" }> = {
 const SAMPLE_TRACE: TraceEvent[] = [{ t: 0, kind: "message", role: "assistant", text: "done" }];
 const TRACE_EVIDENCE = { source: "trace" as const, trace: SAMPLE_TRACE };
 
+describe("gradeContextFromTrace — the preview judges the SAME projection a real grade constructs", () => {
+  it("a pasted trace's infra plane and prior judge:* spans are excluded — a preview cannot show what a real grade would not (arch-review 41 P0-verdict)", async () => {
+    // A pasted trace is often copied straight from an already-judged case: it carries the prior pass's
+    // judge:<id>:verdict span. Pre-fix the preview handed it to the rubric author's calibration verbatim.
+    const { gradeContextFromTrace } = await import("./judge-preview-service.js");
+    const ctx = gradeContextFromTrace({
+      source: "trace",
+      trace: [
+        { t: 0, kind: "message", role: "assistant", text: "done" },
+        { t: 1, kind: "infra", scope: "placement", event: "accepted", message: "accepted" },
+        { t: 2, kind: "span", name: "checkout", attributes: {} },
+        { t: 3, kind: "span", name: "judge:quality:verdict", attributes: { text: "PASS" } },
+      ],
+    });
+    expect(ctx.trace.map((e) => (e.kind === "span" ? e.name : e.kind))).toEqual(["message", "checkout"]);
+  });
+});
+
 describe("JudgePreviewService — code judge dry-run promotion", () => {
   it("try(code) submits a REAL standalone run and returns its runId (no inline scores)", async () => {
     const submitCodeJudgeRun = vi.fn(async () => ({ id: "run-7" }));

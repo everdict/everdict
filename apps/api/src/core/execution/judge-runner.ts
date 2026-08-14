@@ -184,6 +184,9 @@ async function reportJudgeExecution(
     runId?: string;
     billing?: CaseResult;
     publishWhen?: () => Promise<boolean>;
+    // The judgment pass this execution belongs to — scopes the sealed emitter so a re-score's evidence is a
+    // NEW plane instead of a dropped second seal (arch-review 41 P0-audit). Absent = the initial pass.
+    scoringPass?: string;
   },
 ): Promise<void> {
   if (input.events.length === 0) return;
@@ -219,7 +222,10 @@ async function reportJudgeExecution(
         runId: input.runId,
         tenant: input.tenant,
         source: "run",
-        emitter: `judge:${input.spec.id}`,
+        // Pass-scoped for a re-score: the trajectory keeps the FIRST segment per (runId, emitter), so the
+        // bare name would silently drop every revision after the first — current score from revision N,
+        // evidence forever from revision 1.
+        emitter: `judge:${input.spec.id}${input.scoringPass !== undefined ? `#${input.scoringPass}` : ""}`,
         events: input.events,
         t0: input.t0,
       })
@@ -449,6 +455,7 @@ async function runCodeJudge(
   submittedBy?: string,
   runId?: string,
   publishWhen?: () => Promise<boolean>,
+  scoringPass?: string,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -475,6 +482,7 @@ async function runCodeJudge(
       t0: startedAt,
       ...(runId !== undefined ? { runId } : {}),
       ...(publishWhen ? { publishWhen } : {}),
+      ...(scoringPass !== undefined ? { scoringPass } : {}),
       billing: result,
     });
     if (result.failure) {
@@ -497,7 +505,7 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen) {
+    async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen, scoringPass) {
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
@@ -528,7 +536,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       }
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
       if (spec.kind === "code")
-        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen);
+        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen, scoringPass);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
@@ -724,6 +732,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           t0: judgeStartedAt,
           ...(runId !== undefined ? { runId } : {}),
           ...(publishWhen ? { publishWhen } : {}),
+          ...(scoringPass !== undefined ? { scoringPass } : {}),
           ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
         });
       }

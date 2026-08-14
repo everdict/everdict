@@ -104,7 +104,7 @@ export {
 } from "./scorecard/verdict-policy.js";
 export { contentDigest, digestHex, digestUnder, digestsMatch } from "./provenance/content-digest.js";
 export { caseResultDigest } from "./scorecard/case-result-digest.js";
-export { judgeExecutionSpans } from "./scorecard/judge-execution-spans.js";
+export { executionEvidenceTrace, judgeExecutionSpans } from "./scorecard/judge-execution-spans.js";
 export { type EvidenceStatus, evidenceStatus } from "./scorecard/evidence-status.js";
 export {
   benjaminiHochberg,

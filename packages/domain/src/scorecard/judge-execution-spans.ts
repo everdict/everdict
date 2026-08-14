@@ -7,6 +7,19 @@ import type { TraceEvent } from "@everdict/contracts";
 // so a judge's tokens recorded as one would bill the judged agent for the judgment. And deliberately
 // re-timed by the CALLER to the trace's last instant, so the latency grader (which reads first/last `t`
 // regardless of kind) measures the same execution before and after the judgment's evidence is attached.
+// ── THE INVERSE: WHAT A JUDGE IS ALLOWED TO SEE (arch-review 41 P0-verdict) ──────────────────────────
+//
+// The spans minted above are retained on the judged case's trace as EVIDENCE OF THE JUDGMENT — but they
+// must never become evidence FOR the next judgment. A re-score rebuilds its grading context from the
+// stored trace, so without this projection revision 2's judge reads revision 1's verdict text as if the
+// agent had said it (anchoring / self-confirmation across the time axis). Co-located with the minter so
+// the `judge:<id>:` naming convention and its filter can never drift apart. Every construction of a
+// judge/grader input from a stored trace MUST go through this — the infra plane is execution machinery,
+// the judge:* plane is prior judgment; neither is the agent's own work.
+export function executionEvidenceTrace(trace: TraceEvent[]): TraceEvent[] {
+  return trace.filter((e) => e.kind !== "infra" && !(e.kind === "span" && e.name.startsWith("judge:")));
+}
+
 export function judgeExecutionSpans(judgeId: string, events: TraceEvent[]): TraceEvent[] {
   const spans: TraceEvent[] = [];
   for (const e of events) {

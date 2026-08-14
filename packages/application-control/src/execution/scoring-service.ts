@@ -9,7 +9,13 @@ import type {
   Score,
   SealedJudgeEntry,
 } from "@everdict/contracts";
-import { contentDigest, judgeGradeable, modelBindingLabel, pinnedDocumentMismatch } from "@everdict/domain";
+import {
+  contentDigest,
+  executionEvidenceTrace,
+  judgeGradeable,
+  modelBindingLabel,
+  pinnedDocumentMismatch,
+} from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
@@ -277,6 +283,9 @@ export class ScoringService {
     runId?: string, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
     // Asked immediately before that seal, never before the judge starts — see the port's note.
     publishWhen?: () => Promise<boolean>,
+    // The judgment pass this scoring belongs to — scopes the sealed evidence plane so a re-score's judge
+    // execution is not dropped by first-write-wins against revision 1's (arch-review 41 P0-audit).
+    scoringPass?: string,
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -286,14 +295,15 @@ export class ScoringService {
       ? { ...evalCase.placement, target: runtime }
       : evalCase.placement;
     // Pulled-trace evidence (mapping evidence slots) rides the CaseResult — carries custom template slots to the judge.
-    // The infra plane (placement lifecycle, roster, per-service log tails) is evidence about the EXECUTION, not the
-    // agent's work — the judge contract says it may be ignored, and the model judge serializes the trace verbatim
-    // into a char-capped prompt, so leaving it in would crowd the agent's own steps out of the judged window.
+    // The trace a judge sees is the canonical EXECUTION projection (executionEvidenceTrace): the infra plane is
+    // machinery, and a PRIOR judgment's own `judge:<id>:*` spans — retained on the stored trace as evidence OF
+    // that judgment — must never become evidence FOR this one. Without the projection a re-score's judge reads
+    // revision N-1's verdict text as if the agent had said it (arch-review 41 P0-verdict).
     const ctx: GradeContext = {
       case: evalCase,
       // One deadline for this scoring phase, bounded by the case's declared budget (arch-review 25 P1).
       deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
-      trace: result.trace.filter((e) => e.kind !== "infra"),
+      trace: executionEvidenceTrace(result.trace),
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
@@ -307,6 +317,7 @@ export class ScoringService {
         runId,
         judge.pins,
         publishWhen,
+        scoringPass,
       );
       // ── THE TRANSPORT SLOT IS DRAINED HERE (downstream report 1.1) ─────────────────────────────────
       //
@@ -345,6 +356,8 @@ export class ScoringService {
     sealed?: SealedJudgeClosure[],
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
     publishWhen?: () => Promise<boolean>,
+    // The judgment pass identity — see applyJudgesToCase; re-score callers pass their passId.
+    scoringPass?: string,
   ): Promise<JudgeStream> {
     const { specs, unresolved } = await this.resolveJudges(tenant, judges, sealed);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
@@ -381,7 +394,17 @@ export class ScoringService {
         result.scores.push(...unresolvedScores());
         const runId = runIdOf?.(result.caseId, result.trial);
         const task = limit(() =>
-          this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy, runId, publishWhen),
+          this.applyJudgesToCase(
+            tenant,
+            evalCase,
+            specs,
+            result,
+            runtime,
+            submittedBy,
+            runId,
+            publishWhen,
+            scoringPass,
+          ),
         ).catch((err) => {
           // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
           firstError ??= err;
@@ -410,6 +433,8 @@ export class ScoringService {
     sealed?: SealedJudgeClosure[],
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
     publishWhen?: () => Promise<boolean>,
+    // The judgment pass identity — see applyJudgesToCase; re-score callers pass their passId.
+    scoringPass?: string,
   ): Promise<void> {
     const stream = await this.createJudgeStream(
       tenant,
@@ -420,6 +445,7 @@ export class ScoringService {
       runIdOf,
       sealed,
       publishWhen,
+      scoringPass,
     );
     for (const result of results) stream.push(result);
     await stream.settle();

@@ -11,6 +11,7 @@ import {
   type TraceEvent,
   type TraceEvidence,
 } from "@everdict/contracts";
+import { executionEvidenceTrace } from "@everdict/domain";
 import {
   type EvidenceAssessment,
   type JudgePreview,
@@ -87,7 +88,9 @@ export function gradeContextFromTrace(evidence: Extract<JudgeEvidenceInput, { so
       tags: [],
       ...(evidence.expected ? { expected: evidence.expected } : {}),
     },
-    trace: evidence.trace,
+    // A pasted trace is often copied from an already-judged case — apply the same execution projection a
+    // real grade does, so the preview can never show a judge input a real grade would not construct.
+    trace: executionEvidenceTrace(evidence.trace),
     snapshot: evidence.snapshot ?? { kind: "prompt", output: "" },
     ...(evidence.traceEvidence ? { evidence: evidence.traceEvidence } : {}),
   };
@@ -119,7 +122,10 @@ export class JudgePreviewService {
       // Same: the preview's own interactive bound, not the case's execution window (which already happened).
       deadlineAt: Date.now() + 60_000,
       case: evalCase,
-      trace: record.result.trace,
+      // The SAME canonical projection a real grade applies (scoring-service): a stored trace carries the
+      // infra plane and prior judgments' judge:* spans — a preview that showed them would diverge from the
+      // real grade AND leak revision N-1's verdict into the rubric author's calibration.
+      trace: executionEvidenceTrace(record.result.trace),
       snapshot: record.result.snapshot,
       ...(record.result.evidence ? { evidence: record.result.evidence } : {}),
     };

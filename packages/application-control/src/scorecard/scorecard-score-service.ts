@@ -544,6 +544,10 @@ export class ScorecardScoreService {
       submittedBy,
       runIdOf,
       pass.judges,
+      undefined,
+      // The pass identity scopes each judge's sealed evidence plane (judge:<id>#<pass>) — without it the
+      // trajectory's first-write-wins dropped every re-score's judge execution (arch-review 41 P0-audit).
+      pass.passId,
     );
     // Count the attempt onto whatever this produced. A verdict ends the counting; another unmeasured row
     // carries prior+1, so a judge that keeps failing the same way exhausts its budget and the pass can end.
@@ -675,6 +679,8 @@ export class ScorecardScoreService {
         submittedBy,
         runIdOf,
         (fresh ?? record).scoringPass?.judges,
+        undefined,
+        pass.passId, // scope the judge evidence planes to THIS pass (arch-review 41 P0-audit)
       );
       await this.writeBackScores(record, results, pass, { judges });
       await this.aggregate(record, scorecard, results, judges, submittedBy, pass);

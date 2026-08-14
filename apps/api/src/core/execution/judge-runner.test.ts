@@ -777,6 +777,21 @@ describe("judge execution evidence + metering", () => {
     });
   });
 
+  it("a re-score's judge execution seals under a PASS-SCOPED emitter — first-write-wins cannot drop revision N's evidence (arch-review 41 P0-audit)", async () => {
+    // The trajectory ledger keeps the FIRST segment per (runId, emitter). The bare `judge:<id>` emitter is
+    // revision 1's plane; a re-score sealing under the same name was silently dropped — current score from
+    // revision N, evidence forever from revision 1. The pass identity makes each revision its own plane.
+    const deps = captureDeps();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: verdictWithUsage('{"pass":false,"score":0.2,"reason":"changed my mind"}') as typeof fetch,
+      ...deps,
+    });
+    await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, "pass-7");
+    expect(deps.seals).toHaveLength(1);
+    expect(deps.seals[0]?.emitter).toBe("judge:correctness#pass-7");
+  });
+
   it("model judge without a child run id: still metered, no evidence plane (nowhere to land)", async () => {
     const deps = captureDeps();
     const runner = defaultJudgeRunner({
