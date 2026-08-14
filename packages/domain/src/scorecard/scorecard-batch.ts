@@ -244,40 +244,30 @@ export class ScorecardBatch {
     return { cause, ...(record.createdBy ? { actor: record.createdBy } : {}) };
   }
 
-  // ── WHICH CHILD IS THE CASE'S ANSWER (review 39 P0) ────────────────────────────────────────────────
+  // ── WHICH CHILD IS THE CASE'S ANSWER (review 39 P0, Phase 4) ───────────────────────────────────────
   //
-  // Preferred over `latestChildPerCase` wherever receipts exist: the receipt records which attempt EARNED the
-  // commit (a database constraint decided it), while "latest updatedAt" answers which row was touched last —
-  // a late metadata write on a superseded attempt was enough to change the answer after the fact.
+  // The receipt, and nothing else. `latestChildPerCase` — the largest `updatedAt` — answered "which row was
+  // touched last" over rows that are all equally real, so a late metadata write on a superseded attempt could
+  // change a settled batch's canonical result after the fact. It survived one review as a per-case fallback;
+  // it is gone now, because a fallback that decides correctness is not a fallback, it is a second answer.
   //
-  // Falls back per case, not per batch: a batch that started before receipts existed, or a case whose commit
-  // predates them, still resolves the old way. Mixing them is deliberate — the alternative is to declare
-  // older batches unreadable, which is a worse answer to "who won" than the one they already have.
+  // A case with no receipt therefore has NO canonical child — which is exactly what the caller's missing-case
+  // check is for. That is self-healing rather than lossy: an unaccounted case fails the batch into a state
+  // recovery picks up, the re-drive commits a receipt, and the batch finalizes on the second pass. A batch
+  // that predates receipts entirely is already terminal, and nothing re-finalizes a terminal batch.
   static canonicalChildPerCase(
     children: RunRecord[],
     receipts: ReadonlyArray<{ caseId: string; childRunId: string }>,
   ): Map<string, RunRecord> {
     const byId = new Map(children.map((c) => [c.id, c]));
-    const canonical = ScorecardBatch.latestChildPerCase(children);
+    const canonical = new Map<string, RunRecord>();
     for (const receipt of receipts) {
       const committed = byId.get(receipt.childRunId);
-      // A receipt naming a child this batch cannot see is not a reason to drop the case — it is a
-      // disagreement, and the caller states it (see the parity check). Here the fallback stands.
+      // A receipt naming a child this batch cannot see is a disagreement the caller states (the parity
+      // check) — never a licence to pick some other row and call it the answer.
       if (committed) canonical.set(receipt.caseId, committed);
     }
     return canonical;
-  }
-
-  // Latest child per case — a batch resumed more than once has several children for a re-run case; the newest
-  // write wins. Keyed by caseId: child records don't persist a trial axis, and every caller path is single-trial
-  // by construction (resume refuses multi-trial batches; the Temporal driver never fans trials out).
-  static latestChildPerCase(children: RunRecord[]): Map<string, RunRecord> {
-    const latest = new Map<string, RunRecord>();
-    for (const c of children) {
-      const prev = latest.get(c.caseId);
-      if (!prev || c.updatedAt > prev.updatedAt) latest.set(c.caseId, c);
-    }
-    return latest;
   }
 
   // Terminal = the batch's outcome is settled; nothing may rewrite it (first terminal write wins).

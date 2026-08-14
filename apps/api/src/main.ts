@@ -731,7 +731,6 @@ async function main(): Promise<void> {
     ...(recordingStore ? { recordingStore } : {}),
     // A re-drive begins a new attempt; the recorder serving this process stamps it from here on, and the
     // store refuses the previous attempt's appends (mig 0173).
-    onAttempt: (runId, generation) => caseRecorder.serves(runId, generation),
   });
 
   const scorecardService = buildScorecard({
@@ -748,7 +747,6 @@ async function main(): Promise<void> {
     // The SAME handoff the standalone driver gets (mig 0173). It was wired there and not here, so a batch's
     // re-driven case raised the generation and then its producers went on stamping the old one — every
     // append refused, the recording silently empty. A fence only one caller knows about is an outage.
-    onAttempt: (executionId, generation) => caseRecorder.serves(executionId, generation),
     // Where a case's canonical outcome is decided (mig 0175) — claimed at the commit, compared against the
     // ledger at the finalize while both are written.
     caseReceipts: caseReceiptStore,
@@ -1151,8 +1149,10 @@ async function main(): Promise<void> {
           const rec = new CdpEnvironmentRecorder(
             cdpBase,
             {
-              track: (item) => void caseRecorder.recordTrack(runId, item),
-              frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
+              // A browser session records ONCE — it has a single attempt, and 0 is that attempt said out
+              // loud rather than left to a default somebody could change (review 39, Phase 4).
+              track: (item) => void caseRecorder.recordTrack(runId, item, 0),
+              frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64, 0),
             },
             { frames: true },
           );

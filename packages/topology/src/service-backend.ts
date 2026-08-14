@@ -123,7 +123,9 @@ export interface ServiceTopologyBackendOptions {
   // dispatch with the runId; returns undefined to skip recording for this run. The sink routes to the durable recorder:
   // self-hosted → report_case_track/report_case_screen MCP; managed → CaseRecorder.recordTrack/recordFrame. Absent = no
   // environment recording (trace-only replay, as before). Best-effort — a recorder failure never affects the run.
-  recordSink?: (runId: string) => EnvRecordSink | undefined;
+  // …and WHICH ATTEMPT the case is running under (review 39, Phase 4): the recorder is told rather than
+  // remembering, so a producer can never write into an attempt it does not belong to.
+  recordSink?: (runId: string, generation: number) => EnvRecordSink | undefined;
 }
 
 // Per-service log-tail cap for the sealed trajectory (half the failure-path FAILURE_LOG_TAIL_CAP) — the tail is
@@ -690,7 +692,8 @@ export class ServiceTopologyBackend
       // Start the environment recorder now the per-case browser is up — it runs IN PARALLEL with the agent (not on its
       // boundaries), taping the CDP event stream for the whole drive. Only when a browser target exposes a reachable CDP
       // AND a record sink is configured. Best-effort: a start failure leaves an empty environment plane, never a failed run.
-      const sink = target?.cdpBase && this.opts.recordSink ? this.opts.recordSink(runId) : undefined;
+      const sink =
+        target?.cdpBase && this.opts.recordSink ? this.opts.recordSink(runId, job.recordingGeneration ?? 0) : undefined;
       if (target?.cdpBase && sink) {
         const rec = new CdpEnvironmentRecorder(target.cdpBase, sink, { frames: Boolean(sink.frame) });
         try {

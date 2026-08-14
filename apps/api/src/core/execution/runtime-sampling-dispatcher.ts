@@ -17,7 +17,8 @@ export class RuntimeSamplingDispatcher implements Dispatcher {
       // Resolve the job's runtime target to a live backend and read one sample (undefined = no live alloc / unsupported).
       sample: (tenant: string, target: string, caseId: string) => Promise<CaseRuntimeSample | undefined>;
       // Append onto the recording (CaseRecorder.recordTrack — best-effort by contract).
-      record: (runId: string, item: TrackEntry) => void;
+      // …and WHICH ATTEMPT the sample belongs to: the job says, because nothing else can (review 39, Phase 4).
+      record: (runId: string, item: TrackEntry, generation: number) => void;
       intervalMs?: number;
       now?: () => number; // test injection — the sample stamp
     },
@@ -36,7 +37,7 @@ export class RuntimeSamplingDispatcher implements Dispatcher {
         .sample(job.tenant ?? "default", target, job.evalCase.id)
         .then((sample) => {
           if (sample && (sample.cpuPct !== undefined || sample.memBytes !== undefined))
-            this.opts.record(runId, { track: "runtime", entry: { t: now(), ...sample } });
+            this.opts.record(runId, { track: "runtime", entry: { t: now(), ...sample } }, job.recordingGeneration ?? 0);
         })
         .catch(() => undefined)
         .finally(() => {

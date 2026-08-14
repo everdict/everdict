@@ -2233,6 +2233,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       dispatcher: okDispatch,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = submitted-fact event id (E0), sc-2 = child run of case c1
     });
@@ -2280,7 +2281,13 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
         now: "2026-07-30T00:00:00.000Z",
       }),
     );
-    const service = new ScorecardService({ dispatcher: okDispatch, store, runStore, datasets });
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      datasets,
+    });
     const rec = await service.submit({
       tenant: "acme",
       submittedBy: "alice",
@@ -2319,9 +2326,8 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       recordingStore,
-      // Wiring a recording store without this is refused at construction: an unnamed attempt records nothing.
-      onAttempt: () => {},
       datasets,
       newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = submitted-fact event id (E0), sc-2 = child run of case c1
     });
@@ -2362,6 +2368,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       dispatcher: dispatchPass(true),
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       newId: () => `b-${bn++}`,
     });
@@ -2371,6 +2378,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       dispatcher: dispatchPass(false),
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       newId: () => `c-${cn++}`,
     });
@@ -2858,9 +2866,46 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     const store = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     const datasets = new InMemoryDatasetRegistry();
+    const receipts = new InMemoryCaseReceiptStore();
     let n = 0;
-    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => `t-${n++}` });
-    return { store, runs, datasets, service };
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      caseReceipts: receipts,
+      newId: () => `t-${n++}`,
+    });
+    return { store, runs, datasets, receipts, service };
+  }
+
+  // A child that a previous run SETTLED — which, since the commit point exists, means a receipt naming it.
+  // Seeding the row alone would describe a state production can no longer produce: a terminal child no
+  // attempt ever committed.
+  async function seedCommitted(
+    runs: InMemoryRunStore,
+    receipts: InMemoryCaseReceiptStore,
+    child: { id: string; caseId: string; scorecardId: string; result: CaseResult },
+  ): Promise<void> {
+    await runs.create({
+      id: child.id,
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: child.caseId,
+      status: "succeeded",
+      result: child.result,
+      parentScorecardId: child.scorecardId,
+      createdAt: "2026-07-08T00:00:01.000Z",
+      updatedAt: "2026-07-08T00:00:02.000Z",
+    } as never);
+    await receipts.commit({
+      scorecardId: child.scorecardId,
+      caseId: child.caseId,
+      trial: 0,
+      childRunId: child.id,
+      resultDigest: "seeded",
+      committedAt: "2026-07-08T00:00:02.000Z",
+    });
   }
   const record = () => ({
     id: "sc-t",
@@ -2905,6 +2950,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
       store,
       datasets,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => `t-${n++}`,
     });
     await datasets.register("acme", threeCases);
@@ -2989,20 +3035,10 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
         return ok(job.evalCase.id);
       },
     };
-    const { store, runs, service, datasets } = wire(dispatcher);
+    const { store, runs, receipts, service, datasets } = wire(dispatcher);
     await datasets.register("acme", threeCases);
     await store.create(record());
-    await runs.create({
-      id: "done-c2",
-      tenant: "acme",
-      harness: { id: "h", version: "1" },
-      caseId: "c2",
-      status: "succeeded",
-      result: ok("c2"),
-      parentScorecardId: "sc-t",
-      createdAt: "2026-07-08T00:00:01.000Z",
-      updatedAt: "2026-07-08T00:00:02.000Z",
-    });
+    await seedCommitted(runs, receipts, { id: "done-c2", caseId: "c2", scorecardId: "sc-t", result: ok("c2") });
     const plan = await service.planBatch("sc-t");
     expect(plan.caseIds).toEqual(["c1", "c3"]);
   });
@@ -3111,16 +3147,30 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const store = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     const datasets = new InMemoryDatasetRegistry();
+    const receipts = new InMemoryCaseReceiptStore();
     let n = 0;
     const service = new ScorecardService({
       dispatcher,
       store,
       datasets,
       runStore: runs,
+      caseReceipts: receipts,
       newId: () => `id-${n++}`,
     });
-    return { store, runs, datasets, service };
+    return { store, runs, datasets, receipts, service };
   }
+
+  // A child a previous run SETTLED carries a receipt: the commit point is what made it terminal. A fixture
+  // with the row alone describes a state production can no longer produce.
+  const commitFor = (receipts: InMemoryCaseReceiptStore, scorecardId: string, caseId: string, childRunId: string) =>
+    receipts.commit({
+      scorecardId,
+      caseId,
+      trial: 0,
+      childRunId,
+      resultDigest: "seeded",
+      committedAt: "2026-07-08T00:00:02.000Z",
+    });
 
   it('runtime:"auto" expands to every registered runtime and shards; empty registry is a 400', async () => {
     const seen: string[] = [];
@@ -3212,9 +3262,10 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
 
   it("resume keeps the finished children and re-dispatches only the unfinished cases", async () => {
     const { dispatched, dispatcher } = capturingDispatcher();
-    const { store, runs, datasets, service } = build(dispatcher);
+    const { store, runs, datasets, receipts, service } = build(dispatcher);
     await datasets.register("acme", threeCaseDataset);
-    // An interrupted batch: c1 finished (child with result), c2 was mid-flight when the process died, c3 never started.
+    // An interrupted batch: c1 finished (child with result AND the receipt that made it terminal), c2 was
+    // mid-flight when the process died, c3 never started.
     await store.create({
       id: "sc-int",
       tenant: "acme",
@@ -3237,6 +3288,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       createdAt: "2026-07-08T00:00:01.000Z",
       updatedAt: "2026-07-08T00:00:02.000Z",
     });
+    await commitFor(receipts, "sc-int", "c1", "child-c1");
     await runs.create({
       id: "child-c2",
       tenant: "acme",
@@ -3274,6 +3326,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       store,
       datasets,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => `ad-${n++}`,
       // The runtime still runs the job the dead control plane submitted — harvest it.
       adoptCase: async (_tenant, _runtime, caseId) => {
@@ -3679,6 +3732,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       store,
       datasets,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => `tp-${n++}`,
       temporalBatches: {
         workflowIdFor: (id) => `everdict-batch-${id}`,
@@ -3768,7 +3822,14 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", threeCaseDataset);
     let n = 0;
-    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => `est-${n++}` });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      newId: () => `est-${n++}`,
+    });
 
     // No history yet — honest empty (a guess would be worse than nothing).
     expect(await service.estimate({ tenant: "acme", dataset: "rd", harness: "h" })).toEqual({
@@ -3823,7 +3884,14 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const runs = new InMemoryRunStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", threeCaseDataset);
-    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => "eta-1" });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      newId: () => "eta-1",
+    });
     await store.create({
       id: "sc-eta",
       tenant: "acme",
@@ -3912,6 +3980,7 @@ describe("ScorecardService.submit — N-trial (pass@k / flakiness)", () => {
       store,
       datasets,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => `id-${n++}`,
     });
 
@@ -3959,6 +4028,7 @@ describe("ScorecardService.submit — N-trial (pass@k / flakiness)", () => {
       store,
       datasets,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => `id-${n++}`,
     });
 
@@ -4505,7 +4575,13 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
-    const service = new ScorecardService({ dispatcher, store, datasets, runStore: new InMemoryRunStore() });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: new InMemoryRunStore(),
+      caseReceipts: new InMemoryCaseReceiptStore(),
+    });
     await store.create({
       id: "sc-plan-sup",
       tenant: "acme",
@@ -4529,11 +4605,13 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const completed: string[] = [];
+    const receipts = new InMemoryCaseReceiptStore();
     const service = new ScorecardService({
       dispatcher,
       store,
       datasets,
       runStore: runs,
+      caseReceipts: receipts,
       onComplete: async (_tenant, rec) => {
         completed.push(rec.id);
       },
@@ -4560,6 +4638,16 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       parentScorecardId: "sc-fin-sup",
       createdAt: "2026-07-10T00:00:01.000Z",
       updatedAt: "2026-07-10T00:00:02.000Z",
+    });
+    // A settled child carries the receipt that made it terminal — the commit point is what a case's answer
+    // IS now, so a row without one describes a state production cannot produce.
+    await receipts.commit({
+      scorecardId: "sc-fin-sup",
+      caseId: "c1",
+      trial: 0,
+      childRunId: "child-c1",
+      resultDigest: "seeded",
+      committedAt: "2026-07-10T00:00:02.000Z",
     });
 
     await service.finalizeBatch("sc-fin-sup");
@@ -4633,6 +4721,7 @@ describe("ScorecardService.cancel — user stop", () => {
       dispatcher,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets: new InMemoryDatasetRegistry(),
       killCase: async (_tenant, runtime, caseId) => {
         killed.push({ runtime, caseId });
@@ -4683,6 +4772,7 @@ describe("ScorecardService.cancel — user stop", () => {
       dispatcher,
       store,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets: new InMemoryDatasetRegistry(),
     });
 
@@ -4734,6 +4824,7 @@ describe("ScorecardService.cancel — user stop", () => {
       store,
       datasets,
       runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       newId: () => (n++ === 0 ? "sc-late" : `id-${n}`),
     });
     await service.submit({
@@ -4763,7 +4854,13 @@ describe("ScorecardService.cancel — user stop", () => {
     const runs = new InMemoryRunStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
-    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+    });
     await store.create({
       id: "sc-can-act",
       tenant: "acme",
@@ -4812,7 +4909,13 @@ describe("ScorecardService.delete — hard delete (creator-or-admin, terminal on
     await runStore.create(childRun("c1", "sc-1"));
     await runStore.create(childRun("c2", "sc-1"));
     await runStore.create(childRun("c3", "sc-other")); // another batch's child survives
-    const service = new ScorecardService({ dispatcher, store, runStore, datasets: new InMemoryDatasetRegistry() });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      datasets: new InMemoryDatasetRegistry(),
+    });
 
     const res = await service.delete({ principal: principal(["member"]), id: "sc-1" });
 
@@ -5047,7 +5150,14 @@ describe("ScorecardService — the P4 causal admission leg (envelope 402 + draw-
     await runStore.create(agentRun());
     const envelopes = new InMemoryEnvelopeStore();
     const store = new InMemoryScorecardStore();
-    const service = new ScorecardService({ dispatcher: paidDispatch, store, runStore, datasets, envelopes });
+    const service = new ScorecardService({
+      dispatcher: paidDispatch,
+      store,
+      runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      datasets,
+      envelopes,
+    });
     const rec = await service.submit({
       tenant: "acme",
       submittedBy: "alice",
@@ -5074,6 +5184,7 @@ describe("ScorecardService — the P4 causal admission leg (envelope 402 + draw-
       dispatcher: paidDispatch,
       store: new InMemoryScorecardStore(),
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       envelopes,
     });
@@ -5132,6 +5243,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
       dispatcher: ungraded,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: passRunner,
@@ -5176,6 +5288,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
       dispatcher: ungraded,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: passRunner,
@@ -5212,6 +5325,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
       dispatcher: ungraded,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: runner,
@@ -5285,6 +5399,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
       dispatcher: ungraded,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: countingRunner,
@@ -5353,6 +5468,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
       dispatcher: ungraded,
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: passRunner,
@@ -6368,6 +6484,7 @@ describe("Scoring identity — the revision ledger records the PASS-START seal (
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: {
@@ -6444,6 +6561,7 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
       },
       store,
       runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
       datasets,
       judges,
       judgeRunner: {

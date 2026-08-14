@@ -451,21 +451,18 @@ describeTrust("TRUST-151 — a re-driven run's replay is its own attempt, not th
     await recordings.append("evd-run-r-redrive", { track: "frames", entry: { t: 1_100, ref: "a://1", hash: "h1" } }, 0);
 
     let dispatched = 0;
-    let attemptB = 0;
     const service = new RunService({
       store,
       recordingStore: recordings,
-      onAttempt: (_runId: string, generation: number) => {
-        attemptB = generation;
-      },
       dispatcher: {
         async dispatch(job: CaseJob) {
           dispatched += 1;
           await recordings.append(
             "evd-run-r-redrive",
             { track: "logs", entry: { t: 5_000, stream: "stdout", text: "attempt B" } },
-            // The generation the re-drive opened — what `onAttempt` hands this process's recorder.
-            attemptB,
+            // The generation the re-drive opened, READ OFF THE JOB (review 39, Phase 4) — the producer is
+            // handed its attempt rather than a process being told to remember one on its behalf.
+            job.recordingGeneration ?? 0,
           );
           return result(job.evalCase.id);
         },
@@ -1021,7 +1018,6 @@ describeTrust("TRUST-158 — a terminal child carries its assembled evidence, no
       store,
       runStore,
       recordingStore: recordings,
-      onAttempt: () => {},
       datasets,
       harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
     } as never);

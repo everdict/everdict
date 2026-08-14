@@ -51,7 +51,7 @@ export function buildTopologyEnvironment(
     // Replay environment plane (docs/architecture/replay.md ②) — a per-run sink the CDP recorder streams the browser's
     // network/console/nav (+ frames) into. For the managed backend this routes straight to the in-process CaseRecorder
     // (recordTrack/recordFrame → the durable RecordingStore). Undefined = no environment recording (trace-only replay).
-    recordSink?: (runId: string) => EnvRecordSink | undefined;
+    recordSink?: (runId: string, generation: number) => EnvRecordSink | undefined;
     // Per-tenant isolation, when the operator configured a policy: the topology's warm pool is keyed BY zone
     // (so two tenants never share a pool) and each service runs under the zone's runtime + namespace.
     trustZones?: TrustZonePolicy;

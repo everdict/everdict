@@ -39,20 +39,33 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
     const authorize = async (
       key: SelfHostedKey,
       input: Reported,
-    ): Promise<{ runId: string; durable: boolean; generation?: number; reason?: string }> => {
+    ): Promise<{ runId: string; durable: boolean; generation: number; reason?: string }> => {
+      // 0 is "no attempt was opened", which no store accepts — the live view still works, the durable half
+      // does not, and every branch below reads `durable` rather than guessing from the number.
       if (input.jobId === undefined || input.leaseEpoch === undefined)
-        return { runId: input.runId, durable: false, reason: "no attempt token (update the runner)" };
+        return { runId: input.runId, durable: false, generation: 0, reason: "no attempt token (update the runner)" };
       const authority = await hub.authorizeAttempt(key, { jobId: input.jobId, leaseEpoch: input.leaseEpoch });
-      if (!authority) return { runId: input.runId, durable: false, reason: "the attempt token is not a current lease" };
+      if (!authority)
+        return {
+          runId: input.runId,
+          durable: false,
+          generation: 0,
+          reason: "the attempt token is not a current lease",
+        };
       // The lease decides which run this is about. A job with no runId (a dispatch that minted none) has no
       // durable destination either — there is nothing for the evidence to belong to.
-      if (!authority.runId) return { runId: input.runId, durable: false, reason: "this job carries no run id" };
-      // …and which ATTEMPT's recording it may write into. The number rode in on the job this runner leased.
-      return {
-        runId: authority.runId,
-        durable: true,
-        ...(authority.recordingGeneration !== undefined ? { generation: authority.recordingGeneration } : {}),
-      };
+      if (!authority.runId)
+        return { runId: input.runId, durable: false, generation: 0, reason: "this job carries no run id" };
+      // …and which ATTEMPT's recording it may write into. The number rode in on the job this runner leased;
+      // a job dispatched without one opened no attempt, so there is nothing durable to write either.
+      if (authority.recordingGeneration === undefined)
+        return {
+          runId: authority.runId,
+          durable: false,
+          generation: 0,
+          reason: "this job opened no recording attempt",
+        };
+      return { runId: authority.runId, durable: true, generation: authority.recordingGeneration };
     };
 
     server.registerTool(

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ArtifactStore, RecordingStore } from "@everdict/application-control";
+import { attemptIdOf } from "@everdict/contracts";
 import type { TrackEntry } from "@everdict/contracts";
 
 // The durable twin of LiveFrameStore/LiveLogStore. As a self-hosted runner pushes frames/logs
@@ -8,24 +9,21 @@ import type { TrackEntry } from "@everdict/contracts";
 // the RecordingStore, and consecutive-identical frames reuse one offloaded object (a still screen is deduped).
 // Best-effort throughout — a recording failure must never affect the run. Sealing happens at run finalize
 // (RunService), not here. docs/architecture/replay.md D3.
+//
+// ── THE ATTEMPT IS AN ARGUMENT, NOT A MEMORY (review 39, Phase 4) ────────────────────────────────────
+//
+// This class used to hold a map of "which attempt I am recording for this run", filled by a `serves()` call
+// from whichever code path opened the attempt. That map WAS the fence's authority in practice: a producer in
+// another process sent no generation at all, and this process stamped whatever its own map happened to say —
+// so a stale attempt's frames were re-labelled as its successor's, and two replicas disagreed about the same
+// report depending on which one received it.
+//
+// The generation now travels with the work (CaseJob.recordingGeneration → the leased job → the authorized
+// report), so every caller HAS it and the parameter is required. A recorder that cannot be told which attempt
+// it serves is a recorder that must not write, and the type says so.
 export class CaseRecorder {
   private readonly lastFrame = new Map<string, { hash: string; ref: string }>();
-  // WHICH ATTEMPT THIS PROCESS IS RECORDING (mig 0173). A re-driven run keeps its correlation id — that is
-  // what lets an observer find it without a lookup — so two attempts write into one buffer, and clearing the
-  // buffer on re-drive removes history without revoking the recorder that has not noticed it was replaced.
-  // The generation is stamped on every append, and the store refuses one from an earlier attempt.
-  //
-  // Unset for a run this process was never told about — which reads as 0, the generation a recording starts
-  // at. It used to read as "no generation", and the store waved that through: the producer that matters most
-  // (the FIRST attempt's, the one that pauses and comes back) had never been told a number, so the fence let
-  // it write into its successor's recording. A default is not the same as an exemption (arch-review 37 P0).
-  private readonly attempt = new Map<string, number>();
 
-  // The re-drive tells the recorder which attempt it is now serving; the value comes from the reset that
-  // began it, so a recorder cannot invent one.
-  serves(runId: string, generation: number): void {
-    this.attempt.set(runId, generation);
-  }
   constructor(
     private readonly recordings: RecordingStore,
     // Optional: frames need an object store to offload. Without one, logs still record (they carry no bytes).
@@ -33,11 +31,7 @@ export class CaseRecorder {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  // `generation` is the attempt the CALLER was authorized under (the number that rode in on the leased job).
-  // Passing it is what makes a cross-process producer stamp its own attempt instead of this process's guess;
-  // the in-process managed path omits it and uses the map, which is correct there because the process that
-  // opened the attempt is the one recording.
-  async recordFrame(runId: string, frameBase64: string, generation?: number): Promise<void> {
+  async recordFrame(runId: string, frameBase64: string, generation: number): Promise<void> {
     const artifacts = this.artifacts;
     if (!artifacts) return; // frames need an object store to offload; without one, skip them (logs still record)
     try {
@@ -48,25 +42,28 @@ export class CaseRecorder {
       if (prev && prev.hash === hash) {
         ref = prev.ref; // consecutive-identical frame → reuse the offloaded object (dedup a static screen)
       } else {
-        ref = await artifacts.put(`recordings/${runId}/${t}.png`, Buffer.from(frameBase64, "base64"), "image/png");
+        // …under the ATTEMPT's key (review 39, Phase 4). `recordings/<runId>/…` is one namespace for every
+        // execution of a run, and an object store has no compare-and-set: two attempts writing a frame at the
+        // same millisecond would leave one's bytes under the other's reference.
+        ref = await artifacts.put(
+          `attempts/${attemptIdOf(runId, generation)}/frames/${t}.png`,
+          Buffer.from(frameBase64, "base64"),
+          "image/png",
+        );
         this.lastFrame.set(runId, { hash, ref });
       }
-      await this.recordings.append(
-        runId,
-        { track: "frames", entry: { t, ref, hash } },
-        generation ?? this.attempt.get(runId) ?? 0,
-      );
+      await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, generation);
     } catch {
       // best-effort — a recording failure must never affect the run
     }
   }
 
-  async recordLog(runId: string, line: string, generation?: number): Promise<void> {
+  async recordLog(runId: string, line: string, generation: number): Promise<void> {
     try {
       await this.recordings.append(
         runId,
         { track: "logs", entry: { t: this.now(), stream: "stdout", text: line } },
-        generation ?? this.attempt.get(runId) ?? 0,
+        generation,
       );
     } catch {
       // best-effort
@@ -76,9 +73,9 @@ export class CaseRecorder {
   // Append a pre-prepared deep-capture entry (network/console/nav/dom/stateDeltas/runtime/custom). Byte-heavy
   // entries (dom-event batches) carry an object-store ref the PRODUCER already offloaded, so this is a pure
   // append — the deep-track twin of recordFrame (which offloads a raw frame). Frames still go through recordFrame.
-  async recordTrack(runId: string, item: TrackEntry, generation?: number): Promise<void> {
+  async recordTrack(runId: string, item: TrackEntry, generation: number): Promise<void> {
     try {
-      await this.recordings.append(runId, item, generation ?? this.attempt.get(runId) ?? 0);
+      await this.recordings.append(runId, item, generation);
     } catch {
       // best-effort — a recording failure must never affect the run
     }

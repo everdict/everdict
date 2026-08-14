@@ -261,9 +261,6 @@ export interface RunServiceDeps {
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // for the webhook (test injection)
-  // "this process now records attempt N for this run" — the composition hands it to the CaseRecorder, which
-  // stamps it on every append so the store can refuse the previous attempt's producer (mig 0173).
-  onAttempt?: (runId: string, generation: number) => void;
 }
 
 // Price the model calls of a reported trace before it is sealed. The agent counts tokens (it is the only one
@@ -812,8 +809,7 @@ export class RunService {
     const runId = RunService.runIdFor(record);
     const attempt = await this.deps.recordingStore?.reset(runId).catch(() => undefined);
     if (attempt !== undefined) {
-      this.attempt.set(runId, attempt);
-      this.deps.onAttempt?.(runId, attempt);
+      this.attempt.set(runId, attempt); // …and it rides onto the job below (CaseJob.recordingGeneration)
     }
     void this.track(
       record.id,

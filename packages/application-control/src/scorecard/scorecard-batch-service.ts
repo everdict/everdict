@@ -147,17 +147,17 @@ export class ScorecardBatchService {
     this.breaker = shared.breaker;
     this.inFlight = shared.inFlight;
     this.getRecord = shared.getRecord;
-    // ── A FENCE NOBODY IS TOLD ABOUT REFUSES EVERYONE ────────────────────────────────────────────────
+    // ── A LEDGER WITH NO COMMIT POINT CANNOT SAY WHICH ATTEMPT ANSWERED (review 39, Phase 4) ─────────
     //
-    // Every dispatch now opens an attempt, so a producer that was never handed the generation stamps 0 and
-    // has every append refused. That is correct — and silent, if a composition wires a recording store and
-    // forgets the handoff. It is not a condition to discover from an empty replay weeks later, so the
-    // wiring is refused at construction instead.
-    if (deps.recordingStore && !deps.onAttempt)
+    // Canonicality is the receipt's, and the "largest updatedAt" fallback is gone — so a composition that
+    // writes child rows without a place to commit them has no way to tell a case's answer from a superseded
+    // attempt's, and would re-run finished cases on every resume. That is a wiring mistake, not a mode, and
+    // it is refused here rather than discovered as a batch that never converges.
+    if (deps.runStore && !deps.caseReceipts)
       throw new BadRequestError(
         "BAD_REQUEST",
-        { missing: "onAttempt" },
-        "A recordingStore was wired without onAttempt: every dispatch opens an attempt, so a recorder that is never told which attempt it serves has all of its writes refused. Wire onAttempt (composition: hand it to the CaseRecorder).",
+        { missing: "caseReceipts" },
+        "A runStore was wired without caseReceipts: a case's canonical outcome is its commit receipt, so child rows with nowhere to commit cannot be told apart from superseded attempts. Wire caseReceipts (InMemoryCaseReceiptStore in dev/tests, PgCaseReceiptStore in production).",
       );
   }
 
@@ -276,15 +276,27 @@ export class ScorecardBatchService {
       dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
       if (this.deps.runStore) {
         const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
-        // Latest child per case wins (a batch resumed more than once has several children for a re-run case).
-        const latestByCase = ScorecardBatch.latestChildPerCase(children);
-        for (const c of latestByCase.values()) {
+        // WHICH child is this case's answer: the receipt, and only the receipt (review 39, Phase 4). A
+        // resume that seeded "the newest row" could carry a superseded attempt's result into the rebuilt
+        // batch — and a case with no receipt has no answer at all, so it is simply re-dispatched below,
+        // which is what an uncommitted case means.
+        const committedReceipts = (await this.deps.caseReceipts?.list(id).catch(() => [])) ?? [];
+        const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
+        const committedIds = new Set([...canonical.values()].map((c) => c.id));
+        // EVERY child is examined, and only the COMMITTED ones are evidence. Two different questions that
+        // used to be one: "which row is this case's answer" (the receipt) and "which rows are still running
+        // and must be adopted or interrupted" (all of them). Iterating the canonical map alone left a
+        // mid-flight child of an uncommitted case untouched — parented to the batch and running forever.
+        for (const c of children) {
           // TERMINAL + RESULT IS FINISHED EVIDENCE, whatever the status says (arch-review 30 P1). The
           // symmetric half of "terminal + no result is unfinished work": a case can settle FAILED and still
           // carry a complete CaseResult — the write-back attaches one to a failed child on purpose, because
           // a failed case is a measured outcome, not a missing one. Seeding only `succeeded` re-ran those
           // cases on resume, and the abandoned attempt stayed parented to the batch.
-          if (isRunTerminal(c) && c.result) {
+          //
+          // …and COMMITTED is now part of that sentence (review 39, Phase 4): a terminal child no attempt
+          // committed is a superseded execution, so it is left where it is and its case is re-dispatched.
+          if (committedIds.has(c.id) && c.result) {
             seed.push(c.result);
             seedRunIds.push(c.id);
           } else if (c.status === "running" || c.status === "queued") {
@@ -615,8 +627,11 @@ export class ScorecardBatchService {
     const doneIds = new Set<string>();
     if (this.deps.runStore) {
       const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
-      const latest = ScorecardBatch.latestChildPerCase(children);
-      for (const c of latest.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
+      // …and the same rule decides what a rebuilt context already considers done (review 39, Phase 4): a
+      // case is done when a receipt says which attempt answered it, never when a row happens to be newest.
+      const committedReceipts = (await this.deps.caseReceipts?.list(id).catch(() => [])) ?? [];
+      const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
+      for (const c of canonical.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
     }
     const ctx = {
       tenant: rec.tenant,
@@ -836,7 +851,8 @@ export class ScorecardBatchService {
       if (this.deps.recordingStore) {
         generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
         if (generation === undefined) unisolated = true;
-        else this.deps.onAttempt?.(executionId, generation);
+        // Nobody to tell: the number travels ON THE JOB now (review 39, Phase 4), so the producer that
+        // matters cannot be missed by a wiring nobody remembered to do.
       }
       const baseJob: CaseJob = {
         evalCase,
@@ -1378,19 +1394,29 @@ export class ScorecardBatchService {
         // was already settled by the batch that originally ran them. Resolved once, not per seed.
         const seededEnvelope = await this.childEnvelope(record);
         for (const r of [...seed, ...recovered]) {
-          await this.deps.runStore.create(
-            newSeededScorecardChildRun({
-              id: this.newId(),
-              tenant: input.tenant,
-              harness: src.harness,
-              result: r,
-              parentScorecardId: record.id,
-              ...(src.runtime ? { runtime: src.runtime } : {}),
-              origin: ScorecardBatch.childRunOrigin(record),
-              ...(seededEnvelope ? { envelope: seededEnvelope } : {}),
-              now: this.now(),
-            }),
-          );
+          const seededChild = newSeededScorecardChildRun({
+            id: this.newId(),
+            tenant: input.tenant,
+            harness: src.harness,
+            result: r,
+            parentScorecardId: record.id,
+            ...(src.runtime ? { runtime: src.runtime } : {}),
+            origin: ScorecardBatch.childRunOrigin(record),
+            ...(seededEnvelope ? { envelope: seededEnvelope } : {}),
+            now: this.now(),
+          });
+          await this.deps.runStore.create(seededChild);
+          // …AND ITS RECEIPT (review 39, Phase 4). A carried-over result is this retry's answer for that case
+          // — it is terminal from the moment it is written — and canonicality is the receipt's now, so a
+          // seeded child without one would be re-dispatched by the very plan it exists to satisfy.
+          await this.deps.caseReceipts?.commit({
+            scorecardId: record.id,
+            caseId: r.caseId,
+            trial: r.trial ?? 0,
+            childRunId: seededChild.id,
+            resultDigest: contentDigest(r),
+            committedAt: this.now(),
+          });
         }
         const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
         await this.deps.store.update(record.id, {
@@ -2113,8 +2139,7 @@ export class ScorecardBatchService {
       // So the attempt opens HERE, unconditionally, because this is the moment a physical execution begins.
       // A first attempt therefore owns generation 1 rather than 0, and a producer that was never told a
       // number stamps 0 and is refused — which is the intended reading of "no attempt", not an exemption.
-      // That is also why `onAttempt` is no longer optional in the presence of a recording store: see the
-      // check in the constructor.
+      // The number travels ON THE JOB from here (CaseJob.recordingGeneration), so no wiring can lose it.
       if (this.deps.recordingStore) {
         const executionId = executionIdOf(job, id);
         // FAIL-CLOSED (arch-review 38 P0). A `reset` that throws is not "isolation was unnecessary" — it is a
@@ -2124,7 +2149,6 @@ export class ScorecardBatchService {
         if (generation === undefined) unisolated.add(executionId);
         else {
           attemptGeneration.set(executionId, generation);
-          this.deps.onAttempt?.(executionId, generation);
         }
       }
       try {

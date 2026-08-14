@@ -66,7 +66,6 @@ export function buildScorecard(deps: {
   // Told when a case opens a new attempt, so this process's recorder stamps the generation the store fences
   // on (mig 0173). Without it a re-driven case's producers keep sending the previous number and every one of
   // their appends is refused — the fence turning into a silent recording outage.
-  onAttempt?: (executionId: string, generation: number) => void;
   // The receipts constitutional declarations leave (mig 0165) — submit refuses an unapproved one.
   constitutionApprovals?: ConstitutionApprovalStore;
   meteredDispatcher: CoreDispatcher;
@@ -104,7 +103,6 @@ export function buildScorecard(deps: {
     scoringStageStore,
     recordingStore,
     caseReceipts,
-    onAttempt,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -298,7 +296,6 @@ export function buildScorecard(deps: {
     },
     ...(recordingStore ? { recordingStore } : {}),
     ...(caseReceipts ? { caseReceipts } : {}),
-    ...(onAttempt ? { onAttempt } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,

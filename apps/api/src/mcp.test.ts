@@ -7,7 +7,7 @@ import { RunService, SandboxSessionService } from "@everdict/application-control
 import { RunnerHub } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
-import { ScorecardService } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import { SkillService, SubscriptionService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
@@ -1747,6 +1747,7 @@ describe("MCP tools", () => {
         dispatcher: okDispatcher,
         store,
         runStore,
+        caseReceipts: new InMemoryCaseReceiptStore(),
         datasets: new InMemoryDatasetRegistry(),
         newId: () => `sc-${n++}`,
       }),

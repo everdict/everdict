@@ -85,10 +85,13 @@ export function buildDispatch(deps: {
   // straight into the in-process CaseRecorder (→ RecordingStore), so a MANAGED browser-use run replays how its
   // environment evolved, not just the agent trace. recordTrack/recordFrame are best-effort (they swallow internally),
   // so firing-and-forgetting the promise is safe. Undefined when no recorder is wired (recording disabled).
+  // …and it is handed the ATTEMPT the case was dispatched under (review 39, Phase 4). The recorder used to
+  // hold that number in a process-local map, which is how a stale producer's evidence was re-labelled as its
+  // successor's; every caller has it on the job now, so it travels as an argument.
   const recordSink = caseRecorder
-    ? (runId: string): EnvRecordSink => ({
-        track: (item) => void caseRecorder.recordTrack(runId, item),
-        frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
+    ? (runId: string, generation: number): EnvRecordSink => ({
+        track: (item) => void caseRecorder.recordTrack(runId, item, generation),
+        frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64, generation),
       })
     : undefined;
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
@@ -295,7 +298,7 @@ export function buildDispatch(deps: {
   const samplingDispatcher = caseRecorder
     ? new RuntimeSamplingDispatcher(resolvingDispatcher, {
         sample: sampleCaseRuntime,
-        record: (runId, item) => void caseRecorder.recordTrack(runId, item),
+        record: (runId, item, generation) => void caseRecorder.recordTrack(runId, item, generation),
       })
     : resolvingDispatcher;
   // Control-plane infra-plane recording — the OUTERMOST decorator, so the sealed trajectory's account starts at
