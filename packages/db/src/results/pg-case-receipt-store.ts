@@ -35,10 +35,17 @@ function toReceipt(row: ReceiptRow): CaseCommitReceipt {
 export class PgCaseReceiptStore implements CaseReceiptStore {
   constructor(private readonly client: SqlClient) {}
 
-  // ONE STATEMENT, because a claim that reads first is not a claim (the same lesson every terminal write here
-  // has already learned). `ON CONFLICT DO NOTHING` combined with a UNION over the existing row means the
-  // caller always gets back the receipt that OWNS the case — its own when it won, the winner's when it lost —
-  // without a second round trip that another attempt could slip through.
+  // THE CLAIM IS ONE STATEMENT, because a claim that reads first is not a claim (the lesson every terminal
+  // write here has already learned). What the loser needs afterwards — WHOSE case it is — cannot always come
+  // from that same statement, and the multi-process race (TRUST-169) is what proved it: a data-modifying CTE
+  // and the query around it share ONE SNAPSHOT, taken before the statement ran. `ON CONFLICT DO NOTHING`
+  // waits for the competing transaction and then skips, but the `SELECT` half is still looking at the table
+  // as it was BEFORE that transaction committed — so the loser saw no row at all and the store threw.
+  //
+  // Failing closed there was right (an unreadable decision is not a decision in our favour), and it is not an
+  // answer. The follow-up read is a SECOND statement precisely so it gets a fresh snapshot, and it is not a
+  // race: by the time the first statement returned, the conflicting row was committed — that is what the
+  // insert waited for.
   async commit(receipt: CaseCommitReceipt): Promise<CaseCommitOutcome> {
     const { rows } = await this.client.query<ReceiptRow & { inserted: boolean }>(
       `WITH claim AS (
@@ -68,11 +75,19 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
       ],
     );
     const row = rows[0];
-    // No row at all can only mean the insert was refused AND the conflicting row vanished between the two
-    // halves of one statement, which the primary key makes impossible — so this is a store fault, not an
-    // outcome to interpret. Reporting it as "somebody else committed" would invent a winner.
-    if (!row) throw new Error("case receipt claim returned no row — neither inserted nor found");
-    return { kind: row.inserted ? "committed" : "already_committed", receipt: toReceipt(row) };
+    if (row) return { kind: row.inserted ? "committed" : "already_committed", receipt: toReceipt(row) };
+    // Refused, and the winner was invisible to this statement's snapshot (see above). Read it now.
+    const { rows: settled } = await this.client.query<ReceiptRow>(
+      `SELECT * FROM everdict_case_commit_receipts
+        WHERE scorecard_id = $1 AND case_id = $2 AND trial = $3`,
+      [receipt.scorecardId, receipt.caseId, receipt.trial],
+    );
+    const winner = settled[0];
+    // Neither inserted nor found even now would mean the row that refused the insert has since vanished, and
+    // nothing deletes a receipt — so this is a store fault, not an outcome to interpret. Reporting it as
+    // "somebody else committed" would invent a winner nobody can name.
+    if (!winner) throw new Error("case receipt claim returned no row — neither inserted nor found");
+    return { kind: "already_committed", receipt: toReceipt(winner) };
   }
 
   async list(scorecardId: string): Promise<CaseCommitReceipt[]> {

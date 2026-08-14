@@ -58,10 +58,28 @@ describe("PgCaseReceiptStore — the claim is the constraint", () => {
     expect(out.receipt.childRunId).toBe("child-A");
   });
 
-  it("a claim that returns nothing is a store fault, not a silent loss", async () => {
+  it("reads the winner in a SECOND statement when the claim's own snapshot could not see it", async () => {
+    // The multi-process race (TRUST-169) proved this is the ordinary path, not an edge: a data-modifying CTE
+    // and the query around it share one snapshot taken before the statement ran, so a loser whose conflict
+    // committed after that instant sees no row at all. The follow-up read exists to get a fresh snapshot.
+    let call = 0;
+    const client = {
+      async query<T>(_sql: string, _params?: unknown[]) {
+        call += 1;
+        const rows = call === 1 ? [] : [{ ...row, child_run_id: "child-A" }];
+        return { rows: rows as T[], rowCount: rows.length };
+      },
+    } as unknown as SqlClient;
+    const out = await new PgCaseReceiptStore(client).commit({ ...receipt, childRunId: "child-B" });
+    expect(out.kind).toBe("already_committed");
+    expect(out.receipt.childRunId).toBe("child-A");
+    expect(call).toBe(2);
+  });
+
+  it("…and a claim that finds nothing even then is a store fault, not a silent loss", async () => {
     const { client } = fakeClient([]);
-    // Neither inserted nor found is impossible under the primary key — reporting it as "somebody else
-    // committed" would invent a winner and hand this attempt's evidence to nobody.
+    // Nothing deletes a receipt, so "refused by a row that is no longer there" is not an outcome to
+    // interpret. Reporting it as "somebody else committed" would invent a winner nobody can name.
     await expect(new PgCaseReceiptStore(client).commit(receipt)).rejects.toThrow(/neither inserted nor found/);
   });
 });
