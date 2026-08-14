@@ -59,11 +59,21 @@ describe("RunService", () => {
   });
 
   it("seals the replay recording and attaches its ref when frames were teed during the run", async () => {
-    // Given a recording store with a frame teed under the run's derived runId (evd-run-<id>)
+    // Given a producer that tees a frame under the generation ITS JOB carries — the first dispatch OPENS the
+    // attempt now (review 40 P1), so the job ships with recordingGeneration 1 and the durable lane accepts it.
     const store = new InMemoryRunStore();
     const recordingStore = new InMemoryRecordingStore();
-    await recordingStore.append("evd-run-rec1", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
-    const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec1", recordingStore });
+    const teeing: Dispatcher = {
+      dispatch: async (job) => {
+        await recordingStore.append(
+          job.runId ?? "",
+          { track: "frames", entry: { t: 1, ref: "memory://f" } },
+          job.recordingGeneration ?? 0,
+        );
+        return okDispatcher.dispatch(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: teeing, store, newId: () => "rec1", recordingStore });
 
     // When the run finalizes
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
@@ -71,8 +81,9 @@ describe("RunService", () => {
 
     // Then the result carries the recordingRef and the sealed recording (envKind from the case) is retrievable
     const done = await svc.get(rec.id);
-    // The ref names the ATTEMPT (mig 0177) — a first dispatch opens none, so its producers stamp 0.
-    expect(done?.result?.recordingRef?.ref).toBe("memory://recording/evd-run-rec1/g0");
+    // The ref names the ATTEMPT (mig 0177) — the FIRST dispatch opened generation 1 (review 40 P1): attempt
+    // opening is a dispatch primitive, not a recovery privilege.
+    expect(done?.result?.recordingRef?.ref).toBe("memory://recording/evd-run-rec1/g1");
     expect((await recordingStore.get("evd-run-rec1"))?.envKind).toBe("repo");
   });
 
@@ -95,11 +106,20 @@ describe("RunService", () => {
   });
 
   it("recording() returns the sealed replay recording for a run, keyed by its derived runId", async () => {
-    // Given a run whose recording was teed + sealed under its derived runId (evd-run-<id>)
+    // Given a run whose recording is teed under the generation its job carries (the dispatch opened it)
     const store = new InMemoryRunStore();
     const recordingStore = new InMemoryRecordingStore();
-    await recordingStore.append("evd-run-rec3", { track: "frames", entry: { t: 1, ref: "memory://f" } }, 0);
-    const svc = new RunService({ dispatcher: okDispatcher, store, newId: () => "rec3", recordingStore });
+    const teeing: Dispatcher = {
+      dispatch: async (job) => {
+        await recordingStore.append(
+          job.runId ?? "",
+          { track: "frames", entry: { t: 1, ref: "memory://f" } },
+          job.recordingGeneration ?? 0,
+        );
+        return okDispatcher.dispatch(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: teeing, store, newId: () => "rec3", recordingStore });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
 
@@ -117,7 +137,8 @@ describe("RunService", () => {
     const hang: Dispatcher = { dispatch: () => new Promise(() => undefined) };
     const svc = new RunService({ dispatcher: hang, store, newId: () => "rec-live", recordingStore });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
-    await recordingStore.append("evd-run-rec-live", { track: "frames", entry: { t: 1000, ref: "memory://f" } }, 0);
+    // The producer stamps the generation the dispatch opened (1) — the live tail serves the newest attempt.
+    await recordingStore.append("evd-run-rec-live", { track: "frames", entry: { t: 1000, ref: "memory://f" } }, 1);
 
     // When the player asks mid-run, the unsealed tail scrubs with provisional metadata
     const out = await svc.recording(rec.id);

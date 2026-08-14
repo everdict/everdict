@@ -882,6 +882,18 @@ export class RunService {
 
   private async track(id: string, input: SubmitInput, envelopeId?: string, epoch?: number): Promise<void> {
     if (epoch !== undefined) this.driverEpoch.set(id, epoch);
+    // ── AN ATTEMPT IS OPENED BY EVERY DISPATCH, THE FIRST ONE INCLUDED (review 40 P1) ─────────────────
+    //
+    // A re-drive opened one in resume(); a FIRST dispatch opened none, so the job shipped with no
+    // recordingGeneration and the whole durable evidence lane failed closed against it: a self-hosted
+    // runner's frame/log tee was refused ("this job opened no recording attempt") and the terminal run had
+    // no replay — on the first execution only, the one every run has. Attempt opening is a dispatch
+    // primitive, not a recovery privilege. An open that fails leaves the map unset (the case still runs;
+    // its replay is simply not claimed), which is the same fail-closed reading the batch dispatch has.
+    if (this.deps.recordingStore && this.attempt.get(`evd-run-${id}`) === undefined) {
+      const generation = await this.deps.recordingStore.open(`evd-run-${id}`).catch(() => undefined);
+      if (generation !== undefined) this.attempt.set(`evd-run-${id}`, generation);
+    }
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
     // An inline spec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) wins over the registry.
     // Built-ins (claude-code/scripted) aren't in the registry, so undefined → fall back to id branching.

@@ -59,6 +59,10 @@ export class InMemoryRecordingStore implements RecordingStore {
     const rec = this.attempt(runId, generation);
     if (!rec) return undefined; // nothing was recorded for this attempt → no ref to attach
     if (rec.sealed) return undefined; // already frozen — a second seal is not this attempt's to make
+    // An EMPTY attempt row seals to nothing — the Pg adapter's own condition (its seal requires the tracks to
+    // be non-empty), matched here because every dispatch now OPENS its attempt row up front (review 40): an
+    // opened-but-silent attempt must not mint a ref to a replay that holds nothing.
+    if (!Object.values(rec.tracks).some((lane) => (lane?.length ?? 0) > 0)) return undefined;
     rec.sealed = {
       t0: earliestT(rec.tracks),
       envKind: meta.envKind,
