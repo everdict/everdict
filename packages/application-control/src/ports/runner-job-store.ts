@@ -45,19 +45,29 @@ export interface ClaimInput {
 }
 
 // The port a store-backed RunnerHub binds. All ops are idempotent / no-op on a missing/terminal job.
+// ⚠️ Every runner-initiated mutation (touch/complete/fail) is CONDITIONED on the current lease
+// (status='leased' AND leased_by=runner AND lease_epoch=epoch) — the same predicate `authorize` reads. A
+// signature with nowhere to put the epoch is how the result wire stayed unfenced while the evidence wire
+// was: the store must be UNABLE to accept an outcome from a lease it no longer considers current.
 export interface RunnerJobStore {
   park(input: ParkInput): Promise<void>;
   // Atomically requeue this owner's expired leases, then claim the next queued job this runner can run
   // (its own queue before the owner pool). null = nothing to take. Cross-replica safe (SKIP LOCKED).
   claim(input: ClaimInput): Promise<RunnerJobLease | null>;
-  // Liveness — refresh activity_at; returns whether the job is still queued/leased and the control-plane cancel flag.
-  touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }>;
+  // Liveness — refresh activity_at; returns whether the CALLER'S lease is still current and the control-plane
+  // cancel flag. A stale holder's touch extends nothing (it would keep the successor's lease alive).
+  touch(
+    jobId: string,
+    runnerId: string,
+    leaseEpoch: number,
+    now: number,
+  ): Promise<{ extended: boolean; cancelled: boolean }>;
   // Is this token the CURRENT lease, held by this runner? Returns the job it authorizes (so the caller reads the
   // run id from the lease instead of accepting one from the request), or null. Durable and therefore
   // cross-replica: the evidence a runner pushes is authorized by the same row every replica claims through.
   authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null>;
-  complete(jobId: string, result: CaseResult, ranBy: string): Promise<boolean>;
-  fail(jobId: string, message: string): Promise<boolean>;
+  complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean>;
+  fail(jobId: string, message: string, runnerId: string, leaseEpoch: number): Promise<boolean>;
   // Mark a still-pending job as an idle-timeout casualty (the parking replica calls this when activity_at is stale).
   expire(jobId: string): Promise<void>;
   // The parking replica polls this to resolve/reject its dispatch promise. null = the row is gone.

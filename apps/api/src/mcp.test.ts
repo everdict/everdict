@@ -402,15 +402,28 @@ describe("MCP — github write", () => {
 describe("MCP — live screen (report_case_screen)", () => {
   const withFrames = (frames: LiveFrameStore) => ({ ...harness(), liveFrames: frames });
 
-  it("a runner pushes a frame; it is stored under the run id (served later by RunService.screen())", async () => {
+  it("a runner pushes a frame under the attempt it holds; it is stored under the LEASE's run id", async () => {
     const frames = new LiveFrameStore();
-    const runner = await connectRunner(withFrames(frames), "laptop");
+    const deps = withFrames(frames);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, { ...parkableJob(), runId: "evd-run-42" }).catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const runner = await connectRunner(deps, "laptop");
     const res = await runner.callTool({
       name: "report_case_screen",
-      arguments: { runId: "evd-run-42", frame: "AAAAframe" },
+      arguments: { frame: "AAAAframe", jobId: leased?.jobId, leaseEpoch: leased?.attempt.leaseEpoch },
     });
     expect(res.isError).toBeFalsy();
     expect(frames.get("evd-run-42")?.frameBase64).toBe("AAAAframe");
+  });
+
+  it("REFUSES a tokenless frame — the live view is what an operator judges a case by, and a runner credential is not a claim on a run", async () => {
+    const frames = new LiveFrameStore();
+    const runner = await connectRunner(withFrames(frames), "laptop");
+    const res = await runner.callTool({ name: "report_case_screen", arguments: { frame: "AAAAframe" } });
+    expect(res.isError).toBeFalsy(); // best-effort wire — but the refusal is stated and NOTHING is written
+    expect(JSON.stringify(res.content)).toContain("no attempt token");
+    expect(frames.get("evd-run-42")).toBeUndefined();
   });
 
   it("regular (non-runner) credentials cannot push a frame — FORBIDDEN", async () => {
@@ -428,16 +441,27 @@ describe("MCP — live screen (report_case_screen)", () => {
 describe("MCP — live execution log (report_case_log)", () => {
   const withLogs = (logs: LiveLogStore) => ({ ...harness(), liveLogs: logs });
 
-  it("a runner appends lifecycle log lines under the run id (cumulative; served later by RunService.logs())", async () => {
+  it("a runner appends lifecycle log lines under the LEASE's run id (cumulative; served later by RunService.logs())", async () => {
     const logs = new LiveLogStore();
-    const runner = await connectRunner(withLogs(logs), "laptop");
-    await runner.callTool({ name: "report_case_log", arguments: { runId: "evd-run-42", line: "▶ Started" } });
-    const res = await runner.callTool({
-      name: "report_case_log",
-      arguments: { runId: "evd-run-42", line: "✓ Completed" },
-    });
+    const deps = withLogs(logs);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, { ...parkableJob(), runId: "evd-run-42" }).catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const token = { jobId: leased?.jobId, leaseEpoch: leased?.attempt.leaseEpoch };
+    const runner = await connectRunner(deps, "laptop");
+    await runner.callTool({ name: "report_case_log", arguments: { line: "▶ Started", ...token } });
+    const res = await runner.callTool({ name: "report_case_log", arguments: { line: "✓ Completed", ...token } });
     expect(res.isError).toBeFalsy();
     expect(logs.get("evd-run-42")).toBe("▶ Started\n✓ Completed"); // append, not overwrite
+  });
+
+  it("REFUSES a tokenless log line — nothing is written under a caller-claimed run id", async () => {
+    const logs = new LiveLogStore();
+    const runner = await connectRunner(withLogs(logs), "laptop");
+    const res = await runner.callTool({ name: "report_case_log", arguments: { line: "x" } });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.stringify(res.content)).toContain("no attempt token");
+    expect(logs.get("evd-run-42")).toBeUndefined();
   });
 
   it("regular (non-runner) credentials cannot push a log line — FORBIDDEN", async () => {
@@ -456,16 +480,27 @@ describe("MCP — live trace push (report_case_trace)", () => {
     { t: 1, kind: "tool_call", id: "t1", name: "bash", args: { cmd: "ls" } },
   ];
 
-  it("a runner pushes drained-event batches under the run id (cumulative; served by RunService.liveTrace())", async () => {
+  it("a runner pushes drained-event batches under the LEASE's run id (cumulative; served by RunService.liveTrace())", async () => {
     const traces = new LiveTraceStore();
-    const runner = await connectRunner(withTraces(traces), "laptop");
-    await runner.callTool({ name: "report_case_trace", arguments: { runId: "evd-run-42", events: [EVENTS[0]] } });
-    const res = await runner.callTool({
-      name: "report_case_trace",
-      arguments: { runId: "evd-run-42", events: [EVENTS[1]] },
-    });
+    const deps = withTraces(traces);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, { ...parkableJob(), runId: "evd-run-42" }).catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const token = { jobId: leased?.jobId, leaseEpoch: leased?.attempt.leaseEpoch };
+    const runner = await connectRunner(deps, "laptop");
+    await runner.callTool({ name: "report_case_trace", arguments: { events: [EVENTS[0]], ...token } });
+    const res = await runner.callTool({ name: "report_case_trace", arguments: { events: [EVENTS[1]], ...token } });
     expect(res.isError).toBeFalsy();
     expect(traces.get("evd-run-42")).toHaveLength(2); // append, not overwrite
+  });
+
+  it("REFUSES a tokenless trace push AND SAYS SO — this tool used to reply ok while discarding its own authorize result", async () => {
+    const traces = new LiveTraceStore();
+    const runner = await connectRunner(withTraces(traces), "laptop");
+    const res = await runner.callTool({ name: "report_case_trace", arguments: { events: [EVENTS[0]] } });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.stringify(res.content)).toContain("no attempt token");
+    expect(traces.get("evd-run-42")).toBeUndefined();
   });
 
   it("regular (non-runner) credentials cannot push trace events — FORBIDDEN", async () => {
@@ -604,35 +639,63 @@ describe("MCP — deep track push (report_case_track)", () => {
 describe("MCP — run-workbench fs rendezvous (poll_case_fs_requests / answer_case_fs_request)", () => {
   const withHub = (hub: CaseFsRequestHub) => ({ ...harness(), caseFsRequests: hub });
 
-  it("a runner drains a parked read and its answer resolves the waiting control-plane request", async () => {
+  it("a runner drains a parked read UNDER ITS LEASE and its answer resolves the waiting control-plane request", async () => {
     const hub = new CaseFsRequestHub(5000);
-    const runner = await connectRunner(withHub(hub), "laptop");
+    const deps = withHub(hub);
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, { ...parkableJob(), runId: "evd-run-42" }).catch(() => {});
+    const leased = deps.runnerHub.lease(key);
+    const token = { jobId: leased?.jobId, leaseEpoch: leased?.attempt.leaseEpoch };
+    const runner = await connectRunner(deps, "laptop");
     const parked = hub.request("evd-run-42", { kind: "fsTree" });
 
-    const polled = JSON.parse(
-      text(await runner.callTool({ name: "poll_case_fs_requests", arguments: { runId: "evd-run-42" } })),
-    ) as { requests: Array<{ id: string; kind: string }> };
+    const polled = JSON.parse(text(await runner.callTool({ name: "poll_case_fs_requests", arguments: token }))) as {
+      requests: Array<{ id: string; kind: string }>;
+    };
     expect(polled.requests).toHaveLength(1);
     expect(polled.requests[0]?.kind).toBe("fsTree");
 
     const tree = { files: [{ path: "a.py", status: "modified" }], truncated: false };
     const res = await runner.callTool({
       name: "answer_case_fs_request",
-      arguments: { runId: "evd-run-42", requestId: polled.requests[0]?.id, result: { kind: "fsTree", tree } },
+      arguments: { ...token, requestId: polled.requests[0]?.id, result: { kind: "fsTree", tree } },
     });
     expect(res.isError).toBeFalsy();
     expect(await parked).toEqual({ kind: "fsTree", tree });
   });
 
+  it("a runner holding NO lease on that run cannot drain its parked reads — the token names the run, not the caller", async () => {
+    // The steal this fence exists for: any paired runner (any owner) used to be able to drain another
+    // workspace's parked workbench reads by quoting its runId, marking them delivered — a silent theft —
+    // and inject arbitrary tree/file content as the answer.
+    const hub = new CaseFsRequestHub(50);
+    const deps = withHub(hub);
+    const runner = await connectRunner(deps, "laptop"); // paired, but holds no lease at all
+    const parked = hub.request("evd-run-42", { kind: "fsTree" });
+    parked.catch(() => {});
+    const polled = JSON.parse(
+      text(await runner.callTool({ name: "poll_case_fs_requests", arguments: { jobId: "j-unknown", leaseEpoch: 1 } })),
+    ) as { requests: unknown[]; reason?: string };
+    expect(polled.requests).toEqual([]); // nothing drained — the parked read stays for the real holder
+    expect(polled.reason).toContain("not a current lease");
+    const answered = await runner.callTool({
+      name: "answer_case_fs_request",
+      arguments: { jobId: "j-unknown", leaseEpoch: 1, requestId: "any", result: { kind: "fsTree" } },
+    });
+    expect(JSON.parse(text(answered)).ok).toBe(false);
+  });
+
   it("regular (non-runner) credentials cannot drain or answer — FORBIDDEN", async () => {
     const hub = new CaseFsRequestHub(50);
     const admin = await connect(withHub(hub), ["admin"]); // via=oidc, no runnerId
-    expect((await admin.callTool({ name: "poll_case_fs_requests", arguments: { runId: "r" } })).isError).toBe(true);
+    expect(
+      (await admin.callTool({ name: "poll_case_fs_requests", arguments: { jobId: "j", leaseEpoch: 1 } })).isError,
+    ).toBe(true);
     expect(
       (
         await admin.callTool({
           name: "answer_case_fs_request",
-          arguments: { runId: "r", requestId: "x", result: { kind: "fsTree" } },
+          arguments: { jobId: "j", leaseEpoch: 1, requestId: "x", result: { kind: "fsTree" } },
         })
       ).isError,
     ).toBe(true);
@@ -640,14 +703,19 @@ describe("MCP — run-workbench fs rendezvous (poll_case_fs_requests / answer_ca
 });
 
 describe("MCP — runner update-required signal (lease_job)", () => {
-  it("a runner whose reported protocol is behind the control plane is told to update (piggybacked on the lease reply)", async () => {
-    const runner = await connectRunner(harness(), "laptop");
+  it("a runner whose reported protocol is behind the control plane is REFUSED a lease and told to update", async () => {
+    const deps = harness();
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    void deps.runnerHub.enqueue(key, parkableJob()).catch(() => {}); // a job IS waiting — and still not handed over
+    const runner = await connectRunner(deps, "laptop");
     const reply = JSON.parse(
       text(await runner.callTool({ name: "lease_job", arguments: { protocol: RUNNER_PROTOCOL_VERSION - 1 } })),
     );
     expect(reply.updateRequired).toBe(true);
     expect(reply.serverProtocol).toBe(RUNNER_PROTOCOL_VERSION);
-    expect(reply.job).toBeNull(); // no job queued — the signal rides an empty long-poll too
+    // Since v2 the refusal is structural: a build that cannot carry the attempt token must not take an
+    // attempt it cannot prove it holds — the waiting job stays for an up-to-date runner.
+    expect(reply.job).toBeNull();
   });
 
   it("an up-to-date runner gets no update signal (the reply stays lean)", async () => {
@@ -659,10 +727,11 @@ describe("MCP — runner update-required signal (lease_job)", () => {
     expect(reply.serverProtocol).toBeUndefined();
   });
 
-  it("a runner that reports no protocol (pre-version) is not nagged", async () => {
+  it("a runner that reports no protocol (pre-protocol build) is refused a lease too — it cannot carry the v2 token", async () => {
     const runner = await connectRunner(harness(), "laptop");
     const reply = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} })));
-    expect(reply.updateRequired).toBeUndefined();
+    expect(reply.updateRequired).toBe(true);
+    expect(reply.job).toBeNull();
   });
 });
 
@@ -1199,20 +1268,78 @@ describe("MCP tools", () => {
     const dispatched = deps.runnerHub.enqueue(key, parkedJob);
 
     const runner = await connectRunner(deps, "laptop");
-    // Fetch the job (pull).
-    const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} })));
+    // Fetch the job (pull) — a v2 runner reports its protocol on every lease.
+    const withProtocol = { protocol: RUNNER_PROTOCOL_VERSION };
+    const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: withProtocol })));
     expect(leased.jobId).toBeTruthy();
     expect(leased.job.evalCase.id).toBe("c1");
+    expect(leased.attempt).toEqual({ jobId: leased.jobId, leaseEpoch: 1 }); // the token the result must ride
     // {job:null} when there are no more.
-    expect(JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} }))).job).toBeNull();
+    expect(JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: withProtocol }))).job).toBeNull();
 
-    // Report the result → the parked dispatch promise resolves.
+    // Report the result UNDER THE TOKEN → the parked dispatch promise resolves.
     const submit = JSON.parse(
-      text(await runner.callTool({ name: "submit_job_result", arguments: { jobId: leased.jobId, result } })),
+      text(
+        await runner.callTool({
+          name: "submit_job_result",
+          arguments: { jobId: leased.jobId, leaseEpoch: leased.attempt.leaseEpoch, result },
+        }),
+      ),
     );
     expect(submit.accepted).toBe(true);
     // enqueue resolves with {result, ranBy} (the runner that actually finished) — for the pool job's provenance.runner.
     await expect(dispatched).resolves.toMatchObject({ result: { caseId: "c1" }, ranBy: "laptop" });
+  });
+
+  it("submit_job_result under a token that is not the current lease is refused — a stale holder cannot end an attempt", async () => {
+    const deps = harness();
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    const dispatched = deps.runnerHub.enqueue(key, parkableJob());
+    dispatched.catch(() => {});
+    const runner = await connectRunner(deps, "laptop");
+    const leased = JSON.parse(
+      text(await runner.callTool({ name: "lease_job", arguments: { protocol: RUNNER_PROTOCOL_VERSION } })),
+    );
+    // Epoch 2 was never issued for this job — a paused runner quoting anything but its own current lease is
+    // not current, and its late result must not become the canonical completion (nor its failure end it).
+    const stale = JSON.parse(
+      text(
+        await runner.callTool({
+          name: "submit_job_result",
+          arguments: { jobId: leased.jobId, leaseEpoch: leased.attempt.leaseEpoch + 1, result },
+        }),
+      ),
+    );
+    expect(stale.accepted).toBe(false);
+    const staleFail = JSON.parse(
+      text(
+        await runner.callTool({
+          name: "fail_job",
+          arguments: { jobId: leased.jobId, leaseEpoch: leased.attempt.leaseEpoch + 1, message: "late failure" },
+        }),
+      ),
+    );
+    expect(staleFail.accepted).toBe(false);
+    const staleBeat = JSON.parse(
+      text(
+        await runner.callTool({
+          name: "heartbeat_job",
+          arguments: { jobId: leased.jobId, leaseEpoch: leased.attempt.leaseEpoch + 1 },
+        }),
+      ),
+    );
+    expect(staleBeat.extended).toBe(false);
+    // …and the CURRENT token still completes the dispatch.
+    const current = JSON.parse(
+      text(
+        await runner.callTool({
+          name: "submit_job_result",
+          arguments: { jobId: leased.jobId, leaseEpoch: leased.attempt.leaseEpoch, result },
+        }),
+      ),
+    );
+    expect(current.accepted).toBe(true);
+    await expect(dispatched).resolves.toMatchObject({ ranBy: "laptop" });
   });
 
   it("runner tools require a runner token (via=runner) only — regular credentials are FORBIDDEN", async () => {
@@ -1245,7 +1372,14 @@ describe("MCP tools", () => {
     );
     const runner = await connectRunner(deps, "laptop");
     // A runner leasing without docker (git only) → no job to take (gate) + that job is explicitly rejected.
-    const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["git"] } })));
+    const leased = JSON.parse(
+      text(
+        await runner.callTool({
+          name: "lease_job",
+          arguments: { capabilities: ["git"], protocol: RUNNER_PROTOCOL_VERSION },
+        }),
+      ),
+    );
     expect(leased.job).toBeNull();
     const r = await settled;
     expect(r).toMatchObject({ ok: false, e: { code: "UPSTREAM_ERROR", extra: { reason: "capability_mismatch" } } });

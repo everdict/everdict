@@ -10,11 +10,12 @@ import { z } from "zod";
 import type { RunnerStore } from "../ports/runner-store.js";
 
 // A runner is out of date when the protocol it built with is BELOW this control plane's — it is running older code than
-// the server, so the runner-facing job/lease contract may have moved on. A runner that reports no protocol (pre-version)
-// is left unflagged: we cannot know it is behind, and nagging every legacy runner on day one would be noise (its own
-// auto-update brings it to a protocol-reporting build anyway). Pure — shared by lease (signal) and list (roster badge).
+// the server, so the runner-facing job/lease contract may have moved on. A runner that reports NO protocol is a
+// pre-protocol build, which is by construction older than any protocol-bumping change — since v2 (the attempt-token
+// wire) it is flagged too, because the lease gate refuses it and the roster must say why. Pure — shared by lease
+// (signal + refusal) and list (roster badge).
 export function runnerUpdateRequired(protocol: number | undefined): boolean {
-  return protocol !== undefined && protocol < RUNNER_PROTOCOL_VERSION;
+  return (protocol ?? 0) < RUNNER_PROTOCOL_VERSION;
 }
 
 // Self-hosted runner service — the core of personally-owned device pairing (pair/list/revoke/workspace roster).

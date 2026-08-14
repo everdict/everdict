@@ -451,17 +451,35 @@ export class RunnerHub {
     });
   }
 
+  // ── THE RESULT WIRE IS FENCED BY THE SAME TOKEN AS THE EVIDENCE WIRE ─────────────────────────────
+  //
+  // A report may only act on the attempt it belongs to. Before this, complete/fail/heartbeat took a bare
+  // jobId: a runner whose lease had been requeued and re-leased could still end the successor's execution
+  // (submit a stale result as the canonical completion, fail a healthy attempt) or keep a dead attempt
+  // looking alive (a stale heartbeat renewing the successor's lease). The token protects the OUTCOME, not
+  // just the evidence that explains it.
+  private holdsCurrentLease(entry: PendingEntry, key: SelfHostedKey, token: AttemptToken): boolean {
+    if (entry.leaseEpoch === 0) return false; // never leased — no report can ride an unleased job
+    if (entry.leaseEpoch !== token.leaseEpoch) return false; // a superseded attempt — its lease was taken
+    return entry.leasedBy === key.runnerId; // the token belongs to another runner's lease
+  }
+
   // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. It also carries
   // the control plane's cancel decision back to the runner: `cancelled` = stop this job now (→ the runner aborts the
-  // local run, freeing the runtime mid-case). `extended` is false if the job isn't in a queue (own/pool).
-  heartbeat(key: SelfHostedKey, jobId: string, capabilities?: string[]): { extended: boolean; cancelled: boolean } {
+  // local run, freeing the runtime mid-case). `extended` is false if the job isn't in a queue (own/pool) or the
+  // token is not the CURRENT lease — a stale holder must not keep the successor's lease (or its own corpse) alive.
+  heartbeat(
+    key: SelfHostedKey,
+    token: AttemptToken,
+    capabilities?: string[],
+  ): { extended: boolean; cancelled: boolean } {
     // A heartbeat is proof the runner is alive — refresh the idle timeout of everything else it could still take too
     // (a maxConcurrent=1 runner heartbeats only the job it is running; the jobs queued behind it must not expire meanwhile).
     // capabilities scope it: a runner only keeps alive jobs IT could run, so a job whose only capable runner DIED stops
     // being refreshed by surviving-but-incapable runners → it times out (fails with a reason) instead of pending forever.
     this.touchByRunner(key, capabilities);
-    const loc = this.locate(key, jobId);
-    if (!loc) return { extended: false, cancelled: false };
+    const loc = this.locate(key, token.jobId);
+    if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return { extended: false, cancelled: false };
     loc.entry.leasedAt = this.now();
     this.rearm(loc.key, loc.entry); // liveness signal → reset idle timeout (so a long-running job isn't wrongly rejected)
     return { extended: true, cancelled: loc.entry.cancelRequested === true };
@@ -525,24 +543,27 @@ export class RunnerHub {
     }
   }
 
-  // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already completed/expired/unknown).
-  complete(key: SelfHostedKey, jobId: string, result: CaseResult): boolean {
-    const loc = this.locate(key, jobId);
-    if (!loc) return false;
-    this.remove(loc.key, jobId);
+  // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already
+  // completed/expired/unknown) OR the token is not the current lease — a stale holder's late result must not
+  // become the canonical completion of an attempt someone else now owns.
+  complete(key: SelfHostedKey, token: AttemptToken, result: CaseResult): boolean {
+    const loc = this.locate(key, token.jobId);
+    if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return false;
+    this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
     // ranBy = the real id of the runner that called complete (key.runnerId). For a pool job this is the real runner, not "*" (the pool key).
     loc.entry.resolve({ result, ranBy: key.runnerId });
     return true;
   }
 
-  // Runner reports a job failure → reject the promise (remapped to our error). false if not in a queue (own/pool).
-  fail(key: SelfHostedKey, jobId: string, message: string): boolean {
-    const loc = this.locate(key, jobId);
-    if (!loc) return false;
-    this.remove(loc.key, jobId);
+  // Runner reports a job failure → reject the promise (remapped to our error). false if not in a queue (own/pool)
+  // or the token is not the current lease — a stale holder must not end a healthy successor's attempt as a failure.
+  fail(key: SelfHostedKey, token: AttemptToken, message: string): boolean {
+    const loc = this.locate(key, token.jobId);
+    if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return false;
+    this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
-    loc.entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId }, message));
+    loc.entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId: token.jobId }, message));
     return true;
   }
 

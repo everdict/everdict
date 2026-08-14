@@ -118,13 +118,25 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runC
   `Scheduler`. No self-hosted runner registered / not owned → no fallthrough to a cluster (explicit error — a
   self-hosted pin is intentional).
 - **MCP runner tools** (subject-scoped, no role gate — personal, like `list_api_keys`):
-  - `lease_job {runnerId, capabilities, waitMs}` → long-call returning the next `CaseJob` pinned to a
+  - `lease_job {runnerId, capabilities, waitMs, protocol}` → long-call returning the next `CaseJob` pinned to a
     self-runner **owned by the leasing subject**, or empty on timeout (the runner re-polls). Double-sided
-    enforcement: the queue only holds the owner's jobs, and the tool only serves the owner's queue.
-  - `submit_result {runnerId, jobId, result}` → Zod-validated `CaseResult`; resolves the parked `dispatch`
-    promise; writes to `RunStore`/`ScorecardStore`.
-  - `heartbeat_job {runnerId, jobId}` → extends the lease; expiry → **requeue** (a dead runner never
+    enforcement: the queue only holds the owner's jobs, and the tool only serves the owner's queue. The reply
+    mints the **attempt token** `{jobId, leaseEpoch}` (epoch bumped per lease, durable in mig 0174) — the
+    physical attempt's identity every later call proves. A runner whose `protocol` is behind the control
+    plane's (or absent) is **refused a lease** (`{job:null, updateRequired:true}`) — since protocol v2 the
+    token is mandatory on the result wire, and a build that cannot carry one must not take an attempt.
+  - `submit_job_result {jobId, leaseEpoch, result}` → Zod-validated `CaseResult`; refused (`accepted:false`)
+    unless the token is the CURRENT lease (`status='leased' AND leased_by AND lease_epoch` in the store) —
+    a paused runner's late result must not become the canonical completion of its successor's execution.
+    `fail_job {jobId, leaseEpoch, message}` carries the same fence (a stale holder cannot end a healthy
+    attempt as a failure). Resolves the parked `dispatch` promise; writes to `RunStore`/`ScorecardStore`.
+  - `heartbeat_job {jobId, leaseEpoch}` → extends the lease **only for its current holder** (a stale
+    heartbeat must not keep a dead attempt looking alive); expiry → **requeue** (a dead runner never
     black-holes a job).
+  - Every report tool (`report_case_screen/log/trace/track`) and the fs rendezvous
+    (`poll_case_fs_requests`/`answer_case_fs_request`) authorizes by the SAME token, and the control plane
+    reads the run FROM the lease — a caller-supplied runId is never written to, the live view included
+    (TRUST-173: the token protects the outcome, not just the evidence that explains it).
   - Pairing/management tools — `pair_runner`, `list_runners`, `revoke_runner` — with **BFF parity** (account
     page) since those are also human-facing.
 

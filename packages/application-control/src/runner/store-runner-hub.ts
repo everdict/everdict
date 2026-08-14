@@ -139,17 +139,25 @@ export class StoreRunnerHub {
     };
   }
 
-  // Liveness + the control plane's cancel decision (carried back to the runner's next heartbeat), same as the in-memory hub.
-  heartbeat(key: SelfHostedKey, jobId: string): Promise<{ extended: boolean; cancelled: boolean }> {
-    return this.store.touch(jobId, this.now());
+  // Liveness + the control plane's cancel decision (carried back to the runner's next heartbeat), same as the
+  // in-memory hub. The token rides down to the store's WHERE clause — a stale holder's heartbeat must not renew
+  // the successor's lease, so the fence is the row's, not this process's. `capabilities` is accepted for
+  // signature parity with the in-memory hub and unused: the store path has no per-process timers to rearm
+  // (each parking replica enforces the idle timeout off the shared activity clock).
+  heartbeat(
+    key: SelfHostedKey,
+    token: AttemptToken,
+    _capabilities?: string[],
+  ): Promise<{ extended: boolean; cancelled: boolean }> {
+    return this.store.touch(token.jobId, key.runnerId, token.leaseEpoch, this.now());
   }
 
-  complete(key: SelfHostedKey, jobId: string, result: CaseResult): Promise<boolean> {
-    return this.store.complete(jobId, result, key.runnerId);
+  complete(key: SelfHostedKey, token: AttemptToken, result: CaseResult): Promise<boolean> {
+    return this.store.complete(token.jobId, result, key.runnerId, token.leaseEpoch);
   }
 
-  fail(key: SelfHostedKey, jobId: string, message: string): Promise<boolean> {
-    return this.store.fail(jobId, message);
+  fail(key: SelfHostedKey, token: AttemptToken, message: string): Promise<boolean> {
+    return this.store.fail(token.jobId, message, key.runnerId, token.leaseEpoch);
   }
 
   requestCancel(predicate: (job: CaseJob) => boolean): Promise<number> {

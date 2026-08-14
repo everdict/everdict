@@ -87,25 +87,41 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     return e.job;
   }
 
-  async touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }> {
+  // The current-lease fence every runner-initiated mutation shares (the same predicate `authorize` reads):
+  // a report from a lease that was requeued or re-leased acts on nothing.
+  private holdsLease(e: Entry | undefined, runnerId: string, leaseEpoch: number): e is Entry {
+    return (
+      e !== undefined &&
+      e.status === "leased" &&
+      e.leasedBy === runnerId &&
+      !!e.leaseEpoch &&
+      e.leaseEpoch === leaseEpoch
+    );
+  }
+
+  async touch(
+    jobId: string,
+    runnerId: string,
+    leaseEpoch: number,
+    now: number,
+  ): Promise<{ extended: boolean; cancelled: boolean }> {
     const e = this.jobs.get(jobId);
-    if (!e || isTerminal(e)) return { extended: false, cancelled: false };
+    if (!this.holdsLease(e, runnerId, leaseEpoch)) return { extended: false, cancelled: false };
     e.activityAt = now;
     return { extended: true, cancelled: e.cancelRequested };
   }
 
-  async complete(jobId: string, result: CaseResult, ranBy: string): Promise<boolean> {
+  async complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!e || isTerminal(e)) return false;
+    if (!this.holdsLease(e, ranBy, leaseEpoch)) return false;
     e.status = "completed";
     e.result = result;
-    e.leasedBy = ranBy;
     return true;
   }
 
-  async fail(jobId: string, message: string): Promise<boolean> {
+  async fail(jobId: string, message: string, runnerId: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!e || isTerminal(e)) return false;
+    if (!this.holdsLease(e, runnerId, leaseEpoch)) return false;
     e.status = "failed";
     e.error = message;
     return true;
@@ -217,32 +233,43 @@ export class PgRunnerJobStore implements RunnerJobStore {
     return row ? CaseJobSchema.parse(row.job) : null;
   }
 
-  async touch(jobId: string, now: number): Promise<{ extended: boolean; cancelled: boolean }> {
+  // Every runner-initiated mutation below shares one WHERE clause with `authorize`: the row must still be
+  // THIS runner's CURRENT lease. `status = 'leased'` (never 'queued') — a requeued job's previous holder has
+  // no further right to end it, extend it, or overwrite who held it; and the epoch pins which lease of this
+  // runner's it was (a re-lease of the same job to the same runner mints a new epoch).
+  async touch(
+    jobId: string,
+    runnerId: string,
+    leaseEpoch: number,
+    now: number,
+  ): Promise<{ extended: boolean; cancelled: boolean }> {
     const res = await this.client.query<{ cancel_requested: boolean }>(
-      `UPDATE everdict_runner_jobs SET activity_at = to_timestamp($2 / 1000.0)
-       WHERE job_id = $1 AND status IN ('queued', 'leased')
+      `UPDATE everdict_runner_jobs SET activity_at = to_timestamp($4 / 1000.0)
+       WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
        RETURNING cancel_requested`,
-      [jobId, now],
+      [jobId, runnerId, leaseEpoch, now],
     );
     const row = res.rows[0];
     if (!row) return { extended: false, cancelled: false };
     return { extended: true, cancelled: row.cancel_requested === true };
   }
 
-  async complete(jobId: string, result: CaseResult, ranBy: string): Promise<boolean> {
+  async complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean> {
     const res = await this.client.query<{ job_id: string }>(
-      `UPDATE everdict_runner_jobs SET status = 'completed', result = $2, leased_by = $3
-       WHERE job_id = $1 AND status IN ('queued', 'leased') RETURNING job_id`,
-      [jobId, JSON.stringify(result), ranBy],
+      `UPDATE everdict_runner_jobs SET status = 'completed', result = $2
+       WHERE job_id = $1 AND status = 'leased' AND leased_by = $3 AND lease_epoch = $4 AND lease_epoch > 0
+       RETURNING job_id`,
+      [jobId, JSON.stringify(result), ranBy, leaseEpoch],
     );
     return res.rows.length > 0;
   }
 
-  async fail(jobId: string, message: string): Promise<boolean> {
+  async fail(jobId: string, message: string, runnerId: string, leaseEpoch: number): Promise<boolean> {
     const res = await this.client.query<{ job_id: string }>(
       `UPDATE everdict_runner_jobs SET status = 'failed', error = $2
-       WHERE job_id = $1 AND status IN ('queued', 'leased') RETURNING job_id`,
-      [jobId, message],
+       WHERE job_id = $1 AND status = 'leased' AND leased_by = $3 AND lease_epoch = $4 AND lease_epoch > 0
+       RETURNING job_id`,
+      [jobId, message, runnerId, leaseEpoch],
     );
     return res.rows.length > 0;
   }

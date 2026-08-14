@@ -39,7 +39,7 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     const leased = await replicaB.leaseWait(keyA, 200, ["repo"]); // B leases the SAME job from the shared store
     if (!leased) throw new Error("expected a lease");
     expect(leased.job.evalCase.id).toBe("c1");
-    expect(await replicaB.complete(keyA, leased.jobId, result)).toBe(true); // B reports the result
+    expect(await replicaB.complete(keyA, leased.attempt, result)).toBe(true); // B reports the result under its lease token
 
     await expect(dispatched).resolves.toMatchObject({ result, ranBy: "laptop" }); // A's promise resolves cross-replica
   });
@@ -65,9 +65,30 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     if (!leased) throw new Error("expected a lease");
     for (let i = 0; i < 25; i++) {
       await new Promise((r) => setTimeout(r, 30));
-      expect((await hub.heartbeat(keyA, leased.jobId)).extended).toBe(true);
+      expect((await hub.heartbeat(keyA, leased.attempt)).extended).toBe(true);
     }
-    expect(await hub.complete(keyA, leased.jobId, result)).toBe(true);
+    expect(await hub.complete(keyA, leased.attempt, result)).toBe(true);
+    await expect(d).resolves.toMatchObject({ result });
+  });
+
+  it("a stale holder's result, failure and heartbeat are refused after its lease was re-leased (epoch fence)", async () => {
+    const store = new InMemoryRunnerJobStore();
+    // leaseTtlMs 0 → the previous lease is already expired when the next claim runs (requeue-then-claim).
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0 }));
+    const d = hub.enqueue(keyA, job("c1"));
+    d.catch(() => {}); // settled later by the successor — this test only watches the fence
+    const first = await hub.leaseWait(keyA, 200, ["repo"]);
+    if (!first) throw new Error("expected the first lease");
+    const second = await hub.leaseWait(keyA, 200, ["repo"]); // requeues the expired lease, mints epoch+1
+    if (!second) throw new Error("expected the re-lease");
+    expect(second.attempt.leaseEpoch).toBe(first.attempt.leaseEpoch + 1);
+    // The stale holder can neither end the successor's attempt nor keep it alive…
+    expect(await hub.complete(keyA, first.attempt, result)).toBe(false);
+    expect(await hub.fail(keyA, first.attempt, "late failure")).toBe(false);
+    expect((await hub.heartbeat(keyA, first.attempt)).extended).toBe(false);
+    // …and the successor's own token still works.
+    expect((await hub.heartbeat(keyA, second.attempt)).extended).toBe(true);
+    expect(await hub.complete(keyA, second.attempt, result)).toBe(true);
     await expect(d).resolves.toMatchObject({ result });
   });
 

@@ -48,8 +48,11 @@ export interface RunnerLoopDeps {
   log?: (msg: string) => void; // default no-op (tests stay quiet)
   sleep?: (ms: number) => Promise<void>; // default setTimeout
   // Hook that sets up lease renewal while running — returns a cleanup function. Default is setInterval(heartbeat_job).
-  // onCancel fires when the control plane's heartbeat response asks to stop this job (→ abort the local run). Tests inject a fake.
-  setHeartbeat?: (jobId: string, onCancel: () => void) => () => void;
+  // The ATTEMPT TOKEN (jobId + leaseEpoch) rides on every renewal: since protocol v2 the control plane refuses a
+  // renewal that cannot prove which lease it extends (a stale holder's heartbeat must not keep the successor's
+  // lease alive). onCancel fires when the control plane's heartbeat response asks to stop this job (→ abort the
+  // local run). Tests inject a fake.
+  setHeartbeat?: (attempt: { jobId: string; leaseEpoch?: number }, onCancel: () => void) => () => void;
   // Fired (at most once per run) when the control plane reports this runner is older than the server (lease reply
   // updateRequired:true) — the seam the desktop wires to force an immediate auto-update check. GUI-free: the core only signals.
   onUpdateRequired?: (info: { serverProtocol?: number }) => void;
@@ -79,14 +82,15 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const setHeartbeat =
     deps.setHeartbeat ??
-    ((jobId: string, onCancel: () => void) => {
+    ((attempt: { jobId: string; leaseEpoch?: number }, onCancel: () => void) => {
       const t = setInterval(() => {
         void deps
           // Carry capabilities on the heartbeat too — the hub only keeps QUEUED jobs alive that this runner could
           // run, so a job whose only capable runner died stops being refreshed by incapable survivors (no eternal pending).
           // Carry the live status too so a long-running job keeps the roster's status fresh between leases.
           .callJson("heartbeat_job", {
-            jobId,
+            jobId: attempt.jobId,
+            ...(attempt.leaseEpoch !== undefined ? { leaseEpoch: attempt.leaseEpoch } : {}),
             ...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
             status: status.text,
             statusLevel: status.level,
@@ -156,13 +160,16 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const jobId = String(leased.jobId);
       // ── THE TOKEN THAT SAYS WHICH ATTEMPT THIS IS ────────────────────────────────────────────────
       //
-      // Every evidence push below carries it. A lease that expires is requeued under the SAME job id, so
-      // without this a runner that pauses and comes back is indistinguishable from the one that took over —
-      // and the control plane, having no way to tell, used to relabel the late report as the current
-      // attempt's. An older control plane returns no token; the pushes then go out without one and the
-      // control plane refuses the DURABLE half rather than guessing (the live view still works).
+      // Every push below carries it — evidence AND the result wire (submit/fail/heartbeat), since protocol
+      // v2. A lease that expires is requeued under the SAME job id, so without this a runner that pauses and
+      // comes back is indistinguishable from the one that took over — and the control plane, having no way
+      // to tell, used to relabel the late report (or accept the late RESULT) as the current attempt's. An
+      // older control plane returns no token; the pushes then go out without one and a v2 control plane
+      // refuses them rather than guessing.
       const attempt = leased.attempt as { jobId: string; leaseEpoch: number } | undefined;
       const attemptFields = attempt ? { jobId: attempt.jobId, leaseEpoch: attempt.leaseEpoch } : {};
+      // The epoch alone, for the tools whose schema already names jobId at the top level (submit/fail).
+      const epochField = attempt ? { leaseEpoch: attempt.leaseEpoch } : {};
       const parsed = CaseJobSchema.safeParse(leased.job); // boundary validation
       if (!parsed.success) {
         // A job the control plane LEASED but this bundle can't parse is, by construction, a contract mismatch — the CP
@@ -184,7 +191,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           : "";
         log(`✗ job ${jobId} malformed → replying fail`);
         await deps
-          .callJson("fail_job", { jobId, message: `malformed job: ${parsed.error.message}${hint}` })
+          .callJson("fail_job", { jobId, ...epochField, message: `malformed job: ${parsed.error.message}${hint}` })
           .catch(() => {});
         continue;
       }
@@ -195,52 +202,55 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       // is torn down, freeing the runtime mid-case). The run then throws and the classified-failure path replies.
       const controller = new AbortController();
       // Renew the lease via periodic heartbeat so a long-running job isn't requeued by the server.
-      const stopHeartbeat = setHeartbeat(jobId, () => controller.abort());
-      // Live-screen frames: push each captured frame to the control plane keyed by the CP-minted runId. Only wired when
-      // the job carries a runId (control-plane dispatch); runJob only calls it when the harness declares liveScreen.
+      const stopHeartbeat = setHeartbeat(attempt ?? { jobId }, () => controller.abort());
+      // Every report channel below rides the attempt token — the control plane reads the RUN from the lease
+      // (never from the request), so the channels are wired only when the job carries a runId (a CP dispatch
+      // with something to report to) AND this lease minted a token (a v2 control plane; a v1 CP's channels
+      // would refuse tokenless pushes anyway, and a v2 CP always mints one).
       const runId = parsed.data.runId;
-      const reportScreen = runId
+      const wired = runId !== undefined && attempt !== undefined;
+      // Live-screen frames — runJob only calls it when the harness declares liveScreen.
+      const reportScreen = wired
         ? (frame: string): Promise<void> =>
-            deps.callJson("report_case_screen", { runId, frame, ...attemptFields }).then(() => {})
+            deps.callJson("report_case_screen", { frame, ...attemptFields }).then(() => {})
         : undefined;
-      // Live execution log: push this runner's per-case lifecycle lines to the control plane keyed by the CP-minted
-      // runId, so the run detail page's live-log panel shows what THIS runner is doing (a self-hosted runner has no
-      // backend the CP can tail). Best-effort — a push failure must never affect the run. Only wired with a runId.
-      const reportLog = runId
-        ? (line: string): void =>
-            void deps.callJson("report_case_log", { runId, line, ...attemptFields }).catch(() => {})
+      // Live execution log: push this runner's per-case lifecycle lines so the run detail page's live-log panel
+      // shows what THIS runner is doing (a self-hosted runner has no backend the CP can tail). Best-effort —
+      // a push failure must never affect the run.
+      const reportLog = wired
+        ? (line: string): void => void deps.callJson("report_case_log", { line, ...attemptFields }).catch(() => {})
         : undefined;
       // Environment-plane record sink (replay ②) — a topology browser case's CDP recorder (inside ServiceTopologyBackend)
       // streams the browser's network/console/nav through report_case_track and its screencast frames through
-      // report_case_screen (the same channel as a command harness's live screen, offloaded downstream). Only with a
-      // runId (CP dispatch); every push is best-effort — a failure must never affect the run.
-      const recordSink: EnvRecordSink | undefined = runId
+      // report_case_screen (the same channel as a command harness's live screen, offloaded downstream). Every push
+      // is best-effort — a failure must never affect the run.
+      const recordSink: EnvRecordSink | undefined = wired
         ? {
-            track: (item) => void deps.callJson("report_case_track", { runId, item, ...attemptFields }).catch(() => {}),
-            frame: (frame) =>
-              void deps.callJson("report_case_screen", { runId, frame, ...attemptFields }).catch(() => {}),
+            track: (item) => void deps.callJson("report_case_track", { item, ...attemptFields }).catch(() => {}),
+            frame: (frame) => void deps.callJson("report_case_screen", { frame, ...attemptFields }).catch(() => {}),
           }
         : undefined;
-      // Live trace (observability ⑨): push the drained TraceEvent batches to the control plane's live-trace store,
-      // keyed by the CP-minted runId — the run detail page shows the trajectory accumulating while the case runs.
-      // Best-effort like every push; the sealed result stays the durable record. Only wired with a runId.
-      const reportTrace = runId
+      // Live trace (observability ⑨): push the drained TraceEvent batches to the control plane's live-trace store —
+      // the run detail page shows the trajectory accumulating while the case runs. Best-effort like every push;
+      // the sealed result stays the durable record.
+      const reportTrace = wired
         ? (events: TraceEvent[]): Promise<void> =>
-            deps.callJson("report_case_trace", { runId, events, ...attemptFields }).then(() => {})
+            deps.callJson("report_case_trace", { events, ...attemptFields }).then(() => {})
         : undefined;
       // Run-workbench fs servicing (self-hosted parity): the control plane cannot exec into this runner's sandbox,
-      // so it PARKS repo reads; the in-case loop polls them here and answers from inside the case. Only with a
-      // runId (CP dispatch); every call is best-effort — a servicing failure never affects the run.
-      const caseFs: CaseFsServicing | undefined = runId
+      // so it PARKS repo reads; the in-case loop polls them here and answers from inside the case. The attempt
+      // token is the whole address — the CP resolves which run's requests this lease may drain. Best-effort —
+      // a servicing failure never affects the run.
+      const caseFs: CaseFsServicing | undefined = wired
         ? {
             poll: async () => {
-              const out = (await deps.callJson("poll_case_fs_requests", { runId })) as
+              const out = (await deps.callJson("poll_case_fs_requests", { ...attemptFields })) as
                 | { requests?: CaseFsRequest[] }
                 | undefined;
               return out?.requests ?? [];
             },
             answer: (id, result) =>
-              deps.callJson("answer_case_fs_request", { runId, requestId: id, result }).then(() => {}),
+              deps.callJson("answer_case_fs_request", { ...attemptFields, requestId: id, result }).then(() => {}),
           }
         : undefined;
       reportLog?.("▶ Started — running the case on this self-hosted runner.");
@@ -274,7 +284,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         });
         // Best-effort append — the infra record must never fail a job (a test double may return a bare object).
         result.trace = [...(result.trace ?? []), leasedMark, hostInfra("finished", "case finished on this runner")];
-        await deps.callJson("submit_job_result", { jobId, result });
+        await deps.callJson("submit_job_result", { jobId, ...epochField, result });
         setStatus(active > 1 ? `running ${active - 1} job(s)` : "idle", "info");
         log(`✓ job ${jobId} done → replied`);
         reportLog?.("✓ Completed — result submitted to the control plane.");
@@ -308,8 +318,8 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           ],
           failure,
         };
-        await deps.callJson("submit_job_result", { jobId, result: failed }).catch(async () => {
-          await deps.callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
+        await deps.callJson("submit_job_result", { jobId, ...epochField, result: failed }).catch(async () => {
+          await deps.callJson("fail_job", { jobId, ...epochField, message: errMsg(e) }).catch(() => {});
         });
       } finally {
         stopHeartbeat();

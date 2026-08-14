@@ -339,11 +339,13 @@ describe("runLeaseWorkers — classified failure submission", () => {
   });
 });
 
-// Live execution log — the runner tees its per-case lifecycle lines to report_case_log keyed by the CP-minted runId,
-// so the run detail page's live-log panel shows what THIS self-hosted runner is doing (there's no backend to tail).
+// Live execution log — the runner tees its per-case lifecycle lines to report_case_log under its ATTEMPT TOKEN
+// (the control plane reads the run from the lease), so the run detail page's live-log panel shows what THIS
+// self-hosted runner is doing (there's no backend to tail).
 describe("runLeaseWorkers — live execution log stream (report_case_log)", () => {
   const jobWith = (runId?: string): Record<string, unknown> => ({
     jobId: "j1",
+    attempt: { jobId: "j1", leaseEpoch: 1 }, // a v2 control plane always mints the token on lease
     job: {
       ...(runId ? { runId } : {}),
       harness: { id: "h", version: "1" },
@@ -395,10 +397,12 @@ describe("runLeaseWorkers — live execution log stream (report_case_log)", () =
 });
 
 // Live trace (observability ⑨) — the loop hands runJob a reportTrace that pushes drained-event batches to
-// report_case_trace under the CP-minted runId; without a runId there is no key, so no hook is passed at all.
+// report_case_trace under the ATTEMPT TOKEN (the control plane reads the run from the lease); without a runId
+// there is nothing to report to, so no hook is passed at all.
 describe("runLeaseWorkers — live trace push (report_case_trace)", () => {
   const jobWith = (runId?: string): Record<string, unknown> => ({
     jobId: "j1",
+    attempt: { jobId: "j1", leaseEpoch: 1 }, // a v2 control plane always mints the token on lease
     job: {
       ...(runId ? { runId } : {}),
       harness: { id: "h", version: "1" },
@@ -438,11 +442,11 @@ describe("runLeaseWorkers — live trace push (report_case_trace)", () => {
     return { pushed, sawHook };
   };
 
-  it("pushes the batch under the job's runId", async () => {
+  it("pushes the batch under the lease's attempt token (the control plane reads the run from the lease)", async () => {
     const { pushed, sawHook } = await runOnce(jobWith("evd-run-1"));
     expect(sawHook).toBe(true);
     expect(pushed).toHaveLength(1);
-    expect(pushed[0]?.runId).toBe("evd-run-1");
+    expect(pushed[0]).toMatchObject({ jobId: "j1", leaseEpoch: 1 });
     expect(pushed[0]?.events).toHaveLength(1);
   });
 
@@ -491,7 +495,7 @@ describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {
         );
       });
     // The heartbeat requests a cancel on the next tick (as if the control plane returned {cancelled:true}).
-    const setHeartbeat = (_jobId: string, onCancel: () => void) => {
+    const setHeartbeat = (_attempt: { jobId: string; leaseEpoch?: number }, onCancel: () => void) => {
       const t = setTimeout(onCancel, 0);
       return () => clearTimeout(t);
     };
@@ -501,6 +505,64 @@ describe("runLeaseWorkers — heartbeat-delivered cancellation", () => {
     );
     expect(aborted).toBe(true); // the cancel signal reached the run
     expect(submitted).toEqual(["j1"]); // the classified (interrupted) result was submitted so the batch settles
+  });
+});
+
+// Protocol v2 — the result wire (submit/fail) carries the same attempt token as the evidence wire, so the
+// control plane can refuse a stale holder's late result instead of accepting it as the canonical completion.
+describe("runLeaseWorkers — the result wire carries the attempt token", () => {
+  const leaseReply = (jobShape: Record<string, unknown>): Record<string, unknown> => ({
+    jobId: "j1",
+    attempt: { jobId: "j1", leaseEpoch: 7 },
+    job: jobShape,
+  });
+  const wellFormed = {
+    harness: { id: "h", version: "1" },
+    evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+  };
+
+  const runOnce = async (
+    jobShape: Record<string, unknown>,
+    runJob: () => Promise<CaseResult>,
+  ): Promise<Array<{ name: string; args: Record<string, unknown> }>> => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let stop = false;
+    const queue = [leaseReply(jobShape)];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        const next = queue.shift();
+        if (!next) stop = true;
+        return next ?? {};
+      }
+      calls.push({ name, args });
+      if (name === "submit_job_result" || name === "fail_job") stop = true;
+      return {};
+    };
+    await runLeaseWorkers(
+      { callJson, runJob, setHeartbeat: () => () => {}, sleep: async () => {} },
+      { maxConcurrent: 1, waitMs: 0, heartbeatMs: 10_000, pollMs: 0, capabilities: ["repo"], shouldStop: () => stop },
+    );
+    return calls;
+  };
+
+  it("submit_job_result carries the lease's epoch", async () => {
+    const calls = await runOnce(wellFormed, async () => ({}) as CaseResult);
+    const submit = calls.find((c) => c.name === "submit_job_result");
+    expect(submit?.args).toMatchObject({ jobId: "j1", leaseEpoch: 7 });
+  });
+
+  it("a classified-failure submission carries the lease's epoch too", async () => {
+    const calls = await runOnce(wellFormed, async () => {
+      throw new InternalError("HARNESS_INSTALL_FAILED", {}, "pip exploded");
+    });
+    const submit = calls.find((c) => c.name === "submit_job_result");
+    expect(submit?.args).toMatchObject({ jobId: "j1", leaseEpoch: 7 });
+  });
+
+  it("a malformed job's fail_job carries the lease's epoch (the token is read before the job is parsed)", async () => {
+    const calls = await runOnce({ not: "a CaseJob" }, async () => ({}) as CaseResult);
+    const failCall = calls.find((c) => c.name === "fail_job");
+    expect(failCall?.args).toMatchObject({ jobId: "j1", leaseEpoch: 7 });
   });
 });
 

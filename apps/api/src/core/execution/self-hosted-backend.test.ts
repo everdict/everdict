@@ -30,7 +30,7 @@ describe("SelfHostedBackend", () => {
     const backend = new SelfHostedBackend(key, hub);
     const dispatched = backend.dispatch(job);
     expect(hub.lease(key)?.jobId).toBe("j1");
-    hub.complete(key, "j1", result);
+    hub.complete(key, { jobId: "j1", leaseEpoch: 1 }, result);
     await expect(dispatched).resolves.toMatchObject({
       caseId: "c1",
       provenance: { ranOn: "self-hosted", runner: "laptop", by: "u-alice" },

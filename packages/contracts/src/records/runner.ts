@@ -6,7 +6,11 @@
 // whose protocol is BELOW the control plane's is running older code than the server → it is told to update
 // (`updateRequired`). Bump this ONLY on a breaking change to the runner-facing job/lease contract (e.g. CaseJobSchema
 // tightening) — the same breakage the runner-loop's version-skew hint fires on. Monotonic; never reused.
-export const RUNNER_PROTOCOL_VERSION = 1;
+//
+// v2 — the attempt token is REQUIRED on the result wire (submit_job_result / fail_job / heartbeat_job with a jobId,
+// and the fs rendezvous), not just on evidence reports. A v1 runner is refused a lease outright: a runner that cannot
+// prove which physical attempt it is must not be able to end (or keep alive) an attempt it may no longer hold.
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 // A short, self-reported liveness note from the runner (why it can / can't do work right now). Carried on the runner's
 // lease/heartbeat and overlaid on the roster read (never persisted — a restart re-fills it on the next lease). The

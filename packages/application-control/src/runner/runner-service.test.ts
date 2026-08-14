@@ -61,8 +61,8 @@ describe("runnerUpdateRequired", () => {
     expect(runnerUpdateRequired(RUNNER_PROTOCOL_VERSION)).toBe(false);
     expect(runnerUpdateRequired(RUNNER_PROTOCOL_VERSION + 1)).toBe(false);
   });
-  it("does not flag a pre-version runner that reports no protocol (avoids day-one nagging)", () => {
-    expect(runnerUpdateRequired(undefined)).toBe(false);
+  it("flags a pre-protocol runner that reports no protocol — since v2 the attempt-token wire is mandatory, and a build that cannot carry one is behind by construction", () => {
+    expect(runnerUpdateRequired(undefined)).toBe(true);
   });
 });
 

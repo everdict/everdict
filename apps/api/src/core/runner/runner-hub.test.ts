@@ -38,7 +38,7 @@ describe("RunnerHub", () => {
     expect(leased).toEqual({ jobId: "j-0", job: job("c1"), attempt: { jobId: "j-0", leaseEpoch: 1 } });
     expect(hub.lease(keyA)).toBeNull(); // already leased → none left
 
-    expect(hub.complete(keyA, "j-0", result)).toBe(true);
+    expect(hub.complete(keyA, { jobId: "j-0", leaseEpoch: 1 }, result)).toBe(true);
     await expect(dispatched).resolves.toMatchObject({ result });
   });
 
@@ -122,7 +122,7 @@ describe("RunnerHub", () => {
     expect(hub.lease(keyA)?.job.evalCase.id).toBe("a1");
     expect(hub.lease(keyA)?.job.evalCase.id).toBe("a2");
 
-    hub.complete(keyA, "j-0", result);
+    hub.complete(keyA, { jobId: "j-0", leaseEpoch: 1 }, result);
     await expect(a1).resolves.toMatchObject({ result });
   });
 
@@ -130,7 +130,7 @@ describe("RunnerHub", () => {
     const hub = new RunnerHub({ newJobId: () => "j-x" });
     const d = hub.enqueue(keyA, job("c1"));
     hub.lease(keyA);
-    expect(hub.fail(keyA, "j-x", "failed on the runner")).toBe(true);
+    expect(hub.fail(keyA, { jobId: "j-x", leaseEpoch: 1 }, "failed on the runner")).toBe(true);
     await expect(d).rejects.toMatchObject({ code: "UPSTREAM_ERROR", status: 502 });
   });
 
@@ -151,7 +151,7 @@ describe("RunnerHub", () => {
       for (let c = 0; c < cases.length; c++) {
         const leased = hub.lease(runner, ["git"]);
         expect(leased).not.toBeNull();
-        if (leased) hub.complete(runner, leased.jobId, result);
+        if (leased) hub.complete(runner, leased.attempt, result);
       }
       await Promise.all(settled);
     }
@@ -171,7 +171,7 @@ describe("RunnerHub", () => {
       d.catch(() => {});
       const leased = hub.lease(runner, ["git"]); // a pinned-runner poll draining the pool
       expect(leased).not.toBeNull();
-      if (leased) hub.complete(runner, leased.jobId, result); // complete under the runner's own key
+      if (leased) hub.complete(runner, leased.attempt, result); // complete under the runner's own key
       await d;
     }
     // No per-runner own queue was ever materialized; the shared pool queue drained to empty and was pruned.
@@ -186,8 +186,8 @@ describe("RunnerHub", () => {
 
   it("complete/fail with an unknown jobId returns false (already completed/expired)", () => {
     const hub = new RunnerHub();
-    expect(hub.complete(keyA, "nope", result)).toBe(false);
-    expect(hub.fail(keyA, "nope", "x")).toBe(false);
+    expect(hub.complete(keyA, { jobId: "nope", leaseEpoch: 1 }, result)).toBe(false);
+    expect(hub.fail(keyA, { jobId: "nope", leaseEpoch: 1 }, "x")).toBe(false);
   });
 
   // Placement gate: leasing a case.image (container) job to a runner without docker would run it in the wrong environment (host fallback) → reject.
@@ -237,7 +237,7 @@ describe("RunnerHub", () => {
       for (let i = 0; i < 6; i++) {
         await vi.advanceTimersByTimeAsync(30); // 180ms total, well past queueTimeoutMs (100)
         expect(hub.lease(incapableRunner, ["git"])).toBeNull(); // can't run the image job → skips it
-        hub.heartbeat(incapableRunner, "none", ["git"]); // liveness, but it can't run the image job
+        hub.heartbeat(incapableRunner, { jobId: "none", leaseEpoch: 1 }, ["git"]); // liveness, but it can't run the image job
       }
       const r = await settled;
       expect(r).toMatchObject({ ok: false, e: { extra: { reason: "no_runner" } } }); // bounded failure, not eternal pending
@@ -258,11 +258,11 @@ describe("RunnerHub", () => {
       expect(hub.lease(capableRunner, ["git", "docker"])?.jobId).toBe("j-0");
       for (let i = 0; i < 6; i++) {
         await vi.advanceTimersByTimeAsync(30); // 180ms > queueTimeoutMs
-        hub.heartbeat(capableRunner, "j-0", ["git", "docker"]); // capable → keeps j-1 alive
+        hub.heartbeat(capableRunner, { jobId: "j-0", leaseEpoch: 1 }, ["git", "docker"]); // capable → keeps j-1 alive
       }
-      hub.complete(capableRunner, "j-0", result);
+      hub.complete(capableRunner, { jobId: "j-0", leaseEpoch: 1 }, result);
       expect(hub.lease(capableRunner, ["git", "docker"])?.jobId).toBe("j-1"); // still there, leasable
-      hub.complete(capableRunner, "j-1", result);
+      hub.complete(capableRunner, { jobId: "j-1", leaseEpoch: 1 }, result);
       await expect(dB).resolves.toMatchObject({ result });
     } finally {
       vi.useRealTimers();
@@ -316,10 +316,10 @@ describe("RunnerHub", () => {
       // Even well past queueTimeoutMs (100), a heartbeat every 30ms resets it → not rejected (300ms elapsed total).
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(keyA, "j-long").extended).toBe(true);
+        expect(hub.heartbeat(keyA, { jobId: "j-long", leaseEpoch: 1 }).extended).toBe(true);
       }
       expect(rejected).toBe(false);
-      expect(hub.complete(keyA, "j-long", result)).toBe(true);
+      expect(hub.complete(keyA, { jobId: "j-long", leaseEpoch: 1 }, result)).toBe(true);
       await expect(d).resolves.toMatchObject({ result });
     } finally {
       vi.useRealTimers();
@@ -343,13 +343,13 @@ describe("RunnerHub", () => {
       // The runner spends >queueTimeoutMs on c1, heartbeating it every 30ms; c2 sits un-leased the whole time (300ms total).
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(keyA, "j-0").extended).toBe(true);
+        expect(hub.heartbeat(keyA, { jobId: "j-0", leaseEpoch: 1 }).extended).toBe(true);
       }
       expect(rejected2).toBe(false); // pre-fix: c2's idle timer never resets → wrongly rejected; post-fix: kept alive
       // Runner finishes c1, then leases c2 and completes it normally.
-      hub.complete(keyA, "j-0", result);
+      hub.complete(keyA, { jobId: "j-0", leaseEpoch: 1 }, result);
       expect(hub.lease(keyA)?.jobId).toBe("j-1");
-      hub.complete(keyA, "j-1", result);
+      hub.complete(keyA, { jobId: "j-1", leaseEpoch: 1 }, result);
       await expect(d2).resolves.toMatchObject({ result });
     } finally {
       vi.useRealTimers();
@@ -411,10 +411,10 @@ describe("RunnerHub", () => {
     hub.enqueue(keyA, job("c1"));
     hub.lease(keyA); // t=0
     t = 80;
-    expect(hub.heartbeat(keyA, "j1").extended).toBe(true); // renew lease (leasedAt=80)
+    expect(hub.heartbeat(keyA, { jobId: "j1", leaseEpoch: 1 }).extended).toBe(true); // renew lease (leasedAt=80)
     t = 150; // expired against the first lease but not against the heartbeat (80) → not requeued
     expect(hub.lease(keyA)).toBeNull();
-    expect(hub.heartbeat(keyA, "nope").extended).toBe(false); // unknown jobId
+    expect(hub.heartbeat(keyA, { jobId: "nope", leaseEpoch: 1 }).extended).toBe(false); // unknown jobId
   });
 });
 
@@ -434,9 +434,9 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
     expect(hub.lease(r1)).toBeNull(); // pool drained
     // A pool job stays in the pool queue, but the runner completes with its own key → locate finds it in the pool queue.
     // ranBy = the actual completing runner (the real r1/r2, not the pool key "*") → provenance.runner is recorded correctly.
-    expect(hub.complete(r1, "j-0", result)).toBe(true);
+    expect(hub.complete(r1, { jobId: "j-0", leaseEpoch: 1 }, result)).toBe(true);
     await expect(d1).resolves.toEqual({ result, ranBy: "r1" });
-    expect(hub.complete(r2, "j-1", result)).toBe(true);
+    expect(hub.complete(r2, { jobId: "j-1", leaseEpoch: 1 }, result)).toBe(true);
     await expect(d2).resolves.toEqual({ result, ranBy: "r2" });
   });
 
@@ -448,7 +448,9 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
     expect(hub.lease({ owner: OWNER, runnerId: "has-docker" }, ["git", "docker"])?.job.evalCase.id).toBe(
       "needs-docker",
     );
-    expect(hub.complete({ owner: OWNER, runnerId: "has-docker" }, "j-img", result)).toBe(true);
+    expect(hub.complete({ owner: OWNER, runnerId: "has-docker" }, { jobId: "j-img", leaseEpoch: 1 }, result)).toBe(
+      true,
+    );
     await expect(d).resolves.toMatchObject({ result });
   });
 
@@ -468,12 +470,12 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
       expect(hub.lease(r1)?.jobId).toBe("p-0"); // r1 takes p1 from the pool (serial)
       for (let i = 0; i < 10; i++) {
         await vi.advanceTimersByTimeAsync(30);
-        expect(hub.heartbeat(r1, "p-0").extended).toBe(true); // heartbeat on the running pool job (r1's own key)
+        expect(hub.heartbeat(r1, { jobId: "p-0", leaseEpoch: 1 }).extended).toBe(true); // heartbeat on the running pool job (r1's own key)
       }
       expect(rejected).toBe(false); // p2 kept alive via the runner's proof-of-life across the owner pool
-      hub.complete(r1, "p-0", result);
+      hub.complete(r1, { jobId: "p-0", leaseEpoch: 1 }, result);
       expect(hub.lease(r1)?.jobId).toBe("p-1");
-      hub.complete(r1, "p-1", result);
+      hub.complete(r1, { jobId: "p-1", leaseEpoch: 1 }, result);
       await expect(d2).resolves.toMatchObject({ result });
     } finally {
       vi.useRealTimers();
@@ -526,7 +528,7 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
     const waiting = hub.leaseWait(r1, 1000); // r1 waits with its own key
     hub.enqueue(poolKeyFor(OWNER), job("pooled")); // pool enqueue → wakeOwner wakes r1
     expect((await waiting)?.job.evalCase.id).toBe("pooled");
-    hub.complete(r1, "j-w", result);
+    hub.complete(r1, { jobId: "j-w", leaseEpoch: 1 }, result);
   });
 
   it("pool wake fairness (round-robin): two runners waiting, two jobs → a different runner each (no single-runner monopoly)", async () => {
@@ -540,7 +542,7 @@ describe("RunnerHub — workspace pool (N runners drain)", () => {
         const l = await hub.leaseWait({ owner: OWNER, runnerId }, 200);
         if (l) {
           seen.push(runnerId);
-          hub.complete({ owner: OWNER, runnerId }, l.jobId, result);
+          hub.complete({ owner: OWNER, runnerId }, l.attempt, result);
         }
       }
     };
@@ -577,7 +579,7 @@ describe("RunnerHub — requestCancel (user stop / supersede)", () => {
     expect(r).toMatchObject({ e: { code: "UPSTREAM_ERROR", extra: { reason: "cancelled" } } });
 
     // The runner's next heartbeat is told to abort the local run (freeing the runtime mid-case).
-    expect(hub.heartbeat(keyA, "j-0")).toMatchObject({ cancelled: true });
+    expect(hub.heartbeat(keyA, { jobId: "j-0", leaseEpoch: 1 })).toMatchObject({ cancelled: true });
   });
 
   it("drops an un-leased (parked) cancelled job so a runner never picks it up", async () => {
@@ -632,6 +634,30 @@ describe("RunnerHub.authorizeAttempt — which physical attempt a report belongs
     expect(await hub.authorizeAttempt(runnerB, token)).toBeUndefined(); // a valid token, the wrong runner
     expect(await hub.authorizeAttempt(keyA, { jobId: "nope", leaseEpoch: 1 })).toBeUndefined();
     expect(await hub.authorizeAttempt(keyA, token)).toBeDefined();
+  });
+
+  it("a stale holder's result, failure and heartbeat are refused after a re-lease — the token protects the OUTCOME, not just the evidence", async () => {
+    let n = 0;
+    let clock = 1_000;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}`, leaseTtlMs: 50, now: () => clock });
+    const d = hub.enqueue(poolKeyFor("u-alice"), job("c1"));
+    d.catch(() => {});
+    const first = hub.lease(runnerA);
+    if (!first) throw new Error("expected the first lease");
+    clock += 1_000; // runner A pauses past the TTL…
+    const second = hub.lease(runnerB); // …and runner B takes over the SAME job id under epoch 2
+    if (!second) throw new Error("expected the re-lease");
+
+    // A's late submit must not become the canonical completion of B's execution, its fail_job must not end
+    // B's healthy attempt, and its heartbeat must not keep B's lease looking alive.
+    expect(hub.complete(runnerA, first.attempt, result)).toBe(false);
+    expect(hub.fail(runnerA, first.attempt, "late failure from the paused runner")).toBe(false);
+    expect(hub.heartbeat(runnerA, first.attempt).extended).toBe(false);
+
+    // B's own token still works end to end.
+    expect(hub.heartbeat(runnerB, second.attempt).extended).toBe(true);
+    expect(hub.complete(runnerB, second.attempt, result)).toBe(true);
+    await expect(d).resolves.toMatchObject({ result, ranBy: "desktop" });
   });
 
   it("hands back the run id from the LEASED JOB — the caller's own runId is never taken on trust", async () => {
