@@ -177,3 +177,66 @@ describeTrust("TRUST-167 — a case ends the same way whichever driver ended it"
     expect(child?.result?.caseId).toBe("c1");
   }, 20_000);
 });
+
+// ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39, Phase 3) ─────────────────────────────────
+describeTrust("TRUST-168 — the summary is built from the committed children, not from memory", () => {
+  it("counts the CHILD's result when the two differ — memory is not the record", async () => {
+    // The driver holds the object the harness returned; the child row holds what was committed (judge
+    // coverage may have added rows to it, and a re-drive may have committed another attempt's result
+    // entirely). Summarizing from memory made the parent's answer depend on which of the two a reader asked.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const backing = new InMemoryRunStore();
+    // The committed child carries a FAILING score; the in-memory result says pass. A summary built from
+    // memory would report a passing batch over a ledger that says otherwise.
+    const runStore = new Proxy(backing, {
+      get(target, prop, receiver) {
+        if (prop !== "update") return Reflect.get(target, prop, receiver);
+        return async (id: string, patch: Record<string, unknown>, events: unknown, opts: unknown) => {
+          const result = patch.result as CaseResult | undefined;
+          const rewritten =
+            result?.caseId === "c1"
+              ? { ...patch, result: { ...result, scores: [{ metric: "pass", graderId: "g", value: 0, pass: false }] } }
+              : patch;
+          return backing.update(id, rewritten as never, events as never, opts as never);
+        };
+      },
+    });
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // The SUMMARY is the assertion, because it is computed from the aggregate at settle time and frozen on
+    // the record — a hydrated read would go to the child rows either way and could not tell the two apart.
+    const settled = await store.get(record.id);
+    const pass = settled?.summary?.find((m) => m.metric === "pass");
+    expect(pass?.count).toBe(1);
+    // What the ledger committed — not what the driver remembered: the committed child failed.
+    expect(pass?.passRate).toBe(0);
+    expect(pass?.mean).toBe(0);
+  }, 20_000);
+});

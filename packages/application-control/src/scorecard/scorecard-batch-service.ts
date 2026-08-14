@@ -1604,6 +1604,40 @@ export class ScorecardBatchService {
     return outcome.kind === "committed" || outcome.receipt.childRunId === entry.childId;
   }
 
+  // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39, Phase 3) ─────────────────────────────────
+  //
+  // The in-process driver summarized the results it held IN MEMORY — the objects `runSuite` handed back. The
+  // ledger is what a reader sees a year later, and the two can differ in the one way that matters: a case
+  // whose canonical outcome is another attempt's. Nothing in memory knows that; the receipt does.
+  //
+  // So the aggregate is rebuilt from the committed children before it is summarized, scored and settled.
+  // Deliberately NOT for a trialled batch: child rows carry no trial axis, so rebuilding by case id would
+  // collapse N trials into one — for those the in-memory set stays authoritative and the parity check is what
+  // reports a disagreement. Nothing to rebuild from (no run store, no receipts, no children) also keeps the
+  // in-memory set, which is the same behaviour every deployment had before receipts existed.
+  private async resultsFromLedger(id: string, tenant: string, inMemory: CaseResult[]): Promise<CaseResult[]> {
+    const runStore = this.deps.runStore;
+    const receipts = this.deps.caseReceipts;
+    if (!runStore || !receipts) return inMemory;
+    if (inMemory.some((r) => (r.trial ?? 0) > 0)) return inMemory; // trialled — see above
+    try {
+      const committed = await receipts.list(id);
+      if (committed.length === 0) return inMemory;
+      const children = await runStore.list(tenant, { scorecardId: id });
+      const canonical = ScorecardBatch.canonicalChildPerCase(children, committed);
+      const order = new Map(inMemory.map((r, i) => [r.caseId, i] as const));
+      const fromLedger = [...canonical.values()]
+        .map((child) => child.result)
+        .filter((r): r is CaseResult => r !== undefined)
+        .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0));
+      // A rebuild that would DROP cases is not a rebuild — it is a smaller batch, and the missing-case check
+      // is the place that decides what to do about that. Keep the in-memory set and let parity say so.
+      return fromLedger.length === inMemory.length ? fromLedger : inMemory;
+    } catch {
+      return inMemory; // a ledger read that failed says nothing about the batch
+    }
+  }
+
   // ── THE LEDGER AND THE RECEIPTS MUST AGREE (review 39, Phase 1 parity) ───────────────────────────────
   //
   // Both are being written while the cutover is in progress: the parent still aggregates the children it can
@@ -2516,6 +2550,9 @@ export class ScorecardBatchService {
           : undefined;
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
+      // The aggregate is the LEDGER's, not this process's memory (see resultsFromLedger) — and the parity
+      // check then compares what was counted against what was committed.
+      scorecard = { ...scorecard, results: await this.resultsFromLedger(id, tenant, scorecard.results) };
       await this.checkReceiptParity(id, scorecard.results);
       const summary = summarizeScorecard(scorecard);
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
