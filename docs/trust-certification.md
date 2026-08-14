@@ -220,6 +220,22 @@ half the other missed, and both looked handled.
 | TRUST-172 | **The ledger keeps the trial axis** — the receipt's primary key always carried (scorecard, case, trial), and the aggregation dropped it: `canonicalChildPerCase` keyed by caseId alone collapsed a trialled case's N receipts into one slot, which is why every consumer abandoned the ledger for a trialled batch. The canonical map is keyed by the (case, trial) child key now; N trials leave N receipts, each naming its own child, and a trialled batch is summarized from the ledger like any other | `apps/api/src/trust/case-commit-receipt.trust.test.ts` · `packages/domain/src/scorecard/scorecard-batch.test.ts` |
 | TRUST-173 | **The attempt token protects the outcome, not just the evidence that explains it** — `submit_job_result`, `fail_job` and `heartbeat_job` took a bare jobId while the evidence wire was fenced, so a paused runner's late submit became the canonical completion of its successor's execution, its fail ended a healthy attempt, its heartbeat kept a dead attempt looking alive — and the fs rendezvous plus the live screen/log/trace wrote under a caller-claimed runId with no lease check at all (any paired runner could silently drain another workspace's parked workbench reads). Every runner-initiated mutation now requires the lease's epoch and is conditioned on `status='leased' AND leased_by AND lease_epoch` in the store itself; the run is always read FROM the lease; and protocol v2 refuses a lease to a build that cannot carry the token | `apps/api/src/core/runner/runner-hub.test.ts` · `packages/db/src/activity/store-runner-hub.test.ts` · `apps/api/src/mcp.test.ts` |
 
+## Mutation gates — removing a fence must turn the suite red
+
+A guard that survives the deletion of the thing it guards is decoration. Each named mutation below has a
+test that fails when the fence is removed, pinned either on the SQL text (the fake-`SqlClient` idiom), on
+the transactional shape, or on a repository scan — so "the fence exists" is something the suite asserts,
+not something a reviewer remembers:
+
+| Mutation | The test that goes red |
+|---|---|
+| Split the receipt claim from the child settle (two round-trips again) | `packages/db/src/results/case-commit.test.ts` — the base client throws on any statement outside the transaction, and BEGIN…ROLLBACK is asserted for a refused fence |
+| Drop `lease_epoch` / `leased_by` / `status='leased'` from a runner mutation's WHERE | `packages/db/src/activity/runner-job-store.sql-guard.test.ts` — pins the predicates in the statement text for complete/fail/touch/authorize |
+| Accept a stale holder in the in-memory hub (requeued or superseded lease) | `apps/api/src/core/runner/runner-hub.test.ts` (epoch fence + requeued-window suites) · `packages/db/src/activity/store-runner-hub.test.ts` |
+| Add a new finalization path that claims via raw `receipts.commit` | `packages/application-control/src/ports/case-commit-guard.test.ts` — repository scan, allowlist of the two couples-nothing callers |
+| Drop the receipt's primary-key claim (cardinality) | TRUST-166 (in-process) · TRUST-169 (two OS processes against Postgres) |
+| Settle a run/scorecard around the fenced verb | `packages/application-control/src/ports/terminal-write-guard.test.ts` (the review-32 scanner) |
+
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
