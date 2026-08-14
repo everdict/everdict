@@ -1,4 +1,4 @@
-import type { ArtifactStore } from "@everdict/application-control";
+import { type ArtifactStore, artifactKeyOf } from "@everdict/application-control";
 
 // In-process store for dev/test. Keeps bytes in a Map, ref is a memory:// URL. Not persisted/shared (same posture as the InMemory run-store).
 export class InMemoryArtifactStore implements ArtifactStore {
@@ -13,8 +13,11 @@ export class InMemoryArtifactStore implements ArtifactStore {
     return this.objects.get(key)?.data;
   }
 
-  // memory:// refs don't expire and there is no second address to mint — a ref of ours is already the only one.
+  // memory:// refs don't expire and there is no second address to mint — a ref of ours is already the only
+  // one; the stable artifact:// handle mints against the base like the S3 twin signs against its endpoint.
   async publicUrlFor(ref: string): Promise<string | undefined> {
+    const key = artifactKeyOf(ref);
+    if (key !== undefined) return this.objects.has(key) ? `${this.baseUrl}${key}` : undefined;
     return ref.startsWith(this.baseUrl) ? ref : undefined;
   }
 }

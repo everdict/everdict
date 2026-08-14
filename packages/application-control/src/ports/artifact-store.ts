@@ -4,6 +4,24 @@ import type { EnvSnapshot } from "@everdict/contracts";
 // Implementations: S3ArtifactStore (MinIO/S3, presigned), InMemoryArtifactStore (dev/test) — both in @everdict/storage.
 // The control plane offloads before persisting the result. Moved here in re-architecture P2 (S2): the port +
 // the offload use-case belong to the application layer (I/O through the port, not a pure rule).
+// ── THE STORED REF IS THE KEY, NEVER THE SIGNATURE (review 40 follow-up) ─────────────────────────────
+//
+// `put` returns a presigned URL, and persisting THAT was two defects in one string: the signature expires
+// (a year-old result points at a dead link until a display read happens to re-mint it), and the bytes'
+// identity changed with the signing clock — the same artifact digested differently every time it was
+// offloaded, which is noise a receipt's resultDigest exists to make impossible. What a record stores is the
+// stable `artifact://<key>` handle; every browser-facing URL is minted AT READ (`publicUrlFor`), and legacy
+// rows holding old presigned URLs keep re-minting exactly as before.
+export const ARTIFACT_REF_SCHEME = "artifact://";
+export function artifactRefOf(key: string): string {
+  return `${ARTIFACT_REF_SCHEME}${key}`;
+}
+export function artifactKeyOf(ref: string): string | undefined {
+  if (!ref.startsWith(ARTIFACT_REF_SCHEME)) return undefined;
+  const key = ref.slice(ARTIFACT_REF_SCHEME.length);
+  return key.length > 0 ? key : undefined;
+}
+
 export interface ArtifactStore {
   put(key: string, data: Uint8Array, contentType: string): Promise<string>;
   // Read an artifact back by KEY. The ref `put` returns is not a durable handle — it is presigned (it expires) and it
@@ -36,16 +54,17 @@ export async function offloadSnapshot(
 ): Promise<EnvSnapshot> {
   if (!store) return snapshot;
   let out = snapshot;
-  // Screenshot (os-use + browser): base64 → object store, replace with a ref, drop the inline bytes.
+  // Screenshot (os-use + browser): base64 → object store; the record keeps the STABLE key handle, never the
+  // put's presigned URL (see ARTIFACT_REF_SCHEME above) — display reads mint a fresh URL from it.
   if ((out.kind === "os-use" || out.kind === "browser") && out.screenshot) {
-    const ref = await store.put(`${keyBase}.png`, Buffer.from(out.screenshot, "base64"), "image/png");
-    out = { ...out, screenshotRef: ref, screenshot: "" };
+    await store.put(`${keyBase}.png`, Buffer.from(out.screenshot, "base64"), "image/png");
+    out = { ...out, screenshotRef: artifactRefOf(`${keyBase}.png`), screenshot: "" };
   }
   // DOM (browser): the full page HTML can be large (100KB–1MB), bloating the persisted jsonb result. Offload it and
   // keep only an inline preview; the full DOM stays fetchable via domRef.
   if (out.kind === "browser" && out.dom.length > DOM_INLINE_MAX) {
-    const ref = await store.put(`${keyBase}.dom.html`, Buffer.from(out.dom, "utf8"), "text/html; charset=utf-8");
-    out = { ...out, domRef: ref, dom: out.dom.slice(0, DOM_INLINE_MAX) };
+    await store.put(`${keyBase}.dom.html`, Buffer.from(out.dom, "utf8"), "text/html; charset=utf-8");
+    out = { ...out, domRef: artifactRefOf(`${keyBase}.dom.html`), dom: out.dom.slice(0, DOM_INLINE_MAX) };
   }
   return out;
 }

@@ -21,7 +21,8 @@ describe("offloadSnapshot (snapshot media → object storage: screenshot + DOM)"
     expect(out.kind).toBe("os-use");
     if (out.kind !== "os-use") throw new Error("kind");
     expect(out.screenshot).toBe(""); // base64 removed
-    expect(out.screenshotRef).toBe("memory://artifacts/runs/r1.png"); // replaced with the URL
+    // The record keeps the STABLE handle, never the put's minted URL — display reads re-mint from it.
+    expect(out.screenshotRef).toBe("artifact://runs/r1.png");
     // the bytes are actually stored (same as the original decode).
     expect(Buffer.from(store.objects.get("runs/r1.png")?.data ?? new Uint8Array()).toString()).toBe("PNGBYTES");
     expect(store.objects.get("runs/r1.png")?.contentType).toBe("image/png");
@@ -41,7 +42,7 @@ describe("offloadSnapshot (snapshot media → object storage: screenshot + DOM)"
     expect(out.kind).toBe("browser");
     if (out.kind !== "browser") throw new Error("kind");
     expect(out.screenshot).toBe(""); // base64 removed from the record
-    expect(out.screenshotRef).toBe("memory://artifacts/runs/b1.png"); // replaced with the URL
+    expect(out.screenshotRef).toBe("artifact://runs/b1.png"); // the stable handle, not the minted URL
     expect(out.dom).toBe("<html>…</html>"); // a SMALL DOM stays inline (below the cap)
     expect(out.domRef).toBeUndefined();
     expect(Buffer.from(store.objects.get("runs/b1.png")?.data ?? new Uint8Array()).toString()).toBe("PAGEPNG");
@@ -53,7 +54,7 @@ describe("offloadSnapshot (snapshot media → object storage: screenshot + DOM)"
     const snap: EnvSnapshot = { kind: "browser", url: "u", dom: bigDom, console: [] };
     const out = await offloadSnapshot(snap, store, "runs/b2");
     if (out.kind !== "browser") throw new Error("kind");
-    expect(out.domRef).toBe("memory://artifacts/runs/b2.dom.html"); // full DOM offloaded
+    expect(out.domRef).toBe("artifact://runs/b2.dom.html"); // full DOM offloaded — stable handle
     expect(out.dom).toBe(bigDom.slice(0, DOM_INLINE_MAX)); // inline preview capped
     expect(out.dom.length).toBe(DOM_INLINE_MAX);
     // the FULL DOM is stored (recoverable), not just the preview.
@@ -92,7 +93,8 @@ describe("offloadSnapshot (snapshot media → object storage: screenshot + DOM)"
     };
     const snap: EnvSnapshot = { kind: "os-use", screenshotRef: "x", screenshot: "QUJDRA==", windows: [] };
     const out = await offloadSnapshot(snap, store, "scorecards/sc1/case1");
-    expect(out.kind === "os-use" && out.screenshotRef).toBe("s3://bucket/scorecards/sc1/case1.png");
+    // Whatever URL put() minted, the RECORD keeps the stable handle — the URL is a read-time concern.
+    expect(out.kind === "os-use" && out.screenshotRef).toBe("artifact://scorecards/sc1/case1.png");
     expect(calls[0]).toEqual({ key: "scorecards/sc1/case1.png", contentType: "image/png", len: 4 }); // "ABCD"=4 bytes
   });
 });
@@ -126,6 +128,19 @@ describe("refreshSnapshotRefs (display twin: the record's refs → links a brows
     expect(out.domRef).toBe("https://cdn.example/bucket/runs/b1.dom.html");
     expect(out.dom).toBe("<html>preview</html>");
     expect(out.url).toBe("https://shop.example/cart");
+  });
+
+  it("mints a browser URL from the STABLE artifact:// handle (the shape every new record stores)", async () => {
+    const stores = new InMemoryArtifactStore("https://cdn.example/artifacts/");
+    await stores.put("runs/b9.png", new Uint8Array([1]), "image/png");
+    const snap: EnvSnapshot = {
+      kind: "os-use",
+      screenshot: "",
+      screenshotRef: "artifact://runs/b9.png",
+      windows: [],
+    };
+    const out = await refreshSnapshotRefs(snap, stores);
+    expect(out.kind === "os-use" && out.screenshotRef).toBe("https://cdn.example/artifacts/runs/b9.png");
   });
 
   it("keeps a ref this store doesn't recognize, and is a no-op without a store", async () => {

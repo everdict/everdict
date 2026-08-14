@@ -6,7 +6,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { ArtifactStore } from "@everdict/application-control";
+import { type ArtifactStore, artifactKeyOf } from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
 
 export interface S3ArtifactStoreOptions {
@@ -73,10 +73,13 @@ export class S3ArtifactStore implements ArtifactStore {
     return key === undefined ? undefined : await this.signedUrl(this.presigner, key);
   }
 
-  // `<endpoint>/<bucket>/<key>?<signature>` → `<key>` (path-style, which is what we always sign). The endpoint's host
-  // is deliberately NOT compared: an old ref minted before the public base was configured names a different host and
-  // still points at this bucket.
+  // `artifact://<key>` (the stable stored handle) or `<endpoint>/<bucket>/<key>?<signature>` (a legacy row's
+  // presigned URL) → `<key>` (path-style, which is what we always sign). The endpoint's host is deliberately
+  // NOT compared: an old ref minted before the public base was configured names a different host and still
+  // points at this bucket.
   private keyOf(ref: string): string | undefined {
+    const stable = artifactKeyOf(ref);
+    if (stable !== undefined) return stable;
     let path: string;
     try {
       path = decodeURIComponent(new URL(ref).pathname);
