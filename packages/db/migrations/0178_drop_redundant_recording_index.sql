@@ -1,0 +1,11 @@
+-- 0178_drop_redundant_recording_index — contract: remove an index the primary key already is.
+--
+-- 0177 widened the recordings key to `(run_id, generation)` and, in the same breath, created a
+-- `(run_id, generation DESC)` index for the two reads this store makes. Both reads walk generations
+-- descending within one run — and that is exactly what the primary key's own btree serves, backwards, at no
+-- extra cost. What the second index bought was a duplicate structure maintained on every append, on the
+-- table that takes the most writes in the system (a frame series is one row-locked jsonb append per frame).
+--
+-- 0177 is left as it shipped: a migration that has been applied anywhere is not edited, because a database
+-- that already ran it will never run it again and would keep the index this file exists to remove.
+DROP INDEX IF EXISTS everdict_recordings_run_generation_idx;

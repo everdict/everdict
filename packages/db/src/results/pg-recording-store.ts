@@ -83,8 +83,9 @@ export class PgRecordingStore implements RecordingStore {
   // reset it used to be.
   async open(runId: string): Promise<number> {
     // One statement: the next generation is computed and claimed together, so two openers cannot both read
-    // the same max and then both insert it — the primary key refuses the second, and it retries by re-running
-    // this statement rather than by trusting a number it read earlier.
+    // the same max and then both insert it. The primary key refuses the second, this throws, and the caller
+    // records the case as `unisolated` — a fence it could not raise, which is the fail-closed reading and not
+    // a number to invent. Two opens for one execution id is already a driver that lost its authority.
     const { rows } = await this.client.query<{ generation: number }>(
       `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
        SELECT $1, '{}'::jsonb, COALESCE(MAX(generation), 0) + 1, now()
