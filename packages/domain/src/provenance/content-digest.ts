@@ -36,10 +36,11 @@ function canonicalize(value: unknown): string {
 // over one form and checked against the other reports drift on a document nobody touched — and in a
 // fail-closed reader that reads as history being unverifiable. Seal and verify therefore both hash what the
 // registry parse produced.
-// No digest subject carries `Score` rows today: the subjects are dataset case bundles, resolved harness and
-// judge specs, grading plans and policy documents, and `ScoreSchema` is referenced by exactly one field in
-// contracts — the one a `CaseResult` carries, which is never digested. A subject that later embeds scores
-// must digest the parsed form. Pinned by content-digest.test.ts "what a digest may be computed over".
+// One digest subject DOES carry `Score` rows now: the case-commit receipt digests a `CaseResult`, and it
+// goes through `caseResultDigest` (scorecard/case-result-digest.ts) — the parse-first spelling this comment
+// always demanded. Every other subject (dataset case bundles, resolved harness and judge specs, grading
+// plans, policy documents) stays score-free. A new subject that embeds scores must digest the parsed form.
+// Pinned by content-digest.test.ts "what a digest may be computed over" + case-result-digest.test.ts.
 function canonicalText(value: unknown): string {
   // `undefined` is not a document — JSON.stringify(undefined) returns the VALUE undefined (typed string), so
   // canonicalize would hand back a non-string far from the caller. Refuse it here, typed and named. (Inside

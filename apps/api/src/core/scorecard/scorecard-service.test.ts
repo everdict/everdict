@@ -34,6 +34,7 @@ import {
   type Principal,
   Run,
   composeVerdictPolicy,
+  caseResultDigest,
   contentDigest,
   evidenceStatus,
   inMemoryUsageMeter,
@@ -2907,7 +2908,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
       childRunId: child.id,
       // Derived from THIS result, the way production digests the committed bytes — a hand-written digest
       // would certify the fixture rather than the code (and the receipt gate now refuses it, as it should).
-      resultDigest: contentDigest(child.result),
+      resultDigest: caseResultDigest(child.result),
       committedAt: "2026-07-08T00:00:02.000Z",
     });
   }
@@ -3179,7 +3180,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       trial: 0,
       childRunId,
       // The digest of the committed bytes, the way production writes it — the receipt gate verifies it now.
-      resultDigest: contentDigest(result),
+      resultDigest: caseResultDigest(result),
       committedAt: "2026-07-08T00:00:02.000Z",
     });
 
@@ -4657,7 +4658,7 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       caseId: "c1",
       trial: 0,
       childRunId: "child-c1",
-      resultDigest: contentDigest({ ...caseResult(true), caseId: "c1" }),
+      resultDigest: caseResultDigest({ ...caseResult(true), caseId: "c1" }),
       committedAt: "2026-07-10T00:00:02.000Z",
     });
 

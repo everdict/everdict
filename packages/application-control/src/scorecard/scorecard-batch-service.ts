@@ -34,6 +34,7 @@ import {
   caseOutcome,
   caseVerdict,
   classifyFailure,
+  caseResultDigest,
   completeJudgeCoverage,
   contentDigest,
   modelBindingLabel,
@@ -1118,7 +1119,7 @@ export class ScorecardBatchService {
     const divergent = [...latest.entries()].filter(([key, child]) => {
       const receipt = receiptByKey.get(key);
       return (
-        receipt !== undefined && child.result !== undefined && contentDigest(child.result) !== receipt.resultDigest
+        receipt !== undefined && child.result !== undefined && caseResultDigest(child.result) !== receipt.resultDigest
       );
     });
     if (divergent.length > 0)
@@ -1459,7 +1460,7 @@ export class ScorecardBatchService {
             caseId: r.caseId,
             trial: r.trial ?? 0,
             childRunId: seededChild.id,
-            resultDigest: contentDigest(r),
+            resultDigest: caseResultDigest(r),
             committedAt: this.now(),
           });
         }
@@ -1652,7 +1653,7 @@ export class ScorecardBatchService {
         ...(where.generation !== undefined
           ? { generation: where.generation, attemptId: attemptIdOf(where.executionId, where.generation) }
           : {}),
-        resultDigest: contentDigest(result),
+        resultDigest: caseResultDigest(result),
         committedAt: this.now(),
       })
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
@@ -1693,7 +1694,9 @@ export class ScorecardBatchService {
       ...(entry.executionId !== undefined && entry.generation !== undefined
         ? { attemptId: attemptIdOf(entry.executionId, entry.generation) }
         : {}),
-      resultDigest: contentDigest(result),
+      // Through the ONE spelling (caseResultDigest): the digest must match across the jsonb round-trip —
+      // ScoreSchema's read-time normalizer reshapes what a producer literally wrote (see case-result-digest.ts).
+      resultDigest: caseResultDigest(result),
       ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
       committedAt: this.now(),
     };
@@ -1748,14 +1751,14 @@ export class ScorecardBatchService {
         // that disagrees with its own receipt is a permanent divergence a reader will hydrate a year from
         // now; counting ANYTHING for that case (the row, or this process's memory) would publish a summary
         // built over bytes the ledger does not vouch for.
-        if (contentDigest(child.result) === receipt.resultDigest) rebuilt.push(child.result);
+        if (caseResultDigest(child.result) === receipt.resultDigest) rebuilt.push(child.result);
         else unaccounted.push(`${key} (child digest mismatch)`);
         continue;
       }
       // A child with NO result copy (a legacy failure row) may be stood in for by the in-memory object ONLY
       // when the receipt vouches for its bytes — the digest is what turns "this process remembers" into
       // "the ledger agrees".
-      if (contentDigest(r) === receipt.resultDigest) {
+      if (caseResultDigest(r) === receipt.resultDigest) {
         rebuilt.push(r);
         continue;
       }

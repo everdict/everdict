@@ -1,7 +1,7 @@
 import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
-import { contentDigest } from "@everdict/domain";
+import { caseResultDigest } from "@everdict/domain";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -302,7 +302,7 @@ describeTrust("TRUST-171 — a failure is committed, not merely recorded", () =>
     );
     expect(failedChild?.status).toBe("failed");
     expect(failedChild?.result?.failure?.class).toBe("infra");
-    expect(failedChild?.result && contentDigest(failedChild.result)).toBe(boom?.resultDigest);
+    expect(failedChild?.result && caseResultDigest(failedChild.result)).toBe(boom?.resultDigest);
   }, 20_000);
 
   it("a RETRY reopens the case — the receipt names the attempt that answered, not the one that died first", async () => {
@@ -402,7 +402,7 @@ describeTrust("TRUST-172 — a trialled batch is summarized from the ledger, per
     for (const r of committed) {
       const trialChild = children.find((c) => c.id === r.childRunId);
       expect(trialChild?.status).toBe("succeeded");
-      expect(trialChild?.result && contentDigest(trialChild.result)).toBe(r.resultDigest);
+      expect(trialChild?.result && caseResultDigest(trialChild.result)).toBe(r.resultDigest);
     }
   }, 20_000);
 });
