@@ -955,56 +955,29 @@ export class ScorecardBatchService {
             () => this.holdsBatch(id, ctx.driverEpoch),
           )
           .catch(() => {});
-        // …AND EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3). The catch above keeps a judge outage from
-        // failing the case — which is right — but "the judge promise finished" is not "the judges answered",
-        // and a terminal child whose selected judge is simply not mentioned reads as a case nobody chose to
-        // judge. The absence is stated instead, retryably, so a re-score can still pick it up.
-        result = { ...result, scores: completeJudgeCoverage(result.scores, ctx.judges) };
       }
-      // …AND THE CASE IS CLAIMED HERE TOO (review 39 P0). A Temporal activity is at-least-once and a case can
-      // legitimately be executed twice; the receipt is what decides which of those executions is the case's
-      // answer, on both drivers, by the same constraint.
-      if (
-        runStore &&
-        child &&
-        !(await this.claimCase(id, result, {
-          childId: child.id,
-          executionId,
-          generation: generation ?? 0,
-          judges: ctx.judges,
-        }))
-      )
-        return { settled: false }; // another attempt owns this case — this one publishes nothing
-      // THE SAME TERMINAL CHILD ON BOTH DRIVERS (review 39 P0-3). The in-process path assembles the case's
-      // evidence — the snapshot offload and the recording seal — BEFORE the one terminal write, because
-      // "judged but not assembled" is not finished. This path called settleChild directly, so the same
-      // sentence meant two different things depending on which driver a deployment happened to run: a
-      // Temporal-terminal child could carry inline base64 and no recording ref.
-      if (runStore && child)
-        await this.assembleCaseEvidence(result, {
-          scorecardId: id,
-          executionId,
-          generation: generation ?? 0,
-          ...(unisolated ? { unisolated: true } : {}),
-        });
-      const committed =
-        runStore && child
-          ? await this.settleChild(
-              child.id,
-              (cur) => ({
-                ...Run.from(cur).succeed(result as CaseResult, this.now()).patch,
-                // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-                ...(ranOn ? { runtime: ranOn } : {}),
-              }),
-              { scorecardId: id, epoch: ctx.driverEpoch },
-            )
-          : undefined;
-      // …AND A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3). The settle's answer
-      // was discarded: `doneIds` was marked, the completion fact was emitted and `{settled:true}` was
-      // returned even when the write was refused (a takeover) or failed (the store). The workflow then moved
-      // on, and the finalizer's missing-case check consults `doneIds` first — so a case with no result on the
-      // ledger could pass the very check that exists to catch it.
-      if (runStore && child && committed === undefined) return { settled: false }; // not ours to end, or not written — either way this activity did not settle it
+      // ── ONE FINALIZER, BOTH DRIVERS (review 39, Phase 2) ─────────────────────────────────────────────
+      //
+      // Judge coverage, the receipt claim, the evidence assembly and the child's one terminal write are no
+      // longer this path's own code. They were, and every review since has found the same defect in whichever
+      // copy was edited second — which is why the duplication, not the individual bugs, was the finding.
+      const outcome = await this.finalizeCaseAttempt({
+        scorecardId: id,
+        epoch: ctx.driverEpoch,
+        result,
+        judges: ctx.judges,
+        ...(child ? { childId: child.id } : {}),
+        executionId,
+        generation: generation ?? 0,
+        ...(unisolated ? { unisolated: true } : {}),
+        ...(ranOn ? { ranOn } : {}),
+      });
+      // A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3). `lost` means another
+      // attempt owns the case (or this driver was displaced); `unwritten` means the store refused it. Either
+      // way this activity did not settle it, and saying otherwise let a case with no result on the ledger
+      // pass the finalizer's missing-case check.
+      if (outcome.kind !== "committed") return { settled: false };
+      result = outcome.result; // what the child carries is what this activity counts
       ctx.doneIds.add(caseId);
       const v = caseVerdict(result, ctx.verdictPolicy);
       const reason = caseReason(result);
@@ -1537,46 +1510,24 @@ export class ScorecardBatchService {
     const entry = pending.get(key);
     if (!entry) return "lost"; // never ours, or a second call for one case
     pending.delete(key);
-    // No child to settle (a batch with no run store) is not a lost authority — the case really did finish.
-    if (!entry.childId || !this.deps.runStore) return "committed";
-    // EVERY SELECTED JUDGE LEAVES A ROW (review 39 P0-3). "The judge stream finished" is not "the judges
-    // answered": a task that died of something unexpected leaves the case's evidence terminal with its
-    // selected judge simply unmentioned, which reads as a judge nobody chose. The absence is stated instead,
-    // retryably, so a re-score can still pick it up — and the same helper runs on the Temporal path, so the
-    // two drivers cannot disagree about what a judged case looks like.
-    const covered =
-      entry.judges.length > 0 ? { ...result, scores: completeJudgeCoverage(result.scores, entry.judges) } : result;
-    // …and the case is CLAIMED before any of it is published (see claimCase). An attempt that lost the claim
-    // is not this case's outcome, so it publishes nothing and reports the loss the way every other lost
-    // authority is reported here.
-    if (!(await this.claimCase(entry.parentDriver.scorecardId, covered, { ...entry, childId: entry.childId })))
-      return "lost";
-    // TERMINAL MEANS FINALIZED, AND FINALIZED INCLUDES THE ARTIFACTS (arch-review 36 P1). The child stopped
-    // going terminal before its judges landed two reviews ago; everything ELSE a case produces still happened
-    // after — the screenshot offload and the replay seal ran later in the batch pipeline, so a crash in
-    // between left a row recovery reads as finished evidence whose snapshot was still inline base64 and whose
-    // replay had no ref. Judged but not assembled is not finished.
-    //
-    // Both are best-effort by contract and stay that way: a failed offload or an unsealed recording must
-    // never cost the case its verdict. What changes is that they happen BEFORE the one terminal write, so
-    // whatever they produced is part of it.
-    await this.assembleCaseEvidence(covered, {
+    // Everything that "ending a case" MEANS lives in one place now (see finalizeCaseAttempt); what is left
+    // here is this loop's own bookkeeping — which case, and whether it already ended.
+    const outcome = await this.finalizeCaseAttempt({
       scorecardId: entry.parentDriver.scorecardId,
+      epoch: entry.parentDriver.epoch,
+      result,
+      judges: entry.judges,
+      ...(entry.childId ? { childId: entry.childId } : {}),
       executionId: entry.executionId,
       generation: entry.generation,
       ...(entry.unisolated ? { unisolated: true } : {}),
+      ...(entry.ranOn ? { ranOn: entry.ranOn } : {}),
     });
-    const settled = await this.settleChild(
-      entry.childId,
-      (cur) => ({
-        ...Run.from(cur).succeed(covered, this.now()).patch,
-        // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        ...(entry.ranOn ? { runtime: entry.ranOn } : {}),
-      }),
-      entry.parentDriver,
-    ).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
-    if (settled instanceof Error) return "unwritten"; // the store could not take it — the batch must not pass
-    return settled === undefined ? "lost" : "committed";
+    // …and the PARENT counts what the child carries. Judge coverage may have added rows, and the aggregate
+    // holds this very object — so a summary built from it would otherwise disagree with the ledger about a
+    // judge that never answered, which is the disagreement this whole seam exists to prevent.
+    if (outcome.kind === "committed") result.scores = outcome.result.scores;
+    return outcome.kind;
   }
 
   // ── CLAIM THE CASE, THEN COMMIT THE CHILD (review 39 P0) ─────────────────────────────────────────────
@@ -1630,7 +1581,11 @@ export class ScorecardBatchService {
     try {
       const committed = await receipts.list(id);
       if (committed.length === 0) return; // nothing claimed (a batch that predates the store) — nothing to say
-      const ledgerKeys = new Set(counted.map((r) => childKey(r.caseId, r.trial)));
+      // A case that died before producing an outcome leaves by the FAILURE exit, which finalizes it without a
+      // commit — there is no canonical result for a receipt to point at, only a failure on the child row. So
+      // those are not "counted without a receipt"; counting them as such would bury the real disagreement
+      // under every ordinary failed case in the batch.
+      const ledgerKeys = new Set(counted.filter((r) => !r.failure).map((r) => childKey(r.caseId, r.trial)));
       const receiptKeys = new Set(committed.map((r) => childKey(r.caseId, r.trial)));
       const uncounted = [...receiptKeys].filter((k) => !ledgerKeys.has(k));
       const unclaimed = [...ledgerKeys].filter((k) => !receiptKeys.has(k));
@@ -1638,6 +1593,7 @@ export class ScorecardBatchService {
       // subtler half of the same disagreement.
       const byKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r]));
       const divergent = counted.filter((r) => {
+        if (r.failure) return false;
         const receipt = byKey.get(childKey(r.caseId, r.trial));
         return receipt !== undefined && receipt.resultDigest !== contentDigest(r);
       });
@@ -1651,6 +1607,73 @@ export class ScorecardBatchService {
       // A parity read that fails says nothing about the batch — it is a diagnostic, and a diagnostic that
       // breaks the thing it observes is worse than no diagnostic.
     }
+  }
+
+  // ── THE ONE PLACE A CASE IS FINALIZED (review 39, Phase 2) ───────────────────────────────────────────
+  //
+  // Both drivers used to hold their own copy of "what ending a case means", and every review since has found
+  // the same defect in whichever copy was edited second: the Temporal path settled without assembling, the
+  // in-process path claimed without covering its judges, one honoured the settle's answer and the other threw
+  // it away. Reviewing them separately is what made the recurrence structural.
+  //
+  // So the ORDER is stated once, and it is the whole content of the contract:
+  //
+  //   ① complete the judge coverage — a selected judge that never answered leaves a stated row, not silence
+  //   ② CLAIM the case — the receipt decides which physical attempt is the case's answer (a DB constraint)
+  //   ③ assemble the evidence — snapshot offload + recording seal, BEFORE the terminal write, because
+  //      "judged but not assembled" is not finished
+  //   ④ commit the child — one terminal write, fenced by the child's epoch and the parent's driver
+  //
+  // ② before ③ matters: an attempt that lost the claim must not publish artifacts as though it were the
+  // case's answer. ③ before ④ matters for the opposite reason: whatever the case produced has to be part of
+  // the one write a reader will ever see.
+  //
+  // The result is what the caller must persist and count — coverage may have added rows to it — so it is
+  // returned rather than mutated in place.
+  private async finalizeCaseAttempt(input: {
+    scorecardId: string;
+    epoch: number;
+    result: CaseResult;
+    judges: ReadonlyArray<{ id: string }>;
+    childId?: string;
+    executionId: string;
+    generation: number;
+    unisolated?: boolean;
+    ranOn?: string;
+  }): Promise<{ kind: "committed"; result: CaseResult } | { kind: "lost" } | { kind: "unwritten" }> {
+    const covered =
+      input.judges.length > 0
+        ? { ...input.result, scores: completeJudgeCoverage(input.result.scores, input.judges) }
+        : input.result;
+    // A batch with no run store has no child to commit — the case really did finish, and there is nothing for
+    // a receipt to make canonical either.
+    if (!input.childId || !this.deps.runStore) return { kind: "committed", result: covered };
+    if (
+      !(await this.claimCase(input.scorecardId, covered, {
+        childId: input.childId,
+        executionId: input.executionId,
+        generation: input.generation,
+        judges: input.judges,
+      }))
+    )
+      return { kind: "lost" };
+    await this.assembleCaseEvidence(covered, {
+      scorecardId: input.scorecardId,
+      executionId: input.executionId,
+      generation: input.generation,
+      ...(input.unisolated ? { unisolated: true } : {}),
+    });
+    const settled = await this.settleChild(
+      input.childId,
+      (cur) => ({
+        ...Run.from(cur).succeed(covered, this.now()).patch,
+        // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+        ...(input.ranOn ? { runtime: input.ranOn } : {}),
+      }),
+      { scorecardId: input.scorecardId, epoch: input.epoch },
+    ).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+    if (settled instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
+    return settled === undefined ? { kind: "lost" } : { kind: "committed", result: covered };
   }
 
   private async settleChild(
