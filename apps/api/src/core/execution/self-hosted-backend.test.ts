@@ -37,6 +37,35 @@ describe("SelfHostedBackend", () => {
     });
   });
 
+  // The caller's seal, artifact key and receipt all name the attempt it dispatched. When a requeue hands the
+  // job to a second runner, that lease opens its OWN recording attempt — so the backend has to report which
+  // one actually ran, or the run seals a recording no execution wrote into (arch-review 41 P0-evidence).
+  it("reports the attempt a re-lease actually ran under, so the caller seals that recording and not the one it parked with", async () => {
+    let t = 0;
+    let opened = 40;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: async () => ++opened,
+    });
+    const backend = new SelfHostedBackend(key, hub);
+    const seen: number[] = [];
+    const dispatched = backend.dispatch(
+      { ...job, runId: "evd-run-1", recordingGeneration: 7 },
+      { onAttempt: (generation) => seen.push(generation) },
+    );
+
+    await hub.leaseWait(key, 0); // the first runner takes it, then goes silent
+    t = 201; // past the lease TTL → requeue + re-lease under a new attempt
+    const second = await hub.leaseWait(key, 0);
+    expect(second?.job.recordingGeneration).toBe(41);
+    hub.complete(key, { jobId: "j1", leaseEpoch: 2 }, result);
+
+    await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
+    expect(seen).toEqual([41]); // …and never the 7 this dispatch opened
+  });
+
   it("capacity is total=maxConcurrent, used=0 (parking uses no real resources)", async () => {
     const backend = new SelfHostedBackend(key, new RunnerHub());
     expect(await backend.capacity()).toEqual({ total: 8, used: 0 });

@@ -24,7 +24,7 @@ export class TraceRecordingDispatcher implements Dispatcher {
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     const t0 = Date.now();
     const events: TraceEvent[] = [];
-    const messages: string[] = []; // 실패 throw 에 증거로 동반되는 문자열판 (classifyFailure → placement.events)
+    const messages: string[] = []; // the string plane that rides a failure throw as evidence (classifyFailure → placement.events)
     const mark = (event: string, message: string): void => {
       const now = Date.now();
       messages.push(message);
@@ -43,13 +43,14 @@ export class TraceRecordingDispatcher implements Dispatcher {
     mark("accepted", `case accepted by the control plane — target ${target}`);
     const wrapped: DispatchOptions = {
       ...opts,
-      // 대기 사유(러너 오프라인·배치 blocked·용량 대기)는 콜백으로만 흐르던 진단 — 궤적에도 남긴다.
-      // 백엔드가 같은 판정을 자기 이벤트로 봉인하는 경우(Nomad blocked)는 문구가 달라 두 평면 모두에 사실로 남는다.
+      // Waiting reasons (runner offline, placement blocked, capacity wait) used to flow only through the
+      // callback — record them on the trace too. A backend that seals the same verdict as its own event
+      // (Nomad blocked) words it differently, so both planes keep it as fact.
       onWaiting: (reason) => {
         if (messages[messages.length - 1] !== reason) mark("waiting", reason);
         opts?.onWaiting?.(reason);
       },
-      // 스케줄러 큐를 벗어나 백엔드가 제출을 시작한 순간 — 큐 대기 시간이 여기서 확정된다.
+      // The moment the job leaves the scheduler queue and the backend starts submitting — queue wait time is fixed here.
       onStarted: () => {
         mark("started", `left the dispatch queue after ${Date.now() - t0}ms — the backend is submitting`);
         opts?.onStarted?.();

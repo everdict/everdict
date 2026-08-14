@@ -72,6 +72,10 @@ export interface AttemptAuthority {
 export interface EnqueueResult {
   result: CaseResult;
   ranBy: string; // runnerId of the runner that ran/reported back
+  // The recording generation the attempt that ACTUALLY RAN owns. A re-lease mints a new one (see
+  // RunnerHubDeps.openAttempt), so the number the dispatcher parked with no longer addresses the evidence this
+  // execution wrote. Absent = the job still carries the generation its dispatch opened (or none at all).
+  generation?: number;
 }
 
 interface PendingEntry {
@@ -106,6 +110,20 @@ export interface RunnerHubDeps {
   maxWaitingPerKey?: number;
   newJobId?: () => string;
   now?: () => number;
+  // ── A RE-LEASE IS A NEW PHYSICAL ATTEMPT, SO IT OPENS ITS OWN RECORDING (arch-review 41 P0-evidence) ──
+  //
+  // The epoch bump on lease already told the RESULT wire which attempt a report belongs to. The job's
+  // `recordingGeneration` did not move with it: a requeued job was handed to the next runner still carrying
+  // the generation its FIRST dispatch opened, so both executions appended into the same (runId, generation)
+  // recording row and the run sealed as ONE replay — the abandoned attempt's frames interleaved with its
+  // successor's, with nothing on the record to say two machines wrote it.
+  //
+  // Same seam shape as SpilloverOpts.reattempt: the composition root binds this to the recording store's
+  // `open`, which inserts the next attempt and returns the generation it owns. `undefined` (or a throw) means
+  // the recording lane opened nothing, and the re-leased job is then dispatched with NO generation at all —
+  // fail-closed, because the durable evidence path refusing (degrading to the live view) is the correct
+  // outcome and merging into another execution's row is the one thing this exists to prevent.
+  openAttempt?: (job: CaseJob) => Promise<number | undefined>;
 }
 
 // The fairness-map composite-key separator (queueName + group). A NUL byte can't occur in a backend name
@@ -140,12 +158,14 @@ export class RunnerHub {
   private readonly maxWaitingPerKey: number;
   private readonly newJobId: () => string;
   private readonly now: () => number;
+  private readonly openAttempt: ((job: CaseJob) => Promise<number | undefined>) | undefined;
   constructor(deps: RunnerHubDeps = {}) {
     this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // default 5 minutes
     this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // default 2 minutes (renewed by heartbeat)
     this.maxWaitingPerKey = deps.maxWaitingPerKey ?? 0; // 0 = unlimited (backpressure opt-in)
     this.newJobId = deps.newJobId ?? randomUUID;
     this.now = deps.now ?? Date.now;
+    this.openAttempt = deps.openAttempt;
   }
 
   private q(key: SelfHostedKey): PendingEntry[] {
@@ -305,6 +325,9 @@ export class RunnerHub {
   // First requeues expired leases (runner dead/disconnected) — so another/reconnected runner can take them again.
   // If capabilities are given (runner self-advertised) this is a placement gate: if the runner lacks a capability the job requires
   // (case.image→docker), fail that job immediately — reject with a clear reason instead of running in the wrong environment (host fallback), avoiding a silent idle timeout.
+  // ⚠️ Taking the entry is ALL this does. The physical attempt a lease opens (mintAttempt) is minted by
+  // leaseWait, which is the only path that hands a job to a runner — the take has to stay synchronous
+  // because the wake protocol below reasons about a single-threaded "the woken runner takes it right here".
   lease(key: SelfHostedKey, capabilities?: string[]): LeasedJob | null {
     const now = this.now();
     // Peek, don't materialize: an idle runner polling an EMPTY own queue must not lazily recreate the map entry
@@ -373,6 +396,24 @@ export class RunnerHub {
     return null;
   }
 
+  // Open the recording attempt THIS lease is, and restamp the queue entry with it. Only a RE-lease needs it
+  // (epoch > 1): the first lease runs the job whose attempt its dispatch already opened, so minting there
+  // would orphan that one. An open that fails STRIPS the inherited generation rather than keeping it — a
+  // producer with no number lands in the live-only lane (runner-lease.mcp.ts refuses the durable half), where
+  // a producer carrying the PREVIOUS attempt's number would silently merge two executions into one recording.
+  //
+  // The ENTRY is restamped, not just the reply: authorizeAttempt answers every evidence push out of it, and
+  // complete() reads the generation back off it to tell the dispatcher which attempt actually ran.
+  private async mintAttempt(key: SelfHostedKey, leased: LeasedJob): Promise<LeasedJob> {
+    if (leased.attempt.leaseEpoch <= 1 || !this.openAttempt) return leased;
+    const entry = this.locate(key, leased.jobId)?.entry;
+    const generation = await this.openAttempt(leased.job).catch(() => undefined);
+    const { recordingGeneration: _inherited, ...withoutAttempt } = leased.job;
+    const job: CaseJob = generation === undefined ? withoutAttempt : { ...leased.job, recordingGeneration: generation };
+    if (entry) entry.job = job;
+    return { ...leased, job };
+  }
+
   // Requeue expired leases (runner dead/disconnected) — clear leasedAt to make them leasable again. Shared by the own queue and the pool queue.
   private requeueExpired(arr: readonly PendingEntry[], now: number): void {
     for (const e of arr) {
@@ -424,23 +465,38 @@ export class RunnerHub {
 
   // long-poll lease — if there's no job to take immediately, wait until the next enqueue (or the waitMs timeout) then return one (null if none).
   // Keeps runners from re-polling in a tight loop (the server holds the request until a job appears).
+  // THE DELIVERY PATH, so this is where a lease's physical attempt is minted (mintAttempt): a job only ever
+  // reaches a runner through here, in both hubs (the store hub mints in its own leaseWait, for the same reason).
   leaseWait(key: SelfHostedKey, waitMs: number, capabilities?: string[]): Promise<LeasedJob | null> {
     const immediate = this.lease(key, capabilities);
-    if (immediate || waitMs <= 0) return Promise.resolve(immediate);
+    if (immediate) return this.mintAttempt(key, immediate);
+    if (waitMs <= 0) return Promise.resolve(null);
     const k = selfHostedBackendName(key);
     return new Promise<LeasedJob | null>((resolve) => {
       let done = false;
-      const finish = (v: LeasedJob | null) => {
-        if (done) return;
+      // Give up this waiter's slot — the timeout can no longer fire for it, an enqueue can no longer wake it.
+      const release = () => {
         done = true;
         clearTimeout(timer);
         const a = this.waiters.get(k);
         const i = a?.indexOf(wake) ?? -1;
         if (a && i >= 0) a.splice(i, 1);
         if (a && a.length === 0) this.waiters.delete(k); // don't leak an empty waiters array per runner key (churn hygiene)
+      };
+      const finish = (v: LeasedJob | null) => {
+        if (done) return;
+        release();
         resolve(v);
       };
-      const wake = () => finish(this.lease(key, capabilities)); // enqueue wakes us → immediately lease that job (gate included)
+      const wake = () => {
+        if (done) return;
+        const taken = this.lease(key, capabilities); // enqueue wakes us → immediately lease that job (gate included)
+        if (!taken) return finish(null);
+        // The slot is released BEFORE the mint's await, never after: the waitMs timeout must not be able to
+        // fire in that window and resolve null while this waiter is holding a job nobody would then be given.
+        release();
+        void this.mintAttempt(key, taken).then(resolve);
+      };
       const timer = setTimeout(() => finish(null), waitMs);
       (timer as { unref?: () => void }).unref?.();
       const arr = this.waiters.get(k) ?? [];
@@ -554,7 +610,10 @@ export class RunnerHub {
     this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
     // ranBy = the real id of the runner that called complete (key.runnerId). For a pool job this is the real runner, not "*" (the pool key).
-    loc.entry.resolve({ result, ranBy: key.runnerId });
+    // …and `generation` is the attempt the entry ENDED UP on: a re-lease restamped the job, so the dispatcher
+    // learns which recording it must seal instead of assuming the one it parked with.
+    const generation = loc.entry.job.recordingGeneration;
+    loc.entry.resolve({ result, ranBy: key.runnerId, ...(generation !== undefined ? { generation } : {}) });
     return true;
   }
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
-import type { RunnerJobStore } from "../ports/runner-job-store.js";
+import type { RunnerJobLease, RunnerJobStore } from "../ports/runner-job-store.js";
 import {
   type AttemptAuthority,
   type AttemptToken,
@@ -18,6 +18,7 @@ export interface StoreRunnerHubDeps {
   newJobId?: () => string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  openAttempt?: (job: CaseJob) => Promise<number | undefined>; // see RunnerHubDeps.openAttempt — the store twin
 }
 
 // Store-backed RunnerHub — the multi-replica counterpart to the in-memory RunnerHub. Same public surface (enqueue /
@@ -33,6 +34,7 @@ export class StoreRunnerHub {
   private readonly newJobId: () => string;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly openAttempt: ((job: CaseJob) => Promise<number | undefined>) | undefined;
   constructor(
     private readonly store: RunnerJobStore,
     deps: StoreRunnerHubDeps = {},
@@ -43,6 +45,7 @@ export class StoreRunnerHub {
     this.newJobId = deps.newJobId ?? randomUUID;
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    this.openAttempt = deps.openAttempt;
   }
 
   // Park a job and poll the store until it settles — resolves on complete, rejects on fail/cancel, and rejects as
@@ -82,7 +85,13 @@ export class StoreRunnerHub {
         );
       }
       if (o.status === "completed" && o.result) {
-        return { result: o.result, ranBy: o.ranBy ?? key.runnerId };
+        // The generation comes off the ROW, not off the job this replica parked: a re-lease restamped it, and
+        // this replica never saw that claim (it may not even have served it).
+        return {
+          result: o.result,
+          ranBy: o.ranBy ?? key.runnerId,
+          ...(o.recordingGeneration !== undefined ? { generation: o.recordingGeneration } : {}),
+        };
       }
       if (o.status === "failed") {
         throw new UpstreamError(
@@ -118,11 +127,29 @@ export class StoreRunnerHub {
         leaseTtlMs: this.leaseTtlMs,
         now: this.now(),
       });
-      if (claimed) return { ...claimed, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
+      if (claimed) {
+        const job = await this.mintAttempt(claimed, key);
+        return { jobId: claimed.jobId, job, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
+      }
       const remaining = deadline - this.now();
       if (remaining <= 0) return null;
       await this.sleep(Math.min(this.pollMs, remaining));
     }
+  }
+
+  // The store twin of RunnerHub.mintAttempt — a claim that RE-leases a requeued job (epoch > 1) is a new
+  // physical execution, so it opens its own recording generation instead of inheriting the first attempt's.
+  // The restamp is PERSISTED because `authorize` answers every later evidence push out of the row: a number
+  // that lived only in this reply would leave the durable lane still handing out the previous attempt's.
+  // A failed open strips the inherited number (fail-closed → the live-only lane); a failed restamp is NOT
+  // swallowed, so the runner never receives a lease whose row still points at the other execution.
+  private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob> {
+    if (claimed.leaseEpoch <= 1 || !this.openAttempt) return claimed.job;
+    const generation = await this.openAttempt(claimed.job).catch(() => undefined);
+    const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
+    const job = generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: generation };
+    await this.store.restampJob(claimed.jobId, key.runnerId, claimed.leaseEpoch, job);
+    return job;
   }
 
   // The durable, CROSS-REPLICA authorization read (see RunnerJobStore.authorize). The in-memory hub can only

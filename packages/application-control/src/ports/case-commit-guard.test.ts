@@ -5,19 +5,16 @@ import { describe, expect, it } from "vitest";
 // ── THE STRUCTURAL HALF OF "CLAIMING THE RIGHT TO COMMIT IS NOT THE COMMIT" (review 40) ──────────────
 //
 // `commitCase` couples the receipt claim to the child's fenced terminal write in one transaction. The raw
-// `commit` stays on the port for exactly two callers that genuinely have no child write to couple — seeding
-// a carried-over result whose child row is born terminal, and the failure exit's receipt (its child was
-// terminalized by the fenced settle in the dispatch catch). Every OTHER finalization path must go through
-// `commitCase`, and this scan is what says so: a new code path reaching for the raw claim re-opens the
-// poison pill (a receipt naming a child that never carried its result), and it must fail HERE, in review,
-// rather than in a takeover race a year later.
+// `commit` has NO live-lifecycle caller left (arch-review 41 P0-lifecycle): the retry seeding and the
+// failure exit — the two that used to be allowlisted — both go through `commitCase` now (a seeded child is
+// CREATED inside the claim transaction; a failure fail-settles inside it). The raw claim remains on the
+// port only for the certification fixtures that pin the claim constraint itself. A new code path reaching
+// for it re-opens the poison pill (a receipt naming a child that never carried its result), and it must
+// fail HERE, in review, rather than in a takeover race a year later.
 //
 // GETTING ON THE ALLOWLIST means the call provably has no child write to couple. It never means "this one
 // is fine without the transaction".
-const ALLOWED_RAW_COMMIT_FILES = new Map<string, number>([
-  // seeding (child born terminal) + commitFailureReceipt (child terminalized by the fenced fail-settle).
-  ["packages/application-control/src/scorecard/scorecard-batch-service.ts", 2],
-]);
+const ALLOWED_RAW_COMMIT_FILES = new Map<string, number>([]);
 
 const SCAN_ROOTS = ["apps", "packages"];
 // packages/db implements the port (its Pg commitCase calls its own commitOn); tests certify with fixtures.

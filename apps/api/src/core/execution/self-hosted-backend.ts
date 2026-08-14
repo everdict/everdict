@@ -28,7 +28,17 @@ export class SelfHostedBackend implements Backend, Probeable {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled park
     // onStarted fires on LEASE (not here at park) — a self-hosted job is "waiting" until a runner takes it. The hub
     // fires the hook the moment it hands the job to a runner, so the caller flips the run record queued→running then.
-    const { result, ranBy } = await this.hub.enqueue(this.key, job, opts?.onStarted);
+    const { result, ranBy, generation } = await this.hub.enqueue(this.key, job, opts?.onStarted);
+    // A RE-LEASE RAN THIS JOB UNDER ITS OWN RECORDING ATTEMPT (arch-review 41 P0-evidence). The number this
+    // dispatch parked with names an attempt that a requeue abandoned; the evidence lives under the one the
+    // lease minted. Report it before returning so the caller seals THAT attempt, not the one it opened.
+    if (generation !== undefined) {
+      try {
+        opts?.onAttempt?.(generation);
+      } catch (e) {
+        console.warn(`[self-hosted] onAttempt hook threw for job ${job.runId ?? job.evalCase.id}: ${String(e)}`);
+      }
+    }
     // Provenance is stamped by the control plane (not runner self-reported) — record in the result that this ran on an unmanaged personal host (D2).
     // runner = the runner that actually completed it (ranBy). For a pool (self:ws) job key.runnerId is "*" (the pool), so use ranBy to record the real runner.
     // attestation "self_reported": the manifest/result came from compute we do not operate — a reader

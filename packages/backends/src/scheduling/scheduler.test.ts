@@ -2,7 +2,7 @@ import type { AdmissionLedger } from "@everdict/application-control";
 import { type CaseJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
-import type { Backend } from "../backend.js";
+import type { Backend, DispatchOptions } from "../backend.js";
 import { BackendRegistry } from "../placement/registry.js";
 import { Scheduler, binPackPolicy } from "./scheduler.js";
 
@@ -634,6 +634,34 @@ describe("Scheduler", () => {
     expect(small.handled).toBe(0);
 
     big.releaseAll();
+    await flush();
+    await p;
+  });
+
+  // ── THE QUEUE ENTRY IS WHERE A DISPATCH HOOK DIES SILENTLY ──────────────────────────────────────────
+  // The Scheduler does not forward DispatchOptions; it copies the fields it knows about onto its queue
+  // entry and rebuilds them at dispatch. A hook it has never heard of is dropped with no error anywhere —
+  // which is how onWaiting was lost once already, and would have made the self-hosted re-lease's attempt
+  // report (arch-review 41 P0-evidence) inert on every lane that queues.
+  it("forwards onAttempt through the wait queue to the backend (a hook this whitelist forgets is dropped silently)", async () => {
+    let received: DispatchOptions | undefined;
+    const b = new ControlledBackend("a", 1);
+    const spy: Backend = {
+      capacity: () => b.capacity(),
+      dispatch: (j, opts) => {
+        received = opts;
+        return b.dispatch(j);
+      },
+    };
+    const sched = new Scheduler(new BackendRegistry().register("a", spy));
+    const seen: number[] = [];
+    const p = sched.dispatch(job(), { onAttempt: (generation) => seen.push(generation) });
+    await flush();
+
+    received?.onAttempt?.(41);
+    expect(seen).toEqual([41]);
+
+    b.releaseAll();
     await flush();
     await p;
   });

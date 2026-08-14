@@ -12,6 +12,7 @@ interface ReceiptRow {
   generation: number | null;
   attempt_id: string | null;
   result_digest: string;
+  observation_digest: string | null;
   judge_closure_digest: string | null;
   committed_at: string | Date;
 }
@@ -26,6 +27,7 @@ function toReceipt(row: ReceiptRow): CaseCommitReceipt {
     ...(row.generation !== null ? { generation: Number(row.generation) } : {}),
     ...(row.attempt_id !== null ? { attemptId: row.attempt_id } : {}),
     resultDigest: row.result_digest,
+    ...(row.observation_digest !== null ? { observationDigest: row.observation_digest } : {}),
     ...(row.judge_closure_digest !== null ? { judgeClosureDigest: row.judge_closure_digest } : {}),
     committedAt: new Date(row.committed_at).toISOString(),
   };
@@ -65,8 +67,8 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
       `WITH claim AS (
          INSERT INTO everdict_case_commit_receipts
            (scorecard_id, case_id, trial, child_run_id, execution_id, generation, attempt_id, result_digest,
-            judge_closure_digest, committed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            observation_digest, judge_closure_digest, committed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (scorecard_id, case_id, trial) DO NOTHING
          RETURNING *, true AS inserted
        )
@@ -84,6 +86,7 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
         receipt.generation ?? null,
         receipt.attemptId ?? null,
         receipt.resultDigest,
+        receipt.observationDigest ?? null,
         receipt.judgeClosureDigest ?? null,
         receipt.committedAt,
       ],

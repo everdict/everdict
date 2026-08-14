@@ -1,6 +1,12 @@
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
-import { RunnerHub, type RunnerHubLike, type RunnerJobStore, StoreRunnerHub } from "@everdict/application-control";
+import {
+  type RecordingStore,
+  RunnerHub,
+  type RunnerHubLike,
+  type RunnerJobStore,
+  StoreRunnerHub,
+} from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
 import {
@@ -11,7 +17,7 @@ import {
   buildRuntimeBackend,
   isCaseSampleable,
 } from "@everdict/backends";
-import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { TrustZonePolicy } from "@everdict/domain";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
@@ -58,6 +64,10 @@ export function buildDispatch(deps: {
   trustZones?: TrustZonePolicy;
   cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
   caseRecorder?: CaseRecorder; // replay ② — durable recorder the managed topology backend streams browser CDP events into
+  // The attempt ledger the LEASE mints into (arch-review 41 P0-evidence). A self-hosted requeue re-leases the
+  // same job to a second runner: that is a new physical execution, and it opens its own recording generation
+  // here instead of appending into the row the abandoned attempt is still sealing.
+  recordingStore?: RecordingStore;
   liveTraces?: LiveTraceStore; // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
 }) {
   const {
@@ -75,6 +85,7 @@ export function buildDispatch(deps: {
     browserProfileStore,
     cipher,
     caseRecorder,
+    recordingStore,
     liveTraces,
   } = deps;
   // Saved-profile injection for browser evals (browser-profiles S5) — seed a referenced profile's login into the
@@ -107,10 +118,19 @@ export function buildDispatch(deps: {
   };
   // EVERDICT_SELF_HOSTED_STORE_HUB=1 → the store-backed hub (a job parked on one control-plane replica is leased +
   // completed from another via the shared Pg queue). Default = the in-memory hub (single-process, no polling).
+  // A LEASE IS THE PHYSICAL ATTEMPT, so a re-lease opens its own recording generation (arch-review 41
+  // P0-evidence). Only a re-lease mints — the first lease runs the job whose attempt the dispatch already
+  // opened. A job with no runId has no recording to open; an open that fails leaves the re-leased job with no
+  // generation at all, which the runner protocol degrades to the live-only lane rather than merging.
+  const openAttempt = recordingStore
+    ? async (job: CaseJob): Promise<number | undefined> =>
+        job.runId === undefined ? undefined : await recordingStore.open(job.runId).catch(() => undefined)
+    : undefined;
+  const hubDeps = { ...hubTimeout, ...(openAttempt ? { openAttempt } : {}) };
   const runnerHub: RunnerHubLike =
     process.env.EVERDICT_SELF_HOSTED_STORE_HUB === "1"
-      ? new StoreRunnerHub(runnerJobStore, hubTimeout)
-      : new RunnerHub(hubTimeout);
+      ? new StoreRunnerHub(runnerJobStore, hubDeps)
+      : new RunnerHub(hubDeps);
 
   // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
   // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model

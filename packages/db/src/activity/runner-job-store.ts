@@ -80,6 +80,13 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     return { jobId: e.jobId, job: e.job, leaseEpoch: e.leaseEpoch };
   }
 
+  async restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean> {
+    const e = this.jobs.get(jobId);
+    if (!this.holdsLease(e, runnerId, leaseEpoch)) return false;
+    e.job = job;
+    return true;
+  }
+
   async authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null> {
     const e = this.jobs.get(jobId);
     if (!e || e.status !== "leased" || e.leasedBy !== runnerId) return null;
@@ -143,6 +150,7 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
       ...(e.result !== undefined ? { result: e.result } : {}),
       ...(e.error !== undefined ? { error: e.error } : {}),
       ...(e.leasedBy !== undefined ? { ranBy: e.leasedBy } : {}),
+      ...(e.job.recordingGeneration !== undefined ? { recordingGeneration: e.job.recordingGeneration } : {}),
       activityAt: e.activityAt,
     };
   }
@@ -171,6 +179,7 @@ interface JobRow {
   result: unknown;
   error: string | null;
   leased_by: string | null;
+  recording_generation: number | null; // job->>'recordingGeneration' — the attempt the row's job currently names
   activity_ms: string; // extract(epoch ...) comes back as a numeric string
 }
 
@@ -218,6 +227,18 @@ export class PgRunnerJobStore implements RunnerJobStore {
     const row = res.rows[0];
     if (!row) return null;
     return { jobId: row.job_id, job: CaseJobSchema.parse(row.job), leaseEpoch: Number(row.lease_epoch) };
+  }
+
+  // The lease-time attempt restamp — same current-lease predicate as every other runner-initiated mutation
+  // below, so a claim that has already moved the row on cannot have its job overwritten by a late restamp.
+  async restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean> {
+    const res = await this.client.query<{ job_id: string }>(
+      `UPDATE everdict_runner_jobs SET job = $4
+       WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
+       RETURNING job_id`,
+      [jobId, runnerId, leaseEpoch, JSON.stringify(job)],
+    );
+    return res.rows.length > 0;
   }
 
   // The authorization read, in ONE statement so it cannot see a lease that a concurrent claim has already
@@ -283,8 +304,11 @@ export class PgRunnerJobStore implements RunnerJobStore {
   }
 
   async outcome(jobId: string): Promise<RunnerJobOutcome | null> {
+    // The generation is projected OUT of the job document rather than parsing the whole CaseJob back: this is
+    // the parking replica's poll loop (once per pollMs, per in-flight job), and only that one number is read.
     const res = await this.client.query<JobRow>(
-      `SELECT status, cancel_requested, result, error, leased_by, extract(epoch from activity_at) * 1000 AS activity_ms
+      `SELECT status, cancel_requested, result, error, leased_by, (job->>'recordingGeneration')::int AS recording_generation,
+              extract(epoch from activity_at) * 1000 AS activity_ms
        FROM everdict_runner_jobs WHERE job_id = $1`,
       [jobId],
     );
@@ -296,6 +320,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
       ...(row.result != null ? { result: CaseResultSchema.parse(row.result) } : {}),
       ...(row.error != null ? { error: row.error } : {}),
       ...(row.leased_by != null ? { ranBy: row.leased_by } : {}),
+      ...(row.recording_generation != null ? { recordingGeneration: Number(row.recording_generation) } : {}),
       activityAt: Number(row.activity_ms),
     };
   }

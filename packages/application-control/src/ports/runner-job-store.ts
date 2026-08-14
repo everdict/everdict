@@ -24,6 +24,9 @@ export interface RunnerJobOutcome {
   error?: string;
   ranBy?: string; // the runner that completed it (real id, not the pool "*") — for provenance
   activityAt: number; // last lease/heartbeat epoch ms — the parking replica enforces the idle timeout off this
+  // The recording generation the row's job currently carries. A re-lease restamps it (see restampJob), so the
+  // parking replica reads the attempt that actually ran back off the store rather than assuming its own.
+  recordingGeneration?: number;
 }
 
 export interface ParkInput {
@@ -54,6 +57,13 @@ export interface RunnerJobStore {
   // Atomically requeue this owner's expired leases, then claim the next queued job this runner can run
   // (its own queue before the owner pool). null = nothing to take. Cross-replica safe (SKIP LOCKED).
   claim(input: ClaimInput): Promise<RunnerJobLease | null>;
+  // Replace the stored job of a lease this runner CURRENTLY holds — the lease-time attempt restamp. A claim
+  // that re-leases a requeued job is a new physical execution, so the hub opens a fresh recording generation
+  // for it; that number has to land on the ROW, because `authorize` answers every later evidence push out of
+  // the row and would otherwise keep serving the generation the FIRST attempt opened (two executions writing
+  // one recording). Conditioned on the same current-lease predicate every other runner-initiated mutation
+  // uses. false = not this runner's current lease, and nothing was written.
+  restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean>;
   // Liveness — refresh activity_at; returns whether the CALLER'S lease is still current and the control-plane
   // cancel flag. A stale holder's touch extends nothing (it would keep the successor's lease alive).
   touch(

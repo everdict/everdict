@@ -14,9 +14,9 @@ import type { RunStore } from "./run-store.js";
 // (undefined — the fence said no) rolls the claim back and reports `unsettled`; a settle that THROWS rolls
 // the claim back and rethrows (a store fault is reported as one, never converted into an outcome).
 //
-// `commit` remains as the RAW claim for the two callers that genuinely have no child write to couple:
-// seeding a carried-over result whose child row is born terminal, and certifying the claim constraint
-// itself. Every finalization path goes through `commitCase`.
+// `commit` remains as the RAW claim for exactly one purpose: certifying the claim constraint itself (the
+// trust fixtures race it directly). Every LIVE path — executed, failed and inherited outcomes alike — goes
+// through `commitCase`; the structural scan in case-commit-guard.test.ts holds the allowlist at zero.
 //
 // The store is deliberately not a general CRUD surface: there is no update and no delete. A receipt is the
 // record of a decision, and a decision that can be edited is not one.

@@ -556,3 +556,43 @@ describe("canonicalChildPerCase — the receipt decides, not the clock", () => {
     ).toBe(false);
   });
 });
+
+// ── EXPECTED SET == OUTCOME SET (arch-review 41 P1) ──────────────────────────────────────────────────
+describe("ScorecardBatch.caseSetDelta — the plan's set against the ledger's, on the (caseId, trial) axis", () => {
+  const receipt = (caseId: string, trial: number) => ({ caseId, trial });
+
+  it("equal sets — no delta, and the trial axis participates (id-only equality was the hole)", () => {
+    const expected = [receipt("c1", 0), receipt("c1", 1), receipt("c2", 0)];
+    expect(ScorecardBatch.caseSetDelta(expected, expected)).toEqual({ missing: [], extra: [] });
+    // Same ids, wrong trials: an id-only check calls this complete; the pair check does not.
+    const wrongTrials = [receipt("c1", 0), receipt("c1", 2), receipt("c2", 0)];
+    const delta = ScorecardBatch.caseSetDelta(expected, wrongTrials);
+    expect(delta.missing).toEqual(["c1#1"]);
+    expect(delta.extra).toEqual(["c1#2"]);
+  });
+
+  it("a planned case no receipt answers is MISSING; a receipt the plan never asked for is EXTRA", () => {
+    const delta = ScorecardBatch.caseSetDelta(
+      [receipt("c1", 0), receipt("c2", 0)],
+      [receipt("c1", 0), receipt("stray", 0)],
+    );
+    expect(delta).toEqual({ missing: ["c2#0"], extra: ["stray#0"] });
+  });
+
+  it("decisionContext records the plan's digest and count beside the read-set, and the revision it judged over", () => {
+    const receipts = [
+      { caseId: "c1", trial: 0, childRunId: "r1", resultDigest: "d1" },
+      { caseId: "c2", trial: 0, childRunId: "r2", resultDigest: "d2" },
+    ];
+    const expected = [receipt("c2", 0), receipt("c1", 0)]; // deliberately unsorted — the digest is a set identity
+    const decision = ScorecardBatch.decisionContext(receipts, 3, expected, 1);
+    expect(decision.expectedCaseCount).toBe(2);
+    expect(decision.scoringRevision).toBe(1);
+    // Order-independent: the same set in any order digests identically.
+    const again = ScorecardBatch.decisionContext(receipts, 3, [receipt("c1", 0), receipt("c2", 0)], 1);
+    expect(decision.expectedCaseSetDigest).toBe(again.expectedCaseSetDigest);
+    // …and without the plan, the context simply omits the claim (legacy shape preserved).
+    const legacy = ScorecardBatch.decisionContext(receipts, 3);
+    expect(legacy.expectedCaseSetDigest).toBeUndefined();
+  });
+});

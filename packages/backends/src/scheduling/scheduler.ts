@@ -61,6 +61,7 @@ interface QueueEntry {
   onAbort?: () => void; // the queued-abort listener, detached when the entry leaves the queue
   onStarted?: () => void; // fires when the entry leaves the wait queue and is dispatched — forwarded to the backend
   onWaiting?: (reason: string) => void; // "cannot start now + why" (blocked placement / no online runner) — forwarded to the backend
+  onAttempt?: (generation: number) => void; // "the executing attempt's recording coordinate" (self-hosted re-lease) — forwarded to the backend
 }
 
 export interface SchedulerOptions {
@@ -260,6 +261,7 @@ export class Scheduler {
         ...(opts?.signal ? { signal: opts.signal } : {}),
         ...(opts?.onStarted ? { onStarted: opts.onStarted } : {}),
         ...(opts?.onWaiting ? { onWaiting: opts.onWaiting } : {}),
+        ...(opts?.onAttempt ? { onAttempt: opts.onAttempt } : {}),
       };
       if (opts?.signal) {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
@@ -611,13 +613,16 @@ export class Scheduler {
     // hook). A managed backend fires onStarted at its dispatch entry (= now, post-admission); the self-hosted backend
     // forwards it to the lease hub so it fires only when a runner actually takes the job.
     const dispatchOpts =
-      entry.signal || entry.onStarted || entry.onWaiting
+      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt
         ? {
             ...(entry.signal ? { signal: entry.signal } : {}),
             ...(entry.onStarted ? { onStarted: entry.onStarted } : {}),
             // onWaiting rides along too (live-caught: the Scheduler used to DROP it, so a managed lane's
             // blocked-placement verdict never reached the caller's step/fact seam).
             ...(entry.onWaiting ? { onWaiting: entry.onWaiting } : {}),
+            // …and onAttempt, for the same reason: this whitelist is the ONE place a hook can silently die,
+            // and dropping this one would leave the caller sealing the attempt a requeue abandoned.
+            ...(entry.onAttempt ? { onAttempt: entry.onAttempt } : {}),
           }
         : undefined;
     this.registry

@@ -541,6 +541,15 @@ export const ScorecardDecisionContextSchema = z.object({
   receiptCount: z.number().int().nonnegative(),
   // contentDigest of `cases` (sorted by caseId, trial) — one string an auditor compares before re-walking.
   receiptSetDigest: z.string(),
+  // THE PLAN'S OWN SET (arch-review 41 P1): contentDigest of the sorted (caseId, trial) pairs the submit
+  // planned (manifest cases × trials) plus their count. The read-set above says which receipts the settle
+  // read; these say the receipts were exactly the ones the plan required — a success may only settle when
+  // the two sets are equal, so a case that never entered anyone's memory is a refusal, not a smaller batch.
+  expectedCaseSetDigest: z.string().optional(),
+  expectedCaseCount: z.number().int().nonnegative().optional(),
+  // Which judgment revision the settle's digests were taken over (the initial revision = 1). Later
+  // re-scores append revisions; the context stays the record of what THIS settle read.
+  scoringRevision: z.number().int().positive().optional(),
   cases: z.array(ScorecardDecisionCaseSchema),
 });
 export type ScorecardDecisionContext = z.infer<typeof ScorecardDecisionContextSchema>;

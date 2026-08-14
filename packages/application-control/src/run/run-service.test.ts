@@ -281,3 +281,95 @@ describe("RunService verdict derivation — the application layer owns the inter
     expect((await unresolvable.get("c1"))?.verdict).toBeUndefined();
   });
 });
+
+// ── THE STANDALONE TERMINAL ROW IS BORN FINAL (arch-review 41 P1) ────────────────────────────────────
+describe("standalone finality — the terminal write itself carries the evidence refs", () => {
+  it("the succeed patch includes recordingRef; no post-terminal patch amends the result", async () => {
+    // Pre-fix order was settle → seal → follow-up `store.update(id, { result })`: a crash between the two
+    // published a SUCCEEDED run (completion fact and all) whose recordingRef never landed, and the follow-up
+    // amended a terminal result under a weaker guard. The seal is attempt-generation-fenced, so it moves
+    // BEFORE the terminal CAS and the ref rides the one terminal write.
+    const patches: Array<Partial<RunRecord>> = [];
+    const rows = new Map<string, RunRecord>();
+    const store: RunStore = {
+      async create(record: RunRecord) {
+        rows.set(record.id, record);
+      },
+      async update(id: string, patch: Partial<RunRecord>) {
+        const cur = rows.get(id);
+        if (!cur) return undefined;
+        patches.push(patch);
+        const next = { ...cur, ...patch, id: cur.id };
+        rows.set(id, next);
+        return next;
+      },
+      async get(id: string) {
+        return rows.get(id);
+      },
+      async list() {
+        return [...rows.values()];
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async inFlightByTenant() {
+        return {};
+      },
+      async liveSessions() {
+        return [];
+      },
+    };
+    const sealed: Array<{ runId: string; generation: number }> = [];
+    const service = new RunService({
+      dispatcher: {
+        async dispatch() {
+          return {
+            caseId: "case-1",
+            harness: "cc@1.0.0",
+            trace: [],
+            snapshot: { kind: "prompt" as const, output: "done" },
+            scores: [],
+          };
+        },
+      },
+      store,
+      recordingStore: {
+        async open() {
+          return 1;
+        },
+        async append() {},
+        async peek() {
+          return undefined;
+        },
+        async get() {
+          return undefined;
+        },
+        async seal(runId: string, _meta: unknown, generation: number) {
+          sealed.push({ runId, generation });
+          return { ref: `${runId}#g${generation}`, frameCount: 1, byteSize: 10 };
+        },
+      } as never,
+    });
+    const record = await service.submit({
+      tenant: "acme",
+      harness: { id: "cc", version: "1.0.0" },
+      case: { id: "case-1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    });
+    // wait for the async track to settle the run
+    const deadline = Date.now() + 5_000;
+    while ((await store.get(record.id))?.status !== "succeeded") {
+      if (Date.now() > deadline) throw new Error("run never settled");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(sealed).toHaveLength(1);
+    // THE terminal patch carries the ref…
+    const terminal = patches.find((p) => p.status === "succeeded");
+    expect(terminal?.result?.recordingRef?.ref).toBe(`evd-run-${record.id}#g1`);
+    // …and nothing after it touches `result` again (no post-terminal amendment).
+    const terminalIndex = patches.findIndex((p) => p.status === "succeeded");
+    for (const later of patches.slice(terminalIndex + 1)) expect(later.result).toBeUndefined();
+  });
+});

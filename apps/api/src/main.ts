@@ -502,6 +502,7 @@ async function main(): Promise<void> {
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
     caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording
+    recordingStore, // replay ② — a self-hosted RE-lease opens its own attempt here (arch-review 41 P0-evidence)
     liveTraces, // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
   });
   // WHERE anything runs, answered once (composition/runtime-compute): the deployment's own compute, and any

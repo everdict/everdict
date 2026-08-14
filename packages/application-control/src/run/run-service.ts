@@ -86,7 +86,7 @@ export interface SubmitInput {
   // submitter (principal.subject) — the owner used to resolve a personally-owned connection for a private-repo seed ("clone with my connection").
   // HTTP/MCP routes always carry principal.subject; if unset, resolveRepoToken falls back to tenant (test compatibility).
   submittedBy?: string;
-  // 이 실행을 소유한 팀 — 자산과 같은 축(라우트가 결정해 넘긴다).
+  // The team that owns this run — the same axis assets carry (the route decides and passes it).
   teamId?: string;
   harness: { id: string; version: string };
   case: EvalCase;
@@ -944,6 +944,14 @@ export class RunService {
       let waitingAnnounced = false;
       const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
         onStarted: () => void this.markRunning(id),
+        // ── THE ATTEMPT THAT RAN, NOT THE ONE THIS DISPATCH OPENED (arch-review 41 P0-evidence) ────────
+        // A self-hosted requeue hands the job to a second runner, and that re-lease opens its own recording
+        // generation. Everything downstream reads this map — the seal, the snapshot's artifact key, the
+        // receipt's attemptId — so leaving it on the parked number would seal an abandoned attempt's row and
+        // name it as the execution that produced the result.
+        onAttempt: (generation) => {
+          this.attempt.set(`evd-run-${id}`, generation);
+        },
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;
@@ -987,28 +995,21 @@ export class RunService {
           );
         } catch {}
       }
-      // SETTLEMENT AUTHORITY GOVERNS EVIDENCE PUBLICATION, NOT ONLY THE ROW (arch-review 32 P0). Notification
-      // and metrics already hung off the committed settle; the trajectory and the replay recording did not,
-      // and they are the two artifacts every later judgment stands on. The trajectory store keeps the FIRST
-      // seal (immutable evidence, a re-offer never rewrites it), so a displaced driver that lost the row and
-      // sealed anyway left the run reading `result = B, trajectory = A`: one artifact, two executions, and
-      // nothing on the record to say so.
+      // ── PREPARE THE EVIDENCE, THEN COMMIT — the batch lane's order, here too (arch-review 41 P1) ─────
       //
-      // So the settle happens FIRST and everything downstream of it derives from the answer. The ordering is
-      // the fix — the loser now seals nothing, which leaves the winner's own seal the first and only one.
-      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
-      // Seal the replay recording (frames/logs teed during the run under job.runId) → attach the ref. Best-effort:
-      // a recording failure never fails the run, and an empty recording seals to undefined (no ref). replay.md D3.
+      // The recording used to seal AFTER the terminal settle, with `recordingRef` attached in a follow-up
+      // patch. Two defects fell out of that order: a crash between the settle and the patch published a
+      // SUCCEEDED run (completion fact and all) whose evidence set was not final — consumers reacting to the
+      // fact saw a run with no recordingRef, forever — and the follow-up patch amended a terminal result
+      // under a weaker guard (`expectNotCancelled`, no epoch), with its failure swallowed.
       //
-      // THE ATTEMPT IS NAMED, SO THE SEAL IS THIS ATTEMPT'S (mig 0173). The buffer is shared by construction —
-      // a re-driven run keeps its live-correlation id, which is what lets an observer find it with no lookup
-      // — and what separates the attempts is the generation every producer stamps. A returning attempt holds
-      // the number it was started with and is refused, at the append and at the seal alike.
-      if (committed && this.deps.recordingStore) {
+      // The seal is attempt-generation-fenced (mig 0173), so sealing BEFORE the terminal CAS cannot poison a
+      // winner: a displaced attempt seals ITS OWN generation's row, and when its settle is then refused the
+      // sealed recording is an orphan attempt's evidence — referenced by nothing, overwriting nothing. The
+      // TRAJECTORY seal stays downstream of the committed settle (arch-review 32 P0): that store keeps the
+      // FIRST segment per emitter, so only the settle's winner may plant it.
+      if (this.deps.recordingStore) {
         try {
-          // Fold the in-run repo git-diff checkpoints (CaseResult.envDeltas) into the recording before sealing.
-          // Read from the map, not from a value the settle may already have cleared: the seal is downstream
-          // of the settlement, and the settlement is what releases this run's driver state.
           const generation = this.attempt.get(`evd-run-${id}`) ?? 0;
           await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result, generation);
           const ref = await this.deps.recordingStore.seal(
@@ -1019,14 +1020,12 @@ export class RunService {
             },
             generation,
           );
-          // The ref is attached to the settled row in a follow-up patch: the settle above is what earned the
-          // right to publish this recording, so the reference to it lands after, on the row this driver owns.
-          if (ref) {
-            result.recordingRef = ref;
-            await this.deps.store.update(id, { result }, undefined, { expectNotCancelled: true }).catch(() => {});
-          }
+          // Attached to the RESULT the terminal write itself carries — the row is born final, no post-terminal
+          // amendment, and the completion fact vouches for an evidence set that actually exists.
+          if (ref) result.recordingRef = ref;
         } catch {}
       }
+      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
       // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
       // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.

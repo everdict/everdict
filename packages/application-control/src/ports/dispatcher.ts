@@ -19,6 +19,13 @@ export interface DispatchOptions {
   // decides how to show it (the scorecard batch appends it as a step). Best-effort; a throw must not break dispatch.
   // NOT fired when a runner is merely busy (healthy queuing) — only when nothing online can pick the job up.
   onWaiting?: (reason: string) => void;
+  // Fired when a physical attempt's RECORDING COORDINATE becomes known — i.e. when the executing attempt is
+  // not the one the caller dispatched. The self-hosted lane is where that happens: a requeued job is re-leased
+  // as a second physical execution, and the lease opens a new recording generation for it (a further re-lease
+  // fires this again, so the LAST value is the attempt that produced the evidence). The caller must seal, key
+  // its artifacts by, and name on the receipt the generation reported here rather than the one it parked with.
+  // Managed backends never fire it — their dispatch is the attempt. Best-effort; a throw must not break dispatch.
+  onAttempt?: (generation: number) => void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

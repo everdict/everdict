@@ -35,6 +35,11 @@ export const CaseCommitReceiptSchema = z.object({
   // The committed result's content digest — the parent's scoring digest is computed over these, so a
   // recomputation from the ledger can be compared against what the parent actually decided.
   resultDigest: z.string(),
+  // The EXECUTION's own digest — scores and judge:* evidence spans excluded (arch-review 41 P1). A re-score
+  // legally replaces the child's scores in place, so `resultDigest` (commit-time bytes) diverges from a
+  // re-scored row forever; this one is invariant under re-judgment and is what "is this still the execution
+  // the receipt vouches for" compares. Absent on receipts committed before the split.
+  observationDigest: z.string().optional(),
   // What the case's judges were asked, sealed at the commit: a receipt whose judge closure differs from the
   // batch's selection is a case judged under a different question.
   judgeClosureDigest: z.string().optional(),

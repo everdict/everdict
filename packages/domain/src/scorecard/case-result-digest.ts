@@ -16,3 +16,22 @@ import { contentDigest } from "../provenance/content-digest.js";
 export function caseResultDigest(result: CaseResult): string {
   return contentDigest(CaseResultSchema.parse(result));
 }
+
+// ── THE EXECUTION'S OWN DIGEST — INVARIANT UNDER RE-JUDGMENT (arch-review 41 P1) ─────────────────────
+//
+// `caseResultDigest` covers the WHOLE result, scores included — correct for "are these the exact bytes the
+// commit persisted", and wrong for "is this still the execution the receipt vouches for": a re-score
+// legally replaces `scores` in place (writeBackScores, under the pass fence), so the full digest of a
+// re-scored child diverges from its receipt forever, and an auditor cannot tell a legitimate re-judgment
+// from tampering. This digest names the OBSERVATION only — what the agent/runtime did — by dropping the
+// mutable judgment plane (scores) and the judgment's evidence spans (`judge:*`, appended by the scoring
+// merge). The receipt carries both: `resultDigest` freezes commit-time bytes, `observationDigest` stays
+// true across every judgment revision. Same parse-first spelling as above, same reason.
+export function caseObservationDigest(result: CaseResult): string {
+  const parsed = CaseResultSchema.parse(result);
+  return contentDigest({
+    ...parsed,
+    scores: [],
+    trace: parsed.trace.filter((e) => !(e.kind === "span" && e.name.startsWith("judge:"))),
+  });
+}

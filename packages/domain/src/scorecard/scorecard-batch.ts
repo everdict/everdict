@@ -293,6 +293,11 @@ export class ScorecardBatch {
       attemptId?: string;
     }>,
     epoch?: number,
+    // The plan's own (caseId, trial) set — when the caller carries it, the context records its digest so the
+    // settle's completeness claim ("these receipts are exactly the plan") is auditable, not just enforced.
+    expected?: ReadonlyArray<{ caseId: string; trial: number }>,
+    // The judgment revision the settle's digests were taken over (initial settle = 1).
+    scoringRevision?: number,
   ): ScorecardDecisionContext {
     const cases = [...receipts]
       .sort((a, b) => (a.caseId < b.caseId ? -1 : a.caseId > b.caseId ? 1 : a.trial - b.trial))
@@ -307,7 +312,40 @@ export class ScorecardBatch {
       ...(epoch !== undefined ? { epoch } : {}),
       receiptCount: receipts.length,
       receiptSetDigest: contentDigest(cases),
+      ...(expected !== undefined
+        ? {
+            expectedCaseSetDigest: contentDigest(ScorecardBatch.sortedCaseSet(expected)),
+            expectedCaseCount: expected.length,
+          }
+        : {}),
+      ...(scoringRevision !== undefined ? { scoringRevision } : {}),
       cases,
+    };
+  }
+
+  private static sortedCaseSet(
+    pairs: ReadonlyArray<{ caseId: string; trial: number }>,
+  ): Array<{ caseId: string; trial: number }> {
+    return [...pairs]
+      .map((p) => ({ caseId: p.caseId, trial: p.trial }))
+      .sort((a, b) => (a.caseId < b.caseId ? -1 : a.caseId > b.caseId ? 1 : a.trial - b.trial));
+  }
+
+  // ── EXPECTED SET == OUTCOME SET, EXACTLY (arch-review 41 P1) ────────────────────────────────────────
+  //
+  // The receipt gate holds every COUNTED case to a receipt; nothing held the receipt set to the PLAN. A case
+  // that never entered any process's memory was invisible to both, and an extra receipt (a case the plan
+  // never asked for) was silently summarized. Pure over the two sets, on the (caseId, trial) axis the
+  // receipt's own key carries — the trial dimension included, which the id-only check dropped.
+  static caseSetDelta(
+    expected: ReadonlyArray<{ caseId: string; trial: number }>,
+    receipts: ReadonlyArray<{ caseId: string; trial: number }>,
+  ): { missing: string[]; extra: string[] } {
+    const want = new Set(expected.map((p) => childKey(p.caseId, p.trial)));
+    const have = new Set(receipts.map((r) => childKey(r.caseId, r.trial)));
+    return {
+      missing: [...want].filter((k) => !have.has(k)).sort(),
+      extra: [...have].filter((k) => !want.has(k)).sort(),
     };
   }
 

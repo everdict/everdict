@@ -92,6 +92,44 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     await expect(d).resolves.toMatchObject({ result });
   });
 
+  // The store twin of the in-memory hub's lease-time attempt mint (arch-review 41 P0-evidence). Here the
+  // restamp has to be PERSISTED: `authorize` answers every pushed frame/log out of the row, so a generation
+  // that lived only in the lease reply would leave the durable lane still naming the first attempt.
+  it("a re-lease opens its own recording attempt and persists it — authorize stops serving the first attempt's generation", async () => {
+    const store = new InMemoryRunnerJobStore();
+    let opened = 20;
+    // leaseTtlMs 0 → the first lease is already expired when the next claim runs (requeue-then-claim).
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openAttempt: async () => ++opened }));
+    const d = hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 });
+
+    const first = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(first?.job.recordingGeneration).toBe(7); // the first lease runs the attempt the dispatch opened
+    const second = await hub.leaseWait(keyA, 200, ["repo"]);
+    if (!second) throw new Error("expected the re-lease");
+    expect(second.attempt.leaseEpoch).toBe(2);
+    expect(second.job.recordingGeneration).toBe(21); // its OWN attempt, not the abandoned one's 7
+    // The ROW carries it, which is the half that matters — that is what the evidence wire authorizes against.
+    expect(await store.authorize(second.jobId, keyA.runnerId, 2)).toMatchObject({ recordingGeneration: 21 });
+
+    expect(await hub.complete(keyA, second.attempt, result)).toBe(true);
+    await expect(d).resolves.toMatchObject({ generation: 21 }); // …and the parking replica seals THAT attempt
+  });
+
+  it("a re-lease whose attempt cannot be opened persists a job with NO generation (fail-closed, never merged)", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const hub = new StoreRunnerHub(
+      store,
+      opts({ leaseTtlMs: 0, openAttempt: () => Promise.reject(new Error("recording store unreachable")) }),
+    );
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 200, ["repo"]);
+    const second = await hub.leaseWait(keyA, 200, ["repo"]);
+    if (!second) throw new Error("expected the re-lease");
+    expect(second.job.recordingGeneration).toBeUndefined();
+    const authorized = await store.authorize(second.jobId, keyA.runnerId, 2);
+    expect(authorized?.recordingGeneration).toBeUndefined(); // the ROW lost it too — nothing durable to merge into
+  });
+
   it("capability gate: an image job is not leased by a runner without docker (stays for a capable one)", async () => {
     const store = new InMemoryRunnerJobStore();
     const hub = new StoreRunnerHub(store, opts());

@@ -388,6 +388,55 @@ describe("RunnerHub", () => {
     expect(hub.lease(keyA)?.jobId).toBe("j1");
   });
 
+  // ── A RE-LEASE IS A SECOND PHYSICAL EXECUTION, SO IT RECORDS SOMEWHERE ELSE (arch-review 41) ────────
+  // The requeue above already gave the successor its own epoch, but the JOB it was handed still named the
+  // generation the first dispatch opened — so both runners appended into one (runId, generation) recording
+  // and the run sealed as a single replay of two executions.
+  it("a re-lease opens its own recording attempt — the requeued job never reuses the first attempt's generation", async () => {
+    let t = 0;
+    let opened = 10;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: async () => ++opened,
+    });
+    const dispatched = hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 });
+
+    const first = await hub.leaseWait(keyA, 0);
+    expect(first?.job.recordingGeneration).toBe(7); // the first lease runs the attempt the DISPATCH opened
+    t = 201; // past the lease TTL → the next lease requeues and re-leases: a second physical execution
+    const second = await hub.leaseWait(keyA, 0);
+    expect(second?.attempt.leaseEpoch).toBe(2);
+    expect(second?.job.recordingGeneration).toBe(11); // its OWN attempt, not the abandoned one's 7
+    // …and the fence serves the same number, so the runner's pushed evidence lands in the attempt that ran.
+    expect(await hub.authorizeAttempt(keyA, { jobId: "j1", leaseEpoch: 2 })).toMatchObject({
+      recordingGeneration: 11,
+    });
+    // …which is also what the dispatcher is told to seal, instead of the generation it parked with.
+    expect(hub.complete(keyA, { jobId: "j1", leaseEpoch: 2 }, result)).toBe(true);
+    await expect(dispatched).resolves.toMatchObject({ generation: 11 });
+  });
+
+  it("a re-lease whose attempt cannot be opened carries NO generation — the durable lane refuses instead of merging", async () => {
+    let t = 0;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: () => Promise.reject(new Error("recording store unreachable")),
+    });
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 0);
+    t = 201;
+    const second = await hub.leaseWait(keyA, 0);
+    // Fail-closed: the inherited number is STRIPPED, so the re-leased runner falls back to the live-only lane
+    // rather than writing its frames into the recording the previous attempt is still sealing.
+    expect(second?.job.recordingGeneration).toBeUndefined();
+    const authority = await hub.authorizeAttempt(keyA, { jobId: "j1", leaseEpoch: 2 });
+    expect(authority?.recordingGeneration).toBeUndefined();
+  });
+
   it("leaseWait: immediate if a job exists; otherwise the next enqueue wakes it (long-poll)", async () => {
     let m = 0;
     const hub = new RunnerHub({ newJobId: () => `j-${m++}` });
