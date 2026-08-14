@@ -42,6 +42,9 @@ export interface SpeculationOpts {
   // never scoring: it must not reach the scorecard, the trajectory, or any aggregate that answers "how did
   // the agent do".
   onLoser?: (outcome: SpilloverOutcome, caseId: string) => void;
+  // The DUPLICATE is a new physical attempt — the caller opens a fresh recording generation for it (see
+  // SpilloverOpts.reattempt; same contract), so the race's two executions never share an evidence buffer.
+  reattempt?: (job: CaseJob) => Promise<CaseJob>;
 }
 
 const DEFAULT_MIN_STRAGGLER_MS = 10_000;
@@ -144,12 +147,11 @@ export class SpeculationController {
           if (target === undefined) return; // no healthy alternative — let the primary finish
           speculated = true;
           this.opts.onSpeculate?.(job.evalCase.id, assigned ?? "", target);
-          join(
-            execute({
-              ...job,
-              evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target } },
-            }),
-          );
+          const duplicate: CaseJob = {
+            ...job,
+            evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target } },
+          };
+          join((async () => execute((await this.opts.reattempt?.(duplicate)) ?? duplicate))());
         }, waitMs);
       };
 

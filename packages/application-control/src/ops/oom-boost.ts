@@ -16,6 +16,9 @@ export interface OomBoostOpts {
   enabled: boolean;
   capMb?: number; // default OOM_ESCALATION_CAP_MB
   onBoost?: (caseId: string, fromMb: number, toMb: number) => void; // progress-step / metrics visibility
+  // A boosted re-dispatch is a NEW physical attempt — the caller opens a fresh recording generation for it
+  // (see SpilloverOpts.reattempt; same contract).
+  reattempt?: (job: CaseJob) => Promise<CaseJob>;
 }
 
 export async function executeWithOomBoost(
@@ -38,7 +41,12 @@ export async function executeWithOomBoost(
       const nextMb = Math.min(capMb, currentMb * 2);
       opts.onBoost?.(job.evalCase.id, currentMb, nextMb);
       // Job-only boost — the registry spec is never mutated; non-OOM cases keep the declared resources.
-      attempt = { ...attempt, harnessSpec: { ...spec, resources: { ...spec.resources, memoryMb: nextMb } } };
+      // …and a fresh attempt for the re-run: the OOM-killed execution keeps its own evidence buffer.
+      const boosted: CaseJob = {
+        ...attempt,
+        harnessSpec: { ...spec, resources: { ...spec.resources, memoryMb: nextMb } },
+      };
+      attempt = (await opts.reattempt?.(boosted)) ?? boosted;
     }
   }
 }

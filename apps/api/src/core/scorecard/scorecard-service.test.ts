@@ -247,6 +247,39 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     expect(rec.manifest?.judges?.[0]).toMatchObject({ id: "quality", version: "2.0.0", model: "claude-opus-4-8" });
   });
 
+  it("the case receipt's judgeClosureDigest names the SEALED closure, not a list of id strings", async () => {
+    // The receipt answers "which judgment produced this outcome". Bare sorted ids answered "which names were
+    // selected" — two batches judged by different versions/models of the same id digested identically.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", modelJudge("1.0.0"));
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const receipts = new InMemoryCaseReceiptStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      judges,
+      runStore: runs,
+      caseReceipts: receipts,
+      newId: () => "sc-jdig",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "quality", version: "1.0.0" }],
+    });
+    const rec = await waitTerminal(store, "sc-jdig");
+    const sealed = rec.manifest?.judges;
+    if (!sealed) throw new Error("expected the manifest to seal the judge closure");
+    const committed = await receipts.list("sc-jdig");
+    expect(committed).toHaveLength(1);
+    expect(committed[0]?.judgeClosureDigest).toBe(contentDigest([...sealed].sort((a, b) => (a.id < b.id ? -1 : 1))));
+  });
+
   it("seals a judge's REF binding to its resolved concrete version — same spec digest, no moving target", async () => {
     // A spec pinning {ref} with no version is a byte-identical document over a moving target: the manifest
     // must seal what the ref RESOLVED TO at submit, or two batches under one spec digest can be judged by

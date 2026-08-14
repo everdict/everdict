@@ -27,6 +27,40 @@ const okResult: CaseResult = {
 
 const infraDown = new UpstreamError("UPSTREAM_ERROR", {}, "cluster unreachable");
 
+describe("executeWithSpillover — a spill is a new physical attempt", () => {
+  it("opens a fresh recording generation per spill and returns the WINNING job", async () => {
+    const breaker = new CircuitBreaker({ threshold: 5, cooldownMs: 60_000, now: () => 0 });
+    let opened = 0;
+    const reattempt = async (j: CaseJob): Promise<CaseJob> => ({ ...j, recordingGeneration: 10 + ++opened });
+    const seen: Array<number | undefined> = [];
+    const outcome = await executeWithSpillover(
+      async (j) => {
+        seen.push(j.recordingGeneration);
+        if (j.evalCase.placement?.target === "nomad") throw infraDown;
+        return okResult;
+      },
+      { ...jobOn("nomad"), recordingGeneration: 1 },
+      { targets: ["nomad", "kind"], tenant: "acme", breaker, reattempt },
+    );
+    // The first dispatch ran under the attempt its dispatcher opened (1); the spill opened its own (11).
+    expect(seen).toEqual([1, 11]);
+    expect(outcome.target).toBe("kind");
+    // …and the winner's JOB is returned, so the finalizer seals/claims the attempt that actually answered.
+    expect(outcome.job.recordingGeneration).toBe(11);
+  });
+
+  it("pass-through (single runtime) returns the original job untouched", async () => {
+    const breaker = new CircuitBreaker({ threshold: 5, cooldownMs: 60_000, now: () => 0 });
+    const job = { ...jobOn("nomad"), recordingGeneration: 3 };
+    const outcome = await executeWithSpillover(async () => okResult, job, {
+      targets: ["nomad"],
+      tenant: "acme",
+      breaker,
+    });
+    expect(outcome.job).toBe(job);
+  });
+});
+
 describe("executeWithSpillover", () => {
   it("passes through untouched when the batch has a single runtime", async () => {
     const breaker = new CircuitBreaker({ now: () => 0 });

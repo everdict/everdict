@@ -57,22 +57,26 @@ function fakeTime() {
 // A controllable executor: each dispatch parks until released per target.
 function fakeExecutor() {
   const dispatched: string[] = []; // "caseId@target"
+  const jobs = new Map<string, CaseJob>(); // the job each dispatch actually carried (attempt identity)
   const parked = new Map<string, { resolve: (o: SpilloverOutcome) => void; reject: (e: unknown) => void }>();
   const execute = (job: CaseJob): Promise<SpilloverOutcome> => {
     const target = job.evalCase.placement?.target ?? "?";
     const key = `${job.evalCase.id}@${target}`;
     dispatched.push(key);
+    jobs.set(key, job);
     return new Promise((resolve, reject) => parked.set(key, { resolve, reject }));
   };
   const release = (key: string, caseId: string, target: string): void => {
-    parked.get(key)?.resolve({ result: okResult(caseId), target });
+    const job = jobs.get(key);
+    if (!job) throw new Error(`release before dispatch: ${key}`);
+    parked.get(key)?.resolve({ result: okResult(caseId), target, job });
     parked.delete(key);
   };
   const fail = (key: string, e: unknown): void => {
     parked.get(key)?.reject(e);
     parked.delete(key);
   };
-  return { execute, dispatched, release, fail };
+  return { execute, dispatched, jobs, release, fail };
 }
 
 const baseOpts = (time: ReturnType<typeof fakeTime>, breaker: CircuitBreaker, totalCases: number) => ({
@@ -112,6 +116,26 @@ describe("SpeculationController — tail straggler duplication", () => {
     await time.advance(1501);
     const outcome = await slow;
     expect(outcome.target).toBe("fast-rt"); // winner = the speculated runtime
+  });
+
+  it("the duplicate is a NEW physical attempt — it dispatches under a fresh recording generation, and the winner's job says so", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    let opened = 0;
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 1),
+      reattempt: async (j) => ({ ...j, recordingGeneration: 30 + ++opened }),
+    });
+    const race = ctl.run(exec.execute, { ...jobOn("a", "slow-rt"), recordingGeneration: 1 });
+    await time.advance(1500); // past the floor → duplicate fires
+    // The primary kept the attempt its dispatcher opened; the duplicate opened its own — the two racing
+    // executions never share an evidence buffer.
+    expect(exec.jobs.get("a@slow-rt")?.recordingGeneration).toBe(1);
+    expect(exec.jobs.get("a@fast-rt")?.recordingGeneration).toBe(31);
+    exec.release("a@fast-rt", "a", "fast-rt"); // the duplicate wins
+    const outcome = await race;
+    expect(outcome.job.recordingGeneration).toBe(31); // the finalizer seals the WINNER's attempt
   });
 
   it("never speculates before every case has been dispatched (pure tail only)", async () => {

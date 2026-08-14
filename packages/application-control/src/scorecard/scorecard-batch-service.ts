@@ -8,6 +8,7 @@ import {
   type CaseResult,
   ConflictError,
   type Dataset,
+  type DomainFact,
   type EvalCase,
   type HarnessSpec,
   InternalError,
@@ -71,7 +72,7 @@ import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
-import type { RunStore } from "../ports/run-store.js";
+import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
@@ -117,6 +118,10 @@ interface PendingChildSettle {
   // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
   // rather than leaving the row silent about it (review 39 P0-3) — the same invariant the Temporal path holds.
   judges: ReadonlyArray<{ id: string }>;
+  // …and the SEALED closure those judges resolved to at submit (specDigest/model/rubric digests) — what the
+  // receipt's judgeClosureDigest names, so "which judgment produced this outcome" is the manifest's answer,
+  // not a list of id strings (review 40 follow-up P1).
+  sealedJudges?: SealedJudgeClosure[];
 }
 
 // A case the in-process loop finalized down the FAILURE exit — what the judged exit needs to (a) not report
@@ -393,6 +398,7 @@ export class ScorecardBatchService {
                         childId: c.id,
                         ...(c.executionId ? { executionId: c.executionId } : {}),
                         judges: orch.judges,
+                        ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
                       }),
                       async (runs) => {
                         const cur = await runs.get(c.id);
@@ -691,6 +697,7 @@ export class ScorecardBatchService {
               tenant: rec.tenant,
               breaker: this.breaker,
               totalCases: caseIndex.size,
+              ...(this.reattemptOf() ? { reattempt: this.reattemptOf() } : {}),
               ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
               onSpeculate: (cid: string, from: string, to: string) => {
                 this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
@@ -759,6 +766,31 @@ export class ScorecardBatchService {
     return { caseIds: remaining, concurrency: ctx.concurrency };
   }
 
+  // ── A NEW PHYSICAL EXECUTION OPENS ITS OWN ATTEMPT (review 40 follow-up) ───────────────────────────
+  //
+  // Spillover, the OOM boost and the speculation duplicate all re-dispatch the SAME job, and all of them
+  // used to ride the recording generation the first dispatch opened — so `attemptIdOf(executionId, gen)`
+  // named a physical attempt only when nothing interesting happened. Two executions of one case (the
+  // straggler AND its duplicate, racing concurrently) wrote into one evidence buffer, and the winner's
+  // replay could carry the loser's frames. Every internal re-dispatch now opens its own generation; the
+  // WINNER's job (SpilloverOutcome.job) is what the finalizer seals, claims and references. An open that
+  // fails STRIPS the stale number instead of inheriting it — writing into another physical execution's
+  // buffer is the one thing this exists to prevent, so those producers land in the unclaimed g0 bucket.
+  private reattemptOf(): ((job: CaseJob) => Promise<CaseJob>) | undefined {
+    const store = this.deps.recordingStore;
+    if (!store) return undefined;
+    return async (job: CaseJob): Promise<CaseJob> => {
+      const executionId = job.runId;
+      if (!executionId) return job;
+      const generation = await store.open(executionId).catch(() => undefined);
+      if (generation === undefined) {
+        const { recordingGeneration: _stale, ...rest } = job;
+        return rest;
+      }
+      return { ...job, recordingGeneration: generation };
+    };
+  }
+
   // runBatchCase — execute + settle exactly one case (idempotent). Mirrors the in-process track dispatch closure:
   // budget admit → child run → secret resolve → executeCase (CP-side transient retry by failure class) → settle →
   // per-case judges → progress step. Kept deliberately parallel to track() — the two drivers share every primitive
@@ -782,8 +814,11 @@ export class ScorecardBatchService {
       onWaiting: (reason: string) => void;
       onStarted?: () => void;
       onStep: (message: string, caseId: string) => void;
+      // Opens a fresh recording attempt for a NEW physical execution (spill / OOM boost / speculation
+      // duplicate) and returns the job stamped with it — see SpilloverOpts.reattempt.
+      reattempt?: (job: CaseJob) => Promise<CaseJob>;
     },
-  ): Promise<{ result: CaseResult; target?: string }> {
+  ): Promise<{ result: CaseResult; target?: string; job: CaseJob }> {
     // Resolve env secret references just before dispatch; a missing referenced secret throws → the case is isolated.
     const resolved =
       cfg.secretMap && job.harnessSpec
@@ -805,7 +840,7 @@ export class ScorecardBatchService {
       ...(cfg.onStarted ? { onStarted: cfg.onStarted } : {}),
     };
     // Spillover wraps executeCase; tail speculation wraps that (a straggler gets a duplicate, first result wins).
-    const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string }> =>
+    const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string; job: CaseJob }> =>
       executeWithSpillover((jj) => executeCase(this.deps, cfg.owner, jj, startOpts), j, {
         targets: cfg.targets,
         tenant: cfg.tenant,
@@ -814,6 +849,7 @@ export class ScorecardBatchService {
           this.deps.onOrchestrationEvent?.({ kind: "spillover", from, to, code });
           cfg.onStep(`${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
         },
+        ...(cfg.reattempt ? { reattempt: cfg.reattempt } : {}),
       });
     return executeWithOomBoost((j) => (cfg.speculation ? cfg.speculation.run(exec, j) : exec(j)), jobToRun, {
       enabled: cfg.oomAutoBoost ?? false,
@@ -821,6 +857,7 @@ export class ScorecardBatchService {
         this.deps.onOrchestrationEvent?.({ kind: "oom_escalated", memoryMb: toMb });
         cfg.onStep(`${cid}: OOM auto-boost ${fromMb} → ${toMb}Mb (in-batch retry)`, cid);
       },
+      ...(cfg.reattempt ? { reattempt: cfg.reattempt } : {}),
     });
   }
 
@@ -899,10 +936,15 @@ export class ScorecardBatchService {
       };
       let result: CaseResult | undefined;
       let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
+      // The job of the CURRENT physical attempt — a control-plane retry re-dispatches under a fresh
+      // recording generation (review 40 follow-up), and the WINNER's job is what the finalizer references.
+      let currentJob: CaseJob = baseJob;
+      let winnerJob: CaseJob | undefined;
       for (let attempt = 0; ; attempt++) {
         try {
           const childId = child?.id;
-          const outcome = await this.runResilientCase(baseJob, {
+          const reattempt = this.reattemptOf();
+          const outcome = await this.runResilientCase(currentJob, {
             owner: ctx.owner,
             targets: ctx.targets,
             tenant: ctx.tenant,
@@ -910,6 +952,7 @@ export class ScorecardBatchService {
             boostMb: ctx.memoryBoostMb?.[caseId],
             oomAutoBoost: ctx.oomAutoBoost,
             speculation: ctx.speculation,
+            ...(reattempt ? { reattempt } : {}),
             onWaiting: (reason) => {
               void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason });
               // M2 live-anomaly fact — ONCE per batch (500 blocked cases must read as one signal, not a flood):
@@ -933,6 +976,7 @@ export class ScorecardBatchService {
           });
           result = outcome.result;
           ranOn = outcome.target;
+          winnerJob = outcome.job;
           break;
         } catch (err) {
           const failure = classifyFailure(err, "dispatch");
@@ -960,8 +1004,15 @@ export class ScorecardBatchService {
             break;
           }
           await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
+          // The retry is a NEW physical execution — it opens its own attempt rather than writing into the
+          // one the failed dispatch may still have late producers for.
+          currentJob = (await this.reattemptOf()?.(currentJob)) ?? currentJob;
         }
       }
+      // Which attempt the case's answer belongs to: the winner's (a spill/boost/duplicate opened its own);
+      // a synthesized failure belongs to the LAST attempt dispatched. Absent = no attempt was isolatable.
+      const winnerGeneration = (winnerJob ?? currentJob).recordingGeneration;
+      const winnerUnisolated = this.deps.recordingStore !== undefined && winnerGeneration === undefined;
       // Bill the case, itemized per model: managed/ws-runner bill the whole cost; an own-pays personal self-hosted run
       // bills the workspace only for calls on a workspace-billed model. The same lines feed the meter + enforcement budget.
       let caseUsd = 0;
@@ -997,7 +1048,7 @@ export class ScorecardBatchService {
             events: result.trace,
             // WHOSE evidence this is (review 39 P1) — the same identity the receipt records, so a reader can
             // ask whether the replay in front of them belongs to the execution that produced the verdict.
-            attemptId: attemptIdOf(executionId, generation ?? 0),
+            attemptId: attemptIdOf(executionId, winnerGeneration ?? 0),
             // Names the row on the browse page: an eval is known by the case it evaluated.
             ...runEvidenceIdentity(child),
             // The producer's declared clock anchor (a topology case: drive start) — what lets an inline
@@ -1035,10 +1086,16 @@ export class ScorecardBatchService {
         epoch: ctx.driverEpoch,
         result,
         judges: ctx.judges,
+        ...(ctx.sealedJudges ? { sealedJudges: ctx.sealedJudges } : {}),
+        tenant: ctx.tenant,
+        announce: {
+          ...(ctx.verdictPolicy ? { verdictPolicy: ctx.verdictPolicy } : {}),
+          ...(ctx.owner !== undefined ? { owner: ctx.owner } : {}),
+        },
         ...(child ? { childId: child.id } : {}),
         executionId,
-        generation: generation ?? 0,
-        ...(unisolated ? { unisolated: true } : {}),
+        generation: winnerGeneration ?? 0,
+        ...(unisolated || winnerUnisolated ? { unisolated: true } : {}),
         ...(ranOn ? { ranOn } : {}),
       });
       // A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3). `lost` means another
@@ -1057,15 +1114,8 @@ export class ScorecardBatchService {
         message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
         caseId,
       });
-      // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
-      void this.deps.events?.emit({
-        workspace: ctx.tenant,
-        kind: "scorecard.case.completed",
-        subject: { type: "scorecard", id },
-        ...(ctx.owner !== undefined ? { recipient: ctx.owner } : {}),
-        payload: { caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
-        message: `Scorecard ${id} case ${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
-      });
+      // The lifecycle FACT rode the commit transaction itself (finalizeCaseAttempt, E0) — persisted with the
+      // child's terminal write and pushed to the live bus there, so nothing is emitted here.
       return { settled: true };
     } finally {
       ctx.inFlightIds.delete(caseId); // release the claim so a failed/incomplete attempt (or the next case) is unblocked
@@ -1603,6 +1653,8 @@ export class ScorecardBatchService {
   // reader can find, because the aggregate was built from this process's memory and the ledger disagrees.
   private async settleJudgedChild(
     scorecardId: string,
+    tenant: string,
+    announce: { verdictPolicy?: VerdictPolicy; owner?: string },
     pending: Map<string, PendingChildSettle>,
     finalized: Map<string, FailureFinalization>,
     result: CaseResult,
@@ -1623,6 +1675,9 @@ export class ScorecardBatchService {
       epoch: entry.parentDriver.epoch,
       result,
       judges: entry.judges,
+      ...(entry.sealedJudges ? { sealedJudges: entry.sealedJudges } : {}),
+      tenant,
+      announce,
       ...(entry.childId ? { childId: entry.childId } : {}),
       executionId: entry.executionId,
       generation: entry.generation,
@@ -1689,6 +1744,7 @@ export class ScorecardBatchService {
       executionId?: string;
       generation?: number;
       judges: ReadonlyArray<{ id: string }>;
+      sealedJudges?: SealedJudgeClosure[];
     },
   ): CaseCommitReceipt {
     return {
@@ -1706,7 +1762,15 @@ export class ScorecardBatchService {
       // Through the ONE spelling (caseResultDigest): the digest must match across the jsonb round-trip —
       // ScoreSchema's read-time normalizer reshapes what a producer literally wrote (see case-result-digest.ts).
       resultDigest: caseResultDigest(result),
-      ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
+      // The judge-closure identity: the SEALED closure when the manifest carries one (each entry pins the
+      // judge document and its nested model/rubric/harness digests — the whole judgment, not its name), and
+      // only a batch that sealed nothing falls back to the bare id list. Sorted by id so the digest is a
+      // set identity, not an ordering accident.
+      ...(entry.sealedJudges && entry.sealedJudges.length > 0
+        ? { judgeClosureDigest: contentDigest([...entry.sealedJudges].sort((a, b) => (a.id < b.id ? -1 : 1))) }
+        : entry.judges.length > 0
+          ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) }
+          : {}),
       committedAt: this.now(),
     };
   }
@@ -1872,21 +1936,58 @@ export class ScorecardBatchService {
     epoch: number;
     result: CaseResult;
     judges: ReadonlyArray<{ id: string }>;
+    sealedJudges?: SealedJudgeClosure[];
     childId?: string;
     executionId: string;
     generation: number;
     unisolated?: boolean;
     ranOn?: string;
+    // The completion FACT's ingredients (review 40 follow-up, E0): with a ledger, the fact rides the commit
+    // transaction itself — persisted if and only if the case committed, so a loser structurally announces
+    // nothing; without one, it falls back to the best-effort emit this fact always had.
+    tenant?: string;
+    announce?: { verdictPolicy?: VerdictPolicy; owner?: string };
   }): Promise<{ kind: "committed"; result: CaseResult } | { kind: "lost" } | { kind: "unwritten" }> {
     const covered =
       input.judges.length > 0
         ? { ...input.result, scores: completeJudgeCoverage(input.result.scores, input.judges) }
         : input.result;
+    const completionFact = (): { message: string; fact: DomainFact & { message: string; recipient?: string } } => {
+      const v = caseVerdict(covered, input.announce?.verdictPolicy);
+      const reason = caseReason(covered);
+      const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
+      const message = `Scorecard ${input.scorecardId} case ${covered.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`;
+      return {
+        message,
+        fact: {
+          kind: "scorecard.case.completed",
+          subject: { type: "scorecard", id: input.scorecardId },
+          payload: {
+            caseId: covered.caseId,
+            ...(covered.trial !== undefined ? { trial: covered.trial } : {}),
+            verdict: v ?? null,
+            ...(reason !== undefined ? { reason } : {}),
+          },
+          message,
+          ...(input.announce?.owner !== undefined ? { recipient: input.announce.owner } : {}),
+        },
+      };
+    };
     // A batch with no run store has no child to commit — the case really did finish, and there is nothing for
-    // a receipt to make canonical either.
+    // a receipt to make canonical either. The fact keeps its historical best-effort emit here.
     const runStore = this.deps.runStore;
     const childId = input.childId;
-    if (!childId || !runStore) return { kind: "committed", result: covered };
+    if (!childId || !runStore) {
+      if (input.announce && input.tenant !== undefined) {
+        const { fact } = completionFact();
+        void this.deps.events?.emit({ workspace: input.tenant, ...fact });
+      }
+      return { kind: "committed", result: covered };
+    }
+    const stamped =
+      input.announce && input.tenant !== undefined
+        ? stampFacts(input.tenant, [completionFact().fact], { newId: this.newId, now: this.now })
+        : [];
     await this.assembleCaseEvidence(covered, {
       scorecardId: input.scorecardId,
       executionId: input.executionId,
@@ -1904,6 +2005,7 @@ export class ScorecardBatchService {
           executionId: input.executionId,
           generation: input.generation,
           judges: input.judges,
+          ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
         }),
         (runs) =>
           this.settleChildOn(
@@ -1915,12 +2017,18 @@ export class ScorecardBatchService {
               ...(input.ranOn ? { runtime: input.ranOn } : {}),
             }),
             { scorecardId: input.scorecardId, epoch: input.epoch },
+            stamped.length > 0 ? stamped.map((f) => f.record) : undefined,
           ),
         runStore,
       )
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
-    if (outcome.kind === "committed") return { kind: "committed", result: covered };
+    if (outcome.kind === "committed") {
+      // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
+      // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      return { kind: "committed", result: covered };
+    }
     if (outcome.kind === "already_committed")
       // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child
       // owning the case means a concurrent attempt won — this one was never the case's answer.
@@ -1949,6 +2057,9 @@ export class ScorecardBatchService {
     // The batch this child belongs to, and the epoch its driver holds. Proved INSIDE the write: the child's
     // own epoch cannot answer "am I still this batch's driver" (arch-review 33 P0).
     parentDriver?: { scorecardId: string; epoch: number },
+    // Outbox facts that ride the SAME write (E0): inside commitCase this is the same transaction as the
+    // receipt claim, so "the case completed" is persisted if and only if the case actually committed.
+    events?: OutboxEvent[],
   ): Promise<RunRecord | undefined> {
     const current = await store.get(childId);
     if (!current || Run.from(current).isTerminal()) return undefined;
@@ -1964,7 +2075,7 @@ export class ScorecardBatchService {
     // The ANSWER is returned, because everything a finished case does next — announcing it, exporting it,
     // counting it done — is authority the committed transition owns and the attempt does not (arch-review 35
     // P1). Swallowing it made "the judges are done" the licence, which is one step short of the truth.
-    return await settleRun(store, childId, settle(current), undefined, {
+    return await settleRun(store, childId, settle(current), events, {
       epoch: current.ownerEpoch ?? 0,
       ...(parentDriver ? { parentDriver } : {}),
     });
@@ -2309,7 +2420,12 @@ export class ScorecardBatchService {
         const openedGeneration = attemptGeneration.get(executionIdOf(job, id));
         const dispatchable: CaseJob =
           openedGeneration === undefined ? enriched : { ...enriched, recordingGeneration: openedGeneration };
-        const { result, target: ranOn } = await this.runResilientCase(dispatchable, {
+        const reattempt = this.reattemptOf();
+        const {
+          result,
+          target: ranOn,
+          job: winnerJob,
+        } = await this.runResilientCase(dispatchable, {
           owner,
           targets,
           tenant,
@@ -2317,6 +2433,7 @@ export class ScorecardBatchService {
           boostMb: opts.memoryBoostMb?.[job.evalCase.id],
           oomAutoBoost: opts.oomAutoBoost,
           speculation,
+          ...(reattempt ? { reattempt } : {}),
           onWaiting,
           ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
           onStep: (message, cid) => {
@@ -2355,7 +2472,9 @@ export class ScorecardBatchService {
               events: result.trace,
               // WHOSE evidence this is (review 39 P1): the attempt this dispatch opened, spelled the way the
               // receipt spells it, so a reader can compare rather than assume.
-              attemptId: attemptIdOf(executionIdOf(job, id), attemptGeneration.get(executionIdOf(job, id)) ?? 0),
+              // WHOSE evidence: the WINNING physical attempt's generation (a spill/boost/duplicate opened
+              // its own), never the first dispatch's by default.
+              attemptId: attemptIdOf(executionIdOf(job, id), winnerJob.recordingGeneration ?? 0),
               ...runEvidenceIdentity(child),
               ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});
@@ -2375,14 +2494,16 @@ export class ScorecardBatchService {
         // looked equivalent and was not: `runSuite` stamps the trial onto the result AFTER dispatch returns,
         // so all N trials of a case registered under `#0`, the first settle consumed the entry and the rest
         // read as somebody else's. A trialled case is N cases everywhere else in this file; here too.
+        const winnerUnisolated = this.deps.recordingStore !== undefined && winnerJob.recordingGeneration === undefined;
         pendingChildSettle.set(childKey(job.evalCase.id, job.trial), {
           childId: child?.id,
           ...(ranOn ? { ranOn } : {}),
           parentDriver: { scorecardId: id, epoch },
           executionId: executionIdOf(job, id),
-          generation: attemptGeneration.get(executionIdOf(job, id)) ?? 0,
-          ...(unisolated.has(executionIdOf(job, id)) ? { unisolated: true } : {}),
+          generation: winnerJob.recordingGeneration ?? 0,
+          ...(unisolated.has(executionIdOf(job, id)) || winnerUnisolated ? { unisolated: true } : {}),
           judges, // …and what this batch asked of the case, so its commit can state a judge that never answered
+          ...(opts.sealedJudges ? { sealedJudges: opts.sealedJudges } : {}),
         });
         return result;
       } catch (err) {
@@ -2466,6 +2587,7 @@ export class ScorecardBatchService {
           tenant,
           breaker: this.breaker,
           totalCases: cases.length,
+          ...(this.reattemptOf() ? { reattempt: this.reattemptOf() } : {}),
           ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
           onSpeculate: (cid, from, to) => {
             this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
@@ -2570,7 +2692,7 @@ export class ScorecardBatchService {
           // where it was, so the code's own new invariant and its vocabulary disagreed.
           //
           // Both now happen where the child settles: after the judges, from the result they wrote into.
-          const announce = (): void => {
+          const announce = (failureExit: boolean): void => {
             const v = caseVerdict(r, opts.verdictPolicy);
             const reason = caseReason(r);
             const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
@@ -2581,22 +2703,33 @@ export class ScorecardBatchService {
               r.caseId,
             );
             void flushSteps();
-            // Lifecycle FACT (agent-automation A2): one streamed case landed — a watching agent reacts MID-batch.
-            void this.deps.events?.emit({
-              workspace: tenant,
-              kind: "scorecard.case.completed",
-              subject: { type: "scorecard", id },
-              recipient: owner,
-              payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
-              message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
-            });
+            // The SUCCESS path's lifecycle fact rode the commit transaction (finalizeCaseAttempt, E0). The
+            // FAILURE exit's child was terminalized in the dispatch catch — there is no commit transaction
+            // left to ride, so its fact keeps the best-effort emit it always had (after its receipt landed).
+            if (failureExit)
+              void this.deps.events?.emit({
+                workspace: tenant,
+                kind: "scorecard.case.completed",
+                subject: { type: "scorecard", id },
+                recipient: owner,
+                payload: { caseId: r.caseId, verdict: v ?? null, ...(reason !== undefined ? { reason } : {}) },
+                message: `Scorecard ${id} case ${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+              });
           };
           // A reclaimed batch fires no judges, so its child settles now with what it has — the alternative is
           // a row left running forever because the thing that was going to settle it was cancelled.
           if (controller.signal.aborted) {
+            const failureExit = finalizedByFailure.has(childKey(r.caseId, r.trial));
             childSettles.push(
-              this.settleJudgedChild(id, pendingChildSettle, finalizedByFailure, r).then((outcome) => {
-                if (outcome === "committed") announce();
+              this.settleJudgedChild(
+                id,
+                tenant,
+                { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
+                pendingChildSettle,
+                finalizedByFailure,
+                r,
+              ).then((outcome) => {
+                if (outcome === "committed") announce(failureExit);
                 return outcome;
               }),
             );
@@ -2611,10 +2744,18 @@ export class ScorecardBatchService {
             // (arch-review 35 P1). A settle refused because this driver lost the batch used to be followed
             // by "case completed" on the live bus and an export to the tenant's platform anyway — a case
             // announced and shipped by the one process whose result the ledger just declined.
+            const failureExit = finalizedByFailure.has(childKey(r.caseId, r.trial));
             const settleJudged = (): Promise<"committed" | "lost" | "unwritten"> =>
-              this.settleJudgedChild(id, pendingChildSettle, finalizedByFailure, r).then((outcome) => {
+              this.settleJudgedChild(
+                id,
+                tenant,
+                { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
+                pendingChildSettle,
+                finalizedByFailure,
+                r,
+              ).then((outcome) => {
                 if (outcome !== "committed") return outcome;
-                announce();
+                announce(failureExit);
                 // Case-completion chaining: export only after the case is BOTH judged and committed — and
                 // skip new fires after abort (already-fired exports complete naturally; the supersede path
                 // joins them and records a partial outcome).

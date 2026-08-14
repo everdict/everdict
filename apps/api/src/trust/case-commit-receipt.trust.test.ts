@@ -1,6 +1,6 @@
 import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
-import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
+import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { caseResultDigest } from "@everdict/domain";
 import {
   InMemoryDatasetRegistry,
@@ -402,6 +402,53 @@ describeTrust("TRUST-171 — a failure is committed, not merely recorded", () =>
     // No receipt was claimed for the refused case — the successor can still commit it.
     const committed = await receipts.list(record.id);
     expect(committed.some((r) => r.caseId === "c-boom")).toBe(false);
+  }, 20_000);
+});
+
+// ── THE COMPLETION FACT RIDES THE COMMIT (review 40 follow-up, E0) ───────────────────────────────────
+describeTrust("TRUST-171 — the case-completed fact is persisted with the child's commit", () => {
+  it("a committed case leaves its scorecard.case.completed on the SAME store write the ledger saw", async () => {
+    // The fact used to be a fire-and-forget emit after the commit — a crash between the two left a committed
+    // case nobody was told about, and a loser that emitted anyway told the workspace about a case the ledger
+    // never counted. Riding the child's terminal write (settleRun's outbox arm, one transaction with the
+    // receipt on Pg) makes both impossible by construction.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one-fact",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const facts = new InMemoryPlatformEventStore();
+    const runStore = new InMemoryRunStore(facts); // the E0 pair: events append with the write
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one-fact", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    expect((await store.get(record.id))?.status).toBe("succeeded");
+    const completed = (await facts.list("acme")).filter((e) => e.kind === "scorecard.case.completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.subject).toEqual({ type: "scorecard", id: record.id });
+    expect(completed[0]?.payload).toMatchObject({ caseId: "c1" });
   }, 20_000);
 });
 

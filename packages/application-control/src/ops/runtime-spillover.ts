@@ -18,11 +18,20 @@ export interface SpilloverOpts {
   tenant: string; // breaker key scope (runtime ids are tenant-scoped)
   breaker: CircuitBreaker;
   onSpill?: (caseId: string, from: string, to: string, code: string) => void; // progress-step visibility
+  // ── A RE-DISPATCH IS A NEW PHYSICAL ATTEMPT (review 40 follow-up) ────────────────────────────────
+  // Called for every dispatch AFTER the first (a spill onto the next runtime). The caller opens a fresh
+  // recording generation and returns the job stamped with it, so two physical executions of one case never
+  // share an evidence buffer — the exact mixing `attemptIdOf(executionId, generation)` exists to prevent.
+  reattempt?: (job: CaseJob) => Promise<CaseJob>;
 }
 
 export interface SpilloverOutcome {
   result: CaseResult;
   target?: string; // the runtime that actually ran the case (undefined on the pass-through path)
+  // The JOB that produced the result — the winning physical attempt. Its recordingGeneration is the attempt
+  // the finalizer must seal, claim and reference; using the first dispatch's number instead re-labelled a
+  // spilled/boosted/speculated execution's evidence as the original attempt's.
+  job: CaseJob;
 }
 
 export async function executeWithSpillover(
@@ -31,7 +40,7 @@ export async function executeWithSpillover(
   opts: SpilloverOpts,
 ): Promise<SpilloverOutcome> {
   const assigned = job.evalCase.placement?.target;
-  if (!assigned || opts.targets.length <= 1) return { result: await run(job) };
+  if (!assigned || opts.targets.length <= 1) return { result: await run(job), job };
 
   const keyOf = (t: string): string => `${opts.tenant}:${t}`;
   // Candidate order: the assigned runtime first (shard stability), then the rest of the list. Open circuits sink
@@ -44,14 +53,17 @@ export async function executeWithSpillover(
   let lastErr: unknown;
   for (let i = 0; i < candidates.length; i++) {
     const target = candidates[i] as string;
-    const attempt: CaseJob =
+    const retargeted: CaseJob =
       target === assigned
         ? job
         : { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target } } };
+    // The first dispatch runs under the attempt its dispatcher opened; every spill is a NEW physical
+    // execution and opens its own (see SpilloverOpts.reattempt).
+    const attempt: CaseJob = i === 0 ? retargeted : ((await opts.reattempt?.(retargeted)) ?? retargeted);
     try {
       const result = await run(attempt);
       opts.breaker.success(keyOf(target));
-      return { result, target };
+      return { result, target, job: attempt };
     } catch (err) {
       const failure = classifyFailure(err, "dispatch");
       // Only an infra failure says anything about the runtime's health — and saturation says even less: a full
