@@ -93,6 +93,7 @@ export function TraceSourceManager({
   const [endpoint, setEndpoint] = useState('')
   const [authName, setAuthName] = useState('')
   const [otelCorrelate, setOtelCorrelate] = useState<'id' | 'tag'>('tag')
+  const [correlateTag, setCorrelateTag] = useState('')
   const [service, setService] = useState('')
   const [project, setProject] = useState('')
   const [webUrl, setWebUrl] = useState('')
@@ -122,6 +123,7 @@ export function TraceSourceManager({
     setEndpoint('')
     setAuthName('')
     setOtelCorrelate('tag')
+    setCorrelateTag('')
     setService('')
     setProject('')
     setWebUrl('')
@@ -138,6 +140,7 @@ export function TraceSourceManager({
     setAuthName(s.authSecretName ?? '')
     setOtelCorrelate(s.correlate)
     setService(s.service ?? '')
+    setCorrelateTag(s.correlateTag ?? '')
     setProject(s.project ?? '')
     setWebUrl(s.webUrl ?? '')
     setProbe({ status: 'idle', scopes: [] }) // editing requires re-testing (stored scope may not be in the fresh list)
@@ -201,6 +204,9 @@ export function TraceSourceManager({
           ...(service.trim() ? { service: service.trim() } : {}),
           ...(project.trim() ? { project: project.trim() } : {}),
           ...(webUrl.trim() ? { webUrl: webUrl.trim() } : {}),
+          ...(correlate === 'tag' && (kind === 'otel' || kind === 'mlflow') && correlateTag.trim()
+            ? { correlateTag: correlateTag.trim() }
+            : {}),
         })
         if (!r.ok) setError(r.error)
         else resetForm()
@@ -370,6 +376,21 @@ export function TraceSourceManager({
                   value={otelCorrelate}
                   onChange={(v) => setOtelCorrelate(v === 'tag' ? 'tag' : 'id')}
                   aria-label={t('correlateLabel')}
+                />
+              </div>
+            )}
+            {/* Controlled correlation tag — only meaningful to a tag-mode search on the kinds that read it. */}
+            {correlate === 'tag' && (kind === 'otel' || kind === 'mlflow') && (
+              <div className="space-y-1">
+                <Label htmlFor="tsrc-correlate-tag" className="flex items-center gap-1.5">
+                  {t('correlateTagField')}
+                  <InfoTip content={t('correlateTagFieldInfoTip')} />
+                </Label>
+                <Input
+                  id="tsrc-correlate-tag"
+                  placeholder={kind === 'otel' ? 'everdict.run_id' : 'mlflow.trace.session'}
+                  value={correlateTag}
+                  onChange={(e) => setCorrelateTag(e.target.value)}
                 />
               </div>
             )}

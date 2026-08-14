@@ -932,4 +932,64 @@ describe("a judge's inputs come from what it declared, not from its kind", () =>
     expect(score).toMatchObject({ metric: "judge:pixel-check", status: "unmeasured", reason: "missing_evidence" });
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  it("resolves the screenshot a CODE judge declared it needs — the fetched base64 rides the wrapper's context file", async () => {
+    // The positive twin: `requires: [{kind:"screenshot"}]` on a CODE judge gates the image fetch too (not just a
+    // model judge's `inputs`). A browser snapshot carrying only a screenshotRef URL is resolved to real bytes
+    // BEFORE the wrapper serializes judge-context.json, so the code grades the image, not a link.
+    const pngB64 = Buffer.from("PNGBYTES").toString("base64");
+    const fetchImpl = vi.fn((_u: string) =>
+      Promise.resolve(new Response(Buffer.from("PNGBYTES"), { status: 200, headers: { "content-type": "image/png" } })),
+    );
+    let dispatched: CaseJob | undefined;
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      dispatch: async (job) => {
+        dispatched = job;
+        return {
+          caseId: job.evalCase.id,
+          harness: "judge",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [],
+        } satisfies CaseResult;
+      },
+    });
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "pixel-check",
+      version: "1.0.0",
+      language: "python",
+      code: "print('[]')",
+      timeoutSec: 30,
+      requires: [{ kind: "screenshot" }],
+      tags: [],
+    };
+    const browserCtx: GradeContext = {
+      deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+      case: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "did it render?",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+      trace: [],
+      // URL only — the base64 was offloaded to object storage.
+      snapshot: {
+        kind: "browser",
+        url: "https://x",
+        dom: "<html></html>",
+        screenshot: "",
+        screenshotRef: "https://store.example/artifacts/shot.png",
+        console: [],
+      },
+    };
+    await runner.run(codeSpec, "acme", browserCtx);
+    expect(fetchImpl).toHaveBeenCalled(); // the artifact URL was fetched…
+    expect(dispatched).toBeDefined(); // …the declared evidence was satisfied, so the wrapper WAS dispatched…
+    expect(JSON.stringify(dispatched)).toContain(pngB64); // …and the context file carries the image bytes
+  });
 });

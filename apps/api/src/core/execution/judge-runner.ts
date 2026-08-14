@@ -19,6 +19,7 @@ import type {
 import { NotFoundError, type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
 import {
   billingCharges,
+  judgeExecutionSpans,
   modelApiKeySecretName,
   normalizeModelBinding,
   pinnedDocumentMismatch,
@@ -52,6 +53,16 @@ const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 // skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently
 // vanish, and stamp status "unmeasured": the variant carries no value and no pass at all, so a judge that never
 // ran has no number to leak into an aggregate and no verdict to leak into a passRate.
+// The judge's own execution, attached to its verdict's FIRST row as the Score transport slot (report 1.1):
+// converted to `span` vocabulary by the domain (never `llm_call` — the cost/steps graders read that kind, and
+// a judge's tokens must not bill the judged agent). The scoring service drains the slot onto the judged
+// case's trace and persists the score without it.
+function attachJudgeEvidence(spec: JudgeSpec, events: TraceEvent[], scores: Score[]): Score[] {
+  const spans = judgeExecutionSpans(spec.id, events);
+  if (spans.length === 0 || scores.length === 0) return scores;
+  return scores.map((score, i) => (i === 0 ? { ...score, traceEvents: spans } : score));
+}
+
 // retryable=true only when retrying AS-IS can recover (a transient error); config-shaped skips (missing secret,
 // unresolvable ref, no dispatcher) need a human change first and stay non-retryable.
 function skip(spec: JudgeSpec, reason: UnmeasuredReason, detail: string, retryable = false): Score[] {
@@ -467,15 +478,17 @@ async function runCodeJudge(
       billing: result,
     });
     if (result.failure) {
-      return skip(
+      // The dead judge job's own calls ride the unmeasured row — the failure stays diagnosable (report 1.1).
+      return attachJudgeEvidence(
         spec,
-        "grader_error",
-        `code judge job failed at ${result.failure.stage}: ${result.failure.message}`,
-        true,
+        result.trace,
+        skip(spec, "grader_error", `code judge job failed at ${result.failure.stage}: ${result.failure.message}`, true),
       );
     }
-    // The wrapper job's scores ARE the code's verdict — stamp this judge's identity onto them.
-    return stampCodeJudgeScores(spec, result.scores);
+    // The wrapper job's scores ARE the code's verdict — stamp this judge's identity onto them, and carry the
+    // judge's own execution back through the score's transport slot (drained onto the judged case's trace by
+    // the scoring service; the stored score never keeps it).
+    return attachJudgeEvidence(spec, result.trace, stampCodeJudgeScores(spec, result.scores));
   } catch (err) {
     return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);
   }
@@ -679,17 +692,27 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         // ground truth. Declared to the boundary as a judge producer, which refuses any metric outside
         // `judge:<id>[:criterion]`.
         const producer: ScoreProducer = { kind: "judge", id: spec.id };
-        return graded.map((score) => {
-          const metric = score.metric.replace(/^judge/, metricOf(spec));
-          // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
-          // and no pass to re-decide, so only its identity is rewritten.
-          if (!isMeasured(score)) return sanitizeScore({ ...score, metric }, producer);
-          const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
-          const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
-          return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) }, producer);
-        });
+        return attachJudgeEvidence(
+          spec,
+          spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
+          graded.map((score) => {
+            const metric = score.metric.replace(/^judge/, metricOf(spec));
+            // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
+            // and no pass to re-decide, so only its identity is rewritten.
+            if (!isMeasured(score)) return sanitizeScore({ ...score, metric }, producer);
+            const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
+            const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
+            return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) }, producer);
+          }),
+        );
       } catch (err) {
-        return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);
+        // A failed judge still CALLED — the call rides the unmeasured row, which is what makes it diagnosable
+        // (downstream report 1.1). Pre-transport skips never executed, so they rightly carry nothing.
+        return attachJudgeEvidence(
+          spec,
+          spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
+          skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true),
+        );
       } finally {
         // The execution happened whether or not the verdict parsed — a failed parse still spent the tokens, so the
         // report (meter + judge:<id> evidence plane) runs on BOTH exits. Pre-transport skips never reach here.

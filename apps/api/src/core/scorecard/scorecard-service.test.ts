@@ -231,7 +231,16 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const judges = new InMemoryJudgeRegistry();
-    await judges.register("acme", modelJudge("1.0.0"));
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
     await judges.register("acme", modelJudge("2.0.0")); // latest
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({ dispatcher: okDispatch, store, datasets, judges, newId: () => "sc-pin" });
@@ -253,7 +262,16 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const judges = new InMemoryJudgeRegistry();
-    await judges.register("acme", modelJudge("1.0.0"));
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
     const store = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     const receipts = new InMemoryCaseReceiptStore();
@@ -2094,7 +2112,8 @@ describe("ScorecardService — trace sink export", () => {
     });
     const done = await waitTerminal(store, "sc-export");
     // Then: the scored results go to export and the outcome remains in the record.
-    expect(calls[0]?.ctx).toEqual({ scorecardId: "sc-export", dataset: "d@1.0.0", harness: "h@1" });
+    // judgeModels is the per-judge export attribution map — empty here because the batch selected no judges.
+    expect(calls[0]?.ctx).toEqual({ scorecardId: "sc-export", dataset: "d@1.0.0", harness: "h@1", judgeModels: {} });
     expect(calls[0]?.caseIds).toEqual(["c1"]);
     expect(done.status).toBe("succeeded");
     expect(done.export?.status).toBe("succeeded");
@@ -2914,6 +2933,66 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     });
     return { store, runs, datasets, receipts, service };
   }
+
+  it("the durable per-case activity hands the judge the runtime the case ran on — a co-located judge must not fall to a registry miss", async () => {
+    // Downstream report §6: this call site passed `undefined` where RUNTIME goes, so a co-located
+    // code/harness judge lost its placement and skipped. The judge runner's placement argument is the
+    // observable: it must name where the case actually ran (spillover-aware), else the batch's selector.
+    const placements: Array<string | undefined> = [];
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "quality",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return ok(job.evalCase.id);
+        },
+      },
+      store,
+      datasets,
+      judges,
+      runStore: runs,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      judgeRunner: {
+        async run(_spec, _tenant, _ctx, placement) {
+          placements.push(placement?.target);
+          return [{ graderId: "judge", metric: "judge:quality", value: 1, pass: true }];
+        },
+      },
+      newId: () => `jr-${n++}`,
+    });
+    await datasets.register("acme", threeCases);
+    await store.create({
+      id: "sc-jrt",
+      tenant: "acme",
+      dataset: { id: "td", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      manifest: sealOf(threeCases),
+      status: "running",
+      runtime: "rt-a,rt-b",
+      orchestration: { judges: [{ id: "quality", version: "1.0.0" }], concurrency: 2, retries: 0 },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+    const plan = await service.planBatch("sc-jrt");
+    expect(await service.runBatchCase("sc-jrt", plan.caseIds[0] as string)).toEqual({ settled: true });
+    // The judge saw a placement — either the runtime the case actually ran on or the batch's selector —
+    // never the undefined that dropped it to the topology backend.
+    expect(placements).toHaveLength(1);
+    expect(placements[0]).toBeDefined();
+  });
 
   // A child that a previous run SETTLED — which, since the commit point exists, means a receipt naming it.
   // Seeding the row alone would describe a state production can no longer produce: a terminal child no

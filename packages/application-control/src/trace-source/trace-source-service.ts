@@ -24,20 +24,26 @@ import { traceAuthorizationCredential } from "./authorization-credential.js";
 // SecretStore name reference, resolved to a value only inside resolve()/browse at point of use. The HTTP route and MCP
 // tool share this core. Design: docs/architecture/trace-sink.md + docs/service-harness.md.
 
-// A single source's status (no secrets — all name references/URLs).
-export interface TraceSourceConfigView {
-  name: string;
-  kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix";
-  endpoint: string;
-  authSecretName?: string;
-  correlate: "id" | "tag";
-  service?: string;
-  project?: string;
-  webUrl?: string;
-  artifactBaseUrl?: string;
-}
-
 type TraceSourceEntry = NonNullable<WorkspaceSettings["traceSources"]>[number];
+
+// ── TRANSPORTED, NOT TRANSCRIBED (downstream report 2.1, the service half) ───────────────────────────
+//
+// This service used to re-describe the record FOUR times — the view interface, `toView`, the upsert input
+// and the stored entry literal — and every hand-list was one more place a new record field silently died:
+// `correlateTag` reached the schema and the builder and no caller could ever set it, because none of the
+// four lists mentioned it. The types are DERIVED from the record now, so a field added to
+// `WorkspaceSettingsSchema.traceSources[]` flows to the input and the view by construction — or the
+// compiler objects — instead of waiting for someone to notice a list.
+//
+// A single source's status. The entry carries no secret VALUE (authSecretName is a SecretStore name
+// reference), so the view is the record itself; a future field that must NOT travel gets an `Omit` here,
+// which is a decision the type states instead of a literal quietly forgetting it.
+export type TraceSourceConfigView = TraceSourceEntry;
+
+// The upsert input = the record, minus what the service derives (`correlate` defaults here).
+export type TraceSourceUpsertInput = Omit<TraceSourceEntry, "correlate"> & {
+  correlate?: TraceSourceEntry["correlate"];
+};
 
 // The unified trace-source pool = registered sources + any not-yet-migrated legacy trace sinks (merged by name).
 // A legacy sink becomes a source entry (correlate default "id"); a source of the same name wins. The next write of the
@@ -61,17 +67,9 @@ export function unifiedTraceSources(s: WorkspaceSettings | undefined): TraceSour
   return [...sources, ...legacy];
 }
 
-const toView = (s: TraceSourceEntry): TraceSourceConfigView => ({
-  name: s.name,
-  kind: s.kind,
-  endpoint: s.endpoint,
-  ...(s.authSecretName ? { authSecretName: s.authSecretName } : {}),
-  correlate: s.correlate,
-  ...(s.service ? { service: s.service } : {}),
-  ...(s.project ? { project: s.project } : {}),
-  ...(s.webUrl ? { webUrl: s.webUrl } : {}),
-  ...(s.artifactBaseUrl ? { artifactBaseUrl: s.artifactBaseUrl } : {}),
-});
+// Identity today (nothing in the entry is a secret value) — the seam where a field would be dropped ON
+// PURPOSE, stated as a type decision rather than a literal omission.
+const toView = (s: TraceSourceEntry): TraceSourceConfigView => s;
 
 export interface TraceSourceServiceDeps {
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → value resolve (workspace SecretStore) — used in resolve()/probe()
@@ -109,20 +107,7 @@ export class TraceSourceService {
   // first and specify only its name. A scope is required where the platform cannot be queried without it: mlflow needs an
   // `project` (experiment_id) and phoenix an `project` (both to pull AND to export); otel correlate:"tag" needs `service`.
   // correlate is a pull-only detail (default "id"). Any write migrates legacy sinks into the pool.
-  async upsert(
-    workspace: string,
-    input: {
-      name: string;
-      kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix";
-      endpoint: string;
-      authSecretName?: string;
-      correlate?: "id" | "tag";
-      service?: string;
-      project?: string;
-      webUrl?: string;
-      artifactBaseUrl?: string;
-    },
-  ): Promise<TraceSourceConfigView> {
+  async upsert(workspace: string, input: TraceSourceUpsertInput): Promise<TraceSourceConfigView> {
     // The owned store's reserved name (N2 continuous evaluation) — a workspace platform may not shadow it.
     if (input.name === EVERDICT_TRACE_SOURCE)
       throw new BadRequestError(
@@ -147,17 +132,26 @@ export class TraceSourceService {
         { name: input.name },
         "otel correlate:'tag' requires `service` (the agent's service.name for the Jaeger search).",
       );
-    const entry: TraceSourceEntry = {
-      name: input.name,
-      kind: input.kind,
-      endpoint: input.endpoint,
-      ...(input.authSecretName ? { authSecretName: input.authSecretName } : {}),
-      correlate,
-      ...(input.service ? { service: input.service } : {}),
-      ...(input.project ? { project: input.project } : {}),
-      ...(input.webUrl ? { webUrl: input.webUrl } : {}),
-      ...(input.artifactBaseUrl ? { artifactBaseUrl: input.artifactBaseUrl } : {}),
-    };
+    // A controlled correlation tag only means something to a tag-mode search, and only the adapters that
+    // read it (otel's Jaeger tag key, mlflow's session tag) — a declaration the platform cannot act on is
+    // refused at register time, never silently ignored (downstream report 3).
+    if (input.correlateTag !== undefined) {
+      if (correlate !== "tag")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { name: input.name },
+          "`correlateTag` names the tag a correlate:'tag' search matches — set correlate:'tag' or drop it.",
+        );
+      if (input.kind !== "otel" && input.kind !== "mlflow")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { name: input.name, kind: input.kind },
+          `${input.kind} does not search by a controlled tag — \`correlateTag\` applies to otel and mlflow.`,
+        );
+    }
+    // Transported, not transcribed: the input IS the record minus the derived default, so a new record
+    // field flows into storage without anyone re-listing it here.
+    const entry: TraceSourceEntry = { ...input, correlate };
     const existing = unifiedTraceSources(await this.settings.get(workspace));
     const next = [...existing.filter((s) => s.name !== input.name), entry];
     await this.settings.set(workspace, { traceSources: next, traceSinks: [] });

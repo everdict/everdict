@@ -354,7 +354,13 @@ export class ScorecardIngestService {
       ? await this.deps
           .exportResults(
             tenant,
-            { scorecardId: id, dataset: `${effectiveDataset.id}@${effectiveDataset.version}`, harness: harnessLabel },
+            {
+              scorecardId: id,
+              dataset: `${effectiveDataset.id}@${effectiveDataset.version}`,
+              harness: harnessLabel,
+              // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
+              judgeModels: await this.scoring.collectJudgeModelMap(tenant, judges).catch(() => ({})),
+            },
             results,
             attach,
           )

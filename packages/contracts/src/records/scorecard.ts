@@ -488,6 +488,8 @@ export const ScorecardExportSchema = z.object({
         externalId: z.string().optional(), // platform trace/run id (the target created or attached)
         url: z.string().optional(), // case trace deep link
         error: z.string().optional(), // per-case failure (isolated — other cases keep exporting)
+        // Degraded-but-exported (e.g. MLflow span upload failed while trace+scores landed) — never counted as a failure.
+        warning: z.string().optional(),
       }),
     )
     .optional(),

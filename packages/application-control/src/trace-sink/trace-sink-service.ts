@@ -29,6 +29,25 @@ export interface CaseExportStream {
 
 type SinkCaseOutcome = NonNullable<ScorecardExport["cases"]>[number];
 
+// The export ctx as the orchestration paths build it — the TraceSinkContext plus the per-batch sink override.
+interface ExportContext {
+  scorecardId: string;
+  dataset: string;
+  harness: string;
+  sinkOverride?: string;
+  judgeModels?: Record<string, string>; // judge id → declared model label (ScoringService.collectJudgeModelMap)
+}
+
+// "judge:<id>" / "judge:<id>:<criterion>" → the judge id. Anything else (grader metrics, the inline judge's
+// bare "judge") is not judge-attributable and takes the batch identity.
+function judgeIdOf(metric: string): string | undefined {
+  if (!metric.startsWith("judge:")) return undefined;
+  const rest = metric.slice("judge:".length);
+  const colon = rest.indexOf(":");
+  const id = colon === -1 ? rest : rest.slice(0, colon);
+  return id === "" ? undefined : id;
+}
+
 export class TraceSinkService {
   constructor(
     private readonly settings: WorkspaceSettingsStore,
@@ -44,7 +63,7 @@ export class TraceSinkService {
   // docs/architecture/streaming-case-pipeline.md D5 + docs/architecture/trace-sink.md
   async exportStream(
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
+    ctx: ExportContext,
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<CaseExportStream | undefined> {
     // Per-batch override wins over the harness selection; the literal "none" suppresses export for this batch.
@@ -98,16 +117,28 @@ export class TraceSinkService {
         // is the same claim leaving the building, so it filters too. Unmeasured scores are omitted rather than
         // annotated — the sink payload has no non-score slot (TraceSinkScore is name+value), and the batch's
         // own record keeps the per-metric `unmeasured` tallies.
-        scores: measuredScores(r.scores).map((sc) => ({
-          name: sc.metric,
-          value: sc.value,
-          ...(sc.pass !== undefined ? { pass: sc.pass } : {}),
-          // The reason as a READER gets it, whatever shape the grader wrote (arch-review: downstream 1.3).
-          // Narrowing `detail` to `string` here dropped every judge verdict's explanation — they are objects
-          // — and exported a score with nothing saying why. `renderScoreDetail` lives next to the contract
-          // that made the field open, so no sink decides this for itself again.
-          ...(renderScoreDetail(sc.detail) !== "" ? { comment: renderScoreDetail(sc.detail) } : {}),
-        })),
+        scores: measuredScores(r.scores).map((sc) => {
+          // WHO judged (downstream 1.2): a judge:<id> metric (and its criterion children) carries the judge's
+          // declared model when the attribution map states one; everything else — grader metrics, the inline
+          // judge's bare "judge", a harness judge with no stated model — carries the batch identity. The map
+          // only ever states declared models, so nothing here invents one.
+          const judgeId = judgeIdOf(sc.metric);
+          const source =
+            (judgeId !== undefined ? ctx.judgeModels?.[judgeId] : undefined) ?? `everdict:${ctx.scorecardId}`;
+          return {
+            name: sc.metric,
+            value: sc.value,
+            ...(sc.pass !== undefined ? { pass: sc.pass } : {}),
+            // Categorical outcome — the platform shows the label, `value` stays the ordering key.
+            ...(sc.label !== undefined ? { label: sc.label } : {}),
+            source,
+            // The reason as a READER gets it, whatever shape the grader wrote (arch-review: downstream 1.3).
+            // Narrowing `detail` to `string` here dropped every judge verdict's explanation — they are objects
+            // — and exported a score with nothing saying why. `renderScoreDetail` lives next to the contract
+            // that made the field open, so no sink decides this for itself again.
+            ...(renderScoreDetail(sc.detail) !== "" ? { comment: renderScoreDetail(sc.detail) } : {}),
+          };
+        }),
         ...(externalId ? { externalId } : {}),
         // …and where the judged evidence lives, so a verdict on the tenant's platform has a route back to the
         // trace it was rendered from rather than being a score with no provenance.
@@ -168,7 +199,7 @@ export class TraceSinkService {
   // (paths where the results already exist, e.g. ingest). Internally pushes everything to the stream, then joins.
   async exportScorecard(
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
+    ctx: ExportContext,
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<ScorecardExport | undefined> {

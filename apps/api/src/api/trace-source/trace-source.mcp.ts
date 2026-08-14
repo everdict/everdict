@@ -42,6 +42,13 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
             .describe(
               "pull-only: id = runId IS the trace id (default) | tag = search the everdict.run_id the deployed agent tagged",
             ),
+          correlateTag: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "the controlled tag a correlate:'tag' search matches (otel Jaeger tag key / mlflow session tag) — tag mode + otel|mlflow only",
+            ),
           service: z.string().min(1).optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
           project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix|langfuse|langsmith project"),
           webUrl: z.string().url().optional().describe("export deep-link base when it differs from the endpoint"),

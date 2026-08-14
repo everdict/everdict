@@ -22,7 +22,10 @@ const CTX = { scorecardId: "sc-1", dataset: "d@1", harness: "h@1" };
 
 // A harness h that has selected the mlf trace source AS AN EXPORT TARGET + a capturing fake buildSink.
 async function exportHarness(over: {
-  sinkResult?: { url?: string; cases: Array<{ caseId: string; externalId?: string; error?: string }> };
+  sinkResult?: {
+    url?: string;
+    cases: Array<{ caseId: string; externalId?: string; error?: string; warning?: string }>;
+  };
   throwOnExport?: boolean;
   secrets?: Record<string, string>;
   authSecretName?: string;
@@ -42,7 +45,11 @@ async function exportHarness(over: {
 
   const captured: {
     cfg?: TraceSinkConfig;
-    cases?: Array<{ caseId: string; externalId?: string; scores?: Array<{ name: string; value: number }> }>;
+    cases?: Array<{
+      caseId: string;
+      externalId?: string;
+      scores?: Array<{ name: string; value: number; label?: string; source?: string }>;
+    }>;
   } = {};
   const svc = new TraceSinkService(store, {
     secretsFor: async () => over.secrets ?? {},
@@ -54,7 +61,12 @@ async function exportHarness(over: {
           captured.cases = cases.map((c) => ({
             caseId: c.caseId,
             ...(c.externalId ? { externalId: c.externalId } : {}),
-            scores: c.scores.map((s) => ({ name: s.name, value: s.value })),
+            scores: c.scores.map((s) => ({
+              name: s.name,
+              value: s.value,
+              ...(s.label !== undefined ? { label: s.label } : {}),
+              ...(s.source !== undefined ? { source: s.source } : {}),
+            })),
           }));
           // the service calls per case (streaming) — the fixed sinkResult returns only this call's slice of cases.
           if (over.sinkResult)
@@ -154,7 +166,59 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness export 
 
     // Then only the measurement is published — the placeholders are omitted, never republished as real zeros.
     expect(out?.status).toBe("succeeded");
-    expect(captured.cases?.[0]?.scores).toEqual([{ name: "judge:q", value: 0.7 }]);
+    expect(captured.cases?.[0]?.scores).toEqual([{ name: "judge:q", value: 0.7, source: "everdict:sc-1" }]);
+  });
+
+  it("attributes each judge:<id> score to its judge's declared model; graders and unmapped judges carry the batch identity", async () => {
+    const { svc, captured } = await exportHarness({});
+    const judged: CaseResult = {
+      ...RESULT,
+      scores: [
+        { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true },
+        { graderId: "judge", metric: "judge:q", value: 0.7 },
+        { graderId: "judge", metric: "judge:q:helpfulness", value: 0.9 }, // criterion child — same judge, same model
+        { graderId: "judge", metric: "judge:agentic", value: 1 }, // harness judge — NO model in the map
+      ],
+    };
+    await svc.exportScorecard("acme", { ...CTX, judgeModels: { q: "gpt-5.4" } }, [judged]);
+    const bySource = Object.fromEntries((captured.cases?.[0]?.scores ?? []).map((s) => [s.name, s.source]));
+    expect(bySource).toEqual({
+      tests_pass: "everdict:sc-1", // a grader's judgment is the batch's own
+      "judge:q": "gpt-5.4", // the model that judged
+      "judge:q:helpfulness": "gpt-5.4",
+      // The harness judge declares no model — the export falls back to the batch identity, never invents one.
+      "judge:agentic": "everdict:sc-1",
+    });
+  });
+
+  it("a categorical measurement's label travels to the sink alongside its numeric ordering key", async () => {
+    const { svc, captured } = await exportHarness({});
+    const categorical: CaseResult = {
+      ...RESULT,
+      scores: [{ graderId: "tier", metric: "tier", value: 3, label: "gold" }],
+    };
+    await svc.exportScorecard("acme", CTX, [categorical]);
+    expect(captured.cases?.[0]?.scores).toEqual([{ name: "tier", value: 3, label: "gold", source: "everdict:sc-1" }]);
+  });
+
+  it("a per-case WARNING (degraded-but-exported, e.g. span upload failed) never demotes the export status", async () => {
+    // Given a sink whose cases all exported, one of them with a degradation warning
+    const { svc } = await exportHarness({
+      sinkResult: {
+        cases: [
+          { caseId: "c1", externalId: "e1", warning: "trace spans upload failed: 415" },
+          { caseId: "c2", externalId: "e2" },
+        ],
+      },
+    });
+
+    // When the batch exports
+    const out = await svc.exportScorecard("acme", CTX, [RESULT, { ...RESULT, caseId: "c2" }]);
+
+    // Then the status rollup counts only errors — a warned case still counts as exported
+    expect(out?.status).toBe("succeeded");
+    expect(out?.message).toBeUndefined();
+    expect(out?.cases?.find((c) => c.caseId === "c1")?.warning).toContain("415");
   });
 
   it("attach passes externalId only when the source and sink platforms match; otherwise it falls back to create mode", async () => {

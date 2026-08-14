@@ -3,7 +3,7 @@ import type { ComputeHandle, ComputeSpec } from "./compute.js";
 import type { EnvSnapshot } from "./environment.js";
 import type { EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvidence } from "./trace-source.js";
-import type { TraceEvent } from "./trace.js";
+import { type TraceEvent, TraceEventSchema } from "./trace.js";
 import { type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
 
 // Why a score was NOT a measurement. Closed vocabulary — a new skip path picks an existing reason or adds one here.
@@ -29,6 +29,19 @@ const ScoreIdentitySchema = {
   graderId: z.string(),
   metric: z.string(),
   detail: z.unknown().optional(),
+  // ── THE JUDGE'S OWN EXECUTION, AS A TRANSPORT SLOT (downstream report 1.1) ─────────────────────────
+  //
+  // A dispatched judge's only return channel is its scores, so the judgment's own observation — the model
+  // call it made, the tokens it spent, the verdict text — had nowhere to exist: an `unmeasured` row said the
+  // judge failed and the failed CALL was recorded nowhere. This slot carries those events back. It is a
+  // TRANSPORT: the scoring service drains it onto the judged case's trace and persists the score WITHOUT it,
+  // so a stored score stays a judgment, never an envelope. On every variant — the failure variants above
+  // all — because a failed judge still called, and that call is what makes the failure diagnosable.
+  //
+  // The events must be `span` kind, NEVER `llm_call`: the cost/steps graders read `llm_call`, so a judge's
+  // tokens recorded as one would bill the judged agent for the judgment — the measurement plane polluted by
+  // the judging plane's bookkeeping. `judgeExecutionSpans` (@everdict/domain) is the one spelling.
+  traceEvents: z.array(TraceEventSchema).optional(),
 };
 
 // ── THE REASON, AS A READER GETS IT ──────────────────────────────────────────────────────────────────
@@ -162,8 +175,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // A non-object input is passed through untouched so the union — not this function — reports the type error.
 function normalizeScoreShape(raw: unknown): unknown {
   if (!isRecord(raw)) return raw;
-  const { graderId, metric, value, pass, label, detail, status, reason, retryable, attempts } = raw;
-  const identity = { graderId, metric, ...(detail !== undefined ? { detail } : {}) };
+  const { graderId, metric, value, pass, label, detail, status, reason, retryable, attempts, traceEvents } = raw;
+  // `traceEvents` must SURVIVE normalization like `attempts` does: this function runs at every
+  // deserialization boundary, and a field it forgets is a field every read silently drops — the exact class
+  // that kept a schema-present field unreachable (downstream report 1.1's second trap).
+  const identity = {
+    graderId,
+    metric,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(Array.isArray(traceEvents) && traceEvents.length > 0 ? { traceEvents } : {}),
+  };
   const invalid = () => ({ ...identity, status: "invalid", reason: "contract_violation" });
 
   if (status === "invalid") return invalid();
@@ -236,6 +257,9 @@ export function sanitizeScore(score: Score, producer?: ScoreProducer): Score {
   if (!idsBroken && !valueBroken && forged === undefined) return score;
   const shownValue = isMeasured(score) ? String(score.value) : "none";
   return {
+    // The violating producer's own execution evidence still travels — an invalid row that kept the call is
+    // diagnosable; one that dropped it says only that something went wrong somewhere.
+    ...(score.traceEvents !== undefined && score.traceEvents.length > 0 ? { traceEvents: score.traceEvents } : {}),
     graderId: score.graderId === "" ? "unknown" : score.graderId,
     metric: score.metric === "" ? score.graderId || "unknown" : score.metric,
     status: "invalid",

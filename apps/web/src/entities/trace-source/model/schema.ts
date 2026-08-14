@@ -14,6 +14,7 @@ export const traceSourceConfigSchema = z.object({
   endpoint: z.string(),
   authSecretName: z.string().optional(),
   correlate: z.enum(['id', 'tag']), // pull-only: id = everdict runId IS the trace id · tag = search the everdict.run_id the agent tagged
+  correlateTag: z.string().optional(), // the controlled tag a correlate:'tag' search matches (otel tag key / mlflow session tag)
   service: z.string().optional(), // otel/jaeger tag-search scope (the agent's service.name)
   project: z.string().optional(), // per-kind scope: mlflow experiment_id · phoenix|langfuse|langsmith project
   webUrl: z.string().optional(), // export deep-link base when it differs from the endpoint (export-target use)

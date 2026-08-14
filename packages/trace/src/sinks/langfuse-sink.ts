@@ -99,12 +99,14 @@ export function langfuseBatch(
       }
     }
     for (const s of c.scores) {
+      // Categorical score → CATEGORICAL with the label as the (string) value — Langfuse's score-create accepts
+      // a string value under dataType CATEGORICAL; the numeric ordering key would render as a meaningless number.
       push(c.caseId, "score-create", {
         id: newId(),
         traceId,
         name: s.name,
-        value: s.value,
-        dataType: "NUMERIC",
+        value: s.label ?? s.value,
+        dataType: s.label !== undefined ? "CATEGORICAL" : "NUMERIC",
         ...(s.comment ? { comment: s.comment } : {}),
       });
     }

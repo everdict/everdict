@@ -1369,6 +1369,8 @@
     "correlateTag": "Tag (everdict.run_id)",
     "correlateLabel": "Select correlation strategy",
     "correlateInfoTip": "How the pulled trace is matched to the Everdict run. id = the Everdict run id IS the trace id (best when Everdict controls the run). tag = search the everdict.run_id tag the deployed agent set on its own trace.",
+    "correlateTagField": "Correlation tag key",
+    "correlateTagFieldInfoTip": "The controlled tag a tag-mode search matches — otel: the Jaeger tag key (default everdict.run_id); mlflow: the session tag (e.g. mlflow.trace.session). Set it when the deployed agent stamps its traces with a coordinate you control instead of the default run id tag.",
     "service": "Service (optional)",
     "required": "Required",
     "webUrlBase": "UI link base (optional)",

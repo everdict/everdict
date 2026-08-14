@@ -30,16 +30,44 @@ function sourceType(name: string): "LLM_JUDGE" | "CODE" {
 }
 
 // One score → a CreateAssessment request body (pure — unit-testable).
-export function mlflowAssessmentBody(score: TraceSinkScore, sourceId: string): Record<string, unknown> {
+// sourceId is the batch-identity fallback; a score carrying its own `source` (the judging model's label) wins —
+// that is what makes the LLM_JUDGE rows attributable to a model on the MLflow side. A categorical score exports
+// its label as the feedback value (the human-facing result) and keeps the numeric ordering key in metadata.value.
+// spanId (present only when the OTLP spans actually uploaded) scopes the assessment to the trace's root span.
+export function mlflowAssessmentBody(
+  score: TraceSinkScore,
+  sourceId: string,
+  spanId?: string,
+): Record<string, unknown> {
+  const metadata: Record<string, string> = {
+    ...(score.label !== undefined ? { value: String(score.value) } : {}),
+    ...(score.pass !== undefined ? { pass: String(score.pass) } : {}),
+  };
   return {
     assessment: {
       assessment_name: score.name,
-      source: { source_type: sourceType(score.name), source_id: sourceId },
-      feedback: { value: score.value },
+      source: { source_type: sourceType(score.name), source_id: score.source ?? sourceId },
+      ...(spanId ? { span_id: spanId } : {}),
+      feedback: { value: score.label ?? score.value },
       ...(score.comment ? { rationale: score.comment } : {}),
-      ...(score.pass !== undefined ? { metadata: { pass: String(score.pass) } } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     },
   };
+}
+
+// Token usage summed from the trace's llm_call cost fields (pure) — undefined when the trace reports none.
+function tokenUsageOf(
+  c: TraceSinkCase,
+): { input_tokens: number; output_tokens: number; total_tokens: number } | undefined {
+  let input = 0;
+  let output = 0;
+  for (const e of c.trace) {
+    if (e.kind !== "llm_call") continue;
+    input += e.cost?.inputTokens ?? 0;
+    output += e.cost?.outputTokens ?? 0;
+  }
+  const total = input + output;
+  return total > 0 ? { input_tokens: input, output_tokens: output, total_tokens: total } : undefined;
 }
 
 // One case → a StartTraceV3 request body (pure). The preview is the trace's first user message / last assistant message.
@@ -53,6 +81,7 @@ export function mlflowTraceBody(
   const firstUser = c.trace.find((e) => e.kind === "message" && e.role === "user");
   const lastAssistant = [...c.trace].reverse().find((e) => e.kind === "message" && e.role === "assistant");
   const maxT = c.trace.reduce((m, e) => Math.max(m, e.t), 0);
+  const tokenUsage = tokenUsageOf(c);
   return {
     trace: {
       trace_info: {
@@ -69,6 +98,16 @@ export function mlflowTraceBody(
           "everdict.harness": ctx.harness,
           "everdict.caseId": c.caseId,
           ...(c.sourceTraceId ? { "everdict.sourceTraceId": c.sourceTraceId } : {}),
+          // MLflow's own metadata vocabulary — what the UI's name/request/response columns and token counters
+          // read, so an exported trace looks native there instead of preview-only.
+          "mlflow.traceName": c.caseId,
+          ...(firstUser?.kind === "message"
+            ? { "mlflow.traceInputs": JSON.stringify(firstUser.text.slice(0, 2000)) }
+            : {}),
+          ...(lastAssistant?.kind === "message"
+            ? { "mlflow.traceOutputs": JSON.stringify(lastAssistant.text.slice(0, 2000)) }
+            : {}),
+          ...(tokenUsage ? { "mlflow.trace.tokenUsage": JSON.stringify(tokenUsage) } : {}),
         },
         tags: {},
       },
@@ -93,6 +132,13 @@ function otlpAttrs(
   return out;
 }
 
+// The ROOT span id of the OTLP payload this sink generates for a trace — DETERMINISTIC (derived from the trace
+// id), so the assessment body can span_id-scope itself to the uploaded root span without threading the generated
+// id around. Shared by mlflowOtlpSpans (writes it) and export (references it after a confirmed upload).
+export function mlflowRootSpanId(traceIdHex: string): string {
+  return traceIdHex.slice(0, 16);
+}
+
 // One case → an OTLP/JSON ExportTraceServiceRequest (pure). Attributes are emitted in the OTel GenAI conventions
 // (gen_ai.*/tool.*/message.content) that our spansToTraceEvents reads — reading them back via pull round-trips to the same TraceEvent.
 export function mlflowOtlpSpans(
@@ -105,7 +151,7 @@ export function mlflowOtlpSpans(
   const maxT = c.trace.reduce((m, e) => Math.max(m, e.t), 0);
   const baseNs = (ms: number): string => String(BigInt(Date.parse(nowIso) - maxT + ms) * 1_000_000n);
   const spanId = (): string => newId().replace(/-/g, "").slice(0, 16);
-  const rootId = spanId();
+  const rootId = mlflowRootSpanId(traceIdHex); // deterministic — assessments reference it as their span scope
   const spans: Array<Record<string, unknown>> = [
     {
       traceId: traceIdHex,
@@ -212,6 +258,8 @@ export class MlflowTraceSink implements TraceSink {
     for (const c of cases) {
       try {
         let traceId = c.externalId;
+        let warning: string | undefined; // degraded-but-exported (span upload failed — never a case failure)
+        let rootSpanId: string | undefined; // set only when the OTLP spans actually uploaded (assessment span scope)
         if (!traceId) {
           // create mode — a trace can't be created without the experiment coordinate (project) (an honest case failure).
           const project = this.opts.project;
@@ -236,11 +284,22 @@ export class MlflowTraceSink implements TraceSink {
           }
           // Span upload (OTLP/JSON, server ≥3.12) — best-effort: on older (protobuf-only) / unsupported servers, degrade to
           // a trace with only the spans missing (trace_info+assessments stay valid, so it doesn't make the case fail).
-          await f(`${this.base}/v1/traces`, {
-            method: "POST",
-            headers: { ...this.headers(), "x-mlflow-experiment-id": project },
-            body: JSON.stringify(mlflowOtlpSpans(ctx, c, hex, this.nowIso(), this.newId)),
-          }).catch(() => undefined);
+          // The degradation is RECORDED as a per-case warning — a silently swallowed non-2xx read as a full export.
+          try {
+            const spanRes = await f(`${this.base}/v1/traces`, {
+              method: "POST",
+              headers: { ...this.headers(), "x-mlflow-experiment-id": project },
+              body: JSON.stringify(mlflowOtlpSpans(ctx, c, hex, this.nowIso(), this.newId)),
+            });
+            if (spanRes.ok) {
+              rootSpanId = mlflowRootSpanId(hex); // spans are live — assessments may scope to the root span
+            } else {
+              const text = await spanRes.text().catch(() => "");
+              warning = `trace spans upload failed: ${spanRes.status}${text ? ` ${text.slice(0, 200)}` : ""}`;
+            }
+          } catch (err) {
+            warning = `trace spans upload failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
         }
         // Attach scores — one call per assessment. Isolate the case as failed on the first failure (other cases continue).
         let scoreError: string | undefined;
@@ -248,7 +307,7 @@ export class MlflowTraceSink implements TraceSink {
           const res = await f(`${this.base}/api/3.0/mlflow/traces/${encodeURIComponent(traceId)}/assessments`, {
             method: "POST",
             headers: this.headers(),
-            body: JSON.stringify(mlflowAssessmentBody(s, `everdict:${ctx.scorecardId}`)),
+            body: JSON.stringify(mlflowAssessmentBody(s, `everdict:${ctx.scorecardId}`, rootSpanId)),
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");
@@ -262,6 +321,7 @@ export class MlflowTraceSink implements TraceSink {
           externalId: traceId,
           ...(url ? { url } : {}),
           ...(scoreError ? { error: scoreError } : {}),
+          ...(warning ? { warning } : {}),
         });
       } catch (err) {
         // A connection-level failure — likely the same cause for all cases, so escalate to a wholesale failure.

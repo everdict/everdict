@@ -34,6 +34,9 @@ export function registerTraceSourceRoutes(app: FastifyInstance, deps: ServerDeps
         endpoint: z.string().url(),
         authSecretName: z.string().min(1).optional(),
         correlate: z.enum(["id", "tag"]).optional(),
+        // The controlled correlation tag a correlate:'tag' search matches (otel's Jaeger tag key / mlflow's
+        // session tag) — the service refuses it outside tag mode or on a kind that cannot search by it.
+        correlateTag: z.string().min(1).optional(),
         service: z.string().min(1).optional(),
         project: z.string().min(1).optional(),
         webUrl: z.string().url().optional(),

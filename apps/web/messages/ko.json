@@ -1369,6 +1369,8 @@
     "correlateTag": "Tag (everdict.run_id)",
     "correlateLabel": "상관 방식 선택",
     "correlateInfoTip": "pull 로 가져온 trace 를 Everdict 실행에 매칭하는 방식이에요. id = Everdict run id 가 곧 trace id (Everdict 가 실행을 제어할 때 최적). tag = 배포된 에이전트가 자기 trace 에 심은 everdict.run_id 태그를 검색.",
+    "correlateTagField": "상관관계 태그 키",
+    "correlateTagFieldInfoTip": "tag 모드 검색이 매칭할 통제 태그입니다 — otel: Jaeger 태그 키(기본 everdict.run_id), mlflow: 세션 태그(예: mlflow.trace.session). 배포된 에이전트가 기본 run id 태그 대신 직접 통제하는 좌표로 트레이스를 표시할 때 지정하세요.",
     "service": "서비스 (선택)",
     "required": "필수",
     "webUrlBase": "UI 링크 베이스 (선택)",

@@ -555,6 +555,7 @@ export class ScorecardBatchService {
       secretMap?: HarnessSecretMaps;
       caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
+      runtime?: string; // the batch's runtime selector — the judge co-locate placement (downstream report §6)
       speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
       memoryBoostMb?: Record<string, number>; // OOM escalation of a Temporal-owned retry (origin.memoryBoostMb)
       oomAutoBoost?: boolean; // in-batch OOM auto-boost (orchestration.oomAutoBoost)
@@ -682,6 +683,10 @@ export class ScorecardBatchService {
       ...(secretMap ? { secretMap } : {}),
       caseIndex,
       targets,
+      // The batch's runtime SELECTOR, kept for the judge co-locate placement — the durable driver used to
+      // pass undefined here, so a co-located code/harness judge fell to the topology backend and skipped on
+      // a registry miss instead of pinning to where the case actually ran (downstream report §6).
+      ...(rec.runtime ? { runtime: rec.runtime } : {}),
       ...(rec.origin?.memoryBoostMb ? { memoryBoostMb: rec.origin.memoryBoostMb } : {}),
       ...(rec.orchestration?.oomAutoBoost ? { oomAutoBoost: true } : {}),
       ...(orch.traceSink ? { traceSink: orch.traceSink } : {}),
@@ -1065,7 +1070,10 @@ export class ScorecardBatchService {
             ctx.dataset,
             [result],
             ctx.judges,
-            undefined,
+            // The runtime the case actually ran on (spillover-aware), else the batch's selector — the judge
+            // co-locates with the artifacts it grades. `undefined` sat in this slot, so a co-located
+            // code/harness judge fell to the topology backend and skipped on a registry miss.
+            ranOn ?? ctx.runtime,
             ctx.owner,
             () => child?.id,
             ctx.sealedJudges,
@@ -1214,6 +1222,8 @@ export class ScorecardBatchService {
               scorecardId: id,
               dataset: `${rec.dataset.id}@${rec.dataset.version}`,
               harness: scorecard.harness,
+              // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
+              judgeModels: await this.scoring.collectJudgeModelMap(ctx.tenant, ctx.judges).catch(() => ({})),
               ...(ctx.traceSink ? { sinkOverride: ctx.traceSink } : {}),
             },
             results,
@@ -2642,6 +2652,9 @@ export class ScorecardBatchService {
         scorecardId: id,
         dataset: `${dataset.id}@${dataset.version}`,
         harness: `${harnessId}@${harnessVersion}`,
+        // Judge attribution for the platform-side scores (judge id → declared model). Best-effort by contract:
+        // attribution must never fail an export, so a resolution error degrades to the batch-identity fallback.
+        judgeModels: await this.scoring.collectJudgeModelMap(tenant, judges).catch(() => ({})),
         ...(opts.sinkOverride ? { sinkOverride: opts.sinkOverride } : {}),
       };
       const exportStream = this.deps.exportStreamFor

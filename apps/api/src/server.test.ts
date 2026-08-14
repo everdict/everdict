@@ -767,6 +767,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
         endpoint: "http://mlflow.corp.io:5000",
         authSecretName: "MLFLOW_AUTH",
         correlate: "tag",
+        correlateTag: "mlflow.trace.session", // the controlled tag the wire must carry end to end (report 2.1)
         project: "7",
         webUrl: "http://mlflow.corp.io:5000/ui",
       },
@@ -775,6 +776,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     expect(put.json().config).toMatchObject({
       name: "dev-mlflow",
       correlate: "tag",
+      correlateTag: "mlflow.trace.session",
       project: "7",
       webUrl: "http://mlflow.corp.io:5000/ui",
     });

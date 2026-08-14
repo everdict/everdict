@@ -178,9 +178,17 @@ export interface ScorecardServiceDeps {
   // Trace-sink export (when configured) — send scored results (trace+scores) to the workspace observability platform (TraceSinkService).
   // The returned outcome is recorded in record.export; a failure is isolated from the scorecard result (surfaced via outcome.status only). docs/architecture/trace-sink.md
   // attach: the pull-ingest (source.kind, caseId→external runId) — if source=sink platform, attach scores to the existing trace instead of duplicating.
+  // ctx.judgeModels (judge id → declared model label) attributes each judge:<id> score to the model that judged it
+  // on the platform side — best-effort, never a reason for an export to fail.
   exportResults?: (
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
+    ctx: {
+      scorecardId: string;
+      dataset: string;
+      harness: string;
+      sinkOverride?: string;
+      judgeModels?: Record<string, string>;
+    },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ) => Promise<ScorecardExport | undefined>;
@@ -188,7 +196,13 @@ export interface ScorecardServiceDeps {
   // If unset, a live batch falls back to exportResults (batched, after the run) (no regression). ingest always uses exportResults (batched).
   exportStreamFor?: (
     tenant: string,
-    ctx: { scorecardId: string; dataset: string; harness: string; sinkOverride?: string },
+    ctx: {
+      scorecardId: string;
+      dataset: string;
+      harness: string;
+      sinkOverride?: string;
+      judgeModels?: Record<string, string>;
+    },
   ) => Promise<CaseExportStream | undefined>;
   artifacts?: ArtifactStore; // when set, offload os-use screenshots to object storage (record keeps only the URL)
   // When set, fan out a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).

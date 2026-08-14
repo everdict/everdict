@@ -9,6 +9,12 @@ export interface TraceSinkScore {
   name: string;
   value: number;
   pass?: boolean;
+  // Categorical outcome (MeasuredScore.label) — the human-facing result ("gold" / "timeout"). When present the
+  // platform-side score shows the label, with `value` kept as the numeric ordering key.
+  label?: string;
+  // WHO judged: the judging model's label for a judge:<id> metric, else the batch identity (`everdict:<scorecardId>`).
+  // Never a fabricated model — a harness judge with no stated model carries the batch identity too.
+  source?: string;
   comment?: string; // Score.detail (when a string) — passed as rationale/explanation
 }
 
@@ -29,6 +35,10 @@ export interface TraceSinkContext {
   scorecardId: string;
   dataset: string; // "id@version"
   harness: string; // "id@version"
+  // Judge attribution: judge id → the model label that judged (a model judge's binding / a code judge's declared
+  // model). A judge absent from the map (harness judge, unresolvable spec) exports under the batch identity —
+  // the map states only what was actually declared, never an invented model.
+  judgeModels?: Record<string, string>;
 }
 
 export interface TraceSinkCaseResult {
@@ -36,6 +46,9 @@ export interface TraceSinkCaseResult {
   externalId?: string; // the platform trace/run id that was created or attached to
   url?: string; // case-trace deep link
   error?: string; // per-case failure (isolated — other cases keep exporting)
+  // Degraded-but-exported: the trace/scores landed, a best-effort extra (e.g. MLflow OTLP span upload) did not.
+  // A warning never counts the case as failed — the status rollup reads only `error`.
+  warning?: string;
 }
 
 export interface TraceSinkResult {

@@ -10,6 +10,10 @@ export const TraceSourceConfigViewSchema = z.object({
   correlate: z
     .enum(["id", "tag"])
     .describe("id = the everdict runId IS the trace id | tag = search the everdict.run_id the deployed agent tagged"),
+  correlateTag: z
+    .string()
+    .optional()
+    .describe("the controlled tag a correlate:'tag' search matches (otel Jaeger tag key / mlflow session tag)"),
   service: z.string().optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
   project: z
     .string()

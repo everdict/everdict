@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildTraceSink } from "./build-sink.js";
 import { LangfuseTraceSink, chunkLangfuseEvents, langfuseBatch } from "./langfuse-sink.js";
 import { LangsmithTraceSink } from "./langsmith-sink.js";
-import { MlflowTraceSink, mlflowAssessmentBody } from "./mlflow-sink.js";
+import { MlflowTraceSink, mlflowAssessmentBody, mlflowRootSpanId } from "./mlflow-sink.js";
 import { PhoenixTraceSink, phoenixAnnotation, phoenixSpans } from "./phoenix-sink.js";
 
 const CTX: TraceSinkContext = { scorecardId: "sc-1", dataset: "d@1.0.0", harness: "h@1" };
@@ -96,7 +96,7 @@ describe("MlflowTraceSink", () => {
     expect(out.cases[0]?.externalId).toBe("tr-orig");
   });
 
-  it("the case still succeeds even if span upload (OTLP) fails — best-effort (older-server degrade)", async () => {
+  it("the case still succeeds even if span upload (OTLP) fails — best-effort (older-server degrade), RECORDED as a warning", async () => {
     const ff = fakeFetch([
       new Response("{}", { status: 200 }), // trace creation
       new Response("unsupported", { status: 415 }), // span upload fails (protobuf-only server)
@@ -105,8 +105,67 @@ describe("MlflowTraceSink", () => {
     ]);
     const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: ff.impl });
     const out = await sink.export(CTX, [CASE]);
+    // The case counts as EXPORTED (trace_info + assessments landed) — the degradation is a warning, never an error.
     expect(out.cases[0]?.error).toBeUndefined();
     expect(out.cases[0]?.externalId).toMatch(/^tr-/);
+    expect(out.cases[0]?.warning).toContain("trace spans upload failed: 415");
+    // Without live spans the assessments must NOT claim a span scope — the referenced root span never uploaded.
+    expect((ff.body(2).assessment as Record<string, unknown>).span_id).toBeUndefined();
+  });
+
+  it("a span-upload connection failure (fetch throw) degrades to a warning too — never a wholesale sink failure", async () => {
+    let call = 0;
+    const impl = (async () => {
+      call++;
+      if (call === 2) throw new Error("ECONNRESET mid-upload");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: impl });
+    const out = await sink.export(CTX, [CASE]);
+    expect(out.cases[0]?.error).toBeUndefined();
+    expect(out.cases[0]?.warning).toContain("trace spans upload failed: ECONNRESET mid-upload");
+  });
+
+  it("writes MLflow's own trace metadata (name/inputs/outputs/tokenUsage) so the exported trace reads native in the UI", async () => {
+    const ff = fakeFetch();
+    const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: ff.impl, newId: seq("abab") });
+    await sink.export(CTX, [CASE]);
+    const info = (ff.body(0).trace as { trace_info: Record<string, unknown> }).trace_info;
+    const meta = info.trace_metadata as Record<string, string>;
+    expect(meta["mlflow.traceName"]).toBe("c1");
+    expect(JSON.parse(meta["mlflow.traceInputs"] ?? "null")).toBe("task instruction");
+    expect(JSON.parse(meta["mlflow.traceOutputs"] ?? "null")).toBe("complete");
+    expect(JSON.parse(meta["mlflow.trace.tokenUsage"] ?? "null")).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+      total_tokens: 150,
+    });
+  });
+
+  it("omits traceInputs/traceOutputs/tokenUsage when the trace carries no message/cost to state (never an empty claim)", async () => {
+    const ff = fakeFetch();
+    const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: ff.impl });
+    await sink.export(CTX, [
+      { caseId: "c9", trace: [{ t: 0, kind: "tool_call", id: "t", name: "x", args: {} }], scores: [] },
+    ]);
+    const info = (ff.body(0).trace as { trace_info: Record<string, unknown> }).trace_info;
+    const meta = info.trace_metadata as Record<string, string>;
+    expect(meta["mlflow.traceName"]).toBe("c9");
+    expect(meta["mlflow.traceInputs"]).toBeUndefined();
+    expect(meta["mlflow.traceOutputs"]).toBeUndefined();
+    expect(meta["mlflow.trace.tokenUsage"]).toBeUndefined();
+  });
+
+  it("assessments span_id-scope to the OTLP payload's deterministic root span once the spans actually uploaded", async () => {
+    const ff = fakeFetch();
+    const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: ff.impl, newId: seq("cdcd") });
+    const out = await sink.export(CTX, [CASE]);
+    const hex = String(out.cases[0]?.externalId).slice(3); // tr-<hex>
+    // The uploaded root span carries the SAME deterministic id the assessments reference.
+    const rs = ff.body(1).resourceSpans as Array<{ scopeSpans: Array<{ spans: Array<Record<string, unknown>> }> }>;
+    expect(rs[0]?.scopeSpans[0]?.spans[0]?.spanId).toBe(mlflowRootSpanId(hex));
+    expect((ff.body(2).assessment as Record<string, unknown>).span_id).toBe(mlflowRootSpanId(hex));
+    expect((ff.body(3).assessment as Record<string, unknown>).span_id).toBe(mlflowRootSpanId(hex));
   });
 
   it("in create mode with project (experiment_id) unset → an honest per-case failure (no silent skip)", async () => {
@@ -351,6 +410,59 @@ describe("buildTraceSink · pure builder", () => {
     expect(String(spans[0]?.start_time)).toBe("2026-07-06T00:00:00.960Z"); // now - maxT (40ms)
     const ann = phoenixAnnotation("a".repeat(32), { name: "tests_pass", value: 0, pass: false });
     expect((ann.result as Record<string, unknown>).label).toBe("fail");
+  });
+
+  it("mlflowAssessmentBody: a score's own source (the judging model) wins over the batch-identity fallback", () => {
+    const judged = mlflowAssessmentBody({ name: "judge:q", value: 1, source: "claude-opus-4-8" }, "everdict:sc-1");
+    expect((judged.assessment as Record<string, unknown>).source).toEqual({
+      source_type: "LLM_JUDGE",
+      source_id: "claude-opus-4-8",
+    });
+    const grader = mlflowAssessmentBody({ name: "tests_pass", value: 1 }, "everdict:sc-1");
+    expect((grader.assessment as Record<string, unknown>).source).toEqual({
+      source_type: "CODE",
+      source_id: "everdict:sc-1",
+    });
+  });
+
+  it("mlflowAssessmentBody: a categorical score exports its label as the feedback value, numeric key demoted to metadata", () => {
+    const body = mlflowAssessmentBody({ name: "tier", value: 3, label: "gold" }, "everdict:sc-1");
+    const a = body.assessment as Record<string, unknown>;
+    expect(a.feedback).toEqual({ value: "gold" }); // the human-facing result
+    expect(a.metadata).toEqual({ value: "3" }); // the ordering key survives, but never as the shown score
+  });
+
+  it("phoenixAnnotation: a categorical score's own label wins over the derived pass/fail label", () => {
+    const ann = phoenixAnnotation("a".repeat(32), { name: "judge:tier", value: 2, pass: true, label: "silver" });
+    expect((ann.result as Record<string, unknown>).label).toBe("silver");
+  });
+
+  it("langfuse score-create: a categorical score ships CATEGORICAL with the label as the string value", async () => {
+    const { events } = langfuseBatch(
+      { scorecardId: "sc-1", dataset: "d@1", harness: "h@1" },
+      [{ caseId: "c1", trace: [], scores: [{ name: "tier", value: 2, label: "silver" }], externalId: "lf-1" }],
+      seq("eeee"),
+      () => "2026-07-06T00:00:00.000Z",
+    );
+    expect(events[0]?.body).toMatchObject({ name: "tier", value: "silver", dataType: "CATEGORICAL" });
+  });
+
+  it("langsmith feedback: a score's source (judging model / batch identity) rides feedback_source.metadata", async () => {
+    const ff = fakeFetch();
+    const sink = new LangsmithTraceSink({ endpoint: "https://ls", fetchImpl: ff.impl, newId: seq("ffff") });
+    await sink.export(CTX, [
+      {
+        ...CASE,
+        scores: [
+          { name: "tests_pass", value: 1, source: "everdict:sc-1" },
+          { name: "judge:quality", value: 0.8, source: "gpt-5.4" },
+        ],
+      },
+    ]);
+    const graderSource = ff.body(1).feedback_source as Record<string, unknown>;
+    expect(graderSource).toEqual({ type: "api", metadata: { source: "everdict:sc-1" } });
+    const judgeSource = ff.body(2).feedback_source as Record<string, unknown>;
+    expect(judgeSource).toEqual({ type: "model", metadata: { source: "gpt-5.4" } });
   });
 });
 

@@ -23,6 +23,48 @@ const JUDGE: JudgeSpec = {
 };
 
 describe("ScoringService — applyJudgesToCase", () => {
+  it("drains the judge's traceEvents transport slot onto the judged case's trace — and the stored score keeps none of it", async () => {
+    // Downstream report 1.1: the dispatched judge's only return channel is its scores, so its own execution
+    // rides Score.traceEvents. The judged case's trace is where that evidence LIVES; the persisted score
+    // stays a judgment, never an envelope. Re-timed to the trace's last instant so the latency grader
+    // (first/last t regardless of kind) measures the same execution before and after.
+    const judgeSpans = [
+      { t: 99, kind: "span" as const, name: "judge:quality:llm_call", attributes: { model: "m", usd: 0.01 } },
+      { t: 100, kind: "span" as const, name: "judge:quality:verdict", attributes: { text: "PASS" } },
+    ];
+    const service = new ScoringService({
+      judgeRunner: {
+        async run() {
+          return [{ graderId: "judge", metric: "judge:quality", value: 1, pass: true, traceEvents: judgeSpans }];
+        },
+      },
+    });
+    const result: CaseResult = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [
+        { t: 1, kind: "message", role: "user", text: "task" },
+        { t: 7, kind: "tool_call", id: "t1", name: "bash", args: {} },
+      ],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+    };
+    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
+    // The judgment's evidence is on the case's trace, re-timed to the last instant (7)…
+    const spans = result.trace.filter((e) => e.kind === "span");
+    expect(spans).toHaveLength(2);
+    for (const s of spans) expect(s.t).toBe(7);
+    expect(spans.map((s) => (s.kind === "span" ? s.name : ""))).toEqual([
+      "judge:quality:llm_call",
+      "judge:quality:verdict",
+    ]);
+    // …no llm_call was added (the judge's tokens must not bill the judged agent)…
+    expect(result.trace.filter((e) => e.kind === "llm_call")).toHaveLength(0);
+    // …and the STORED score carries no transport slot.
+    expect(result.scores).toHaveLength(1);
+    expect(result.scores[0]?.traceEvents).toBeUndefined();
+  });
+
   it("hands the judge the agent's trace WITHOUT the infra plane (placement noise must not crowd the judged window)", async () => {
     // The model judge serializes the trace verbatim into a char-capped prompt — a sealed service log tail
     // (kind infra) riding into it would push the agent's own steps out of the judged window.
@@ -98,6 +140,77 @@ describe("ScoringService — a SELECTED judge that cannot be resolved stays visi
     });
     // …and it carries no value at all: the dispatch placeholder cannot enter a mean or a passRate.
     expect(result.scores[0] !== undefined && "value" in result.scores[0]).toBe(false);
+  });
+});
+
+describe("ScoringService — judge model collection (leaderboard axis + export attribution)", () => {
+  const specs: Record<string, JudgeSpec> = {
+    quality: JUDGE, // model judge → gpt-5.4-mini
+    "code-judge": {
+      kind: "code",
+      id: "code-judge",
+      version: "1.0.0",
+      language: "python",
+      code: "print('[]')",
+      model: "claude-opus-4-8",
+      timeoutSec: 600,
+      tags: [],
+    } as unknown as JudgeSpec,
+    "code-no-model": {
+      kind: "code",
+      id: "code-no-model",
+      version: "1.0.0",
+      language: "node",
+      code: "console.log('[]')",
+      timeoutSec: 600,
+      tags: [],
+    } as unknown as JudgeSpec,
+    agentic: {
+      kind: "harness",
+      id: "agentic",
+      version: "1.0.0",
+      harness: { id: "reviewer", version: "latest" },
+      tags: [],
+    } as unknown as JudgeSpec,
+  };
+  const service = () =>
+    new ScoringService({
+      judges: {
+        get: async (_tenant: string, id: string) => {
+          const spec = specs[id];
+          if (!spec) throw new Error(`judge ${id} not found`);
+          return spec;
+        },
+      } as unknown as import("../ports/judge-registry.js").JudgeRegistry,
+      judgeRunner: {
+        async run() {
+          return [];
+        },
+      },
+    });
+  const sel = (id: string) => ({ id, version: "1.0.0" });
+
+  it("collectJudgeModels includes a CODE judge's declared model (the kind==='model' predicate wrongly excluded it)", async () => {
+    const models = await service().collectJudgeModels("acme", [sel("quality"), sel("code-judge")], undefined);
+    expect(models).toEqual(["claude-opus-4-8", "gpt-5.4-mini"]);
+  });
+
+  it("collectJudgeModelMap maps judge id → declared model; harness judges and model-less code judges are simply absent", async () => {
+    const map = await service().collectJudgeModelMap("acme", [
+      sel("quality"),
+      sel("code-judge"),
+      sel("code-no-model"), // a code judge with no model declares nothing — nothing is fabricated for it
+      sel("agentic"), // a harness judge states no model — absent, so the export falls back to the batch identity
+      sel("ghost"), // a missing judge is skipped (same tolerance as applyJudges)
+    ]);
+    expect(map).toEqual({ quality: "gpt-5.4-mini", "code-judge": "claude-opus-4-8" });
+  });
+
+  it("the two views cannot drift: every mapped model is also on the distinct model list", async () => {
+    const judges = [sel("quality"), sel("code-judge"), sel("agentic")];
+    const models = await service().collectJudgeModels("acme", judges, undefined);
+    const map = await service().collectJudgeModelMap("acme", judges);
+    for (const label of Object.values(map)) expect(models).toContain(label);
   });
 });
 

@@ -35,6 +35,7 @@ export async function upsertTraceSourceAction(input: {
   endpoint: string
   authSecretName?: string
   correlate?: 'id' | 'tag'
+  correlateTag?: string
   service?: string
   project?: string
   webUrl?: string

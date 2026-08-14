@@ -98,14 +98,16 @@ export function phoenixSpans(
 }
 
 // One score → a trace annotation (pure). judge:<id> → LLM, otherwise → CODE.
+// A categorical score's own label (the human-facing result) wins over the derived pass/fail label.
 export function phoenixAnnotation(traceId: string, score: TraceSinkScore): Record<string, unknown> {
+  const label = score.label ?? (score.pass !== undefined ? (score.pass ? "pass" : "fail") : undefined);
   return {
     name: score.name,
     annotator_kind: score.name.startsWith("judge:") ? "LLM" : "CODE",
     trace_id: traceId,
     result: {
       score: score.value,
-      ...(score.pass !== undefined ? { label: score.pass ? "pass" : "fail" } : {}),
+      ...(label !== undefined ? { label } : {}),
       ...(score.comment ? { explanation: score.comment } : {}),
     },
   };

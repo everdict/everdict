@@ -40,6 +40,11 @@ const docs = {
         endpoint: z.string().url().describe("Platform query API base URL"),
         authSecretName: z.string().min(1).optional().describe("SecretStore name of the auth-header value"),
         correlate: z.enum(["id", "tag"]).optional().describe("How a pulled trace is found (default id)"),
+        correlateTag: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("The controlled tag a correlate:'tag' search matches (tag mode, otel|mlflow only)"),
         service: z.string().min(1).optional().describe("otel/jaeger tag-search scope (the agent's service.name)"),
         project: z.string().min(1).optional().describe("mlflow experiment_id / phoenix|langfuse|langsmith project"),
         webUrl: z.string().url().optional().describe("export deep-link base when it differs from the endpoint"),

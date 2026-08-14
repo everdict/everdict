@@ -20,6 +20,62 @@ function fakeSettings(initial: WorkspaceSettings = {}): WorkspaceSettingsStore {
 describe("TraceSourceService", () => {
   const WS = "acme";
 
+  it("a FULLY-populated record arrives fully in the view — the record→input→store→view lane is transported, not transcribed", async () => {
+    // Downstream report 2.1: `correlateTag` reached the schema and the builder while four hand-lists in
+    // this service dropped it — no caller could ever set it. The input and the view are DERIVED from the
+    // record now; this pins the direction those lists never had a suite for: every settable record field,
+    // set, survives to the reader (a new record field fails this test until every boundary carries it).
+    const svc = new TraceSourceService(fakeSettings());
+    const full = {
+      name: "tagged-otel",
+      kind: "otel" as const,
+      endpoint: "http://jaeger:16686",
+      authSecretName: "jaeger-token",
+      correlate: "tag" as const,
+      correlateTag: "shop.session_id",
+      service: "shop-agent",
+      project: "obs",
+      webUrl: "https://jaeger.acme.dev",
+      artifactBaseUrl: "https://artifacts.acme.dev",
+    };
+    await svc.upsert(WS, full);
+    const { sources } = await svc.list(WS);
+    expect(sources).toEqual([full]); // nothing dropped — the view IS the record (no field in it is a secret value)
+  });
+
+  it("correlateTag outside tag mode, or on a kind that cannot search by it, is refused at register time", async () => {
+    // A declaration the platform cannot act on is refused, never silently ignored (downstream report 3).
+    const svc = new TraceSourceService(fakeSettings());
+    await expect(
+      svc.upsert(WS, {
+        name: "s1",
+        kind: "otel",
+        endpoint: "http://jaeger:16686",
+        correlate: "id",
+        correlateTag: "shop.session_id",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      svc.upsert(WS, {
+        name: "s2",
+        kind: "langfuse",
+        endpoint: "http://langfuse:3000",
+        correlate: "tag",
+        correlateTag: "shop.session_id",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // …and the pair the field exists for registers cleanly.
+    const view = await svc.upsert(WS, {
+      name: "s3",
+      kind: "mlflow",
+      endpoint: "http://mlflow:5000",
+      correlate: "tag",
+      correlateTag: "mlflow.trace.session",
+      project: "12",
+    });
+    expect(view.correlateTag).toBe("mlflow.trace.session");
+  });
+
   it("registers a source by name and lists it back without secret values", async () => {
     const svc = new TraceSourceService(fakeSettings());
     await svc.upsert(WS, {

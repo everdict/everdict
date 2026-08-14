@@ -298,8 +298,33 @@ export class ScoringService {
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
     for (const judge of specs) {
+      const scores = await runner.run(
+        judge.spec,
+        tenant,
+        ctx,
+        runPlacement,
+        submittedBy,
+        runId,
+        judge.pins,
+        publishWhen,
+      );
+      // ── THE TRANSPORT SLOT IS DRAINED HERE (downstream report 1.1) ─────────────────────────────────
+      //
+      // A dispatched judge's own execution rides back on Score.traceEvents; the judged case's trace is where
+      // that evidence LIVES, and the stored score must stay a judgment, not an envelope. Re-timed to the
+      // trace's last instant so the latency grader — which reads first/last `t` regardless of kind — measures
+      // the same execution before and after the judgment's evidence is attached. The events are `span` kind
+      // by construction (judgeExecutionSpans), so cost/steps stay the judged agent's own.
+      const anchor = result.trace.reduce((max, e) => Math.max(max, e.t), 0);
+      for (const score of scores) {
+        if (score.traceEvents !== undefined && score.traceEvents.length > 0)
+          result.trace.push(...score.traceEvents.map((e) => ({ ...e, t: anchor })));
+      }
       result.scores.push(
-        ...(await runner.run(judge.spec, tenant, ctx, runPlacement, submittedBy, runId, judge.pins, publishWhen)),
+        ...scores.map((score) => {
+          const { traceEvents: _drained, ...judgment } = score;
+          return judgment as typeof score;
+        }),
       );
     }
   }
@@ -400,9 +425,34 @@ export class ScoringService {
     await stream.settle();
   }
 
-  // The judge model(s) used in this scoring — distinct (sorted) of inline judge config.model + registered model-judge spec.model
-  // (a Model binding → its id/ref or raw label). For filtering/display on the leaderboard judge axis (fair comparison: same
-  // judge). Harness judges have no model, so excluded.
+  // ONE resolution for "which model does this judge selection declare" — both judge-model views (the distinct
+  // leaderboard axis and the per-judge export attribution map) read it, so the two cannot drift. Per spec kind:
+  // model → its binding (required); code → its optional binding (the model the code may call — the old
+  // `kind === "model"` predicate wrongly excluded it and the leaderboard judge axis lost every code judge's
+  // model); harness → nothing (the delegated agent's model is not stated on the spec — fabricating one would
+  // be false provenance). A missing judge is skipped (same as applyJudges).
+  private async judgeModelEntries(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<Array<{ id: string; label: string }>> {
+    if (!this.deps.judges) return [];
+    const entries: Array<{ id: string; label: string }> = [];
+    for (const sel of judges) {
+      try {
+        const spec = await this.deps.judges.get(tenant, sel.id, sel.version || "latest");
+        const label = spec.kind === "harness" ? undefined : modelBindingLabel(spec.model);
+        if (label) entries.push({ id: sel.id, label });
+      } catch {
+        // skip a missing judge (same as applyJudges)
+      }
+    }
+    return entries;
+  }
+
+  // The judge model(s) used in this scoring — distinct (sorted) of inline judge config.model + registered judge
+  // spec models (a Model binding → its id/ref or raw label; model AND code judges — see judgeModelEntries). For
+  // filtering/display on the leaderboard judge axis (fair comparison: same judge). Harness judges have no model,
+  // so excluded.
   async collectJudgeModels(
     tenant: string,
     judges: Array<{ id: string; version: string }>,
@@ -411,19 +461,21 @@ export class ScoringService {
     const models = new Set<string>();
     const inlineLabel = modelBindingLabel(inlineJudge?.model); // inline judge model is a binding → its id/ref or raw label
     if (inlineLabel) models.add(inlineLabel);
-    if (this.deps.judges) {
-      for (const sel of judges) {
-        try {
-          const spec = await this.deps.judges.get(tenant, sel.id, sel.version || "latest");
-          if (spec.kind === "model") {
-            const label = modelBindingLabel(spec.model);
-            if (label) models.add(label);
-          }
-        } catch {
-          // skip a missing judge (same as applyJudges)
-        }
-      }
-    }
+    for (const e of await this.judgeModelEntries(tenant, judges)) models.add(e.label);
     return [...models].sort();
+  }
+
+  // Judge id → declared model label, for per-score export attribution (trace-sink `source`). A judge with no
+  // declared model (harness judge) is simply absent — the export falls back to the batch identity rather than
+  // inventing a model. Same resolution as collectJudgeModels (judgeModelEntries), so the two views agree.
+  // (The inline judge config is deliberately not here: its overall metric is the bare "judge" — no judge:<id>
+  // key exists for it, so the map could not carry it honestly.)
+  async collectJudgeModelMap(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<Record<string, string>> {
+    const map: Record<string, string> = {};
+    for (const e of await this.judgeModelEntries(tenant, judges)) map[e.id] = e.label;
+    return map;
   }
 }

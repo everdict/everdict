@@ -62,13 +62,18 @@ export function langsmithRunBody(
 }
 
 // One score → a feedback body (pure). judge:<id> → model (LLM judge), otherwise classified as the api source.
+// A score's `source` (the judging model's label / the batch identity) rides feedback_source.metadata — LangSmith's
+// free-form source slot — so a judge verdict is attributable to the model that rendered it.
 export function langsmithFeedbackBody(runId: string, score: TraceSinkScore): Record<string, unknown> {
   return {
     run_id: runId,
     key: score.name,
     score: score.value,
     ...(score.comment ? { comment: score.comment } : {}),
-    feedback_source: { type: score.name.startsWith("judge:") ? "model" : "api" },
+    feedback_source: {
+      type: score.name.startsWith("judge:") ? "model" : "api",
+      ...(score.source ? { metadata: { source: score.source } } : {}),
+    },
   };
 }
 

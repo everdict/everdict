@@ -82,6 +82,21 @@ describe("ScoreUnionSchema — illegal states are unrepresentable", () => {
 });
 
 describe("normalizeScore — the ONE reader-side normalizer", () => {
+  it("carries the judge's traceEvents transport slot through normalization — a field the normalizer forgets is a field every read drops", () => {
+    const spans = [{ t: 3, kind: "span" as const, name: "judge:q:llm_call", attributes: { model: "m" } }];
+    const measured = normalizeScore({ graderId: "g", metric: "judge:q", value: 1, pass: true, traceEvents: spans });
+    expect(measured.traceEvents).toEqual(spans);
+    const unmeasured = normalizeScore({
+      graderId: "g",
+      metric: "judge:q",
+      status: "unmeasured",
+      reason: "grader_error",
+      retryable: true,
+      traceEvents: spans, // a failed judge still called — the call is what makes the row diagnosable
+    });
+    expect(unmeasured.traceEvents).toEqual(spans);
+  });
+
   it("stamps a plain legacy row as measured (it never was anything else)", () => {
     const out = normalizeScore({ graderId: "g", metric: "m", value: 0.5, pass: true });
     expect(out).toEqual({ graderId: "g", metric: "m", value: 0.5, pass: true, status: "measured" });
