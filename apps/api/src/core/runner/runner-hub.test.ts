@@ -660,6 +660,34 @@ describe("RunnerHub.authorizeAttempt — which physical attempt a report belongs
     await expect(d).resolves.toMatchObject({ result, ranBy: "desktop" });
   });
 
+  it("a REQUEUED job refuses its previous holder even before anyone re-leases it (store parity)", async () => {
+    // The window between requeue and re-lease: the epoch only bumps on the NEXT lease, so without the
+    // leased-state check the old holder's token still matched — its result was accepted and its heartbeat
+    // RESURRECTED the lease without an epoch bump, un-happening the requeue. The SQL twin always refused
+    // this (status='leased' required); the in-memory hub must answer the same wire the same way.
+    let n = 0;
+    let clock = 1_000;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}`, leaseTtlMs: 50, now: () => clock });
+    const d = hub.enqueue(poolKeyFor("u-alice"), imageJob("c-img")); // needs docker
+    d.catch(() => {});
+    const first = hub.lease(runnerA, ["git", "docker"]);
+    if (!first) throw new Error("expected the first lease");
+    clock += 1_000; // past the TTL…
+    // …and a NON-docker runner polls: requeueExpired frees the job, but this runner cannot take it.
+    expect(hub.lease(runnerB, ["git"])).toBeNull();
+    // The old holder is no longer current — result, failure, heartbeat and evidence all refuse.
+    expect(hub.complete(runnerA, first.attempt, result)).toBe(false);
+    expect(hub.fail(runnerA, first.attempt, "late")).toBe(false);
+    expect(hub.heartbeat(runnerA, first.attempt).extended).toBe(false);
+    expect(await hub.authorizeAttempt(runnerA, first.attempt)).toBeUndefined();
+    // A re-lease mints the next epoch and works end to end.
+    const second = hub.lease(runnerA, ["git", "docker"]);
+    if (!second) throw new Error("expected the re-lease");
+    expect(second.attempt.leaseEpoch).toBe(first.attempt.leaseEpoch + 1);
+    expect(hub.complete(runnerA, second.attempt, result)).toBe(true);
+    await expect(d).resolves.toMatchObject({ result });
+  });
+
   it("hands back the run id from the LEASED JOB — the caller's own runId is never taken on trust", async () => {
     let n = 0;
     const hub = new RunnerHub({ newJobId: () => `j-${n++}` });

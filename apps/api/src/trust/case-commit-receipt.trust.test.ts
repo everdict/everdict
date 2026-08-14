@@ -353,6 +353,56 @@ describeTrust("TRUST-171 — a failure is committed, not merely recorded", () =>
     const loser = children.find((c) => c.id !== committed[0]?.childRunId);
     expect(loser?.status).toBe("failed"); // the died-first attempt is terminal, not a zombie
   }, 20_000);
+
+  it("a failure whose fenced settle was REFUSED claims no receipt — the batch refuses instead of poisoning the case", async () => {
+    // The displaced-driver shape: the fail-settle bounces off the parent-driver fence, so this exit
+    // terminalized NOTHING. Claiming the receipt anyway (the receipt store has no epoch fence) would
+    // permanently name a child that never carried the result — the commitCase poison pill, reopened through
+    // the failure path. The judged exit must report the case unwritten and the batch must refuse.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", { ...dataset, id: "fenced" });
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const backing = new InMemoryRunStore();
+    // Refuse exactly the FAIL-settle (the displaced driver's write); everything else lands normally.
+    const runStore = new Proxy(backing, {
+      get(target, prop, receiver) {
+        if (prop !== "update") return Reflect.get(target, prop, receiver);
+        return async (id: string, patch: Record<string, unknown>, events: unknown, opts: unknown) => {
+          if (patch.status === "failed") return undefined; // the fence said no
+          return backing.update(id, patch as never, events as never, opts as never);
+        };
+      },
+    });
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          if (job.evalCase.id === "c-boom") throw new Error("sandbox evaporated");
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "fenced", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const settled = await store.get(record.id);
+    expect(settled?.status).toBe("failed");
+    expect(settled?.error?.message).toContain("could not be written to the ledger");
+    // No receipt was claimed for the refused case — the successor can still commit it.
+    const committed = await receipts.list(record.id);
+    expect(committed.some((r) => r.caseId === "c-boom")).toBe(false);
+  }, 20_000);
 });
 
 // ── THE LEDGER KEEPS THE TRIAL AXIS (review 40 P0) ───────────────────────────────────────────────────

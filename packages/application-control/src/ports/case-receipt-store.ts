@@ -55,7 +55,9 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
   private readonly commits = new Map<string, Promise<unknown>>();
 
   private static key(r: Pick<CaseCommitReceipt, "scorecardId" | "caseId" | "trial">): string {
-    return `${r.scorecardId} ${r.caseId} ${r.trial}`;
+    // NUL-joined (spelled as an escape — a literal byte is invisible and edit-hostile): ids are user-adjacent
+    // strings, and a printable separator lets `("sc a", "b")` alias `("sc", "a b")` across the tuple.
+    return `${r.scorecardId}\u0000${r.caseId}\u0000${r.trial}`;
   }
 
   async commit(receipt: CaseCommitReceipt): Promise<CaseCommitOutcome> {

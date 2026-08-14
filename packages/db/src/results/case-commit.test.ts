@@ -111,6 +111,21 @@ describe("InMemoryCaseReceiptStore.commitCase — the claim and the settle are o
   });
 });
 
+describe("InMemoryCaseReceiptStore — the tuple key cannot alias", () => {
+  it("ids containing the printable separator do not collapse into one claim", async () => {
+    // `("sc a", "b")` vs `("sc", "a b")` — with a space-joined key these spell the SAME string, so the
+    // second claim would be told "already committed" about a case in a DIFFERENT scorecard. NUL-joined
+    // keys keep the tuple a tuple.
+    const receipts = new InMemoryCaseReceiptStore();
+    const a = await receipts.commit({ ...receipt("child-A"), scorecardId: "sc a", caseId: "b" });
+    const b = await receipts.commit({ ...receipt("child-B"), scorecardId: "sc", caseId: "a b" });
+    expect(a.kind).toBe("committed");
+    expect(b.kind).toBe("committed");
+    expect(await receipts.list("sc a")).toHaveLength(1);
+    expect(await receipts.list("sc")).toHaveLength(1);
+  });
+});
+
 // The Pg twin over a fake SqlClient (the house testing idiom — assert the transactional shape, not a live DB;
 // the live race is TRUST-169's, and stays a two-OS-process scenario).
 describe("PgCaseReceiptStore.commitCase — BEGIN … claim … settle … COMMIT/ROLLBACK", () => {

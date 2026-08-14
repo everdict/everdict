@@ -32,9 +32,9 @@ import {
   type ScorecardOutcomeExtras,
   billingCharges,
   caseOutcome,
+  caseResultDigest,
   caseVerdict,
   classifyFailure,
-  caseResultDigest,
   completeJudgeCoverage,
   contentDigest,
   modelBindingLabel,
@@ -1435,7 +1435,10 @@ export class ScorecardBatchService {
       // restart mid-retry must not lose it. Seeds (passes + recovered) are MATERIALIZED as succeeded child runs
       // first, so the idempotent planBatch naturally skips them and finalize aggregates them; the workflow then
       // drives only the re-dispatch remainder. Start failure degrades to the in-process loop (same as submit).
-      if (this.deps.temporalBatches && this.deps.runStore) {
+      // …and a TRIALLED source degrades to the in-process loop, exactly like submit (review 40 follow-up):
+      // the Temporal finalize's missing-case gate iterates case ids (the workflow drives per-case, no trial
+      // fan-out), so a workflow-owned trialled retry would under-enforce the very accounting it exists for.
+      if (this.deps.temporalBatches && this.deps.runStore && !ScorecardBatch.from(src).isMultiTrial()) {
         // Seeds carry the envelope stamp for lineage consistency but never settle against it — their cost
         // was already settled by the batch that originally ran them. Resolved once, not per seed.
         const seededEnvelope = await this.childEnvelope(record);
@@ -1642,7 +1645,13 @@ export class ScorecardBatchService {
     where: FailureFinalization,
   ): Promise<"committed" | "lost" | "unwritten"> {
     const receipts = this.deps.caseReceipts;
-    if (!receipts || !where.childId || !this.deps.runStore) return "committed"; // no ledger to account on
+    if (!receipts || !this.deps.runStore) return "committed"; // no ledger to account on
+    // A ledger IS wired and this exit terminalized nothing (the fenced fail-settle was refused — a displaced
+    // driver — or the child row never existed). The case is counted in memory and cannot be accounted on the
+    // ledger, and claiming a receipt for a child that carries nothing would poison it permanently. `unwritten`
+    // is the honest answer: the batch refuses to summarize (recoverable), and a displaced driver's own batch
+    // settle is refused by its epoch fence anyway.
+    if (!where.childId) return "unwritten";
     const outcome = await receipts
       .commit({
         scorecardId,
@@ -2377,6 +2386,9 @@ export class ScorecardBatchService {
         });
         return result;
       } catch (err) {
+        // The child this exit actually TERMINALIZED (fenced fail-settle landed) — absent when the fence
+        // refused or the row never existed, and only a terminalized child is claimable at the judged exit.
+        let failedChildId: string | undefined;
         if (runStore && child) {
           const error =
             err instanceof AppError
@@ -2387,7 +2399,14 @@ export class ScorecardBatchService {
           // lets the parent rebuild a counted failure from the ledger, and what the failure RECEIPT's digest
           // will name (committed at the judged exit, where the failure is known to be final — a retryable
           // throw is re-dispatched, and a non-final attempt must not claim the case).
-          await this.settleChild(
+          // …and the settle's ANSWER decides whether this exit terminalized anything (review 40 follow-up
+          // P0). A refused fence (a displaced driver, a child that settled elsewhere, a create that threw
+          // before the row existed) means NOTHING here went terminal — recording the childId regardless let
+          // the judged exit claim the case's RECEIPT for a child that never carried the result, through the
+          // one settlement surface with no epoch fence. That is the commitCase poison pill, reopened by the
+          // failure path: claim acquired, canonical artifact never recorded, the successor's re-drive told
+          // "already committed" forever.
+          const settled = await this.settleChild(
             child.id,
             (cur) => Run.from(cur).fail(error, this.now(), failedCaseResult(job, err)).patch,
             {
@@ -2395,6 +2414,7 @@ export class ScorecardBatchService {
               epoch,
             },
           );
+          if (settled !== undefined) failedChildId = child.id;
           // …and this case is FINALIZED by this exit. The dispatch registered a pending entry; leaving it
           // would have `settleJudgedChild` meet an already-terminal child later and report `lost` —
           // "somebody else took this case" about a case this very loop just settled, which then aborted the
@@ -2408,7 +2428,7 @@ export class ScorecardBatchService {
         pendingChildSettle.delete(finalizedKey);
         const failedGeneration = attemptGeneration.get(executionIdOf(job, id));
         finalizedByFailure.set(finalizedKey, {
-          ...(child ? { childId: child.id } : {}),
+          ...(failedChildId !== undefined ? { childId: failedChildId } : {}),
           executionId: executionIdOf(job, id),
           ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
         });

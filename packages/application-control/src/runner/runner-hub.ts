@@ -413,9 +413,7 @@ export class RunnerHub {
   async authorizeAttempt(key: SelfHostedKey, token: AttemptToken): Promise<AttemptAuthority | undefined> {
     const loc = this.locate(key, token.jobId);
     const entry = loc?.entry;
-    if (!entry || entry.leaseEpoch === 0) return undefined;
-    if (entry.leaseEpoch !== token.leaseEpoch) return undefined; // a superseded attempt — its lease was taken
-    if (entry.leasedBy !== key.runnerId) return undefined; // the token belongs to another runner's lease
+    if (!entry || !this.holdsCurrentLease(entry, key, token)) return undefined;
     return {
       ...(entry.job.runId ? { runId: entry.job.runId } : {}),
       ...(entry.job.tenant ? { tenant: entry.job.tenant } : {}),
@@ -460,6 +458,10 @@ export class RunnerHub {
   // just the evidence that explains it.
   private holdsCurrentLease(entry: PendingEntry, key: SelfHostedKey, token: AttemptToken): boolean {
     if (entry.leaseEpoch === 0) return false; // never leased — no report can ride an unleased job
+    // A REQUEUED job has no current holder (store parity: the SQL twin requires status='leased'). The old
+    // holder's token must not act on it — least of all a heartbeat, which would resurrect the lease without
+    // an epoch bump and un-happen the requeue.
+    if (entry.leasedAt === undefined) return false;
     if (entry.leaseEpoch !== token.leaseEpoch) return false; // a superseded attempt — its lease was taken
     return entry.leasedBy === key.runnerId; // the token belongs to another runner's lease
   }
