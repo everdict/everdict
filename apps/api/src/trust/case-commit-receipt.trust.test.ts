@@ -1,7 +1,7 @@
 import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
-import { caseResultDigest } from "@everdict/domain";
+import { caseResultDigest, contentDigest } from "@everdict/domain";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -449,6 +449,65 @@ describeTrust("TRUST-171 — the case-completed fact is persisted with the child
     expect(completed).toHaveLength(1);
     expect(completed[0]?.subject).toEqual({ type: "scorecard", id: record.id });
     expect(completed[0]?.payload).toMatchObject({ caseId: "c1" });
+  }, 20_000);
+});
+
+// ── WHAT THE PARENT READ IS WHAT THE PARENT COMMITTED ON (review 40, the Release pattern) ────────────
+describeTrust("TRUST-175 — the settle freezes its read-set and conditions on it", () => {
+  it("a settled batch records the exact receipts it counted, and the digest vector matches the ledger", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "two-dc",
+      version: "1.0.0",
+      tags: [],
+      cases: ["c1", "c2"].map((id) => ({
+        id,
+        env: { kind: "prompt" as const },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      })),
+    });
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    store.attachReceipts((id) => receipts.countFor(id)); // the composition's pairing — the CAS is live here
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "two-dc", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 2,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const settled = await store.get(record.id);
+    expect(settled?.status).toBe("succeeded");
+    const decision = settled?.decision;
+    if (!decision) throw new Error("expected the settle to freeze its decision context");
+    const committed = await receipts.list(record.id);
+    // The read-set is EXACTLY the ledger: same count (what the terminal write conditioned on), same rows.
+    expect(decision.receiptCount).toBe(committed.length);
+    const byKey = new Map(committed.map((r) => [`${r.caseId}#${r.trial}`, r] as const));
+    for (const c of decision.cases) {
+      const receipt = byKey.get(`${c.caseId}#${c.trial}`);
+      expect(receipt?.childRunId).toBe(c.childRunId);
+      expect(receipt?.resultDigest).toBe(c.resultDigest);
+    }
+    expect(decision.receiptSetDigest).toBe(contentDigest(decision.cases));
   }, 20_000);
 });
 

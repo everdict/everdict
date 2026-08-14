@@ -515,6 +515,34 @@ export const EVERDICT_TRACE_SOURCE = "everdict";
 // pre-caseSpec record); dataset-backed experiments re-drive normally.
 export const EXPERIMENT_ADHOC_REF = "_adhoc";
 
+// ── WHAT THE PARENT READ IS WHAT THE PARENT COMMITTED ON (review 40, the Release pattern) ────────────
+//
+// The settle summarizes over the receipt ledger, and until this existed the record did not SAY which ledger
+// it read: an auditor recomputing the summary a year later had to trust that the receipts they see now are
+// the receipts the settle saw then. The decision context freezes the read-set — one row per (case, trial):
+// the child the receipt named, the digest of the bytes counted, the attempt that produced them — plus the
+// receipt COUNT the terminal write conditioned on (receipts are insert-only, so the count is a sound
+// freshness token: a receipt committed between the read and the write refuses the settle).
+export const ScorecardDecisionCaseSchema = z.object({
+  caseId: z.string(),
+  trial: z.number().int().nonnegative(),
+  childRunId: z.string(),
+  resultDigest: z.string(),
+  attemptId: z.string().optional(),
+});
+export type ScorecardDecisionCase = z.infer<typeof ScorecardDecisionCaseSchema>;
+
+export const ScorecardDecisionContextSchema = z.object({
+  // The driver epoch the settle held — the same token the terminal write proved.
+  epoch: z.number().int().optional(),
+  // What the terminal write CONDITIONED on (see above). Recomputable: receipts of this batch at settle time.
+  receiptCount: z.number().int().nonnegative(),
+  // contentDigest of `cases` (sorted by caseId, trial) — one string an auditor compares before re-walking.
+  receiptSetDigest: z.string(),
+  cases: z.array(ScorecardDecisionCaseSchema),
+});
+export type ScorecardDecisionContext = z.infer<typeof ScorecardDecisionContextSchema>;
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -625,6 +653,9 @@ export const ScorecardRecordSchema = z.object({
   // Release-gate decisions recorded AGAINST this candidate (A1/B1) — append-only; the audit report scans
   // these instead of a separate store (ledger-derivation principle). mig 0128.
   gates: z.array(GateDecisionSchema).optional(),
+  // The settle's frozen read-set (see ScorecardDecisionContextSchema) — present on batches settled since the
+  // decision context existed, absent on aborted/failed settles (a cancelled batch never gates).
+  decision: ScorecardDecisionContextSchema.optional(),
   // Scoring identity ledger — one entry per scoring pass (the initial settle + each re-score), append-only
   // even though the live score plane mutates in place. mig 0144. Absent on pre-ledger batches and on failed/
   // aborted settles (they never gate, so they carry no judgment to identify — a named deferral).

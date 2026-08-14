@@ -33,6 +33,7 @@ interface ScorecardRow {
   manifest: unknown; // reproducibility digests sealed at submit (mig 0126)
   requested: number | string | null; // the batch's ask — cases × trials at submit (mig 0127)
   gates: unknown; // release-gate decisions recorded against this candidate (mig 0128)
+  decision: unknown;
   scoring: unknown; // append-only scoring-identity ledger — one entry per scoring pass (mig 0144)
   sink_export: unknown;
   error: unknown;
@@ -83,6 +84,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     ...(row.requested !== null && row.requested !== undefined ? { requested: Number(row.requested) } : {}),
     // lightweight — the gate audit scans the ledger for decisions; a handful of small artifacts per row
     ...(row.gates !== null && row.gates !== undefined ? { gates: row.gates as ScorecardRecord["gates"] } : {}),
+    ...(row.decision !== null && row.decision !== undefined
+      ? { decision: row.decision as ScorecardRecord["decision"] }
+      : {}),
     // detail-shaped consumers (gate pins, diff, audit) read through get(); list omits the column like the other detail jsonb
     ...(row.scoring !== null && row.scoring !== undefined
       ? { scoring: row.scoring as ScorecardRecord["scoring"] }
@@ -255,6 +259,10 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`requested = $${i++}`);
       vals.push(patch.requested);
     }
+    if (patch.decision !== undefined) {
+      sets.push(`decision = $${i++}`);
+      vals.push(JSON.stringify(patch.decision));
+    }
     if (patch.gates !== undefined) {
       // append-path (gate decide/override) — the service writes the whole array back (small artifacts).
       sets.push(`gates = $${i++}`);
@@ -338,6 +346,14 @@ export class PgScorecardStore implements ScorecardStore {
       i++;
       guardSql += ` AND coalesce(jsonb_array_length(scoring), 0) = $${i}`;
       vals.push(guard.expectScoringCount);
+    }
+    // The decision context's freshness CAS (review 40): receipts are insert-only, so the COUNT the settle
+    // read is a sound fence — a receipt committed between the read and this write refuses the settle, and
+    // the recorded read-set can never describe a ledger the summary was not computed over.
+    if (guard?.expectReceiptCount !== undefined) {
+      i++;
+      guardSql += ` AND (SELECT count(*) FROM everdict_case_commit_receipts r WHERE r.scorecard_id = everdict_scorecards.id) = $${i}`;
+      vals.push(guard.expectReceiptCount);
     }
     if (guard?.expectGatesCount !== undefined) {
       i++;

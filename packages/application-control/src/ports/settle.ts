@@ -38,6 +38,7 @@ export async function settleScorecard(
   return store.update(id, patch, events, {
     ...(opts.over === "aborted" ? { expectStatusIn: ABORTABLE_SETTLE_STATUSES } : { expectNonTerminal: true as const }),
     ...(opts.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
+    ...(opts.expectReceiptCount !== undefined ? { expectReceiptCount: opts.expectReceiptCount } : {}),
   });
 }
 

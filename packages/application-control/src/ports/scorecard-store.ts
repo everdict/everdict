@@ -59,6 +59,8 @@ export const ABORTABLE_SETTLE_STATUSES = ["queued", "running", "cancelled", "sup
 export interface SettleOptions {
   over: "open" | "aborted";
   epoch?: number;
+  // The receipt count the settle read (see ScorecardUpdateGuard.expectReceiptCount).
+  expectReceiptCount?: number;
 }
 
 export interface ScorecardUpdateGuard {
@@ -96,6 +98,10 @@ export interface ScorecardUpdateGuard {
   claimOwnership?: true;
   expectScoringCount?: number;
   expectGatesCount?: number;
+  // The decision context's freshness CAS (review 40): the receipt count the settle READ. Receipts are
+  // insert-only, so equality proves the ledger did not move between the read and this terminal write — the
+  // recorded read-set can never describe a ledger the summary was not computed over.
+  expectReceiptCount?: number;
   // The scoring-pass FENCE (arch-review 9 P0): the pass that must still own the marker for this write to
   // commit. `passId` is a UUID and is never reused, which is what makes it a sound fencing token —
   // `expectScoringPassEpoch` alone was NOT, because a settle clears the marker and the next claim starts

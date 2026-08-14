@@ -12,6 +12,14 @@ import type {
 
 export class InMemoryScorecardStore implements ScorecardStore {
   private readonly cards = new Map<string, ScorecardRecord>();
+  // The receipt-count pairing (review 40): Postgres answers `expectReceiptCount` with a sub-select in the
+  // same statement; in memory the two stores are separate objects, so the pairing is explicit (the same
+  // attach idiom the run store uses for the scoring fence). UNPAIRED, a guarded write is ALLOWED — an
+  // unpaired store is not part of a receipt topology at all (the documented dev-store stance).
+  private receiptCountOf?: (scorecardId: string) => number;
+  attachReceipts(countOf: (scorecardId: string) => number): void {
+    this.receiptCountOf = countOf;
+  }
 
   // E0 outbox pair: in-memory has no transaction to share, so "same tx" degrades to "append right after the
   // write" — the ordering guarantee tests rely on (same as InMemoryRunStore).
@@ -32,6 +40,12 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (!cur) return undefined;
     // The append-only ledgers' optimistic guard (I5) — a miss answers undefined like a missing id; the
     // caller (which just read the record) treats it as the concurrent-writer conflict it is.
+    if (
+      guard?.expectReceiptCount !== undefined &&
+      this.receiptCountOf &&
+      this.receiptCountOf(id) !== guard.expectReceiptCount
+    )
+      return undefined;
     if (guard?.expectScoringCount !== undefined && (cur.scoring?.length ?? 0) !== guard.expectScoringCount)
       return undefined;
     if (guard?.expectGatesCount !== undefined && (cur.gates?.length ?? 0) !== guard.expectGatesCount) return undefined;

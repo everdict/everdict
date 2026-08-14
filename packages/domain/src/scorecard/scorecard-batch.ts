@@ -3,12 +3,14 @@ import type { DomainFact, RunOrigin } from "@everdict/contracts";
 import type {
   RunEnvelope,
   RunRecord,
+  ScorecardDecisionContext,
   ScorecardOrigin,
   ScorecardRecord,
   ScorecardSubset,
   VerdictPolicy,
   VerdictPolicyRef,
 } from "@everdict/contracts";
+import { contentDigest } from "../provenance/content-digest.js";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { decisionPassRate, headlinePassRate } from "./headline.js";
 import { childKey } from "./scoring-plan.js";
@@ -64,6 +66,7 @@ export type ScorecardOutcomeExtras = Partial<
     | "scoringPass"
     | "manifest"
     | "orchestration"
+    | "decision"
   >
 >;
 
@@ -273,6 +276,39 @@ export class ScorecardBatch {
       if (committed) canonical.set(childKey(receipt.caseId, receipt.trial), committed);
     }
     return canonical;
+  }
+
+  // ── THE SETTLE'S FROZEN READ-SET (review 40, the Release pattern) ──────────────────────────────────
+  //
+  // Pure over the receipts the settle read: one row per (case, trial) naming the committed child, the digest
+  // of the counted bytes and the attempt that produced them, plus the COUNT the terminal write conditions on
+  // (receipts are insert-only — a receipt landing between the read and the write refuses the settle). Sorted
+  // so the set digest is an identity, not an ordering accident.
+  static decisionContext(
+    receipts: ReadonlyArray<{
+      caseId: string;
+      trial: number;
+      childRunId: string;
+      resultDigest: string;
+      attemptId?: string;
+    }>,
+    epoch?: number,
+  ): ScorecardDecisionContext {
+    const cases = [...receipts]
+      .sort((a, b) => (a.caseId < b.caseId ? -1 : a.caseId > b.caseId ? 1 : a.trial - b.trial))
+      .map((r) => ({
+        caseId: r.caseId,
+        trial: r.trial,
+        childRunId: r.childRunId,
+        resultDigest: r.resultDigest,
+        ...(r.attemptId !== undefined ? { attemptId: r.attemptId } : {}),
+      }));
+    return {
+      ...(epoch !== undefined ? { epoch } : {}),
+      receiptCount: receipts.length,
+      receiptSetDigest: contentDigest(cases),
+      cases,
+    };
   }
 
   // Terminal = the batch's outcome is settled; nothing may rewrite it (first terminal write wins).

@@ -360,11 +360,15 @@ export async function makePersistence(): Promise<Persistence> {
       const versions = inMemoryProductVersions.removeAllForProduct(tenant, productId);
       return { releases, versions };
     });
+    // The settle's receipt-count CAS (review 40, expectReceiptCount): Postgres answers it with a sub-select
+    // in the terminal write's own statement; in memory the pairing is explicit, like the fences above.
+    const inMemoryReceipts = new InMemoryCaseReceiptStore();
+    inMemoryScorecards.attachReceipts((id) => inMemoryReceipts.countFor(id));
     return {
       store: inMemoryRuns,
       scoringStageStore: new InMemoryScoringStageStore(),
       recordingStore: new InMemoryRecordingStore(),
-      caseReceiptStore: new InMemoryCaseReceiptStore(),
+      caseReceiptStore: inMemoryReceipts,
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,

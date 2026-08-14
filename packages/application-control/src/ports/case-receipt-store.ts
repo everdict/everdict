@@ -98,4 +98,12 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
   async list(scorecardId: string): Promise<CaseCommitReceipt[]> {
     return [...this.receipts.values()].filter((r) => r.scorecardId === scorecardId);
   }
+
+  // Synchronous count for the scorecard store's receipt-count pairing (expectReceiptCount) — the in-memory
+  // stand-in for the Pg sub-select evaluated inside the terminal write's own statement.
+  countFor(scorecardId: string): number {
+    let n = 0;
+    for (const r of this.receipts.values()) if (r.scorecardId === scorecardId) n += 1;
+    return n;
+  }
 }

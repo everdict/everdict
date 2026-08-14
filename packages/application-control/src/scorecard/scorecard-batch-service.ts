@@ -1243,9 +1243,14 @@ export class ScorecardBatchService {
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
     });
+    // THE SETTLE'S FROZEN READ-SET (review 40, the Release pattern): what this finalize read is what its
+    // terminal write conditions on and what the record keeps — the summary is auditable against the exact
+    // receipts it was computed over, forever.
+    const decision = ScorecardBatch.decisionContext(committed, ctx.driverEpoch);
     const settlement = batch.succeed(
       {
         summary,
+        decision,
         // The stamped-policy verdict aggregate (arch-review 7 §4) — the number release-shaped surfaces read,
         // so the headline's hardcoded authority ladder can never contradict the actual case verdicts.
         verdictSummary: verdictSummaryOf(results, ctx.verdictPolicy),
@@ -1277,7 +1282,7 @@ export class ScorecardBatchService {
       id,
       settlement.patch,
       stampedCompletion.map((f) => f.record),
-      { over: "open", epoch: ctx.driverEpoch },
+      { over: "open", epoch: ctx.driverEpoch, expectReceiptCount: decision.receiptCount },
     );
     // EVERY EFFECT OF A SETTLEMENT HANGS OFF THE SETTLEMENT THAT COMMITTED (arch-review 31 P2). The facts
     // below the fold already did; the operator time series did not, so a CAS loser could leave a world where
@@ -1796,10 +1801,10 @@ export class ScorecardBatchService {
     // child to receive a receipt, and their provenance is the SOURCE batch's ledger (origin.retryOf). They
     // pass through verbatim; everything THIS batch executed is held to the receipt gate.
     carried?: ReadonlySet<string>,
-  ): Promise<CaseResult[]> {
+  ): Promise<{ results: CaseResult[]; receipts?: CaseCommitReceipt[] }> {
     const runStore = this.deps.runStore;
     const receipts = this.deps.caseReceipts;
-    if (!runStore || !receipts || inMemory.length === 0) return inMemory;
+    if (!runStore || !receipts || inMemory.length === 0) return { results: inMemory };
     // Throws propagate: an unreadable ledger refuses the batch instead of summarizing from memory.
     const committed = await receipts.list(id);
     const children = await runStore.list(tenant, { scorecardId: id });
@@ -1843,7 +1848,9 @@ export class ScorecardBatchService {
         { scorecard: id, unaccounted: unaccounted.slice(0, 20), count: unaccounted.length },
         `${unaccounted.length} counted case(s) cannot be traced to a committed receipt — the batch cannot be summarized from results the ledger does not vouch for`,
       );
-    return rebuilt;
+    // The receipts ride back with the rebuild: they are the settle's READ-SET, and the decision context
+    // freezes exactly this list (never a re-read, which could see a ledger the summary was not built over).
+    return { results: rebuilt, receipts: committed };
   }
 
   // ── THE LEDGER AND THE RECEIPTS MUST AGREE (review 39, Phase 1 parity) ───────────────────────────────
@@ -2892,10 +2899,16 @@ export class ScorecardBatchService {
       phase = "persist";
       // The aggregate is the LEDGER's, not this process's memory (see resultsFromLedger) — and the parity
       // check then compares what was counted against what was committed.
-      scorecard = {
-        ...scorecard,
-        results: await this.resultsFromLedger(id, tenant, scorecard.results, seedChildBacked ? undefined : seededIds),
-      };
+      const accounted = await this.resultsFromLedger(
+        id,
+        tenant,
+        scorecard.results,
+        seedChildBacked ? undefined : seededIds,
+      );
+      scorecard = { ...scorecard, results: accounted.results };
+      // THE SETTLE'S FROZEN READ-SET (review 40): the receipts the rebuild READ are what the terminal write
+      // conditions on (expectReceiptCount) and what the record keeps — never a re-read.
+      const decision = accounted.receipts ? ScorecardBatch.decisionContext(accounted.receipts, epoch) : undefined;
       await this.checkReceiptParity(id, scorecard.results);
       const summary = summarizeScorecard(scorecard);
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
@@ -2961,7 +2974,7 @@ export class ScorecardBatchService {
             createdAt: this.now(),
             ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
           });
-          const settlement = batch.succeed({ ...extras, scoring }, this.now());
+          const settlement = batch.succeed({ ...extras, ...(decision ? { decision } : {}), scoring }, this.now());
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
           // Under the aggregate's terminal fence AND this driver's own epoch (mig 0166): a replica that was
           // declared dead and came back must not settle a batch another replica now owns. The comment below
@@ -2975,6 +2988,7 @@ export class ScorecardBatchService {
             {
               over: "open",
               ...epochOpt,
+              ...(decision ? { expectReceiptCount: decision.receiptCount } : {}),
             },
           );
           // …and the metric hangs off the same commit as the facts (arch-review 31 P2) — a loser that still
