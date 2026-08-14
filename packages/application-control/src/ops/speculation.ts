@@ -30,6 +30,18 @@ export interface SpeculationOpts {
   // Reclaim hook — when a speculated case settles, cancel any of its dispatches still QUEUED at the scheduler
   // (the loser may never have reached a backend; there is no reason to let it).
   cancelQueued?: (caseId: string) => void;
+  // ── A CANONICAL VERDICT IS ONE; PHYSICAL SPEND IS NOT (review 39 P0) ─────────────────────────────
+  //
+  // The race keeps the first success and DROPS every later one. That is right for the verdict — a case has
+  // one answer — and wrong for everything the loser actually consumed: model calls, compute, storage. It ran
+  // on the tenant's infrastructure and on the tenant's provider key, and its cost simply vanished, so the
+  // usage a workspace was shown and the budget it was enforced against were both computed over an execution
+  // set smaller than the one that happened.
+  //
+  // The loser's outcome is handed here instead of being discarded. What the caller does with it is billing,
+  // never scoring: it must not reach the scorecard, the trajectory, or any aggregate that answers "how did
+  // the agent do".
+  onLoser?: (outcome: SpilloverOutcome, caseId: string) => void;
 }
 
 const DEFAULT_MIN_STRAGGLER_MS = 10_000;
@@ -90,6 +102,12 @@ export class SpeculationController {
         pending += 1;
         p.then(
           (v) => {
+            // A result that lands after the race is settled is the LOSER's. Not discarded: the work happened
+            // and was paid for (see onLoser), it simply is not the case's answer.
+            if (settled) {
+              this.opts.onLoser?.(v, job.evalCase.id);
+              return;
+            }
             const elapsed = this.clock() - startedAt;
             finish(() => {
               this.durations.push(elapsed);

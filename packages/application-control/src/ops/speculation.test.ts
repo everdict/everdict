@@ -210,3 +210,54 @@ describe("SpeculationController — tail straggler duplication", () => {
     expect(outcome.target).toBe("fast-rt");
   });
 });
+
+// ── A CANONICAL VERDICT IS ONE; PHYSICAL SPEND IS NOT (review 39 P0) ─────────────────────────────────
+describe("SpeculationController — the loser's outcome is handed back, not dropped", () => {
+  it("reports the late result to onLoser while the winner's stays the case's answer", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const losers: Array<{ caseId: string; target?: string }> = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 2),
+      onLoser: (outcome, caseId) => losers.push({ caseId, ...(outcome.target ? { target: outcome.target } : {}) }),
+    });
+
+    const fast = ctl.run(exec.execute, jobOn("a", "fast-rt"));
+    const slow = ctl.run(exec.execute, jobOn("b", "slow-rt"));
+    await time.advance(200);
+    exec.release("a@fast-rt", "a", "fast-rt");
+    await time.advance(300);
+    await fast;
+
+    await time.advance(1500); // "b" is a straggler → a duplicate fires on the other runtime
+    exec.release("b@fast-rt", "b", "fast-rt"); // the duplicate wins
+    await time.advance(1501);
+    expect((await slow).target).toBe("fast-rt");
+    expect(losers).toEqual([]); // nothing lost yet — the primary is still running
+
+    // …and when the primary finally lands, it is the LOSER. Its work happened and was paid for: model calls,
+    // compute, storage. Dropping it made the usage a workspace is shown, and the budget it is enforced
+    // against, both smaller than the execution set that actually ran.
+    exec.release("b@slow-rt", "b", "slow-rt");
+    await time.advance(1600);
+    expect(losers).toEqual([{ caseId: "b", target: "slow-rt" }]);
+  });
+
+  it("says nothing when there was no race to lose", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const losers: string[] = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 1),
+      onLoser: (_outcome, caseId) => losers.push(caseId),
+    });
+    const only = ctl.run(exec.execute, jobOn("a", "fast-rt"));
+    await time.advance(100);
+    exec.release("a@fast-rt", "a", "fast-rt");
+    await only;
+    await time.advance(5000);
+    expect(losers).toEqual([]);
+  });
+});

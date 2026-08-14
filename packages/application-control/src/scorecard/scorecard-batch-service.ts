@@ -637,6 +637,7 @@ export class ScorecardBatchService {
                   caseId: cid,
                 });
               },
+              onLoser: (outcome, cid: string) => this.meterLostAttempt(rec.tenant, outcome.result, cid, id),
               ...(this.deps.cancelQueued
                 ? {
                     cancelQueued: (cid: string) =>
@@ -1609,6 +1610,32 @@ export class ScorecardBatchService {
     }
   }
 
+  // ── THE LOSER OF A RACE STILL SPENT (review 39 P0) ───────────────────────────────────────────────────
+  //
+  // Tail speculation keeps the first success and drops the other, which is correct for the VERDICT — a case
+  // has one answer — and wrong for the money: the duplicate ran on the tenant's infrastructure and its
+  // provider key, and its cost simply vanished. Usage and the enforcement budget were therefore both computed
+  // over a smaller execution set than the one that happened, which is the same "canonical verdict is one,
+  // physical spend is many" confusion the receipt draws the line for on the evidence side.
+  //
+  // Metered, never scored: this touches the usage/budget ledgers and nothing that answers "how did the agent
+  // do". `evaluations` is deliberately left out of the count — a loser is spend, not an evaluation.
+  private meterLostAttempt(tenant: string, result: CaseResult, caseId: string, id: string): void {
+    let usd = 0;
+    for (const charge of billingCharges(result, tenant)) {
+      this.deps.budget?.settle(charge.tenant, charge.cost);
+      this.deps.usage?.record(charge.tenant, charge.source, charge.model, charge.cost, 0);
+      usd += charge.cost.usd;
+    }
+    if (usd <= 0) return; // a duplicate that spent nothing measurable is not worth a line on the timeline
+    void this.appendBatchStep(id, {
+      phase: "case",
+      status: "info",
+      message: `${caseId}: speculation loser billed ($${usd.toFixed(4)}) — its result is not the case's answer`,
+      caseId,
+    });
+  }
+
   // ── THE ONE PLACE A CASE IS FINALIZED (review 39, Phase 2) ───────────────────────────────────────────
   //
   // Both drivers used to hold their own copy of "what ending a case means", and every review since has found
@@ -2175,6 +2202,7 @@ export class ScorecardBatchService {
             if (speculated)
               this.deps.onOrchestrationEvent?.({ kind: "speculation_settled", winnerSpeculated: speculated });
           },
+          onLoser: (outcome, cid) => this.meterLostAttempt(tenant, outcome.result, cid, id),
           ...(this.deps.cancelQueued
             ? {
                 cancelQueued: (cid: string) =>
