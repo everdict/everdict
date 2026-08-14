@@ -3,6 +3,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { installProxyDispatcher, proxyEnv, proxyRoutingDispatcher } from "./proxy-dispatcher.js";
 
 describe("proxyEnv — the standard proxy env, read case-insensitively", () => {
+  it("merges BOTH NO_PROXY spellings — compose fills no_proxy, the host shell exports NO_PROXY, and each may carry entries the other lacks (report 4.1)", () => {
+    const p = proxyEnv({
+      HTTP_PROXY: "http://proxy.corp:3128",
+      NO_PROXY: ".corp.internal",
+      no_proxy: "10.0.0.0/8,api",
+    } as NodeJS.ProcessEnv);
+    expect(p.noProxy).toBe(".corp.internal,10.0.0.0/8,api");
+  });
   it("picks HTTP(S)_PROXY / NO_PROXY (upper preferred, lower fallback); trims and drops blanks", () => {
     expect(proxyEnv({ HTTPS_PROXY: "http://p:3128", NO_PROXY: "localhost,10.0.0.0/8" })).toEqual({
       httpsProxy: "http://p:3128",

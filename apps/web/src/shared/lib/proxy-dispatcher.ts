@@ -1,8 +1,15 @@
-import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
+import { Agent, Dispatcher, EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
 
-// 표준 아웃바운드 프록시 env(HTTP_PROXY/HTTPS_PROXY/NO_PROXY — 관례상 대소문자 둘 다)를 읽는다. 순수 함수라
-// "프록시가 구성되었는가" 판단을 전역 상태 없이 검증할 수 있다. apps/api infrastructure/http/proxy-dispatcher 의
-// 재해석 — 웹은 런타임 디커플링 규칙상 @everdict/* 를 import 할 수 없어 같은 로직을 로컬로 둔다.
+import { shouldBypassProxy } from './no-proxy'
+
+// Standard outbound-proxy env, read case-insensitively (both HTTP_PROXY and http_proxy are conventional).
+// Pure — the "is a proxy configured" decision is testable without global state. A reinterpretation of
+// apps/api's infrastructure/http/proxy-dispatcher for the web tier, which cannot import @everdict/* at
+// runtime (type-only contracts rule) — the matcher is the drift-guarded local mirror in ./no-proxy.
+//
+// NO_PROXY is the UNION of both spellings, not a pick: compose merges the internal service list into
+// `no_proxy` while a host shell exports `NO_PROXY`, and the two routinely carry entries the other lacks —
+// picking one silently dropped half the bypass list (downstream report 4.1).
 export function proxyEnv(env: NodeJS.ProcessEnv = process.env): {
   httpProxy?: string
   httpsProxy?: string
@@ -14,7 +21,10 @@ export function proxyEnv(env: NodeJS.ProcessEnv = process.env): {
   }
   const httpProxy = pick('HTTP_PROXY', 'http_proxy')
   const httpsProxy = pick('HTTPS_PROXY', 'https_proxy')
-  const noProxy = pick('NO_PROXY', 'no_proxy')
+  const noProxyParts = [env.NO_PROXY?.trim(), env.no_proxy?.trim()].filter((v): v is string =>
+    Boolean(v)
+  )
+  const noProxy = noProxyParts.length > 0 ? noProxyParts.join(',') : undefined
   return {
     ...(httpProxy ? { httpProxy } : {}),
     ...(httpsProxy ? { httpsProxy } : {}),
@@ -22,24 +32,51 @@ export function proxyEnv(env: NodeJS.ProcessEnv = process.env): {
   }
 }
 
-// 프록시-인지 전역 디스패처 설치 — 사내 프록시 뒤 배포에서 웹 서버의 아웃바운드 fetch(대표적으로 데스크탑
-// 릴리즈 목록의 api.github.com 호출)가 HTTP(S)_PROXY 를 타게 한다. undici 의 setGlobalDispatcher 는 Node 내장
-// fetch 가 읽는 것과 동일한 전역(Symbol.for 레지스트리)을 설정하므로, 이 한 번의 호출이 호출부 수정 없이 전체를
-// 커버한다. 프록시 env 미설정이면 no-op — 프록시 없는 배포는 기존과 동일하게 동작한다.
-// EnvHttpProxyAgent 는 요청마다 NO_PROXY 를 적용하므로 내부 호스트(CONTROL_PLANE_URL 의 api, agent 등)는
-// NO_PROXY 에 올라 있으면 프록시를 우회한다 — compose 가 서비스 이름을 자동으로 합류시킨다(deploy/compose).
-// 설치된 구성(또는 undefined)을 반환해 부팅 로그 한 줄에 쓴다.
+// The bypass list is the operator's, not the transport library's: EnvHttpProxyAgent honours exact hostnames
+// and dot suffixes only, while operators also write CIDR (`10.0.0.0/8`) and bare prefixes (`192.168.`) —
+// silently ignored, so internal traffic tunnelled through the corporate proxy. The routing decision is OURS
+// (the mirrored matcher), the agent keeps its own narrower list too — the union, since either saying
+// "bypass" sends the request direct. Same shape as apps/api's proxyRoutingDispatcher.
+export function proxyRoutingDispatcher(
+  proxied: Dispatcher,
+  noProxy: string | undefined,
+  injectedDirect?: Dispatcher
+): Dispatcher {
+  if (!noProxy) return proxied
+  const direct = injectedDirect ?? new Agent()
+  class ProxyRouter extends Dispatcher {
+    override dispatch(
+      options: Dispatcher.DispatchOptions,
+      handler: Parameters<Dispatcher['dispatch']>[1]
+    ): boolean {
+      const origin =
+        typeof options.origin === 'string' ? options.origin : (options.origin?.href ?? '')
+      return shouldBypassProxy(origin, noProxy)
+        ? direct.dispatch(options, handler)
+        : proxied.dispatch(options, handler)
+    }
+  }
+  return new ProxyRouter()
+}
+
+// Install a proxy-aware global dispatcher — behind a corporate proxy the web server's outbound fetches
+// (e.g. the desktop release-list call to api.github.com) ride HTTP(S)_PROXY. undici's setGlobalDispatcher
+// sets the same global Node's built-in fetch reads, so this one boot-time call covers every call site.
+// No proxy configured → no-op (unproxied deployments unchanged). Returns the installed config for the boot log.
 export function installProxyDispatcher(
   env: NodeJS.ProcessEnv = process.env
 ): { httpProxy?: string; httpsProxy?: string } | undefined {
   const p = proxyEnv(env)
-  if (!p.httpProxy && !p.httpsProxy) return undefined // 프록시 미구성 → 기본 디스패처 유지
+  if (!p.httpProxy && !p.httpsProxy) return undefined
   setGlobalDispatcher(
-    new EnvHttpProxyAgent({
-      ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),
-      ...(p.httpsProxy ? { httpsProxy: p.httpsProxy } : {}),
-      ...(p.noProxy ? { noProxy: p.noProxy } : {}),
-    })
+    proxyRoutingDispatcher(
+      new EnvHttpProxyAgent({
+        ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),
+        ...(p.httpsProxy ? { httpsProxy: p.httpsProxy } : {}),
+        ...(p.noProxy ? { noProxy: p.noProxy } : {}),
+      }),
+      p.noProxy
+    )
   )
   return {
     ...(p.httpProxy ? { httpProxy: p.httpProxy } : {}),

@@ -1,0 +1,3 @@
+# The no-proxy matcher is a byte-identical MIRROR of packages/contracts/src/infra/no-proxy.ts —
+# formatting it would break the drift comparison the web test enforces. Fix contracts first, re-copy.
+src/shared/lib/no-proxy.ts

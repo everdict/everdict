@@ -14,7 +14,11 @@ export function proxyEnv(env: NodeJS.ProcessEnv = process.env): {
   };
   const httpProxy = pick("HTTP_PROXY", "http_proxy");
   const httpsProxy = pick("HTTPS_PROXY", "https_proxy");
-  const noProxy = pick("NO_PROXY", "no_proxy");
+  // NO_PROXY is the UNION of both spellings, not a pick: compose merges the internal service list into
+  // `no_proxy` while a host shell exports `NO_PROXY` — the two routinely carry entries the other lacks,
+  // and picking one silently dropped half the bypass list (downstream report 4.1).
+  const noProxyParts = [env.NO_PROXY?.trim(), env.no_proxy?.trim()].filter((v): v is string => Boolean(v));
+  const noProxy = noProxyParts.length > 0 ? noProxyParts.join(",") : undefined;
   return {
     ...(httpProxy ? { httpProxy } : {}),
     ...(httpsProxy ? { httpsProxy } : {}),
