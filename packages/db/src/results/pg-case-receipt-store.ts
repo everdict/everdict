@@ -1,6 +1,7 @@
-import type { CaseReceiptStore } from "@everdict/application-control";
-import type { CaseCommitOutcome, CaseCommitReceipt } from "@everdict/contracts";
-import type { SqlClient } from "../client.js";
+import type { CaseReceiptStore, CaseSettleOutcome, RunStore } from "@everdict/application-control";
+import { type CaseCommitOutcome, type CaseCommitReceipt, InternalError, type RunRecord } from "@everdict/contracts";
+import { type SqlClient, withTransaction } from "../client.js";
+import { PgRunStore } from "./pg-run-store.js";
 
 interface ReceiptRow {
   scorecard_id: string;
@@ -30,6 +31,15 @@ function toReceipt(row: ReceiptRow): CaseCommitReceipt {
   };
 }
 
+// Module-private control-flow signal for commitCase — a refused child fence must ROLLBACK the transaction
+// (the helper's contract for a throw) and then surface as the `unsettled` OUTCOME, not as an error. Never
+// crosses this file's boundary.
+class UnsettledSignal extends Error {
+  constructor() {
+    super("case commit unsettled — the child's fence refused the write, the claim was rolled back");
+  }
+}
+
 // Postgres-backed case-commit receipts (mig 0175). The whole store is one statement: the INSERT is the claim,
 // and the primary key decides it.
 export class PgCaseReceiptStore implements CaseReceiptStore {
@@ -47,7 +57,11 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
   // race: by the time the first statement returned, the conflicting row was committed — that is what the
   // insert waited for.
   async commit(receipt: CaseCommitReceipt): Promise<CaseCommitOutcome> {
-    const { rows } = await this.client.query<ReceiptRow & { inserted: boolean }>(
+    return this.commitOn(this.client, receipt);
+  }
+
+  private async commitOn(client: SqlClient, receipt: CaseCommitReceipt): Promise<CaseCommitOutcome> {
+    const { rows } = await client.query<ReceiptRow & { inserted: boolean }>(
       `WITH claim AS (
          INSERT INTO everdict_case_commit_receipts
            (scorecard_id, case_id, trial, child_run_id, execution_id, generation, attempt_id, result_digest,
@@ -77,7 +91,7 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
     const row = rows[0];
     if (row) return { kind: row.inserted ? "committed" : "already_committed", receipt: toReceipt(row) };
     // Refused, and the winner was invisible to this statement's snapshot (see above). Read it now.
-    const { rows: settled } = await this.client.query<ReceiptRow>(
+    const { rows: settled } = await client.query<ReceiptRow>(
       `SELECT * FROM everdict_case_commit_receipts
         WHERE scorecard_id = $1 AND case_id = $2 AND trial = $3`,
       [receipt.scorecardId, receipt.caseId, receipt.trial],
@@ -86,8 +100,48 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
     // Neither inserted nor found even now would mean the row that refused the insert has since vanished, and
     // nothing deletes a receipt — so this is a store fault, not an outcome to interpret. Reporting it as
     // "somebody else committed" would invent a winner nobody can name.
-    if (!winner) throw new Error("case receipt claim returned no row — neither inserted nor found");
+    if (!winner)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { scorecard: receipt.scorecardId, caseId: receipt.caseId, trial: receipt.trial },
+        "case receipt claim returned no row — neither inserted nor found",
+      );
     return { kind: "already_committed", receipt: toReceipt(winner) };
+  }
+
+  // ── THE COMMIT POINT IS ONE TRANSACTION (review 40 P0) ─────────────────────────────────────────────
+  //
+  // The receipt claim and the child's terminal write, all-or-nothing. As two independent round-trips, the
+  // window between them was a poison pill: the claim landed, a parent takeover (or a transient store error)
+  // refused the child's write, and the case was permanently claimed for a child that never carried its
+  // result — the successor's re-drive then met `already_committed` naming a non-terminal child, forever.
+  //
+  // Inside the transaction the claim goes FIRST (the cheap conflict detection — a loser rolls back having
+  // written nothing and is told whose case it is), the child's fenced write second. A refused fence aborts
+  // the transaction, taking the claim with it. A concurrent claimant blocks on the in-flight insert until
+  // this transaction commits or rolls back, so the two-statement winner read below stays race-free.
+  async commitCase(
+    receipt: CaseCommitReceipt,
+    settle: (runs: RunStore) => Promise<RunRecord | undefined>,
+    // The caller's ambient run store — deliberately unused here: the settle must go through the SAME
+    // transaction as the claim, so a transaction-bound twin is handed in instead. The parameter exists
+    // because the in-memory implementation has no transaction to bind one to.
+    _runs: RunStore,
+  ): Promise<CaseSettleOutcome> {
+    try {
+      return await withTransaction(this.client, "the case commit (receipt + child settle)", async (tx) => {
+        const outcome = await this.commitOn(tx, receipt);
+        if (outcome.kind === "already_committed") return outcome;
+        const settled = await settle(new PgRunStore(tx));
+        // The fence refused the child's write → abort, which rolls the claim back too. Thrown (not returned)
+        // because ROLLBACK is the transaction helper's contract for a throw; unwrapped below.
+        if (settled === undefined) throw new UnsettledSignal();
+        return { kind: "committed" as const, receipt: outcome.receipt };
+      });
+    } catch (err) {
+      if (err instanceof UnsettledSignal) return { kind: "unsettled" };
+      throw err; // a store fault is reported as one — never converted into an outcome
+    }
   }
 
   async list(scorecardId: string): Promise<CaseCommitReceipt[]> {

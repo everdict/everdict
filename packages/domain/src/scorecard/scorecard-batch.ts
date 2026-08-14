@@ -11,6 +11,7 @@ import type {
 } from "@everdict/contracts";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { decisionPassRate, headlinePassRate } from "./headline.js";
+import { childKey } from "./scoring-plan.js";
 import { summarizeTrials } from "./trials.js";
 import { resolvePolicyResolution, verdictPolicyRef } from "./verdict-policy.js";
 
@@ -255,9 +256,13 @@ export class ScorecardBatch {
   // check is for. That is self-healing rather than lossy: an unaccounted case fails the batch into a state
   // recovery picks up, the re-drive commits a receipt, and the batch finalizes on the second pass. A batch
   // that predates receipts entirely is already terminal, and nothing re-finalizes a terminal batch.
+  //
+  // Keyed by the (case, trial) CHILD KEY — the axis the receipt's primary key already carries. Keying by
+  // caseId alone collapsed a trialled case's N receipts into one map slot, which is why every consumer used
+  // to abandon the ledger for a trialled batch: the aggregation dropped the axis the schema kept.
   static canonicalChildPerCase(
     children: RunRecord[],
-    receipts: ReadonlyArray<{ caseId: string; childRunId: string }>,
+    receipts: ReadonlyArray<{ caseId: string; trial: number; childRunId: string }>,
   ): Map<string, RunRecord> {
     const byId = new Map(children.map((c) => [c.id, c]));
     const canonical = new Map<string, RunRecord>();
@@ -265,7 +270,7 @@ export class ScorecardBatch {
       const committed = byId.get(receipt.childRunId);
       // A receipt naming a child this batch cannot see is a disagreement the caller states (the parity
       // check) — never a licence to pick some other row and call it the answer.
-      if (committed) canonical.set(receipt.caseId, committed);
+      if (committed) canonical.set(childKey(receipt.caseId, receipt.trial), committed);
     }
     return canonical;
   }

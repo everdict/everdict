@@ -429,11 +429,11 @@ describe("ScorecardBatch — pure derivations and the child-seed helper", () => 
     ];
     // The COMMITTED attempt is the older row here — which is the whole point: a late metadata write on a
     // superseded attempt used to make it the batch's answer.
-    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "old-c1" }]);
-    expect(canonical.get("c1")?.id).toBe("old-c1");
+    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", trial: 0, childRunId: "old-c1" }]);
+    expect(canonical.get("c1#0")?.id).toBe("old-c1"); // keyed by the (case, trial) child key — the receipt's own axis
     // …and a case nobody committed has NO canonical child. That is not a loss: the caller's missing-case
     // check fails the batch into recovery, the re-drive commits a receipt, and the second pass finalizes.
-    expect(canonical.has("c2")).toBe(false);
+    expect(canonical.has("c2#0")).toBe(false);
   });
 
   it("withTrialSummary derives the pass@k roll-up only when the scorecard actually holds trials", () => {
@@ -518,7 +518,9 @@ describe("canonicalChildPerCase — the receipt decides, not the clock", () => {
     // way a superseded attempt used to take over a settled batch's canonical result.
     const rows = [child("A", "c1", "2026-08-14T00:00:01.000Z"), child("B", "c1", "2026-08-14T00:00:09.000Z")];
     // "B is newer" was the old answer, and it answered the wrong question.
-    expect(ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "A" }]).get("c1")?.id).toBe("A");
+    expect(
+      ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", trial: 0, childRunId: "A" }]).get("c1#0")?.id,
+    ).toBe("A");
   });
 
   it("a case with no receipt has NO canonical child — the missing-case check decides, not a guess", () => {
@@ -527,16 +529,30 @@ describe("canonicalChildPerCase — the receipt decides, not the clock", () => {
       child("B", "c1", "2026-08-14T00:00:09.000Z"),
       child("C", "c2", "2026-08-14T00:00:02.000Z"),
     ];
-    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "A" }]);
-    expect(canonical.get("c1")?.id).toBe("A"); // committed
+    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", trial: 0, childRunId: "A" }]);
+    expect(canonical.get("c1#0")?.id).toBe("A"); // committed
     // Self-healing rather than lossy: an unaccounted case fails the batch into recovery, the re-drive commits
     // a receipt, and the second pass finalizes. Picking a row here would be inventing an answer.
-    expect(canonical.has("c2")).toBe(false);
+    expect(canonical.has("c2#0")).toBe(false);
+  });
+
+  it("a trialled case keeps one canonical child PER TRIAL — the aggregation carries the axis the receipt's key has", () => {
+    // Keying by caseId alone collapsed a trialled case's N receipts into one slot, which is why every
+    // consumer used to abandon the ledger for a trialled batch (review 40 P0).
+    const rows = [child("t0", "c1", "2026-08-14T00:00:01.000Z"), child("t1", "c1", "2026-08-14T00:00:02.000Z")];
+    const canonical = ScorecardBatch.canonicalChildPerCase(rows, [
+      { caseId: "c1", trial: 0, childRunId: "t0" },
+      { caseId: "c1", trial: 1, childRunId: "t1" },
+    ]);
+    expect(canonical.get("c1#0")?.id).toBe("t0");
+    expect(canonical.get("c1#1")?.id).toBe("t1");
   });
 
   it("a receipt naming a child this batch cannot see yields nothing for that case", () => {
     // A disagreement the caller states (the parity check) — never a licence to pick some other row.
     const rows = [child("A", "c1", "2026-08-14T00:00:01.000Z")];
-    expect(ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", childRunId: "gone" }]).has("c1")).toBe(false);
+    expect(
+      ScorecardBatch.canonicalChildPerCase(rows, [{ caseId: "c1", trial: 0, childRunId: "gone" }]).has("c1#0"),
+    ).toBe(false);
   });
 });

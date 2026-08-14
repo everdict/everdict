@@ -1,6 +1,7 @@
 import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
+import { contentDigest } from "@everdict/domain";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -180,10 +181,12 @@ describeTrust("TRUST-167 — a case ends the same way whichever driver ended it"
 
 // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39, Phase 3) ─────────────────────────────────
 describeTrust("TRUST-168 — the summary is built from the committed children, not from memory", () => {
-  it("counts the CHILD's result when the two differ — memory is not the record", async () => {
-    // The driver holds the object the harness returned; the child row holds what was committed (judge
-    // coverage may have added rows to it, and a re-drive may have committed another attempt's result
-    // entirely). Summarizing from memory made the parent's answer depend on which of the two a reader asked.
+  it("REFUSES the batch when the child row's bytes are not its receipt's — neither memory nor the row is silently counted", async () => {
+    // The driver holds the object the harness returned; the child row holds what the store persisted. When
+    // the two disagree, the receipt is the arbiter — its digest names the committed bytes. A row that
+    // diverges from its own receipt is a permanent split a reader will hydrate a year from now, so the
+    // parent must not summarize over it: not from the row (the ledger does not vouch for it) and not from
+    // memory (that is the pre-receipt defect wearing a new coat). The batch fails into a recoverable state.
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", {
       id: "one",
@@ -230,13 +233,176 @@ describeTrust("TRUST-168 — the summary is built from the committed children, n
     } as never);
     await new Promise((r) => setTimeout(r, 2000));
 
-    // The SUMMARY is the assertion, because it is computed from the aggregate at settle time and frozen on
-    // the record — a hydrated read would go to the child rows either way and could not tell the two apart.
     const settled = await store.get(record.id);
-    const pass = settled?.summary?.find((m) => m.metric === "pass");
-    expect(pass?.count).toBe(1);
-    // What the ledger committed — not what the driver remembered: the committed child failed.
-    expect(pass?.passRate).toBe(0);
-    expect(pass?.mean).toBe(0);
+    // The batch REFUSED to settle succeeded — the failure names the receipt gate, and the state is
+    // recoverable (a re-drive re-commits the case and the second pass finalizes). The partial summary a
+    // FAILED batch freezes for visibility is diagnostic, not a verdict: nothing downstream (baseline,
+    // leaderboard, release gates) reads a failed batch as an answer.
+    expect(settled?.status).toBe("failed");
+    expect(settled?.error?.message).toContain("cannot be traced to a committed receipt");
+  }, 20_000);
+});
+
+// ── EVERY COUNTED OUTCOME HAS A RECEIPT — THE FAILURE EXIT INCLUDED (review 40 P0) ───────────────────
+describeTrust("TRUST-171 — a failure is committed, not merely recorded", () => {
+  const dataset = {
+    id: "mixed",
+    version: "1.0.0",
+    tags: [],
+    cases: ["c-ok", "c-boom"].map((id) => ({
+      id,
+      env: { kind: "prompt" as const },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    })),
+  };
+
+  it("a case that dies at dispatch leaves a receipt whose digest names the failed child's own bytes", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", dataset);
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          if (job.evalCase.id === "c-boom") throw new Error("sandbox evaporated");
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "mixed", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // The batch settled (a failed case is a measured part of the batch's story, not a batch failure)…
+    expect((await store.get(record.id))?.status).toBe("succeeded");
+    // …and BOTH outcomes are on the receipt ledger — a parent that counts an outcome the ledger never
+    // committed is the exact fail-open the failure exit used to be.
+    const committed = await receipts.list(record.id);
+    expect(committed.map((r) => r.caseId).sort()).toEqual(["c-boom", "c-ok"]);
+    // The failure receipt names the failed child, and its digest is the digest of the bytes that child
+    // carries — the synthesized failure result settles WITH the child now, so a reader can rebuild the
+    // counted failure from the row.
+    const boom = committed.find((r) => r.caseId === "c-boom");
+    const failedChild = (await runStore.list("acme", { scorecardId: record.id })).find(
+      (c) => c.id === boom?.childRunId,
+    );
+    expect(failedChild?.status).toBe("failed");
+    expect(failedChild?.result?.failure?.class).toBe("infra");
+    expect(failedChild?.result && contentDigest(failedChild.result)).toBe(boom?.resultDigest);
+  }, 20_000);
+
+  it("a RETRY reopens the case — the receipt names the attempt that answered, not the one that died first", async () => {
+    // The regression this pins (review 40): the failure exit marked the (case, trial) finalized; a retryable
+    // throw was then re-dispatched by runSuite, and the judged exit read "already ended" about the retried
+    // SUCCESS — its child stayed running forever under a batch that reported the case done.
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", { ...dataset, id: "retry", cases: dataset.cases.slice(1, 2) }); // c-boom only
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let attempts = 0;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          attempts += 1;
+          if (attempts === 1) throw new Error("transient placement blip"); // unknown throw → retryable infra
+          return result(job.evalCase.id);
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "retry", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 1,
+      retries: 1,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    expect(attempts).toBe(2);
+    const settled = await store.get(record.id);
+    expect(settled?.status).toBe("succeeded");
+    expect(settled?.summary?.find((m) => m.metric === "pass")?.mean).toBe(1); // the retried SUCCESS counted
+    // Exactly one receipt for the case, and it names the SECOND child (the attempt that answered); the first
+    // attempt's child is a terminal failed row with no claim on the case.
+    const committed = await receipts.list(record.id);
+    expect(committed).toHaveLength(1);
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    const canonical = children.find((c) => c.id === committed[0]?.childRunId);
+    expect(canonical?.status).toBe("succeeded");
+    const loser = children.find((c) => c.id !== committed[0]?.childRunId);
+    expect(loser?.status).toBe("failed"); // the died-first attempt is terminal, not a zombie
+  }, 20_000);
+});
+
+// ── THE LEDGER KEEPS THE TRIAL AXIS (review 40 P0) ───────────────────────────────────────────────────
+describeTrust("TRUST-172 — a trialled batch is summarized from the ledger, per (case, trial)", () => {
+  it("N trials leave N receipts per case and the parent aggregates them — no memory fallback", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "one",
+      version: "1.0.0",
+      tags: [],
+      cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+    });
+    const receipts = new InMemoryCaseReceiptStore();
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob) {
+          return { ...result(job.evalCase.id), ...(job.trial !== undefined ? { trial: job.trial } : {}) };
+        },
+      },
+      store,
+      runStore,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "one", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      concurrency: 2,
+      trials: 2,
+    } as never);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const settled = await store.get(record.id);
+    // Before the trial axis reached the aggregation, a trialled batch abandoned the ledger entirely (the
+    // rebuild collapsed N trials into one slot) — the receipt gate would now REFUSE such a batch, so a
+    // succeeded trialled batch is itself the certification that the ledger accounted for every trial.
+    expect(settled?.status).toBe("succeeded");
+    const committed = await receipts.list(record.id);
+    expect(committed.map((r) => `${r.caseId}#${r.trial}`).sort()).toEqual(["c1#0", "c1#1"]);
+    // Each trial's receipt names its own child, and both children are terminal with their own bytes.
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    for (const r of committed) {
+      const trialChild = children.find((c) => c.id === r.childRunId);
+      expect(trialChild?.status).toBe("succeeded");
+      expect(trialChild?.result && contentDigest(trialChild.result)).toBe(r.resultDigest);
+    }
   }, 20_000);
 });

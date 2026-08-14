@@ -2905,7 +2905,9 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
       caseId: child.caseId,
       trial: 0,
       childRunId: child.id,
-      resultDigest: "seeded",
+      // Derived from THIS result, the way production digests the committed bytes — a hand-written digest
+      // would certify the fixture rather than the code (and the receipt gate now refuses it, as it should).
+      resultDigest: contentDigest(child.result),
       committedAt: "2026-07-08T00:00:02.000Z",
     });
   }
@@ -3164,13 +3166,20 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
 
   // A child a previous run SETTLED carries a receipt: the commit point is what made it terminal. A fixture
   // with the row alone describes a state production can no longer produce.
-  const commitFor = (receipts: InMemoryCaseReceiptStore, scorecardId: string, caseId: string, childRunId: string) =>
+  const commitFor = (
+    receipts: InMemoryCaseReceiptStore,
+    scorecardId: string,
+    caseId: string,
+    childRunId: string,
+    result: CaseResult,
+  ) =>
     receipts.commit({
       scorecardId,
       caseId,
       trial: 0,
       childRunId,
-      resultDigest: "seeded",
+      // The digest of the committed bytes, the way production writes it — the receipt gate verifies it now.
+      resultDigest: contentDigest(result),
       committedAt: "2026-07-08T00:00:02.000Z",
     });
 
@@ -3290,7 +3299,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       createdAt: "2026-07-08T00:00:01.000Z",
       updatedAt: "2026-07-08T00:00:02.000Z",
     });
-    await commitFor(receipts, "sc-int", "c1", "child-c1");
+    await commitFor(receipts, "sc-int", "c1", "child-c1", passResult("c1"));
     await runs.create({
       id: "child-c2",
       tenant: "acme",
@@ -4648,7 +4657,7 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
       caseId: "c1",
       trial: 0,
       childRunId: "child-c1",
-      resultDigest: "seeded",
+      resultDigest: contentDigest({ ...caseResult(true), caseId: "c1" }),
       committedAt: "2026-07-10T00:00:02.000Z",
     });
 

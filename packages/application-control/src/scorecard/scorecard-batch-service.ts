@@ -3,6 +3,7 @@ import {
   AuthorityLostError,
   BadRequestError,
   CURRENT_EVIDENCE_VERSION,
+  type CaseCommitReceipt,
   type CaseJob,
   type CaseResult,
   ConflictError,
@@ -69,10 +70,11 @@ import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
+import type { RunStore } from "../ports/run-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
-import { type Dispatch, runSuite } from "../run-suite.js";
+import { type Dispatch, failedCaseResult, runSuite } from "../run-suite.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
@@ -114,6 +116,15 @@ interface PendingChildSettle {
   // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
   // rather than leaving the row silent about it (review 39 P0-3) — the same invariant the Temporal path holds.
   judges: ReadonlyArray<{ id: string }>;
+}
+
+// A case the in-process loop finalized down the FAILURE exit — what the judged exit needs to (a) not report
+// it as taken by somebody else and (b) commit its RECEIPT once the final failure result lands: every outcome
+// the parent counts has one, failures included (review 40 P0).
+interface FailureFinalization {
+  childId?: string;
+  executionId: string;
+  generation?: number;
 }
 
 export class ScorecardBatchService {
@@ -280,7 +291,9 @@ export class ScorecardBatchService {
         // resume that seeded "the newest row" could carry a superseded attempt's result into the rebuilt
         // batch — and a case with no receipt has no answer at all, so it is simply re-dispatched below,
         // which is what an uncommitted case means.
-        const committedReceipts = (await this.deps.caseReceipts?.list(id).catch(() => [])) ?? [];
+        // No `.catch(() => [])`: a receipt read that fails must fail the resume (it is retried), not read as
+        // "nothing committed" — which re-dispatched every finished case of the batch (review 40 P0).
+        const committedReceipts = (await this.deps.caseReceipts?.list(id)) ?? [];
         const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
         const committedIds = new Set([...canonical.values()].map((c) => c.id));
         // EVERY child is examined, and only the COMMITTED ones are evidence. Two different questions that
@@ -364,35 +377,46 @@ export class ScorecardBatchService {
                 orch.judges.length > 0
                   ? { ...adoptable, scores: completeJudgeCoverage(adoptable.scores, orch.judges) }
                   : adoptable;
-              if (
-                !(await this.claimCase(id, adoptedResult, {
-                  childId: c.id,
-                  ...(c.executionId ? { executionId: c.executionId } : {}),
-                  judges: orch.judges,
-                }))
-              )
-                continue; // another attempt owns this case — the recovery does not adopt it
-              // Through the VERB, like every other settlement: `adopt` writes `succeeded`, and the fact that
-              // this call remembered its fence is not the property being kept — being unable to forget it is.
-              // The scan walked past this one for a wrapper's worth of reason (`Run.from(c).adopt(…)` opens
-              // with `from`), which is the exact shape of false green a structural guard exists to refuse.
-              const claimed = await settleRun(
-                this.deps.runStore,
-                c.id,
-                Run.from(c).adopt(adoptedResult, this.now()).patch,
-                undefined,
-                // …AND the parent's driver, which is the authority this preprocessing acts under
-                // (arch-review 34 P0). The variable existed and was never passed, so the defect it was
-                // introduced to close stayed open: `resume` touches children BEFORE `track` proves anything,
-                // and a child's own epoch does not move when the BATCH is taken over.
-                { epoch: c.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
-              );
-              if (claimed !== undefined) {
+              // ATOMIC, like every other commit (review 40 P0): the claim and the adopt-settle are ONE
+              // transaction, so a recovery that lost the child's fence never leaves a receipt naming a child
+              // whose adoption was refused. Through the VERB still — `adopt` writes `succeeded` under the
+              // child's epoch AND the parent's driver (arch-review 34 P0), re-read inside the transaction so
+              // the fence is proven against the row the commit actually lands on. A commit that THROWS
+              // leaves the case active — the resume below re-dispatches it, which is the recoverable reading
+              // of a store fault.
+              const recoveryRuns = this.deps.runStore;
+              const adoption = this.deps.caseReceipts
+                ? await this.deps.caseReceipts
+                    .commitCase(
+                      this.receiptOf(id, adoptedResult, {
+                        childId: c.id,
+                        ...(c.executionId ? { executionId: c.executionId } : {}),
+                        judges: orch.judges,
+                      }),
+                      async (runs) => {
+                        const cur = await runs.get(c.id);
+                        if (!cur || Run.from(cur).isTerminal()) return undefined;
+                        return settleRun(runs, c.id, Run.from(cur).adopt(adoptedResult, this.now()).patch, undefined, {
+                          epoch: cur.ownerEpoch ?? 0,
+                          ...(parentDriver ? { parentDriver } : {}),
+                        });
+                      },
+                      recoveryRuns,
+                    )
+                    .catch(() => undefined)
+                : undefined;
+              if (adoption === undefined) continue; // store fault — left active: the resume below re-dispatches it
+              if (adoption.kind === "committed") {
                 adopted += 1;
                 seed.push(adoptedResult);
                 seedRunIds.push(c.id);
                 continue;
               }
+              // Another attempt owns this case — the recovery does not adopt it.
+              if (adoption.kind === "already_committed" && adoption.receipt.childRunId !== c.id) continue;
+              // `unsettled` (the child settled on its own between the list and this write — the fence
+              // refused, and the claim rolled back with it) or the idempotent re-claim of this very child:
+              // the persisted truth decides — re-read the child and follow it.
               const settled = await this.deps.runStore.get(c.id);
               // It finished while we were harvesting: its own result is the evidence, not ours.
               if (settled?.result) {
@@ -629,7 +653,9 @@ export class ScorecardBatchService {
       const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
       // …and the same rule decides what a rebuilt context already considers done (review 39, Phase 4): a
       // case is done when a receipt says which attempt answered it, never when a row happens to be newest.
-      const committedReceipts = (await this.deps.caseReceipts?.list(id).catch(() => [])) ?? [];
+      // No `.catch(() => [])` — an unreadable ledger fails the context build (retried), it does not read as
+      // "nothing is done" (review 40 P0).
+      const committedReceipts = (await this.deps.caseReceipts?.list(id)) ?? [];
       const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
       for (const c of canonical.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
     }
@@ -1054,8 +1080,11 @@ export class ScorecardBatchService {
     // WHICH CHILD IS THE CASE'S ANSWER (review 39 P0). The receipt says which attempt earned the commit; the
     // fallback — largest updatedAt — answers which row was touched last, which is a different question and was
     // the only one this could ask. Per case, so a batch that predates receipts still resolves the old way.
-    const committed = await this.deps.caseReceipts?.list(id).catch(() => []);
-    const latest = ScorecardBatch.canonicalChildPerCase(children, committed ?? []);
+    // No `.catch(() => [])`: a receipt read that fails must fail THIS finalize (the workflow retries it),
+    // not quietly report every case as uncommitted — which either re-dispatched a finished batch or threw a
+    // batch-wide missing-case error over a transient read (review 40 P0).
+    const committed = (await this.deps.caseReceipts?.list(id)) ?? [];
+    const latest = ScorecardBatch.canonicalChildPerCase(children, committed);
     const order = new Map([...ctx.caseIndex.keys()].map((cid, i) => [cid, i] as const));
     const results = [...latest.values()]
       .map((c) => c.result)
@@ -1075,12 +1104,28 @@ export class ScorecardBatchService {
     // rebuilt context (another worker, a restart) has an empty set, which made the same batch answer
     // differently depending on where the finalizer happened to run. A case is accounted for when a row on the
     // ledger carries its result, and by nothing else.
-    const missing = [...ctx.caseIndex.keys()].filter((cid) => !latest.get(cid)?.result);
+    const missing = [...ctx.caseIndex.keys()].filter((cid) => !latest.get(childKey(cid))?.result);
     if (missing.length > 0)
       throw new InternalError(
         "UPSTREAM_ERROR",
         { scorecard: id, missing: missing.slice(0, 20), count: missing.length },
         `${missing.length} case(s) have no result on the ledger — the batch cannot be summarized over the ones that do`,
+      );
+    // …and the LEDGER rows must be the bytes their receipts vouch for (review 40 P0). Checked over the child
+    // rows — never the in-memory copies a later offload may touch — and BEFORE anything downstream publishes:
+    // counting the right case with another attempt's result is the subtler half of the missing-case defect.
+    const receiptByKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r] as const));
+    const divergent = [...latest.entries()].filter(([key, child]) => {
+      const receipt = receiptByKey.get(key);
+      return (
+        receipt !== undefined && child.result !== undefined && contentDigest(child.result) !== receipt.resultDigest
+      );
+    });
+    if (divergent.length > 0)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { scorecard: id, divergent: divergent.map(([key]) => key).slice(0, 20), count: divergent.length },
+        `${divergent.length} case(s) carry a result whose digest is not their receipt's — the batch cannot be summarized over rows the ledger does not vouch for`,
       );
     const scorecard: Scorecard = {
       suiteId: rec.dataset.id,
@@ -1553,12 +1598,17 @@ export class ScorecardBatchService {
   // SUCCEEDS while one of its cases never reached the ledger is a scorecard whose summary counts a result no
   // reader can find, because the aggregate was built from this process's memory and the ledger disagrees.
   private async settleJudgedChild(
+    scorecardId: string,
     pending: Map<string, PendingChildSettle>,
-    finalized: Set<string>,
+    finalized: Map<string, FailureFinalization>,
     result: CaseResult,
   ): Promise<"committed" | "lost" | "unwritten"> {
     const key = childKey(result.caseId, result.trial);
-    if (finalized.has(key)) return "committed"; // this loop already ended it, down the failure exit
+    // This loop already ended it, down the failure exit — the child is terminal (with this very result on
+    // it). What is left is the RECEIPT: every outcome the parent counts has one, failures included
+    // (review 40 P0), or the ledger rebuild below cannot account for the case and refuses the batch.
+    const failure = finalized.get(key);
+    if (failure) return this.commitFailureReceipt(scorecardId, result, failure);
     const entry = pending.get(key);
     if (!entry) return "lost"; // never ours, or a second call for one case
     pending.delete(key);
@@ -1582,36 +1632,56 @@ export class ScorecardBatchService {
     return outcome.kind;
   }
 
-  // ── CLAIM THE CASE, THEN COMMIT THE CHILD (review 39 P0) ─────────────────────────────────────────────
-  //
-  // The receipt is where "at most one canonical outcome per case" becomes a fact of the database instead of a
-  // comparison the parent makes afterwards over rows that are all equally real. It is claimed BEFORE the
-  // child's terminal write, because the order is what makes it a decision: an attempt that lost the claim
-  // must not go on to publish evidence as though it were the case's answer.
-  //
-  // Losing is not a failure. Another physical attempt of the same case — a speculative duplicate, a
-  // spillover, a recovery — got there first, and its evidence is the case's. This attempt's rows stay where
-  // they are; what it does not get is the right to be counted.
-  //
-  // With no receipt store wired (a deployment that has not migrated) the answer is `true`: the ledger stays
-  // the only witness, exactly as before. A claim that THROWS is a store fault, and it is reported as one
-  // rather than silently treated as a win — an unreadable decision is not a decision made in our favour.
-  private async claimCase(
+  // The failure exit's receipt — raw `commit`, not `commitCase`: the child was already terminalized (with
+  // the failure result on it) by the exit itself, so there is no child write left to couple. The claim is
+  // what makes the failure COUNTABLE; a claim that lost names another attempt as the case's owner.
+  private async commitFailureReceipt(
     scorecardId: string,
     result: CaseResult,
-    // `generation` is optional because one caller genuinely does not know it: a RECOVERY adopting a result
-    // from a backend never opened the attempt that produced it. An unknown attempt number is recorded as
-    // absent rather than as 0 — 0 is a real generation, and claiming to know is worse than saying nothing.
+    where: FailureFinalization,
+  ): Promise<"committed" | "lost" | "unwritten"> {
+    const receipts = this.deps.caseReceipts;
+    if (!receipts || !where.childId || !this.deps.runStore) return "committed"; // no ledger to account on
+    const outcome = await receipts
+      .commit({
+        scorecardId,
+        caseId: result.caseId,
+        trial: result.trial ?? 0,
+        childRunId: where.childId,
+        executionId: where.executionId,
+        ...(where.generation !== undefined
+          ? { generation: where.generation, attemptId: attemptIdOf(where.executionId, where.generation) }
+          : {}),
+        resultDigest: contentDigest(result),
+        committedAt: this.now(),
+      })
+      .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+    if (outcome instanceof Error) return "unwritten"; // an unclaimable failure must refuse the batch, not pass it
+    return outcome.kind === "committed" || outcome.receipt.childRunId === where.childId ? "committed" : "lost";
+  }
+
+  // ── THE RECEIPT NAMES WHAT THE CHILD WILL CARRY (review 39 P0 · review 40 P0) ────────────────────────
+  //
+  // A pure builder: the claim itself is `commitCase` now — one transaction with the child's terminal write.
+  // The digest is computed over the result AS IT WILL BE PERSISTED, which is why every caller builds the
+  // receipt AFTER `assembleCaseEvidence`: the assembly mutates the result (snapshot refs, recordingRef), and
+  // a digest taken before it named bytes no row ever carried — the parity check then reported a divergence
+  // on every case with an offloaded snapshot, which is a diagnostic crying wolf.
+  //
+  // `generation` is optional because one caller genuinely does not know it: a RECOVERY adopting a result
+  // from a backend never opened the attempt that produced it. An unknown attempt number is recorded as
+  // absent rather than as 0 — 0 is a real generation, and claiming to know is worse than saying nothing.
+  private receiptOf(
+    scorecardId: string,
+    result: CaseResult,
     entry: {
-      childId?: string;
+      childId: string;
       executionId?: string;
       generation?: number;
       judges: ReadonlyArray<{ id: string }>;
     },
-  ): Promise<boolean> {
-    const receipts = this.deps.caseReceipts;
-    if (!receipts || !entry.childId) return true;
-    const outcome = await receipts.commit({
+  ): CaseCommitReceipt {
+    return {
       scorecardId,
       caseId: result.caseId,
       trial: result.trial ?? 0,
@@ -1626,42 +1696,78 @@ export class ScorecardBatchService {
       resultDigest: contentDigest(result),
       ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
       committedAt: this.now(),
-    });
-    return outcome.kind === "committed" || outcome.receipt.childRunId === entry.childId;
+    };
   }
 
-  // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39, Phase 3) ─────────────────────────────────
+  // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39 Phase 3 · review 40 P0) ───────────────────
   //
   // The in-process driver summarized the results it held IN MEMORY — the objects `runSuite` handed back. The
   // ledger is what a reader sees a year later, and the two can differ in the one way that matters: a case
   // whose canonical outcome is another attempt's. Nothing in memory knows that; the receipt does.
   //
-  // So the aggregate is rebuilt from the committed children before it is summarized, scored and settled.
-  // Deliberately NOT for a trialled batch: child rows carry no trial axis, so rebuilding by case id would
-  // collapse N trials into one — for those the in-memory set stays authoritative and the parity check is what
-  // reports a disagreement. Nothing to rebuild from (no run store, no receipts, no children) also keeps the
-  // in-memory set, which is the same behaviour every deployment had before receipts existed.
-  private async resultsFromLedger(id: string, tenant: string, inMemory: CaseResult[]): Promise<CaseResult[]> {
+  // Every counted outcome must trace to a receipt, on the (case, trial) axis the receipt's own key carries —
+  // failures included, since the failure exit commits one too. And there is NO fallback to memory any more:
+  // "receipt read failed", "fewer receipts than results" and "trialled batch" all used to quietly hand the
+  // aggregate back to this process's memory, which is the Release defect in a different coat — a configured
+  // authority that is unreadable is not an authority that is absent. A batch that cannot be accounted for on
+  // the ledger REFUSES to summarize (the throw fails it into a state recovery re-drives), and a digest that
+  // matches is what lets the in-memory object stand in for a child row that carries no result copy.
+  private async resultsFromLedger(
+    id: string,
+    tenant: string,
+    inMemory: CaseResult[],
+    // Results CARRIED from another batch (retry-failed, child-unbacked): they executed nothing here, have no
+    // child to receive a receipt, and their provenance is the SOURCE batch's ledger (origin.retryOf). They
+    // pass through verbatim; everything THIS batch executed is held to the receipt gate.
+    carried?: ReadonlySet<string>,
+  ): Promise<CaseResult[]> {
     const runStore = this.deps.runStore;
     const receipts = this.deps.caseReceipts;
-    if (!runStore || !receipts) return inMemory;
-    if (inMemory.some((r) => (r.trial ?? 0) > 0)) return inMemory; // trialled — see above
-    try {
-      const committed = await receipts.list(id);
-      if (committed.length === 0) return inMemory;
-      const children = await runStore.list(tenant, { scorecardId: id });
-      const canonical = ScorecardBatch.canonicalChildPerCase(children, committed);
-      const order = new Map(inMemory.map((r, i) => [r.caseId, i] as const));
-      const fromLedger = [...canonical.values()]
-        .map((child) => child.result)
-        .filter((r): r is CaseResult => r !== undefined)
-        .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0));
-      // A rebuild that would DROP cases is not a rebuild — it is a smaller batch, and the missing-case check
-      // is the place that decides what to do about that. Keep the in-memory set and let parity say so.
-      return fromLedger.length === inMemory.length ? fromLedger : inMemory;
-    } catch {
-      return inMemory; // a ledger read that failed says nothing about the batch
+    if (!runStore || !receipts || inMemory.length === 0) return inMemory;
+    // Throws propagate: an unreadable ledger refuses the batch instead of summarizing from memory.
+    const committed = await receipts.list(id);
+    const children = await runStore.list(tenant, { scorecardId: id });
+    const byKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r] as const));
+    const byId = new Map(children.map((c) => [c.id, c] as const));
+    const rebuilt: CaseResult[] = [];
+    const unaccounted: string[] = [];
+    for (const r of inMemory) {
+      if (carried?.has(r.caseId)) {
+        rebuilt.push(r);
+        continue;
+      }
+      const key = childKey(r.caseId, r.trial);
+      const receipt = byKey.get(key);
+      if (!receipt) {
+        unaccounted.push(`${key} (no receipt)`);
+        continue;
+      }
+      const child = byId.get(receipt.childRunId);
+      if (child?.result) {
+        // The committed child's own copy is the answer — and its bytes must be the receipt's. A child row
+        // that disagrees with its own receipt is a permanent divergence a reader will hydrate a year from
+        // now; counting ANYTHING for that case (the row, or this process's memory) would publish a summary
+        // built over bytes the ledger does not vouch for.
+        if (contentDigest(child.result) === receipt.resultDigest) rebuilt.push(child.result);
+        else unaccounted.push(`${key} (child digest mismatch)`);
+        continue;
+      }
+      // A child with NO result copy (a legacy failure row) may be stood in for by the in-memory object ONLY
+      // when the receipt vouches for its bytes — the digest is what turns "this process remembers" into
+      // "the ledger agrees".
+      if (contentDigest(r) === receipt.resultDigest) {
+        rebuilt.push(r);
+        continue;
+      }
+      unaccounted.push(`${key} (digest mismatch)`);
     }
+    if (unaccounted.length > 0)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { scorecard: id, unaccounted: unaccounted.slice(0, 20), count: unaccounted.length },
+        `${unaccounted.length} counted case(s) cannot be traced to a committed receipt — the batch cannot be summarized from results the ledger does not vouch for`,
+      );
+    return rebuilt;
   }
 
   // ── THE LEDGER AND THE RECEIPTS MUST AGREE (review 39, Phase 1 parity) ───────────────────────────────
@@ -1680,27 +1786,20 @@ export class ScorecardBatchService {
     try {
       const committed = await receipts.list(id);
       if (committed.length === 0) return; // nothing claimed (a batch that predates the store) — nothing to say
-      // A case that died before producing an outcome leaves by the FAILURE exit, which finalizes it without a
-      // commit — there is no canonical result for a receipt to point at, only a failure on the child row. So
-      // those are not "counted without a receipt"; counting them as such would bury the real disagreement
-      // under every ordinary failed case in the batch.
-      const ledgerKeys = new Set(counted.filter((r) => !r.failure).map((r) => childKey(r.caseId, r.trial)));
+      // Failures included: the failure exit commits a receipt too (review 40 P0), so a counted failure with
+      // no receipt is exactly the disagreement this exists to surface. The DIGESTS are no longer compared
+      // here — they are enforced at the gates (resultsFromLedger / the finalize divergence check), and this
+      // read runs after offloadResults may have touched the in-memory copies, so a byte comparison against
+      // memory would cry wolf about mutations the ledger never saw.
+      const ledgerKeys = new Set(counted.map((r) => childKey(r.caseId, r.trial)));
       const receiptKeys = new Set(committed.map((r) => childKey(r.caseId, r.trial)));
       const uncounted = [...receiptKeys].filter((k) => !ledgerKeys.has(k));
       const unclaimed = [...ledgerKeys].filter((k) => !receiptKeys.has(k));
-      // …and the DIGESTS, not just the keys: counting the right case with another attempt's result is the
-      // subtler half of the same disagreement.
-      const byKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r]));
-      const divergent = counted.filter((r) => {
-        if (r.failure) return false;
-        const receipt = byKey.get(childKey(r.caseId, r.trial));
-        return receipt !== undefined && receipt.resultDigest !== contentDigest(r);
-      });
-      if (uncounted.length === 0 && unclaimed.length === 0 && divergent.length === 0) return;
+      if (uncounted.length === 0 && unclaimed.length === 0) return;
       await this.appendBatchStep(id, {
         phase: "persist",
         status: "info",
-        message: `receipt parity: ${uncounted.length} committed case(s) not counted, ${unclaimed.length} counted case(s) with no receipt, ${divergent.length} counted with another attempt's result`,
+        message: `receipt parity: ${uncounted.length} committed case(s) not counted, ${unclaimed.length} counted case(s) with no receipt`,
       });
     } catch {
       // A parity read that fails says nothing about the batch — it is a diagnostic, and a diagnostic that
@@ -1744,14 +1843,15 @@ export class ScorecardBatchService {
   // So the ORDER is stated once, and it is the whole content of the contract:
   //
   //   ① complete the judge coverage — a selected judge that never answered leaves a stated row, not silence
-  //   ② CLAIM the case — the receipt decides which physical attempt is the case's answer (a DB constraint)
-  //   ③ assemble the evidence — snapshot offload + recording seal, BEFORE the terminal write, because
-  //      "judged but not assembled" is not finished
-  //   ④ commit the child — one terminal write, fenced by the child's epoch and the parent's driver
+  //   ② assemble the evidence — snapshot offload + recording seal, staged under the attempt's OWN key
+  //      (`attempts/<attemptId>`), so a concurrent attempt's staging never overwrites a winner's bytes: a
+  //      loser's artifacts become unreferenced orphans, not corruption
+  //   ③ COMMIT — the receipt claim and the child's one terminal write, in ONE transaction (review 40 P0).
+  //      As two writes, a claim whose child settle was then refused poisoned the case forever: canonical
+  //      right acquired, canonical artifact never recorded. Claiming the right to commit is not the commit.
   //
-  // ② before ③ matters: an attempt that lost the claim must not publish artifacts as though it were the
-  // case's answer. ③ before ④ matters for the opposite reason: whatever the case produced has to be part of
-  // the one write a reader will ever see.
+  // ② before ③ is what makes the receipt's digest TRUE: the assembly mutates the result (snapshot refs,
+  // recordingRef), and the digest must name the bytes the child row will actually carry.
   //
   // The result is what the caller must persist and count — coverage may have added rows to it — so it is
   // returned rather than mutated in place.
@@ -1772,44 +1872,72 @@ export class ScorecardBatchService {
         : input.result;
     // A batch with no run store has no child to commit — the case really did finish, and there is nothing for
     // a receipt to make canonical either.
-    if (!input.childId || !this.deps.runStore) return { kind: "committed", result: covered };
-    if (
-      !(await this.claimCase(input.scorecardId, covered, {
-        childId: input.childId,
-        executionId: input.executionId,
-        generation: input.generation,
-        judges: input.judges,
-      }))
-    )
-      return { kind: "lost" };
+    const runStore = this.deps.runStore;
+    const childId = input.childId;
+    if (!childId || !runStore) return { kind: "committed", result: covered };
     await this.assembleCaseEvidence(covered, {
       scorecardId: input.scorecardId,
       executionId: input.executionId,
       generation: input.generation,
       ...(input.unisolated ? { unisolated: true } : {}),
     });
-    const settled = await this.settleChild(
-      input.childId,
-      (cur) => ({
-        ...Run.from(cur).succeed(covered, this.now()).patch,
-        // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-        ...(input.ranOn ? { runtime: input.ranOn } : {}),
-      }),
-      { scorecardId: input.scorecardId, epoch: input.epoch },
-    ).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
-    if (settled instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
-    return settled === undefined ? { kind: "lost" } : { kind: "committed", result: covered };
+    // The constructor guard couples the receipt store to the run store, so this branch is unreachable in a
+    // wired service — and if a wiring ever uncouples them, refusing the commit is the only honest answer.
+    const receipts = this.deps.caseReceipts;
+    if (!receipts) return { kind: "unwritten" };
+    const outcome = await receipts
+      .commitCase(
+        this.receiptOf(input.scorecardId, covered, {
+          childId,
+          executionId: input.executionId,
+          generation: input.generation,
+          judges: input.judges,
+        }),
+        (runs) =>
+          this.settleChildOn(
+            runs,
+            childId,
+            (cur) => ({
+              ...Run.from(cur).succeed(covered, this.now()).patch,
+              // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
+              ...(input.ranOn ? { runtime: input.ranOn } : {}),
+            }),
+            { scorecardId: input.scorecardId, epoch: input.epoch },
+          ),
+        runStore,
+      )
+      .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+    if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
+    if (outcome.kind === "committed") return { kind: "committed", result: covered };
+    if (outcome.kind === "already_committed")
+      // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child
+      // owning the case means a concurrent attempt won — this one was never the case's answer.
+      return outcome.receipt.childRunId === childId ? { kind: "committed", result: covered } : { kind: "lost" };
+    // `unsettled` — the child's fence refused (takeover / cancel / already terminal) and the claim rolled
+    // back with it: the case belongs to whoever holds the authority now.
+    return { kind: "lost" };
   }
 
   private async settleChild(
+    childId: string,
+    settle: (current: RunRecord) => Partial<RunRecord>,
+    parentDriver?: { scorecardId: string; epoch: number },
+  ): Promise<RunRecord | undefined> {
+    const store = this.deps.runStore;
+    if (!store) return undefined;
+    return this.settleChildOn(store, childId, settle, parentDriver);
+  }
+
+  private async settleChildOn(
+    // The store this settle must go through — commitCase hands a TRANSACTION-BOUND twin so the child's
+    // terminal write commits or rolls back with the receipt claim (review 40 P0).
+    store: RunStore,
     childId: string,
     settle: (current: RunRecord) => Partial<RunRecord>,
     // The batch this child belongs to, and the epoch its driver holds. Proved INSIDE the write: the child's
     // own epoch cannot answer "am I still this batch's driver" (arch-review 33 P0).
     parentDriver?: { scorecardId: string; epoch: number },
   ): Promise<RunRecord | undefined> {
-    const store = this.deps.runStore;
-    if (!store) return undefined;
     const current = await store.get(childId);
     if (!current || Run.from(current).isTerminal()) return undefined;
     // …and the CONDITION travels with the write (Tier B, the cancel/completion race). The read above builds
@@ -1991,9 +2119,9 @@ export class ScorecardBatchService {
     // execute; their replay is simply not claimed as this attempt's, because the buffer may still hold an
     // earlier one's frames and nothing here can tell.
     const unisolated = new Set<string>();
-    // Cases this loop finalized down the FAILURE exit. The judged exit consults it so a case that ended one
-    // way is not later reported as taken by somebody else.
-    const finalizedByFailure = new Set<string>();
+    // Cases this loop finalized down the FAILURE exit — see FailureFinalization. The judged exit consults it
+    // so a case that ended one way is not later reported as taken by somebody else, and commits its receipt.
+    const finalizedByFailure = new Map<string, FailureFinalization>();
     const epoch = opts.authority?.epoch ?? opening.ownerEpoch ?? 0;
     const fenced = { expectOwnerEpoch: epoch };
     const epochOpt = { epoch };
@@ -2085,6 +2213,12 @@ export class ScorecardBatchService {
           { scorecard: id },
           "this replica no longer owns the batch — another one claimed it while this loop was running, so the case was not dispatched.",
         );
+      // A RETRY REOPENS THE CASE (review 40). runSuite re-dispatches a retryable throw, and the previous
+      // attempt's failure exit had already marked the case finalized — so the judged exit would meet the
+      // retried SUCCESS, read "already ended", and skip settling its child entirely: a stuck running row
+      // under a batch that reports the case done. A new dispatch of the same (case, trial) is a new attempt,
+      // and the failure bookkeeping of the old one does not describe it.
+      finalizedByFailure.delete(childKey(job.evalCase.id, job.trial));
       const enriched: CaseJob = {
         ...job,
         tenant,
@@ -2104,28 +2238,7 @@ export class ScorecardBatchService {
         ...(judge ? { judge } : {}),
       };
       const runStore = this.deps.runStore;
-      // Child run (if any): born queued, flipped to running via onStarted only when compute actually starts (a runner
-      // leases it / a managed backend dispatches it). Tagged with parentScorecardId, hidden from the activity list by default.
       let child: RunRecord | undefined;
-      if (runStore) {
-        child = newScorecardChildRun({
-          id: this.newId(),
-          tenant,
-          harness: { id: harnessId, version: harnessVersion },
-          caseId: job.evalCase.id,
-          parentScorecardId: id,
-          // The id its evidence will be keyed by, stamped rather than left to be re-derived (mig 0172) —
-          // the derivation drops the trial, and a trialled case has one child per trial.
-          executionId: executionIdOf(job, id),
-          ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
-          ...(childOrigin ? { origin: childOrigin } : {}),
-          ...(childEnv ? { envelope: childEnv } : {}),
-          now: this.now(),
-        });
-        // …and the in-process loop commits the same intent under the epoch IT holds (P1 above).
-        await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch } });
-        caseToChild.set(childKey(job.evalCase.id, job.trial), child.id);
-      }
       // ── AN ATTEMPT IS OPENED BY THE DISPATCH, NOT BY WHETHER ANYONE HAPPENED TO RECORD ──────────────
       //
       // This used to `peek` first and open a new attempt only when the buffer already held something. But the
@@ -2152,6 +2265,31 @@ export class ScorecardBatchService {
         }
       }
       try {
+        // Child run (if any): born queued, flipped to running via onStarted only when compute actually starts
+        // (a runner leases it / a managed backend dispatches it). Tagged with parentScorecardId, hidden from
+        // the activity list by default. INSIDE the failure exit's reach (review 40): a create that throws is a
+        // store fault, and it must leave by the same finalization bookkeeping as any other dispatch failure —
+        // outside it, the judged exit later read "somebody else took this case" about a case nobody took, and
+        // that answer aborts the whole batch (the arch-review 38 P1 shape, one line earlier).
+        if (runStore) {
+          child = newScorecardChildRun({
+            id: this.newId(),
+            tenant,
+            harness: { id: harnessId, version: harnessVersion },
+            caseId: job.evalCase.id,
+            parentScorecardId: id,
+            // The id its evidence will be keyed by, stamped rather than left to be re-derived (mig 0172) —
+            // the derivation drops the trial, and a trialled case has one child per trial.
+            executionId: executionIdOf(job, id),
+            ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
+            ...(childOrigin ? { origin: childOrigin } : {}),
+            ...(childEnv ? { envelope: childEnv } : {}),
+            now: this.now(),
+          });
+          // …and the in-process loop commits the same intent under the epoch IT holds (P1 above).
+          await runStore.create(child, undefined, { parentDriver: { scorecardId: id, epoch } });
+          caseToChild.set(childKey(job.evalCase.id, job.trial), child.id);
+        }
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
         const childId = child?.id;
         // The attempt opened above travels WITH the job (review 39 P0-1), so a producer in another process
@@ -2241,10 +2379,19 @@ export class ScorecardBatchService {
             err instanceof AppError
               ? { code: err.code, message: err.message }
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-          await this.settleChild(child.id, (cur) => Run.from(cur).fail(error, this.now()).patch, {
-            scorecardId: id,
-            epoch,
-          });
+          // The child settles WITH the synthesized failure result — the same bytes runSuite is about to count
+          // (failedCaseResult is pure over (job, err), so the two fabrications are identical). That is what
+          // lets the parent rebuild a counted failure from the ledger, and what the failure RECEIPT's digest
+          // will name (committed at the judged exit, where the failure is known to be final — a retryable
+          // throw is re-dispatched, and a non-final attempt must not claim the case).
+          await this.settleChild(
+            child.id,
+            (cur) => Run.from(cur).fail(error, this.now(), failedCaseResult(job, err)).patch,
+            {
+              scorecardId: id,
+              epoch,
+            },
+          );
           // …and this case is FINALIZED by this exit. The dispatch registered a pending entry; leaving it
           // would have `settleJudgedChild` meet an already-terminal child later and report `lost` —
           // "somebody else took this case" about a case this very loop just settled, which then aborted the
@@ -2256,7 +2403,12 @@ export class ScorecardBatchService {
         // that answer aborts the whole batch (arch-review 38 P1). One case, one finalization, either exit.
         const finalizedKey = childKey(job.evalCase.id, job.trial);
         pendingChildSettle.delete(finalizedKey);
-        finalizedByFailure.add(finalizedKey);
+        const failedGeneration = attemptGeneration.get(executionIdOf(job, id));
+        finalizedByFailure.set(finalizedKey, {
+          ...(child ? { childId: child.id } : {}),
+          executionId: executionIdOf(job, id),
+          ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
+        });
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }
     };
@@ -2420,7 +2572,7 @@ export class ScorecardBatchService {
           // a row left running forever because the thing that was going to settle it was cancelled.
           if (controller.signal.aborted) {
             childSettles.push(
-              this.settleJudgedChild(pendingChildSettle, finalizedByFailure, r).then((outcome) => {
+              this.settleJudgedChild(id, pendingChildSettle, finalizedByFailure, r).then((outcome) => {
                 if (outcome === "committed") announce();
                 return outcome;
               }),
@@ -2437,7 +2589,7 @@ export class ScorecardBatchService {
             // by "case completed" on the live bus and an export to the tenant's platform anyway — a case
             // announced and shipped by the one process whose result the ledger just declined.
             const settleJudged = (): Promise<"committed" | "lost" | "unwritten"> =>
-              this.settleJudgedChild(pendingChildSettle, finalizedByFailure, r).then((outcome) => {
+              this.settleJudgedChild(id, pendingChildSettle, finalizedByFailure, r).then((outcome) => {
                 if (outcome !== "committed") return outcome;
                 announce();
                 // Case-completion chaining: export only after the case is BOTH judged and committed — and
@@ -2576,7 +2728,10 @@ export class ScorecardBatchService {
       phase = "persist";
       // The aggregate is the LEDGER's, not this process's memory (see resultsFromLedger) — and the parity
       // check then compares what was counted against what was committed.
-      scorecard = { ...scorecard, results: await this.resultsFromLedger(id, tenant, scorecard.results) };
+      scorecard = {
+        ...scorecard,
+        results: await this.resultsFromLedger(id, tenant, scorecard.results, seedChildBacked ? undefined : seededIds),
+      };
       await this.checkReceiptParity(id, scorecard.results);
       const summary = summarizeScorecard(scorecard);
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
