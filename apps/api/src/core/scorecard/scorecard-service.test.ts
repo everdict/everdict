@@ -2340,7 +2340,9 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
 
     // The child run's final result carries the sealed recording ref; the recording is retrievable.
     const child = await runStore.get("sc-2");
-    expect(child?.result?.recordingRef?.ref).toBe("memory://recording/evd-sc-0-c1");
+    // …under the attempt the dispatch opened for it (mig 0177), which is the name a replay reader compares
+    // against the receipt rather than trusting that both derived it the same way.
+    expect(child?.result?.recordingRef?.ref).toBe("memory://recording/evd-sc-0-c1/g1");
     expect((await recordingStore.get("evd-sc-0-c1"))?.tracks.frames).toHaveLength(1);
   });
 

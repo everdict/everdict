@@ -29,11 +29,11 @@ describe("PgRecordingStore", () => {
 
     // Then it INSERTs with an ON CONFLICT jsonb append, carrying [runId, track, entry-json, generation]
     expect(calls[0]?.text).toContain("INSERT INTO everdict_recordings");
-    expect(calls[0]?.text).toContain("ON CONFLICT (run_id) DO UPDATE");
+    // …onto the row of the attempt this producer serves (mig 0177) — the conflict target is the ATTEMPT,
+    // so a recorder still stamping an earlier attempt's number appends to that attempt's row and never to
+    // its successor's.
+    expect(calls[0]?.text).toContain("ON CONFLICT (run_id, generation) DO UPDATE");
     expect(calls[0]?.text).toContain("jsonb_set");
-    // …and the attempt this producer serves (mig 0173). NULL = a producer nobody has told, which is every
-    // first attempt; a recorder still stamping an earlier attempt's number writes nothing.
-    expect(calls[0]?.text).toContain("everdict_recordings.generation = $4");
     expect(calls[0]?.params).toEqual(["evd-run-1", "frames", JSON.stringify({ t: 1000, ref: "s3://f" }), 0]);
   });
 
@@ -44,7 +44,7 @@ describe("PgRecordingStore", () => {
 
     const ref = await store.seal("evd-run-1", { envKind: "browser" }, 0);
 
-    expect(ref?.ref).toBe("pg://recording/evd-run-1");
+    expect(ref?.ref).toBe("pg://recording/evd-run-1/g0");
     const update = calls.find((c) => c.text.includes("UPDATE everdict_recordings"));
     // t0 and effectiveFidelity are DERIVED INSIDE the write, over the row it is claiming — the read-then-
     // write version let a reset land in between and stamp one attempt's metadata onto another's recording.
@@ -67,6 +67,40 @@ describe("PgRecordingStore", () => {
     const { client } = fakeClient(() => ({ rows: [] }));
     const store = new PgRecordingStore(client);
     expect(await store.seal("evd-run-x", { envKind: "repo" }, 0)).toBeUndefined();
+  });
+
+  it("open INSERTs the next attempt in one statement — it never clears the previous one", async () => {
+    // Given the run already has attempts (the statement computes MAX(generation) + 1 itself)
+    const { client, calls } = fakeClient(() => ({ rows: [{ generation: 3 }] }));
+    const store = new PgRecordingStore(client);
+
+    expect(await store.open("evd-run-1")).toBe(3);
+    // Then it is an INSERT, not the UPDATE-to-empty it used to be: the previous attempt's tracks, seal and
+    // metadata are untouched, and the next generation is claimed by the same statement that computed it.
+    expect(calls[0]?.text).toContain("INSERT INTO everdict_recordings");
+    expect(calls[0]?.text).toContain("COALESCE(MAX(generation), 0) + 1");
+    expect(calls[0]?.text).not.toContain("UPDATE");
+    expect(calls[0]?.params).toEqual(["evd-run-1"]);
+  });
+
+  it("open REFUSES to invent an attempt number when the insert came back empty", async () => {
+    // Nothing deletes recordings, so an insert that returns no row is a store fault. Answering 0 would hand
+    // the caller the generation every un-fenced producer already stamps — a fence that fences nothing.
+    const { client } = fakeClient(() => ({ rows: [] }));
+    await expect(new PgRecordingStore(client).open("evd-run-1")).rejects.toThrow("was not opened");
+  });
+
+  it("get serves the attempt the caller named, or the newest sealed one when it names none", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const store = new PgRecordingStore(client);
+
+    await store.get("evd-run-1", 2);
+    expect(calls[0]?.text).toContain("ORDER BY generation DESC LIMIT 1");
+    expect(calls[0]?.params).toEqual(["evd-run-1", 2]);
+
+    // No generation → NULL, which the predicate reads as "any", so the newest sealed attempt answers.
+    await store.get("evd-run-1");
+    expect(calls[1]?.params).toEqual(["evd-run-1", null]);
   });
 
   it("get maps a sealed row to a validated CaseRecording", async () => {

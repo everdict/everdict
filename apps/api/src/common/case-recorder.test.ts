@@ -19,7 +19,7 @@ describe("CaseRecorder", () => {
     const recordings = new InMemoryRecordingStore();
     const artifacts = new InMemoryArtifactStore();
     const recorder = new CaseRecorder(recordings, artifacts, fakeClock());
-    const attempt = await recordings.reset("evd-run-1"); // the dispatch opens it; producers stamp what it returns
+    const attempt = await recordings.open("evd-run-1"); // the dispatch opens it; producers stamp what it returns
 
     // When a runner reports a frame
     await recorder.recordFrame("evd-run-1", "AAAA", attempt);
@@ -38,7 +38,7 @@ describe("CaseRecorder", () => {
     const recordings = new InMemoryRecordingStore();
     const artifacts = new InMemoryArtifactStore();
     const recorder = new CaseRecorder(recordings, artifacts, fakeClock());
-    const attempt = await recordings.reset("evd-run-1"); // the dispatch opens it; producers stamp what it returns
+    const attempt = await recordings.open("evd-run-1"); // the dispatch opens it; producers stamp what it returns
 
     await recorder.recordFrame("evd-run-1", "SAME", attempt);
     await recorder.recordFrame("evd-run-1", "SAME", attempt);
@@ -57,7 +57,7 @@ describe("CaseRecorder", () => {
     // Given a runner pushing lifecycle log lines
     const recordings = new InMemoryRecordingStore();
     const recorder = new CaseRecorder(recordings, new InMemoryArtifactStore(), fakeClock());
-    const attempt = await recordings.reset("evd-run-1"); // the dispatch opens it; producers stamp what it returns
+    const attempt = await recordings.open("evd-run-1"); // the dispatch opens it; producers stamp what it returns
 
     await recorder.recordLog("evd-run-1", "Started", attempt);
     await recorder.recordLog("evd-run-1", "Completed", attempt);
@@ -72,7 +72,7 @@ describe("CaseRecorder", () => {
     // Given a recorder with NO artifact store (persistent recording still on; frames just can't offload)
     const recordings = new InMemoryRecordingStore();
     const recorder = new CaseRecorder(recordings, undefined, fakeClock());
-    const attempt = await recordings.reset("evd-run-1");
+    const attempt = await recordings.open("evd-run-1");
 
     // When both a frame and a log are reported
     await recorder.recordFrame("evd-run-1", "AAAA", attempt);
@@ -89,7 +89,7 @@ describe("CaseRecorder", () => {
     // Given a recorder and producer-prepared deep-track entries (byte-heavy ones carry an already-offloaded ref)
     const recordings = new InMemoryRecordingStore();
     const recorder = new CaseRecorder(recordings, new InMemoryArtifactStore(), fakeClock());
-    const attempt = await recordings.reset("evd-run-1"); // the dispatch opens it; producers stamp what it returns
+    const attempt = await recordings.open("evd-run-1"); // the dispatch opens it; producers stamp what it returns
 
     // When deep tracks are pushed
     await recorder.recordTrack(
@@ -125,7 +125,7 @@ describe("CaseRecorder", () => {
       },
     };
     const recorder = new CaseRecorder(recordings, brokenArtifacts, fakeClock());
-    const attempt = await recordings.reset("evd-run-1");
+    const attempt = await recordings.open("evd-run-1");
 
     // When a frame is reported, recordFrame resolves (best-effort) without throwing
     await expect(recorder.recordFrame("evd-run-1", "AAAA", attempt)).resolves.toBeUndefined();

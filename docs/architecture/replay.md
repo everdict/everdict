@@ -287,16 +287,29 @@ type TrackEntry =        // any plane's timestamped entry, tagged by track
   | { track: "custom"; entry: CustomEntry };
 
 interface RecordingStore {
-  append(runId: string, item: TrackEntry): Promise<void>;
-  seal(runId: string, dispatch: DispatchManifest): Promise<RecordingRef>;  // freeze → manifest in object storage
-  get(runId: string): Promise<CaseRecording | undefined>;
+  open(runId: string): Promise<number>;                                    // the next ATTEMPT → its generation
+  append(runId: string, item: TrackEntry, generation: number): Promise<void>;
+  seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined>;
+  get(runId: string, generation?: number): Promise<CaseRecording | undefined>;   // named attempt, else newest sealed
+  peek(runId: string, generation?: number): Promise<CaseRecording | undefined>;  // the live tail
 }
 ```
 
-`InMemoryRecordingStore` (dev/test) + `PgRecordingStore` (append rows keyed by runId, manifest sealed to
-`ArtifactStore` — the same S3/MinIO path `offloadSnapshot` uses). `list` never hydrates the tracks (same
-discipline as `ScorecardStore.list` omitting heavy per-case results). Numbered migration + idempotent
-`migrate`/`preflight`, per the `db` conventions.
+**An attempt is a row** (mig 0173 + 0177). A re-driven run keeps its live-correlation id on purpose — an
+observer derives `evd-run-<id>` from the record with no lookup — so several PHYSICAL executions share one
+key: a spillover, an OOM re-run, a speculative duplicate, a recovery re-drive. The generation is the fence a
+producer stamps (`CaseJob.recordingGeneration`), and the store is keyed `(run_id, generation)`, which buys
+two things a single per-run buffer could not. A stale producer coming back writes into ITS OWN attempt
+instead of its successor's recording, so no replay interleaves two executions with nothing marking the seam.
+And the discarded attempt's frames survive — clearing the buffer at re-drive deleted the only record of what
+the failed execution did, which is precisely what an operator asks to see. The ref a seal returns names the
+attempt (`<scheme>://recording/<runId>/g<n>`, minted + parsed by `recordingRefOf`/`recordingGenerationOf`),
+so a settled run is replayed through its own ref rather than through whichever attempt was last.
+
+`InMemoryRecordingStore` (dev/test) + `PgRecordingStore` (append rows keyed by `(run_id, generation)`,
+manifest sealed to `ArtifactStore` — the same S3/MinIO path `offloadSnapshot` uses). `list` never hydrates
+the tracks (same discipline as `ScorecardStore.list` omitting heavy per-case results). Numbered migration +
+idempotent `migrate`/`preflight`, per the `db` conventions.
 
 ### D5 — the browser recorder adapter (reference impl of the recorder seam)
 

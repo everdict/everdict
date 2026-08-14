@@ -842,14 +842,14 @@ export class ScorecardBatchService {
       }
       // THIS CASE'S ATTEMPT, ON THIS DRIVER TOO (review 39 P0-2/P0-3). The in-process loop opens one at
       // dispatch intent; this path opened none at all, so a Temporal-driven case had no attempt to fence and
-      // its producers wrote under whatever number the receiving process held. A reset that throws is a fence
-      // we could not raise, not a fence that was unnecessary — the case still runs, knowing its replay is not
-      // canonical (`unisolated`).
+      // its producers wrote under whatever number the receiving process held. An `open` that throws is a
+      // fence we could not raise, not a fence that was unnecessary — the case still runs, knowing its replay
+      // is not canonical (`unisolated`).
       const executionId = `evd-${id}-${caseId}`;
       let generation: number | undefined;
       let unisolated = false;
       if (this.deps.recordingStore) {
-        generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
+        generation = await this.deps.recordingStore.open(executionId).catch(() => undefined);
         if (generation === undefined) unisolated = true;
         // Nobody to tell: the number travels ON THE JOB now (review 39, Phase 4), so the producer that
         // matters cannot be missed by a wiring nobody remembered to do.
@@ -2145,7 +2145,7 @@ export class ScorecardBatchService {
         // FAIL-CLOSED (arch-review 38 P0). A `reset` that throws is not "isolation was unnecessary" — it is a
         // fence we could not raise. The case still RUNS (the evaluation is what the user asked for), knowing
         // its replay is not canonical, which is what `unisolated` records.
-        const generation = await this.deps.recordingStore.reset(executionId).catch(() => undefined);
+        const generation = await this.deps.recordingStore.open(executionId).catch(() => undefined);
         if (generation === undefined) unisolated.add(executionId);
         else {
           attemptGeneration.set(executionId, generation);

@@ -512,7 +512,7 @@ describe("MCP — deep track push (report_case_track)", () => {
     const key = { owner: "u-alice", runnerId: "laptop" };
     // The dispatcher OPENS the attempt (every dispatch does now) and the job carries its number, so the
     // producer stamps its own attempt rather than whatever this process last heard about.
-    const generation = await recordings.reset("evd-run-42");
+    const generation = await recordings.open("evd-run-42");
     void deps.runnerHub
       .enqueue(key, { ...parkableJob(), runId: "evd-run-42", recordingGeneration: generation })
       .catch(() => {});
@@ -549,7 +549,7 @@ describe("MCP — deep track push (report_case_track)", () => {
     const recordings = new InMemoryRecordingStore();
     const deps = withRecorder(recordings);
     const key = { owner: "u-alice", runnerId: "laptop" };
-    const first = await recordings.reset("evd-run-42");
+    const first = await recordings.open("evd-run-42");
     void deps.runnerHub
       .enqueue(key, { ...parkableJob(), runId: "evd-run-42", recordingGeneration: first })
       .catch(() => {});
@@ -557,17 +557,20 @@ describe("MCP — deep track push (report_case_track)", () => {
     const runner = await connectRunner(deps, "laptop");
 
     // The recovery opens attempt 2 and re-leases the same job id (a requeue mints a new epoch).
-    const second = await recordings.reset("evd-run-42");
+    const second = await recordings.open("evd-run-42");
     expect(second).toBe(first + 1);
     const res = await runner.callTool({
       name: "report_case_track",
       arguments: { runId: "evd-run-42", item: trackItem, jobId: leaseA?.jobId, leaseEpoch: leaseA?.attempt.leaseEpoch },
     });
     // A's token is still the current lease here (the hub was not re-leased in this test), so the write is
-    // authorized — but it is stamped with A's OWN generation, which the store no longer accepts.
+    // authorized — but it is stamped with A's OWN generation, so it lands in A's attempt row.
     expect(res.isError).toBeFalsy();
     await recordings.seal("evd-run-42", { envKind: "browser" }, second);
     expect((await recordings.get("evd-run-42"))?.tracks.network ?? []).toHaveLength(0);
+    // …where it is still readable (review 39, Phase 4). A stale producer is not silenced — it is confined to
+    // the attempt it belongs to, and what it wrote there remains the record of what that execution did.
+    expect((await recordings.peek("evd-run-42", first))?.tracks.network).toHaveLength(1);
   });
 
   it("REFUSES a token whose lease was taken over — the stale attempt cannot write into its successor", async () => {

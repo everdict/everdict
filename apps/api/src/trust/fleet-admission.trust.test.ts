@@ -168,7 +168,14 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
       // Then: B admits only the 2 slots the ledger says are left. Pre-ledger, its empty local map said "0 in
       // flight" and it admitted all five, putting 8 of a 5-quota workspace's runs on real compute.
       expect(backendB.dispatched).toEqual(["B0", "B1"]);
-      expect((await runs.inFlightByTenant())[tenant]).toBe(5);
+      // …and the LEDGER shows five, which is a different observation from "B placed two" and has to be waited
+      // on separately: the backend appends to its own list before the row commits, so a fleet-wide count read
+      // the instant B's list settles can still be one insert behind. This scenario's own first wait says why —
+      // the row is what the other replica reads, and it lands when it commits.
+      await until(
+        "the ledger to show the workspace's five slots in flight",
+        async () => (await runs.inFlightByTenant())[tenant] === 5,
+      );
       expect(replicaB.stats().queued).toBe(3);
 
       // And: settling frees the slots by LEAVING the ledger — there is no counter anywhere to reconcile, which

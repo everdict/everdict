@@ -1,4 +1,4 @@
-import type { RecordingSeal, RecordingStore } from "@everdict/application-control";
+import { type RecordingSeal, type RecordingStore, recordingRefOf } from "@everdict/application-control";
 import type { CaseRecording, DispatchManifest, Fidelity, RecordingRef, TrackEntry } from "@everdict/contracts";
 
 type SealedMeta = { t0: number; envKind: string; effectiveFidelity: Fidelity; dispatch?: DispatchManifest };
@@ -7,28 +7,57 @@ type SealedMeta = { t0: number; envKind: string; effectiveFidelity: Fidelity; di
 // t0 + effectiveFidelity from the tracks) and hands back a memory:// ref. Interchangeable with the Postgres +
 // object-store impl behind RecordingStore (S4).
 export class InMemoryRecordingStore implements RecordingStore {
+  // ONE ROW PER ATTEMPT (review 39, Phase 4). A re-drive opens a new one; the previous attempt's frames stay
+  // where they are, because a discarded execution really did happen and deleting its record is not something
+  // a ledger does.
   private readonly recordings = new Map<
     string,
-    { tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number }
+    Array<{ tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number }>
   >();
 
+  private attemptsOf(
+    runId: string,
+  ): Array<{ tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number }> {
+    return this.recordings.get(runId) ?? [];
+  }
+
+  private attempt(
+    runId: string,
+    generation: number,
+  ): { tracks: CaseRecording["tracks"]; sealed?: SealedMeta; generation: number } | undefined {
+    return this.attemptsOf(runId).find((a) => a.generation === generation);
+  }
+
+  async open(runId: string): Promise<number> {
+    const attempts = this.attemptsOf(runId);
+    const generation = Math.max(0, ...attempts.map((a) => a.generation)) + 1;
+    this.recordings.set(runId, [...attempts, { tracks: {}, generation }]);
+    return generation;
+  }
+
   async append(runId: string, item: TrackEntry, generation: number): Promise<void> {
-    const rec = this.recordings.get(runId) ?? { tracks: {}, generation: 0 };
-    // EXACTLY the attempt this row is on (mig 0173). Not "at least": a producer holding a number from either
-    // side of the current attempt is not writing this recording.
-    if (generation !== rec.generation) return;
+    // EXACTLY the attempt this producer was told it serves (mig 0173) — its own row, created on first write
+    // because a first dispatch opens nothing and its producers stamp 0. What the fence buys is not that a
+    // stale producer is silenced (it may keep writing; that is a true record of what it did) but that it
+    // writes into ITS OWN attempt, which no reader of the successor's recording is ever served.
+    let rec = this.attempt(runId, generation);
+    if (!rec) {
+      rec = { tracks: {}, generation };
+      this.recordings.set(
+        runId,
+        [...this.attemptsOf(runId), rec].sort((a, b) => a.generation - b.generation),
+      );
+    }
     // …and a SEALED recording is final (arch-review 38 P0). The self-hosted lane reports frames and logs
     // fire-and-forget, so an append arriving after the settle is ordinary rather than exceptional — and one
     // that lands leaves a recording disagreeing with its own metadata.
     if (rec.sealed) return;
     appendEntry(rec.tracks, item);
-    this.recordings.set(runId, rec);
   }
 
   async seal(runId: string, meta: RecordingSeal, generation: number): Promise<RecordingRef | undefined> {
-    const rec = this.recordings.get(runId);
-    if (!rec) return undefined; // nothing was recorded for this run → no ref to attach
-    if (generation !== rec.generation) return undefined; // not this attempt's recording to freeze
+    const rec = this.attempt(runId, generation);
+    if (!rec) return undefined; // nothing was recorded for this attempt → no ref to attach
     if (rec.sealed) return undefined; // already frozen — a second seal is not this attempt's to make
     rec.sealed = {
       t0: earliestT(rec.tracks),
@@ -37,19 +66,14 @@ export class InMemoryRecordingStore implements RecordingStore {
       effectiveFidelity: rec.tracks.frames?.length ? "frames" : "final",
       ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
     };
-    return { ref: `memory://recording/${runId}` };
+    // The ref NAMES THE ATTEMPT (review 39 P1): a pointer that said only the run could not tell a reader
+    // which execution it was about to play.
+    return { ref: recordingRefOf("memory", runId, generation) };
   }
 
-  // A re-drive starts a fresh recording — the previous attempt produced no outcome, so its frames are not
-  // this run's replay (arch-review 33 P1).
-  async reset(runId: string): Promise<number> {
-    const generation = (this.recordings.get(runId)?.generation ?? 0) + 1;
-    this.recordings.set(runId, { tracks: {}, generation });
-    return generation;
-  }
-
-  async get(runId: string): Promise<CaseRecording | undefined> {
-    const rec = this.recordings.get(runId);
+  async get(runId: string, generation?: number): Promise<CaseRecording | undefined> {
+    const sealed = this.attemptsOf(runId).filter((a) => a.sealed);
+    const rec = generation === undefined ? sealed[sealed.length - 1] : sealed.find((a) => a.generation === generation);
     if (!rec?.sealed) return undefined; // only a sealed recording is a complete CaseRecording
     return {
       runId,
@@ -63,10 +87,11 @@ export class InMemoryRecordingStore implements RecordingStore {
 
   // The live tail — whatever has streamed in so far, sealed or not (the player scrubs a still-running run with
   // this). Unsealed metadata is provisional: t0/fidelity derived from the tracks, envKind "live" until seal.
-  async peek(runId: string): Promise<CaseRecording | undefined> {
-    const rec = this.recordings.get(runId);
+  async peek(runId: string, generation?: number): Promise<CaseRecording | undefined> {
+    const attempts = this.attemptsOf(runId);
+    const rec = generation === undefined ? attempts[attempts.length - 1] : this.attempt(runId, generation);
     if (!rec) return undefined;
-    if (rec.sealed) return this.get(runId);
+    if (rec.sealed) return this.get(runId, rec.generation);
     return {
       runId,
       t0: earliestT(rec.tracks),

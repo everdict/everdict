@@ -71,7 +71,8 @@ describe("RunService", () => {
 
     // Then the result carries the recordingRef and the sealed recording (envKind from the case) is retrievable
     const done = await svc.get(rec.id);
-    expect(done?.result?.recordingRef?.ref).toBe("memory://recording/evd-run-rec1");
+    // The ref names the ATTEMPT (mig 0177) — a first dispatch opens none, so its producers stamp 0.
+    expect(done?.result?.recordingRef?.ref).toBe("memory://recording/evd-run-rec1/g0");
     expect((await recordingStore.get("evd-run-rec1"))?.envKind).toBe("repo");
   });
 

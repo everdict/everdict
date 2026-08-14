@@ -34,7 +34,7 @@ describe("InMemoryRecordingStore", () => {
     const ref = await store.seal("run-1", { envKind: "browser", dispatch: { harness: "claude-code@1.0.0" } }, 0);
 
     // Then the ref points at the recording and get() returns the assembled, ordered tracks
-    expect(ref?.ref).toBe("memory://recording/run-1");
+    expect(ref?.ref).toBe("memory://recording/run-1/g0");
     const rec = await store.get("run-1");
     expect(rec?.t0).toBe(1000); // earliest event across all lanes
     expect(rec?.envKind).toBe("browser");
@@ -73,6 +73,29 @@ describe("InMemoryRecordingStore", () => {
     // And once sealed, peek answers exactly what get answers
     await store.seal("run-live", { envKind: "browser" }, 0);
     expect(await store.peek("run-live")).toEqual(await store.get("run-live"));
+  });
+
+  // ── A RE-DRIVE OPENS AN ATTEMPT; IT DOES NOT ERASE ONE (review 39, Phase 4) ──────────────────────
+  it("a re-drive keeps the previous attempt's recording, addressable by its own generation", async () => {
+    // Given a first attempt that ran and sealed
+    const store = new InMemoryRecordingStore();
+    await store.append("run-redrive", { track: "frames", entry: { t: 10, ref: "memory://first" } }, 0);
+    const firstRef = await store.seal("run-redrive", { envKind: "browser" }, 0);
+
+    // When a recovery re-drives the run — it opens the NEXT attempt rather than clearing the buffer
+    const second = await store.open("run-redrive");
+    expect(second).toBe(1);
+    await store.append("run-redrive", { track: "frames", entry: { t: 20, ref: "memory://second" } }, second);
+    const secondRef = await store.seal("run-redrive", { envKind: "browser" }, second);
+
+    // Then the run's current replay is the new attempt…
+    expect((await store.get("run-redrive"))?.tracks.frames?.map((f) => f.ref)).toEqual(["memory://second"]);
+    // …and the discarded attempt's evidence is still there, under its own name. It really did run; deleting
+    // what it recorded is not something a ledger does, and it is exactly what an operator asks to see.
+    expect((await store.get("run-redrive", 0))?.tracks.frames?.map((f) => f.ref)).toEqual(["memory://first"]);
+    // Each ref names the attempt it belongs to, so a reader holding one plays that execution, not the latest.
+    expect(firstRef?.ref).toBe("memory://recording/run-redrive/g0");
+    expect(secondRef?.ref).toBe("memory://recording/run-redrive/g1");
   });
 
   it("keeps recordings separate per runId", async () => {

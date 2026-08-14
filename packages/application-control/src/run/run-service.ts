@@ -53,7 +53,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
-import type { RecordingStore } from "../ports/recording-store.js";
+import { type RecordingStore, recordingGenerationOf } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
 import {
@@ -710,8 +710,12 @@ export class RunService {
       this.deps.recordingStore === undefined
         ? undefined
         : terminal
-          ? record.result?.recordingRef
-            ? await this.deps.recordingStore.get(runId)
+          ? // …and now that an attempt is a row (mig 0177), the ref does not merely PROVE this result has a
+            // replay — it NAMES which one, so the read follows it instead of taking the newest sealed attempt
+            // and hoping the two agree. A ref written before the grammar existed names no generation, and
+            // that reads as "the producer did not say": the newest sealed attempt, exactly as before.
+            record.result?.recordingRef
+            ? await this.deps.recordingStore.get(runId, recordingGenerationOf(record.result.recordingRef.ref))
             : undefined
           : ((await this.deps.recordingStore.get(runId)) ?? (await this.deps.recordingStore.peek(runId)));
     // The player draws every frame straight from its ref, so this read is display-only by nature — re-mint them
@@ -800,14 +804,14 @@ export class RunService {
     // holding the frames of an execution whose settlement was refused, and a reader scrubbing that timeline
     // watches two runs. The claim above is what earns the right to do this: only the driver that won the
     // re-drive clears the buffer.
-    // A NEW ATTEMPT IS OPENED AND NAMED (mig 0173). `reset` clears the buffer AND returns the generation this
-    // attempt owns; the recorder serving this process is told, and every producer that reports through it
-    // stamps that number. The previous attempt's recorder keeps the one it was started with and is refused —
-    // clearing history alone never stopped it writing.
+    // A NEW ATTEMPT IS OPENED AND NAMED (mig 0173/0177). `open` INSERTS the next attempt and returns the
+    // generation it owns; the recorder serving this process is told, and every producer that reports through
+    // it stamps that number. The previous attempt keeps its own row — its frames, its seal, its ref — and its
+    // recorder keeps the number it was started with, which no longer addresses anything this run replays.
     // …and a re-drive is exactly the case that HAS an earlier producer to revoke, which is why this one
     // always opens a new attempt while a first dispatch opens none (see the batch's note).
     const runId = RunService.runIdFor(record);
-    const attempt = await this.deps.recordingStore?.reset(runId).catch(() => undefined);
+    const attempt = await this.deps.recordingStore?.open(runId).catch(() => undefined);
     if (attempt !== undefined) {
       this.attempt.set(runId, attempt); // …and it rides onto the job below (CaseJob.recordingGeneration)
     }

@@ -1146,17 +1146,21 @@ describeTrust("TRUST-160 — a sealed recording cannot be appended to, and a sea
     expect((await recordings.get("evd-run-twice"))?.envKind).toBe("repo");
   }, 20_000);
 
-  it("a reset re-opens the recording — the next attempt writes into a buffer of its own", async () => {
+  it("opening an attempt gives it a buffer of its own — and leaves the previous attempt's where it is", async () => {
     const { InMemoryRecordingStore } = await import("@everdict/db");
     const recordings = new InMemoryRecordingStore();
     await recordings.append("evd-run-again", { track: "logs", entry: { t: 1, stream: "stdout", text: "a" } }, 0);
     await recordings.seal("evd-run-again", { envKind: "repo" }, 0);
-    const next = await recordings.reset("evd-run-again");
+    const next = await recordings.open("evd-run-again");
     expect(next).toBe(1);
-    // The previous attempt's producer keeps its number and writes nothing; the new one owns the buffer.
+    // The previous attempt's producer keeps its number, so its late line goes to ITS attempt — which is
+    // already sealed, and a sealed recording is final. Either way it is not the successor's.
     await recordings.append("evd-run-again", { track: "logs", entry: { t: 2, stream: "stdout", text: "stale" } }, 0);
     await recordings.append("evd-run-again", { track: "logs", entry: { t: 3, stream: "stdout", text: "b" } }, 1);
     await recordings.seal("evd-run-again", { envKind: "repo" }, 1);
     expect((await recordings.get("evd-run-again"))?.tracks.logs?.map((l) => l.text)).toEqual(["b"]);
+    // …and the first attempt is still readable under its own generation (review 39, Phase 4). Opening the
+    // next attempt is not a licence to delete the previous one's record of what happened.
+    expect((await recordings.get("evd-run-again", 0))?.tracks.logs?.map((l) => l.text)).toEqual(["a"]);
   }, 20_000);
 });

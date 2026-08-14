@@ -1,4 +1,4 @@
-import type { RecordingSeal, RecordingStore } from "@everdict/application-control";
+import { type RecordingSeal, type RecordingStore, recordingRefOf } from "@everdict/application-control";
 import {
   type CaseRecording,
   CaseRecordingSchema,
@@ -16,10 +16,12 @@ interface RecordingRow {
   dispatch: unknown;
 }
 
-// Postgres-backed replay recording store. One row per runId; `append` pushes an entry onto its track lane via a
-// jsonb append (row-locked, so concurrent appends for the same run serialize — no lost update), `seal` freezes the
-// derived metadata (t0 + effectiveFidelity), `get` returns the sealed CaseRecording. Same contract as
-// InMemoryRecordingStore — apps/api swaps the two by DATABASE_URL. docs/architecture/replay.md D4.
+// Postgres-backed replay recording store. ONE ROW PER ATTEMPT (mig 0177), keyed `(run_id, generation)`:
+// `open` inserts the next attempt, `append` pushes an entry onto its track lane via a jsonb append (row-locked,
+// so concurrent appends for the same attempt serialize — no lost update), `seal` freezes the derived metadata
+// (t0 + effectiveFidelity) over the row the write claims, `get` returns a sealed CaseRecording (the newest
+// sealed attempt when the caller names none). Same contract as InMemoryRecordingStore — apps/api swaps the two
+// by DATABASE_URL. docs/architecture/replay.md D4.
 export class PgRecordingStore implements RecordingStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -27,18 +29,18 @@ export class PgRecordingStore implements RecordingStore {
     // Create the row + lane on first sight; on conflict append to the lane. jsonb_set under the row lock makes
     // concurrent appends for the same run safe.
     //
-    // …and the WHERE on the conflict path is what revokes a producer from an earlier attempt (mig 0173): a
-    // reset raised the generation, and a recorder still stamping the number it was started with writes
-    // nothing from that moment.
+    // …and the row this claims is the ATTEMPT's (mig 0177), which is what revokes a producer from an earlier
+    // one: each attempt owns its own row, and a recorder stamping a generation nobody opened writes into a row
+    // of its own that no reader of the run's newest attempt will ever be served.
     //
     // A SEALED RECORDING IS FINAL (arch-review 38 P0). It had no such condition, so a late report — and the
     // self-hosted lane's frame/log reports are fire-and-forget, so late is ORDINARY, not exceptional — kept
     // appending after the seal. The recording a reader is served then disagrees with its own metadata: frames
     // in the tracks, `effectiveFidelity: "final"` beside them, and a t0 computed before either arrived.
     await this.client.query(
-      `INSERT INTO everdict_recordings (run_id, tracks, updated_at)
-       VALUES ($1, jsonb_build_object($2::text, jsonb_build_array($3::jsonb)), now())
-       ON CONFLICT (run_id) DO UPDATE SET
+      `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
+       VALUES ($1, jsonb_build_object($2::text, jsonb_build_array($3::jsonb)), $4::int, now())
+       ON CONFLICT (run_id, generation) DO UPDATE SET
          tracks = jsonb_set(
            everdict_recordings.tracks,
            ARRAY[$2::text],
@@ -46,7 +48,7 @@ export class PgRecordingStore implements RecordingStore {
            true
          ),
          updated_at = now()
-       WHERE everdict_recordings.generation = $4::int AND everdict_recordings.sealed = false`,
+       WHERE everdict_recordings.sealed = false`,
       [runId, item.track, JSON.stringify(item.entry), generation],
     );
   }
@@ -72,33 +74,40 @@ export class PgRecordingStore implements RecordingStore {
       [runId, generation, meta.envKind, meta.dispatch ? JSON.stringify(meta.dispatch) : null],
     );
     // Nothing recorded, another attempt's row, or already frozen — in every case there is no ref that is ours.
-    return rows.length > 0 ? { ref: `pg://recording/${runId}` } : undefined;
+    // The ref NAMES THE ATTEMPT (review 39 P1): a pointer that said only the run left a reader holding a
+    // verdict unable to tell which execution it was about to play.
+    return rows.length > 0 ? { ref: recordingRefOf("pg", runId, generation) } : undefined;
   }
 
-  // A re-drive starts a fresh recording (arch-review 33 P1) — see the port for why this is a reset and not a
-  // filter at seal time.
-  async reset(runId: string): Promise<number> {
-    // Clear the buffer AND raise the attempt (mig 0173) — the previous recorder keeps writing under the
-    // number it was started with, and `append` refuses it from here on. One statement, so a producer can
-    // never see an emptied buffer that still accepts its writes.
+  // A re-drive OPENS A NEW ATTEMPT (review 39, Phase 4) — see the port for why this is an insert and not the
+  // reset it used to be.
+  async open(runId: string): Promise<number> {
+    // One statement: the next generation is computed and claimed together, so two openers cannot both read
+    // the same max and then both insert it — the primary key refuses the second, and it retries by re-running
+    // this statement rather than by trusting a number it read earlier.
     const { rows } = await this.client.query<{ generation: number }>(
       `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
-       VALUES ($1, '{}'::jsonb, 1, now())
-       ON CONFLICT (run_id) DO UPDATE
-         SET tracks = '{}'::jsonb,
-             generation = everdict_recordings.generation + 1,
-             t0 = NULL, env_kind = NULL, effective_fidelity = NULL, dispatch = NULL, sealed = false,
-             updated_at = now()
+       SELECT $1, '{}'::jsonb, COALESCE(MAX(generation), 0) + 1, now()
+         FROM everdict_recordings WHERE run_id = $1
        RETURNING generation`,
       [runId],
     );
-    return Number(rows[0]?.generation ?? 0);
+    const generation = rows[0]?.generation;
+    // No row back means the insert was refused, and nothing here deletes recordings — so this is a store
+    // fault, not an attempt number to invent. Returning 0 would hand the caller the generation every
+    // un-fenced producer already stamps.
+    if (generation == null) throw new Error(`recording attempt for ${runId} was not opened`);
+    return Number(generation);
   }
 
-  async get(runId: string): Promise<CaseRecording | undefined> {
+  // The sealed replay. A caller naming a generation gets THAT attempt — the one its verdict was committed
+  // under — and one naming none gets the newest sealed attempt, which is the run's current replay.
+  async get(runId: string, generation?: number): Promise<CaseRecording | undefined> {
     const { rows } = await this.client.query<RecordingRow>(
-      "SELECT tracks, t0, env_kind, effective_fidelity, dispatch FROM everdict_recordings WHERE run_id = $1 AND sealed = true",
-      [runId],
+      `SELECT tracks, t0, env_kind, effective_fidelity, dispatch FROM everdict_recordings
+        WHERE run_id = $1 AND sealed = true AND ($2::int IS NULL OR generation = $2::int)
+        ORDER BY generation DESC LIMIT 1`,
+      [runId, generation ?? null],
     );
     const row = rows[0];
     if (!row || row.t0 == null || row.env_kind == null || row.effective_fidelity == null) return undefined;
@@ -113,12 +122,14 @@ export class PgRecordingStore implements RecordingStore {
     });
   }
 
-  // The live tail — the row as it stands, sealed or not (the player scrubs a still-running run with this).
+  // The live tail — the attempt as it stands, sealed or not (the player scrubs a still-running run with this).
   // Unsealed metadata is provisional: t0/fidelity derived from the tracks, envKind "live" until seal names it.
-  async peek(runId: string): Promise<CaseRecording | undefined> {
+  async peek(runId: string, generation?: number): Promise<CaseRecording | undefined> {
     const { rows } = await this.client.query<RecordingRow & { sealed: boolean }>(
-      "SELECT tracks, t0, env_kind, effective_fidelity, dispatch, sealed FROM everdict_recordings WHERE run_id = $1",
-      [runId],
+      `SELECT tracks, t0, env_kind, effective_fidelity, dispatch, sealed FROM everdict_recordings
+        WHERE run_id = $1 AND ($2::int IS NULL OR generation = $2::int)
+        ORDER BY generation DESC LIMIT 1`,
+      [runId, generation ?? null],
     );
     const row = rows[0];
     if (!row) return undefined;
