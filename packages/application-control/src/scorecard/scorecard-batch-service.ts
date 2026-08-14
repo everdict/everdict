@@ -21,6 +21,7 @@ import {
   type ScorecardStep,
   type Suite,
   type VerdictPolicy,
+  attemptIdOf,
 } from "@everdict/contracts";
 import {
   type CircuitBreaker,
@@ -951,6 +952,9 @@ export class ScorecardBatchService {
             runId: child.id,
             tenant: ctx.tenant,
             events: result.trace,
+            // WHOSE evidence this is (review 39 P1) — the same identity the receipt records, so a reader can
+            // ask whether the replay in front of them belongs to the execution that produced the verdict.
+            attemptId: attemptIdOf(executionId, generation ?? 0),
             // Names the row on the browse page: an eval is known by the case it evaluated.
             ...runEvidenceIdentity(child),
             // The producer's declared clock anchor (a topology case: drive start) — what lets an inline
@@ -1498,7 +1502,7 @@ export class ScorecardBatchService {
         result.snapshot = await offloadSnapshot(
           result.snapshot,
           this.deps.artifacts,
-          `attempts/${where.executionId}/g${where.generation}`,
+          `attempts/${attemptIdOf(where.executionId, where.generation)}`,
         );
       } catch {}
     }
@@ -1588,6 +1592,11 @@ export class ScorecardBatchService {
       childRunId: entry.childId,
       ...(entry.executionId !== undefined ? { executionId: entry.executionId } : {}),
       ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
+      // …and the joined identity, so a reader comparing a receipt with a sealed replay or an artifact key
+      // compares STRINGS rather than re-deriving the pair and hoping both sides did it the same way.
+      ...(entry.executionId !== undefined && entry.generation !== undefined
+        ? { attemptId: attemptIdOf(entry.executionId, entry.generation) }
+        : {}),
       resultDigest: contentDigest(result),
       ...(entry.judges.length > 0 ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) } : {}),
       committedAt: this.now(),
@@ -2136,6 +2145,9 @@ export class ScorecardBatchService {
               runId: child.id,
               tenant,
               events: result.trace,
+              // WHOSE evidence this is (review 39 P1): the attempt this dispatch opened, spelled the way the
+              // receipt spells it, so a reader can compare rather than assume.
+              attemptId: attemptIdOf(executionIdOf(job, id), attemptGeneration.get(executionIdOf(job, id)) ?? 0),
               ...runEvidenceIdentity(child),
               ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});

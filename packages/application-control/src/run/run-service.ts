@@ -17,6 +17,7 @@ import {
   type TraceSource,
   type TraceSourceConfig,
   type TraceSpan,
+  attemptIdOf,
   isPulledCommandTrace,
 } from "@everdict/contracts";
 // Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
@@ -970,7 +971,7 @@ export class RunService {
           result.snapshot = await offloadSnapshot(
             result.snapshot,
             this.deps.artifacts,
-            `attempts/evd-run-${id}/g${attempt}`,
+            `attempts/${attemptIdOf(`evd-run-${id}`, attempt)}`,
           );
         } catch {}
       }
@@ -1238,6 +1239,10 @@ export class RunService {
       runId,
       tenant,
       events,
+      // WHOSE evidence this is (review 39 P1). A re-driven run keeps its correlation id on purpose, so the
+      // seal has to say which physical attempt produced the plane — the same name the artifact key and the
+      // receipt use.
+      attemptId: attemptIdOf(runId, this.attempt.get(runId) ?? 0),
       ...(audience?.scope === "member" ? { owner: audience.subject } : {}),
       ...(owned?.record !== undefined ? runEvidenceIdentity(owned.record) : {}),
       ...(owned?.t0 !== undefined ? { t0: owned.t0 } : {}),

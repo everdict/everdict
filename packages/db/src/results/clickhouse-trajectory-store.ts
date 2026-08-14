@@ -51,6 +51,7 @@ const schemaSql = (table: string): string => `CREATE TABLE IF NOT EXISTS ${table
   body_format String DEFAULT '',
   kind String DEFAULT '',
   label String DEFAULT '',
+  attempt_id String DEFAULT '',
   INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4
 ) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
 
@@ -70,6 +71,10 @@ const ADD_BODY_FORMAT_SQL = (table: string): string =>
 // that arrived with no run to name it. No backfill, for the same reason the owner column has none: this store
 // has no run ledger beside it to read from.
 const ADD_KIND_SQL = (table: string): string => `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS kind String DEFAULT ''`;
+// WHICH physical attempt sealed it (mig 0176's rung-2 twin). '' = the producer did not say — never
+// agreement with whatever attempt a reader has in hand. No backfill: sealed evidence is not rewritten.
+const ADD_ATTEMPT_SQL = (table: string): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS attempt_id String DEFAULT ''`;
 const ADD_LABEL_SQL = (table: string): string =>
   `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS label String DEFAULT ''`;
 
@@ -182,6 +187,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       owner: input.owner ?? "",
       kind: input.kind ?? "",
       label: input.label ?? "",
+      attempt_id: input.attemptId ?? "",
     };
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
@@ -204,6 +210,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       t0_first: string;
       sealed_at_first: string;
       owner_first: string;
+      attempt_id_first: string;
     }>(
       `SELECT emitter,
               argMin(tenant, sealed_at) AS tenant_first,
@@ -213,6 +220,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(body_format, sealed_at) AS body_format_first,
               argMin(t0, sealed_at) AS t0_first,
               argMin(owner, sealed_at) AS owner_first,
+              argMin(attempt_id, sealed_at) AS attempt_id_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()}
        WHERE run_id = {runId:String}
@@ -230,6 +238,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       ...(row.t0_first !== "" ? { t0: row.t0_first } : {}),
       sealedAt: row.sealed_at_first,
       format: formatOf(row.body_format_first),
+      ...(row.attempt_id_first ? { attemptId: row.attempt_id_first } : {}),
       ...bodyOf(formatOf(row.body_format_first), JSON.parse(row.body_first)),
     }));
     const execution = executionSegment(segments);

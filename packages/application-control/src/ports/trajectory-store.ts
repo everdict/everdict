@@ -71,6 +71,9 @@ export interface TrajectorySegment {
   // The record itself, when this segment holds one. Absent for an `events` body — a tree we never had is
   // not a tree we reconstruct at read time.
   spans?: TraceSpan[];
+  // The physical attempt that sealed this plane (see SealInput.attemptId). Absent on evidence written before
+  // attempts had an identity, and on any producer that does not declare one.
+  attemptId?: string;
 }
 
 // What a trajectory read returns. `events` is the EXECUTION's own evidence (unchanged semantics — the
@@ -135,6 +138,10 @@ export async function sealExecutionPlanes(
     // What this evidence IS and what to call it on a browse row (see TrajectoryMeta.kind/label).
     kind?: string;
     label?: string;
+    // WHICH physical attempt is sealing (see SealInput.attemptId). Carried onto BOTH planes, because a run's
+    // agent evidence and its placement account come from the same execution and a reader comparing them
+    // against a receipt must be able to see that.
+    attemptId?: string;
     newSpanId?: () => string;
   },
 ): Promise<void> {
@@ -147,6 +154,7 @@ export async function sealExecutionPlanes(
     ...(input.owner !== undefined ? { owner: input.owner } : {}),
     ...(input.kind !== undefined ? { kind: input.kind } : {}),
     ...(input.label !== undefined ? { label: input.label } : {}),
+    ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
   };
   const traceId = traceIdForRun(input.runId);
   const mintSpanId = input.newSpanId ?? (() => newSpanId());
@@ -302,6 +310,16 @@ export interface SealInput {
   // names it and later planes join something already named.
   kind?: string;
   label?: string;
+  // ── WHOSE EVIDENCE THIS IS (review 39 P1) ────────────────────────────────────────────────────────
+  //
+  // The store keeps the first seal per (run, emitter) — evidence is never rewritten — and a re-drive reuses
+  // the run's correlation id on purpose, so a plane could belong to any of the physical executions that ran
+  // under it. A reader holding a case's verdict then cannot ask the only question that matters for replay:
+  // is this the execution that produced the result I am looking at?
+  //
+  // `<executionId>#g<generation>` — the same identity the commit receipt carries, so the two can be compared
+  // rather than assumed equal. Absent = the producer did not say, which is never the same as agreement.
+  attemptId?: string;
 }
 
 // The one place the body rule is enforced, so every store impl agrees on what it was handed. Throws rather

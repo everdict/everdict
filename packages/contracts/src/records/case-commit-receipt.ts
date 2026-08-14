@@ -29,6 +29,9 @@ export const CaseCommitReceiptSchema = z.object({
   // which is the question a replay reader has to answer and could not.
   executionId: z.string().optional(),
   generation: z.number().int().nonnegative().optional(),
+  // The two joined into the one name every other consumer uses (see attemptIdOf). Absent when the committer
+  // could not know it — a recovery adopting a result from a backend never opened the attempt that made it.
+  attemptId: z.string().optional(),
   // The committed result's content digest — the parent's scoring digest is computed over these, so a
   // recomputation from the ledger can be compared against what the parent actually decided.
   resultDigest: z.string(),
@@ -38,6 +41,20 @@ export const CaseCommitReceiptSchema = z.object({
   committedAt: z.string(),
 });
 export type CaseCommitReceipt = z.infer<typeof CaseCommitReceiptSchema>;
+
+// ── ONE NAME FOR ONE PHYSICAL EXECUTION (review 39) ──────────────────────────────────────────────────
+//
+// The identity of an attempt was split across two axes that nobody could join: `executionId` (stable across
+// every retry of a logical case — a correlation id) and the recording `generation` (the fence a producer
+// stamps). Neither alone answers "which execution produced this", and every consumer that needed to ask —
+// the receipt, the sealed trajectory, the object-store key — invented its own spelling of the pair.
+//
+// This is the spelling. Total, pure, and boring on purpose: `<executionId>#g<generation>`. What matters is
+// that the receipt, the replay and the artifact all say the SAME string, so a reader can compare them
+// instead of trusting that they were derived the same way.
+export function attemptIdOf(executionId: string, generation: number): string {
+  return `${executionId}#g${generation}`;
+}
 
 // What a commit attempt learns. `already_committed` carries the receipt that won, because the caller's next
 // question is always "then whose is it" — and answering it from a second read would be racing again.

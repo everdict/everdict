@@ -65,6 +65,8 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
       sealedAt,
       format: body.format,
+      // WHOSE evidence this plane is (mig 0176) — several physical executions can seal under one run id.
+      ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
       // Held as sealed; the projection is recomputed on read so it can never drift from the record.
       events: body.spans !== undefined ? spansToEvents(body.spans) : body.events,
       ...(body.spans !== undefined ? { spans: body.spans } : {}),
@@ -193,7 +195,8 @@ interface PrimaryRow {
   sealed_at: string | Date;
   owner: string | null; // mig 0116 — whose evidence this is; NULL = the workspace's
   body_format?: string | null; // mig 0118 — what the body holds; NULL = an event body sealed before N6
-  kind?: string | null; // mig 0124 — what it is (RUN_KINDS); NULL = arrived with no run to name it
+  kind?: string | null;
+  attempt_id?: string | null; // mig 0176 — WHICH physical attempt sealed it; NULL = the producer did not say // mig 0124 — what it is (RUN_KINDS); NULL = arrived with no run to name it
   label?: string | null; // mig 0124 — the human handle (conversation title · case id · harness)
 }
 
@@ -211,8 +214,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
     const bytes = JSON.stringify(body.spans ?? body.events);
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, attempt_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
       [
@@ -228,6 +231,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.owner ?? null,
         input.kind ?? null,
         input.label ?? null,
+        input.attemptId ?? null,
       ],
     );
     if (inserted.rows.length > 0) {
@@ -258,11 +262,22 @@ export class PgTrajectoryStore implements TrajectoryStore {
     }
     if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
     const appended = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9)
+      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10)
        ON CONFLICT (run_id, emitter) DO NOTHING
        RETURNING run_id`,
-      [input.runId, emitter, input.tenant, input.source, count, bytes, body.format, input.t0 ?? null, sealedAt],
+      [
+        input.runId,
+        emitter,
+        input.tenant,
+        input.source,
+        count,
+        bytes,
+        body.format,
+        input.t0 ?? null,
+        sealedAt,
+        input.attemptId ?? null,
+      ],
     );
     const created = appended.rows.length > 0;
     if (created) {
@@ -277,7 +292,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
     const res = await this.client.query<PrimaryRow & { body: unknown }>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, body_format, t0, sealed_at, owner, kind, label
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, body_format, t0, sealed_at, owner, kind, label, attempt_id
        FROM everdict_trajectories WHERE run_id = $1`,
       [runId],
     );
@@ -291,8 +306,9 @@ export class PgTrajectoryStore implements TrajectoryStore {
       body_format: string | null;
       t0: string | Date | null;
       sealed_at: string | Date;
+      attempt_id: string | null;
     }>(
-      `SELECT emitter, source, event_count, body, body_format, t0, sealed_at FROM everdict_trajectory_segments
+      `SELECT emitter, source, event_count, body, body_format, t0, sealed_at, attempt_id FROM everdict_trajectory_segments
        WHERE run_id = $1 ORDER BY sealed_at ASC, emitter ASC`,
       [runId],
     );
@@ -304,6 +320,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         ...(row.t0 !== null ? { t0: isoOf(row.t0) } : {}),
         sealedAt: isoOf(row.sealed_at),
         format: formatOf(row.body_format),
+        ...(row.attempt_id ? { attemptId: row.attempt_id } : {}),
         ...bodyOf(formatOf(row.body_format), row.body),
       },
       ...sides.rows.map((side) => ({
@@ -313,6 +330,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         ...(side.t0 !== null ? { t0: isoOf(side.t0) } : {}),
         sealedAt: isoOf(side.sealed_at),
         format: formatOf(side.body_format),
+        ...(side.attempt_id ? { attemptId: side.attempt_id } : {}),
         ...bodyOf(formatOf(side.body_format), side.body),
       })),
     ];
