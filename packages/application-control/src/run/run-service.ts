@@ -57,7 +57,7 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import { type RecordingStore, recordingGenerationOf } from "../ports/recording-store.js";
-import type { RunStore } from "../ports/run-store.js";
+import type { AttemptStamp, RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
 import {
   type TrajectorySegmentWire,
@@ -1067,11 +1067,10 @@ export class RunService {
           if (ref) result.recordingRef = ref;
         } catch {}
       }
-      committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
-      // …and the physical attempt reaches its terminal state (arch-review 42). A settle that LOST did not
-      // supersede itself — somebody else's attempt owns the run now, and `superseded` is the ledger's word
-      // for exactly that.
-      await this.stampAttempt(id, committed ? "committed" : "superseded");
+      // …and the physical attempt reaches its terminal state with it (arch-review 42 · 45): the stamp rides
+      // the settlement where the store has the seam for it, and follows it — awaited — where it does not.
+      committed =
+        (await this.finalize(id, (run) => run.succeed(result, this.now()), { committed: "committed" })) !== undefined;
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
       // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
       // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.
@@ -1090,8 +1089,9 @@ export class RunService {
       // after settlement) plus the evidence trace. Live-caught gap — error {code,message} alone left a failed
       // single run with no "why" once the orchestrator job was GC'd.
       const failed = failedCaseResult(job, err);
-      committed = (await this.finalize(id, (run) => run.fail(error, this.now(), failed))) !== undefined;
-      await this.stampAttempt(id, committed ? "failed" : "superseded", { error });
+      committed =
+        (await this.finalize(id, (run) => run.fail(error, this.now(), failed), { committed: "failed", error })) !==
+        undefined;
       // Dual-write parity with the success path, including the part that matters: a settle that lost publishes
       // no evidence either, so the winner's trajectory is the one the run keeps.
       if (committed && failed.trace.length > 0)
@@ -1124,14 +1124,13 @@ export class RunService {
   // row under this run's execution id and its own generation, `onAttempt` moved this map onto that number,
   // and the stamp below therefore lands on the row the second runner actually opened.
   //
-  // Phase-1 dual-write: nothing reads these rows, so a failure costs an audit row and never an outcome.
-  // Still dual-write HERE, deliberately (arch-review 43): the batch lane's terminal stamps are transactional
-  // now because a batch case commits through `commitCase`, one transaction that a stamp can join. A standalone
-  // run's finalize is a fenced `settleRun` with no receipt transaction around it, so there is nothing to ride
-  // yet — this lane's promotion follows when runs get a receipt commit point of their own. What the caller
-  // owes it in the meantime is the ORDER: every terminal stamp is awaited immediately after the settle whose
-  // answer it records, so a process that exits after settling has already written the row it is about to be
-  // asked about (arch-review 44).
+  // WHAT IS LEFT ON THIS PATH, now that the TERMINAL stamp rides the settlement (arch-review 45, see
+  // `finalize`): every stamp that has no settlement to ride — `executing` (nothing is being committed), a
+  // loser's `superseded` (its write never landed), and both endings on a store without the atomic seam. Those
+  // are diagnostics: nothing reads them to decide anything, which is why a failure here costs an audit row and
+  // never an outcome. What they still owe is the ORDER — awaited immediately after the settle whose answer
+  // they record, so a process that exits after settling has already written the row it is about to be asked
+  // about (arch-review 44).
   //
   // The coordinate is the ATTEMPT's, not the recording fence's (see `attemptRow`) — an attempt that ran
   // unisolated has a row and no generation, and it is exactly the execution whose ending matters most.
@@ -1360,7 +1359,14 @@ export class RunService {
   // downstream (arch-review 31 P2). A run's completion notification used to fire whether or not this write
   // landed, so a driver whose settle lost still announced a settlement it had no part in: one outcome, two
   // notifications, the second from the process that was told it had been replaced.
-  private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<RunRecord | undefined> {
+  private async finalize(
+    id: string,
+    outcome: (run: Run) => RunTransition,
+    // What the physical attempt becomes IF this settlement commits (arch-review 45). A settlement that is
+    // REFUSED stamps `superseded` instead — that attempt lost, and a write that never landed owes no
+    // transaction to anything.
+    stamp?: { committed: ExecutionAttemptState; error?: { code: string; message: string } },
+  ): Promise<RunRecord | undefined> {
     const current = await this.deps.store.get(id);
     if (!current) return undefined;
     const run = Run.from(current);
@@ -1369,18 +1375,72 @@ export class RunService {
     // a crash between "run settled" and "the world was told" is no longer expressible.
     const { patch, facts } = outcome(run);
     const stamped = this.stampFacts(current.tenant, facts);
-    const settled = await settleRun(
-      this.deps.store,
-      id,
-      patch,
-      stamped.map((f) => f.record),
-      this.fence(id),
-    );
+    // ── THE ATTEMPT'S TERMINAL STAMP RIDES THE SETTLEMENT (arch-review 45) ───────────────────────────
+    //
+    // The batch lane got this a review ago (`commitCase`); the standalone lane kept a dual-write because it
+    // has no receipt to claim — and the window was the same one: a crash between the fenced settle and the
+    // awaited stamp left a succeeded run whose attempt row said `created` forever. The run row IS this
+    // lane's outcome record, so the commit point is the terminal write itself.
+    const riding = stamp !== undefined ? this.attemptStamp(id, stamp.committed, stamp.error) : undefined;
+    let settled: RunRecord | undefined;
+    let faulted = false;
+    try {
+      settled = await settleRun(
+        this.deps.store,
+        id,
+        patch,
+        stamped.map((f) => f.record),
+        {
+          ...this.fence(id),
+          ...(riding !== undefined ? { stamp: riding } : {}),
+        },
+      );
+    } catch (err) {
+      // Reachable through the atomic seam only: `update` reports a refused fence as `undefined` and throws
+      // only on a store fault, and on the two-step path a fault has always propagated to the caller (which
+      // settles the run failed) — so that path keeps rethrowing, byte for byte.
+      if (riding === undefined) throw err;
+      // The stamp (or the write it rode) faulted, and the transaction took the terminal write with it. The
+      // run is still OPEN, which is the honest state and the one boot recovery re-drives — settling it
+      // FAILED here would publish a failure for an execution that succeeded, on the strength of an audit
+      // row we could not write.
+      faulted = true;
+    }
     this.driverEpoch.delete(id);
     // A CAS loser publishes nothing — the guarded write inserted no durable event, and this bus feeds agent
     // activation rather than a UI toast.
     if (settled !== undefined && stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    if (stamp !== undefined && !faulted) {
+      // A settle that LOST did not supersede itself — somebody else's attempt owns the run now, and
+      // `superseded` is the ledger's word for exactly that. Best-effort either way: the loser has no
+      // transaction to ride (its write never landed), and neither does a deployment without the seam.
+      if (settled === undefined) await this.stampAttempt(id, "superseded");
+      else if (riding === undefined)
+        await this.stampAttempt(id, stamp.committed, stamp.error !== undefined ? { error: stamp.error } : undefined);
+    }
     return settled;
+  }
+
+  // The atomic seam AS THIS DEPLOYMENT ACTUALLY HAS IT — three conditions asking three different questions:
+  // a ledger is wired at all, this dispatch can NAME its attempt (see `attemptRow`), and the store can make
+  // the terminal write and the stamp one decision. Missing any one of them, the lane keeps the two-step it
+  // has always had, which is why the stamp's failure is swallowed there and fatal here.
+  private attemptStamp(
+    id: string,
+    to: ExecutionAttemptState,
+    error?: { code: string; message: string },
+  ): AttemptStamp | undefined {
+    const attempts = this.deps.attempts;
+    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    if (!attempts || attemptId === undefined || this.deps.store.settleWith === undefined) return undefined;
+    return {
+      attempts,
+      apply: async (bound) => {
+        // The transition's own answer is deliberately unread: a refusal is a silent no-op by contract (an
+        // already-terminal row meeting a late stamp is ordinary), and only a throw aborts the settlement.
+        await bound.transition(attemptId, to, { childRunId: id, ...(error !== undefined ? { error } : {}) });
+      },
+    };
   }
 
   // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same

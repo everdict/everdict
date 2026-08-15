@@ -32,25 +32,33 @@ export interface OpenAttemptInput {
 // saw end. A stamp that throws there aborts the commit, which is the honest answer: the ledger could not
 // record what the receipt is about to claim.
 //
+// AND IT HAS NOW LANDED FOR THE STANDALONE RUN LANE TOO (arch-review 45). That lane has no receipt to
+// claim — the run ROW is its outcome record — so its commit point is the fenced terminal write itself:
+// `RunStore.settleWith` applies the settlement and the attempt's terminal stamp as one decision, and
+// `settleRun` routes a stamped settlement through it. Same contract as the batch's: a refused fence runs no
+// stamp and rolls nothing back (the loser wrote nothing to undo), and a stamp that throws takes the terminal
+// write with it, leaving the run OPEN for recovery rather than settled behind a ledger that could not record
+// it. `settleWith` is optional, and that is the fallback rather than a loophole: a store with no transaction
+// to offer keeps the two-step below, and the promotion is per-adapter, not per-lane.
+//
 // WHAT IS STILL BEST-EFFORT, and why each one has no transaction to ride: `executing` (no commit is being
 // made), a loser's `superseded` (its claim was refused before any settle ran, or its transaction rolled back
-// whole), a retry's abandon stamp (the abandoned attempt commits nothing), and the whole standalone run lane
-// (its finalize is a fenced `settleRun`, not a receipt commit — that promotion follows when runs get a
-// commit point of their own). Those rows are diagnostics: they say what ran, and no outcome is derived from
+// whole), a retry's abandon stamp (the abandoned attempt commits nothing), and both endings on a store
+// without the atomic seam. Those rows are diagnostics: they say what ran, and no outcome is derived from
 // them. That last clause is the rule that still holds everywhere — nothing may READ an attempt row to make a
 // decision while any stamp of it is best-effort: a best-effort write that something depends on is a
 // fail-open wearing a ledger's clothes.
 //
-// WHAT THE STANDALONE LANE OWES IN THE MEANTIME (arch-review 44), since it cannot yet be atomic: ① the
-// terminal stamp is AWAITED at the settle it records, never fired and forgotten — a driver that exits after
-// settling has already written the row, so the only surviving window is a stamp that actually fails; and
-// ② the attempt is addressed by its OWN coordinate, so an execution the recording fence refused
-// (`unisolated`) still reaches a terminal state instead of standing at `created` for a run that succeeded.
-// A stamp that fails is still swallowed, deliberately: failing a SUCCEEDED run because its diagnostic row
-// could not be written would let the audit plane decide outcomes, which is the inversion this whole comment
-// exists to prevent. It costs an incomplete row, and the reconciliation for those is the same one every
-// pre-promotion row needs — an attempt row whose execution has a terminal child is not the child's authority
-// on anything.
+// WHAT A LANE WITHOUT THE SEAM OWES (arch-review 44, still the contract wherever the promotion has not
+// reached): ① the terminal stamp is AWAITED at the settle it records, never fired and forgotten — a driver
+// that exits after settling has already written the row, so the only surviving window is a stamp that
+// actually fails; and ② the attempt is addressed by its OWN coordinate, so an execution the recording fence
+// refused (`unisolated`) still reaches a terminal state instead of standing at `created` for a run that
+// succeeded. A stamp that fails is swallowed there, deliberately: failing a SUCCEEDED run because its
+// diagnostic row could not be written would let the audit plane decide outcomes, which is the inversion this
+// whole comment exists to prevent. It costs an incomplete row, and the reconciliation for those is the same
+// one every pre-promotion row needs — an attempt row whose execution has a terminal child is not the child's
+// authority on anything.
 //
 // TWO MINTING AUTHORITIES WOULD DRIFT. `open` is THE authority for the attempt ordinal: it computes MAX+1
 // per executionId and returns the coordinate. The recording store, which used to mint its own by the same

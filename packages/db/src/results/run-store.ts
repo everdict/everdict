@@ -13,6 +13,7 @@ export function withRunUsage(r: RunRecord): RunRecord {
 }
 
 import type {
+  AttemptStamp,
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
@@ -129,6 +130,27 @@ export class InMemoryRunStore implements RunStore {
     this.runs.set(id, next);
     await this.appendEvents(events);
     return withRunUsage(next);
+  }
+
+  // The standalone lane's commit point (arch-review 45), sequentially. What this twin CAN give is the
+  // ordering and the refusal — the stamp runs only after a settlement that committed, and a refused fence
+  // runs no stamp at all. What it cannot give is ROLLBACK: a stamp that throws leaves the terminal write
+  // already written (the same limitation `InMemoryCaseReceiptStore.commitCase` documents for its receipt).
+  // The Pg twin is where the promotion is atomic; this one keeps the contract's observable shape so a
+  // dev-store test cannot certify something production does not do.
+  async settleWith(
+    id: string,
+    patch: Partial<RunRecord>,
+    events: OutboxEvent[] | undefined,
+    guard: RunUpdateGuard,
+    stamp: AttemptStamp,
+  ): Promise<RunRecord | undefined> {
+    const settled = await this.update(id, patch, events, guard);
+    if (settled === undefined) return undefined;
+    // Handed straight back, like `commitCase` hands back the run store: there is no transaction to bind a
+    // twin to, so the stamp lands in the caller's own ledger.
+    await stamp.apply(stamp.attempts);
+    return settled;
   }
 
   private async appendEvents(events?: OutboxEvent[]): Promise<void> {

@@ -1,5 +1,6 @@
 import type { PlatformEventRecord, RunRecord } from "@everdict/contracts";
 import type { AdmissionLedger } from "./admission-ledger.js";
+import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
 
 // list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
 // With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
@@ -129,6 +130,26 @@ export interface RunUpdateGuard {
   parentDriver?: { scorecardId: string; epoch: number };
 }
 
+// ── THE LEDGER WRITE THAT RIDES A TERMINAL SETTLEMENT (arch-review 45) ───────────────────────────────
+//
+// A run's physical attempt has to end where the run ends, and "settle, then stamp" is two commits with a
+// window between them: a crash there leaves a SUCCEEDED run whose attempt row still says `created` — a
+// ledger that never saw the execution end, for an outcome the world has already been told about. The batch
+// lane closed that window by putting the stamp inside `commitCase`'s transaction; this is the same thing for
+// the lane whose outcome record IS the run row, so there is no receipt to claim, only a fenced terminal write
+// to ride.
+export interface AttemptStamp {
+  // The caller's AMBIENT ledger. An implementation that can open a transaction ignores it and hands `apply` a
+  // transaction-bound twin instead (exactly as `commitCase` does for the run store); one that cannot hands
+  // this back. Passed by the caller rather than wired at construction, so the store the stamp lands in can
+  // never drift from the one the attempt was opened on.
+  attempts: ExecutionAttemptStore;
+  // What to write on the attempt, through whichever ledger the store hands it. A refused TRANSITION is a
+  // silent no-op by contract (the state machine's ordinary answer) and must not abort anything; only a THROW
+  // — a store fault — takes the settlement down with it.
+  apply: (attempts: ExecutionAttemptStore) => Promise<void>;
+}
+
 export interface RunStore extends AdmissionLedger {
   // THE CHILD ROW IS THE DISPATCH INTENT (arch-review 33 P1). A batch creates a case's child run immediately
   // before dispatching it, so conditioning that INSERT on the parent's fencing token is what makes "may I
@@ -148,6 +169,21 @@ export interface RunStore extends AdmissionLedger {
     patch: Partial<RunRecord>,
     events?: OutboxEvent[],
     guard?: RunUpdateGuard,
+  ): Promise<RunRecord | undefined>;
+  // The STANDALONE lane's commit point: the same fenced write `update` makes, plus the attempt's terminal
+  // stamp, as ONE decision. Returns what `update` returns — the settled record, or undefined when the fence
+  // refused, and a refusal runs no stamp and rolls nothing back (the loser wrote nothing to undo). A stamp
+  // that THROWS takes the terminal write with it: the ledger could not record what the row is about to say.
+  //
+  // OPTIONAL, and the optionality is the fallback: a store that cannot open a transaction omits it, and
+  // `settleRun` then makes the two writes the way this lane always has (settle, then stamp — awaited, and
+  // swallowed by the caller). Missing this method must never mean a missing stamp.
+  settleWith?(
+    id: string,
+    patch: Partial<RunRecord>,
+    events: OutboxEvent[] | undefined,
+    guard: RunUpdateGuard,
+    stamp: AttemptStamp,
   ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;

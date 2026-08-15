@@ -1,5 +1,5 @@
 import type { RunRecord, ScorecardRecord } from "@everdict/contracts";
-import type { OutboxEvent, RunStore } from "./run-store.js";
+import type { AttemptStamp, OutboxEvent, RunStore, RunUpdateGuard } from "./run-store.js";
 import { ABORTABLE_SETTLE_STATUSES, type ScorecardStore, type SettleOptions } from "./scorecard-store.js";
 
 // ── THE TERMINAL VERB ────────────────────────────────────────────────────────────────────────────────
@@ -58,12 +58,22 @@ export async function settleRun(
     // stand-in — a parent takeover raises the SCORECARD's token and leaves the child's untouched, so a
     // displaced batch driver clears the child fence it was never displaced from (arch-review 33 P0).
     parentDriver?: { scorecardId: string; epoch: number };
+    // The physical attempt's terminal stamp, made part of THIS settlement (arch-review 45). Offered rather
+    // than commanded: a store with the atomic seam commits the two writes together, and one without it is
+    // routed back to the ordinary settlement — so the caller that offers a stamp still owes the two-step
+    // where the seam is absent (`RunService.finalize` owns that fallback, and the swallow that goes with it).
+    stamp?: AttemptStamp;
   },
 ): Promise<RunRecord | undefined> {
-  return store.update(id, patch, events, {
+  const guard: RunUpdateGuard = {
     expectNonTerminal: true,
     ...(opts?.expectOwnerReplica !== undefined ? { expectOwnerReplica: opts.expectOwnerReplica } : {}),
     ...(opts?.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
     ...(opts?.parentDriver !== undefined ? { parentDriver: opts.parentDriver } : {}),
-  });
+  };
+  // One fence, two ways to commit it — the condition above is built once so the atomic path can never be
+  // guarded more weakly than the ordinary one (which is how five reviews' worth of forgotten fences happened).
+  if (opts?.stamp !== undefined && store.settleWith !== undefined)
+    return store.settleWith(id, patch, events, guard, opts.stamp);
+  return store.update(id, patch, events, guard);
 }

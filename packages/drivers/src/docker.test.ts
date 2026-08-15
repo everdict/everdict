@@ -32,8 +32,11 @@ describe("DockerDriver — the declared compute world is honored, never silently
     // A browser-use bundle's image carries headless chromium; the driver cannot know, so it must not refuse.
     // No docker binary in CI: reaching the pull/run stage (past every pre-flight guard) proves the pass-through.
     const driver = new DockerDriver({ defaultImage: "example/browser-bundle:1" });
+    // Reaching the pull is the point, and a pull is a real docker CLI call against a registry — how long it
+    // takes to fail is the network's business, not this contract's, so it gets a timeout that outlasts a
+    // loaded machine rather than the 5s default it currently fits inside by ~2s.
     const err = await driver.provision({ os: "linux", needs: ["shell", "browser"] }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(String(err)).not.toMatch(/BAD_REQUEST|desktop world/); // failed at docker exec, not at the gate
-  });
+  }, 60_000);
 });

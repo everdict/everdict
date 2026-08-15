@@ -49,29 +49,62 @@ describe("LocalDriver — execStream (incremental exec for live harness sessions
     const compute = await new LocalDriver().provision({ os: "linux", needs: [] });
     try {
       if (!compute.execStream) throw new Error("execStream missing");
-      let resolved = false;
-      let live = false;
-      const p = compute.execStream("echo tick; sleep 0.3", (c) => {
-        if (!resolved && c.data.includes("tick")) live = true;
-      });
+      // Certified as an ORDER plus a GAP, not as a timing margin (same shape as the runSpawn scenario): the
+      // live chunk and the settle both append to one sequence, so the first assertion reads which came
+      // first rather than sampling a flag whenever the scheduler happens to run the continuation.
+      const order: string[] = [];
+      let chunkAt = 0;
+      let settledAt = 0;
+      const p = compute
+        .execStream("echo tick; sleep 1", (c) => {
+          if (order.length === 0 && c.data.includes("tick")) {
+            order.push("chunk");
+            chunkAt = Date.now();
+          }
+        })
+        .then((r) => {
+          order.push("resolve");
+          settledAt = Date.now();
+          return r;
+        });
       const res = await p;
-      resolved = true;
       expect(res.exitCode).toBe(0);
-      expect(live).toBe(true);
+      expect(order).toEqual(["chunk", "resolve"]);
+      // The order alone is not enough HERE: execStream is an async function, so its promise adopts the
+      // spawn's over two extra microtasks — a replay dispatched at settle would still land "first". The gap
+      // is what a replay cannot fake: the tick is echoed a full second before the command ends, so a live
+      // feed shows ~1000ms and a replay-at-settle shows ~0. The 300ms floor leaves room for a stall, which
+      // can only ever DELAY the settle and widen the gap.
+      expect(settledAt - chunkAt).toBeGreaterThan(300);
     } finally {
       await compute.dispose();
     }
-  });
+  }, 30_000);
 
   it("dispose() during a stream kills the in-flight child (cancellation tears the compute down)", async () => {
     const compute = await new LocalDriver().provision({ os: "linux", needs: [] });
     if (!compute.execStream) throw new Error("execStream missing");
-    const p = compute.execStream("echo started && sleep 30", () => {}, { timeoutSec: 60 });
-    await new Promise((r) => setTimeout(r, 300)); // let the child start
+    // Wait for the child's OWN first line instead of a fixed sleep: "the child has started" is an event the
+    // stream already reports, and a 300ms guess is the kind of margin a loaded machine loses (disposing
+    // before the child had run would tear down a process that never echoed, and the assertion would fail on
+    // scheduling rather than on cancellation). Racing the exec keeps a child that dies without output from
+    // hanging here — the settled result then fails the assertion with what it actually captured.
+    let markStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const p = compute.execStream(
+      "echo started && sleep 30",
+      (c) => {
+        if (c.data.includes("started")) markStarted();
+      },
+      { timeoutSec: 60 },
+    );
+    await Promise.race([started, p]);
     await compute.dispose();
     const res = await p; // settles from the kill, not the 60s timeout
     expect(res.stdout).toContain("started");
-  });
+  }, 30_000);
 });
 
 describe("LocalDriver — echo mode (in-job live-tail feed)", () => {
@@ -105,12 +138,15 @@ describe("LocalDriver — echo mode (in-job live-tail feed)", () => {
 
   it("kills a timed-out child and resolves exit 124 with the output captured so far", async () => {
     const compute = await new LocalDriver({ echo: true }).provision({ os: "linux", needs: [] });
-    const res = await compute.exec("echo before && sleep 30", { timeoutSec: 1 });
+    // The budget is incidental — 124, the pre-kill output and the note are what this certifies. It is wider
+    // than the shell needs to start and flush `before` so that a fork delayed by a loaded machine cannot
+    // expire it first; `sleep 30` still outlives it by an order of magnitude, so the timeout path is taken.
+    const res = await compute.exec("echo before && sleep 30", { timeoutSec: 3 });
     await compute.dispose();
     expect(res.exitCode).toBe(124);
     expect(res.stdout).toContain("before");
     expect(res.stderr).toContain("timed out");
-  });
+  }, 30_000);
 
   it("captures stdout that flushes around/after process exit (regression: settle on 'close', not 'exit')", async () => {
     // The exec used to resolve on the child's 'exit' event, which fires when the process ends but BEFORE its stdout

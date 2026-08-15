@@ -71,6 +71,7 @@ export type { AdmissionLedger } from "./ports/admission-ledger.js";
 export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type {
+  AttemptStamp,
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,

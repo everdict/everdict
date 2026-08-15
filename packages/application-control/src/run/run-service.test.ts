@@ -305,8 +305,17 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     // A recording store whose claim is REFUSED — the `unisolated` execution: it runs, its replay is not ours.
     refuseRecording?: boolean;
     seals?: SealInput[];
+    // A store that HAS the atomic seam (arch-review 45) — the terminal write and the attempt's terminal stamp
+    // as one decision, with the Pg transaction's observable shape: nothing is published unless both land.
+    atomic?: boolean;
+    // The ledger refuses every terminal stamp — the store fault the atomic path must not settle behind.
+    stampFails?: boolean;
+    // What happened, in order: which write path settled and which stamp rode it.
+    order?: string[];
   }): { service: RunService; store: RunStore; attempts: InMemoryExecutionAttemptStore } {
     const rows = new Map<string, RunRecord>();
+    const order = opts.order;
+    const terminal = (r: RunRecord | undefined): boolean => r?.status === "succeeded" || r?.status === "failed";
     const store: RunStore = {
       async create(record: RunRecord) {
         rows.set(record.id, record);
@@ -314,6 +323,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
       async update(id: string, patch: Partial<RunRecord>) {
         const cur = rows.get(id);
         if (!cur) return undefined;
+        if (terminal(patch as RunRecord)) order?.push(`update:${patch.status}`);
         const next = { ...cur, ...patch, id: cur.id };
         rows.set(id, next);
         return next;
@@ -336,8 +346,32 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
       async liveSessions() {
         return [];
       },
+      ...(opts.atomic
+        ? {
+            // The transaction, modelled: the settled row becomes visible only once the stamp has landed too,
+            // so a stamp that throws leaves the run exactly as open as a ROLLBACK would.
+            async settleWith(id, patch, _events, guard, stamp) {
+              const cur = rows.get(id);
+              if (!cur) return undefined;
+              if (guard.expectNonTerminal === true && terminal(cur)) return undefined;
+              order?.push(`settleWith:${patch.status}`);
+              await stamp.apply(stamp.attempts);
+              const next = { ...cur, ...patch, id: cur.id };
+              rows.set(id, next);
+              return next;
+            },
+          }
+        : {}),
     };
     const attempts = new InMemoryExecutionAttemptStore();
+    if (opts.stampFails || order) {
+      const real = attempts.transition.bind(attempts);
+      attempts.transition = async (attemptId, to, patch) => {
+        if (to !== "executing") order?.push(`stamp:${to}`);
+        if (opts.stampFails && to !== "executing") throw new UpstreamError("UPSTREAM_ERROR", {}, "ledger down");
+        return real(attemptId, to, patch);
+      };
+    }
     const seals = opts.seals;
     const service = new RunService({
       dispatcher: { dispatch: opts.dispatch },
@@ -461,6 +495,72 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
 
     expect(seals.length).toBeGreaterThan(0);
     for (const s of seals) expect(s.attemptId).toBe(`evd-run-${record.id}#g1`);
+  });
+
+  // ── THE TERMINAL STAMP RIDES THE SETTLEMENT (arch-review 45) ───────────────────────────────────────
+  //
+  // The two-step above is what this lane had: settle, then stamp. A crash between them left a SUCCEEDED run
+  // — completion fact, callback and all — whose attempt row still said `created`, which is the batch lane's
+  // old window wearing this lane's clothes. Where the store can make the two writes one decision, it must.
+  it("settles THROUGH the atomic seam when the store has one — the stamp rides the terminal write", async () => {
+    const order: string[] = [];
+    const { service, store, attempts } = standalone({ dispatch: async () => passing, atomic: true, order });
+    const record = await submit(service);
+    expect((await settledRun(store, record.id)).status).toBe("succeeded");
+
+    // The terminal write went through the commit point, and the stamp is INSIDE it — never a second write
+    // afterwards that a crash could sit in front of.
+    expect(order).toEqual(["settleWith:succeeded", "stamp:committed"]);
+    expect(order).not.toContain("update:succeeded");
+    expect((await attempts.list(`evd-run-${record.id}`)).map((r) => r.state)).toEqual(["committed"]);
+  });
+
+  it("a stamp that FAILS takes the settlement with it — the run is left open for recovery, not settled behind a ledger that could not record it", async () => {
+    // The alternative endings this forecloses: settling the run SUCCEEDED behind an attempt row nobody could
+    // write (the audit plane silently losing the execution), or converting the ledger's fault into a FAILED
+    // run (publishing a failure for an execution that succeeded).
+    const order: string[] = [];
+    const { service, store } = standalone({
+      dispatch: async () => passing,
+      atomic: true,
+      stampFails: true,
+      order,
+    });
+    const record = await submit(service);
+    for (const deadline = Date.now() + 5_000; !order.includes("stamp:committed"); ) {
+      if (Date.now() > deadline) throw new Error(`the settlement never reached its stamp (saw ${order.join(", ")})`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 50)); // …and nothing lands after it
+
+    const after = await store.get(record.id);
+    expect(after?.status).not.toBe("succeeded");
+    expect(after?.status).not.toBe("failed"); // never re-settled as a failure — the execution succeeded
+    // ONE settlement was attempted and it rolled back. A fault that escaped `finalize` would be caught by the
+    // dispatch's own error path and re-settled as FAILED — a failure published for an execution that
+    // succeeded, on the strength of an audit row nobody could write.
+    expect(order).toEqual(["settleWith:succeeded", "stamp:committed"]);
+  });
+
+  it("keeps the two-step where the store has no seam — settle, then stamp, awaited", async () => {
+    // The fallback IS the behaviour this lane already had, and it must stay reachable: a store that cannot
+    // open a transaction settles through `update` and the stamp follows it, swallowed on failure (a
+    // diagnostic row may not decide a run's outcome).
+    const order: string[] = [];
+    const { service, store, attempts } = standalone({ dispatch: async () => passing, order });
+    const record = await submit(service);
+    expect((await settledRun(store, record.id)).status).toBe("succeeded");
+
+    expect(order).toEqual(["update:succeeded", "stamp:committed"]);
+    expect((await attempts.list(`evd-run-${record.id}`)).map((r) => r.state)).toEqual(["committed"]);
+  });
+
+  it("a stamp that fails on the two-step path never disturbs the run — the audit plane decides no outcomes", async () => {
+    const order: string[] = [];
+    const { service, store } = standalone({ dispatch: async () => passing, stampFails: true, order });
+    const record = await submit(service);
+    expect((await settledRun(store, record.id)).status).toBe("succeeded");
+    expect(order).toEqual(["update:succeeded", "stamp:committed"]); // attempted, refused by the ledger, swallowed
   });
 });
 

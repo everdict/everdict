@@ -1,4 +1,5 @@
 import type {
+  AttemptStamp,
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
@@ -16,8 +17,9 @@ import {
   TERMINAL_SCORECARD_STATUSES,
 } from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
-import type { SqlClient } from "../client.js";
+import { type SqlClient, withTransaction } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
+import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
 import { withRunUsage } from "./run-store.js";
 
 interface RunRow {
@@ -204,6 +206,45 @@ export class PgRunStore implements RunStore {
     events?: OutboxEvent[],
     guard?: RunUpdateGuard,
   ): Promise<RunRecord | undefined> {
+    return this.updateOn(this.client, id, patch, events, guard);
+  }
+
+  // ── THE STANDALONE LANE'S COMMIT POINT (arch-review 45) ────────────────────────────────────────────
+  //
+  // The fenced terminal write and the physical attempt's terminal stamp, all-or-nothing. As two round-trips
+  // the window between them was the batch lane's old one wearing this lane's clothes: a crash there published
+  // a SUCCEEDED run — completion fact, callback and all — whose attempt row still said `created`, a ledger
+  // that never saw the execution it is supposed to be the record of end.
+  //
+  // The fence is NOT re-expressed here: the write goes through the same `updateOn` every settlement uses,
+  // bound to the transaction, so the atomic path cannot drift from the ordinary one. A refused fence returns
+  // undefined WITHOUT a rollback — nothing was written, and there is no claim to un-happen (the difference
+  // from `commitCase`, whose claim lands before the settle and must be taken back). A stamp that throws
+  // aborts the transaction, so the run stays open for recovery rather than settled behind an unwritable row.
+  async settleWith(
+    id: string,
+    patch: Partial<RunRecord>,
+    events: OutboxEvent[] | undefined,
+    guard: RunUpdateGuard,
+    // The caller's ambient ledger is on `stamp.attempts` and deliberately unused: the stamp must go through
+    // the SAME transaction as the write, so a transaction-bound twin is handed to it instead.
+    stamp: AttemptStamp,
+  ): Promise<RunRecord | undefined> {
+    return withTransaction(this.client, "the run settlement (terminal write + attempt stamp)", async (tx) => {
+      const settled = await this.updateOn(tx, id, patch, events, guard);
+      if (settled === undefined) return undefined;
+      await stamp.apply(new PgExecutionAttemptStore(tx));
+      return settled;
+    });
+  }
+
+  private async updateOn(
+    client: SqlClient,
+    id: string,
+    patch: Partial<RunRecord>,
+    events?: OutboxEvent[],
+    guard?: RunUpdateGuard,
+  ): Promise<RunRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/result/error/runtime/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -252,7 +293,7 @@ export class PgRunStore implements RunStore {
       sets.push(`updated_at = $${i++}`);
       vals.push(patch.updatedAt);
     }
-    if (sets.length === 0) return this.get(id);
+    if (sets.length === 0) return this.getOn(client, id);
     vals.push(id);
     // The scoring-pass FENCE (arch-review 8 P0) — a cross-row condition IN the write statement: this row
     // changes only while the named pass still owns the parent scorecard's marker. Evaluating it in the
@@ -308,7 +349,7 @@ export class PgRunStore implements RunStore {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
       const ev = eventValuesClause(events, vals.length + 1);
-      const res = await this.client.query<RunRow>(
+      const res = await client.query<RunRow>(
         `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
@@ -318,7 +359,7 @@ export class PgRunStore implements RunStore {
       );
       return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
     }
-    const res = await this.client.query<RunRow>(
+    const res = await client.query<RunRow>(
       `UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *`,
       vals,
     );
@@ -326,7 +367,11 @@ export class PgRunStore implements RunStore {
   }
 
   async get(id: string): Promise<RunRecord | undefined> {
-    const res = await this.client.query<RunRow>("SELECT * FROM everdict_runs WHERE id = $1", [id]);
+    return this.getOn(this.client, id);
+  }
+
+  private async getOn(client: SqlClient, id: string): Promise<RunRecord | undefined> {
+    const res = await client.query<RunRow>("SELECT * FROM everdict_runs WHERE id = $1", [id]);
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
   }
 

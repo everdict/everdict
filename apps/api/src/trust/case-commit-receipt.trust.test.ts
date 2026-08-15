@@ -180,6 +180,13 @@ describeTrust("TRUST-167 — a case ends the same way whichever driver ended it"
 });
 
 // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39, Phase 3) ─────────────────────────────────
+//
+// The accounting is the same on every settle path — a counted outcome traces to a receipt on the (case,
+// trial) axis and the child row's bytes are the receipt's — and what differs is the verdict on a case the
+// ledger cannot vouch for. This scenario pins the SUCCESS gate: it REFUSES. The failure/supersede settles
+// count the vouched results only and DROP the rest onto the batch's timeline instead of refusing (a batch
+// already ending badly has nowhere better to be left); that half is pinned in
+// apps/api/src/core/scorecard/outcome-commit-atomicity.test.ts. Neither path ever counts an unvouched case.
 describeTrust("TRUST-168 — the summary is built from the committed children, not from memory", () => {
   it("REFUSES the batch when the child row's bytes are not its receipt's — neither memory nor the row is silently counted", async () => {
     // The driver holds the object the harness returned; the child row holds what the store persisted. When

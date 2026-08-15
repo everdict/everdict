@@ -28,19 +28,34 @@ describe("runSpawn (the shared incremental spawn core)", () => {
   });
 
   it("a chunk arrives BEFORE the exec resolves (the incremental contract, not a post-hoc replay)", async () => {
-    let sawChunkBeforeResolve = false;
-    let resolved = false;
-    const p = runSpawn("echo early; sleep 0.3", {
-      timeoutMs: 5_000,
+    // Certified as an ORDER, not as a timing margin: both events append to one sequence — the first chunk
+    // when the sink fires, the settle in a `then` attached at creation — so the assertion reads which
+    // happened first instead of sampling a flag at a moment the scheduler picks. The tail sleep keeps the
+    // two a second apart, so a loaded machine cannot make them adjacent: pre-fix (a post-hoc replay of the
+    // buffers) the sequence is ["resolve"] and this still fails.
+    const order: string[] = [];
+    let chunkAt = 0;
+    let settledAt = 0;
+    const p = runSpawn("echo early; sleep 1", {
+      timeoutMs: 30_000,
       sinks: chunkSinks(() => {
-        if (!resolved) sawChunkBeforeResolve = true;
+        if (order.length === 0) {
+          order.push("chunk");
+          chunkAt = Date.now();
+        }
       }),
+    }).then((r) => {
+      order.push("resolve");
+      settledAt = Date.now();
+      return r;
     });
     const res = await p;
-    resolved = true;
     expect(res.exitCode).toBe(0);
-    expect(sawChunkBeforeResolve).toBe(true);
-  });
+    expect(order).toEqual(["chunk", "resolve"]);
+    // And the two are a second apart, not adjacent: a replay dispatched at settle can win an ordering check
+    // through a microtask, never a wall-clock gap. A stall only ever delays the settle and widens it.
+    expect(settledAt - chunkAt).toBeGreaterThan(300);
+  }, 30_000);
 
   it("a non-zero exit resolves as a result (never throws) — exec's contract", async () => {
     const res = await runSpawn("echo out && exit 7", { timeoutMs: 5_000 });
@@ -49,15 +64,20 @@ describe("runSpawn (the shared incremental spawn core)", () => {
   });
 
   it("kills a timed-out detached group and resolves 124 with the caller's note and captured output", async () => {
+    // The budget is incidental — what is certified is the OUTCOME of the kill (124, the output captured
+    // before it, the caller's note). It is deliberately wider than the shell needs to start and flush
+    // `before`, because a fork on a loaded machine (a repo-wide parallel test run) can cost hundreds of
+    // milliseconds and a budget that expires first would fail on scheduling rather than on the contract.
+    // `sleep 30` still outlives it by an order of magnitude, so the timeout path is the one taken.
     const res = await runSpawn("echo before && sleep 30", {
       detached: true,
-      timeoutMs: 500,
+      timeoutMs: 3_000,
       timeoutNote: "[everdict] test timed out",
     });
     expect(res.exitCode).toBe(124);
     expect(res.stdout).toContain("before");
     expect(res.stderr).toContain("test timed out");
-  });
+  }, 30_000);
 
   it("argv mode runs the binary directly and streams its output", async () => {
     const chunks: ExecChunk[] = [];
