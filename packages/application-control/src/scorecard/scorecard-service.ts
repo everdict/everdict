@@ -1024,6 +1024,80 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     }
   }
 
+  // ── THE TEARDOWN AS A DURABLE OPERATION (arch-review 47 §5.2) ───────────────────────────────────────
+  //
+  // Everything below `stopInFlight` is idempotent and convergent, and convergence needs somebody to converge:
+  // a 5xx converges when a caller retries, but a control-plane crash between the CANCELLED commit and a
+  // successful teardown has no caller left. The decision is durable, the work is not torn down, and nothing
+  // is looking for the difference. This wrapper gives that gap an owner — the operation row is written WITH
+  // the teardown attempt (the decision is the settle; this row is the teardown's own ledger), and
+  // `reconcileCancellations` re-runs whatever is still owed.
+  //
+  // Absent store = today's behavior exactly: the teardown runs, a failure throws, the retry converges.
+  private async tearDownDurably(rec: ScorecardRecord): Promise<void> {
+    const operations = this.deps.cancellations;
+    if (!operations) return await this.stopInFlight(rec);
+    // BEST-EFFORT REQUEST, deliberately. Failing the cancel because this auxiliary row could not be written
+    // would make the ledger's presence strictly worse than its absence: the teardown would not run at all,
+    // for a batch whose decision is already committed. A request that fails degrades to the convergent
+    // behavior this ledger was added on top of — loudly, because the operation is then unowned.
+    await operations.request(rec.id, this.now()).catch((err: unknown) => {
+      console.warn(
+        `[scorecard] cancel of ${rec.id} is running without a durable teardown owner: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    try {
+      await this.stopInFlight(rec);
+    } catch (err) {
+      // The 5xx keeps its meaning — the caller is still told the teardown did not finish. What changes is
+      // that the caller is no longer the only one who can finish it.
+      await operations
+        .fail(rec.id, err instanceof Error ? err.message : String(err), this.now())
+        .catch(() => undefined);
+      throw err;
+    }
+    await operations.complete(rec.id, this.now()).catch(() => undefined);
+  }
+
+  // The reconciler: re-run every teardown that is still owed. Called on a timer by the composition root
+  // (leader-gated — it acts on rows this process does not own). Returns how many operations it closed.
+  //
+  // The steps it re-runs are the same idempotent ones the retry runs: a fenced child settle that loses is a
+  // normal race result, a kill of a job that is already gone is a no-op, a queue drop that matches nothing
+  // removes nothing. So a reconciliation that overlaps a caller's own retry costs work, never correctness.
+  async reconcileCancellations(limit = 50): Promise<number> {
+    const operations = this.deps.cancellations;
+    if (!operations) return 0;
+    const owed = await operations.listIncomplete(limit);
+    let closed = 0;
+    for (const operation of owed) {
+      const rec = await this.deps.store.get(operation.scorecardId);
+      // A batch that is gone (deleted) or not aborted has no teardown this operation is entitled to run —
+      // tearing down a live batch because a stale row names it would be the reconciler cancelling work
+      // nobody cancelled. Closing the row is the honest end: the operation cannot be completed by doing
+      // anything, so it is over.
+      if (!rec || (rec.status !== "cancelled" && rec.status !== "superseded")) {
+        await operations.complete(operation.scorecardId, this.now()).catch(() => undefined);
+        closed += 1;
+        continue;
+      }
+      try {
+        await this.stopInFlight(rec);
+      } catch (err) {
+        // Stays owed, with the reason recorded. The next sweep tries again — this is the whole point of the
+        // row, so a failure here is not escalated into the sweep's own failure (one stuck batch must not
+        // stop the reconciler from converging the others).
+        await operations
+          .fail(operation.scorecardId, err instanceof Error ? err.message : String(err), this.now())
+          .catch(() => undefined);
+        continue;
+      }
+      await operations.complete(operation.scorecardId, this.now()).catch(() => undefined);
+      closed += 1;
+    }
+    return closed;
+  }
+
   // User stop — terminate a queued/running batch as cancelled and free its runtime. Mark the record cancelled first
   // (the domain rejects a terminal batch → 409 ConflictError, so a double-stop or a stop-after-finish is a clean
   // conflict) so the track loop's abort branch settles it as cancelled (not superseded); then stop the live work.
@@ -1041,10 +1115,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // is therefore not a conflict here — the DECISION is made; what the retry owes is the TEARDOWN, which is
     // idempotent end to end (fenced child settles, best-effort kills, no-op queue drops). Succeeded/failed
     // keep the conflict: cancelling finished work is a cancellation of something that no longer exists.
-    // (The durable CancellationOperation/reconciler is the target shape — arch-review 47 §5.2; this is the
-    // convergent interim that makes the retry honest without widening the status vocabulary.)
+    // (The teardown is now a DURABLE operation on top of that convergence — arch-review 47 §5.2: a
+    // reconciler owns what a crashed caller can no longer retry. See tearDownDurably.)
     if (rec.status === "cancelled" || rec.status === "superseded") {
-      await this.stopInFlight(rec);
+      await this.tearDownDurably(rec);
       return (await this.get(rec.id)) ?? rec;
     }
     // E0 outbox: the cancelled fact rides the transition (the domain is where "the completion path skips
@@ -1063,7 +1137,8 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // something that no longer exists (arch-review 29 P0).
     if (cancelled === undefined) return (await this.get(rec.id)) ?? rec;
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    await this.stopInFlight(rec);
+    // The decision has committed — from here the teardown is owed no matter what happens to this process.
+    await this.tearDownDurably(rec);
     return (await this.get(rec.id)) ?? rec;
   }
 

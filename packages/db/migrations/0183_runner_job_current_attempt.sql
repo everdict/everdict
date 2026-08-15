@@ -1,0 +1,16 @@
+-- The row carries its CURRENT physical attempt, so a re-lease can supersede its predecessor ACROSS REPLICAS
+-- (arch-review 47 §5.1 — the claimAttempt transaction's anchor).
+--
+-- The store lane could name the attempt it was opening and nothing else. The attempt it REPLACED was
+-- unreachable: the previous claim may have been served by a different control-plane replica, and the only
+-- handle to that row lived in that replica's memory. So a requeued job left `g1 executing` standing for ever
+-- beside `g2 created→committed` — the ledger said two executions were live when one had been abandoned.
+--
+-- The predecessor's id has to travel through the one thing both replicas share, which is this row. The claim
+-- reads it, supersedes it, and writes the successor's id back — all inside the transaction that mints the
+-- lease, so the lease and the ledger cannot disagree about which attempt is current.
+--
+-- NULL means "no attempt this hub opened": a job that has only ever been leased once runs the attempt its
+-- DISPATCH opened, and no handle to that one reaches the lease lane (it is ended by whatever settles the
+-- dispatch, not by the lease that displaced it).
+ALTER TABLE everdict_runner_jobs ADD COLUMN IF NOT EXISTS current_attempt_id text;

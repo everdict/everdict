@@ -1,3 +1,4 @@
+import type { ClaimAttemptMint } from "@everdict/application-control";
 import type { CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -125,5 +126,139 @@ describe("PgRunnerJobStore — a cancelled job is revoked in the statement, not 
     expect(sql).toMatch(/RETURNING cancel_requested/);
     // …but the renewal stops, so a runner that ignores the signal is reclaimed by the idle-timeout path.
     expect(sql).toMatch(/CASE WHEN cancel_requested OR status = 'cancelled' THEN activity_at ELSE to_timestamp/);
+  });
+});
+
+// ── THE CLAIM AND ITS ATTEMPT ARE ONE TRANSACTION (arch-review 47 §5.1, the SQL half) ────────────────
+//
+// `claimAttempt` is only worth having if every statement it names lands inside ONE transaction: the claim, the
+// predecessor's supersede, the successor's insert, its `executing` stamp, and the row's job + current_attempt_id
+// restamp. Drop the transaction and each one still runs, each one still passes every behavioural test — and the
+// three windows the design exists to close are all back open (a lease with no attempt row, an attempt row with
+// no lease, a predecessor nobody ends). So the BEGIN…COMMIT bracket and the order inside it are pinned here.
+
+const CLAIMED_JOB = {
+  evalCase: {
+    id: "c1",
+    env: { kind: "repo", source: { files: {} } },
+    task: "t",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  },
+  harness: { id: "h", version: "1" },
+  tenant: "acme",
+  runId: "evd-run-1",
+};
+
+// A fake that can transact: BEGIN/COMMIT/ROLLBACK are recorded as statements of their own, so the bracket is
+// visible in the same list as the writes it is supposed to contain.
+function transactional(rowsFor: (sql: string) => unknown[]) {
+  const statements: Array<{ sql: string; params: unknown[] }> = [];
+  const query = async (sql: string, params?: unknown[]) => {
+    statements.push({ sql, params: params ?? [] });
+    return { rows: rowsFor(sql) };
+  };
+  const inner = { query } as unknown as SqlClient;
+  const client = {
+    query,
+    async transaction<T>(run: (tx: SqlClient) => Promise<T>): Promise<T> {
+      statements.push({ sql: "BEGIN", params: [] });
+      try {
+        const out = await run(inner);
+        statements.push({ sql: "COMMIT", params: [] });
+        return out;
+      } catch (err) {
+        statements.push({ sql: "ROLLBACK", params: [] });
+        throw err;
+      }
+    },
+  } as unknown as SqlClient;
+  return { client, statements };
+}
+
+// The row a re-lease claims: epoch 2, and it already names the attempt the FIRST lease opened.
+const reLeaseRows = (sql: string): unknown[] => {
+  if (sql.includes("RETURNING job_id, job, lease_epoch, current_attempt_id"))
+    return [{ job_id: "j1", job: CLAIMED_JOB, lease_epoch: 2, current_attempt_id: "evd-run-1#g1" }];
+  if (sql.includes("INSERT INTO everdict_execution_attempts")) return [{ attempt_id: "evd-run-1#g2", generation: 2 }];
+  return [];
+};
+
+// The composition's claim-lane mint, in miniature — it writes through the ledger the STORE hands it, which is
+// the whole point: those writes have to land on the claim's own transaction.
+const mint: ClaimAttemptMint = async (claimed, ledger) => {
+  const attempts = ledger.attempts;
+  if (!attempts) throw new Error("the Pg store binds a transaction-bound ledger");
+  if (ledger.prior !== undefined)
+    await attempts.transition(ledger.prior, "superseded", {
+      error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
+    });
+  const opened = await attempts.open({ executionId: "evd-run-1", tenant: "acme" });
+  await attempts.transition(opened.attemptId, "executing", { leaseEpoch: claimed.leaseEpoch });
+  return { job: { ...claimed.job, recordingGeneration: opened.generation }, attemptId: opened.attemptId };
+};
+
+describe("PgRunnerJobStore — claimAttempt commits the lease and its attempt together", () => {
+  it("brackets claim → supersede → insert → executing → restamp in ONE transaction, in that order", async () => {
+    const { client, statements } = transactional(reLeaseRows);
+    const lease = await new PgRunnerJobStore(client).claimAttempt(
+      { owner: "u1", runnerId: "runner-1", leaseTtlMs: 1_000, now: 1_000 },
+      mint,
+    );
+    const sql = statements.map((s) => s.sql);
+    expect(sql[0]).toBe("BEGIN");
+    expect(sql.at(-1)).toBe("COMMIT"); // nothing escapes the bracket — no statement runs after the commit
+    // The claim's own three statements are the SAME ones the fenced path runs (they are shared, not forked):
+    // the expired-lease requeue, the cancelled sweep, then the candidate UPDATE — which now also brings back
+    // the attempt the row names, the one thing no replica could otherwise learn.
+    expect(sql[1]).toMatch(/SET status = 'queued'/);
+    expect(sql[2]).toMatch(/SET status = 'cancelled'/);
+    expect(sql[3]).toMatch(/RETURNING job_id, job, lease_epoch, current_attempt_id/);
+    // …then the ledger work, on the transaction's own twin.
+    expect(statements[4]?.sql).toMatch(/UPDATE everdict_execution_attempts/);
+    expect(statements[4]?.params.slice(0, 2)).toEqual(["evd-run-1#g1", "superseded"]); // the PREDECESSOR ends
+    expect(statements[5]?.sql).toMatch(/INSERT INTO everdict_execution_attempts/);
+    expect(statements[6]?.params.slice(0, 2)).toEqual(["evd-run-1#g2", "executing"]);
+    expect(statements[6]?.params[3]).toBe(2); // …stamped with the lease epoch that authorized it
+    // …and the row restamp closes it: the job the runner will actually run, and the attempt the NEXT claim
+    // will supersede.
+    const restamp = statements[7];
+    expect(restamp?.sql).toMatch(/SET job = COALESCE\(\$4::jsonb, job\), current_attempt_id = COALESCE\(\$5/);
+    expect(restamp?.params[4]).toBe("evd-run-1#g2");
+    for (const predicate of FENCE) expect(restamp?.sql ?? "").toMatch(predicate);
+    expect(lease?.job.recordingGeneration).toBe(2); // the lease hands out the attempt it just minted
+  });
+
+  it("rolls the whole claim back when the mint throws — no COMMIT, so the job was never leased", async () => {
+    const { client, statements } = transactional(reLeaseRows);
+    await expect(
+      new PgRunnerJobStore(client).claimAttempt(
+        { owner: "u1", runnerId: "runner-1", leaseTtlMs: 1_000, now: 1_000 },
+        () => Promise.reject(new Error("attempt ledger unreachable")),
+      ),
+    ).rejects.toThrow("attempt ledger unreachable");
+    const sql = statements.map((s) => s.sql);
+    expect(sql.at(-1)).toBe("ROLLBACK");
+    expect(sql).not.toContain("COMMIT"); // "this runner holds a lease" and "the ledger has no row" never coexist
+  });
+
+  it("writes nothing but the claim when the mint yields no attempt — a first lease owes the row no restamp", async () => {
+    const { client, statements } = transactional(reLeaseRows);
+    await new PgRunnerJobStore(client).claimAttempt(
+      { owner: "u1", runnerId: "runner-1", leaseTtlMs: 1_000, now: 1_000 },
+      async () => ({}),
+    );
+    // BEGIN + the three claim statements + COMMIT: the row's job is already the one to hand out, and rewriting
+    // it with itself on every first lease is a write bought for nothing.
+    expect(statements.map((s) => s.sql)).toHaveLength(5);
+    expect(statements.at(-1)?.sql).toBe("COMMIT");
+  });
+
+  it("leaves the fenced claim() path outside any transaction — an unpromoted deployment is unchanged", async () => {
+    const { client, statements } = transactional(() => []);
+    await new PgRunnerJobStore(client).claim({ owner: "u1", runnerId: "runner-1", leaseTtlMs: 1_000, now: 1_000 });
+    expect(statements.map((s) => s.sql)).not.toContain("BEGIN");
+    expect(statements).toHaveLength(3);
   });
 });

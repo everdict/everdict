@@ -184,6 +184,7 @@ async function main(): Promise<void> {
     recordingStore,
     caseReceiptStore,
     executionAttemptStore,
+    cancellationStore,
     scorecardStore,
     scoringStageStore,
     keyStore,
@@ -759,6 +760,9 @@ async function main(): Promise<void> {
     // …and every PHYSICAL attempt behind those receipts (mig 0182): the spillover duplicate, the speculation
     // loser and the retried dispatch, which the one-per-case receipt structurally cannot report.
     attempts: executionAttemptStore,
+    // The cancel TEARDOWN's durable owner (mig 0184): the CANCELLED decision commits first, so a crash before
+    // the teardown finishes leaves work with nobody to stop it. The row is what the reconciler below sweeps.
+    cancellations: cancellationStore,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -798,6 +802,27 @@ async function main(): Promise<void> {
     owner: REPLICA_ID,
     replicas,
   });
+  // The cancel teardown's reconciler (mig 0184, arch-review 47 §5.2). Boot recovery above resumes batches
+  // whose DRIVER died; this closes the other half — batches whose cancellation was decided and whose teardown
+  // never finished. Registered here rather than inside runStartupRecovery because it is not a one-shot boot
+  // pass: a teardown can also be orphaned by a crash minutes into normal operation, and the row it leaves
+  // behind is only found by sweeping.
+  //
+  // Leader-gated, like the other sweeps that act on rows this process does not own — the teardown kills jobs
+  // and settles children, and N replicas racing to do it repeats work for no gain. Boot pass first, so a
+  // restart converges immediately instead of at the first tick.
+  const reconcileCancellations = whenLeader(
+    leader,
+    () =>
+      void scorecardService
+        .reconcileCancellations()
+        .then((closed) => {
+          if (closed > 0) console.log(`▶ cancellation reconciler: converged ${closed} orphaned teardown(s)`);
+        })
+        .catch(() => {}),
+  );
+  setInterval(reconcileCancellations, 60_000).unref();
+  reconcileCancellations();
 
   const mattermostCommandService = buildMattermostCommand({ settingsStore, runtimeSecretsFor, scorecardService });
   const { benchmarkService, bundleService } = buildCatalog({

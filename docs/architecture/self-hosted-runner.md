@@ -111,6 +111,16 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runC
   job into a **lease queue keyed by `(owner, runnerId)`** (workspace-independent → cross-workspace) and returns a
   promise that the matching `submit_result` resolves. `capacity()` = `maxConcurrent`; jobs park until a runner
   leases them, bounded by a lease/queue timeout (no connected runner ⇒ jobs wait then reject — natural scale-to-zero).
+- **The re-lease is one transition (arch-review 47 §5.1, store lane)** — a requeued job claimed again is a NEW
+  physical execution, and on the store-backed hub the whole attempt mint rides the claim's own transaction
+  (`RunnerJobStore.claimAttempt`, mig 0183): claim the row → supersede the attempt it currently names
+  (`current_attempt_id` carries the predecessor across replicas) → insert the new attempt (`executing`, lease
+  epoch stamped) → restamp the job's recording generation → write `current_attempt_id` back — all-or-nothing.
+  A ledger fault refuses the lease (rollback; the job stays claimable) rather than handing out a lease whose
+  attempt the ledger never saw; a refused RECORDING claim still inserts the attempt row (unisolated) and
+  strips the job's generation — the fail-closed live-only lane. The in-memory hub keeps the sequential
+  equivalent (post-await lease re-proof, predecessor supersede via the entry's own handle). The dispatch's
+  first attempt (epoch 1) is never superseded by a re-lease — it is ended by whatever settles the dispatch.
 - **`RuntimeDispatcher` branch** — when `placement.target` matches `self:<runnerId>`, resolve it against the
   **submitter's** `RunnerStore` (owner = `principal.subject`), exactly as Phase 3a resolves a `connectionId`
   against the submitter's subject. **Reject** if the runner isn't owned by the submitter (you cannot target

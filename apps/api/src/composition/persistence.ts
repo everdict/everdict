@@ -1,4 +1,5 @@
 import type {
+  CancellationStore,
   CapabilityGenerationStore,
   CaseReceiptStore,
   ConstitutionApprovalStore,
@@ -11,6 +12,7 @@ import type {
   VerificationDecisionStore,
 } from "@everdict/application-control";
 import {
+  InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
   soleLeader,
@@ -103,6 +105,7 @@ import {
   PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
+  PgCancellationStore,
   PgCapabilityGenerationStore,
   PgCapabilityStore,
   PgCaseReceiptStore,
@@ -222,6 +225,9 @@ export interface Persistence {
   // The PHYSICAL execution ledger (mig 0182): one unconditional row per physical execution, with a state.
   // Phase-1 dual-write — stamped beside the commit points, read by nothing (arch-review 42).
   executionAttemptStore: ExecutionAttemptStore;
+  // The cancel teardown's durable owner (mig 0184): a batch whose CANCELLED decision committed but whose
+  // live work may still be running. Swept by ScorecardService.reconcileCancellations (arch-review 47 §5.2).
+  cancellationStore: CancellationStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
@@ -380,6 +386,7 @@ export async function makePersistence(): Promise<Persistence> {
       recordingStore: new InMemoryRecordingStore(),
       caseReceiptStore: inMemoryReceipts,
       executionAttemptStore: new InMemoryExecutionAttemptStore(),
+      cancellationStore: new InMemoryCancellationStore(),
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
@@ -450,6 +457,7 @@ export async function makePersistence(): Promise<Persistence> {
     recordingStore: new PgRecordingStore(client),
     caseReceiptStore: new PgCaseReceiptStore(client),
     executionAttemptStore: new PgExecutionAttemptStore(client),
+    cancellationStore: new PgCancellationStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,

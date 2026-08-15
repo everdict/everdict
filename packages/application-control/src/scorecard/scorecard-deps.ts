@@ -20,6 +20,7 @@ import type {
 } from "@everdict/domain";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { CancellationStore } from "../ports/cancellation-store.js";
 import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { ConstitutionApprovalStore } from "../ports/constitution-approval-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
@@ -154,6 +155,11 @@ export interface ScorecardServiceDeps {
   // runner (via its heartbeat) to abort the in-flight run, freeing the runtime mid-case. killCase covers managed
   // Nomad/K8s backends; self:* lanes are lease queues, so this is their force-kill path (RunnerHub.requestCancel).
   cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
+  // The cancel TEARDOWN's durable owner (mig 0184, arch-review 47 §5.2). The CANCELLED decision commits
+  // first and the teardown follows; this ledger records that the teardown is owed, so a crash between them
+  // leaves an operation `reconcileCancellations` picks up instead of stranded children and held leases.
+  // Absent = the convergent-retry behavior it was built on (the caller's retry is the only owner).
+  cancellations?: CancellationStore;
   // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation /
   // batch settle. One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
   onOrchestrationEvent?: (event: OrchestrationEvent) => void;

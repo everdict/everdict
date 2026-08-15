@@ -1,17 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
-import type { RunnerJobLease, RunnerJobStore } from "../ports/runner-job-store.js";
+import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import type {
+  ClaimAttemptMint,
+  ClaimInput,
+  ClaimedAttempt,
+  RunnerJobLease,
+  RunnerJobStore,
+} from "../ports/runner-job-store.js";
 import {
   type AttemptAuthority,
   type AttemptToken,
   type EnqueueResult,
   type LeasedJob,
   type OpenAttempt,
+  type OpenedAttempt,
   type RunnerHub,
   type SelfHostedKey,
   normalizeOpenedAttempt,
   requiredRunnerCapabilities,
 } from "./runner-hub.js";
+
+// What the CLAIM lane's attempt open is told (arch-review 47 §5.1). The dispatch lanes keep `OpenAttempt`,
+// which closes over the composition's ambient stores and answers with a coordinate; this one additionally
+// carries the two things only a claim knows: the LEDGER the writes must go through — the claim transaction's
+// own twin, so the attempt row and the lease commit together — and the PREDECESSOR the row names, which is
+// the attempt this re-lease replaces and which no replica but this row could have named.
+export interface LeaseAttemptOpen {
+  job: CaseJob;
+  leaseEpoch: number;
+  // Absent = the store had no transaction to bind (the in-memory twin); the opener uses its ambient ledger.
+  attempts?: ExecutionAttemptStore;
+  prior?: string;
+}
+export type OpenLeaseAttempt = (input: LeaseAttemptOpen) => Promise<OpenedAttempt>;
 
 export interface StoreRunnerHubDeps {
   queueTimeoutMs?: number; // idle timeout — no lease/heartbeat activity for this long → no_runner (default 5 min)
@@ -21,6 +43,9 @@ export interface StoreRunnerHubDeps {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   openAttempt?: OpenAttempt; // see RunnerHubDeps.openAttempt + OpenedAttempt — the store twin
+  // The transactional lane's opener. Wired ⇒ a claim mints its attempt INSIDE the claim transaction
+  // (RunnerJobStore.claimAttempt); unwired ⇒ the three-step path below, unchanged.
+  openLeaseAttempt?: OpenLeaseAttempt;
 }
 
 // Store-backed RunnerHub — the multi-replica counterpart to the in-memory RunnerHub. Same public surface (enqueue /
@@ -37,6 +62,7 @@ export class StoreRunnerHub {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly openAttempt: OpenAttempt | undefined;
+  private readonly openLeaseAttempt: OpenLeaseAttempt | undefined;
   constructor(
     private readonly store: RunnerJobStore,
     deps: StoreRunnerHubDeps = {},
@@ -48,6 +74,7 @@ export class StoreRunnerHub {
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     this.openAttempt = deps.openAttempt;
+    this.openLeaseAttempt = deps.openLeaseAttempt;
   }
 
   // Park a job and poll the store until it settles — resolves on complete, rejects on fail/cancel, and rejects as
@@ -122,24 +149,71 @@ export class StoreRunnerHub {
   async leaseWait(key: SelfHostedKey, waitMs: number, capabilities?: string[]): Promise<LeasedJob | null> {
     const deadline = this.now() + waitMs;
     for (;;) {
-      const claimed = await this.store.claim({
-        owner: key.owner,
-        runnerId: key.runnerId,
-        ...(capabilities !== undefined ? { advertisedCaps: capabilities } : {}),
-        leaseTtlMs: this.leaseTtlMs,
-        now: this.now(),
-      });
-      if (claimed) {
-        const job = await this.mintAttempt(claimed, key);
-        // A lost mint (CAS miss — see mintAttempt) hands out NOTHING; the loop re-claims. Handing the
-        // runner a job whose row the store will never authorize is duplicate compute plus an orphan.
-        if (job !== null)
-          return { jobId: claimed.jobId, job, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
-      }
+      const leased = await this.claimOnce(key, capabilities);
+      // A lost mint hands out NOTHING; the loop re-claims. Handing the runner a job whose row the store will
+      // never authorize is duplicate compute plus an orphan. (The transactional lane cannot lose a mint — see
+      // claimWithAttempt — so this is the three-step path's outcome.)
+      if (leased)
+        return {
+          jobId: leased.jobId,
+          job: leased.job,
+          attempt: { jobId: leased.jobId, leaseEpoch: leased.leaseEpoch },
+        };
       const remaining = deadline - this.now();
       if (remaining <= 0) return null;
       await this.sleep(Math.min(this.pollMs, remaining));
     }
+  }
+
+  // One claim attempt: the §5.1 transaction when both halves of it are present, else the three-step path this
+  // hub has always run. The choice is per-deployment, not per-call — a store with no `claimAttempt` (or a
+  // composition that wired no lease opener) keeps the old sequence byte for byte.
+  private async claimOnce(key: SelfHostedKey, capabilities?: string[]): Promise<RunnerJobLease | null> {
+    const input: ClaimInput = {
+      owner: key.owner,
+      runnerId: key.runnerId,
+      ...(capabilities !== undefined ? { advertisedCaps: capabilities } : {}),
+      leaseTtlMs: this.leaseTtlMs,
+      now: this.now(),
+    };
+    const open = this.openLeaseAttempt;
+    if (this.store.claimAttempt && open) return this.store.claimAttempt(input, this.claimWithAttempt(open));
+    const claimed = await this.store.claim(input);
+    if (!claimed) return null;
+    const job = await this.mintAttempt(claimed, key);
+    return job === null ? null : { ...claimed, job };
+  }
+
+  // ── THE CLAIM'S LEDGER WORK, INSIDE THE CLAIM (arch-review 47 §5.1) ─────────────────────────────────
+  //
+  // The same decisions `mintAttempt` makes below, minus every one that existed only because they were three
+  // separate round-trips. There is no restamp to lose (the transaction holds the row, so nothing can move it),
+  // hence no just-opened attempt to supersede again; and the PREDECESSOR — unreachable on this lane until the
+  // row started carrying it — is ended here, by the claim that replaced it, on whichever replica serves it.
+  //
+  // The stamps are AWAITED and NOT swallowed, which is the whole difference from the best-effort posture the
+  // three-step path documents: they ride a transaction now, so a stamp that fails takes the lease with it
+  // rather than leaving a lease whose attempt the ledger never recorded.
+  private claimWithAttempt(open: OpenLeaseAttempt): ClaimAttemptMint {
+    return async (claimed, ledger): Promise<ClaimedAttempt> => {
+      // Epoch 1 is the FIRST lease: it runs the attempt the dispatch already opened, so there is nothing to
+      // mint, nothing to supersede (no handle to the dispatch's attempt reaches this lane) and no restamp owed.
+      if (claimed.leaseEpoch <= 1) return {};
+      const opened = await open({
+        job: claimed.job,
+        leaseEpoch: claimed.leaseEpoch,
+        ...(ledger.attempts !== undefined ? { attempts: ledger.attempts } : {}),
+        ...(ledger.prior !== undefined ? { prior: ledger.prior } : {}),
+      });
+      // The lease IS the dispatch, so compute starts under this attempt the moment the claim commits.
+      await opened.markExecuting?.();
+      const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
+      // A mint that produced no coordinate strips the inherited one (fail-closed → the live-only lane); the
+      // attempt ROW still exists and still says what ran, which is the point of the ledger.
+      const job =
+        opened.generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: opened.generation };
+      return { job, ...(opened.attemptId !== undefined ? { attemptId: opened.attemptId } : {}) };
+    };
   }
 
   // The store twin of RunnerHub.mintAttempt — a claim that RE-leases a requeued job (epoch > 1) is a new
@@ -149,13 +223,12 @@ export class StoreRunnerHub {
   // A failed open strips the inherited number (fail-closed → the live-only lane); a failed restamp is NOT
   // swallowed, so the runner never receives a lease whose row still points at the other execution.
   //
-  // ⚠️ WHAT THIS LANE STILL CANNOT DO: supersede the attempt this re-lease REPLACED. The prior attempt's id
-  // is not something the row carries and not something this replica knows — the previous claim may have been
-  // served by another replica entirely, and there is no column to hand it across. The in-memory hub can do it
-  // because the queue entry it owns carries the handle. Ending the replaced attempt here needs the claim and
-  // the attempt open to be ONE transaction, which is the review's §5.1 claimAttempt — until then the store
-  // lane's replaced rows are reconciled like every other pre-promotion row (an attempt row whose execution
-  // has a terminal outcome is not that outcome's authority).
+  // ⚠️ WHAT THIS PATH STILL CANNOT DO: supersede the attempt this re-lease REPLACED. The prior attempt's id
+  // reaches this replica only on the row, and reading it here would not help — ending it and claiming the
+  // lease would still be two decisions with a window between them. That is what `claimWithAttempt` above is
+  // for, and a deployment whose store offers `claimAttempt` never reaches this method. This one remains for
+  // the stores that cannot transact, where the replaced rows are reconciled like every other pre-promotion
+  // row (an attempt row whose execution has a terminal outcome is not that outcome's authority).
   private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob | null> {
     if (claimed.leaseEpoch <= 1 || !this.openAttempt) return claimed.job;
     const opened = normalizeOpenedAttempt(

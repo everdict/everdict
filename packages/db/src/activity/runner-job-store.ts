@@ -1,4 +1,5 @@
 import {
+  type ClaimAttemptMint,
   type ClaimInput,
   POOL_RUNNER,
   type ParkInput,
@@ -7,7 +8,8 @@ import {
   type RunnerJobStore,
 } from "@everdict/application-control";
 import { type CaseJob, CaseJobSchema, type CaseResult, CaseResultSchema } from "@everdict/contracts";
-import type { SqlClient } from "../client.js";
+import { type SqlClient, withTransaction } from "../client.js";
+import { PgExecutionAttemptStore } from "../results/pg-execution-attempt-store.js";
 
 // Store-backed self-hosted runner lease queue (migration 0055) — the multi-replica RunnerHub persistence.
 // InMemory mirrors the SQL semantics for tests/single-process; Pg uses FOR UPDATE SKIP LOCKED so two replicas never
@@ -24,6 +26,9 @@ interface Entry {
   cancelRequested: boolean;
   leasedBy?: string;
   leaseEpoch?: number; // minted per claim — the physical attempt's identity (see the port)
+  // The physical attempt this row currently names (mig 0183's column) — the predecessor the NEXT claim
+  // supersedes. Undefined for a job whose only attempt is its dispatch's own.
+  currentAttemptId?: string;
   activityAt: number;
   result?: CaseResult;
   error?: string;
@@ -87,6 +92,35 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     e.leaseEpoch = (e.leaseEpoch ?? 0) + 1; // a new physical attempt on the same job
     e.activityAt = input.now;
     return { jobId: e.jobId, job: e.job, leaseEpoch: e.leaseEpoch };
+  }
+
+  // The single-process twin of the claim transaction (see RunnerJobStore.claimAttempt). Same SEQUENCE — claim,
+  // then the mint's ledger work against the row's predecessor, then the restamp — and the same visible
+  // outcome, run sequentially because this store has no transaction to bind a ledger twin to (`attempts` is
+  // therefore omitted, and the caller writes through its own ambient ledger).
+  //
+  // What it approximates rather than provides is ROLLBACK: a mint that throws has already had its claim
+  // applied, so the entry is put back to `queued` by hand. The epoch is deliberately NOT rolled back with it —
+  // epochs only ever move forward here, so a retry of this claim mints a fresh one and the abandoned number
+  // can never be handed out twice.
+  async claimAttempt(input: ClaimInput, mint: ClaimAttemptMint): Promise<RunnerJobLease | null> {
+    const lease = await this.claim(input);
+    if (!lease) return null;
+    const e = this.jobs.get(lease.jobId);
+    try {
+      const minted = await mint(lease, { ...(e?.currentAttemptId !== undefined ? { prior: e.currentAttemptId } : {}) });
+      if (e) {
+        if (minted.job !== undefined) e.job = minted.job;
+        if (minted.attemptId !== undefined) e.currentAttemptId = minted.attemptId;
+      }
+      return { ...lease, ...(minted.job !== undefined ? { job: minted.job } : {}) };
+    } catch (err) {
+      if (e && e.status === "leased" && e.leaseEpoch === lease.leaseEpoch) {
+        e.status = "queued";
+        e.leasedBy = undefined;
+      }
+      throw err;
+    }
   }
 
   async restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean> {
@@ -253,11 +287,65 @@ export class PgRunnerJobStore implements RunnerJobStore {
   }
 
   async claim(input: ClaimInput): Promise<RunnerJobLease | null> {
+    const claimed = await this.claimOn(this.client, input);
+    return claimed ? claimed.lease : null;
+  }
+
+  // ── THE CLAIM TRANSACTION (arch-review 47 §5.1) ────────────────────────────────────────────────────
+  //
+  // The same three statements as `claim` (they are shared, not forked — a predicate that drifts between the
+  // fenced path and the transactional one is a fence in name only), and then the ledger work INSIDE the same
+  // transaction. The order is the point:
+  //
+  //   BEGIN → requeue sweep → cancelled sweep → candidate UPDATE (which also RETURNS the attempt the row
+  //   currently names) → mint(predecessor superseded · new attempt inserted `executing` with the lease epoch)
+  //   → job restamp + current_attempt_id → COMMIT
+  //
+  // The candidate UPDATE takes the row's lock, and it is held to COMMIT. So nothing can move the row under the
+  // mint — no cancel, no expiry sweep, no competing claim — which is why the restamp below carries the
+  // lease fence as a statement of what it relies on rather than as a race it could lose (see restampJob, whose
+  // fence IS load-bearing because its claim committed long before).
+  //
+  // A throw anywhere inside rolls the whole thing back: the job returns to `queued` with no lease, no attempt
+  // row and no restamp. That includes a ledger fault — with the ledger wired it is the ONLY ordinal authority,
+  // and a re-lease it cannot record does not happen at all rather than running unrecorded. (A FIRST lease
+  // touches the ledger not at all, so an outage never blocks fresh work; only re-leases wait for it.)
+  async claimAttempt(input: ClaimInput, mint: ClaimAttemptMint): Promise<RunnerJobLease | null> {
+    return withTransaction(this.client, "the runner lease claim (job + attempt ledger)", async (tx) => {
+      const claimed = await this.claimOn(tx, input);
+      if (!claimed) return null;
+      const minted = await mint(claimed.lease, {
+        attempts: new PgExecutionAttemptStore(tx),
+        ...(claimed.priorAttemptId !== undefined ? { prior: claimed.priorAttemptId } : {}),
+      });
+      // Nothing to restamp: a first lease runs the attempt its dispatch opened, so the row's job is already
+      // the one to hand out and a write here would only rewrite it with itself.
+      if (minted.job === undefined && minted.attemptId === undefined) return claimed.lease;
+      await tx.query(
+        `UPDATE everdict_runner_jobs SET job = COALESCE($4::jsonb, job), current_attempt_id = COALESCE($5, current_attempt_id)
+         WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
+           AND NOT cancel_requested`,
+        [
+          claimed.lease.jobId,
+          input.runnerId,
+          claimed.lease.leaseEpoch,
+          minted.job !== undefined ? JSON.stringify(minted.job) : null,
+          minted.attemptId ?? null,
+        ],
+      );
+      return { ...claimed.lease, ...(minted.job !== undefined ? { job: minted.job } : {}) };
+    });
+  }
+
+  private async claimOn(
+    client: SqlClient,
+    input: ClaimInput,
+  ): Promise<{ lease: RunnerJobLease; priorAttemptId?: string } | null> {
     // Requeue this owner's expired leases (silent runner) before claiming. `NOT cancel_requested` on BOTH
     // statements: a cancelled job is neither requeued nor claimed. Without it the queue kept re-dispatching
     // work the control plane had already stopped — the in-memory hub's requeueExpired/orderLeasable have
     // always skipped a cancelled entry, and this is the store lane catching up to that guard.
-    await this.client.query(
+    await client.query(
       `UPDATE everdict_runner_jobs SET status = 'queued', leased_by = NULL
        WHERE owner = $1 AND status = 'leased' AND NOT cancel_requested
          AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
@@ -266,14 +354,21 @@ export class PgRunnerJobStore implements RunnerJobStore {
     // …and a CANCELLED expired lease terminalizes here instead of entering limbo (arch-review 47 P1-2):
     // excluded from the requeue above and from the claim below, ended by nothing — the sweep is the
     // non-compliant holder's reclaim.
-    await this.client.query(
+    await client.query(
       `UPDATE everdict_runner_jobs SET status = 'cancelled'
        WHERE owner = $1 AND status = 'leased' AND cancel_requested
          AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
       [input.owner, input.now, input.leaseTtlMs / 1000],
     );
     // Own queue before the owner pool (ORDER BY runner_id <> '*' DESC), FIFO; capability gate via array containment.
-    const res = await this.client.query<{ job_id: string; job: unknown; lease_epoch: number }>(
+    // `current_attempt_id` comes back with the lease (mig 0183): the attempt this claim REPLACES, which the
+    // transactional path supersedes and which nothing else on any replica could have told it about.
+    const res = await client.query<{
+      job_id: string;
+      job: unknown;
+      lease_epoch: number;
+      current_attempt_id: string | null;
+    }>(
       `UPDATE everdict_runner_jobs SET status = 'leased', leased_by = $2, lease_epoch = lease_epoch + 1,
               activity_at = to_timestamp($5 / 1000.0)
        WHERE job_id = (
@@ -284,12 +379,17 @@ export class PgRunnerJobStore implements RunnerJobStore {
          LIMIT 1
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING job_id, job, lease_epoch`,
+       RETURNING job_id, job, lease_epoch, current_attempt_id`,
       [input.owner, input.runnerId, POOL_RUNNER, input.advertisedCaps ?? null, input.now],
     );
     const row = res.rows[0];
     if (!row) return null;
-    return { jobId: row.job_id, job: CaseJobSchema.parse(row.job), leaseEpoch: Number(row.lease_epoch) };
+    return {
+      lease: { jobId: row.job_id, job: CaseJobSchema.parse(row.job), leaseEpoch: Number(row.lease_epoch) },
+      ...(row.current_attempt_id !== null && row.current_attempt_id !== undefined
+        ? { priorAttemptId: row.current_attempt_id }
+        : {}),
+    };
   }
 
   // The lease-time attempt restamp — same current-lease predicate as every other runner-initiated mutation

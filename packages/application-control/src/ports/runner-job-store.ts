@@ -1,4 +1,5 @@
 import type { CaseJob, CaseResult } from "@everdict/contracts";
+import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
 
 // Shared store for a MULTI-REPLICA self-hosted runner lease queue — the cross-replica counterpart to the in-process
 // RunnerHub. A job parked on replica A is leased by a runner attached to replica B (atomic claim), and the parking
@@ -47,6 +48,24 @@ export interface ClaimInput {
   now: number;
 }
 
+// What a claim's ledger work answers with. `job` ABSENT means "nothing to restamp" — the first lease of a job
+// runs the attempt its dispatch already opened, so the row's job is already right and no write is owed.
+export interface ClaimedAttempt {
+  job?: CaseJob;
+  // The attempt the ROW will name from now on — read by the NEXT claim as the predecessor to supersede.
+  // Absent leaves the pointer as it was: a mint that opened no attempt has no successor to name.
+  attemptId?: string;
+}
+
+// The ledger half of a claim, run INSIDE the claim's transaction (see `claimAttempt`). It receives the claim
+// that just won and the ledger to write through — a transaction-bound twin when the implementation could bind
+// one, `undefined` when it could not (the in-memory twin, whose caller uses its own ambient ledger instead) —
+// plus `prior`, the attempt the row currently names.
+export type ClaimAttemptMint = (
+  claimed: RunnerJobLease,
+  ledger: { attempts?: ExecutionAttemptStore; prior?: string },
+) => Promise<ClaimedAttempt>;
+
 // The port a store-backed RunnerHub binds. All ops are idempotent / no-op on a missing/terminal job.
 // ⚠️ Every runner-initiated mutation (touch/complete/fail) is CONDITIONED on the current lease
 // (status='leased' AND leased_by=runner AND lease_epoch=epoch) — the same predicate `authorize` reads. A
@@ -60,6 +79,35 @@ export interface RunnerJobStore {
   // Atomically requeue this owner's expired leases, then claim the next queued job this runner can run
   // (its own queue before the owner pool). null = nothing to take. Cross-replica safe (SKIP LOCKED).
   claim(input: ClaimInput): Promise<RunnerJobLease | null>;
+  // ── ONE TRANSITION MINTS A COMPLETE ATTEMPT (arch-review 47 §5.1) ──────────────────────────────────
+  //
+  // The re-lease used to be three independent round-trips — `claim`, then the hub's attempt open, then
+  // `restampJob` — and the gaps between them were where the store lane's attempt lifecycle went missing:
+  //
+  //   ① THE PREDECESSOR COULD NOT BE SUPERSEDED. Its id was on no row, and the claim that opened it may have
+  //     been served by another replica, so the abandoned attempt stood `executing` for ever beside its
+  //     successor. The row now carries `current_attempt_id` (mig 0183) precisely so that id can travel
+  //     between replicas, and this call is what reads it, ends it, and writes the successor's back.
+  //   ② THE RESTAMP COULD BE REFUSED. The row moved while the open was in flight (a cancel, an expiry
+  //     sweep, another claim) and the freshly-opened attempt had to be superseded again — a lost claim, wasted
+  //     ledger writes, and a runner that had to be handed nothing. Inside one transaction the claim HOLDS the
+  //     row, so nothing can move it: the restamp cannot be refused, and that whole failure mode is gone.
+  //   ③ THE `executing` STAMP AND ITS LEASE EPOCH WERE BEST-EFFORT. They rode no transaction, so a crash left
+  //     an attempt that never recorded starting under the epoch that authorized it.
+  //
+  // THE CONTRACT: the claim, the predecessor's supersede, the new attempt's insert (state `executing`, lease
+  // epoch stamped), the job restamp and `current_attempt_id` are ALL-OR-NOTHING. A mint that throws rolls the
+  // claim back too — the job stays claimable and no attempt is left behind, because "the ledger could not
+  // record this attempt" and "this runner holds a lease" must not both be true.
+  //
+  // A mint that produces NO attempt (the recording claim was refused, or this is a first lease that mints
+  // nothing) still COMPLETES the claim: the execution is about to happen either way, so the lease is real and
+  // only the fence is missing — the fail-closed lane the whole attempt plane already documents
+  // (ports/execution-attempt-store.ts). The attempt ROW still inserts in the refused-recording case; what is
+  // stripped is the recording generation the job carries, which is what puts the producers on the live-only
+  // lane. Optional because a store with no transaction to offer must not pretend: a caller reaching for this
+  // and not finding it keeps the three-step path rather than getting a version of it with a window in it.
+  claimAttempt?(input: ClaimInput, mint: ClaimAttemptMint): Promise<RunnerJobLease | null>;
   // Replace the stored job of a lease this runner CURRENTLY holds — the lease-time attempt restamp. A claim
   // that re-leases a requeued job is a new physical execution, so the hub opens a fresh recording generation
   // for it; that number has to land on the ROW, because `authorize` answers every later evidence push out of

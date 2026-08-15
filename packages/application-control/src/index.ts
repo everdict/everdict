@@ -89,6 +89,12 @@ export {
   InMemoryExecutionAttemptStore,
   type OpenAttemptInput,
 } from "./ports/execution-attempt-store.js";
+export {
+  type CancellationOperation,
+  type CancellationOperationState,
+  type CancellationStore,
+  InMemoryCancellationStore,
+} from "./ports/cancellation-store.js";
 export { openPhysicalAttempt, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
@@ -405,8 +411,16 @@ export {
   selfHostedBackendName,
   type SelfHostedKey,
 } from "./runner/runner-hub.js";
-export { type RunnerHubLike, StoreRunnerHub, type StoreRunnerHubDeps } from "./runner/store-runner-hub.js";
+export {
+  type LeaseAttemptOpen,
+  type OpenLeaseAttempt,
+  type RunnerHubLike,
+  StoreRunnerHub,
+  type StoreRunnerHubDeps,
+} from "./runner/store-runner-hub.js";
 export type {
+  ClaimAttemptMint,
+  ClaimedAttempt,
   ClaimInput,
   ParkInput,
   RunnerJobLease,

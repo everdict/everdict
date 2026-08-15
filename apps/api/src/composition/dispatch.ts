@@ -2,6 +2,7 @@ import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import {
   type ExecutionAttemptStore,
+  type OpenLeaseAttempt,
   type OpenedAttempt,
   type RecordingStore,
   RunnerHub,
@@ -143,43 +144,99 @@ export function buildDispatch(deps: {
   // `created` with no handle left to close it. The stamps ride no transaction, so they stay best-effort at
   // the hub's call sites — diagnostics, exactly as ports/execution-attempt-store.ts requires of every stamp
   // no outcome is derived from.
+  //
+  // …and on the lane whose store can TRANSACT, the same open is handed the transaction's own ledger twin and
+  // the predecessor the row names (arch-review 47 §5.1 — see `openLeaseAttempt` below). One opener serves
+  // both so the two lanes cannot drift on what "a lease's attempt" means; what differs is only what the
+  // caller can give it, and therefore what it is allowed to promise.
+  const openLeaseAttemptOn = async (
+    job: CaseJob,
+    opts: { leaseEpoch?: number; attempts?: ExecutionAttemptStore; prior?: string },
+  ): Promise<OpenedAttempt> => {
+    // The ledger the writes go through: the claim transaction's twin when one was offered, else the ambient
+    // store. Never both — a claim that opened its attempt on one connection and stamped it on another would
+    // be back to the two-decision shape the transaction exists to end.
+    const ledger = opts.attempts ?? attempts;
+    if (job.runId === undefined) return {};
+    // The attempt this claim REPLACES, ended by the claim that replaced it. Only the transactional lane can
+    // name one (the row carries it); on the three-step path `prior` is always absent. Refused transitions are
+    // silent no-ops by contract, so an already-terminal predecessor costs nothing.
+    if (opts.prior !== undefined && ledger)
+      await ledger.transition(opts.prior, "superseded", {
+        error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
+      });
+    // A job carrying no tenant gets the recording lane exactly as it did before — the ledger's tenant
+    // is not a value to invent, and losing an audit row is the lesser of the two failures. No ledger
+    // row means no handles either, so this path answers with the bare coordinate it always did.
+    if (job.tenant === undefined) {
+      const generation = await recordingStore?.open(job.runId).catch(() => undefined);
+      return generation === undefined ? {} : { generation };
+    }
+    const opened = await openPhysicalAttempt(
+      { ...(ledger ? { attempts: ledger } : {}), recordings: recordingStore },
+      {
+        executionId: job.runId,
+        tenant: job.tenant,
+        ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
+        caseId: job.evalCase.id,
+        ...(job.trial !== undefined ? { trial: job.trial } : {}),
+      },
+    );
+    const attemptId = opened.attemptId;
+    // No ledger wired (recording-only) ⇒ nothing to stamp: the bare coordinate, same as before.
+    if (!ledger || attemptId === undefined)
+      return opened.generation === undefined ? {} : { generation: opened.generation };
+    return {
+      ...(opened.generation !== undefined ? { generation: opened.generation } : {}),
+      attemptId,
+      supersede: async (reason: string) => {
+        await ledger.transition(attemptId, "superseded", {
+          error: { code: "LEASE_SUPERSEDED", message: reason },
+        });
+      },
+      markExecuting: async () => {
+        await ledger.transition(
+          attemptId,
+          "executing",
+          opts.leaseEpoch !== undefined ? { leaseEpoch: opts.leaseEpoch } : {},
+        );
+      },
+    };
+  };
   const openAttempt =
     recordingStore || attempts
-      ? async (job: CaseJob, lease?: { leaseEpoch: number }): Promise<OpenedAttempt | number | undefined> => {
-          if (job.runId === undefined) return undefined;
-          // A job carrying no tenant gets the recording lane exactly as it did before — the ledger's tenant
-          // is not a value to invent, and losing an audit row is the lesser of the two failures. No ledger
-          // row means no handles either, so this path answers with the bare number it always did.
-          if (job.tenant === undefined) return await recordingStore?.open(job.runId).catch(() => undefined);
-          const opened = await openPhysicalAttempt(
-            { attempts, recordings: recordingStore },
-            {
-              executionId: job.runId,
-              tenant: job.tenant,
-              ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
-              caseId: job.evalCase.id,
-              ...(job.trial !== undefined ? { trial: job.trial } : {}),
-            },
-          );
-          const ledger = attempts;
-          const attemptId = opened.attemptId;
-          // No ledger wired (recording-only) ⇒ nothing to stamp: the bare number, same as before.
-          if (!ledger || attemptId === undefined) return opened.generation;
-          return {
-            ...(opened.generation !== undefined ? { generation: opened.generation } : {}),
-            attemptId,
-            supersede: async (reason: string) => {
-              await ledger.transition(attemptId, "superseded", {
-                error: { code: "LEASE_SUPERSEDED", message: reason },
-              });
-            },
-            markExecuting: async () => {
-              await ledger.transition(attemptId, "executing", lease ? { leaseEpoch: lease.leaseEpoch } : {});
-            },
-          };
-        }
+      ? (job: CaseJob, lease?: { leaseEpoch: number }): Promise<OpenedAttempt> =>
+          openLeaseAttemptOn(job, lease ? { leaseEpoch: lease.leaseEpoch } : {})
       : undefined;
-  const hubDeps = { ...hubTimeout, ...(openAttempt ? { openAttempt } : {}) };
+  // ── THE CLAIM LANE'S OPEN (arch-review 47 §5.1) ───────────────────────────────────────────────────
+  //
+  // Same verb, told two more things. `attempts` is the ledger bound to the transaction the CLAIM opened, so
+  // the attempt row and the lease that authorizes it commit together or not at all; `prior` is the attempt
+  // the job row names, which is how the predecessor finally becomes reachable from whichever replica serves
+  // the re-lease. Both stamps below are therefore awaited by the hub rather than fired best-effort — they have
+  // a transaction to ride, which is exactly the promotion ports/execution-attempt-store.ts asks for.
+  //
+  // ⚠️ THE RECORDING CLAIM IS NOT IN THAT TRANSACTION. `openPhysicalAttempt` claims the recording coordinate
+  // through the ambient recording store — its own connection — because the recording plane is evidence-lifetime
+  // and prunable, not part of the decision. A refused claim is already handled (the row is marked unisolated
+  // and the generation stripped, all inside the transaction); the residue is the reverse case, a claim that
+  // succeeds and is then rolled back by a later fault, leaving a recording generation no attempt will use. That
+  // fails CLOSED: the ledger's ordinal rolled back with it, so the next attempt mints the same generation, finds
+  // the recording coordinate already taken, and runs unisolated.
+  const openLeaseAttempt: OpenLeaseAttempt | undefined =
+    recordingStore || attempts
+      ? (input) =>
+          openLeaseAttemptOn(input.job, {
+            leaseEpoch: input.leaseEpoch,
+            ...(input.attempts !== undefined ? { attempts: input.attempts } : {}),
+            ...(input.prior !== undefined ? { prior: input.prior } : {}),
+          })
+      : undefined;
+  const hubDeps = {
+    ...hubTimeout,
+    ...(openAttempt ? { openAttempt } : {}),
+    ...(openLeaseAttempt ? { openLeaseAttempt } : {}),
+  };
   const runnerHub: RunnerHubLike =
     process.env.EVERDICT_SELF_HOSTED_STORE_HUB === "1"
       ? new StoreRunnerHub(runnerJobStore, hubDeps)

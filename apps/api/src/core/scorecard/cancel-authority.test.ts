@@ -1,4 +1,4 @@
-import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
+import { InMemoryCancellationStore, InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { CaseResult, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
@@ -117,5 +117,112 @@ describe("ScorecardService.cancel — a retry CONVERGES the teardown (arch-revie
     });
     await store.create(runningRecord("sc-2"));
     await expect(service.cancel({ tenant: "acme", id: "sc-2" })).rejects.toThrow(/runner job store unavailable/);
+  });
+});
+
+// ── THE TEARDOWN IS A DURABLE OPERATION A RECONCILER OWNS (arch-review 47 §5.2) ──────────────────────
+//
+// Convergence needed somebody to converge: the retry above is honest only while a caller is alive to make it.
+// A control-plane crash between the CANCELLED commit and a successful teardown left children running, leases
+// held and cluster compute burning, with a human re-cancelling as the recovery procedure.
+describe("ScorecardService cancellation operations — a crashed teardown still has an owner", () => {
+  // The child-list read is the teardown's first durable step, so failing it is the whole teardown failing.
+  const withFailingChildList = () => {
+    const operations = new InMemoryCancellationStore();
+    const { store, runs, service } = makeService({ cancellations: operations });
+    const realList = runs.list.bind(runs);
+    const state = { fail: true };
+    runs.list = async (...args: Parameters<typeof realList>) => {
+      if (state.fail) throw new Error("child list unavailable");
+      return realList(...args);
+    };
+    return { operations, store, runs, service, state };
+  };
+
+  const childOf = (id: string, scorecardId: string) =>
+    ({
+      id,
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "running",
+      parentScorecardId: scorecardId,
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    }) as never;
+
+  it("a failed teardown leaves an incomplete operation carrying the reason", async () => {
+    const { operations, store, runs, service, state } = withFailingChildList();
+    await store.create(runningRecord("sc-1"));
+    await runs.create(childOf("child-1", "sc-1"));
+
+    await expect(service.cancel({ tenant: "acme", id: "sc-1" })).rejects.toThrow(/child list unavailable/);
+
+    expect((await store.get("sc-1"))?.status).toBe("cancelled"); // the decision landed…
+    expect((await runs.get("child-1"))?.status).toBe("running"); // …and the teardown did not
+    const owed = await operations.listIncomplete(10);
+    expect(owed.map((op) => op.scorecardId)).toEqual(["sc-1"]);
+    expect(owed[0]?.lastError).toMatch(/child list unavailable/);
+    expect(state.fail).toBe(true);
+  });
+
+  it("the reconciler converges an orphaned teardown and completes its operation", async () => {
+    // The crash is expressed by simply never retrying the cancel: nothing but the row remains.
+    const { operations, store, runs, service, state } = withFailingChildList();
+    await store.create(runningRecord("sc-1"));
+    await runs.create(childOf("child-1", "sc-1"));
+    await expect(service.cancel({ tenant: "acme", id: "sc-1" })).rejects.toThrow(/child list unavailable/);
+
+    state.fail = false; // the store recovers; no caller is left to notice
+    expect(await service.reconcileCancellations()).toBe(1);
+
+    expect((await runs.get("child-1"))?.status).toBe("failed");
+    expect((await runs.get("child-1"))?.error?.code).toBe("CANCELLED");
+    expect(await operations.listIncomplete(10)).toEqual([]);
+  });
+
+  it("a reconciler pass that still cannot tear down keeps the operation owed", async () => {
+    const { operations, store, runs, service } = withFailingChildList();
+    await store.create(runningRecord("sc-1"));
+    await runs.create(childOf("child-1", "sc-1"));
+    await expect(service.cancel({ tenant: "acme", id: "sc-1" })).rejects.toThrow(/child list unavailable/);
+
+    expect(await service.reconcileCancellations()).toBe(0); // the store is still down — nothing closed
+    const owed = await operations.listIncomplete(10);
+    expect(owed).toHaveLength(1);
+    expect(owed[0]?.lastError).toMatch(/child list unavailable/);
+  });
+
+  it("a completed operation is never re-run", async () => {
+    const operations = new InMemoryCancellationStore();
+    const { store, runs, service } = makeService({ cancellations: operations });
+    await store.create(runningRecord("sc-1"));
+    await runs.create(childOf("child-1", "sc-1"));
+    await service.cancel({ tenant: "acme", id: "sc-1" }); // teardown succeeds first time
+
+    expect(await operations.listIncomplete(10)).toEqual([]);
+    let listed = 0;
+    const realList = runs.list.bind(runs);
+    runs.list = async (...args: Parameters<typeof realList>) => {
+      listed += 1;
+      return realList(...args);
+    };
+    expect(await service.reconcileCancellations()).toBe(0);
+    expect(listed).toBe(0); // the sweep did not touch the batch at all
+  });
+
+  it("an operation whose batch is not aborted is closed without tearing anything down", async () => {
+    // A stale row must never become a way to stop live work: the reconciler runs the teardown only for a
+    // batch the decision plane already marked aborted.
+    const operations = new InMemoryCancellationStore();
+    const { store, runs, service } = makeService({ cancellations: operations });
+    await store.create(runningRecord("sc-live"));
+    await runs.create(childOf("child-live", "sc-live"));
+    await operations.request("sc-live", "2026-08-15T00:00:00.000Z");
+
+    expect(await service.reconcileCancellations()).toBe(1);
+    expect((await runs.get("child-live"))?.status).toBe("running"); // untouched
+    expect((await store.get("sc-live"))?.status).toBe("running");
+    expect(await operations.listIncomplete(10)).toEqual([]);
   });
 });

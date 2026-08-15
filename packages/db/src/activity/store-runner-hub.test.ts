@@ -1,4 +1,9 @@
-import { type SelfHostedKey, StoreRunnerHub } from "@everdict/application-control";
+import {
+  InMemoryExecutionAttemptStore,
+  type OpenLeaseAttempt,
+  type SelfHostedKey,
+  StoreRunnerHub,
+} from "@everdict/application-control";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunnerJobStore } from "./runner-job-store.js";
@@ -409,5 +414,119 @@ describe("StoreRunnerHub — a re-lease completes the attempt lifecycle", () => 
     // …and the row that lost claim opened reaches a terminal state: no execution will ever happen under it,
     // and after the restamp was refused nobody but this mint still held its handle.
     expect(seam.calls).toEqual([{ attemptId: "evd-run-1#g31", kind: "superseded", reason: "lease lost during mint" }]);
+  });
+});
+
+// ── ONE TRANSITION MINTS A COMPLETE ATTEMPT (arch-review 47 §5.1) ───────────────────────────────────
+//
+// The claim, the predecessor's supersede and the successor's insert as ONE decision (RunnerJobStore.
+// claimAttempt). What the three-step path structurally could not do is the first half: the replaced attempt's
+// id was on no row, so it stood `executing` for ever while its successor ran and committed — the ledger
+// reporting two live executions of a job that had one. The id now travels on the row (mig 0183), which is
+// what lets ANY replica end the attempt it replaced.
+describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => {
+  // The composition root's claim-lane seam, in miniature: supersede what the row names, open the successor,
+  // stamp it executing under the epoch that authorized it — all through the ledger the STORE handed in.
+  const seam = (ledger: InMemoryExecutionAttemptStore) => {
+    const priors: Array<string | undefined> = [];
+    const openLeaseAttempt: OpenLeaseAttempt = async ({ job, leaseEpoch, attempts, prior }) => {
+      const store = attempts ?? ledger;
+      priors.push(prior);
+      if (prior !== undefined)
+        await store.transition(prior, "superseded", {
+          error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
+        });
+      const { runId, tenant } = job;
+      if (runId === undefined || tenant === undefined) throw new Error("the fixture job carries both");
+      const opened = await store.open({ executionId: runId, tenant });
+      return {
+        generation: opened.generation,
+        attemptId: opened.attemptId,
+        markExecuting: async () => {
+          await store.transition(opened.attemptId, "executing", { leaseEpoch });
+        },
+      };
+    };
+    return { priors, openLeaseAttempt };
+  };
+  const leasedJob = { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 };
+
+  it("supersedes the attempt the row names and leaves exactly one live attempt behind (the cross-replica half)", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const ledger = new InMemoryExecutionAttemptStore();
+    const { priors, openLeaseAttempt } = seam(ledger);
+    // leaseTtlMs 0 → each claim requeues the previous lease first, so these are genuine RE-leases.
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openLeaseAttempt }));
+    hub.enqueue(keyA, leasedJob).catch(() => {});
+
+    const first = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(first?.job.recordingGeneration).toBe(7); // the first lease runs the attempt the DISPATCH opened
+    expect(await ledger.list("evd-run-1")).toEqual([]); // …so the lease lane mints nothing at all
+    const second = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(second?.job.recordingGeneration).toBe(1); // its OWN attempt, minted by the ledger
+    const third = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(third?.job.recordingGeneration).toBe(2);
+
+    // The row told the third claim what the second one opened — the id no replica-local handle could carry.
+    expect(priors).toEqual([undefined, "evd-run-1#g1"]);
+    expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state, a.leaseEpoch])).toEqual([
+      ["evd-run-1#g1", "superseded", 2], // ended by the claim that replaced it, not left `executing` for ever
+      ["evd-run-1#g2", "executing", 3], // …under the lease epoch that authorized it
+    ]);
+  });
+
+  it("a mint that throws rolls the claim back — the job is still claimable and no lease was handed out", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const ledger = new InMemoryExecutionAttemptStore();
+    let fail = true;
+    const openLeaseAttempt: OpenLeaseAttempt = async ({ job, leaseEpoch, attempts, prior }) => {
+      if (fail) throw new Error("attempt ledger unreachable");
+      return seam(ledger).openLeaseAttempt({
+        job,
+        leaseEpoch,
+        ...(attempts ? { attempts } : {}),
+        ...(prior !== undefined ? { prior } : {}),
+      });
+    };
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openLeaseAttempt }));
+    hub.enqueue(keyA, leasedJob).catch(() => {});
+    const first = await hub.leaseWait(keyA, 200, ["repo"]); // epoch 1 mints nothing — it cannot fail
+    if (!first) throw new Error("expected the first lease");
+
+    // The re-lease's mint fails: "this runner holds a lease" and "the ledger could not record its attempt"
+    // must not both be true, so the claim itself is undone.
+    await expect(hub.leaseWait(keyA, 50, ["repo"])).rejects.toThrow("attempt ledger unreachable");
+    // The row is back in the QUEUE, not sitting `leased` under an epoch nobody holds — which is the half a
+    // rollback-less claim gets wrong: the epoch it minted would go on authorizing evidence for a lease that
+    // was never handed out, and only the idle-timeout sweep would ever free the job.
+    expect(await store.outcome(first.jobId)).toMatchObject({ status: "queued" });
+    expect(await store.authorize(first.jobId, keyA.runnerId, 2)).toBeNull();
+    fail = false;
+    const recovered = await hub.leaseWait(keyA, 200, ["repo"]); // the job never left the queue
+    expect(recovered?.job.recordingGeneration).toBe(1);
+  });
+
+  it("keeps the three-step path when no claim-lane seam is wired — an unwired deployment is byte-for-byte unchanged", async () => {
+    const store = new InMemoryRunnerJobStore();
+    let claims = 0;
+    const wrapped = Object.assign(
+      Object.create(Object.getPrototypeOf(store) as object) as InMemoryRunnerJobStore,
+      store,
+      {
+        claimAttempt: async (...args: Parameters<NonNullable<typeof store.claimAttempt>>) => {
+          claims += 1;
+          return store.claimAttempt(...args);
+        },
+      },
+    );
+    let opened = 40;
+    // Only the legacy per-lease seam is wired (openAttempt), which is what a composition with no
+    // transaction-capable store hands over.
+    const hub = new StoreRunnerHub(wrapped, opts({ leaseTtlMs: 0, openAttempt: async () => ++opened }));
+    hub.enqueue(keyA, leasedJob).catch(() => {});
+    await hub.leaseWait(keyA, 200, ["repo"]);
+    const second = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(second?.job.recordingGeneration).toBe(41); // claim → open → restampJob, exactly as before
+    expect(claims).toBe(0); // …and the transactional entry point was never taken
   });
 });
