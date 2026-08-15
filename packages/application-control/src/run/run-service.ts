@@ -8,6 +8,7 @@ import {
   type CaseResult,
   type DomainFact,
   type EvalCase,
+  type ExecutionAttemptState,
   type HarnessSpec,
   type JudgeRunConfig,
   type RegistryAuth,
@@ -46,12 +47,14 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
+import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot, refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
+import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import { type RecordingStore, recordingGenerationOf } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
@@ -109,6 +112,10 @@ export interface RunServiceDeps {
   store: RunStore;
   // Durable replay recording (optional) — at finalize, seal the frames/logs teed during the run and attach the ref.
   recordingStore?: RecordingStore;
+  // The PHYSICAL execution ledger (arch-review 42, Phase 1) — one unconditional row per physical execution of
+  // this run, including the re-drive that the recording buffer alone could never distinguish. Dual-write and
+  // observed-only: nothing reads it to decide anything yet.
+  attempts?: ExecutionAttemptStore;
   // Grader factory (@everdict/graders) injected into executeCase's collection-mode scoring — the application layer
   // never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3). Optional: a mock
   // dispatcher (unit tests) never reaches the collection path, so it may be omitted there; main.ts always supplies it.
@@ -810,10 +817,16 @@ export class RunService {
     // recorder keeps the number it was started with, which no longer addresses anything this run replays.
     // …and a re-drive is exactly the case that HAS an earlier producer to revoke, which is why this one
     // always opens a new attempt while a first dispatch opens none (see the batch's note).
+    // …and the PHYSICAL ledger records the re-drive as its own attempt (arch-review 42), which is the one
+    // thing the recording buffer alone could never say: both executions of a re-driven run are addressed by
+    // the same live-correlation id, and only the attempt ordinal tells them apart.
     const runId = RunService.runIdFor(record);
-    const attempt = await this.deps.recordingStore?.open(runId).catch(() => undefined);
-    if (attempt !== undefined) {
-      this.attempt.set(runId, attempt); // …and it rides onto the job below (CaseJob.recordingGeneration)
+    const attempt = await openPhysicalAttempt(
+      { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
+      { executionId: runId, tenant: record.tenant, childRunId: record.id, driverEpoch: epoch },
+    );
+    if (attempt.generation !== undefined) {
+      this.attempt.set(runId, attempt.generation); // …and it rides onto the job below (CaseJob.recordingGeneration)
     }
     void this.track(
       record.id,
@@ -890,9 +903,17 @@ export class RunService {
     // no replay — on the first execution only, the one every run has. Attempt opening is a dispatch
     // primitive, not a recovery privilege. An open that fails leaves the map unset (the case still runs;
     // its replay is simply not claimed), which is the same fail-closed reading the batch dispatch has.
-    if (this.deps.recordingStore && this.attempt.get(`evd-run-${id}`) === undefined) {
-      const generation = await this.deps.recordingStore.open(`evd-run-${id}`).catch(() => undefined);
-      if (generation !== undefined) this.attempt.set(`evd-run-${id}`, generation);
+    if (this.attempt.get(`evd-run-${id}`) === undefined) {
+      const attempt = await openPhysicalAttempt(
+        { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
+        {
+          executionId: `evd-run-${id}`,
+          tenant: input.tenant,
+          childRunId: id,
+          ...(epoch !== undefined ? { driverEpoch: epoch } : {}),
+        },
+      );
+      if (attempt.generation !== undefined) this.attempt.set(`evd-run-${id}`, attempt.generation);
     }
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
     // An inline spec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) wins over the registry.
@@ -1026,6 +1047,10 @@ export class RunService {
         } catch {}
       }
       committed = (await this.finalize(id, (run) => run.succeed(result, this.now()))) !== undefined;
+      // …and the physical attempt reaches its terminal state (arch-review 42). A settle that LOST did not
+      // supersede itself — somebody else's attempt owns the run now, and `superseded` is the ledger's word
+      // for exactly that.
+      await this.stampAttempt(id, committed ? "committed" : "superseded");
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
       // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
       // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.
@@ -1044,6 +1069,7 @@ export class RunService {
       // single run with no "why" once the orchestrator job was GC'd.
       const failed = failedCaseResult(job, err);
       committed = (await this.finalize(id, (run) => run.fail(error, this.now(), failed))) !== undefined;
+      await this.stampAttempt(id, committed ? "failed" : "superseded", { error });
       // Dual-write parity with the success path, including the part that matters: a settle that lost publishes
       // no evidence either, so the winner's trajectory is the one the run keeps.
       if (committed && failed.trace.length > 0)
@@ -1067,7 +1093,30 @@ export class RunService {
   // Flip the run queued→running when compute actually begins (the onStarted hook: managed dispatch / self-hosted
   // lease). Best-effort and idempotent — acts only on a still-queued record (a terminal/already-running run is a
   // no-op), and a store error never disturbs the run itself.
+  // ── THE PHYSICAL ATTEMPT'S STATE, IN THE STANDALONE LANE (arch-review 42) ──────────────────────────
+  //
+  // Addressed by (executionId, generation), the same coordinate the receipt and the sealed trajectory spell —
+  // which is what lets a self-hosted RE-LEASE join up without threading anything: the hub opened its ledger
+  // row under this run's execution id and its own generation, `onAttempt` moved this map onto that number,
+  // and the stamp below therefore lands on the row the second runner actually opened.
+  //
+  // Phase-1 dual-write: nothing reads these rows, so a failure costs an audit row and never an outcome.
+  private async stampAttempt(
+    id: string,
+    to: ExecutionAttemptState,
+    patch?: { error?: { code: string; message: string } },
+  ): Promise<void> {
+    const attempts = this.deps.attempts;
+    const generation = this.attempt.get(`evd-run-${id}`);
+    if (!attempts || generation === undefined) return;
+    await attempts
+      .transition(attemptIdOf(`evd-run-${id}`, generation), to, { childRunId: id, ...patch })
+      .catch(() => {});
+  }
+
   private async markRunning(id: string): Promise<void> {
+    // Compute actually began — the ledger's `executing`, stamped beside the run's own queued→running flip.
+    void this.stampAttempt(id, "executing");
     try {
       const rec = await this.deps.store.get(id);
       if (!rec || rec.status !== "queued") return;

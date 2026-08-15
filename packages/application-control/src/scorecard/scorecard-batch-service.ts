@@ -10,6 +10,7 @@ import {
   type Dataset,
   type DomainFact,
   type EvalCase,
+  type ExecutionAttemptState,
   type HarnessSpec,
   InternalError,
   type JudgeRunConfig,
@@ -63,6 +64,7 @@ import {
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
+import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
 import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
@@ -410,6 +412,9 @@ export class ScorecardBatchService {
                     .commitCase(
                       this.receiptOf(id, adoptedResult, {
                         childId: c.id,
+                        // An adoption is THIS batch's execution, harvested by recovery — the case ran here
+                        // (its dispatch just outlived the driver), so the kind is the run's own outcome.
+                        kind: adoptedResult.failure !== undefined ? "failed" : "executed",
                         ...(c.executionId ? { executionId: c.executionId } : {}),
                         judges: orch.judges,
                         ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
@@ -716,7 +721,14 @@ export class ScorecardBatchService {
               tenant: rec.tenant,
               breaker: this.breaker,
               totalCases: caseIndex.size,
-              ...(this.reattemptOf() ? { reattempt: this.reattemptOf() } : {}),
+              ...(() => {
+                const reattempt = this.reattemptOf({
+                  tenant: rec.tenant,
+                  scorecardId: id,
+                  driverEpoch: rec.ownerEpoch ?? 0,
+                });
+                return reattempt ? { reattempt } : {};
+              })(),
               ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
               onSpeculate: (cid: string, from: string, to: string) => {
                 this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
@@ -795,18 +807,37 @@ export class ScorecardBatchService {
   // WINNER's job (SpilloverOutcome.job) is what the finalizer seals, claims and references. An open that
   // fails STRIPS the stale number instead of inheriting it — writing into another physical execution's
   // buffer is the one thing this exists to prevent, so those producers land in the unclaimed g0 bucket.
-  private reattemptOf(): ((job: CaseJob) => Promise<CaseJob>) | undefined {
+  // `cx` is the DRIVER's coordinate, not the job's: CaseJob.tenant is optional and the ledger's tenant is not
+  // a value to default — every caller of this already holds the batch's own.
+  private reattemptOf(cx: {
+    tenant: string;
+    scorecardId: string;
+    driverEpoch?: number;
+  }): ((job: CaseJob) => Promise<CaseJob>) | undefined {
     const store = this.deps.recordingStore;
     if (!store) return undefined;
     return async (job: CaseJob): Promise<CaseJob> => {
       const executionId = job.runId;
       if (!executionId) return job;
-      const generation = await store.open(executionId).catch(() => undefined);
-      if (generation === undefined) {
+      // …and each of these re-dispatches is a PHYSICAL EXECUTION with its own ledger row (arch-review 42).
+      // These are precisely the attempts that used to leave no trace: a spillover duplicate or a speculation
+      // loser spends full compute and, unless it happened to record something, was invisible afterwards.
+      const opened = await openPhysicalAttempt(
+        { attempts: this.deps.attempts, recordings: store },
+        {
+          executionId,
+          tenant: cx.tenant,
+          scorecardId: cx.scorecardId,
+          caseId: job.evalCase.id,
+          ...(job.trial !== undefined ? { trial: job.trial } : {}),
+          ...(cx.driverEpoch !== undefined ? { driverEpoch: cx.driverEpoch } : {}),
+        },
+      );
+      if (opened.generation === undefined) {
         const { recordingGeneration: _stale, ...rest } = job;
         return rest;
       }
-      return { ...job, recordingGeneration: generation };
+      return { ...job, recordingGeneration: opened.generation };
     };
   }
 
@@ -947,14 +978,25 @@ export class ScorecardBatchService {
       // fence we could not raise, not a fence that was unnecessary — the case still runs, knowing its replay
       // is not canonical (`unisolated`).
       const executionId = `evd-${id}-${caseId}`;
-      let generation: number | undefined;
-      let unisolated = false;
-      if (this.deps.recordingStore) {
-        generation = await this.deps.recordingStore.open(executionId).catch(() => undefined);
-        if (generation === undefined) unisolated = true;
-        // Nobody to tell: the number travels ON THE JOB now (review 39, Phase 4), so the producer that
-        // matters cannot be missed by a wiring nobody remembered to do.
-      }
+      // …and the attempt LEDGER records it happened at all (arch-review 42): the recording row is where the
+      // evidence goes, this is where the fact that a physical execution began goes — including when the
+      // recording claim is refused and the case runs unisolated.
+      // Nobody to tell about the number: it travels ON THE JOB (review 39, Phase 4), so the producer that
+      // matters cannot be missed by a wiring nobody remembered to do.
+      const opened = await openPhysicalAttempt(
+        { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
+        {
+          executionId,
+          tenant: ctx.tenant,
+          scorecardId: id,
+          caseId,
+          driverEpoch: ctx.driverEpoch,
+          ...(child ? { childRunId: child.id } : {}),
+        },
+      );
+      const generation = opened.generation;
+      const unisolated = opened.unisolated;
+      const attemptId = opened.attemptId;
       const baseJob: CaseJob = {
         evalCase,
         harness: { id: ctx.harnessId, version: ctx.harnessVersion },
@@ -980,7 +1022,7 @@ export class ScorecardBatchService {
       for (let attempt = 0; ; attempt++) {
         try {
           const childId = child?.id;
-          const reattempt = this.reattemptOf();
+          const reattempt = this.reattemptOf({ tenant: ctx.tenant, scorecardId: id, driverEpoch: ctx.driverEpoch });
           const outcome = await this.runResilientCase(currentJob, {
             owner: ctx.owner,
             targets: ctx.targets,
@@ -1007,7 +1049,12 @@ export class ScorecardBatchService {
                   ?.catch?.(() => {});
               }
             },
-            ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
+            // COMPUTE ACTUALLY STARTED — the child flips queued→running, and the attempt ledger records that
+            // this execution reached the machine rather than only having been intended (arch-review 42).
+            onStarted: () => {
+              void this.stampAttempt(attemptId, "executing");
+              if (childId && runStore) void this.markChildRunning(childId);
+            },
             onStep: (message, cid) =>
               void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
           });
@@ -1043,7 +1090,10 @@ export class ScorecardBatchService {
           await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
           // The retry is a NEW physical execution — it opens its own attempt rather than writing into the
           // one the failed dispatch may still have late producers for.
-          currentJob = (await this.reattemptOf()?.(currentJob)) ?? currentJob;
+          currentJob =
+            (await this.reattemptOf({ tenant: ctx.tenant, scorecardId: id, driverEpoch: ctx.driverEpoch })?.(
+              currentJob,
+            )) ?? currentJob;
         }
       }
       // Which attempt the case's answer belongs to: the winner's (a spill/boost/duplicate opened its own);
@@ -1579,6 +1629,8 @@ export class ScorecardBatchService {
           const outcome = await receipts.commitCase(
             this.receiptOf(record.id, r, {
               childId: seededChild.id,
+              kind: "inherited",
+              sourceScorecardId: src.id,
               judges: orch.judges,
               ...(sourcePlan.sealedJudges ? { sealedJudges: sourcePlan.sealedJudges } : {}),
             }),
@@ -1814,6 +1866,11 @@ export class ScorecardBatchService {
     result: CaseResult,
     entry: {
       childId: string;
+      // The outcome ledger's discriminant (arch-review 42): executed | failed | inherited. Every producer
+      // states it — only pre-discriminant rows read as absent.
+      kind: NonNullable<CaseCommitReceipt["kind"]>;
+      // Required with kind "inherited": the batch whose execution the carried result actually is.
+      sourceScorecardId?: string;
       executionId?: string;
       generation?: number;
       judges: ReadonlyArray<{ id: string }>;
@@ -1825,6 +1882,8 @@ export class ScorecardBatchService {
       caseId: result.caseId,
       trial: result.trial ?? 0,
       childRunId: entry.childId,
+      kind: entry.kind,
+      ...(entry.sourceScorecardId !== undefined ? { sourceScorecardId: entry.sourceScorecardId } : {}),
       ...(entry.executionId !== undefined ? { executionId: entry.executionId } : {}),
       ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
       // …and the joined identity, so a reader comparing a receipt with a sealed replay or an artifact key
@@ -2095,6 +2154,7 @@ export class ScorecardBatchService {
       .commitCase(
         this.receiptOf(input.scorecardId, covered, {
           childId,
+          kind: input.outcome === "failed" ? "failed" : "executed",
           executionId: input.executionId,
           ...(input.generation !== undefined ? { generation: input.generation } : {}),
           judges: input.judges,
@@ -2121,19 +2181,37 @@ export class ScorecardBatchService {
         runStore,
       )
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+    // WHICH PHYSICAL ATTEMPT this commit was made by — the same spelling the receipt records, so the two
+    // ledgers can be compared rather than assumed to agree (arch-review 42).
+    const attemptId = input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation);
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
     if (outcome.kind === "committed") {
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      // …and the attempt that made it reaches ITS terminal state. `failed` is a terminal outcome of a real
+      // execution, not a supersede: the case ended here, with this attempt's frozen failure as the answer.
+      await this.stampAttempt(attemptId, input.outcome === "failed" ? "failed" : "committed", {
+        childRunId: childId,
+        ...(input.outcome === "failed" ? { error: failureError } : {}),
+      });
       return { kind: "committed", result: covered };
     }
-    if (outcome.kind === "already_committed")
+    if (outcome.kind === "already_committed") {
       // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child
       // owning the case means a concurrent attempt won — this one was never the case's answer.
-      return outcome.receipt.childRunId === childId ? { kind: "committed", result: covered } : { kind: "lost" };
+      if (outcome.receipt.childRunId === childId) {
+        await this.stampAttempt(attemptId, input.outcome === "failed" ? "failed" : "committed", {
+          childRunId: childId,
+        });
+        return { kind: "committed", result: covered };
+      }
+      await this.stampAttempt(attemptId, "superseded");
+      return { kind: "lost" };
+    }
     // `unsettled` — the child's fence refused (takeover / cancel / already terminal) and the claim rolled
     // back with it: the case belongs to whoever holds the authority now.
+    await this.stampAttempt(attemptId, "superseded");
     return { kind: "lost" };
   }
 
@@ -2178,6 +2256,24 @@ export class ScorecardBatchService {
       epoch: current.ownerEpoch ?? 0,
       ...(parentDriver ? { parentDriver } : {}),
     });
+  }
+
+  // ── THE PHYSICAL ATTEMPT'S STATE, STAMPED BESIDE THE DECISION THAT MADE IT (arch-review 42) ────────
+  //
+  // Phase-1 dual-write: the ledger is written here and read by nothing, so a failure costs an audit row and
+  // never an outcome — which is exactly why it may be swallowed. When the promotion moves this write inside
+  // the commit transaction, this `catch` is the line that has to go.
+  //
+  // `attemptId` is absent when no attempt was minted (no ledger wired, or an execution that never opened a
+  // generation): there is no row to stamp, and inventing a coordinate would address somebody else's.
+  private async stampAttempt(
+    attemptId: string | undefined,
+    to: ExecutionAttemptState,
+    patch?: { childRunId?: string; unisolated?: boolean; error?: { code: string; message: string } },
+  ): Promise<void> {
+    const attempts = this.deps.attempts;
+    if (!attempts || attemptId === undefined) return;
+    await attempts.transition(attemptId, to, patch).catch(() => {});
   }
 
   private async markChildRunning(childId: string): Promise<void> {
@@ -2337,6 +2433,9 @@ export class ScorecardBatchService {
     // scorecard re-drive was the one path where a returning producer still wrote into its successor's
     // recording — the standalone run had been given this and the batch had not.
     const attemptGeneration = new Map<string, number>();
+    // …and the PHYSICAL ATTEMPT's ledger id (arch-review 42), which exists even when the generation does not:
+    // a dispatch whose recording claim was refused still ran, and the row that says so is the whole point.
+    const attemptLedgerId = new Map<string, string>();
     // Cases whose recording could not be ISOLATED for this attempt — the fence read or the reset failed. They
     // execute; their replay is simply not claimed as this attempt's, because the buffer may still hold an
     // earlier one's frames and nothing here can tell.
@@ -2447,6 +2546,17 @@ export class ScorecardBatchService {
       // open row is fail-settled now, fenced, with the error the catch recorded. No receipt: a superseded
       // attempt was never the case's answer.
       const reopened = finalizedByFailure.get(childKey(job.evalCase.id, job.trial));
+      if (reopened !== undefined) {
+        // The abandoned attempt reaches its terminal state on the physical ledger too (arch-review 42):
+        // SUPERSEDED, not failed — the failure was not final (this re-dispatch is the proof), so what the
+        // ledger records is that this execution stopped being the case's, carrying the error that ended it.
+        // Stamped even when the attempt had no child row: a physical execution happened either way.
+        await this.stampAttempt(
+          reopened.generation === undefined ? undefined : attemptIdOf(reopened.executionId, reopened.generation),
+          "superseded",
+          { error: reopened.error },
+        );
+      }
       if (reopened?.childId !== undefined) {
         const abandonedChildId = reopened.childId;
         await this.settleChild(
@@ -2490,16 +2600,25 @@ export class ScorecardBatchService {
       // A first attempt therefore owns generation 1 rather than 0, and a producer that was never told a
       // number stamps 0 and is refused — which is the intended reading of "no attempt", not an exemption.
       // The number travels ON THE JOB from here (CaseJob.recordingGeneration), so no wiring can lose it.
-      if (this.deps.recordingStore) {
+      {
         const executionId = executionIdOf(job, id);
-        // FAIL-CLOSED (arch-review 38 P0). A `reset` that throws is not "isolation was unnecessary" — it is a
+        // FAIL-CLOSED (arch-review 38 P0). An open that throws is not "isolation was unnecessary" — it is a
         // fence we could not raise. The case still RUNS (the evaluation is what the user asked for), knowing
         // its replay is not canonical, which is what `unisolated` records.
-        const generation = await this.deps.recordingStore.open(executionId).catch(() => undefined);
-        if (generation === undefined) unisolated.add(executionId);
-        else {
-          attemptGeneration.set(executionId, generation);
-        }
+        const attempt = await openPhysicalAttempt(
+          { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
+          {
+            executionId,
+            tenant,
+            scorecardId: id,
+            caseId: job.evalCase.id,
+            ...(job.trial !== undefined ? { trial: job.trial } : {}),
+            driverEpoch: epoch,
+          },
+        );
+        if (attempt.unisolated) unisolated.add(executionId);
+        if (attempt.generation !== undefined) attemptGeneration.set(executionId, attempt.generation);
+        if (attempt.attemptId !== undefined) attemptLedgerId.set(executionId, attempt.attemptId);
       }
       try {
         // Child run (if any): born queued, flipped to running via onStarted only when compute actually starts
@@ -2534,7 +2653,8 @@ export class ScorecardBatchService {
         const openedGeneration = attemptGeneration.get(executionIdOf(job, id));
         const dispatchable: CaseJob =
           openedGeneration === undefined ? enriched : { ...enriched, recordingGeneration: openedGeneration };
-        const reattempt = this.reattemptOf();
+        const reattempt = this.reattemptOf({ tenant, scorecardId: id, driverEpoch: epoch });
+        const openedAttemptId = attemptLedgerId.get(executionIdOf(job, id));
         const {
           result,
           target: ranOn,
@@ -2549,7 +2669,12 @@ export class ScorecardBatchService {
           speculation,
           ...(reattempt ? { reattempt } : {}),
           onWaiting,
-          ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
+          // COMPUTE ACTUALLY STARTED — the same pair the Temporal driver stamps: the child flips
+          // queued→running, and the attempt ledger records that this execution reached the machine.
+          onStarted: () => {
+            void this.stampAttempt(openedAttemptId, "executing", { ...(childId ? { childRunId: childId } : {}) });
+            if (childId && runStore) void this.markChildRunning(childId);
+          },
           onStep: (message, cid) => {
             pushStep("case", "info", message, cid);
             void flushSteps();
@@ -2690,7 +2815,10 @@ export class ScorecardBatchService {
           tenant,
           breaker: this.breaker,
           totalCases: cases.length,
-          ...(this.reattemptOf() ? { reattempt: this.reattemptOf() } : {}),
+          ...(() => {
+            const reattempt = this.reattemptOf({ tenant, scorecardId: id, driverEpoch: epoch });
+            return reattempt ? { reattempt } : {};
+          })(),
           ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
           onSpeculate: (cid, from, to) => {
             this.deps.onOrchestrationEvent?.({ kind: "speculation_fired", from, to });
@@ -2894,7 +3022,7 @@ export class ScorecardBatchService {
         // The record was already marked superseded by supersedeInFlight — settle it with the partial outcome
         // (a legal re-write of a superseded record; the domain rejects it over succeeded/failed).
         const reclaimed = await this.deps.store.get(id);
-        if (reclaimed)
+        if (reclaimed && ScorecardBatch.from(reclaimed).canSettleAborted())
           await settleScorecard(
             this.deps.store,
             id,
@@ -3053,11 +3181,15 @@ export class ScorecardBatchService {
           // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
           // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
           // The domain's own rule for this transition, at the storage boundary: it attaches an aborted
-          // batch's partials and must never land on one that settled succeeded/failed.
-          await settleScorecard(this.deps.store, id, batch.settleAborted(extras, this.now()).patch, undefined, {
-            over: "aborted",
-            ...epochOpt,
-          });
+          // batch's partials and must never land on one that settled succeeded/failed — and the QUESTION is
+          // asked (canSettleAborted) rather than the throw absorbed: a reclaimed driver whose predecessor's
+          // success already settled has nothing to attach, and this branch is past the loop's last catch, so
+          // the domain's refusal surfaced as an unhandled rejection (arch-review 42, pre-existing).
+          if (batch.canSettleAborted())
+            await settleScorecard(this.deps.store, id, batch.settleAborted(extras, this.now()).patch, undefined, {
+              over: "aborted",
+              ...epochOpt,
+            });
         } else if (!batch.isTerminal()) {
           // E0 outbox: the completion fact rides the terminal transition and persists atomically with the settle.
           // Scoring identity — the INITIAL revision (same shape as the Temporal finalize; aborted settles
@@ -3144,13 +3276,16 @@ export class ScorecardBatchService {
         const batch = ScorecardBatch.from(settled);
         if (controller.signal.aborted) {
           // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
-          await settleScorecard(
-            this.deps.store,
-            id,
-            batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()).patch,
-            undefined,
-            { over: "aborted", ...epochOpt },
-          );
+          // Same guarded question as the success-path abort settle: a batch that already settled
+          // succeeded/failed elsewhere takes no leftovers (first terminal write wins, arch-review 42).
+          if (batch.canSettleAborted())
+            await settleScorecard(
+              this.deps.store,
+              id,
+              batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()).patch,
+              undefined,
+              { over: "aborted", ...epochOpt },
+            );
         } else if (!batch.isTerminal()) {
           // E0 outbox: the failure fact rides the terminal transition and persists atomically with the settle.
           const settlement = batch.fail({ ...base, phase }, extras, this.now());

@@ -596,3 +596,25 @@ describe("ScorecardBatch.caseSetDelta — the plan's set against the ledger's, o
     expect(legacy.expectedCaseSetDigest).toBeUndefined();
   });
 });
+
+describe("ScorecardBatch.canSettleAborted — a reclaimed driver's partials never amend a settled outcome", () => {
+  const at = (status: string) =>
+    ScorecardBatch.from({
+      id: "sc",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1" },
+      status,
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as never);
+
+  it("legal over queued/running/cancelled/superseded; refused over succeeded/failed — and settleAborted throws on the same condition", () => {
+    for (const s of ["queued", "running", "cancelled", "superseded"]) expect(at(s).canSettleAborted()).toBe(true);
+    for (const s of ["succeeded", "failed"]) {
+      expect(at(s).canSettleAborted()).toBe(false);
+      // The guard and the throw are the same statement — a caller that skips the question still cannot land.
+      expect(() => at(s).settleAborted({ steps: [] } as never, "2026-08-15T00:00:01.000Z")).toThrow(/already settled/);
+    }
+  });
+});

@@ -116,6 +116,9 @@ describe("failure outcomes commit atomically — receipt + fenced terminal fail-
         r.resultDigest,
       );
     }
+    // …each stamped with the outcome ledger's discriminant (arch-review 42): what KIND of outcome it is.
+    expect(committed.find((r) => r.caseId === "c-ok")?.kind).toBe("executed");
+    expect(committed.find((r) => r.caseId === "c-fail")?.kind).toBe("failed");
     const failChild = await runs.get((committed.find((r) => r.caseId === "c-fail") as CaseCommitReceipt).childRunId);
     expect(failChild?.status).toBe("failed");
     expect(failChild?.error?.code).toBe("BAD_REQUEST"); // the exit's own code, preserved through the atomic settle
@@ -199,6 +202,11 @@ describe("carried retry results are INHERITED outcomes — materialized as child
     const committed = await receipts.list(retry.id);
     expect(committed.map((r) => r.caseId).sort()).toEqual(["c-fail", "c-ok"]);
     const inherited = committed.find((r) => r.caseId === "c-ok") as CaseCommitReceipt;
+    // The discriminant names it INHERITED and the lineage names the batch whose execution it actually is —
+    // a reader no longer infers provenance from origin.retryOf plus absence-of-execution-id.
+    expect(inherited.kind).toBe("inherited");
+    expect(inherited.sourceScorecardId).toBe(source.id);
+    expect(committed.find((r) => r.caseId === "c-fail")?.kind).toBe("failed");
     const seeded = await runs.get(inherited.childRunId);
     expect(seeded?.status).toBe("succeeded");
     expect(seeded?.parentScorecardId).toBe(retry.id);

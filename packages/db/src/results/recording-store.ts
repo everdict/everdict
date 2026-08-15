@@ -1,5 +1,12 @@
 import { type RecordingSeal, type RecordingStore, recordingRefOf } from "@everdict/application-control";
-import type { CaseRecording, DispatchManifest, Fidelity, RecordingRef, TrackEntry } from "@everdict/contracts";
+import {
+  type CaseRecording,
+  ConflictError,
+  type DispatchManifest,
+  type Fidelity,
+  type RecordingRef,
+  type TrackEntry,
+} from "@everdict/contracts";
 
 type SealedMeta = { t0: number; envKind: string; effectiveFidelity: Fidelity; dispatch?: DispatchManifest };
 
@@ -28,11 +35,27 @@ export class InMemoryRecordingStore implements RecordingStore {
     return this.attemptsOf(runId).find((a) => a.generation === generation);
   }
 
-  async open(runId: string): Promise<number> {
+  // With a generation, CLAIM that coordinate — the attempt ledger minted it, and a store that recomputed its
+  // own opinion here would be the second minting authority the ledger exists to remove (arch-review 42). A
+  // coordinate already taken is refused, the same way the Pg primary key refuses it.
+  async open(runId: string, generation?: number): Promise<number> {
     const attempts = this.attemptsOf(runId);
-    const generation = Math.max(0, ...attempts.map((a) => a.generation)) + 1;
-    this.recordings.set(runId, [...attempts, { tracks: {}, generation }]);
-    return generation;
+    if (generation !== undefined) {
+      if (attempts.some((a) => a.generation === generation))
+        throw new ConflictError(
+          "CONFLICT",
+          { runId, generation },
+          "that recording attempt is already open — the coordinate was claimed by another opener.",
+        );
+      this.recordings.set(
+        runId,
+        [...attempts, { tracks: {}, generation }].sort((a, b) => a.generation - b.generation),
+      );
+      return generation;
+    }
+    const minted = Math.max(0, ...attempts.map((a) => a.generation)) + 1;
+    this.recordings.set(runId, [...attempts, { tracks: {}, generation: minted }]);
+    return minted;
   }
 
   async append(runId: string, item: TrackEntry, generation: number): Promise<void> {

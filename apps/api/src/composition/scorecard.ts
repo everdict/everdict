@@ -8,7 +8,7 @@ import type {
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
-import type { CaseReceiptStore, RecordingStore } from "@everdict/application-control";
+import type { CaseReceiptStore, ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
@@ -63,6 +63,7 @@ export function buildScorecard(deps: {
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   recordingStore?: RecordingStore;
   caseReceipts?: CaseReceiptStore; // where a case's canonical outcome is decided (mig 0175)
+  attempts?: ExecutionAttemptStore; // every physical execution behind those receipts (mig 0182)
   // Told when a case opens a new attempt, so this process's recorder stamps the generation the store fences
   // on (mig 0173). Without it a re-driven case's producers keep sending the previous number and every one of
   // their appends is refused — the fence turning into a silent recording outage.
@@ -103,6 +104,7 @@ export function buildScorecard(deps: {
     scoringStageStore,
     recordingStore,
     caseReceipts,
+    attempts,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -296,6 +298,7 @@ export function buildScorecard(deps: {
     },
     ...(recordingStore ? { recordingStore } : {}),
     ...(caseReceipts ? { caseReceipts } : {}),
+    ...(attempts ? { attempts } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,

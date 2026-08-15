@@ -25,6 +25,7 @@ import type { ConstitutionApprovalStore } from "../ports/constitution-approval-s
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
+import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
@@ -225,6 +226,11 @@ export interface ScorecardServiceDeps {
   // Optional while both live side by side: the parent still aggregates from the ledger and the receipts are
   // written beside it, so a disagreement surfaces as a stated diagnostic instead of a silent choice.
   caseReceipts?: CaseReceiptStore;
+  // The PHYSICAL execution ledger (arch-review 42, Phase 1). The receipt records which attempt earned the
+  // case; this records which attempts ran at all — the spillover duplicate, the speculation loser, the
+  // retried dispatch. Dual-write and observed-only for now: nothing here reads it to decide anything, so a
+  // failure to stamp costs an audit row and changes no outcome.
+  attempts?: ExecutionAttemptStore;
   concurrency?: number;
   // Policy gate: if true, a batch without a runtime is rejected 400 at submit (no local fallback). The API (main.ts) always sets true.
   // Unset (tests: inject a mock dispatcher directly) = no gate. Not an env toggle — a deployment's fixed policy.
@@ -279,6 +285,7 @@ export type ScorecardBatchDeps = Pick<
   | "trajectories"
   | "recordingStore"
   | "caseReceipts"
+  | "attempts"
   | "artifacts"
   | "exportResults"
   | "exportStreamFor"

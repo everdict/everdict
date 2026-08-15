@@ -1,11 +1,13 @@
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import {
+  type ExecutionAttemptStore,
   type RecordingStore,
   RunnerHub,
   type RunnerHubLike,
   type RunnerJobStore,
   StoreRunnerHub,
+  openPhysicalAttempt,
 } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
@@ -68,6 +70,10 @@ export function buildDispatch(deps: {
   // same job to a second runner: that is a new physical execution, and it opens its own recording generation
   // here instead of appending into the row the abandoned attempt is still sealing.
   recordingStore?: RecordingStore;
+  // …and the PHYSICAL ledger the re-lease is recorded in (arch-review 42). A requeued job that a second
+  // runner picks up is a second execution; without a row it was visible only as a recording generation
+  // nobody had a name for.
+  attempts?: ExecutionAttemptStore;
   liveTraces?: LiveTraceStore; // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
 }) {
   const {
@@ -86,6 +92,7 @@ export function buildDispatch(deps: {
     cipher,
     caseRecorder,
     recordingStore,
+    attempts,
     liveTraces,
   } = deps;
   // Saved-profile injection for browser evals (browser-profiles S5) — seed a referenced profile's login into the
@@ -122,10 +129,31 @@ export function buildDispatch(deps: {
   // P0-evidence). Only a re-lease mints — the first lease runs the job whose attempt the dispatch already
   // opened. A job with no runId has no recording to open; an open that fails leaves the re-leased job with no
   // generation at all, which the runner protocol degrades to the live-only lane rather than merging.
-  const openAttempt = recordingStore
-    ? async (job: CaseJob): Promise<number | undefined> =>
-        job.runId === undefined ? undefined : await recordingStore.open(job.runId).catch(() => undefined)
-    : undefined;
+  //
+  // …and the attempt LEDGER mints the ordinal for it (arch-review 42), so the re-lease leaves a row saying a
+  // second physical execution began — the coordinate it returns is the one the run's terminal stamp then
+  // addresses, since both spell it `attemptIdOf(runId, generation)`. The lease has no tenant of its own to
+  // record beyond the job's; a job with none carries no ledger row rather than a fabricated tenant.
+  const openAttempt =
+    recordingStore || attempts
+      ? async (job: CaseJob): Promise<number | undefined> => {
+          if (job.runId === undefined) return undefined;
+          // A job carrying no tenant gets the recording lane exactly as it did before — the ledger's tenant
+          // is not a value to invent, and losing an audit row is the lesser of the two failures.
+          if (job.tenant === undefined) return await recordingStore?.open(job.runId).catch(() => undefined);
+          const opened = await openPhysicalAttempt(
+            { attempts, recordings: recordingStore },
+            {
+              executionId: job.runId,
+              tenant: job.tenant,
+              ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
+              caseId: job.evalCase.id,
+              ...(job.trial !== undefined ? { trial: job.trial } : {}),
+            },
+          );
+          return opened.generation;
+        }
+      : undefined;
   const hubDeps = { ...hubTimeout, ...(openAttempt ? { openAttempt } : {}) };
   const runnerHub: RunnerHubLike =
     process.env.EVERDICT_SELF_HOSTED_STORE_HUB === "1"

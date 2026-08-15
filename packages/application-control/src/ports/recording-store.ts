@@ -33,7 +33,19 @@ export interface RecordingStore {
   // Opening an attempt now INSERTS one. Older attempts stay where they are, addressable by their own
   // generation, and a reader that asks for none gets the newest sealed one — the run's current replay.
   // Returns the generation this attempt owns; every producer stamps it (CaseJob.recordingGeneration).
-  open(runId: string): Promise<number>;
+  //
+  // ── WHO MINTS THE ORDINAL (arch-review 42, Three-Ledger Phase 1) ─────────────────────────────────
+  //
+  // With `generation` given, this CLAIMS exactly that coordinate: the attempt ledger
+  // (`ExecutionAttemptStore.open`) already minted it, and this store's job is to agree rather than to
+  // decide. A claim that collides throws, which is the same fail-closed answer a self-minted collision
+  // gives today — the caller runs the case knowing its replay is not canonical (`unisolated`).
+  //
+  // Without it, the store self-mints MAX+1 as it always has. That branch is for the paths the attempt
+  // ledger is not wired into; it is not a fallback to reach for, because two MAX+1 computations over two
+  // tables agree only while both tables see exactly the same attempts, and this one is the conditional,
+  // prunable, evidence-lifetime table of the pair.
+  open(runId: string, generation?: number): Promise<number>;
   // The recording of ONE attempt, or — with no generation — the newest sealed one. A run's replay is its
   // latest completed attempt; naming a generation is how a historical reader pins the one it means.
   get(runId: string, generation?: number): Promise<CaseRecording | undefined>;

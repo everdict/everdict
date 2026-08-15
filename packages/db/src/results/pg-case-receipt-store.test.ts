@@ -51,6 +51,26 @@ describe("PgCaseReceiptStore — the claim is the constraint", () => {
     expect(sql).toContain("UNION ALL"); // the loser's read of the winner, in the same statement
   });
 
+  it("persists and reads back the outcome discriminant + lineage (arch-review 42, mig 0181)", async () => {
+    const inheritedRow = { ...row, kind: "inherited", source_scorecard_id: "sc-src", inserted: true };
+    const { client, statements } = fakeClient([inheritedRow]);
+    const out = await new PgCaseReceiptStore(client).commit({
+      ...receipt,
+      kind: "inherited",
+      sourceScorecardId: "sc-src",
+    });
+    expect(statements[0]?.params).toContain("inherited");
+    expect(statements[0]?.params).toContain("sc-src");
+    if (out.kind !== "committed") throw new Error("expected committed");
+    expect(out.receipt.kind).toBe("inherited");
+    expect(out.receipt.sourceScorecardId).toBe("sc-src");
+    // …and a pre-discriminant row (NULL kind) reads as absent, never as some invented kind.
+    const { client: legacy } = fakeClient([{ ...row, kind: null, source_scorecard_id: null, inserted: false }]);
+    const legacyOut = await new PgCaseReceiptStore(legacy).commit(receipt);
+    if (legacyOut.kind !== "already_committed") throw new Error("expected already_committed");
+    expect(legacyOut.receipt.kind).toBeUndefined();
+  });
+
   it("reports the WINNER's receipt when the insert was refused, never the caller's own", async () => {
     const { client } = fakeClient([{ ...row, child_run_id: "child-A", inserted: false }]);
     const out = await new PgCaseReceiptStore(client).commit({ ...receipt, childRunId: "child-B" });

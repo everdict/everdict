@@ -21,6 +21,17 @@ export const CaseCommitReceiptSchema = z.object({
   scorecardId: z.string(),
   caseId: z.string(),
   trial: z.number().int().nonnegative(), // 0 for a single-run case — the same collapse `childKey` makes
+  // WHICH KIND OF OUTCOME this receipt records (arch-review 42, the outcome ledger's discriminant):
+  //   executed  — this batch ran the case and the named child carries the execution's own result
+  //   failed    — this batch ran the case and the named child carries the frozen failure
+  //   inherited — a carried-over result (retry-failed): the named child is a seeded copy; the execution
+  //               happened in the SOURCE batch (see sourceScorecardId), whose ledger is its provenance
+  // Optional for receipts committed before the discriminant existed — a reader treats absence as
+  // "executed-or-failed, kind unrecorded", never as a third kind.
+  kind: z.enum(["executed", "failed", "inherited"]).optional(),
+  // The inherited receipt's lineage: the batch whose execution this result actually is. Present iff
+  // kind === "inherited" (enforced at the store boundary by the producers, not the schema — legacy rows).
+  sourceScorecardId: z.string().optional(),
   // The child run this receipt makes canonical. Other attempts of the same case keep their rows; only this
   // one is the case's outcome.
   childRunId: z.string(),

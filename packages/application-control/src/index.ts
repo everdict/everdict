@@ -83,6 +83,12 @@ export type {
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export { recordingGenerationOf, recordingRefOf } from "./ports/recording-store.js";
 export { type CaseReceiptStore, type CaseSettleOutcome, InMemoryCaseReceiptStore } from "./ports/case-receipt-store.js";
+export {
+  type ExecutionAttemptStore,
+  InMemoryExecutionAttemptStore,
+  type OpenAttemptInput,
+} from "./ports/execution-attempt-store.js";
+export { openPhysicalAttempt, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
 export {

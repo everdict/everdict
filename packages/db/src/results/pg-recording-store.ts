@@ -81,24 +81,36 @@ export class PgRecordingStore implements RecordingStore {
 
   // A re-drive OPENS A NEW ATTEMPT (review 39, Phase 4) — see the port for why this is an insert and not the
   // reset it used to be.
-  async open(runId: string): Promise<number> {
+  async open(runId: string, generation?: number): Promise<number> {
     // One statement: the next generation is computed and claimed together, so two openers cannot both read
     // the same max and then both insert it. The primary key refuses the second, this throws, and the caller
     // records the case as `unisolated` — a fence it could not raise, which is the fail-closed reading and not
     // a number to invent. Two opens for one execution id is already a driver that lost its authority.
-    const { rows } = await this.client.query<{ generation: number }>(
-      `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
+    //
+    // …unless the coordinate was MINTED ELSEWHERE (arch-review 42): the attempt ledger is the one authority
+    // for the ordinal, so a caller holding a generation claims that exact row instead of computing a second
+    // opinion. A collision throws here too, by the same primary key and for the same reason.
+    const { rows } =
+      generation === undefined
+        ? await this.client.query<{ generation: number }>(
+            `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
        SELECT $1, '{}'::jsonb, COALESCE(MAX(generation), 0) + 1, now()
          FROM everdict_recordings WHERE run_id = $1
        RETURNING generation`,
-      [runId],
-    );
-    const generation = rows[0]?.generation;
+            [runId],
+          )
+        : await this.client.query<{ generation: number }>(
+            `INSERT INTO everdict_recordings (run_id, tracks, generation, updated_at)
+       VALUES ($1, '{}'::jsonb, $2::int, now())
+       RETURNING generation`,
+            [runId, generation],
+          );
+    const opened = rows[0]?.generation;
     // No row back means the insert was refused, and nothing here deletes recordings — so this is a store
     // fault, not an attempt number to invent. Returning 0 would hand the caller the generation every
     // un-fenced producer already stamps.
-    if (generation == null) throw new Error(`recording attempt for ${runId} was not opened`);
-    return Number(generation);
+    if (opened == null) throw new Error(`recording attempt for ${runId} was not opened`);
+    return Number(opened);
   }
 
   // The sealed replay. A caller naming a generation gets THAT attempt — the one its verdict was committed

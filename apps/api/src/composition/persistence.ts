@@ -3,13 +3,19 @@ import type {
   CaseReceiptStore,
   ConstitutionApprovalStore,
   ConstitutionalPublisher,
+  ExecutionAttemptStore,
   HandoffCheckpointStore,
   LeaderElector,
   ReplicaRegistry,
   ScoringStageStore,
   VerificationDecisionStore,
 } from "@everdict/application-control";
-import { InMemoryCaseReceiptStore, soleLeader, soloReplicas } from "@everdict/application-control";
+import {
+  InMemoryCaseReceiptStore,
+  InMemoryExecutionAttemptStore,
+  soleLeader,
+  soloReplicas,
+} from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
@@ -105,6 +111,7 @@ import {
   PgCycleStore,
   PgEnvelopeStore,
   PgEventConsumerStateStore,
+  PgExecutionAttemptStore,
   PgFsRevisionStore,
   PgHandoffCheckpointStore,
   PgInitiativeStore,
@@ -212,6 +219,9 @@ export interface Persistence {
   // Where a case's canonical outcome is decided (mig 0175): one receipt per (scorecard, case, trial), claimed
   // by the attempt that commits. Written beside the ledger while the two are compared.
   caseReceiptStore: CaseReceiptStore;
+  // The PHYSICAL execution ledger (mig 0182): one unconditional row per physical execution, with a state.
+  // Phase-1 dual-write — stamped beside the commit points, read by nothing (arch-review 42).
+  executionAttemptStore: ExecutionAttemptStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
@@ -369,6 +379,7 @@ export async function makePersistence(): Promise<Persistence> {
       scoringStageStore: new InMemoryScoringStageStore(),
       recordingStore: new InMemoryRecordingStore(),
       caseReceiptStore: inMemoryReceipts,
+      executionAttemptStore: new InMemoryExecutionAttemptStore(),
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
@@ -438,6 +449,7 @@ export async function makePersistence(): Promise<Persistence> {
     scoringStageStore: new PgScoringStageStore(client),
     recordingStore: new PgRecordingStore(client),
     caseReceiptStore: new PgCaseReceiptStore(client),
+    executionAttemptStore: new PgExecutionAttemptStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,

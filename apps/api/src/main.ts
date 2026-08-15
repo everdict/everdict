@@ -183,6 +183,7 @@ async function main(): Promise<void> {
     store,
     recordingStore,
     caseReceiptStore,
+    executionAttemptStore,
     scorecardStore,
     scoringStageStore,
     keyStore,
@@ -503,6 +504,7 @@ async function main(): Promise<void> {
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
     caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording
     recordingStore, // replay ② — a self-hosted RE-lease opens its own attempt here (arch-review 41 P0-evidence)
+    attempts: executionAttemptStore, // …and the physical ledger records that re-lease as its own row (mig 0182)
     liveTraces, // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
   });
   // WHERE anything runs, answered once (composition/runtime-compute): the deployment's own compute, and any
@@ -732,6 +734,9 @@ async function main(): Promise<void> {
     ...(recordingStore ? { recordingStore } : {}),
     // A re-drive begins a new attempt; the recorder serving this process stamps it from here on, and the
     // store refuses the previous attempt's appends (mig 0173).
+    // …and the PHYSICAL ledger records that attempt unconditionally (mig 0182) — including the re-drive whose
+    // recording claim is refused, which used to leave no row anywhere.
+    attempts: executionAttemptStore,
   });
 
   const scorecardService = buildScorecard({
@@ -751,6 +756,9 @@ async function main(): Promise<void> {
     // Where a case's canonical outcome is decided (mig 0175) — claimed at the commit, compared against the
     // ledger at the finalize while both are written.
     caseReceipts: caseReceiptStore,
+    // …and every PHYSICAL attempt behind those receipts (mig 0182): the spillover duplicate, the speculation
+    // loser and the retried dispatch, which the one-per-case receipt structurally cannot report.
+    attempts: executionAttemptStore,
     meteredDispatcher,
     scheduler,
     runnerHub,

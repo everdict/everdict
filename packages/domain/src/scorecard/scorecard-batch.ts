@@ -591,6 +591,15 @@ export class ScorecardBatch {
   // (results that fired, partial export, the failure that surfaced mid-abort) while KEEPING the aborted status.
   // Legal over a record already marked superseded/cancelled (the abort writes the status first, then aborts the
   // loop — the settlement PRESERVES it) — but never over a batch that settled as succeeded/failed.
+  // May an aborted track loop still attach its partials? Legal over queued/running/cancelled/superseded —
+  // NEVER over a batch that settled succeeded/failed (first terminal write wins; the winner's outcome is
+  // not amended by a reclaimed driver's leftovers). The guard is the SSOT; settleAborted throws on the same
+  // condition so a caller that skipped the question still cannot land the write (arch-review 42: the
+  // in-process abort branch asked nothing, and the refusal surfaced as an unhandled rejection).
+  canSettleAborted(): boolean {
+    return this.record.status !== "succeeded" && this.record.status !== "failed";
+  }
+
   settleAborted(extras: ScorecardOutcomeExtras & { error?: ScorecardRunError }, now: string): ScorecardTransition {
     if (this.record.status === "succeeded" || this.record.status === "failed")
       throw new ConflictError(

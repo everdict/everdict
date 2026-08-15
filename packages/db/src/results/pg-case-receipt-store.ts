@@ -8,6 +8,8 @@ interface ReceiptRow {
   case_id: string;
   trial: number;
   child_run_id: string;
+  kind: string | null;
+  source_scorecard_id: string | null;
   execution_id: string | null;
   generation: number | null;
   attempt_id: string | null;
@@ -23,6 +25,10 @@ function toReceipt(row: ReceiptRow): CaseCommitReceipt {
     caseId: row.case_id,
     trial: Number(row.trial),
     childRunId: row.child_run_id,
+    // Narrowed by value, not cast: an unknown string in the column reads as "kind unrecorded" rather than
+    // flowing through as a fabricated variant.
+    ...(row.kind === "executed" || row.kind === "failed" || row.kind === "inherited" ? { kind: row.kind } : {}),
+    ...(row.source_scorecard_id !== null ? { sourceScorecardId: row.source_scorecard_id } : {}),
     ...(row.execution_id !== null ? { executionId: row.execution_id } : {}),
     ...(row.generation !== null ? { generation: Number(row.generation) } : {}),
     ...(row.attempt_id !== null ? { attemptId: row.attempt_id } : {}),
@@ -66,9 +72,9 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
     const { rows } = await client.query<ReceiptRow & { inserted: boolean }>(
       `WITH claim AS (
          INSERT INTO everdict_case_commit_receipts
-           (scorecard_id, case_id, trial, child_run_id, execution_id, generation, attempt_id, result_digest,
-            observation_digest, judge_closure_digest, committed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (scorecard_id, case_id, trial, child_run_id, kind, source_scorecard_id, execution_id, generation,
+            attempt_id, result_digest, observation_digest, judge_closure_digest, committed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (scorecard_id, case_id, trial) DO NOTHING
          RETURNING *, true AS inserted
        )
@@ -82,6 +88,8 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
         receipt.caseId,
         receipt.trial,
         receipt.childRunId,
+        receipt.kind ?? null,
+        receipt.sourceScorecardId ?? null,
         receipt.executionId ?? null,
         receipt.generation ?? null,
         receipt.attemptId ?? null,
