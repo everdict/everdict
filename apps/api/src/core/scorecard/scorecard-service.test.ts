@@ -5802,6 +5802,19 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
       grading: "sha256:grading",
       harness: { id: "h", version: "1" },
     },
+    // Input-trust-neutral (arch-review 47 follow-up, owner decision: receipt-vouched input only): these
+    // tests exercise the gate's OTHER knobs, so the fixture carries the vouched observation every modern
+    // settle records. The input-trust refusals have their own tests (domain gate.test.ts).
+    scoring: [
+      {
+        kind: "initial",
+        revision: 1,
+        judges: [],
+        scorePlaneDigest: "sha256:plane",
+        inputObservation: { completed: true, cases: results.length },
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ],
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
   });
@@ -6133,6 +6146,17 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
         grading: "sha256:grading",
         harness: { id: "h", version: "1" },
       },
+      // Input-trust-neutral (owner decision: vouched input only) — this test exercises the audit.
+      scoring: [
+        {
+          kind: "initial",
+          revision: 1,
+          judges: [],
+          scorePlaneDigest: "sha256:plane",
+          inputObservation: { completed: true, cases: 1 },
+          createdAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
       scorecard: {
         suiteId: "d@1.0.0",
         harness: "h@1",

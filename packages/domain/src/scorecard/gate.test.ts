@@ -629,9 +629,13 @@ describe("applyInputTrust — the pins' input observation is a judgment conditio
     expect(out.decision).toBe("not_comparable");
   });
 
-  it("a LEGACY pin (pre-observation revision) rides as information — history is not retroactively re-judged", () => {
-    const out = applyInputTrust(passEvaluation(), { baseline: pin(), candidate: pin() }, { maxRegressions: 0 });
-    expect(out.decision).toBe("pass");
-    expect(out.reasons).toEqual([]);
+  it("a LEGACY pin refuses by default too — receipt-vouched input only (owner decision); the waiver covers it", () => {
+    const legacy = { baseline: pin(), candidate: pin() };
+    const blocked = applyInputTrust(passEvaluation(), legacy, { maxRegressions: 0 });
+    expect(blocked.decision).toBe("not_comparable");
+    expect(blocked.reasons[0]).toMatchObject({ kind: "input_unverified" });
+    expect(blocked.reasons[0]?.detail).toContain("predates input observation");
+    const waived = applyInputTrust(passEvaluation(), legacy, { maxRegressions: 0, allowUnverifiedInput: true });
+    expect(waived.decision).toBe("pass"); // gating over history is a recorded choice, never a default
   });
 });

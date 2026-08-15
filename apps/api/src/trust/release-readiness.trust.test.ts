@@ -71,6 +71,18 @@ const seriesBatch = (
     harness: { id: "copilot", version: "1.0.0" },
   },
   origin: { source: "product", ...origin },
+  // A vouched scoring pass — release readiness refuses unvouched/legacy input unconditionally now (owner
+  // decision), and this certification is about the gate's own verdicts, not input trust.
+  scoring: [
+    {
+      kind: "initial",
+      revision: 1,
+      judges: [],
+      scorePlaneDigest: "sha256:plane",
+      inputObservation: { completed: true, cases: results.length },
+      createdAt,
+    },
+  ],
   createdAt,
   updatedAt: createdAt,
 });

@@ -966,11 +966,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         },
       );
       if (superseded === undefined) continue;
-      // stopInFlight now propagates a store failure (see its note) — correct for the user-facing cancel, which the
-      // caller can retry. This path cannot: it runs INSIDE submit, after the new record is persisted and before the
-      // driver starts, so a throw here would abandon the batch that just superseded this one as a queued zombie.
-      // Loud rather than silent, and the superseded record is already terminal either way.
-      await this.stopInFlight(r).catch((e: unknown) => {
+      // Through the DURABLE teardown (arch-review 47 §5.2 follow-up): this path cannot rethrow (it runs
+      // INSIDE submit — a throw would abandon the superseding batch as a queued zombie), which is exactly
+      // why its failure must leave an operation row: nobody user-facing will retry a supersede's teardown,
+      // so the reconciler is its only owner. tearDownDurably records the failure and the sweep converges it.
+      await this.tearDownDurably(r).catch((e: unknown) => {
         console.warn(
           `[scorecard] superseded ${r.id} but could not tear its work down: ${e instanceof Error ? e.message : e}`,
         );

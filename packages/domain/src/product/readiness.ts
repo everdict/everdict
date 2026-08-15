@@ -426,6 +426,14 @@ function inputDivergenceReason(side: "newest evaluation" | "baseline", pin: Gate
     return [
       `this series' ${side} states that no receipt vouches for what its judges read — unvouched evidence cannot anchor a ship decision`,
     ];
+  // …and a LEGACY pin blocks the ship too (owner decision, arch-review 47 follow-up): a revision that
+  // predates input observation states nothing about what its judges read, and a release is the one surface
+  // where "unknown provenance" and "vouched" must not be interchangeable. Re-score the series (its next
+  // revision records the observation) to make it shippable evidence again.
+  if (trust === "legacy_unverified")
+    return [
+      `this series' ${side} predates judgment input observation — nothing states what its judges read; re-score it to produce vouched evidence`,
+    ];
   return [];
 }
 
@@ -575,11 +583,20 @@ export function releaseReadiness(
     // at settle cannot be shipped over by a reader that only compares pass rates. It overrides the verdict
     // rather than riding beside it: a `pass` computed from verdicts whose executions were replaced is not a
     // weaker pass, it is an answer about something else.
+    // The input-trust question applies only where EVIDENCE EXISTS on that side: a series that never ran is
+    // `not_evaluated` (its own honest state — asking "what did its judges read" of an evaluation that never
+    // happened would relabel absence as untrust), and a first ship has no baseline to interrogate.
     const divergence = [
-      ...inputDivergenceReason("newest evaluation", candidateScoring),
-      ...inputDivergenceReason("baseline", baselineScoring),
+      ...(latest !== undefined ? inputDivergenceReason("newest evaluation", candidateScoring) : []),
+      ...(baseline !== undefined ? inputDivergenceReason("baseline", baselineScoring) : []),
     ];
-    const verdict = divergence.length > 0 ? ("not_comparable" as const) : baseVerdict;
+    // The override applies to POSITIVE verdicts only: a verdict already blocking (contract_stale,
+    // not_evaluated, a gate block, a bootstrap refusal) keeps its own, more specific answer — the trust
+    // reasons still ride along, so the doubt is visible either way.
+    const verdict =
+      divergence.length > 0 && (baseVerdict === "pass" || baseVerdict === "no_baseline")
+        ? ("not_comparable" as const)
+        : baseVerdict;
     // A series blocks when it is REQUIRED (the fail-closed default) and its verdict is not a passing one.
     // The explicit `requiredForRelease: false` is the only way evidence-less green exists — a recorded
     // product policy, never an inference.
@@ -633,7 +650,12 @@ export function releaseReadiness(
       ...(() => {
         // Divergence leads: it is the reason the verdict says what it says, and burying it under the reasons
         // for the verdict it replaced is how an operator reads past it.
-        const reasons = [...divergence, ...(baseReasons ?? []), ...(crossWorld !== undefined ? [crossWorld] : [])];
+        // The DECIDING reason leads: when the trust doubt overrode a positive verdict it IS the base reason
+        // set's peer, but over an already-blocking verdict it merely rides along after the specific answer.
+        const reasons =
+          verdict === "not_comparable" && divergence.length > 0
+            ? [...divergence, ...(baseReasons ?? []), ...(crossWorld !== undefined ? [crossWorld] : [])]
+            : [...(baseReasons ?? []), ...divergence, ...(crossWorld !== undefined ? [crossWorld] : [])];
         return reasons.length > 0 ? { reasons } : {};
       })(),
       regressed: blocks,

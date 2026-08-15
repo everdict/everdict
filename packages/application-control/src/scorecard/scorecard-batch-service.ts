@@ -8,9 +8,7 @@ import {
   type CaseResult,
   ConflictError,
   type Dataset,
-  type DomainFact,
   type EvalCase,
-  type ExecutionAttemptState,
   type HarnessSpec,
   InternalError,
   type JudgeRunConfig,
@@ -33,13 +31,11 @@ import {
   ScorecardBatch,
   type ScorecardOutcomeExtras,
   billingCharges,
-  caseObservationDigest,
   caseOutcome,
   caseResultDigest,
   caseVerdict,
   classifyFailure,
   completeJudgeCoverage,
-  contentDigest,
   modelBindingLabel,
   newScorecardChildRun,
   newSeededScorecardChildRun,
@@ -74,14 +70,13 @@ import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
-import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
-import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
-import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
+import { CaseOutcomeCommitter, type FailureFinalization, type PendingChildSettle } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
+import { RecoveryPlanner } from "./recovery-planner.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
   analysisBundle,
@@ -108,50 +103,6 @@ function executionIdOf(job: { evalCase: { id: string }; trial?: number; batchId?
   return `evd-${parent}-${job.evalCase.id}${job.trial !== undefined ? `-t${job.trial}` : ""}`;
 }
 
-// A case whose execution is done and whose child row is deliberately still open until its judges land.
-interface PendingChildSettle {
-  childId?: string;
-  ranOn?: string;
-  parentDriver: { scorecardId: string; epoch: number };
-  // The id this case was dispatched with — the key its replay buffer is written under (mig 0172) — and the
-  // ATTEMPT under that id (mig 0173), which every append and the seal must carry.
-  executionId: string;
-  // Absent when the attempt never opened one (recording claim refused) — never 0: that sentinel fabricated
-  // a `<executionId>#g0` coordinate no ledger mints, and every unisolated case collided on it (review 46).
-  generation?: number;
-  // This attempt could not isolate its recording buffer — it runs, but its replay is not claimed as ours.
-  unisolated?: boolean;
-  // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
-  // rather than leaving the row silent about it (review 39 P0-3) — the same invariant the Temporal path holds.
-  judges: ReadonlyArray<{ id: string }>;
-  // …and the SEALED closure those judges resolved to at submit (specDigest/model/rubric digests) — what the
-  // receipt's judgeClosureDigest names, so "which judgment produced this outcome" is the manifest's answer,
-  // not a list of id strings (review 40 follow-up P1).
-  sealedJudges?: SealedJudgeClosure[];
-}
-
-// A case the in-process loop sent down the FAILURE exit — what the judged exit needs to finalize it
-// ATOMICALLY once the failure is known final (arch-review 41 P0-lifecycle). The dispatch catch no longer
-// terminalizes the child itself: a retryable throw would re-open the case anyway, and terminal-first left a
-// window (terminal child, no receipt) a crash turned into a re-execution and a takeover turned into an
-// unfenced claim. The child stays OPEN until the judged exit commits receipt + terminal write in one
-// transaction — the same commit point every other outcome uses.
-interface FailureFinalization {
-  childId?: string;
-  executionId: string;
-  generation?: number;
-  // The batch this attempt ran under — the fence the atomic commit must re-prove inside the transaction.
-  parentDriver: { scorecardId: string; epoch: number };
-  // What the dispatch could not isolate (see PendingChildSettle.unisolated) — a failure seals no replay then.
-  unisolated?: boolean;
-  // The failure as the catch saw it — the abandon-settle of a superseded attempt's child needs it verbatim.
-  error: { code: string; message: string };
-  // The judge selection + sealed closure, same as the judged exit's pending entry: a failure receipt names
-  // the judgment identity too (pre-fix it carried no judgeClosureDigest — an asymmetry with no reason).
-  judges: ReadonlyArray<{ id: string }>;
-  sealedJudges?: SealedJudgeClosure[];
-}
-
 export class ScorecardBatchService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -163,6 +114,15 @@ export class ScorecardBatchService {
   // Runtime health memory for sharded-batch spillover (docs/architecture/batch-resilience.md).
   private readonly breaker: CircuitBreaker;
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
+  // WHERE A CASE ENDS, for both drivers (arch-review 47 §4). The commit point — judge coverage, evidence
+  // assembly, receipt, the child's one terminal write, the attempt's terminal stamp — is this collaborator's,
+  // and every path that finalizes a case goes through it. Stateless per batch by construction: the pending
+  // and failure maps a track loop keeps are handed to it as arguments (arch-review 34 P0).
+  private readonly commit: CaseOutcomeCommitter;
+  // WHAT A RE-DRIVE MUST NOT RUN AGAIN (arch-review 47 §4). The resume seeding, the adoption of the
+  // mid-flight children a dead process left behind, and the rebuilt context's done-set — one
+  // collaborator, because all three stand on the same rule: the receipt says which attempt answered.
+  private readonly recovery: RecoveryPlanner;
 
   constructor(
     private readonly deps: ScorecardBatchDeps,
@@ -183,6 +143,8 @@ export class ScorecardBatchService {
     this.breaker = shared.breaker;
     this.inFlight = shared.inFlight;
     this.getRecord = shared.getRecord;
+    this.commit = new CaseOutcomeCommitter(deps, { newId: shared.newId, now: shared.now });
+    this.recovery = new RecoveryPlanner(deps, shared.scoring, this.commit, { now: shared.now });
     // ── A LEDGER WITH NO COMMIT POINT CANNOT SAY WHICH ATTEMPT ANSWERED (review 39, Phase 4) ─────────
     //
     // Canonicality is the receipt's, and the "largest updatedAt" fallback is gone — so a composition that
@@ -292,7 +254,7 @@ export class ScorecardBatchService {
     const plan = ExecutionPlan.of(rec);
     let dataset: Dataset;
     let seed: CaseResult[] = [];
-    const seedRunIds: string[] = [];
+    let seedRunIds: string[] = [];
     let adopted = 0;
     try {
       const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
@@ -310,191 +272,23 @@ export class ScorecardBatchService {
       plan.assertSelection(cases);
       // Re-apply the recorded grading plan — resume must score exactly like the original submit.
       dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
-      if (this.deps.runStore) {
-        const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
-        // WHICH child is this case's answer: the receipt, and only the receipt (review 39, Phase 4). A
-        // resume that seeded "the newest row" could carry a superseded attempt's result into the rebuilt
-        // batch — and a case with no receipt has no answer at all, so it is simply re-dispatched below,
-        // which is what an uncommitted case means.
-        // No `.catch(() => [])`: a receipt read that fails must fail the resume (it is retried), not read as
-        // "nothing committed" — which re-dispatched every finished case of the batch (review 40 P0).
-        const committedReceipts = (await this.deps.caseReceipts?.list(id)) ?? [];
-        const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
-        const committedIds = new Set([...canonical.values()].map((c) => c.id));
-        // EVERY child is examined, and only the COMMITTED ones are evidence. Two different questions that
-        // used to be one: "which row is this case's answer" (the receipt) and "which rows are still running
-        // and must be adopted or interrupted" (all of them). Iterating the canonical map alone left a
-        // mid-flight child of an uncommitted case untouched — parented to the batch and running forever.
-        for (const c of children) {
-          // TERMINAL + RESULT IS FINISHED EVIDENCE, whatever the status says (arch-review 30 P1). The
-          // symmetric half of "terminal + no result is unfinished work": a case can settle FAILED and still
-          // carry a complete CaseResult — the write-back attaches one to a failed child on purpose, because
-          // a failed case is a measured outcome, not a missing one. Seeding only `succeeded` re-ran those
-          // cases on resume, and the abandoned attempt stayed parented to the batch.
-          //
-          // …and COMMITTED is now part of that sentence (review 39, Phase 4): a terminal child no attempt
-          // committed is a superseded execution, so it is left where it is and its case is re-dispatched.
-          if (committedIds.has(c.id) && c.result) {
-            seed.push(c.result);
-            seedRunIds.push(c.id);
-          } else if (c.status === "running" || c.status === "queued") {
-            // Mid-flight when the process died. ADOPT first: the orchestrator job the old process submitted may
-            // still be running (or already finished) — harvest its result instead of re-dispatching and paying
-            // for the same execution twice. Only when nothing is adoptable does the case fall to re-dispatch.
-            const adoptable = this.deps.adoptCase
-              ? await this.deps.adoptCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => undefined)
-              : undefined;
-            // A REJECTED TRANSITION IS NOT REJECTED EVIDENCE (arch-review 28 P0). The CAS below correctly
-            // refuses to overwrite a child that settled on its own between the list above and this write —
-            // and the seed was pushed regardless, so the resumed batch could aggregate the harvested result
-            // while the LEDGER held the real one. The two are usually equal and nothing here proves it: the
-            // ledger row is what a reader sees a year later, so the ledger row is what the aggregate must be
-            // built from.
-            //
-            // So when the CAS loses, the persisted truth decides — re-read the child and follow it.
-            if (adoptable) {
-              // WHAT A BACKEND HANDS BACK IS A RECOVERED EXECUTION, NOT FINISHED EVIDENCE (arch-review 34 P0).
-              //
-              // The in-process loop stopped terminalizing a child before its judges landed, and this branch —
-              // the one that runs precisely when a control plane died mid-batch — went on adopting the raw
-              // result straight into `succeeded` and seeding it. A seeded case is never re-dispatched and
-              // never re-judged, so a batch recovered from a crash could complete with a case that met no
-              // judge its own manifest names: no score, and no `unmeasured` row accounting for the absence.
-              // The rule "terminal + result = finished evidence" was true again on one path and false on the
-              // other, which is how it was wrong the first time.
-              //
-              // So the judges run here too, over the SAME sealed closure the batch was submitted under, and
-              // the child settles with what they produced. Re-judging costs a provider call; seeding
-              // unjudged evidence costs a verdict.
-              // A JUDGE THAT FAILED AT THE TOP LEVEL IS NOT A JUDGED CASE (arch-review 38 P0). Swallowing it
-              // here would terminalize the adopted result as finished evidence with no judge row at all —
-              // the very shape re-judging on recovery was introduced to prevent. A per-judge failure still
-              // becomes an `unmeasured` row inside the stream; this catch is for the stream itself dying,
-              // and then the case is left OPEN for the next attempt rather than sealed as complete.
-              let judged = true;
-              if (orch.judges.length > 0)
-                judged = await this.scoring
-                  .applyJudges(
-                    rec.tenant,
-                    dataset,
-                    [adoptable],
-                    orch.judges,
-                    rec.runtime,
-                    rec.createdBy,
-                    () => c.id,
-                    plan.sealedJudges,
-                    // …publishable only while this recovery still holds the batch it is recovering.
-                    parentDriver ? () => this.holdsBatch(id, parentDriver.epoch) : undefined,
-                  )
-                  .then(() => true)
-                  .catch(() => false);
-              if (!judged) continue; // left active: the resume below re-dispatches it
-              // THE SAME TWO INVARIANTS A COMMIT CARRIES ON EITHER DRIVER (review 39). A recovery is a third
-              // path to a terminal child, and it held neither: an adopted case could go terminal with a
-              // selected judge unmentioned, and with no receipt saying which attempt the batch counted — so
-              // the parity check would report every recovered case as a disagreement, which is exactly the
-              // kind of noise that makes a diagnostic useless.
-              //
-              // The evidence assembly is NOT repeated here: this result came back from a backend that
-              // produced its own artifacts under an attempt this process never opened, and re-keying them
-              // under a generation it would have to invent is worse than leaving them where they are.
-              const adoptedResult =
-                orch.judges.length > 0
-                  ? { ...adoptable, scores: completeJudgeCoverage(adoptable.scores, orch.judges) }
-                  : adoptable;
-              // ATOMIC, like every other commit (review 40 P0): the claim and the adopt-settle are ONE
-              // transaction, so a recovery that lost the child's fence never leaves a receipt naming a child
-              // whose adoption was refused. Through the VERB still — `adopt` writes `succeeded` under the
-              // child's epoch AND the parent's driver (arch-review 34 P0), re-read inside the transaction so
-              // the fence is proven against the row the commit actually lands on. A commit that THROWS
-              // leaves the case active — the resume below re-dispatches it, which is the recoverable reading
-              // of a store fault.
-              const recoveryRuns = this.deps.runStore;
-              const adoption = this.deps.caseReceipts
-                ? await this.deps.caseReceipts
-                    .commitCase(
-                      this.receiptOf(id, adoptedResult, {
-                        childId: c.id,
-                        // An adoption is THIS batch's execution, harvested by recovery — the case ran here
-                        // (its dispatch just outlived the driver), so the kind is the run's own outcome.
-                        kind: adoptedResult.failure !== undefined ? "failed" : "executed",
-                        ...(c.executionId ? { executionId: c.executionId } : {}),
-                        judges: orch.judges,
-                        ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
-                      }),
-                      async (runs) => {
-                        const cur = await runs.get(c.id);
-                        if (!cur || Run.from(cur).isTerminal()) return undefined;
-                        return settleRun(runs, c.id, Run.from(cur).adopt(adoptedResult, this.now()).patch, undefined, {
-                          epoch: cur.ownerEpoch ?? 0,
-                          ...(parentDriver ? { parentDriver } : {}),
-                        });
-                      },
-                      recoveryRuns,
-                    )
-                    .catch(() => undefined)
-                : undefined;
-              if (adoption === undefined) continue; // store fault — left active: the resume below re-dispatches it
-              if (adoption.kind === "committed") {
-                adopted += 1;
-                seed.push(adoptedResult);
-                seedRunIds.push(c.id);
-                continue;
-              }
-              // Another attempt owns this case — the recovery does not adopt it.
-              if (adoption.kind === "already_committed" && adoption.receipt.childRunId !== c.id) continue;
-              // `unsettled` (the child settled on its own between the list and this write — the fence
-              // refused, and the claim rolled back with it) or the idempotent re-claim of this very child:
-              // the persisted truth decides — re-read the child and follow it.
-              const settled = await this.deps.runStore.get(c.id);
-              // It finished while we were harvesting: its own result is the evidence, not ours.
-              if (settled?.result) {
-                seed.push(settled.result);
-                seedRunIds.push(c.id);
-                continue;
-              }
-              // TERMINAL WITH NO RESULT IS UNFINISHED WORK, and this is the policy rather than an accident
-              // (arch-review 29 P1). A child can settle `failed` carrying nothing — a dispatch that never
-              // produced a case result, which is an infrastructure failure and exactly what a resume exists
-              // to recover. Seeding nothing leaves the case in `casesToRun`, so it is re-dispatched.
-              //
-              // The alternative reading — "settled is settled, never re-run it" — would turn every lost
-              // sandbox into a permanently unmeasured case, which is the outcome the retry vocabulary was
-              // built to avoid. Saying which of the two this is beats leaving it to whichever branch runs.
-              continue;
-            }
-            const interrupted = await settleRun(
-              this.deps.runStore,
-              c.id,
-              Run.from(c).fail(
-                { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
-                this.now(),
-              ).patch,
-              undefined,
-              // …under the child's own epoch AND the parent's driver: one refuses a child somebody claimed
-              // directly, the other refuses a recovery that has lost the batch it is recovering.
-              { epoch: c.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
-            );
-            if (interrupted === undefined) {
-              // The child settled between the read and this write. Marking it INTERRUPTED lost, correctly —
-              // and treating it as remaining work would re-run a case that already has an answer, so the
-              // persisted answer is seeded instead. A terminal child with no result falls through to the
-              // re-dispatch for the reason above: nothing settled means nothing to carry.
-              const settled = await this.deps.runStore.get(c.id);
-              if (settled?.result) {
-                seed.push(settled.result);
-                seedRunIds.push(c.id);
-              }
-            }
-          }
-        }
-        // Only seed cases that are still in the selection (dataset edits between runs shrink, never corrupt).
-        const selected = new Set(dataset.cases.map((c) => c.id));
-        const keep = seed.map((r, i) => [r, seedRunIds[i]] as const).filter(([r]) => selected.has(r.caseId));
-        seed = keep.map(([r]) => r);
-        seedRunIds.length = 0;
-        seedRunIds.push(...keep.map(([, rid]) => rid).filter((x): x is string => x !== undefined));
-      }
+      // The finished cases this batch already answered, and the mid-flight children a dead process left
+      // behind — one collaborator, because both answers stand on the same rule (see RecoveryPlanner).
+      const seeded = await this.recovery.seedFromLedger({
+        scorecardId: id,
+        tenant: rec.tenant,
+        dataset,
+        judges: orch.judges,
+        ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
+        ...(rec.runtime !== undefined ? { runtime: rec.runtime } : {}),
+        ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
+        ...(parentDriver ? { parentDriver } : {}),
+        // …publishable only while this recovery still holds the batch it is recovering.
+        ...(parentDriver ? { holdsBatch: () => this.holdsBatch(id, parentDriver.epoch) } : {}),
+      });
+      seed = seeded.seed;
+      seedRunIds = seeded.seedRunIds;
+      adopted = seeded.adopted;
     } catch {
       return false; // dataset/subset no longer resolves — not faithfully resumable
     }
@@ -678,17 +472,7 @@ export class ScorecardBatchService {
     const owner = rec.createdBy ?? rec.tenant;
     const secretMap =
       harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(rec.tenant, owner) : undefined;
-    const doneIds = new Set<string>();
-    if (this.deps.runStore) {
-      const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
-      // …and the same rule decides what a rebuilt context already considers done (review 39, Phase 4): a
-      // case is done when a receipt says which attempt answered it, never when a row happens to be newest.
-      // No `.catch(() => [])` — an unreadable ledger fails the context build (retried), it does not read as
-      // "nothing is done" (review 40 P0).
-      const committedReceipts = (await this.deps.caseReceipts?.list(id)) ?? [];
-      const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
-      for (const c of canonical.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
-    }
+    const doneIds = await this.recovery.doneCaseIds(id, rec.tenant);
     const ctx = {
       tenant: rec.tenant,
       owner,
@@ -1055,8 +839,8 @@ export class ScorecardBatchService {
             // COMPUTE ACTUALLY STARTED — the child flips queued→running, and the attempt ledger records that
             // this execution reached the machine rather than only having been intended (arch-review 42).
             onStarted: () => {
-              void this.stampAttempt(attemptId, "executing");
-              if (childId && runStore) void this.markChildRunning(childId);
+              void this.commit.stampAttempt(attemptId, "executing");
+              if (childId && runStore) void this.commit.markChildRunning(childId);
             },
             onStep: (message, cid) =>
               void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
@@ -1177,7 +961,7 @@ export class ScorecardBatchService {
       // Judge coverage, the receipt claim, the evidence assembly and the child's one terminal write are no
       // longer this path's own code. They were, and every review since has found the same defect in whichever
       // copy was edited second — which is why the duplication, not the individual bugs, was the finding.
-      const outcome = await this.finalizeCaseAttempt({
+      const outcome = await this.commit.finalizeCaseAttempt({
         scorecardId: id,
         epoch: ctx.driverEpoch,
         result,
@@ -1643,7 +1427,7 @@ export class ScorecardBatchService {
           // Through `receiptOf`, so the inherited receipt carries the same judgment identity every other
           // receipt does (the inline literal here carried no judgeClosureDigest — an asymmetry, not a choice).
           const outcome = await receipts.commitCase(
-            this.receiptOf(record.id, r, {
+            this.commit.receiptOf(record.id, r, {
               childId: seededChild.id,
               kind: "inherited",
               sourceScorecardId: src.id,
@@ -1743,191 +1527,6 @@ export class ScorecardBatchService {
       .update(id, { updatedAt: this.now() }, undefined, { expectOwnerEpoch: epoch, expectNonTerminal: true })
       .catch(() => undefined);
     return held !== undefined;
-  }
-
-  // The child's ONE terminal write, carrying the result as it now stands — execution plus whatever the judges
-  // attached to it (a failed judge leaves its `unmeasured` row, which is evidence too). Idempotent: the entry
-  // is consumed, so a second call after a retried stream does nothing.
-  //
-  // THE PENDING MAP IS THE BATCH'S, NOT THE SERVICE'S (arch-review 34 P0). It was an instance field keyed by
-  // `caseId#trial` — no tenant, no scorecard — and one `ScorecardService` drives every batch in the process.
-  // Two batches with a case of the same name (`c1`, which is what half the datasets in the world call their
-  // first case) overwrote each other's entry: one child settled with the OTHER batch's result, under the
-  // OTHER batch's parent fence, and the second settle found nothing pending and never settled at all. Across
-  // workspaces, that is one tenant's evidence written onto another tenant's row. The state is per-batch
-  // because the thing it describes is: it now lives in the `track` call that owns those cases.
-  // Everything a case produces, assembled onto its result before the ONE terminal write that publishes it:
-  // the offloaded snapshot and the sealed replay, both under the ATTEMPT that produced them. Shared by the
-  // in-process loop and the Temporal driver, because a case's evidence should not depend on which driver a
-  // deployment happens to run — that difference is how "terminal means finalized" was true on one path and
-  // false on the other for a whole review.
-  //
-  // Best-effort by contract: a failed offload or an unsealed recording must never cost a case its verdict.
-  private async assembleCaseEvidence(
-    result: CaseResult,
-    // `generation` absent = the attempt never opened one (arch-review 46): the snapshot stays INLINE rather
-    // than staged under a fabricated `#g0` key — the execution id is stable across a re-drive by
-    // construction, so two unisolated attempts of one case would share one object key with no CAS beneath.
-    where: { scorecardId: string; executionId: string; generation?: number; unisolated?: boolean },
-  ): Promise<void> {
-    if (this.deps.artifacts && where.generation !== undefined) {
-      try {
-        // Keyed by the ATTEMPT, not by the case (arch-review 37 P0). `scorecards/<id>/<caseId>` gave every
-        // trial of a case one object key, so trial 1 overwrote the bytes trial 0's result still points at —
-        // an execution id was stamped on the row and then not used for the artifact it names.
-        // Keyed by the attempt, GENERATION INCLUDED (arch-review 38 P0). `attempts/<executionId>` is stable
-        // across a re-drive by construction — that is what an execution id is for — so a stale attempt's
-        // offload overwrote the bytes the winner's result already points at. The generation is the part that
-        // differs between two attempts of one case.
-        result.snapshot = await offloadSnapshot(
-          result.snapshot,
-          this.deps.artifacts,
-          `attempts/${attemptIdOf(where.executionId, where.generation)}`,
-        );
-      } catch {}
-    }
-    // …unless this attempt could not isolate its buffer (see `unisolated`): sealing then would publish an
-    // earlier attempt's frames as this result's replay, which is worse than having none.
-    if (this.deps.recordingStore && !where.unisolated && where.generation !== undefined) {
-      try {
-        await foldEnvDeltas(this.deps.recordingStore, where.executionId, result, where.generation);
-        const ref = await this.deps.recordingStore.seal(
-          where.executionId,
-          { envKind: result.snapshot.kind, dispatch: dispatchManifest(result.harness) },
-          where.generation,
-        );
-        if (ref) result.recordingRef = ref;
-      } catch {}
-    }
-  }
-
-  // `committed` — this case's evidence is on the ledger, and everything downstream may derive from it.
-  // `lost` — a takeover or a cancel took the case: not ours, and not a failure of anything.
-  // `unwritten` — we could not write it. That distinction is the point (arch-review 37 P0): a parent that
-  // SUCCEEDS while one of its cases never reached the ledger is a scorecard whose summary counts a result no
-  // reader can find, because the aggregate was built from this process's memory and the ledger disagrees.
-  private async settleJudgedChild(
-    scorecardId: string,
-    tenant: string,
-    announce: { verdictPolicy?: VerdictPolicy; owner?: string },
-    pending: Map<string, PendingChildSettle>,
-    finalized: Map<string, FailureFinalization>,
-    result: CaseResult,
-  ): Promise<"committed" | "lost" | "unwritten"> {
-    const key = childKey(result.caseId, result.trial);
-    // This loop sent it down the failure exit, and runSuite has now frozen the failure as FINAL — the child
-    // is still OPEN (the catch terminalizes nothing, arch-review 41 P0-lifecycle). So the failure commits
-    // through the SAME atomic commit point as every other outcome: receipt + fenced terminal fail-write in
-    // one transaction, judge coverage stated, evidence assembled, completion fact riding the commit.
-    const failure = finalized.get(key);
-    if (failure) {
-      // A ledger is wired and this exit has no child row to commit (the create itself threw): the case is
-      // counted in memory and cannot be accounted on the ledger — `unwritten` is the honest answer (the
-      // batch refuses to summarize, recoverable), exactly as the raw failure receipt answered before.
-      if (!failure.childId && this.deps.runStore && this.deps.caseReceipts) return "unwritten";
-      const outcome = await this.finalizeCaseAttempt({
-        scorecardId: failure.parentDriver.scorecardId,
-        epoch: failure.parentDriver.epoch,
-        result,
-        outcome: "failed",
-        error: failure.error,
-        judges: failure.judges,
-        ...(failure.sealedJudges ? { sealedJudges: failure.sealedJudges } : {}),
-        tenant,
-        announce,
-        ...(failure.childId ? { childId: failure.childId } : {}),
-        executionId: failure.executionId,
-        ...(failure.generation !== undefined ? { generation: failure.generation } : {}),
-        ...(failure.unisolated ? { unisolated: true } : {}),
-      });
-      if (outcome.kind === "committed") result.scores = outcome.result.scores;
-      return outcome.kind;
-    }
-    const entry = pending.get(key);
-    if (!entry) return "lost"; // never ours, or a second call for one case
-    pending.delete(key);
-    // Everything that "ending a case" MEANS lives in one place now (see finalizeCaseAttempt); what is left
-    // here is this loop's own bookkeeping — which case, and whether it already ended.
-    const outcome = await this.finalizeCaseAttempt({
-      scorecardId: entry.parentDriver.scorecardId,
-      epoch: entry.parentDriver.epoch,
-      result,
-      judges: entry.judges,
-      ...(entry.sealedJudges ? { sealedJudges: entry.sealedJudges } : {}),
-      tenant,
-      announce,
-      ...(entry.childId ? { childId: entry.childId } : {}),
-      executionId: entry.executionId,
-      ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
-      ...(entry.unisolated ? { unisolated: true } : {}),
-      ...(entry.ranOn ? { ranOn: entry.ranOn } : {}),
-    });
-    // …and the PARENT counts what the child carries. Judge coverage may have added rows, and the aggregate
-    // holds this very object — so a summary built from it would otherwise disagree with the ledger about a
-    // judge that never answered, which is the disagreement this whole seam exists to prevent.
-    if (outcome.kind === "committed") result.scores = outcome.result.scores;
-    return outcome.kind;
-  }
-
-  // ── THE RECEIPT NAMES WHAT THE CHILD WILL CARRY (review 39 P0 · review 40 P0) ────────────────────────
-  //
-  // A pure builder: the claim itself is `commitCase` now — one transaction with the child's terminal write.
-  // The digest is computed over the result AS IT WILL BE PERSISTED, which is why every caller builds the
-  // receipt AFTER `assembleCaseEvidence`: the assembly mutates the result (snapshot refs, recordingRef), and
-  // a digest taken before it named bytes no row ever carried — the parity check then reported a divergence
-  // on every case with an offloaded snapshot, which is a diagnostic crying wolf.
-  //
-  // `generation` is optional because one caller genuinely does not know it: a RECOVERY adopting a result
-  // from a backend never opened the attempt that produced it. An unknown attempt number is recorded as
-  // absent rather than as 0 — 0 is a real generation, and claiming to know is worse than saying nothing.
-  private receiptOf(
-    scorecardId: string,
-    result: CaseResult,
-    entry: {
-      childId: string;
-      // The outcome ledger's discriminant (arch-review 42): executed | failed | inherited. Every producer
-      // states it — only pre-discriminant rows read as absent.
-      kind: NonNullable<CaseCommitReceipt["kind"]>;
-      // Required with kind "inherited": the batch whose execution the carried result actually is.
-      sourceScorecardId?: string;
-      executionId?: string;
-      generation?: number;
-      judges: ReadonlyArray<{ id: string }>;
-      sealedJudges?: SealedJudgeClosure[];
-    },
-  ): CaseCommitReceipt {
-    return {
-      scorecardId,
-      caseId: result.caseId,
-      trial: result.trial ?? 0,
-      childRunId: entry.childId,
-      kind: entry.kind,
-      ...(entry.sourceScorecardId !== undefined ? { sourceScorecardId: entry.sourceScorecardId } : {}),
-      ...(entry.executionId !== undefined ? { executionId: entry.executionId } : {}),
-      ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
-      // …and the joined identity, so a reader comparing a receipt with a sealed replay or an artifact key
-      // compares STRINGS rather than re-deriving the pair and hoping both sides did it the same way.
-      ...(entry.executionId !== undefined && entry.generation !== undefined
-        ? { attemptId: attemptIdOf(entry.executionId, entry.generation) }
-        : {}),
-      // Through the ONE spelling (caseResultDigest): the digest must match across the jsonb round-trip —
-      // ScoreSchema's read-time normalizer reshapes what a producer literally wrote (see case-result-digest.ts).
-      resultDigest: caseResultDigest(result),
-      // …and the execution's own digest, invariant under re-judgment (arch-review 41 P1): a later re-score
-      // replaces scores in place, so resultDigest diverges from the row — this one is what "still the
-      // execution the receipt vouches for" compares from then on.
-      observationDigest: caseObservationDigest(result),
-      // The judge-closure identity: the SEALED closure when the manifest carries one (each entry pins the
-      // judge document and its nested model/rubric/harness digests — the whole judgment, not its name), and
-      // only a batch that sealed nothing falls back to the bare id list. Sorted by id so the digest is a
-      // set identity, not an ordering accident.
-      ...(entry.sealedJudges && entry.sealedJudges.length > 0
-        ? { judgeClosureDigest: contentDigest([...entry.sealedJudges].sort((a, b) => (a.id < b.id ? -1 : 1))) }
-        : entry.judges.length > 0
-          ? { judgeClosureDigest: contentDigest(entry.judges.map((j) => j.id).sort()) }
-          : {}),
-      committedAt: this.now(),
-    };
   }
 
   // ── THE PARENT COUNTS WHAT THE LEDGER COMMITTED (review 39 Phase 3 · review 40 P0) ───────────────────
@@ -2117,282 +1716,6 @@ export class ScorecardBatchService {
       message: `${caseId}: speculation loser billed ($${usd.toFixed(4)}) — its result is not the case's answer`,
       caseId,
     });
-  }
-
-  // ── THE ONE PLACE A CASE IS FINALIZED (review 39, Phase 2) ───────────────────────────────────────────
-  //
-  // Both drivers used to hold their own copy of "what ending a case means", and every review since has found
-  // the same defect in whichever copy was edited second: the Temporal path settled without assembling, the
-  // in-process path claimed without covering its judges, one honoured the settle's answer and the other threw
-  // it away. Reviewing them separately is what made the recurrence structural.
-  //
-  // So the ORDER is stated once, and it is the whole content of the contract:
-  //
-  //   ① complete the judge coverage — a selected judge that never answered leaves a stated row, not silence
-  //   ② assemble the evidence — snapshot offload + recording seal, staged under the attempt's OWN key
-  //      (`attempts/<attemptId>`), so a concurrent attempt's staging never overwrites a winner's bytes: a
-  //      loser's artifacts become unreferenced orphans, not corruption
-  //   ③ COMMIT — the receipt claim and the child's one terminal write, in ONE transaction (review 40 P0).
-  //      As two writes, a claim whose child settle was then refused poisoned the case forever: canonical
-  //      right acquired, canonical artifact never recorded. Claiming the right to commit is not the commit.
-  //
-  // ② before ③ is what makes the receipt's digest TRUE: the assembly mutates the result (snapshot refs,
-  // recordingRef), and the digest must name the bytes the child row will actually carry.
-  //
-  // The result is what the caller must persist and count — coverage may have added rows to it — so it is
-  // returned rather than mutated in place.
-  private async finalizeCaseAttempt(input: {
-    scorecardId: string;
-    epoch: number;
-    result: CaseResult;
-    // Which terminal transition this commit applies — the SAME transaction shape either way (arch-review 41
-    // P0-lifecycle): receipt claim + fenced terminal write, all-or-nothing. Default "succeeded".
-    outcome?: "succeeded" | "failed";
-    // The failure as the exit recorded it — required with outcome "failed" (the fail transition names it).
-    error?: { code: string; message: string };
-    judges: ReadonlyArray<{ id: string }>;
-    sealedJudges?: SealedJudgeClosure[];
-    childId?: string;
-    executionId: string;
-    // Absent when the attempt never opened one (fail-closed: nothing seals then — see assembleCaseEvidence).
-    generation?: number;
-    unisolated?: boolean;
-    ranOn?: string;
-    // The completion FACT's ingredients (review 40 follow-up, E0): with a ledger, the fact rides the commit
-    // transaction itself — persisted if and only if the case committed, so a loser structurally announces
-    // nothing; without one, it falls back to the best-effort emit this fact always had.
-    tenant?: string;
-    announce?: { verdictPolicy?: VerdictPolicy; owner?: string };
-  }): Promise<{ kind: "committed"; result: CaseResult } | { kind: "lost" } | { kind: "unwritten" }> {
-    const covered =
-      input.judges.length > 0
-        ? { ...input.result, scores: completeJudgeCoverage(input.result.scores, input.judges) }
-        : input.result;
-    const completionFact = (): { message: string; fact: DomainFact & { message: string; recipient?: string } } => {
-      const v = caseVerdict(covered, input.announce?.verdictPolicy);
-      const reason = caseReason(covered);
-      const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
-      const message = `Scorecard ${input.scorecardId} case ${covered.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`;
-      return {
-        message,
-        fact: {
-          kind: "scorecard.case.completed",
-          subject: { type: "scorecard", id: input.scorecardId },
-          payload: {
-            caseId: covered.caseId,
-            ...(covered.trial !== undefined ? { trial: covered.trial } : {}),
-            verdict: v ?? null,
-            ...(reason !== undefined ? { reason } : {}),
-          },
-          message,
-          ...(input.announce?.owner !== undefined ? { recipient: input.announce.owner } : {}),
-        },
-      };
-    };
-    // A batch with no run store has no child to commit — the case really did finish, and there is nothing for
-    // a receipt to make canonical either. The fact keeps its historical best-effort emit here.
-    const runStore = this.deps.runStore;
-    const childId = input.childId;
-    if (!childId || !runStore) {
-      // A wired ledger with no child row to commit cannot account for the case — refusing to summarize is
-      // the honest answer, never a receipt for a child that does not exist.
-      if (runStore && this.deps.caseReceipts) return { kind: "unwritten" };
-      if (input.announce && input.tenant !== undefined) {
-        const { fact } = completionFact();
-        void this.deps.events?.emit({ workspace: input.tenant, ...fact });
-      }
-      return { kind: "committed", result: covered };
-    }
-    const stamped =
-      input.announce && input.tenant !== undefined
-        ? stampFacts(input.tenant, [completionFact().fact], { newId: this.newId, now: this.now })
-        : [];
-    await this.assembleCaseEvidence(covered, {
-      scorecardId: input.scorecardId,
-      executionId: input.executionId,
-      // An attempt that never opened a generation must not seal generation 0's buffer as its replay —
-      // 0 is a real generation; "unknown" is `unisolated`, the same fail-closed answer the dispatch gives.
-      ...(input.generation !== undefined ? { generation: input.generation } : {}),
-      ...(input.unisolated || input.generation === undefined ? { unisolated: true } : {}),
-    });
-    // The constructor guard couples the receipt store to the run store, so this branch is unreachable in a
-    // wired service — and if a wiring ever uncouples them, refusing the commit is the only honest answer.
-    const receipts = this.deps.caseReceipts;
-    if (!receipts) return { kind: "unwritten" };
-    const failureError = input.error ?? { code: "INTERNAL", message: "case failed" };
-    // WHICH PHYSICAL ATTEMPT this commit is made by — the same spelling the receipt records, so the two
-    // ledgers can be compared rather than assumed to agree (arch-review 42). Absent when no attempt was
-    // minted; there is then no row to stamp, and inventing a coordinate would address somebody else's.
-    const attemptId = input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation);
-    // `failed` is a terminal outcome of a REAL execution, not a supersede: the case ended here, with this
-    // attempt's frozen failure as the answer.
-    const terminalState: ExecutionAttemptState = input.outcome === "failed" ? "failed" : "committed";
-    const outcome = await receipts
-      .commitCase(
-        this.receiptOf(input.scorecardId, covered, {
-          childId,
-          kind: input.outcome === "failed" ? "failed" : "executed",
-          executionId: input.executionId,
-          ...(input.generation !== undefined ? { generation: input.generation } : {}),
-          judges: input.judges,
-          ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
-        }),
-        async (runs, attempts) => {
-          const settled = await this.settleChildOn(
-            runs,
-            childId,
-            (cur) =>
-              input.outcome === "failed"
-                ? // The failure transition, WITH the frozen failure result — the same bytes the parent counts
-                  // and the receipt's digest names (failedCaseResult is pure over (job, err), so runSuite's
-                  // copy and this one are identical).
-                  Run.from(cur).fail(failureError, this.now(), covered).patch
-                : {
-                    ...Run.from(cur).succeed(covered, this.now()).patch,
-                    // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
-                    ...(input.ranOn ? { runtime: input.ranOn } : {}),
-                  },
-            { scorecardId: input.scorecardId, epoch: input.epoch },
-            stamped.length > 0 ? stamped.map((f) => f.record) : undefined,
-          );
-          // ── THE ATTEMPT'S TERMINAL STAMP RIDES THE COMMIT (arch-review 43) ─────────────────────────────
-          //
-          // Phase 1 stamped this AFTER the commit resolved, best-effort: a crash in that window left a
-          // committed receipt beside an attempt row still saying `created` — a receipt naming an execution
-          // the physical ledger never saw end. Inside the transaction it is the same decision as the receipt
-          // and the child's terminal write, so there is no window to crash in and no `.catch` to hide a
-          // ledger that could not record what the receipt claims.
-          //
-          // AFTER the settle, never before: a refused fence returns here and the stamp must not have said
-          // "committed" about an attempt that lost (the in-memory twin has no rollback to undo it with). The
-          // transition's own answer is deliberately not read — a refusal is a silent no-op by contract (an
-          // idempotent re-commit meeting its own terminal row is the ordinary case), and only a THROW, which
-          // is a store fault, aborts the commit.
-          //
-          // TWO CONDITIONS, and they ask different questions: `this.deps.attempts` is whether this service
-          // has a ledger AT ALL (an adapter that can always build a transaction-bound twin would otherwise
-          // stamp a plane the deployment was configured without), and `attempts` is the store the write must
-          // go through — the transaction's twin wherever one exists.
-          if (settled === undefined) return undefined;
-          if (this.deps.attempts && attempts && attemptId !== undefined)
-            await attempts.transition(attemptId, terminalState, {
-              childRunId: childId,
-              ...(input.outcome === "failed" ? { error: failureError } : {}),
-            });
-          return settled;
-        },
-        runStore,
-        this.deps.attempts,
-      )
-      .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
-    if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
-    if (outcome.kind === "committed") {
-      // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
-      // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
-      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-      // …and the attempt reached its terminal state inside that same transaction (see the settle above).
-      return { kind: "committed", result: covered };
-    }
-    if (outcome.kind === "already_committed") {
-      // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child
-      // owning the case means a concurrent attempt won — this one was never the case's answer.
-      if (outcome.receipt.childRunId === childId) {
-        // Best-effort, and it stays that way: THIS call's transaction never ran (the claim was already
-        // there), so there is nothing for the stamp to ride. The winning commit — the first one — stamped
-        // this attempt inside its own transaction; a row that pre-dates the promotion is repaired here, a
-        // row that does not is refused as already terminal. Either way it is diagnostic, not the decision.
-        await this.stampAttempt(attemptId, terminalState, {
-          childRunId: childId,
-        });
-        return { kind: "committed", result: covered };
-      }
-      // A LOSER'S STAMP CANNOT RIDE A TRANSACTION, because the loser never had one: its claim was refused
-      // before any settle ran (`already_committed`), or its transaction rolled back whole (`unsettled`). So
-      // the two supersede stamps below stay best-effort — a diagnostic saying which attempts ran and lost.
-      // The WINNER's stamp is the one the commit carries, and losing that one is what may never be swallowed.
-      await this.stampAttempt(attemptId, "superseded");
-      return { kind: "lost" };
-    }
-    // `unsettled` — the child's fence refused (takeover / cancel / already terminal) and the claim rolled
-    // back with it: the case belongs to whoever holds the authority now.
-    await this.stampAttempt(attemptId, "superseded");
-    return { kind: "lost" };
-  }
-
-  private async settleChild(
-    childId: string,
-    settle: (current: RunRecord) => Partial<RunRecord>,
-    parentDriver?: { scorecardId: string; epoch: number },
-  ): Promise<RunRecord | undefined> {
-    const store = this.deps.runStore;
-    if (!store) return undefined;
-    return this.settleChildOn(store, childId, settle, parentDriver);
-  }
-
-  private async settleChildOn(
-    // The store this settle must go through — commitCase hands a TRANSACTION-BOUND twin so the child's
-    // terminal write commits or rolls back with the receipt claim (review 40 P0).
-    store: RunStore,
-    childId: string,
-    settle: (current: RunRecord) => Partial<RunRecord>,
-    // The batch this child belongs to, and the epoch its driver holds. Proved INSIDE the write: the child's
-    // own epoch cannot answer "am I still this batch's driver" (arch-review 33 P0).
-    parentDriver?: { scorecardId: string; epoch: number },
-    // Outbox facts that ride the SAME write (E0): inside commitCase this is the same transaction as the
-    // receipt claim, so "the case completed" is persisted if and only if the case actually committed.
-    events?: OutboxEvent[],
-  ): Promise<RunRecord | undefined> {
-    const current = await store.get(childId);
-    if (!current || Run.from(current).isTerminal()) return undefined;
-    // …and the CONDITION travels with the write (Tier B, the cancel/completion race). The read above builds
-    // the patch and answers "is there anything to do"; it cannot answer "is this row still open", because the
-    // other writer is in another process — a user's cancel in the control plane against a case drain landing
-    // from a worker. Read-check-write made the LAST write win, which is the exact inverse of the rule this
-    // method is named after.
-    // …under the child's own epoch AND the parent's driver. The first refuses a child somebody claimed
-    // directly; the second refuses a driver that lost the BATCH — two different takeovers, and the child's
-    // number moves for only one of them.
-    //
-    // The ANSWER is returned, because everything a finished case does next — announcing it, exporting it,
-    // counting it done — is authority the committed transition owns and the attempt does not (arch-review 35
-    // P1). Swallowing it made "the judges are done" the licence, which is one step short of the truth.
-    return await settleRun(store, childId, settle(current), events, {
-      epoch: current.ownerEpoch ?? 0,
-      ...(parentDriver ? { parentDriver } : {}),
-    });
-  }
-
-  // ── THE PHYSICAL ATTEMPT'S STATE, WHERE NO COMMIT TRANSACTION EXISTS TO RIDE (arch-review 42 · 43) ──
-  //
-  // The WINNER's terminal stamp no longer comes through here: it rides the case commit itself, inside the
-  // transaction that makes the receipt (finalizeCaseAttempt's settle closure), where a throw aborts the
-  // commit instead of being swallowed. What is left on this path is every stamp that HAS no transaction to
-  // ride — `executing` (no commit is being made), a loser's `superseded` (its transaction never ran or
-  // rolled back whole), a retry's abandon stamp (the abandoned attempt commits nothing). Those are
-  // diagnostics: they name what ran, and no outcome is derived from them, which is why they may be swallowed.
-  //
-  // `attemptId` is absent when no attempt was minted (no ledger wired, or an execution that never opened a
-  // generation): there is no row to stamp, and inventing a coordinate would address somebody else's.
-  private async stampAttempt(
-    attemptId: string | undefined,
-    to: ExecutionAttemptState,
-    patch?: { childRunId?: string; unisolated?: boolean; error?: { code: string; message: string } },
-  ): Promise<void> {
-    const attempts = this.deps.attempts;
-    if (!attempts || attemptId === undefined) return;
-    await attempts.transition(attemptId, to, patch).catch(() => {});
-  }
-
-  private async markChildRunning(childId: string): Promise<void> {
-    const store = this.deps.runStore;
-    if (!store) return;
-    try {
-      const rec = await store.get(childId);
-      if (!rec || rec.status !== "queued") return; // already running/terminal — nothing to flip
-      await store.update(childId, Run.from(rec).start(this.now()).patch, undefined, { expectNonTerminal: true });
-    } catch {
-      // Best-effort visibility flip — a failure here must never break the case (the run still executes and settles).
-    }
   }
 
   // The delegated envelope every fan-out child draws from (§5.2, P4): resolved from the batch's causer run
@@ -2661,7 +1984,7 @@ export class ScorecardBatchService {
         // SUPERSEDED, not failed — the failure was not final (this re-dispatch is the proof), so what the
         // ledger records is that this execution stopped being the case's, carrying the error that ended it.
         // Stamped even when the attempt had no child row: a physical execution happened either way.
-        await this.stampAttempt(
+        await this.commit.stampAttempt(
           reopened.generation === undefined ? undefined : attemptIdOf(reopened.executionId, reopened.generation),
           "superseded",
           { error: reopened.error },
@@ -2669,11 +1992,13 @@ export class ScorecardBatchService {
       }
       if (reopened?.childId !== undefined) {
         const abandonedChildId = reopened.childId;
-        await this.settleChild(
-          abandonedChildId,
-          (cur) => Run.from(cur).fail(reopened.error, this.now()).patch,
-          reopened.parentDriver,
-        ).catch(() => {});
+        await this.commit
+          .settleChild(
+            abandonedChildId,
+            (cur) => Run.from(cur).fail(reopened.error, this.now()).patch,
+            reopened.parentDriver,
+          )
+          .catch(() => {});
       }
       finalizedByFailure.delete(childKey(job.evalCase.id, job.trial));
       const enriched: CaseJob = {
@@ -2782,8 +2107,10 @@ export class ScorecardBatchService {
           // COMPUTE ACTUALLY STARTED — the same pair the Temporal driver stamps: the child flips
           // queued→running, and the attempt ledger records that this execution reached the machine.
           onStarted: () => {
-            void this.stampAttempt(openedAttemptId, "executing", { ...(childId ? { childRunId: childId } : {}) });
-            if (childId && runStore) void this.markChildRunning(childId);
+            void this.commit.stampAttempt(openedAttemptId, "executing", {
+              ...(childId ? { childRunId: childId } : {}),
+            });
+            if (childId && runStore) void this.commit.markChildRunning(childId);
           },
           onStep: (message, cid) => {
             pushStep("case", "info", message, cid);
@@ -3057,17 +2384,19 @@ export class ScorecardBatchService {
           // a row left running forever because the thing that was going to settle it was cancelled.
           if (controller.signal.aborted) {
             childSettles.push(
-              this.settleJudgedChild(
-                id,
-                tenant,
-                { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
-                pendingChildSettle,
-                finalizedByFailure,
-                r,
-              ).then((outcome) => {
-                if (outcome === "committed") announce();
-                return outcome;
-              }),
+              this.commit
+                .settleJudgedChild(
+                  id,
+                  tenant,
+                  { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
+                  pendingChildSettle,
+                  finalizedByFailure,
+                  r,
+                )
+                .then((outcome) => {
+                  if (outcome === "committed") announce();
+                  return outcome;
+                }),
             );
           }
           // After supersede, skip firing judges too (don't spend more LLM cost on a reclaimed batch).
@@ -3081,22 +2410,24 @@ export class ScorecardBatchService {
             // by "case completed" on the live bus and an export to the tenant's platform anyway — a case
             // announced and shipped by the one process whose result the ledger just declined.
             const settleJudged = (): Promise<"committed" | "lost" | "unwritten"> =>
-              this.settleJudgedChild(
-                id,
-                tenant,
-                { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
-                pendingChildSettle,
-                finalizedByFailure,
-                r,
-              ).then((outcome) => {
-                if (outcome !== "committed") return outcome;
-                announce();
-                // Case-completion chaining: export only after the case is BOTH judged and committed — and
-                // skip new fires after abort (already-fired exports complete naturally; the supersede path
-                // joins them and records a partial outcome).
-                if (exportStream && !controller.signal.aborted) exportStream.push(r);
-                return outcome;
-              });
+              this.commit
+                .settleJudgedChild(
+                  id,
+                  tenant,
+                  { ...(opts.verdictPolicy ? { verdictPolicy: opts.verdictPolicy } : {}), owner },
+                  pendingChildSettle,
+                  finalizedByFailure,
+                  r,
+                )
+                .then((outcome) => {
+                  if (outcome !== "committed") return outcome;
+                  announce();
+                  // Case-completion chaining: export only after the case is BOTH judged and committed — and
+                  // skip new fires after abort (already-fired exports complete naturally; the supersede path
+                  // joins them and records a partial outcome).
+                  if (exportStream && !controller.signal.aborted) exportStream.push(r);
+                  return outcome;
+                });
             childSettles.push(judged.then(settleJudged, settleJudged));
           }
         },

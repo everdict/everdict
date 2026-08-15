@@ -43,7 +43,15 @@ function release(seriesKeys?: string[]): ReleaseRecord {
 }
 
 function point(scorecardId: string, passRate?: number): SeriesScorecardPoint {
-  return { scorecardId, ...(passRate !== undefined ? { passRate } : {}), createdAt: NOW };
+  return {
+    scorecardId,
+    ...(passRate !== undefined ? { passRate } : {}),
+    createdAt: NOW,
+    // Every modern settle pins a scoring revision whose input observation completed vouched — the fixture
+    // carries that shape so tests about OTHER concerns are input-trust-neutral (legacy/unvouched pins are
+    // exercised by their own dedicated tests, which override `scoring`).
+    scoring: { revision: 1, scorePlaneDigest: "sha256:plane", inputObservation: { completed: true } },
+  };
 }
 
 const gate = (verdict: SeriesGateReading["verdict"], reasons?: string[]): SeriesGateReading => ({
@@ -285,7 +293,7 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.ready).toBe(false);
   });
 
-  it("a LEGACY pin (no input observation at all) says nothing — history is not retroactively re-judged", () => {
+  it("a LEGACY pin blocks the ship too — nothing states what its judges read (owner decision); a re-score revouches it", () => {
     const legacy = { revision: 2, scorePlaneDigest: "sha256:plane" };
     const readiness = releaseReadiness(
       release(["quality"]),
@@ -295,8 +303,9 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
       new Map([["quality", gate("pass")]]),
       0,
     );
-    expect(readiness.series[0]).toMatchObject({ verdict: "pass", regressed: false });
-    expect(readiness.ready).toBe(true);
+    expect(readiness.series[0]?.verdict).toBe("not_comparable");
+    expect(readiness.series[0]?.reasons?.[0]).toContain("predates judgment input observation");
+    expect(readiness.ready).toBe(false);
   });
 
   it("a comparable pair with NO gate reading refuses — the seam being unconfigured is never a pass", () => {
@@ -412,6 +421,8 @@ describe("series evaluation contract — evidence must answer the question the s
     scorecardId: "sc-1",
     passRate: 1,
     createdAt: NOW,
+    // Input-trust-neutral, like point(): these tests are about the CONTRACT axis.
+    scoring: { revision: 1, scorePlaneDigest: "sha256:plane", inputObservation: { completed: true } },
     ...(digest !== undefined ? { contractDigest: digest } : {}),
   });
 

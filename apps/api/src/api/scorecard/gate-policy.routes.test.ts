@@ -44,6 +44,18 @@ const record = (id: string, results: CaseResult[]): ScorecardRecord => ({
   harness: { id: "h", version: "1" },
   status: "succeeded",
   scorecard: { suiteId: "smoke", harness: "h@1", results },
+  // A vouched scoring pass — the gate refuses unvouched input by default now (owner decision), and these
+  // tests are about OTHER refusal reasons, which input_unverified would otherwise mask.
+  scoring: [
+    {
+      kind: "initial",
+      revision: 1,
+      judges: [],
+      scorePlaneDigest: "sha256:plane",
+      inputObservation: { completed: true, cases: results.length },
+      createdAt: new Date().toISOString(),
+    },
+  ],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });

@@ -18,7 +18,10 @@ const ALLOWED = new Set([
   "trace-sink/trace-sink-service.ts", // gated via measuredScores before anything leaves for a platform
   // producer — completes a case's judge coverage before its terminal commit: a selected judge that never
   // answered leaves an explicit unmeasured row rather than no row at all (review 39 P0-3)
-  "scorecard/scorecard-batch-service.ts",
+  "scorecard/case-outcome-committer.ts",
+  // …and the same completion on the ONE path that does not commit through the committer: a recovery adopting
+  // a result a backend produced, which re-judges the case before its adopt-settle (arch-review 34 P0).
+  "scorecard/recovery-planner.ts",
 ]);
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {

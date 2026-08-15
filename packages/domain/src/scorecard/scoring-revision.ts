@@ -238,8 +238,10 @@ export function currentScoringPin(scoring: ScoringRevision[] | undefined): GateS
 //   diverged          — the observation completed and REPORTED divergence (never waivable)
 //   unavailable       — the observation ran and could not vouch (ingest, ledger outage) — waivable only by
 //                       the recorded allowUnverifiedInput policy
-//   legacy_unverified — the revision predates input observation entirely; visible on the pin, not refused
-//                       (a pre-feature history is not retroactively re-judged)
+//   legacy_unverified — the revision predates input observation entirely. REFUSED by decision surfaces by
+//                       default (owner decision, arch-review 47 follow-up: receipt-vouched input only) —
+//                       waivable at the gate via allowUnverifiedInput, never at the release; a re-score
+//                       produces an observed revision and makes the evidence vouched again
 export type DecisionInputTrust = "receipt_vouched" | "diverged" | "unavailable" | "legacy_unverified";
 
 export function decisionInputTrustOf(pin: GateScoringPin | undefined): DecisionInputTrust {

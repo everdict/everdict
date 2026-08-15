@@ -70,10 +70,16 @@ export function applyInputTrust(
         detail: `the ${side}'s pinned judgment read ${pin?.inputObservation?.diverged ?? 0} case(s) whose execution the receipt ledger no longer vouches for — its verdicts describe bytes that have since been replaced`,
         count: pin?.inputObservation?.diverged ?? 0,
       });
-    else if (trust === "unavailable" && policy.allowUnverifiedInput !== true)
+    else if (trust !== "receipt_vouched" && policy.allowUnverifiedInput !== true)
+      // `unavailable` AND `legacy_unverified` alike (owner decision, arch-review 47 follow-up): the default
+      // is the review's — receipt-vouched input only. A pre-observation revision is not retro-vouched by its
+      // age; a caller that wants to gate over history says so with the same recorded waiver.
       reasons.push({
         kind: "input_unverified",
-        detail: `the ${side}'s pinned judgment states no receipt vouches for what its judges read — refused unless the policy records allowUnverifiedInput`,
+        detail:
+          trust === "legacy_unverified"
+            ? `the ${side}'s pinned judgment predates input observation — nothing states what its judges read; refused unless the policy records allowUnverifiedInput`
+            : `the ${side}'s pinned judgment states no receipt vouches for what its judges read — refused unless the policy records allowUnverifiedInput`,
       });
   }
   if (reasons.length === 0) return evaluation;
