@@ -1,4 +1,5 @@
 import type {
+  CaseCommitReceipt,
   CaseResult,
   Dataset,
   JudgeSpec,
@@ -10,6 +11,7 @@ import type {
 import { ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
+import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
@@ -1044,5 +1046,341 @@ describe("writeBackScores — the carrier obeys the stage's per-JUDGE arbitratio
       ),
     ).rejects.toThrow(/stage unavailable/);
     expect(writes).toEqual([]);
+  });
+});
+
+// arch-review 43 ①. The stage's SCORE BYTES are still shadow: the carriers are the source of truth, and the
+// contract step that swaps them is gated on accumulated parity evidence. What that evidence has never covered
+// is the PROMOTION ITSELF — every observation so far compares staged bytes to plane bytes, which certifies
+// the dual write and says nothing about the merge that would consume it, because the merge did not exist.
+//
+// The read-side switch (EVERDICT_SCORING_STAGE_AUTHORITATIVE=1 → `scoringStageAuthoritative`) runs that merge
+// on real traffic under a rule that cannot change a record: promote only where this pass's own parity says
+// the two sources agree completely, re-digest the promoted plane against the carrier plane, and REFUSE —
+// durably, by name — otherwise. Off, nothing here happens at all.
+describe("the scoring stage's read-side switch (EVERDICT_SCORING_STAGE_AUTHORITATIVE)", () => {
+  const verdict = (id: string, value: number): Score => ({
+    graderId: id,
+    metric: `judge:${id}`,
+    value,
+    pass: value === 1,
+  });
+  const inherited: Score = { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true };
+  const JUDGES = [{ id: "a", version: "1.0.0" }];
+
+  function stageOf(rows: Array<{ caseKey: string; judgeId: string; scores: Score[] }>): ScoringStageStore {
+    return {
+      async stage(_s, _p, entries) {
+        return entries;
+      },
+      async staged() {
+        return rows;
+      },
+      async clear() {
+        return rows.length;
+      },
+    };
+  }
+
+  // One settle over a plane holding an inherited grader row plus judge a's verdict, with whatever stage the
+  // case under test wires. Returns the patch the guarded settle wrote.
+  async function settleWith(
+    opts: { stage?: ScoringStageStore; authoritative?: boolean },
+    plane: Score[] = [inherited, verdict("a", 1)],
+  ) {
+    const record: ScorecardRecord = {
+      ...recordWith([result("c1", plane)], livePass({ targetRevision: 1, baseRevision: 0, judges: [] })),
+      runIds: ["child-c1"],
+    };
+    const updates: Array<Partial<ScorecardRecord>> = [];
+    const store: ScorecardStore = {
+      ...unusedStore,
+      async get() {
+        return record;
+      },
+      async update(_id, patch) {
+        updates.push(patch);
+        return { ...record, ...patch };
+      },
+    };
+    const svc = new ScorecardScoreService(
+      {
+        ...deps,
+        store,
+        ...(opts.stage ? { scoringStage: opts.stage } : {}),
+        ...(opts.authoritative !== undefined ? { scoringStageAuthoritative: opts.authoritative } : {}),
+      },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    await svc.finalizeScore("sc-1", JUDGES, "dana", "pass-1");
+    return { revision: updates.at(-1)?.scoring?.at(-1), patch: updates.at(-1) };
+  }
+
+  it("OFF (the default) — a settle records no promotion at all, even over a stage that disagrees", async () => {
+    // The byte-compatibility that makes the whole flag safe to ship: an unset deployment behaves exactly as
+    // it did before this existed, so evidence gathered under it is evidence about the old code.
+    const disagreeing = stageOf([{ caseKey: "c1#0", judgeId: "a", scores: [verdict("a", 0)] }]);
+    const off = await settleWith({ stage: disagreeing });
+    expect(off.revision?.stagePromotion).toBeUndefined();
+    expect(off.patch?.steps).toBeUndefined();
+    // …and the parity observation is unchanged: still recorded, still saying these two disagree.
+    expect(off.revision?.stageParity).toMatchObject({ promotionSafe: false, mismatched: 1 });
+    // The plane the revision certifies is the CARRIER plane — byte-identical to the flag-off world.
+    const on = await settleWith({ stage: disagreeing, authoritative: true });
+    expect(on.revision?.scorePlaneDigest).toBe(off.revision?.scorePlaneDigest);
+  });
+
+  it("ON with an agreeing stage — the plane is promoted and the revision SAYS which source it read", async () => {
+    const agreeing = stageOf([{ caseKey: "c1#0", judgeId: "a", scores: [verdict("a", 1)] }]);
+    const { revision, patch } = await settleWith({ stage: agreeing, authoritative: true });
+    expect(revision?.stagePromotion).toEqual({ applied: true });
+    // The promoted plane still carries the INHERITED grader row: the stage is a delta, and a promotion that
+    // read it as the full desired plane would have dropped it — which the digest would show.
+    expect(revision?.scorePlaneDigest).toBe((await settleWith({ stage: agreeing })).revision?.scorePlaneDigest);
+    expect(patch?.steps).toBeUndefined(); // nothing refused, nothing to narrate
+  });
+
+  it("ON with a judgment the pass never staged — REFUSED by name, and the carriers keep the record", async () => {
+    // The failure mode the whole parity apparatus exists to catch: a promotion here silently drops a
+    // judgment. The switch must not fall back quietly — a refusal nobody can find is the same as no gate.
+    const empty = stageOf([]);
+    const { revision, patch } = await settleWith({ stage: empty, authoritative: true });
+    expect(revision?.stagePromotion?.applied).toBe(false);
+    expect(revision?.stagePromotion?.refusal).toContain("missingFromStage=1");
+    expect(revision?.stageParity).toMatchObject({ promotionSafe: false, missingFromStage: 1 });
+    // …and an operator reading the record's own timeline sees it, not only the ledger.
+    expect(patch?.steps?.at(-1)?.message).toContain("scoring-stage promotion REFUSED");
+  });
+
+  it("ON with no stage wired — the deployment believes it is promoting, and the record says it did not", async () => {
+    // The configuration whose SILENCE would later be read as evidence: a fleet running the switch over passes
+    // that had nothing to promote from.
+    const { revision, patch } = await settleWith({ authoritative: true });
+    expect(revision?.stagePromotion?.applied).toBe(false);
+    expect(revision?.stagePromotion?.refusal).toContain("no stage observation");
+    expect(patch?.steps?.at(-1)?.message).toContain("REFUSED");
+  });
+
+  it("a promoted plane that MOVES the bytes voids the observation too, not merely the promotion", async () => {
+    // Data cannot produce this — the comparison and the merge read the same rows, so a parity-safe pass
+    // merges to an identical plane. A defect in the merge can, and then the record would carry a green
+    // `promotionSafe` beside a refused promotion: the fleet gate would be certified by the very report its
+    // own rehearsal had just contradicted. Driven directly, because that is the only way to state it.
+    const svc = new ScorecardScoreService(
+      { ...deps, scoringStageAuthoritative: true },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => recordWith([]),
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    const carrier = [result("c1", [verdict("a", 1)])];
+    const promote = (
+      svc as unknown as {
+        promoteFromStage: (
+          carrier: CaseResult[],
+          observation: unknown,
+          judges: ReadonlyArray<{ id: string }>,
+        ) => { results: CaseResult[]; parity?: { completed: boolean }; promotion?: { applied: boolean } };
+      }
+    ).promoteFromStage;
+    const out = promote.call(
+      svc,
+      carrier,
+      {
+        // A parity report claiming perfect agreement…
+        parity: {
+          scorecardId: "sc-1",
+          passId: "pass-1",
+          completed: true,
+          expectedJudged: 1,
+          staged: 1,
+          missingFromStage: [],
+          matched: 1,
+          mismatched: [],
+          orphaned: [],
+        },
+        // …over rows that do not agree at all.
+        staged: [{ caseKey: "c1#0", judgeId: "a", scores: [verdict("a", 0)] }],
+      },
+      [{ id: "a" }],
+    );
+    expect(out.results).toBe(carrier); // the carriers certify this revision
+    expect(out.promotion).toMatchObject({ applied: false });
+    expect(out.parity?.completed).toBe(false); // an observation contradicted by the merge measured nothing
+  });
+});
+
+describe("ScorecardScoreService carrier selection — the receipt names the row, not the run store's order", () => {
+  // Regression (arch-review 43, Phase 3): both the judge's evidence-plane seal and the score write-back
+  // resolved a case's carrier by folding `children.filter(result)` into a Map — so the row that won was
+  // whichever attempt the run store happened to list LAST. A resumed or retried batch keeps its superseded
+  // attempts parented to the same scorecard, and `get` hydration serves the RECEIPT's child, so a re-score
+  // paid for provider calls and then wrote its verdicts onto a row no reader would ever hydrate: a pass that
+  // looks like it did nothing. The receipt is the one authority for "which attempt answered this case".
+  const judgeSpec: JudgeSpec = {
+    kind: "model",
+    id: "j",
+    version: "1.0.0",
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    rubric: "good?",
+    inputs: ["trace"],
+    tags: [],
+  };
+  const judges: JudgeRegistry = {
+    async register() {
+      throw new Error("unused");
+    },
+    async has() {
+      return true;
+    },
+    async get() {
+      return judgeSpec;
+    },
+    async versions() {
+      return ["1.0.0"];
+    },
+    async ownVersions() {
+      return ["1.0.0"];
+    },
+    async list() {
+      return [];
+    },
+    async moveToTeam() {
+      throw new Error("unused");
+    },
+    async creatorOfVersion() {
+      return undefined;
+    },
+    async softDelete() {
+      throw new Error("unused");
+    },
+    async setVersionTags() {
+      throw new Error("unused");
+    },
+    async versionTags() {
+      return {};
+    },
+  };
+
+  // Both attempts of c1 carry a result, and the SUPERSEDED one is listed last — the position that used to
+  // decide. Only the committed one is named by a receipt.
+  const committed: RunRecord = {
+    id: "child-committed",
+    tenant: "acme",
+    harness: { id: "h", version: "1" },
+    caseId: "c1",
+    status: "succeeded",
+    result: result("c1", [unmeasuredPlaceholder]),
+    createdAt: "2026-08-07T00:00:00.000Z",
+    updatedAt: "2026-08-07T00:00:00.000Z",
+  };
+  const superseded: RunRecord = { ...committed, id: "child-superseded", updatedAt: "2026-08-07T00:09:00.000Z" };
+
+  function harness(receipts: CaseCommitReceipt[]): {
+    svc: ScorecardScoreService;
+    written: string[];
+    judged: Array<string | undefined>;
+  } {
+    const written: string[] = [];
+    const judged: Array<string | undefined> = [];
+    const runStore: RunStore = {
+      async create() {
+        throw new Error("unused");
+      },
+      async update(id) {
+        written.push(id);
+        return committed; // a fenced write-back reads undefined as "superseded"; this fake accepted it
+      },
+      async get() {
+        return undefined;
+      },
+      async list() {
+        return [committed, superseded]; // the superseded attempt is LAST — last-wins would pick it
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async inFlightByTenant() {
+        return {};
+      },
+      async liveSessions() {
+        return [];
+      },
+    };
+    const caseReceipts = {
+      async commit() {
+        throw new Error("unused");
+      },
+      async commitCase() {
+        throw new Error("unused");
+      },
+      async list() {
+        return receipts;
+      },
+    } as unknown as CaseReceiptStore;
+    const judgeRunner: JudgeRunner = {
+      async run(_spec, _tenant, _ctx, _placement, _submittedBy, runId) {
+        judged.push(runId);
+        return [measuredVerdict];
+      },
+    };
+    const record: ScorecardRecord = {
+      ...recordWith([result("c1", [unmeasuredPlaceholder])]),
+      runIds: ["child-committed"],
+    };
+    const svc = new ScorecardScoreService(
+      { ...deps, runStore, caseReceipts },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({ judges, judgeRunner }),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    return { svc, written, judged };
+  }
+
+  const receiptFor = (childRunId: string): CaseCommitReceipt => ({
+    scorecardId: "sc-1",
+    caseId: "c1",
+    trial: 0,
+    childRunId,
+    resultDigest: "digest-c1",
+    committedAt: "2026-08-07T00:00:00.000Z",
+  });
+
+  it("writes a re-score's verdicts onto the child the RECEIPT committed, not the newest row", async () => {
+    // Given two attempts of c1 where the receipt names the first and the store lists the second last
+    const { svc, written, judged } = harness([receiptFor("child-committed")]);
+    // When the pass re-scores that case
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
+    // Then the judgment lands on the committed attempt — the row every reader hydrates from
+    expect(out.scored).toBe(true);
+    expect(written).toEqual(["child-committed"]);
+    // …and the judge's own execution sealed on that same attempt, so the evidence plane and the scores agree
+    expect(judged).toEqual(["child-committed"]);
+  });
+
+  it("falls back per case — a batch predating the receipt ledger keeps the row it has", async () => {
+    // Given no receipt for c1 at all (a batch older than the ledger), which is what those rows can support
+    const { svc, written } = harness([]);
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
+    // Then the pass still scores it rather than skipping the case for want of a receipt
+    expect(out.scored).toBe(true);
+    expect(written).toEqual(["child-superseded"]);
   });
 });

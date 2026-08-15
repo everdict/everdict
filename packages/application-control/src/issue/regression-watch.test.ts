@@ -142,7 +142,9 @@ function scorecard(
     dataset: { id: "regression-suite", version: over.datasetVersion ?? "1.0.0" },
     harness: { id: "web-agent", version: over.harnessVersion ?? "2.0.0" },
     status: "succeeded",
-    summary: [],
+    // The persisted aggregate is what the watch reads now (decisionPassRate — arch-review 43): the embed
+    // below is inert extra shape. Every production batch is child-backed and carries NO embed at all.
+    summary: [{ metric: "tests_pass", count: 2, mean: over.passes / 2, passRate: over.passes / 2 }],
     scorecard: {
       harness,
       suiteId: "regression-suite",
@@ -312,6 +314,17 @@ describe("regressionWatch", () => {
     await watcher().handle(completedEvent("sc-new"));
     expect((await issues.get("acme", "iss-dataset-only"))?.status).toBe("done");
     expect((await issues.get("acme", "iss-no-evidence"))?.status).toBe("done");
+  });
+
+  it("a CHILD-BACKED batch (runIds, no embedded plane — the production shape) still reopens (arch-review 43)", async () => {
+    // Pre-fix the watch read `record.scorecard` off the raw store row; a child-backed batch deliberately
+    // persists no embed, so the watch computed no rate and silently never fired — for every normal batch.
+    await resolvedIssue();
+    const { scorecard: _plane, ...bare } = scorecard("sc-regressed", { passes: 0, createdAt: NOW });
+    const childBacked: ScorecardRecord = { ...bare, runIds: ["child-1", "child-2"] };
+    await scorecards.create(childBacked);
+    await watcher().handle(completedEvent("sc-regressed"));
+    expect(issues.byId.get("iss-1")?.status).toBe("regressed");
   });
 
   it("never treats the resolution scorecard itself as a regression", async () => {

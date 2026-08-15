@@ -100,6 +100,16 @@ export interface ScorecardServiceDeps {
   // this deploy can be rolled back without losing anything, and the contract step later makes the finalize
   // promote from it. Absent = the pre-stage behavior, unchanged.
   scoringStage?: ScoringStageStore;
+  // THE READ-SIDE SWITCH, off by default (arch-review 43 ①, EVERDICT_SCORING_STAGE_AUTHORITATIVE=1). When on,
+  // a settled pass builds the plane it certifies by PROMOTING its staged delta onto the carriers, instead of
+  // taking the carriers as written — the merge the contract step needs, exercised on real traffic while the
+  // carriers can still be rolled back to.
+  //
+  // It is a rehearsal with teeth, not a half-migration: the promotion is applied only where this pass's own
+  // parity observation certifies the two sources agree, and any refusal is RECORDED on the revision rather
+  // than silently falling back. Off = byte-identical to the pre-flag behavior, which is what makes the
+  // evidence it gathers worth anything.
+  scoringStageAuthoritative?: boolean;
   // Where a settled pass reports how its STAGE compared to the plane it wrote (arch-review 10 P1). The
   // contract step moves the source of truth from the carriers to the stage, and the evidence for that move
   // is having watched the two agree on real traffic — a week of dual-writing that nobody compared is not
@@ -268,6 +278,7 @@ export type ScorecardBatchDeps = Pick<
   | "runStore"
   | "scoringStage"
   | "scoringStageParity"
+  | "scoringStageAuthoritative"
   | "datasets"
   | "harnesses"
   | "budget"
@@ -323,12 +334,17 @@ export type ScorecardAnalyticsDeps = Pick<ScorecardServiceDeps, "store" | "artif
 // `resolveModelBinding` let the rescore aggregate re-seal the selected judges' closure (the same sealer as
 // submit), and `artifacts` lets it re-freeze the analysis bundle from the pass's own plane — a re-score
 // rewrites scoring identity, so it must be able to rewrite everything that DESCRIBES that identity.
+// …and `caseReceipts` because rewriting a plane means knowing WHICH child holds it (arch-review 43, Phase 3):
+// without the ledger this slice could only resolve a carrier by "the last child that has a result", so a
+// re-score on a resumed batch wrote its verdicts onto a superseded attempt. The pick is the fix's precondition.
 export type ScorecardScoringDeps = Pick<
   ScorecardServiceDeps,
   | "store"
   | "runStore"
+  | "caseReceipts"
   | "scoringStage"
   | "scoringStageParity"
+  | "scoringStageAuthoritative"
   | "datasets"
   | "events"
   | "temporalScores"

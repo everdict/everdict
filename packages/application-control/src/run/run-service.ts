@@ -1101,6 +1101,10 @@ export class RunService {
   // and the stamp below therefore lands on the row the second runner actually opened.
   //
   // Phase-1 dual-write: nothing reads these rows, so a failure costs an audit row and never an outcome.
+  // Still dual-write HERE, deliberately (arch-review 43): the batch lane's terminal stamps are transactional
+  // now because a batch case commits through `commitCase`, one transaction that a stamp can join. A standalone
+  // run's finalize is a fenced `settleRun` with no receipt transaction around it, so there is nothing to ride
+  // yet — this lane's promotion follows when runs get a receipt commit point of their own.
   private async stampAttempt(
     id: string,
     to: ExecutionAttemptState,

@@ -18,19 +18,28 @@ export interface OpenAttemptInput {
   driverEpoch?: number;
 }
 
-// ── THE PHYSICAL EXECUTION LEDGER (arch-review 42, Three-Ledger Phase 1) ─────────────────────────────
+// ── THE PHYSICAL EXECUTION LEDGER (arch-review 42 · 43, Three-Ledger Phases 1–2) ─────────────────────
 //
-// PHASE 1 IS A DUAL-WRITE, and saying so here is the point. These rows are an OBSERVED spine: stamped beside
-// the commit points that already exist (best-effort at the call site, durable in the store), read by nobody
-// to decide anything. Every guarantee in the execution lanes still rests on the receipt, the recording fence
-// and the child's terminal write, exactly as it did before — so a failure to stamp an attempt row degrades
-// the audit trail and changes no outcome, which is why the callers may swallow it.
+// PHASE 1 WAS A DUAL-WRITE: rows stamped beside the commit points that already exist, best-effort at the
+// call site, read by nobody to decide anything. The promotion path it named — the one `ScoringStageStore`
+// documents (see ports/scoring-stage-store.ts) — was to move the write INSIDE the commit transaction, at
+// which point a failure stops being best-effort and the caller's `.catch` goes with it.
 //
-// The promotion path is the one `ScoringStageStore` documents (see ports/scoring-stage-store.ts): dual-write
-// until the two planes have been watched agreeing on real traffic, then move the write INSIDE the commit
-// transaction as the contract step, at which point a failure here stops being best-effort and the callers'
-// `.catch` must go with it. Until that step lands, nothing may read an attempt row to make a decision — a
-// best-effort write that something depends on is a fail-open wearing a ledger's clothes.
+// THAT STEP HAS LANDED FOR THE BATCH LANE'S TERMINAL STAMP (arch-review 43). A case's committed/failed stamp
+// now rides `CaseReceiptStore.commitCase` — the same transaction as the receipt claim and the child's
+// terminal write — because the window between them was not harmless: a crash there left a committed receipt
+// naming an execution whose attempt row still said `created`, a receipt about an attempt the ledger never
+// saw end. A stamp that throws there aborts the commit, which is the honest answer: the ledger could not
+// record what the receipt is about to claim.
+//
+// WHAT IS STILL BEST-EFFORT, and why each one has no transaction to ride: `executing` (no commit is being
+// made), a loser's `superseded` (its claim was refused before any settle ran, or its transaction rolled back
+// whole), a retry's abandon stamp (the abandoned attempt commits nothing), and the whole standalone run lane
+// (its finalize is a fenced `settleRun`, not a receipt commit — that promotion follows when runs get a
+// commit point of their own). Those rows are diagnostics: they say what ran, and no outcome is derived from
+// them. That last clause is the rule that still holds everywhere — nothing may READ an attempt row to make a
+// decision while any stamp of it is best-effort: a best-effort write that something depends on is a
+// fail-open wearing a ledger's clothes.
 //
 // TWO MINTING AUTHORITIES WOULD DRIFT. `open` is THE authority for the attempt ordinal: it computes MAX+1
 // per executionId and returns the coordinate. The recording store, which used to mint its own by the same

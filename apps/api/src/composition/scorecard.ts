@@ -263,6 +263,10 @@ export function buildScorecard(deps: {
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore,
     scoringStage: scoringStageStore,
+    // The stage's read-side switch (arch-review 43 ①), OFF unless a deployment says otherwise. `=== "1"` and
+    // nothing else: an unset, empty or misspelled value must land on the carriers, because the one thing a
+    // migration flag may never do is turn itself on by accident.
+    scoringStageAuthoritative: process.env.EVERDICT_SCORING_STAGE_AUTHORITATIVE === "1",
     // The stage/carrier PARITY signal (arch-review 10 P1) — the evidence the contract step needs before it
     // can move the source of truth onto the stage. `result` is the whole point of the label: a dashboard
     // showing only a total says dual-writing happened, which was never in doubt. A mismatch is also logged,

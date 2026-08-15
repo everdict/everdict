@@ -1,9 +1,16 @@
 import {
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
+  type OpenAttemptInput,
   ScorecardService,
 } from "@everdict/application-control";
-import { BadRequestError, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type CaseResult,
+  type ExecutionAttemptState,
+  UpstreamError,
+} from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
   InMemoryDatasetRegistry,
@@ -25,9 +32,14 @@ class CaseBoom extends BadRequestError {
   }
 }
 
-function serviceWith(dispatch: (job: CaseJob) => Promise<CaseResult>): {
+function serviceWith(
+  dispatch: (job: CaseJob) => Promise<CaseResult>,
+  // The ledger under test — a fake one lets a test decide what happens at the moment of the terminal stamp.
+  ledger?: (receipts: InMemoryCaseReceiptStore) => InMemoryExecutionAttemptStore,
+): {
   service: ScorecardService;
   attempts: InMemoryExecutionAttemptStore;
+  receipts: InMemoryCaseReceiptStore;
   store: InMemoryScorecardStore;
   runs: InMemoryRunStore;
   datasets: InMemoryDatasetRegistry;
@@ -38,7 +50,7 @@ function serviceWith(dispatch: (job: CaseJob) => Promise<CaseResult>): {
   const runs = new InMemoryRunStore();
   runs.attachScorecards(store);
   const datasets = new InMemoryDatasetRegistry();
-  const attempts = new InMemoryExecutionAttemptStore();
+  const attempts = ledger ? ledger(receipts) : new InMemoryExecutionAttemptStore();
   const service = new ScorecardService({
     dispatcher: { dispatch },
     store,
@@ -48,7 +60,7 @@ function serviceWith(dispatch: (job: CaseJob) => Promise<CaseResult>): {
     attempts,
     harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
   } as never);
-  return { service, attempts, store, runs, datasets };
+  return { service, attempts, receipts, store, runs, datasets };
 }
 
 async function registerDataset(datasets: InMemoryDatasetRegistry, ids: string[]): Promise<void> {
@@ -197,5 +209,117 @@ describe("the physical execution ledger records every attempt a batch actually r
     } as never);
     expect(await settled(store, record.id)).toBe("succeeded");
     expect(await receipts.list(record.id)).toHaveLength(1);
+  });
+});
+
+// ── THE TERMINAL STAMP RIDES THE COMMIT (arch-review 43, the promotion out of Phase 1) ────────────────
+//
+// Phase 1 stamped the attempt AFTER `commitCase` resolved, best-effort: a crash in that window left a
+// committed receipt naming an execution whose attempt row still said `created` — a receipt about an attempt
+// the physical ledger never saw end. The stamp is now a step of the commit itself, which means two things a
+// test can see: it happens while the receipt is still unmade, and a ledger that cannot take it refuses the
+// whole commit instead of shrugging.
+
+const passingResult = (job: CaseJob): CaseResult => ({
+  caseId: job.evalCase.id,
+  harness: "h@1.0.0",
+  trace: [],
+  snapshot: { kind: "prompt", output: "" },
+  scores: [{ metric: "pass", graderId: "g", value: 1, pass: true }],
+});
+
+// Records what the receipt plane looked like AT the instant of the terminal stamp. The scorecard id comes
+// from the attempt's own open — the batch id is not known to the test until submit returns, which is already
+// a race with the loop this observes.
+class WatchingLedger extends InMemoryExecutionAttemptStore {
+  readonly receiptsWhenStamped: number[] = [];
+  private scorecardId?: string;
+
+  constructor(private readonly receipts: InMemoryCaseReceiptStore) {
+    super();
+  }
+
+  override async open(input: OpenAttemptInput): Promise<{ attemptId: string; generation: number }> {
+    this.scorecardId ??= input.scorecardId;
+    return super.open(input);
+  }
+
+  override async transition(
+    attemptId: string,
+    to: ExecutionAttemptState,
+    patch?: Parameters<InMemoryExecutionAttemptStore["transition"]>[2],
+  ): Promise<boolean> {
+    const scorecardId = this.scorecardId;
+    if (to === "committed" && scorecardId !== undefined)
+      this.receiptsWhenStamped.push(this.receipts.countFor(scorecardId));
+    return super.transition(attemptId, to, patch);
+  }
+}
+
+// A ledger that cannot record the terminal state of the very attempt the receipt is about to name.
+class BrokenLedger extends InMemoryExecutionAttemptStore {
+  override async transition(
+    attemptId: string,
+    to: ExecutionAttemptState,
+    patch?: Parameters<InMemoryExecutionAttemptStore["transition"]>[2],
+  ): Promise<boolean> {
+    if (to === "committed") throw new UpstreamError("UPSTREAM_ERROR", {}, "attempt ledger down");
+    return super.transition(attemptId, to, patch);
+  }
+}
+
+describe("a case's terminal attempt stamp is part of its commit, not a note taken afterwards", () => {
+  it("stamps the attempt while the receipt is still unmade — the two are one decision", async () => {
+    // Given a batch whose ledger records the receipt count at the moment it is stamped
+    let watcher: WatchingLedger | undefined;
+    const { service, receipts, store, datasets } = serviceWith(
+      async (job) => passingResult(job),
+      (r) => {
+        watcher = new WatchingLedger(r);
+        return watcher;
+      },
+    );
+    await registerDataset(datasets, ["c1"]);
+
+    // When the case commits
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      retries: 0,
+    } as never);
+    expect(await settled(store, record.id)).toBe("succeeded");
+
+    // Then the stamp happened INSIDE the commit: the receipt this attempt earns was not yet persisted when
+    // the ledger was written. Stamped afterwards — the Phase-1 shape — the count here would read 1.
+    expect(watcher?.receiptsWhenStamped).toEqual([0]);
+    expect(await receipts.list(record.id)).toHaveLength(1);
+  });
+
+  it("REFUSES the commit when the ledger cannot take the stamp — no receipt for an execution it never saw end", async () => {
+    // Given a ledger that throws on the terminal transition
+    const { service, receipts, store, datasets } = serviceWith(
+      async (job) => passingResult(job),
+      () => new BrokenLedger(),
+    );
+    await registerDataset(datasets, ["c1"]);
+
+    // When the batch runs, the commit cannot complete — and the batch refuses to summarize a case no reader
+    // will find on the ledger (the same answer any other store fault at the commit point gets).
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      retries: 0,
+    } as never);
+    expect(await settled(store, record.id)).toBe("failed");
+
+    // Then NO receipt was made: the claim is un-happened, so the case is still claimable by a re-drive.
+    // (The child's write is rolled back WITH it only where a transaction exists — that half is certified on
+    // the Pg adapter, packages/db/src/results/case-commit.test.ts. This single-process store has no rollback;
+    // what survives here is the guarantee the case's outcome actually rests on, which is the receipt.)
+    expect(await receipts.list(record.id)).toHaveLength(0);
   });
 });

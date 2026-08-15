@@ -325,6 +325,23 @@ export const ScoringRevisionSchema = z.object({
         .optional(),
     })
     .optional(),
+  // WHERE THIS REVISION'S SCORE BYTES WERE READ FROM (arch-review 43 ①).
+  //
+  // `stageParity` is the OBSERVATION; this is what was DONE with it. The contract step moves the score
+  // plane's source of truth from the carriers onto the stage, and the deployment that takes it must be able
+  // to say, per settled pass, which source it actually read — otherwise a fleet running the switch and a
+  // fleet that never enabled it leave identical records, and the migration's own history becomes
+  // unreconstructible at exactly the moment somebody needs to roll it back.
+  //
+  // Absent = the carriers, as they have been since the expand step: the flag was off, or the revision
+  // predates it. Present with `applied: false` means the promotion was ASKED FOR and REFUSED, and `refusal`
+  // says why — a promotion that quietly falls back is the one outcome this field exists to make impossible.
+  stagePromotion: z
+    .object({
+      applied: z.boolean(),
+      refusal: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string(),
   createdBy: z.string().optional(),
 });

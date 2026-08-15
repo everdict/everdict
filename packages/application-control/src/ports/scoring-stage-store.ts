@@ -76,8 +76,17 @@ export interface StagedJudgment {
 // earlier era is a specification bug waiting for the next refactor:
 //
 //   SCORE BYTES — still SHADOW. Writers dual-write here and onto the carriers, and the carriers remain the
-//     source of truth. Nothing reads these bytes to decide anything, so a rollback at any point loses
-//     nothing. The contract step promotes them and deletes the strip.
+//     source of truth. A rollback at any point loses nothing. The contract step promotes them and deletes
+//     the strip.
+//
+//     ONE reader exists, and it is deliberately incapable of changing a record (arch-review 43 ①): under
+//     `EVERDICT_SCORING_STAGE_AUTHORITATIVE=1` a settled pass rebuilds the plane it certifies by promoting
+//     its staged delta onto the carriers (`promoteStagedJudgments`), but only where its own parity
+//     observation says the two sources agree completely, and the promoted plane is re-digested against the
+//     carrier plane before it is used. Anything else is REFUSED and recorded on the revision
+//     (`stagePromotion`). That is the promotion's CODE being exercised on real traffic — the dimension no
+//     amount of dual-write evidence covers, because until then the merge did not exist to be wrong. The
+//     bytes' authority does not move; only the code path that would move it starts running.
 //
 //   CLAIM ARBITRATION — already AUTHORITATIVE, and production-critical. `stage()` decides which invocation
 //     holds the right to write a given (case, judge), and the carrier write OBEYS that answer, per judge. A

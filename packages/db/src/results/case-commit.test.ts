@@ -1,4 +1,4 @@
-import { InMemoryCaseReceiptStore, type RunStore } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, InMemoryExecutionAttemptStore, type RunStore } from "@everdict/application-control";
 import type { CaseCommitReceipt, RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -215,6 +215,53 @@ describe("PgCaseReceiptStore.commitCase — BEGIN … claim … settle … COMMI
     expect(settleRan).toBe(false);
     expect(events).toEqual(["BEGIN", "COMMIT"]);
     expect(txStatements.some((s) => s.sql.includes("everdict_runs"))).toBe(false);
+  });
+
+  // ── THE ATTEMPT'S TERMINAL STAMP RIDES THE SAME TRANSACTION (arch-review 43) ──────────────────────────
+  //
+  // Phase 1 stamped the physical ledger AFTER commitCase resolved, best-effort: a crash in that window left a
+  // committed receipt naming an execution whose attempt row still said `created`. These pin the promotion —
+  // the stamp is a statement BETWEEN this transaction's BEGIN and COMMIT, and a stamp that throws takes the
+  // receipt and the child's write down with it.
+  it("the attempt stamp is a statement of the SAME transaction as the claim and the child's write", async () => {
+    const { client, events, txStatements } = fakeTxClient({ claimRows: [{ ...row, inserted: true }] });
+    const out = await new PgCaseReceiptStore(client).commitCase(
+      receipt("child-A"),
+      async (runs, attempts) => {
+        await runs.update("child-A", { status: "succeeded", updatedAt: "2026-08-14T00:00:01.000Z" });
+        // The ledger handed in is transaction-bound too — the base client throws if anything escapes it.
+        await attempts?.transition("evd-sc-1-c1#g1", "committed", { childRunId: "child-A" });
+        return child("child-A");
+      },
+      new InMemoryRunStore(),
+      // The caller's AMBIENT ledger, which this adapter must ignore exactly as it ignores the ambient run
+      // store: a stamp landing there would commit on its own clock, which is the window being closed.
+      new InMemoryExecutionAttemptStore(),
+    );
+    expect(out.kind).toBe("committed");
+    expect(events).toEqual(["BEGIN", "COMMIT"]);
+    const at = (fragment: string): number => txStatements.findIndex((s) => s.sql.includes(fragment));
+    expect(at("INSERT INTO everdict_case_commit_receipts")).toBe(0);
+    expect(at("UPDATE everdict_runs")).toBeGreaterThan(at("INSERT INTO everdict_case_commit_receipts"));
+    expect(at("UPDATE everdict_execution_attempts")).toBeGreaterThan(at("UPDATE everdict_runs"));
+  });
+
+  it("a stamp that THROWS rolls the whole commit back — no receipt for a case the ledger could not record", async () => {
+    const { client, events } = fakeTxClient({ claimRows: [{ ...row, inserted: true }] });
+    await expect(
+      new PgCaseReceiptStore(client).commitCase(
+        receipt("child-A"),
+        async (runs, attempts) => {
+          await runs.update("child-A", { status: "succeeded", updatedAt: "2026-08-14T00:00:01.000Z" });
+          if (attempts) throw new Error("attempt ledger down");
+          return child("child-A");
+        },
+        new InMemoryRunStore(),
+        new InMemoryExecutionAttemptStore(),
+      ),
+    ).rejects.toThrow("attempt ledger down");
+    // Not `unsettled` — a store fault is reported as one. And the claim is un-happened with it.
+    expect(events).toEqual(["BEGIN", "ROLLBACK"]);
   });
 
   it("FAILS CLOSED on a client that cannot open a transaction — never a claim without its settle", async () => {

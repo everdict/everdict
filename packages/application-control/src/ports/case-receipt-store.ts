@@ -1,5 +1,6 @@
 import type { CaseCommitOutcome, CaseCommitReceipt } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
+import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
 import type { RunStore } from "./run-store.js";
 
 // ── WHERE A CASE'S CANONICAL OUTCOME IS DECIDED (review 39 P0 · review 40 P0) ────────────────────────
@@ -36,10 +37,20 @@ export interface CaseReceiptStore {
   // receives the run store the write must go through — an implementation that can open a transaction hands
   // a transaction-bound twin; one that cannot (in-memory, single-process) hands `runs` back. The closure
   // returns the settled record, or undefined when the fence refused.
+  //
+  // …and the PHYSICAL ATTEMPT's terminal stamp rides the same decision (arch-review 43, the promotion the
+  // attempt port documents). The second argument is the attempt ledger the stamp must go through, bound to
+  // the same transaction by the same rule as `runs`; `undefined` means no ledger is wired and there is
+  // nothing to stamp. A throw from that stamp aborts the commit exactly like any other store fault — the
+  // ledger could not record what the receipt is about to claim, so the receipt is not made.
   commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore) => Promise<RunRecord | undefined>,
+    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
     runs: RunStore,
+    // The caller's ambient ledger, for the implementations that cannot bind one to a transaction — the same
+    // seam `runs` is, and passed by the caller rather than wired at construction so the store the service
+    // stamps through can never drift from the one it opened the attempt on.
+    attempts?: ExecutionAttemptStore,
   ): Promise<CaseSettleOutcome>;
   // Every receipt of one batch — the parent's aggregation input, and the parity check against the ledger.
   list(scorecardId: string): Promise<CaseCommitReceipt[]>;
@@ -70,8 +81,13 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
 
   async commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore) => Promise<RunRecord | undefined>,
+    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
     runs: RunStore,
+    // Handed straight back, like `runs`: a single-process store has no transaction to bind a twin to. What it
+    // therefore cannot give is ROLLBACK — a stamp that throws leaves this store's receipt unmade (the decision
+    // is un-happened, which is the guarantee that matters) but cannot un-write what the settle already wrote.
+    // The Pg twin is where the promotion is atomic; this one keeps the ordering and the refusal.
+    attempts?: ExecutionAttemptStore,
   ): Promise<CaseSettleOutcome> {
     const key = InMemoryCaseReceiptStore.key(receipt);
     const prior = this.commits.get(key) ?? Promise.resolve();
@@ -80,7 +96,7 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
       if (existing) return { kind: "already_committed", receipt: existing };
       // The settle runs BEFORE the claim is visible, exactly like the Pg transaction: a throw or a refusal
       // leaves no receipt behind. Serialization above is what makes check-settle-set atomic here.
-      const settled = await settle(runs);
+      const settled = await settle(runs, attempts);
       if (settled === undefined) return { kind: "unsettled" };
       this.receipts.set(key, receipt);
       return { kind: "committed", receipt };

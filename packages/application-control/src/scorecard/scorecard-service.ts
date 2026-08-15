@@ -43,6 +43,7 @@ import {
   seriesContractDigest,
   seriesContractFromManifest,
 } from "@everdict/domain";
+import { childKey } from "@everdict/domain";
 import {
   applyGradingPlan,
   effectiveGraderDeclarations,
@@ -1130,16 +1131,45 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       //
       // A record with no `runIds` (an older row) falls back to parentage: that is what those rows can
       // support, and narrowing them to an empty set would erase evidence rather than scope it.
+      // ── THE READ-BACK USES THE SAME CANONICALITY THE WRITE SIDE TRUSTS (arch-review 43, Phase 3) ────
+      //
+      // The receipt ledger says which child is each case's answer; `runIds` membership says which children
+      // the batch published. The two diverge exactly where it hurts — a resumed/retried batch has committed
+      // AND superseded children in `runIds`, and the membership filter served both (duplicate results, and
+      // a superseded attempt's trace/recordingRef reaching the wire). Every reader in the system funnels
+      // through this hydration (getRecord is the one shared closure), so the gate, the diff, the verifier's
+      // get_scorecard, ops-report and flake all inherit the receipt-canonical answer from this one read.
+      //
+      // NO `.catch(() => [])` on the ledger read: an unreadable ledger fails this read rather than quietly
+      // answering the membership question instead — serving superseded attempts as evidence at exactly the
+      // moment it is least observable (the batch service makes the same call, for the same reason).
+      const committed = (await this.deps.caseReceipts?.list(id)) ?? [];
+      const canonical = ScorecardBatch.canonicalChildPerCase(children, committed);
+      const receiptedCases = new Set(committed.map((r) => childKey(r.caseId, r.trial)));
       const published = new Set(record.runIds ?? []);
       const members = published.size > 0 ? children.filter((c) => published.has(c.id)) : children;
+      // PER-CASE fallback, never per-batch: a batch straddling the receipt-store deployment has some cases
+      // receipted and some not, and a batch-level "any receipts ⇒ receipts only" read silently DROPPED the
+      // pre-receipt cases (and the served summary is re-derived from this plane, so the headline moved).
+      // A case with a receipt is served the receipt's child; a case without one keeps the membership row.
+      const canonicalIds = new Set([...canonical.values()].map((c) => c.id));
+      const unreceipted = members.filter(
+        (c) => !receiptedCases.has(childKey(c.caseId, c.result?.trial ?? 0)) && !canonicalIds.has(c.id),
+      );
+      const selected = [...canonical.values(), ...unreceipted];
       // A CANCELLED child's payload is not this batch's evidence (arch-review 25 P1). The write-back can no
       // longer land a result on such a row, and this is the reading half of the same rule: a result that
       // arrived before the fence existed — or one written by an older deploy — must not be counted as a case
       // this batch measured. The user stopped the work; the ledger says so, and the aggregate agrees with it.
-      const results = members
+      const results = selected
         .filter((c) => c.error?.code !== CANCELLED_ERROR_CODE)
         .map((c) => c.result)
-        .filter((r): r is CaseResult => r !== undefined);
+        .filter((r): r is CaseResult => r !== undefined)
+        // Deterministic order, store-independently: the Pg receipt list is (case_id, trial)-sorted and the
+        // in-memory one is insertion-ordered — a served plane whose order depends on the store is the exact
+        // fixture-vs-production divergence this series keeps re-finding. (The dataset's own order needs a
+        // registry read this hydration deliberately does not make.)
+        .sort((a, b) => (a.caseId < b.caseId ? -1 : a.caseId > b.caseId ? 1 : (a.trial ?? 0) - (b.trial ?? 0)));
       if (results.length > 0) {
         const harness = `${record.harness.id}@${record.harness.version}`;
         hydrated = { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };

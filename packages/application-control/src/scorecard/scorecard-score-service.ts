@@ -6,6 +6,7 @@ import {
   EXPERIMENT_ADHOC_REF,
   type EvalCase,
   NotFoundError,
+  type RunRecord,
   SCORING_PASS_LEASE_MS,
   SCORING_PASS_RENEW_BEFORE_MS,
   type Score,
@@ -23,7 +24,10 @@ import {
   contentDigest,
   judgeGradeable,
   nextScoringRevision,
+  promoteStagedJudgments,
+  scorePlaneDigest,
   sealedExecutionMessage,
+  stagePromotionRefusal,
   stagePromotionSafe,
   summarizeScorecard,
   verdictSummaryOf,
@@ -41,7 +45,7 @@ import {
 } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
-import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
+import type { JudgmentClaim, StagedJudgment } from "../ports/scoring-stage-store.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
@@ -68,6 +72,16 @@ function parityUnits(parity: ScoringStageParity): {
       parity.mismatched.length > PARITY_UNIT_SAMPLE ||
       parity.orphaned.length > PARITY_UNIT_SAMPLE,
   };
+}
+
+// ONE READ of a pass's stage, answering both questions asked of it at settle: how it COMPARED to the plane
+// (the durable evidence the contract step is gated on) and what it CONTAINS (the rows a promotion merges).
+// They are bundled because they must describe the same read — a second `staged()` call could observe a
+// different stage, and the revision would then be certified by a report about rows its bytes did not come
+// from.
+interface StageObservation {
+  parity: ScoringStageParity;
+  staged: StagedJudgment[];
 }
 
 // One judge family's rows, as a STORAGE-PATH-INDEPENDENT value (arch-review 16 P1-6). Parsing normalizes the
@@ -736,9 +750,24 @@ export class ScorecardScoreService {
     submittedBy: string | undefined,
     pass?: ScoringPass,
   ): Promise<void> {
-    const summary = summarizeScorecard({ ...base, results });
     const fresh = await this.deps.store.get(record.id);
     if (!fresh) return;
+    // THE STAGE IS READ ONCE, HERE — before anything is derived from the plane (arch-review 43 ①). The
+    // observation and the promotion are two questions about one read: asking the stage twice could see two
+    // different answers (a concurrent clear, a late-landing claim), and the revision would then be certified
+    // by a parity report describing a different stage than the one its bytes came from.
+    //
+    // `results` is the CARRIER plane — what this pass wrote. Parity's whole meaning is stage-vs-that, so it
+    // is always computed against it, never against the promoted plane below (which would compare the stage
+    // with itself and report perfect agreement for free).
+    const observation =
+      pass?.passId === undefined ? undefined : await this.stageObservationOf(record.id, pass.passId, results, judges);
+    // …and only then, if the read-side switch is on, is the plane this revision certifies rebuilt from the
+    // stage. Off (the default) this is the carrier plane unchanged and nothing is recorded.
+    const promotion = this.promoteFromStage(results, observation, judges);
+    const plane = promotion.results;
+    const parity = promotion.parity;
+    const summary = summarizeScorecard({ ...base, results: plane });
     // The revision's closure is the PASS-START seal (the marker score()/prepareScore wrote) — the very
     // resolution the pass concretized its judges to, so the ledger records what EXECUTED, not what a
     // finalize-time re-resolution happens to observe after `latest` moved. Sealing live is the fallback
@@ -771,22 +800,22 @@ export class ScorecardScoreService {
                 harness: `${fresh.harness.id}@${fresh.harness.version}`,
               },
               summary,
-              results,
+              plane,
               resolution.policy,
             ),
             pass?.passId ?? fresh.scoringPass?.passId,
           );
-    // The stage observation is taken BEFORE the revision is written, so it can ride IT (arch-review 16 P1-6).
-    // It used to be a fire-and-forget callback after the settle: a control plane dying in between left the
-    // pass with no observation at all, indistinguishable from an agreeing one — and the stage promotion is
-    // gated on exactly that evidence. Non-fatal by construction (`stageParityOf` returns an incomplete
-    // observation rather than throwing): a measurement must never be able to fail the thing it measures.
-    const parity =
-      pass?.passId === undefined ? undefined : await this.stageParityOf(record.id, pass.passId, results, judges);
+    // The stage observation was taken BEFORE anything derived from the plane, so it can ride the REVISION
+    // (arch-review 16 P1-6). It used to be a fire-and-forget callback after the settle: a control plane dying
+    // in between left the pass with no observation at all, indistinguishable from an agreeing one — and the
+    // stage promotion is gated on exactly that evidence. Non-fatal by construction (`stageObservationOf`
+    // returns an incomplete observation rather than throwing): a measurement must never be able to fail the
+    // thing it measures.
     const scoring = appendScoringRevision(fresh.scoring, {
       kind: "rescore",
       judges: sealed,
-      results,
+      results: plane,
+      ...(promotion.promotion !== undefined ? { stagePromotion: promotion.promotion } : {}),
       ...(parity !== undefined
         ? {
             stageParity: {
@@ -826,15 +855,32 @@ export class ScorecardScoreService {
       // The stamped-policy verdict aggregate follows the judgment (arch-review 7 §4). An unresolvable stamp
       // skips the refresh like the analysis re-freeze does — the STALE aggregate stays detectable, because
       // its policyDigest no longer matches the record's verdictPolicy stamp era; never silently re-derived.
-      ...(resolution.status === "unresolvable" ? {} : { verdictSummary: verdictSummaryOf(results, resolution.policy) }),
+      ...(resolution.status === "unresolvable" ? {} : { verdictSummary: verdictSummaryOf(plane, resolution.policy) }),
       ...(judgeModels.length > 0 ? { judgeModels } : {}),
       scoring,
+      // A REFUSED promotion is narrated where an operator reads, not only in the ledger (arch-review 43 ①).
+      // It rides the settle's own patch, so the statement is as durable as the revision that provoked it —
+      // the same reason the parity observation stopped being a callback. `info`, not `failed`: the pass
+      // settled correctly on the carriers; what refused is the rehearsal the flag asked for.
+      ...(promotion.refusal !== undefined
+        ? {
+            steps: [
+              ...(fresh.steps ?? []),
+              {
+                ts: this.now(),
+                phase: "judges",
+                status: "info" as const,
+                message: `scoring-stage promotion REFUSED — ${promotion.refusal}`,
+              },
+            ],
+          }
+        : {}),
       ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
       ...(fresh.manifest ? { manifest: { ...fresh.manifest, judges: mergedManifestJudges } } : {}),
       ...(fresh.orchestration ? { orchestration: { ...fresh.orchestration, judges: mergedPins } } : {}),
       // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
       // and hydrate from the (re-scored) children, so the embed stays out of the row.
-      ...(record.runIds?.length ? {} : { scorecard: { ...base, results } }),
+      ...(record.runIds?.length ? {} : { scorecard: { ...base, results: plane } }),
     };
     const transition = ScorecardBatch.from(fresh).rescore(
       extras,
@@ -889,12 +935,12 @@ export class ScorecardScoreService {
   // comparison that walked the staged rows alone could only ever report on the writes that succeeded, which
   // is precisely the failure mode a best-effort write has. Non-gradeable cases are excluded — the strip skips
   // them, so their surviving old rows are inherited, not produced.
-  private async stageParityOf(
+  private async stageObservationOf(
     scorecardId: string,
     passId: string,
     settled: CaseResult[],
     judges: ReadonlyArray<{ id: string }>,
-  ): Promise<ScoringStageParity | undefined> {
+  ): Promise<StageObservation | undefined> {
     const stage = this.deps.scoringStage;
     // No stage wired = nothing to observe. The revision carries no `stageParity`, which reads as "unobserved"
     // — never as "agreed".
@@ -947,33 +993,107 @@ export class ScorecardScoreService {
         else mismatched.push(key);
       }
       return {
-        scorecardId,
-        passId,
-        completed: true,
-        expectedJudged: produced.size,
-        staged: staged.length,
-        missingFromStage,
-        matched,
-        mismatched,
-        orphaned,
+        parity: {
+          scorecardId,
+          passId,
+          completed: true,
+          expectedJudged: produced.size,
+          staged: staged.length,
+          missingFromStage,
+          matched,
+          mismatched,
+          orphaned,
+        },
+        // The rows the promotion merges, from THIS read — never a second one (see the call site).
+        staged,
       };
     } catch (err) {
       // A parity report that cannot run tells us nothing — and SAYING that is the point (arch-review 13 P1).
       // Reporting nothing made "every pass agreed" and "no pass was ever checked" the same picture, and the
       // contract step reads that picture. It still must not turn a settled pass into a failed one.
       return {
-        scorecardId,
-        passId,
-        completed: false,
-        failure: err instanceof Error ? err.message : String(err),
-        expectedJudged: 0,
-        staged: 0,
-        missingFromStage: [],
-        matched: 0,
-        mismatched: [],
-        orphaned: [],
+        parity: {
+          scorecardId,
+          passId,
+          completed: false,
+          failure: err instanceof Error ? err.message : String(err),
+          expectedJudged: 0,
+          staged: 0,
+          missingFromStage: [],
+          matched: 0,
+          mismatched: [],
+          orphaned: [],
+        },
+        // An unread stage has no rows to promote — and an incomplete observation refuses the promotion
+        // outright, so this empty list is never the thing a plane gets built from.
+        staged: [],
       };
     }
+  }
+
+  // THE READ-SIDE SWITCH (arch-review 43 ①) — where a settled pass decides whether the plane it certifies is
+  // the one it wrote to the carriers, or the one its own stage says it produced.
+  //
+  // This is the contract step's merge, deployed as a REHEARSAL. Two properties make it worth running before
+  // the migration rather than as the migration:
+  //
+  //   1. It exercises the PROMOTION CODE on real traffic. Every piece of evidence gathered so far compares
+  //      DATA — staged bytes against plane bytes — which certifies the dual write and says nothing about the
+  //      merge that would consume it. The merge is where the interesting mistakes live (inherited rows
+  //      dropped, an unselected judge's family replaced), and until now it did not exist to be wrong.
+  //   2. It cannot change a record. The promotion is applied only when this pass's own parity observation
+  //      says the two sources agree completely, and the promoted plane is then re-digested against the
+  //      carrier plane before it is used. A promotion that would alter the bytes is REFUSED and the refusal
+  //      is recorded — the two sources never silently disagree, which is the whole invariant.
+  //
+  // The refusal path is not a fallback with a log line: `stagePromotion.applied: false` plus a reason lands
+  // on the revision and a step lands on the record, so "the switch was on and it declined" is a fact a later
+  // reader can find. Off (the default) this returns the carrier plane and records nothing at all.
+  private promoteFromStage(
+    carrier: CaseResult[],
+    observation: StageObservation | undefined,
+    judges: ReadonlyArray<{ id: string }>,
+  ): {
+    results: CaseResult[];
+    parity?: ScoringStageParity;
+    promotion?: { applied: boolean; refusal?: string };
+    refusal?: string;
+  } {
+    if (this.deps.scoringStageAuthoritative !== true)
+      return { results: carrier, ...(observation !== undefined ? { parity: observation.parity } : {}) };
+    if (observation === undefined) {
+      // The flag is on and there is nothing to promote FROM. Recorded rather than ignored: a pass that ran
+      // with no stage under a deployment that believes it is promoting is precisely the configuration whose
+      // silence would later be read as evidence.
+      const refusal =
+        "this pass has no stage observation (no scoring stage is wired, or the pass carries no identity) — the carriers stay authoritative";
+      return { results: carrier, promotion: { applied: false, refusal }, refusal };
+    }
+    const unsafe = stagePromotionRefusal(observation.parity);
+    if (unsafe !== undefined)
+      return {
+        results: carrier,
+        parity: observation.parity,
+        promotion: { applied: false, refusal: unsafe },
+        refusal: unsafe,
+      };
+    const promoted = promoteStagedJudgments(carrier, observation.staged, judges);
+    if (scorePlaneDigest(promoted) !== scorePlaneDigest(carrier)) {
+      // The comparison said the two sources are identical and the merge produced a different plane. One of
+      // them is wrong, and nothing here can say which — so the OBSERVATION is voided too, not merely the
+      // promotion. Recording it as `completed: false` is what keeps the fleet gate honest: a green
+      // `promotionSafe` beside a refused promotion would let the contract step be certified by the very
+      // report its rehearsal just contradicted.
+      const diverged =
+        "the plane promoted from the stage differs from the plane this pass wrote, on units the parity comparison called identical — the comparison and the merge disagree, so neither may certify this revision";
+      return {
+        results: carrier,
+        parity: { ...observation.parity, completed: false, failure: diverged },
+        promotion: { applied: false, refusal: diverged },
+        refusal: diverged,
+      };
+    }
+    return { results: promoted, parity: observation.parity, promotion: { applied: true } };
   }
 
   // The dataset judges align against: the registered one when it resolves; otherwise (ad-hoc experiments under
@@ -1051,17 +1171,49 @@ export class ScorecardScoreService {
   private async childRunIdResolver(
     record: ScorecardRecord,
   ): Promise<((caseId: string, trial?: number) => string | undefined) | undefined> {
-    const store = this.deps.runStore;
-    if (!store || !record.runIds?.length) return undefined;
+    if (!this.deps.runStore || !record.runIds?.length) return undefined;
     try {
-      const children = await store.list(record.tenant, { scorecardId: record.id });
-      const byKey = new Map(
-        children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c.id] as const),
-      );
-      return (caseId, trial) => byKey.get(childKey(caseId, trial));
+      const byKey = await this.scoreCarriersByKey(record);
+      return (caseId, trial) => byKey.get(childKey(caseId, trial))?.id;
     } catch {
+      // Best-effort by contract, including an unreadable receipt ledger: the judges still run and meter, and
+      // no evidence plane lands. What must never happen is guessing a carrier — a plane sealed on the wrong
+      // attempt is worse than no plane, which is why this degrades to undefined rather than to last-wins.
       return undefined;
     }
+  }
+
+  // ── WHICH CHILD CARRIES THIS CASE'S SCORES (arch-review 43, Phase 3) ────────────────────────────────
+  //
+  // One map, built once, for BOTH the judge's evidence-plane seal and the carrier write-back. The two used
+  // to build it separately and identically, which is exactly how a selector defect survives being fixed in
+  // one of them — the same "reviewing them separately is what made the recurrence structural" this file
+  // records for the two case-finalize paths.
+  //
+  // The receipt names the attempt that ANSWERED the case; folding `children.filter(result)` into a Map names
+  // whichever attempt the run store happened to list LAST. On a resumed or retried batch those are different
+  // rows, so a re-score wrote its verdicts onto a superseded attempt while `get` served the committed one —
+  // a pass that costs provider calls and then looks like it did nothing, because the plane a reader sees
+  // never moved. Per-case fallback, on the same terms as the hydration: a case with no receipt (a batch
+  // predating the ledger) keeps the last-wins row, which is what those rows can support.
+  //
+  // The ledger read is NOT caught here. An unreadable ledger cannot answer which attempt is canonical, and a
+  // write that proceeds anyway lands bytes on a row nobody vouched for; the caller decides what that means
+  // (the resolver degrades to no plane, the write-back fails the pass and is retried).
+  private async scoreCarriersByKey(record: ScorecardRecord): Promise<Map<string, RunRecord>> {
+    const store = this.deps.runStore;
+    if (!store) return new Map();
+    const children = await store.list(record.tenant, { scorecardId: record.id });
+    // Only children WITH a result can carry scores — and a result-less child must not enter the map:
+    // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW
+    // the real trial-0 child and make the write-back skip it.
+    const byKey = new Map(
+      children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c] as const),
+    );
+    const committed = (await this.deps.caseReceipts?.list(record.id)) ?? [];
+    for (const [key, child] of ScorecardBatch.canonicalChildPerCase(children, committed))
+      if (child.result) byKey.set(key, child);
+    return byKey;
   }
 
   // Every child write is FENCED by the owning pass (arch-review 8 P0): the store commits only while that
@@ -1144,13 +1296,9 @@ export class ScorecardScoreService {
         claimedCases = new Set(entries.map((e) => e.caseKey));
       }
     }
-    const children = await store.list(record.tenant, { scorecardId: record.id });
-    // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
-    // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW
-    // the real trial-0 child and make the write-back skip it.
-    const byKey = new Map(
-      children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c] as const),
-    );
+    // The receipt-canonical carrier per case (see scoreCarriersByKey) — a re-score's verdicts belong on the
+    // attempt that answered the case, which is the row every reader hydrates from.
+    const byKey = await this.scoreCarriersByKey(record);
     for (const r of results) {
       const child = byKey.get(childKey(r.caseId, r.trial));
       if (!child?.result) continue;

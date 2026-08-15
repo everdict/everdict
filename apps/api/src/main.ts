@@ -925,6 +925,9 @@ async function main(): Promise<void> {
     regressionWatch({
       issues: issueStore,
       issueService,
+      // The RAW row is enough now (arch-review 43): the watch reads decisionPassRate over the persisted
+      // aggregates — no plane, no hydration — so the reference-stored (child-backed) shape every normal
+      // batch has works directly.
       scorecards: scorecardStore,
       feed: notificationStore,
     }),

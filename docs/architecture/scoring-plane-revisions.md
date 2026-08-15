@@ -214,10 +214,35 @@ unreadable" to what it should have been all along: a lease saying who may promot
    as a sample. The counts make the promotion decision; the ids make it diagnosable — and since the rows are
    collected immediately afterwards, a `promotionSafe: false` investigated later would otherwise know that N
    judgments disagreed with no way left to learn which.
-3. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
+3. **Rehearse the read side** — `EVERDICT_SCORING_STAGE_AUTHORITATIVE=1`, off by default (arch-review 43 ①).
+   A settled pass builds the plane it certifies by PROMOTING its staged delta onto the carriers
+   (`promoteStagedJudgments`) instead of taking the carriers as written.
+
+   This exists because every observation up to here compares **data** — staged bytes against plane bytes —
+   which certifies the dual write and says nothing about the **code** that would consume it. The merge is
+   where the interesting mistakes live (inherited rows dropped, an unselected judge's family replaced, a
+   trial keyed by case alone), and until this step it did not exist to be wrong. A week of green parity is
+   not evidence about a function nobody has run.
+
+   It cannot change a record, by construction: the promotion applies only where this pass's own parity
+   observation says the two sources agree completely, and the promoted plane is re-digested against the
+   carrier plane before it is used. Anything else is REFUSED — recorded on the revision as
+   `stagePromotion: { applied: false, refusal }` and narrated as a step, never as a quiet fallback. A
+   promotion whose merged plane moves the bytes over units the comparison called identical also voids the
+   OBSERVATION (`completed: false`): a green `promotionSafe` beside a refused promotion would let the fleet
+   gate be certified by the very report its own rehearsal contradicted.
+
+   **Known blocker this surfaces: embed-mode groups never stage.** The stage write lives inside
+   `writeBackScores`, which returns early when a group has no child runs — so an embed group's judgments are
+   judged, carried, and never staged. Parity reports it correctly (`missingFromStage` = everything, so the
+   pass is not promotion-safe and the readiness gate blocks), but it means the fleet gate cannot go green
+   while embed groups run, and a contract step taken anyway would drop every embed group's judgments. The
+   stage write has to be hoisted out of the carrier-write guard before step 4 is reachable.
+
+4. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
 
-Each step ships alone. Step 3 is the one that changes behavior, and its precondition is code rather than
+Each step ships alone. Step 4 is the one that changes behavior, and its precondition is code rather than
 prose — `stagePromotionSafe(parity)`:
 
 ```
@@ -242,7 +267,9 @@ shape where a promotion would *invent* a row rather than write a different one.
 
 - **Stage lifetime.** An abandoned pass's rows are evidence of what it was doing (the same argument that kept
   the loser's analysis artifact). Sweep on a schedule, or keep them addressable as pass history?
-- **Embed groups.** They have no child rows; the stage promotes into the embedded scorecard. Same shape,
-  simpler — worth confirming it does not want its own path.
+- **Embed groups.** They have no child rows; the stage would promote into the embedded scorecard. Not merely
+  "same shape, simpler": today they never reach the stage write at all (it sits inside `writeBackScores`,
+  behind the child-run early return), so they are a hard blocker on the fleet gate rather than a detail —
+  see step 3.
 - **Does `prepareScore` survive at all?** If the predicate reads the stage, the strip has no job. Deleting an
   activity is the clearest evidence this change paid for itself; keeping a vestigial one would be the opposite.

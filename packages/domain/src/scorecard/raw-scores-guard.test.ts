@@ -14,6 +14,11 @@ const ALLOWED = new Set([
   "scorecard/scorecard-batch.ts", // aggregate lifecycle — carries results, does not aggregate scores
   "scorecard/scoring-plan.ts", // judge-metric ownership + caseReason — gated via isMeasured/measuredScores (moved from application-control scorecard-shared)
   "scorecard/scoring-revision.ts", // scorePlaneDigest — identity over the WHOLE plane on purpose (a digest is not an aggregation: it never averages, and unmeasured rows are part of the judgment record it identifies; the union discriminates them explicitly)
+  // the stage promotion's MERGE — structural rewriting, not aggregation: it strips the produced judge
+  // families off a case and puts the staged rows in their place, never reading a score's value or deciding
+  // anything from one. The measured gate binds whoever aggregates the promoted plane afterwards, which is
+  // `summarizeScorecard` on the allowlist above.
+  "scorecard/stage-promotion.ts",
   "trace/spans-to-events.ts", // producer side (no Score consumption) — listed defensively if it ever matches
   // evidence identity — `judgedPlane` digests the case plane so a verifier's pin moves when the verdicts do.
   // A digest is not an aggregation, the same reason scoring-revision.ts is here: it never averages and never

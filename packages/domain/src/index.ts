@@ -42,7 +42,10 @@ export {
   CURRENT_STAGE_PARITY_VERSION,
   type ScoringStageParity,
   type StagePromotionReadiness,
+  type StagedJudgmentRow,
+  promoteStagedJudgments,
   stagePromotionReadiness,
+  stagePromotionRefusal,
   stagePromotionSafe,
 } from "./scorecard/stage-promotion.js";
 export {

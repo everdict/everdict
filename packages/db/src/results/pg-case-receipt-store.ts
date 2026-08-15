@@ -1,6 +1,12 @@
-import type { CaseReceiptStore, CaseSettleOutcome, RunStore } from "@everdict/application-control";
+import type {
+  CaseReceiptStore,
+  CaseSettleOutcome,
+  ExecutionAttemptStore,
+  RunStore,
+} from "@everdict/application-control";
 import { type CaseCommitOutcome, type CaseCommitReceipt, InternalError, type RunRecord } from "@everdict/contracts";
 import { type SqlClient, withTransaction } from "../client.js";
+import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
 import { PgRunStore } from "./pg-run-store.js";
 
 interface ReceiptRow {
@@ -131,19 +137,26 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
   // written nothing and is told whose case it is), the child's fenced write second. A refused fence aborts
   // the transaction, taking the claim with it. A concurrent claimant blocks on the in-flight insert until
   // this transaction commits or rolls back, so the two-statement winner read below stays race-free.
+  //
+  // …AND THE ATTEMPT'S TERMINAL STAMP RIDES IT TOO (arch-review 43). The physical ledger used to be stamped
+  // after `commitCase` resolved, best-effort: a crash in that window left a committed receipt beside an
+  // attempt row still saying `created` — the receipt claiming an execution the ledger never saw end. Both
+  // twins below are bound to `tx`, so the receipt, the child's terminal write and the attempt's terminal
+  // state are one decision or none of them.
   async commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore) => Promise<RunRecord | undefined>,
-    // The caller's ambient run store — deliberately unused here: the settle must go through the SAME
-    // transaction as the claim, so a transaction-bound twin is handed in instead. The parameter exists
+    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
+    // The caller's ambient run store and ledger — deliberately unused here: the settle must go through the
+    // SAME transaction as the claim, so transaction-bound twins are handed in instead. The parameters exist
     // because the in-memory implementation has no transaction to bind one to.
     _runs: RunStore,
+    _attempts?: ExecutionAttemptStore,
   ): Promise<CaseSettleOutcome> {
     try {
       return await withTransaction(this.client, "the case commit (receipt + child settle)", async (tx) => {
         const outcome = await this.commitOn(tx, receipt);
         if (outcome.kind === "already_committed") return outcome;
-        const settled = await settle(new PgRunStore(tx));
+        const settled = await settle(new PgRunStore(tx), new PgExecutionAttemptStore(tx));
         // The fence refused the child's write → abort, which rolls the claim back too. Thrown (not returned)
         // because ROLLBACK is the transaction helper's contract for a throw; unwrapped below.
         if (settled === undefined) throw new UnsettledSignal();

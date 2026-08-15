@@ -1,3 +1,6 @@
+import type { CaseResult, Score } from "@everdict/contracts";
+import { childKey, stripJudgeScores } from "./scoring-plan.js";
+
 // Whether a scoring pass's write-ahead STAGE may be promoted to the source of truth
 // (docs/architecture/scoring-plane-revisions.md, the contract step).
 //
@@ -54,6 +57,65 @@ export function stagePromotionSafe(parity: ScoringStageParity): boolean {
     parity.mismatched.length === 0 &&
     parity.orphaned.length === 0
   );
+}
+
+// WHY a pass may not be promoted, as a sentence — the one spelling, so the revision, the step an operator
+// reads and any future gate cannot each describe the same refusal differently. `undefined` = nothing to say.
+export function stagePromotionRefusal(parity: ScoringStageParity): string | undefined {
+  if (!parity.completed)
+    return `the stage/plane parity comparison did not complete (${parity.failure ?? "unknown"}) — an unmeasured pass is not an agreeing one`;
+  if (stagePromotionSafe(parity)) return undefined;
+  return (
+    `the staged judgments do not match the plane this pass settled: judged=${parity.expectedJudged} staged=${parity.staged} ` +
+    `matched=${parity.matched} missingFromStage=${parity.missingFromStage.length} mismatched=${parity.mismatched.length} ` +
+    `orphaned=${parity.orphaned.length}`
+  );
+}
+
+// ONE (case, judge) row as the promotion reads it — the stage's own unit, restated here so the domain merge
+// does not have to import a store port (the layer spine forbids it, and the shape is three fields).
+export interface StagedJudgmentRow {
+  caseKey: string; // caseId#trial
+  judgeId: string;
+  scores: Score[];
+}
+
+// THE PROMOTION'S MERGE — the one piece of the contract step that had never been written down as code.
+//
+// The stage holds a DELTA: what THIS pass produced, per (case, judge). The carriers hold everything else —
+// graders, judges this pass did not select, judgments inherited from the previous revision. So the promoted
+// plane is not "the stage" and never was: it is the carrier plane with each PRODUCED judge family replaced by
+// the staged one, which is exactly the distinction the stage was re-shaped into a delta to preserve
+// (arch-review 11). Writing the merge as "whatever the stage says" would drop every inherited row on the
+// floor, and the mistake would look like a scoring bug rather than a migration one.
+//
+// A judge with no staged row for a case keeps its carrier rows untouched — absence in a delta means "this
+// pass produced nothing here", never "delete what is there". Whether that absence is LEGITIMATE is the parity
+// report's question (`missingFromStage`), and the caller must have asked it before promoting.
+//
+// Pure and total: no I/O, no ordering assumptions beyond its own (the promoted families are appended in a
+// deterministic order, and `scorePlaneDigest` sorts, so row order is not content).
+export function promoteStagedJudgments(
+  results: readonly CaseResult[],
+  staged: readonly StagedJudgmentRow[],
+  judges: ReadonlyArray<{ id: string }>,
+): CaseResult[] {
+  const selected = new Set(judges.map((j) => j.id));
+  const byCase = new Map<string, StagedJudgmentRow[]>();
+  for (const row of staged) {
+    if (!selected.has(row.judgeId)) continue; // a row for a judge this pass did not select is not its delta
+    byCase.set(row.caseKey, [...(byCase.get(row.caseKey) ?? []), row]);
+  }
+  return results.map((result) => {
+    const rows = byCase.get(childKey(result.caseId, result.trial));
+    if (rows === undefined || rows.length === 0) return result;
+    const ordered = [...rows].sort((a, b) => a.judgeId.localeCompare(b.judgeId));
+    const promoted = ordered.map((row) => ({ id: row.judgeId }));
+    return {
+      ...result,
+      scores: [...stripJudgeScores(result.scores, promoted), ...ordered.flatMap((row) => row.scores)],
+    };
+  });
 }
 
 // WHETHER THE FLEET MAY TAKE THE CONTRACT STEP — the aggregate over what passes actually observed.

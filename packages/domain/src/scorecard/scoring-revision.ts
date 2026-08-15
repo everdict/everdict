@@ -49,6 +49,9 @@ export interface ScoringPassInput {
   // the stage promotion is gated on. Absent = no stage wired, or a revision from before it existed; readers
   // must treat that as UNOBSERVED, never as agreement.
   stageParity?: NonNullable<ScoringRevision["stageParity"]>;
+  // WHERE the bytes above came from (arch-review 43 ①) — the carriers, or the stage this pass wrote. Absent =
+  // the carriers, which is what every revision before the read-side switch means.
+  stagePromotion?: NonNullable<ScoringRevision["stagePromotion"]>;
   createdAt: string;
   createdBy?: string;
 }
@@ -84,6 +87,7 @@ export function appendScoringRevision(
       // a caller spreading a new one in is silently dropped — a spread bypasses the excess-property check
       // that would otherwise catch it, which is exactly how this field went missing on its first attempt.
       ...(input.stageParity !== undefined ? { stageParity: input.stageParity } : {}),
+      ...(input.stagePromotion !== undefined ? { stagePromotion: input.stagePromotion } : {}),
       createdAt: input.createdAt,
       ...(input.createdBy !== undefined ? { createdBy: input.createdBy } : {}),
     },

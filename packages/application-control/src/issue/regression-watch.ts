@@ -1,10 +1,9 @@
 import type { IssueRecord, NotificationRecord, ScorecardRecord } from "@everdict/contracts";
-import { resolvePolicyResolution, scorecardPassRate } from "@everdict/domain";
+import { decisionPassRate } from "@everdict/domain";
 import type { PlatformEventConsumer } from "../platform-event/event-consumer-runner.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { NotificationStore } from "../ports/notification-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
-import { ExecutionPlan } from "../scorecard/execution-plan.js";
 import type { IssueService } from "./issue-service.js";
 
 // The REGRESSION WATCH (docs/tracker.md): a resolved issue whose evaluation later degraded reopens itself as
@@ -28,21 +27,25 @@ export interface RegressionWatchDeps {
   // Transitions go through the service so the reopen emits the same facts a member's reopen would (and, on a
   // push-enabled GitHub copy, reopens the remote issue with the regression explanation).
   issueService: IssueService;
-  scorecards: ScorecardStore;
+  // A HYDRATING read, not the raw store row (arch-review 43): a reference-stored batch (a resumed/retried
+  // one — exactly the shape a regression usually arrives in) carries no embedded scorecard on its raw row,
+  // so a raw-store reader computed no pass rate and the watch silently never reopened the issue. The seam is
+  // the shape of ScorecardService.get — receipt-canonical hydration included.
+  scorecards: Pick<ScorecardStore, "get">;
   // The bell feed. Written here rather than in a feed consumer because this is the only place that knows WHO
   // cares about the issue (its creator and assignee); the status fact alone does not carry them.
   feed?: NotificationStore;
 }
 
-// The batch's pass rate under ITS OWN stamped policy. A stamp whose document cannot be restored yields no
-// rate at all: reopening someone's issue on a number re-derived under today's ladder is a false alarm with a
-// name attached to it.
+// The batch's pass rate — the ONE authority (decisionPassRate over the persisted aggregates), the same
+// derivation the terminal fact and the product timeline read (arch-review 43). The previous spelling read
+// `record.scorecard` — a plane every child-backed batch DELIBERATELY does not persist (the settle stores
+// runIds, never the embed) — so the watch computed no rate for every normal batch and silently never fired:
+// the tracker's stated reason to exist, disabled by a raw-row read. The aggregates are on the settled row,
+// policy-digest-guarded (a stale aggregate reads as absent, never as current evidence), so no plane read
+// and no hydration is needed at all.
 function passRateOf(record: ScorecardRecord): number | undefined {
-  if (!record.scorecard) return undefined;
-  const resolution = resolvePolicyResolution(record.verdictPolicy, ExecutionPlan.of(record).verdictPolicy);
-  if (resolution.status === "unresolvable") return undefined;
-  const { total, rate } = scorecardPassRate(record.scorecard, resolution.policy);
-  return total > 0 ? rate : undefined;
+  return decisionPassRate(record) ?? undefined;
 }
 
 function recipientsOf(issue: IssueRecord): string[] {

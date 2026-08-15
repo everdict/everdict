@@ -2150,6 +2150,13 @@ export class ScorecardBatchService {
     const receipts = this.deps.caseReceipts;
     if (!receipts) return { kind: "unwritten" };
     const failureError = input.error ?? { code: "INTERNAL", message: "case failed" };
+    // WHICH PHYSICAL ATTEMPT this commit is made by — the same spelling the receipt records, so the two
+    // ledgers can be compared rather than assumed to agree (arch-review 42). Absent when no attempt was
+    // minted; there is then no row to stamp, and inventing a coordinate would address somebody else's.
+    const attemptId = input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation);
+    // `failed` is a terminal outcome of a REAL execution, not a supersede: the case ended here, with this
+    // attempt's frozen failure as the answer.
+    const terminalState: ExecutionAttemptState = input.outcome === "failed" ? "failed" : "committed";
     const outcome = await receipts
       .commitCase(
         this.receiptOf(input.scorecardId, covered, {
@@ -2160,8 +2167,8 @@ export class ScorecardBatchService {
           judges: input.judges,
           ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
         }),
-        (runs) =>
-          this.settleChildOn(
+        async (runs, attempts) => {
+          const settled = await this.settleChildOn(
             runs,
             childId,
             (cur) =>
@@ -2177,35 +2184,62 @@ export class ScorecardBatchService {
                   },
             { scorecardId: input.scorecardId, epoch: input.epoch },
             stamped.length > 0 ? stamped.map((f) => f.record) : undefined,
-          ),
+          );
+          // ── THE ATTEMPT'S TERMINAL STAMP RIDES THE COMMIT (arch-review 43) ─────────────────────────────
+          //
+          // Phase 1 stamped this AFTER the commit resolved, best-effort: a crash in that window left a
+          // committed receipt beside an attempt row still saying `created` — a receipt naming an execution
+          // the physical ledger never saw end. Inside the transaction it is the same decision as the receipt
+          // and the child's terminal write, so there is no window to crash in and no `.catch` to hide a
+          // ledger that could not record what the receipt claims.
+          //
+          // AFTER the settle, never before: a refused fence returns here and the stamp must not have said
+          // "committed" about an attempt that lost (the in-memory twin has no rollback to undo it with). The
+          // transition's own answer is deliberately not read — a refusal is a silent no-op by contract (an
+          // idempotent re-commit meeting its own terminal row is the ordinary case), and only a THROW, which
+          // is a store fault, aborts the commit.
+          //
+          // TWO CONDITIONS, and they ask different questions: `this.deps.attempts` is whether this service
+          // has a ledger AT ALL (an adapter that can always build a transaction-bound twin would otherwise
+          // stamp a plane the deployment was configured without), and `attempts` is the store the write must
+          // go through — the transaction's twin wherever one exists.
+          if (settled === undefined) return undefined;
+          if (this.deps.attempts && attempts && attemptId !== undefined)
+            await attempts.transition(attemptId, terminalState, {
+              childRunId: childId,
+              ...(input.outcome === "failed" ? { error: failureError } : {}),
+            });
+          return settled;
+        },
         runStore,
+        this.deps.attempts,
       )
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
-    // WHICH PHYSICAL ATTEMPT this commit was made by — the same spelling the receipt records, so the two
-    // ledgers can be compared rather than assumed to agree (arch-review 42).
-    const attemptId = input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation);
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
     if (outcome.kind === "committed") {
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-      // …and the attempt that made it reaches ITS terminal state. `failed` is a terminal outcome of a real
-      // execution, not a supersede: the case ended here, with this attempt's frozen failure as the answer.
-      await this.stampAttempt(attemptId, input.outcome === "failed" ? "failed" : "committed", {
-        childRunId: childId,
-        ...(input.outcome === "failed" ? { error: failureError } : {}),
-      });
+      // …and the attempt reached its terminal state inside that same transaction (see the settle above).
       return { kind: "committed", result: covered };
     }
     if (outcome.kind === "already_committed") {
       // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child
       // owning the case means a concurrent attempt won — this one was never the case's answer.
       if (outcome.receipt.childRunId === childId) {
-        await this.stampAttempt(attemptId, input.outcome === "failed" ? "failed" : "committed", {
+        // Best-effort, and it stays that way: THIS call's transaction never ran (the claim was already
+        // there), so there is nothing for the stamp to ride. The winning commit — the first one — stamped
+        // this attempt inside its own transaction; a row that pre-dates the promotion is repaired here, a
+        // row that does not is refused as already terminal. Either way it is diagnostic, not the decision.
+        await this.stampAttempt(attemptId, terminalState, {
           childRunId: childId,
         });
         return { kind: "committed", result: covered };
       }
+      // A LOSER'S STAMP CANNOT RIDE A TRANSACTION, because the loser never had one: its claim was refused
+      // before any settle ran (`already_committed`), or its transaction rolled back whole (`unsettled`). So
+      // the two supersede stamps below stay best-effort — a diagnostic saying which attempts ran and lost.
+      // The WINNER's stamp is the one the commit carries, and losing that one is what may never be swallowed.
       await this.stampAttempt(attemptId, "superseded");
       return { kind: "lost" };
     }
@@ -2258,11 +2292,14 @@ export class ScorecardBatchService {
     });
   }
 
-  // ── THE PHYSICAL ATTEMPT'S STATE, STAMPED BESIDE THE DECISION THAT MADE IT (arch-review 42) ────────
+  // ── THE PHYSICAL ATTEMPT'S STATE, WHERE NO COMMIT TRANSACTION EXISTS TO RIDE (arch-review 42 · 43) ──
   //
-  // Phase-1 dual-write: the ledger is written here and read by nothing, so a failure costs an audit row and
-  // never an outcome — which is exactly why it may be swallowed. When the promotion moves this write inside
-  // the commit transaction, this `catch` is the line that has to go.
+  // The WINNER's terminal stamp no longer comes through here: it rides the case commit itself, inside the
+  // transaction that makes the receipt (finalizeCaseAttempt's settle closure), where a throw aborts the
+  // commit instead of being swallowed. What is left on this path is every stamp that HAS no transaction to
+  // ride — `executing` (no commit is being made), a loser's `superseded` (its transaction never ran or
+  // rolled back whole), a retry's abandon stamp (the abandoned attempt commits nothing). Those are
+  // diagnostics: they name what ran, and no outcome is derived from them, which is why they may be swallowed.
   //
   // `attemptId` is absent when no attempt was minted (no ledger wired, or an execution that never opened a
   // generation): there is no row to stamp, and inventing a coordinate would address somebody else's.
@@ -3106,17 +3143,23 @@ export class ScorecardBatchService {
       // Trace-sink export (when configured) — even if it fails, the scorecard succeeds (recorded via outcome.status only, no error.phase).
       // With streaming (exportStream), cases already went out right after judging — here it's just joining remaining tasks + summing the outcome.
       // If not wired, fall back to the current batched export. TraceSinkService already doesn't throw, but isolate here too just in case.
-      const exported = exportStream
-        ? await exportStream.settle().catch(() => undefined)
-        : this.deps.exportResults
-          ? await this.deps.exportResults(tenant, exportCtx, scorecard.results).catch(() => undefined)
-          : undefined;
-      if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
+      // Streaming exports already went out per-case, downstream of each case's own commit; joined here.
+      const streamExported = exportStream ? await exportStream.settle().catch(() => undefined) : undefined;
       phase = "persist";
       // The aggregate is the LEDGER's, not this process's memory (see resultsFromLedger) — and the parity
       // check then compares what was counted against what was committed.
       const accounted = await this.resultsFromLedger(id, tenant, scorecard.results);
       scorecard = { ...scorecard, results: accounted.results };
+      // The BATCHED export fallback runs on the RECONCILED results (arch-review 43): it used to fire on the
+      // pre-reconciliation in-memory snapshot, so the payload a customer's platform received and the payload
+      // this record persisted could legitimately disagree wherever the ledger substituted a committed
+      // child's copy. The Temporal finalize already exported post-reconciliation; the two paths now agree.
+      const exported =
+        streamExported ??
+        (this.deps.exportResults && !exportStream
+          ? await this.deps.exportResults(tenant, exportCtx, scorecard.results).catch(() => undefined)
+          : undefined);
+      if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       // …AND THE RECEIPT SET IS EXACTLY THE PLAN'S (arch-review 41 P1). resultsFromLedger holds every
       // COUNTED case to a receipt; this holds the receipt set to the PLAN — a planned (caseId, trial) pair
       // no receipt answers, or a receipt the plan never asked for, refuses the success settle (recovery
