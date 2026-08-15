@@ -329,3 +329,85 @@ describe("RunnerJobStore — a cancelled job's lease authorizes nothing", () => 
     expect(await store.outcome(leased.jobId)).toMatchObject({ status: "cancelled" });
   });
 });
+
+// ── THE RE-LEASE'S ATTEMPT HAS A WHOLE LIFE, NOT JUST A NAME (arch-review 47 P1-3) ──────────────────
+//
+// The store twin of the in-memory hub's lifecycle tests. Same two halves: the attempt this claim opens is
+// stamped `executing` with the lease epoch that authorized it, and an attempt whose restamp the row refused
+// is ENDED instead of being left at `created` — pre-fix that row had no handle left to close it, because a
+// number-only seam could only ever name what it opened.
+//
+// ⚠️ What this lane deliberately does NOT do is supersede the attempt the re-lease REPLACED: the prior
+// attempt's id is not on the row and the previous claim may have been served by another replica entirely.
+// That half needs the claim and the open to be one transaction (§5.1 claimAttempt).
+describe("StoreRunnerHub — a re-lease completes the attempt lifecycle", () => {
+  interface AttemptEvent {
+    attemptId: string;
+    kind: "executing" | "superseded";
+    reason?: string;
+    leaseEpoch?: number;
+  }
+  // The ledger-wired seam apps/api's composition root composes when an ExecutionAttemptStore is present.
+  const attemptSeam = (
+    over: { firstGeneration?: number; stall?: (call: number) => Promise<void> | undefined } = {},
+  ) => {
+    const calls: AttemptEvent[] = [];
+    let call = 0;
+    let generation = (over.firstGeneration ?? 21) - 1;
+    return {
+      calls,
+      openAttempt: async (_job: CaseJob, lease?: { leaseEpoch: number }) => {
+        call += 1;
+        await over.stall?.(call);
+        generation += 1;
+        const attemptId = `evd-run-1#g${generation}`;
+        return {
+          generation,
+          attemptId,
+          supersede: async (reason: string) => {
+            calls.push({ attemptId, kind: "superseded", reason });
+          },
+          markExecuting: async () => {
+            calls.push({ attemptId, kind: "executing", ...(lease ? { leaseEpoch: lease.leaseEpoch } : {}) });
+          },
+        };
+      },
+    };
+  };
+
+  it("stamps the claimed attempt executing with the lease epoch that authorized it", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const seam = attemptSeam({ firstGeneration: 21 });
+    // leaseTtlMs 0 → the first lease is already expired when the next claim runs (requeue-then-claim).
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openAttempt: seam.openAttempt }));
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+
+    await hub.leaseWait(keyA, 200, ["repo"]); // epoch 1 runs the dispatch's attempt — nothing is minted
+    expect(seam.calls).toEqual([]);
+    const second = await hub.leaseWait(keyA, 200, ["repo"]);
+    expect(second?.job.recordingGeneration).toBe(21);
+    expect(seam.calls).toEqual([{ attemptId: "evd-run-1#g21", kind: "executing", leaseEpoch: 2 }]);
+  });
+
+  it("a restamp the row REFUSED supersedes the attempt it just opened — no `created` orphan is left behind", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const gate: Array<() => void> = [];
+    const seam = attemptSeam({
+      firstGeneration: 31,
+      // The FIRST open call is the re-lease's (epoch 1 never mints) — park it so the row can move under it.
+      stall: (call) => (call === 1 ? new Promise<void>((r) => gate.push(r)) : undefined),
+    });
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openAttempt: seam.openAttempt }));
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 200, ["repo"]); // epoch 1
+    const minting = hub.leaseWait(keyA, 200, ["repo"]); // epoch 2 — its open parks on the gate
+    while (gate.length === 0) await new Promise((r) => setImmediate(r));
+    await store.cancel((j) => j.runId === "evd-run-1"); // the row moves under the sleeping mint
+    gate[0]?.();
+
+    expect(await minting).toBeNull(); // the refused restamp still hands out no job (arch-review 47 P1-1)
+    // …and the row that lost claim opened reaches a terminal state: no execution will ever happen under it,
+    // and after the restamp was refused nobody but this mint still held its handle.
+    expect(seam.calls).toEqual([{ attemptId: "evd-run-1#g31", kind: "superseded", reason: "lease lost during mint" }]);
+  });
+});

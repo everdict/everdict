@@ -26,6 +26,42 @@ const poolA = poolKeyFor("u-alice");
 const capableRunner: SelfHostedKey = { owner: "u-alice", runnerId: "capable" };
 const incapableRunner: SelfHostedKey = { owner: "u-alice", runnerId: "incapable" };
 
+// The LEDGER-WIRED attempt seam (the shape apps/api/src/composition/dispatch.ts composes when an
+// ExecutionAttemptStore is present): every open answers with the row it created plus the two handles that
+// end/start it. The fake records which handle was called on which attempt, because "what the ledger was
+// told" is the whole of what these tests are about — the generation alone never showed the lifecycle.
+interface AttemptEvent {
+  attemptId: string;
+  kind: "executing" | "superseded";
+  reason?: string;
+  leaseEpoch?: number;
+}
+const attemptSeam = (opts: { firstGeneration?: number; stall?: (call: number) => Promise<void> | undefined } = {}) => {
+  const calls: AttemptEvent[] = [];
+  let call = 0;
+  let generation = (opts.firstGeneration ?? 11) - 1;
+  return {
+    calls,
+    // The generation is allocated AFTER any stall, so a parked open ends up behind the one that overtook it.
+    openAttempt: async (_job: CaseJob, lease?: { leaseEpoch: number }) => {
+      call += 1;
+      await opts.stall?.(call);
+      generation += 1;
+      const attemptId = `evd-run-1#g${generation}`;
+      return {
+        generation,
+        attemptId,
+        supersede: async (reason: string) => {
+          calls.push({ attemptId, kind: "superseded", reason });
+        },
+        markExecuting: async () => {
+          calls.push({ attemptId, kind: "executing", ...(lease ? { leaseEpoch: lease.leaseEpoch } : {}) });
+        },
+      };
+    },
+  };
+};
+
 describe("RunnerHub", () => {
   it("enqueue parks → lease takes → complete resolves the dispatch promise with the result", async () => {
     let n = 0;
@@ -423,20 +459,18 @@ describe("RunnerHub", () => {
     // open finally resolves, it must assign NOTHING — pre-fix it wrote its generation over the entry, and
     // epoch-3's evidence (its token passes the epoch fence) was then attributed to epoch-2's attempt.
     let t = 0;
-    let opened = 10;
     const gate: Array<() => void> = [];
+    // The ledger-wired seam, so the lost claim's ROW is observable too: pre-P1-3 it was left standing at
+    // `created` for ever, because a number-only answer gave the hub no handle to end what it had opened.
+    const seam = attemptSeam({
+      firstGeneration: 11,
+      stall: (call) => (call === 1 ? new Promise<void>((r) => gate.push(r)) : undefined), // epoch-2's open stalls
+    });
     const hub = new RunnerHub({
       newJobId: () => "j1",
       now: () => t,
       leaseTtlMs: 100,
-      openAttempt: (() => {
-        let calls = 0;
-        return async () => {
-          calls += 1;
-          if (calls === 1) await new Promise<void>((r) => gate.push(r)); // epoch-2's open stalls here
-          return ++opened;
-        };
-      })(),
+      openAttempt: seam.openAttempt,
     });
     hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
     await hub.leaseWait(keyA, 0); // epoch 1 — runs the dispatch's attempt (no mint)
@@ -455,6 +489,13 @@ describe("RunnerHub", () => {
     expect(await hub.authorizeAttempt(keyA, { jobId: "j1", leaseEpoch: 3 })).toMatchObject({
       recordingGeneration: 11,
     });
+    // The row the lost mint opened is ENDED, not abandoned at `created` (arch-review 47 P1-3): no execution
+    // will ever happen under g12, and after the claim was lost nobody but this mint still held its handle.
+    // Epoch-3's own attempt is untouched — it is the one that is running.
+    expect(seam.calls).toEqual([
+      { attemptId: "evd-run-1#g11", kind: "executing", leaseEpoch: 3 },
+      { attemptId: "evd-run-1#g12", kind: "superseded", reason: "lease lost during mint" },
+    ]);
   });
 
   it("a re-lease whose attempt cannot be opened carries NO generation — the durable lane refuses instead of merging", async () => {
@@ -809,5 +850,68 @@ describe("RunnerHub.authorizeAttempt — which physical attempt a report belongs
     const leased = hub.lease(keyA);
     const authority = await hub.authorizeAttempt(keyA, leased?.attempt ?? { jobId: "j-0", leaseEpoch: 1 });
     expect(authority?.runId).toBe("run-owned");
+  });
+});
+
+// ── THE RE-LEASE'S ATTEMPT HAS A WHOLE LIFE, NOT JUST A NAME (arch-review 47 P1-3) ──────────────────
+//
+// The mint already gave a re-lease its own recording generation, and there the ledger stopped: the row it
+// opened never left `created` (no `executing`, no lease epoch saying which authority spent the compute) and
+// the row it replaced never left `executing`. Reading the ledger for one requeued job showed
+// `g1 executing (for ever), g2 created → committed` — two attempts, neither of which had a lifecycle that
+// matched what actually happened.
+describe("RunnerHub — a re-lease completes the attempt lifecycle", () => {
+  it("stamps the new attempt executing with the lease epoch that authorized it", async () => {
+    let t = 0;
+    const seam = attemptSeam({ firstGeneration: 11 });
+    const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100, openAttempt: seam.openAttempt });
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+
+    await hub.leaseWait(keyA, 0); // epoch 1 runs the attempt the DISPATCH opened — nothing is minted here
+    expect(seam.calls).toEqual([]);
+    t = 201; // past the TTL → the next lease is a second physical execution
+    const second = await hub.leaseWait(keyA, 0);
+    expect(second?.job.recordingGeneration).toBe(11);
+    expect(seam.calls).toEqual([{ attemptId: "evd-run-1#g11", kind: "executing", leaseEpoch: 2 }]);
+  });
+
+  it("supersedes the attempt it replaced — a re-leased execution stops standing at executing for ever", async () => {
+    let t = 0;
+    const seam = attemptSeam({ firstGeneration: 11 });
+    const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100, openAttempt: seam.openAttempt });
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 0); // epoch 1
+    t = 201;
+    await hub.leaseWait(keyA, 0); // epoch 2 mints g11
+    t = 402;
+    const third = await hub.leaseWait(keyA, 0); // epoch 3 mints g12 — and ends g11, which it displaced
+    expect(third?.job.recordingGeneration).toBe(12);
+    expect(seam.calls).toEqual([
+      { attemptId: "evd-run-1#g11", kind: "executing", leaseEpoch: 2 },
+      { attemptId: "evd-run-1#g12", kind: "executing", leaseEpoch: 3 },
+      { attemptId: "evd-run-1#g11", kind: "superseded", reason: "re-leased to another runner" },
+    ]);
+    // …and only the attempt this hub minted is reachable: the DISPATCH's first attempt (generation 7) is
+    // ended by whatever settles the dispatch, and no handle to it was ever offered here.
+    expect(seam.calls.some((c) => c.attemptId === "evd-run-1#g7")).toBe(false);
+  });
+
+  it("a legacy number-only seam still mints generations and simply has no lifecycle to stamp", async () => {
+    // The recording-only composition (no ExecutionAttemptStore wired) answers with a bare generation, and
+    // that path must keep working untouched — there is no row for it to end or start.
+    let t = 0;
+    let opened = 40;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: async () => ++opened,
+    });
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 0);
+    t = 201;
+    expect((await hub.leaseWait(keyA, 0))?.job.recordingGeneration).toBe(41);
+    t = 402;
+    expect((await hub.leaseWait(keyA, 0))?.job.recordingGeneration).toBe(42);
   });
 });

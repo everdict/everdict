@@ -89,6 +89,106 @@ describe("ScorecardService.get — receipt-canonical hydration, per case", () =>
     expect(results.find((r) => r.caseId === "aa")?.snapshot).toMatchObject({ output: "v1" });
   });
 
+  // ── DISPLAY COMPATIBILITY IS NOT EVIDENCE (arch-review 47 P1-5) ────────────────────────────────────
+  //
+  // The per-case membership fallback above exists so a mixed batch still RENDERS every case it ran. A
+  // decision must not inherit it: once the batch has a ledger, a case with no receipt is an attempt the
+  // batch declined to commit, and weighing it is a release decision standing on a result nobody adopted.
+  // A batch with no receipts at all keeps the membership read on both paths — otherwise every pre-ledger
+  // comparison would silently become empty rather than honestly legacy.
+  it("a decision read serves only the receipted cases of a receipted batch, while the display read still serves the unreceipted one", async () => {
+    const { receipts, store, runs, service } = fixtures();
+    await runs.create(child("run-receipted", "aa", "succeeded", result("aa", 1)));
+    // An attempt the ledger never committed — membership only.
+    await runs.create(child("run-uncommitted", "bb", "succeeded", result("bb", 0)));
+    await receipts.commit({
+      scorecardId: "sc-1",
+      caseId: "aa",
+      trial: 0,
+      childRunId: "run-receipted",
+      resultDigest: "d",
+      committedAt: "2026-08-15T00:00:01.000Z",
+    });
+    await store.create({
+      id: "sc-1",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "succeeded",
+      runIds: ["run-receipted", "run-uncommitted"],
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as ScorecardRecord);
+
+    const shown = await service.get("sc-1");
+    expect(shown?.scorecard?.results.map((r) => r.caseId)).toEqual(["aa", "bb"]);
+    const decided = await service.getForDecision("sc-1");
+    expect(decided?.scorecard?.results.map((r) => r.caseId)).toEqual(["aa"]);
+  });
+
+  it("a batch with no receipts at all reads identically for display and for decision — legacy history stays decidable", async () => {
+    const { store, runs, service } = fixtures();
+    await runs.create(child("run-legacy-a", "aa", "succeeded", result("aa", 1)));
+    await runs.create(child("run-legacy-b", "bb", "succeeded", result("bb", 0)));
+    await store.create({
+      id: "sc-1",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "succeeded",
+      runIds: ["run-legacy-a", "run-legacy-b"],
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as ScorecardRecord);
+
+    const shown = await service.get("sc-1");
+    const decided = await service.getForDecision("sc-1");
+    expect(shown?.scorecard?.results.map((r) => r.caseId)).toEqual(["aa", "bb"]);
+    expect(decided?.scorecard).toEqual(shown?.scorecard);
+  });
+
+  it("a comparison is computed over the decision read — an uncommitted attempt never becomes a shared case", async () => {
+    const { receipts, store, runs, service } = fixtures();
+    // Baseline: an embedded (ingest-era) scorecard where both cases passed.
+    await store.create({
+      id: "sc-base",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "succeeded",
+      scorecard: { suiteId: "d", harness: "h@1.0.0", results: [result("aa", 1), result("bb", 1)] },
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as ScorecardRecord);
+    // Candidate: `aa` committed and passing; `bb` a FAILING attempt the ledger never committed. Read for
+    // display it looks like a regression; read as evidence it is not this batch's answer at all.
+    await runs.create(child("run-receipted", "aa", "succeeded", result("aa", 1)));
+    await runs.create(child("run-uncommitted", "bb", "succeeded", result("bb", 0)));
+    await receipts.commit({
+      scorecardId: "sc-1",
+      caseId: "aa",
+      trial: 0,
+      childRunId: "run-receipted",
+      resultDigest: "d",
+      committedAt: "2026-08-15T00:00:01.000Z",
+    });
+    await store.create({
+      id: "sc-1",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1.0.0" },
+      status: "succeeded",
+      runIds: ["run-receipted", "run-uncommitted"],
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as ScorecardRecord);
+
+    const diff = await service.diff("acme", "sc-base", "sc-1");
+    expect(diff.overlap).toMatchObject({ sharedCases: 1, candidateCases: 1 });
+    expect(diff.caseTransitions.map((t) => t.caseId)).not.toContain("bb");
+    expect(diff.regressions.map((r) => r.caseId)).not.toContain("bb");
+  });
+
   it("an unreadable receipt ledger fails the read — it never quietly answers the membership question instead", async () => {
     const { store, runs, service, receipts } = fixtures();
     await runs.create(child("run-1", "c1", "succeeded", result("c1", 1)));

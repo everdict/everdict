@@ -60,8 +60,8 @@ function unresolvableStamps(
 
 // Analytics collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md R2-b):
 // read-side derivations over the store + the pure @everdict/domain aggregations — diff / trend / leaderboard /
-// backfillModels. Composed only by the facade; getRecord is the facade's hydrating get (child-run references →
-// embedded scorecard).
+// backfillModels. Composed only by the facade, which injects BOTH of its hydrating reads (child-run references
+// → embedded scorecard): getRecord = display, getDecisionRecord = decision. See the fields below.
 // The diff result the wire has always served — extracted so diff() and diffSnapshot() share one shape.
 export type ScorecardDiffResult = ScorecardDiff & {
   trials?: TrialDiff;
@@ -96,14 +96,24 @@ function snapshotOf(
 
 export class ScorecardAnalyticsService {
   private readonly now: () => string;
+  // The DISPLAY hydration (the facade's get) — what a viewer is shown, receipt-less cases included. Used by
+  // the read-side surfaces that describe a batch: opsReport, flake, analysisBundle.
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
+  // The DECISION hydration (the facade's getForDecision) — a receipted batch's ledger alone. Used ONLY by
+  // requireSucceeded, and therefore by diff / diffSnapshot and everything that gates on them.
+  private readonly getDecisionRecord: (id: string) => Promise<ScorecardRecord | undefined>;
 
   constructor(
     private readonly deps: ScorecardAnalyticsDeps,
-    shared: { now: () => string; getRecord: (id: string) => Promise<ScorecardRecord | undefined> },
+    shared: {
+      now: () => string;
+      getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
+      getDecisionRecord: (id: string) => Promise<ScorecardRecord | undefined>;
+    },
   ) {
     this.now = shared.now;
     this.getRecord = shared.getRecord;
+    this.getDecisionRecord = shared.getDecisionRecord;
   }
 
   // baseline vs candidate comparison — metric deltas over the same cases + pass transitions (regression/improvement). Both must be owned by this workspace and complete.
@@ -464,7 +474,10 @@ export class ScorecardAnalyticsService {
     id: string,
     visibleTeams?: string[],
   ): Promise<{ scorecard: Scorecard; record: ScorecardRecord }> {
-    const record = await this.getRecord(id); // get hydrates dedup storage from child runs — diff works regardless of embed/reference
+    // The DECISION read (arch-review 47 P1-5), not the display one: a comparison is evidence for a gate, and
+    // an unreceipted membership row inside a receipted batch is an attempt the batch never committed. It
+    // renders on a detail screen because a viewer should see everything that ran; it must not move a delta.
+    const record = await this.getDecisionRecord(id); // hydrates dedup storage from child runs — works regardless of embed/reference
     if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     if (!record.scorecard)

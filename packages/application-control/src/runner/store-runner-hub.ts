@@ -6,8 +6,10 @@ import {
   type AttemptToken,
   type EnqueueResult,
   type LeasedJob,
+  type OpenAttempt,
   type RunnerHub,
   type SelfHostedKey,
+  normalizeOpenedAttempt,
   requiredRunnerCapabilities,
 } from "./runner-hub.js";
 
@@ -18,7 +20,7 @@ export interface StoreRunnerHubDeps {
   newJobId?: () => string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  openAttempt?: (job: CaseJob) => Promise<number | undefined>; // see RunnerHubDeps.openAttempt — the store twin
+  openAttempt?: OpenAttempt; // see RunnerHubDeps.openAttempt + OpenedAttempt — the store twin
 }
 
 // Store-backed RunnerHub — the multi-replica counterpart to the in-memory RunnerHub. Same public surface (enqueue /
@@ -34,7 +36,7 @@ export class StoreRunnerHub {
   private readonly newJobId: () => string;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
-  private readonly openAttempt: ((job: CaseJob) => Promise<number | undefined>) | undefined;
+  private readonly openAttempt: OpenAttempt | undefined;
   constructor(
     private readonly store: RunnerJobStore,
     deps: StoreRunnerHubDeps = {},
@@ -146,17 +148,36 @@ export class StoreRunnerHub {
   // that lived only in this reply would leave the durable lane still handing out the previous attempt's.
   // A failed open strips the inherited number (fail-closed → the live-only lane); a failed restamp is NOT
   // swallowed, so the runner never receives a lease whose row still points at the other execution.
+  //
+  // ⚠️ WHAT THIS LANE STILL CANNOT DO: supersede the attempt this re-lease REPLACED. The prior attempt's id
+  // is not something the row carries and not something this replica knows — the previous claim may have been
+  // served by another replica entirely, and there is no column to hand it across. The in-memory hub can do it
+  // because the queue entry it owns carries the handle. Ending the replaced attempt here needs the claim and
+  // the attempt open to be ONE transaction, which is the review's §5.1 claimAttempt — until then the store
+  // lane's replaced rows are reconciled like every other pre-promotion row (an attempt row whose execution
+  // has a terminal outcome is not that outcome's authority).
   private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob | null> {
     if (claimed.leaseEpoch <= 1 || !this.openAttempt) return claimed.job;
-    const generation = await this.openAttempt(claimed.job).catch(() => undefined);
+    const opened = normalizeOpenedAttempt(
+      await this.openAttempt(claimed.job, { leaseEpoch: claimed.leaseEpoch }).catch(() => undefined),
+    );
     const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
-    const job = generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: generation };
+    const job =
+      opened.generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: opened.generation };
     // The restamp's answer IS the claim's answer (arch-review 47 P1-1): false means the row moved while the
     // open was in flight — a cancel, an expiry sweep, another claim — and the store will refuse every
     // authorize/complete under this lease. The boolean was ignored, so the runner received a job it could
     // execute but never report: duplicate compute, an orphan attempt, and a result the ledger never saw.
     const restamped = await this.store.restampJob(claimed.jobId, key.runnerId, claimed.leaseEpoch, job);
-    if (!restamped) return null;
+    if (!restamped) {
+      // The attempt this lost claim opened is ended rather than left at `created` (arch-review 47 P1-3) —
+      // no execution will ever happen under it, and nobody else holds a handle to say so.
+      await opened.supersede?.("lease lost during mint").catch(() => {});
+      return null;
+    }
+    // The lease is the dispatch, so compute starts under this attempt now; the stamp carries the epoch that
+    // authorized it. Best-effort — no transaction to ride (see ports/execution-attempt-store.ts).
+    await opened.markExecuting?.().catch(() => {});
     return job;
   }
 

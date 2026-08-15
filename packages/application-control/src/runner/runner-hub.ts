@@ -78,6 +78,40 @@ export interface EnqueueResult {
   generation?: number;
 }
 
+// ── WHAT A LEASE'S ATTEMPT OPEN ANSWERS WITH (arch-review 47 P1-3) ───────────────────────────────
+//
+// The seam used to answer with a bare recording generation, and that number was the whole of what the hub
+// could do with an attempt: it could NAME the new one and nothing else. So the lifecycle stopped half
+// written — the ledger showed `g1 executing` for ever beside `g2 created→committed`, the re-leased attempt
+// never got an `executing` stamp or its lease epoch, and a mint whose lease was lost while the open slept
+// left the freshly-opened row standing at `created` with nobody left holding a handle to end it.
+//
+// This is that handle. `supersede` ends an attempt this hub opened — the one this lease replaced, or the
+// just-opened one when the claim turned out to be lost; `markExecuting` records that compute actually
+// started under it, carrying the lease epoch the composition root closed over. Both are optional because
+// the recording-only composition (no attempt ledger wired) has no row to stamp, and both are best-effort
+// at the call site: neither has a transaction to ride, exactly the posture the batch lane's terminal
+// stamps document (ports/execution-attempt-store.ts) — they are diagnostics, and no outcome reads them.
+export interface OpenedAttempt {
+  // The recording coordinate the re-leased job is restamped with (absent ⇒ the fail-closed live-only lane).
+  generation?: number;
+  // The physical ledger row's id, when the ledger is wired. Present even with no generation: the attempt
+  // happened either way, which is the whole reason the ledger exists.
+  attemptId?: string;
+  supersede?: (reason: string) => Promise<void>;
+  markExecuting?: () => Promise<void>;
+}
+
+// The seam both hubs bind. A bare number stays legal and means `{ generation }` — the recording-only
+// composition answers with one, and so does every caller that never wired the ledger.
+export type OpenAttempt = (job: CaseJob, lease?: { leaseEpoch: number }) => Promise<OpenedAttempt | number | undefined>;
+
+// One spelling of the legacy normalization, shared by both hubs — two hand-written `typeof === "number"`
+// branches is how one of them silently keeps ignoring the handles.
+export function normalizeOpenedAttempt(opened: OpenedAttempt | number | undefined): OpenedAttempt {
+  return typeof opened === "number" ? { generation: opened } : (opened ?? {});
+}
+
 interface PendingEntry {
   jobId: string;
   job: CaseJob;
@@ -95,6 +129,11 @@ interface PendingEntry {
   // The control plane asked to stop this job (user cancel / supersede). Its promise is already rejected; the entry
   // lingers ONLY so the runner's next heartbeat is told to abort (freeing the runtime). Never leasable/requeuable.
   cancelRequested?: boolean;
+  // The last attempt THIS HUB opened for the job (a re-lease's mint). The next re-lease supersedes it, so a
+  // replaced execution stops standing at `executing` for ever. Absent for a job whose only attempt is the
+  // dispatcher's own — no handle to that one ever reaches here, and it is ended by whatever settles the
+  // dispatch rather than by the lease that displaced it.
+  lastAttempt?: OpenedAttempt;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -123,7 +162,11 @@ export interface RunnerHubDeps {
   // the recording lane opened nothing, and the re-leased job is then dispatched with NO generation at all —
   // fail-closed, because the durable evidence path refusing (degrading to the live view) is the correct
   // outcome and merging into another execution's row is the one thing this exists to prevent.
-  openAttempt?: (job: CaseJob) => Promise<number | undefined>;
+  //
+  // …and with the physical ledger wired it answers with the whole attempt rather than only its number, so
+  // the lease can also END one (see OpenedAttempt). `lease` carries the epoch this open belongs to — the
+  // number the `executing` stamp records as the authority that spent the compute.
+  openAttempt?: OpenAttempt;
 }
 
 // The fairness-map composite-key separator (queueName + group). A NUL byte can't occur in a backend name
@@ -158,7 +201,7 @@ export class RunnerHub {
   private readonly maxWaitingPerKey: number;
   private readonly newJobId: () => string;
   private readonly now: () => number;
-  private readonly openAttempt: ((job: CaseJob) => Promise<number | undefined>) | undefined;
+  private readonly openAttempt: OpenAttempt | undefined;
   constructor(deps: RunnerHubDeps = {}) {
     this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // default 5 minutes
     this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // default 2 minutes (renewed by heartbeat)
@@ -406,20 +449,37 @@ export class RunnerHub {
   // complete() reads the generation back off it to tell the dispatcher which attempt actually ran.
   private async mintAttempt(key: SelfHostedKey, leased: LeasedJob): Promise<LeasedJob | null> {
     if (leased.attempt.leaseEpoch <= 1 || !this.openAttempt) return leased;
-    const generation = await this.openAttempt(leased.job).catch(() => undefined);
+    const opened = normalizeOpenedAttempt(
+      await this.openAttempt(leased.job, { leaseEpoch: leased.attempt.leaseEpoch }).catch(() => undefined),
+    );
     // Re-validated AFTER the await (arch-review 47 P0-2). The entry used to be captured BEFORE it, and the
     // assignment below ran unconditionally — so a SLOW open whose lease had meanwhile expired and been
     // re-leased (epoch N+1, already restamped) rolled entry.job back to ITS generation: the newer runner's
     // token still passed the epoch fence, but authorizeAttempt read the older attempt's number off the
     // entry, and evidence produced by epoch N+1 was attributed to attempt N. A mint whose lease is no
-    // longer current assigns nothing and yields NO job — the claim was lost while it slept. (The opened
-    // ledger row stays behind as a `created` orphan: the number-only seam has no supersede handle — the
-    // attempt-claim transaction that closes that is the review's §5.1.)
+    // longer current assigns nothing and yields NO job — the claim was lost while it slept.
     const current = this.locate(key, leased.jobId)?.entry;
-    if (!current || !this.holdsWritableLease(current, key, leased.attempt)) return null;
+    if (!current || !this.holdsWritableLease(current, key, leased.attempt)) {
+      // …and the row that lost claim just opened is ENDED here rather than left as a `created` orphan
+      // (arch-review 47 P1-3): nothing else holds a handle to it — the entry was never told about it, and
+      // the winner is already recording under its own coordinate.
+      await opened.supersede?.("lease lost during mint").catch(() => {});
+      return null;
+    }
     const { recordingGeneration: _inherited, ...withoutAttempt } = leased.job;
-    const job: CaseJob = generation === undefined ? withoutAttempt : { ...leased.job, recordingGeneration: generation };
+    const job: CaseJob =
+      opened.generation === undefined ? withoutAttempt : { ...leased.job, recordingGeneration: opened.generation };
     current.job = job;
+    // Compute starts under this attempt NOW — the lease is what dispatches it — so the row says so, stamped
+    // with the epoch that authorized it. Best-effort: there is no transaction here to ride, and refusing a
+    // lease because its diagnostic row could not be written would let the audit plane decide placement.
+    await opened.markExecuting?.().catch(() => {});
+    // The attempt this lease REPLACED stops standing at `executing` for ever. Only attempts this hub minted
+    // are reachable (see PendingEntry.lastAttempt) — the first attempt is the dispatcher's own open.
+    const prior = current.lastAttempt;
+    if (prior?.supersede && prior.attemptId !== opened.attemptId)
+      await prior.supersede("re-leased to another runner").catch(() => {});
+    if (opened.attemptId !== undefined) current.lastAttempt = opened;
     return { ...leased, job };
   }
 

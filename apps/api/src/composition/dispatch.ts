@@ -2,6 +2,7 @@ import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import {
   type ExecutionAttemptStore,
+  type OpenedAttempt,
   type RecordingStore,
   RunnerHub,
   type RunnerHubLike,
@@ -134,12 +135,21 @@ export function buildDispatch(deps: {
   // second physical execution began — the coordinate it returns is the one the run's terminal stamp then
   // addresses, since both spell it `attemptIdOf(runId, generation)`. The lease has no tenant of its own to
   // record beyond the job's; a job with none carries no ledger row rather than a fabricated tenant.
+  //
+  // …and the ledger row it opens is HANDED BACK, not just its number (arch-review 47 P1-3). A re-lease is
+  // both an attempt beginning and — when this hub minted the one before it — an attempt ending, and the hub
+  // could express neither: `executing` was never stamped (nor the lease epoch that authorized it), the
+  // replaced attempt stood at `executing` for ever, and a mint whose lease was lost mid-open left its row at
+  // `created` with no handle left to close it. The stamps ride no transaction, so they stay best-effort at
+  // the hub's call sites — diagnostics, exactly as ports/execution-attempt-store.ts requires of every stamp
+  // no outcome is derived from.
   const openAttempt =
     recordingStore || attempts
-      ? async (job: CaseJob): Promise<number | undefined> => {
+      ? async (job: CaseJob, lease?: { leaseEpoch: number }): Promise<OpenedAttempt | number | undefined> => {
           if (job.runId === undefined) return undefined;
           // A job carrying no tenant gets the recording lane exactly as it did before — the ledger's tenant
-          // is not a value to invent, and losing an audit row is the lesser of the two failures.
+          // is not a value to invent, and losing an audit row is the lesser of the two failures. No ledger
+          // row means no handles either, so this path answers with the bare number it always did.
           if (job.tenant === undefined) return await recordingStore?.open(job.runId).catch(() => undefined);
           const opened = await openPhysicalAttempt(
             { attempts, recordings: recordingStore },
@@ -151,7 +161,22 @@ export function buildDispatch(deps: {
               ...(job.trial !== undefined ? { trial: job.trial } : {}),
             },
           );
-          return opened.generation;
+          const ledger = attempts;
+          const attemptId = opened.attemptId;
+          // No ledger wired (recording-only) ⇒ nothing to stamp: the bare number, same as before.
+          if (!ledger || attemptId === undefined) return opened.generation;
+          return {
+            ...(opened.generation !== undefined ? { generation: opened.generation } : {}),
+            attemptId,
+            supersede: async (reason: string) => {
+              await ledger.transition(attemptId, "superseded", {
+                error: { code: "LEASE_SUPERSEDED", message: reason },
+              });
+            },
+            markExecuting: async () => {
+              await ledger.transition(attemptId, "executing", lease ? { leaseEpoch: lease.leaseEpoch } : {});
+            },
+          };
         }
       : undefined;
   const hubDeps = { ...hubTimeout, ...(openAttempt ? { openAttempt } : {}) };

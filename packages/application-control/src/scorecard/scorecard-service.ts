@@ -164,7 +164,13 @@ export class ScorecardService {
           }
         : {}),
     });
+    // TWO READS, NAMED APART (arch-review 47 P1-5). `getRecord` is the DISPLAY hydration — a receipt-less
+    // case still serves its membership row, so a mixed batch renders everything it ran. `getDecisionRecord`
+    // is the same read with that compatibility removed once a ledger exists (see getForDecision); it is what
+    // the gate and the diff must stand on. One closure for both would have made "what a viewer sees" and
+    // "what a release decision weighs" the same question, which they are not.
     const getRecord = (id: string): Promise<ScorecardRecord | undefined> => this.get(id);
+    const getDecisionRecord = (id: string): Promise<ScorecardRecord | undefined> => this.getForDecision(id);
     this.batch = new ScorecardBatchService(deps, {
       newId: this.newId,
       now: this.now,
@@ -175,7 +181,7 @@ export class ScorecardService {
       getRecord,
     });
     this.ingestService = new ScorecardIngestService(deps, { newId: this.newId, now: this.now, scoring });
-    this.analytics = new ScorecardAnalyticsService(deps, { now: this.now, getRecord });
+    this.analytics = new ScorecardAnalyticsService(deps, { now: this.now, getRecord, getDecisionRecord });
     this.scoreService = new ScorecardScoreService(deps, {
       newId: this.newId,
       now: this.now,
@@ -1151,6 +1157,28 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // get hydrates the scorecard from the child runs' final results (response shape/web/diff identical to the embed era).
   // If an embed already exists (no-runStore / ingest / old record), return it as-is. Without a runStore, hydration is impossible → as-is.
   async get(id: string): Promise<ScorecardRecord | undefined> {
+    return this.hydrate(id, "display");
+  }
+
+  // ── WHAT A DECISION IS ALLOWED TO SEE (arch-review 47 P1-5) ──────────────────────────────────────
+  //
+  // The same hydration, minus the display compatibility. `get()` serves a receipt-less case its membership
+  // row so a batch straddling the receipt-store deployment still renders every case it ran — a kindness to
+  // a READER, and the wrong input to a DECISION. A succeeded batch that has receipts is complete by the
+  // expected-set settle gate: every case it committed has a receipt, so a membership row without one is an
+  // abandoned/superseded attempt the ledger declined to commit. Serving it to the gate or the diff means a
+  // release decision weighing a result the batch itself did not adopt as its answer.
+  //
+  // A batch with NO receipts at all is the other case, and it keeps the membership read: those are the
+  // pre-ledger rows, and narrowing them to nothing would make every historical comparison undecidable rather
+  // than honest. Their pin already classifies as legacy_unverified through the input-trust vocabulary, so a
+  // decision reading them knows what it is standing on — which is exactly what it could not know about an
+  // unreceipted row sitting inside a receipted batch.
+  async getForDecision(id: string): Promise<ScorecardRecord | undefined> {
+    return this.hydrate(id, "decision");
+  }
+
+  private async hydrate(id: string, mode: "display" | "decision"): Promise<ScorecardRecord | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return record;
     // Hydrate the scorecard from the child runs when stored as references (response shape identical to the embed era).
@@ -1186,10 +1214,17 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       // receipted and some not, and a batch-level "any receipts ⇒ receipts only" read silently DROPPED the
       // pre-receipt cases (and the served summary is re-derived from this plane, so the headline moved).
       // A case with a receipt is served the receipt's child; a case without one keeps the membership row.
+      //
+      // …and that fallback is DISPLAY compatibility, not evidence (see getForDecision). Once the batch has a
+      // ledger at all, a decision reads the ledger alone; only the receipt-less legacy batch falls through to
+      // membership on both paths.
       const canonicalIds = new Set([...canonical.values()].map((c) => c.id));
-      const unreceipted = members.filter(
-        (c) => !receiptedCases.has(childKey(c.caseId, c.result?.trial ?? 0)) && !canonicalIds.has(c.id),
-      );
+      const unreceipted: RunRecord[] =
+        mode === "decision" && committed.length > 0
+          ? []
+          : members.filter(
+              (c) => !receiptedCases.has(childKey(c.caseId, c.result?.trial ?? 0)) && !canonicalIds.has(c.id),
+            );
       const selected = [...canonical.values(), ...unreceipted];
       // A CANCELLED child's payload is not this batch's evidence (arch-review 25 P1). The write-back can no
       // longer land a result on such a row, and this is the reading half of the same rule: a result that

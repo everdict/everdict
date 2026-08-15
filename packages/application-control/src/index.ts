@@ -395,6 +395,8 @@ export {
   type AttemptToken,
   type EnqueueResult,
   type LeasedJob,
+  type OpenAttempt,
+  type OpenedAttempt,
   POOL_RUNNER,
   poolKeyFor,
   requiredRunnerCapabilities,
