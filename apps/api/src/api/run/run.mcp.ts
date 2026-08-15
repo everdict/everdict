@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { teamCeiling } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { serveBatchChildren } from "./serve.js";
 
 // Run resource MCP tools — the MCP twin of run.routes.ts (same RunService core, second transport).
 export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
@@ -38,7 +39,10 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     {
       annotations: { readOnlyHint: true },
       description:
-        "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard. " +
+        "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard — " +
+        "each row carries `canonical`: true = the attempt that batch's commit receipt named as its case's answer, " +
+        "false = a superseded attempt of a receipted case, absent = unknown (no receipt). Read a superseded row's " +
+        "trace as history, never as the batch's evidence. " +
         'With scope="all", standalone runs AND scorecard child runs together (the "all executions" view). With runner, ' +
         "the runs a self-hosted runner executed (newest first, capped by limit, offset-paginated) — the runner-detail activity feed.",
       inputSchema: {
@@ -50,23 +54,24 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
       },
     },
     ({ scorecard_id, scope, runner, limit, offset }) =>
-      run(principal, "runs:read", async () =>
-        ok(
-          await deps.service.list(ws, {
-            // The viewer keeps another member's agent turns and shell sessions off this page (BFF parity), and
-            // the team ceiling keeps a private team's runs off it (same parity).
-            viewer: principal.subject,
-            ...(await teamCeiling(ctx.deps, principal)),
-            ...(scorecard_id
-              ? { scorecardId: scorecard_id }
-              : runner
-                ? { runnerId: runner, ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) }
-                : scope === "all"
-                  ? { includeChildren: true }
-                  : {}),
-          }),
-        ),
-      ),
+      run(principal, "runs:read", async () => {
+        const runs = await deps.service.list(ws, {
+          // The viewer keeps another member's agent turns and shell sessions off this page (BFF parity), and
+          // the team ceiling keeps a private team's runs off it (same parity).
+          viewer: principal.subject,
+          ...(await teamCeiling(ctx.deps, principal)),
+          ...(scorecard_id
+            ? { scorecardId: scorecard_id }
+            : runner
+              ? { runnerId: runner, ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) }
+              : scope === "all"
+                ? { includeChildren: true }
+                : {}),
+        });
+        // BFF parity — the agent sees the same superseded/canonical labelling the screen does.
+        if (!scorecard_id || !deps.scorecardService) return ok(runs);
+        return ok(serveBatchChildren(runs, await deps.scorecardService.canonicalCaseRuns(scorecard_id, runs)));
+      }),
   );
 
   server.registerTool(

@@ -9,6 +9,7 @@ import type {
   ScoringPass,
 } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
+import { scorePlaneDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
@@ -17,7 +18,7 @@ import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
-import type { ScoringStageStore } from "../ports/scoring-stage-store.js";
+import type { ScoringStageStore, StagedJudgment } from "../ports/scoring-stage-store.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 
@@ -1049,6 +1050,133 @@ describe("writeBackScores — the carrier obeys the stage's per-JUDGE arbitratio
   });
 });
 
+// arch-review 44 ①. A GROUP WITHOUT CHILD RUNS STAGES TOO.
+//
+// The stage write used to live INSIDE `writeBackScores`, which returns early when a group has no child runs —
+// so an embed group's judgments were judged, carried on the embedded scorecard, and never staged. Parity
+// reported it correctly (`missingFromStage` = everything), and that correctness is exactly the problem: the
+// fleet readiness gate could never go green while embed groups ran, and a contract step taken anyway would
+// have dropped every embed group's judgments. The stage write is a judgment being recorded; the carrier write
+// is where the bytes land. Sharing one guard made the second decide the first.
+describe("the scoring stage and EMBED-mode groups (no child runs)", () => {
+  const inheritedGrader: Score = { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true };
+  // A judge that actually returns a verdict — the pass has to PRODUCE a judgment for there to be a delta to
+  // stage, so the smallest registry + runner the scoring service accepts.
+  const judgeA: JudgeSpec = {
+    kind: "model",
+    id: "a",
+    version: "1.0.0",
+    provider: "anthropic",
+    model: "m",
+    rubric: "good?",
+    inputs: ["trace"],
+    tags: [],
+  };
+  const judgeRegistry: JudgeRegistry = {
+    async register() {
+      throw new Error("unused");
+    },
+    async has() {
+      return true;
+    },
+    async get() {
+      return judgeA;
+    },
+    async versions() {
+      return [];
+    },
+    async ownVersions() {
+      return [];
+    },
+    async list() {
+      return [];
+    },
+    async moveToTeam() {
+      throw new Error("unused");
+    },
+    async creatorOfVersion() {
+      return undefined;
+    },
+    async softDelete() {
+      throw new Error("unused");
+    },
+    async setVersionTags() {
+      throw new Error("unused");
+    },
+    async versionTags() {
+      return {};
+    },
+  };
+  const judgeRunner: JudgeRunner = {
+    async run() {
+      return [{ graderId: "a", metric: "judge:a", value: 1, pass: true }];
+    },
+  };
+
+  function embedHarness() {
+    // No `runIds` — the embedded scorecard IS the carrier, which is what makes this the blocked shape.
+    let record: ScorecardRecord = {
+      ...recordWith([result("c1", [inheritedGrader])]),
+      runIds: undefined as string[] | undefined,
+    };
+    const updates: Array<Partial<ScorecardRecord>> = [];
+    const rows: StagedJudgment[] = [];
+    const stage: ScoringStageStore = {
+      async stage(_scorecardId, _passId, entries) {
+        rows.push(...entries);
+        return entries;
+      },
+      async staged() {
+        return rows.map((row) => ({ ...row }));
+      },
+      async clear() {
+        return rows.length;
+      },
+    };
+    const store: ScorecardStore = {
+      ...unusedStore,
+      async get() {
+        return record;
+      },
+      async update(_id, patch) {
+        updates.push(patch);
+        record = { ...record, ...patch } as ScorecardRecord;
+        return record;
+      },
+    };
+    const svc = new ScorecardScoreService(
+      { ...deps, store, scoringStage: stage },
+      {
+        newId: () => "pass-embed",
+        now: () => "2026-08-09T00:00:00.000Z",
+        scoring: new ScoringService({ judges: judgeRegistry, judgeRunner }),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    return { svc, updates, rows };
+  }
+
+  it("stages an embed group's judged delta, so its settle carries a parity observation that can agree", async () => {
+    const { svc, updates, rows } = embedHarness();
+
+    await svc.score({ tenant: "acme", id: "sc-1", judges: [{ id: "a", version: "1.0.0" }] });
+    await new Promise((r) => setTimeout(r, 30));
+
+    // One row per (case, judge) — the delta this pass produced, not the inherited grader row beside it.
+    expect(rows.map((row) => [row.caseKey, row.judgeId])).toEqual([["c1#0", "a"]]);
+    const revision = updates.find((u) => u.scoring !== undefined)?.scoring?.at(-1);
+    // Pre-fix this read `staged: 0, missingFromStage: 1, promotionSafe: false` — a pass that judged correctly
+    // and could never be promotion-safe, on a group shape nothing in the design excludes.
+    expect(revision?.stageParity).toMatchObject({
+      expectedJudged: 1,
+      staged: 1,
+      missingFromStage: 0,
+      promotionSafe: true,
+    });
+  });
+});
+
 // arch-review 43 ①. The stage's SCORE BYTES are still shadow: the carriers are the source of truth, and the
 // contract step that swaps them is gated on accumulated parity evidence. What that evidence has never covered
 // is the PROMOTION ITSELF — every observation so far compares staged bytes to plane bytes, which certifies
@@ -1207,6 +1335,9 @@ describe("the scoring stage's read-side switch (EVERDICT_SCORING_STAGE_AUTHORITA
           matched: 1,
           mismatched: [],
           orphaned: [],
+          // …taken, as the real observer takes it, against THIS carrier plane — so the basis check passes and
+          // the merge divergence below is what the promotion actually trips over.
+          basisDigest: scorePlaneDigest(carrier),
         },
         // …over rows that do not agree at all.
         staged: [{ caseKey: "c1#0", judgeId: "a", scores: [verdict("a", 0)] }],
@@ -1216,6 +1347,79 @@ describe("the scoring stage's read-side switch (EVERDICT_SCORING_STAGE_AUTHORITA
     expect(out.results).toBe(carrier); // the carriers certify this revision
     expect(out.promotion).toMatchObject({ applied: false });
     expect(out.parity?.completed).toBe(false); // an observation contradicted by the merge measured nothing
+  });
+
+  // arch-review 44 ②. THE OBSERVATION HAS TO BE ABOUT THE PLANE BEING PROMOTED FROM.
+  //
+  // Parity means "the stage agrees with the plane this pass WROTE", and the contract step's whole content is
+  // making the settled plane come from the stage instead. Compare against THAT plane and the report is the
+  // stage against itself: perfect, on every pass, forever — the fleet gate green because the measurement
+  // stopped measuring. Until now the only thing preventing it was the order of two statements in `aggregate`
+  // and a comment; now the observation states its basis and the promotion checks it.
+  function promoteWith(observationParity: Record<string, unknown>, carrier: CaseResult[]) {
+    const svc = new ScorecardScoreService(
+      { ...deps, scoringStageAuthoritative: true },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => recordWith([]),
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    const promote = (
+      svc as unknown as {
+        promoteFromStage: (
+          carrier: CaseResult[],
+          observation: unknown,
+          judges: ReadonlyArray<{ id: string }>,
+        ) => {
+          results: CaseResult[];
+          parity?: { completed: boolean };
+          promotion?: { applied: boolean; refusal?: string };
+        };
+      }
+    ).promoteFromStage;
+    return promote.call(
+      svc,
+      carrier,
+      {
+        parity: {
+          scorecardId: "sc-1",
+          passId: "pass-1",
+          completed: true,
+          expectedJudged: 1,
+          staged: 1,
+          missingFromStage: [],
+          matched: 1,
+          mismatched: [],
+          orphaned: [],
+          ...observationParity,
+        },
+        staged: [{ caseKey: "c1#0", judgeId: "a", scores: [verdict("a", 1)] }],
+      },
+      [{ id: "a" }],
+    );
+  }
+
+  it("REFUSES a parity report taken against a plane other than the carriers it is promoting from", () => {
+    const carrier = [result("c1", [inherited, verdict("a", 1)])];
+    // The shape the contract step invites: a comparison re-based onto the plane the settle is about to
+    // certify. Its counts are perfect — and they describe a comparison of the stage with itself.
+    const rebased = scorePlaneDigest([result("c1", [verdict("a", 1)])]);
+
+    const out = promoteWith({ basisDigest: rebased }, carrier);
+
+    // Pre-fix the promotion applied: perfect counts, nothing to notice, no record that the basis had moved.
+    expect(out.promotion?.applied).toBe(false);
+    expect(out.promotion?.refusal).toContain("compares the stage with itself");
+    expect(out.results).toBe(carrier);
+  });
+
+  it("promotes when the comparison's basis IS the carrier plane", () => {
+    const carrier = [result("c1", [inherited, verdict("a", 1)])];
+    const out = promoteWith({ basisDigest: scorePlaneDigest(carrier) }, carrier);
+    expect(out.promotion).toEqual({ applied: true });
   });
 });
 

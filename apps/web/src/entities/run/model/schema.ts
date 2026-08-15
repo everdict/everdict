@@ -4,7 +4,7 @@ import type {
   RunStatus as WireRunStatus,
   Score as WireScore,
 } from '@everdict/contracts'
-import type { RunDetailResponse } from '@everdict/contracts/wire'
+import type { RunDetailResponse, RunListItem as WireRunListItem } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4). The EXPORTED types are anchored to @everdict/contracts (re-architecture
@@ -195,6 +195,13 @@ export const runSchema = z.object({
 
 export const runsSchema = z.array(runSchema)
 
+// GET /runs?scorecardId= — a batch's child rows. `canonical` is the batch's commit-receipt verdict ON THE
+// ATTEMPT: true = the run that case's result stands on, false = a superseded attempt (a retry left it parented
+// here), absent = the ledger has no receipt for that case, which is UNKNOWN and must never be drawn as
+// superseded. It rides only this list, so it lives on a list item rather than the shared run schema.
+export const runListItemSchema = runSchema.extend({ canonical: z.boolean().optional() })
+export const runListSchema = z.array(runListItemSchema)
+
 // 제출된 케이스 본문에서 "무엇을 시켰나"만 뽑아 읽는 좁은 렌즈 — 상세가 요청 프롬프트를 보여주기 위한 것이다
 // (특히 플레이그라운드 케이스: 무슨 과제를 던졌는지가 화면 어디에도 없었다). runSchema 에 넣지 않는 이유는
 // 드리프트 가드다: 와이어의 caseSpec 은 환경·그레이더까지 갖춘 EvalCase 라, 부분만 모델링하면 "웹 ⊆ 와이어"가
@@ -218,6 +225,8 @@ export type Run = WireRunFlat & {
   result?: z.infer<typeof resultSchema>
   usage?: z.infer<typeof usageSchema>
 }
+// One row of the run LIST — the run plus the list-only receipt annotation.
+export type RunListItem = Run & { canonical?: boolean }
 export type RunStatus = WireRunStatus
 
 // Drift guards — the local schema's flat output MUST stay assignable to the wire DTO (minus the loose result/usage).
@@ -246,10 +255,17 @@ type _scoreAcceptsEveryVariant = AssertAssignable<WireScore, Score>
 // The session block is the playground's contract with the control plane (image · TTL · teardown reason), and the
 // web models a SUBSET of it — so anchor it on RunSession directly: renaming/retyping any modelled field breaks here.
 type _sessionGuard = AssertAssignable<WebRun['session'], RunSession | undefined>
+// The list-only annotation must stay the wire's — a rename/retype of `canonical` fails here rather than
+// silently dropping the label at parse (the field is what tells a superseded attempt from the real answer).
+type _canonicalGuard = AssertAssignable<
+  Pick<WireRunListItem, 'canonical'>,
+  Pick<z.infer<typeof runListItemSchema>, 'canonical'>
+>
 
 export type __runDriftGuard = [
   _flatGuard,
   _webFieldsOnWire,
+  _canonicalGuard,
   _statusGuard,
   _usageKeysMatch,
   _scoreDetailAccepts,

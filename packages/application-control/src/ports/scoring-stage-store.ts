@@ -127,6 +127,13 @@ export interface ScoringStageParity {
   mismatched: string[];
   // Staged for a case the plane has no row for at all. A promotion would invent a row here.
   orphaned: string[];
+  // The digest of the CARRIER plane this comparison was taken against (arch-review 44 ②). Parity means "the
+  // stage agrees with the plane this pass wrote", and the contract step is exactly the change that makes the
+  // settled plane come from the stage instead — at which point a comparison re-based onto it compares the
+  // stage with itself and agrees perfectly, for free, forever. The basis is therefore stated by the observer
+  // and CHECKED by the promotion (`stagePromotionRefusal`'s second argument), rather than guaranteed by the
+  // order of two statements.
+  basisDigest?: string;
 }
 
 export interface ScoringStageStore {

@@ -97,6 +97,10 @@ export const traceEventSchema = z
 export const caseResultSchema = z
   .object({
     caseId: z.string(),
+    // Which trial of that case this row is (absent on a single-trial batch). It is half of the row's identity —
+    // the served caseRuns map is keyed by (caseId, trial), so the row can name its own child run instead of
+    // being paired with one by position.
+    trial: z.number().int().optional(),
     harness: z.string().optional(),
     verdict: z.boolean().optional(), // server-computed case verdict (authority rank) — served, never recomputed here
     // The verdict's audit trail — which rung decided, under which aggregation, from which measurements. Loose
@@ -249,6 +253,13 @@ export const scorecardRecordSchema = z.object({
   scorecard: fullScorecardSchema.optional(),
   // Server-computed authority-ranked headline (list + detail) — prefer this over any summary-order heuristic.
   headlinePassRate: z.number().nullable().optional(),
+  // Which child run is each (case, trial)'s answer, decided by the batch's commit receipts (detail only). The
+  // page pairs a result row with its execution detail through THIS — never by position — because a retried
+  // case has several child runs and only the receipted one is the batch's evidence. Absent on records the
+  // receipt ledger cannot answer for (ingested/pre-receipt); the page then falls back to its old heuristic.
+  caseRuns: z
+    .array(z.object({ caseId: z.string(), trial: z.number().int(), runId: z.string() }))
+    .optional(),
   // Server-computed rollup of per-case verdicts (detail only) — replaces the deleted client-side casePass mirror.
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
   // Transient scoring failures a targeted re-score can recover (detail only) — the rescore button shows iff set.

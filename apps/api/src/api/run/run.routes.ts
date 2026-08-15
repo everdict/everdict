@@ -4,6 +4,7 @@ import { teamCeiling } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
 import { SubmitBodySchema } from "./request/submit.js";
 import { runDocs } from "./run.docs.js";
+import { serveBatchChildren } from "./serve.js";
 
 // runs — the async execution primitive: submit returns a run id; the result arrives by poll or webhook.
 export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -93,14 +94,16 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
           : scope === "all"
             ? { includeChildren: true }
             : undefined;
-      return reply.send(
-        await deps.service.list(principal.workspace, {
-          ...opts,
-          viewer: principal.subject,
-          // Second ceiling, orthogonal to the audience one above: a private team's runs are that team's work.
-          ...(await teamCeiling(deps, principal)),
-        }),
-      );
+      const runs = await deps.service.list(principal.workspace, {
+        ...opts,
+        viewer: principal.subject,
+        // Second ceiling, orthogonal to the audience one above: a private team's runs are that team's work.
+        ...(await teamCeiling(deps, principal)),
+      });
+      // A batch's children include superseded attempts; the receipt ledger says which row each case's answer
+      // is. ONE ledger read per request (never per row), over the children this viewer may actually see.
+      if (!scorecardId || !deps.scorecardService) return reply.send(runs);
+      return reply.send(serveBatchChildren(runs, await deps.scorecardService.canonicalCaseRuns(scorecardId, runs)));
     } catch (err) {
       return sendError(reply, err);
     }

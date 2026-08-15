@@ -393,7 +393,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: true },
         description:
-          "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests. `policyResolution` says whether that stamp could be RESTORED: 'unresolvable' means the stamped policy document is gone, so `verdict`/`casePass`/`outcomes` are ABSENT rather than re-derived under today's ladder — read the absence, never treat it as 0. Other workspaces get NOT_FOUND",
+          "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests, and `caseRuns` — the receipt-canonical (case, trial) → child run map, the ONLY correct way to open a case's execution detail (a retried case has several children; only the receipted one is this batch's evidence). `policyResolution` says whether that stamp could be RESTORED: 'unresolvable' means the stamped policy document is gone, so `verdict`/`casePass`/`outcomes` are ABSENT rather than re-derived under today's ladder — read the absence, never treat it as 0. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -405,7 +405,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             !ownedByVisibleTeam(record, await visibleTeamsFor(ctx.deps, principal))
           )
             return fail("NOT_FOUND: scorecard not found.");
-          return ok(serveScorecard(record));
+          // BFF parity — the agent gets the same receipt-canonical case→run map the screen does.
+          return ok(serveScorecard(record, await scorecards.canonicalCaseRuns(record.id)));
         }),
     );
 

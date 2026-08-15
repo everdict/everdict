@@ -1,4 +1,4 @@
-import type { Run, RunRowData } from '@/entities/run'
+import type { Run, RunListItem, RunRowData } from '@/entities/run'
 import type { ScorecardRecord, ScorecardStatus } from '@/entities/scorecard'
 
 // A scorecard batch collapsed to a single feed row — sourced from the lightweight scorecards list (no child runs), so
@@ -33,9 +33,12 @@ export type ActivityBlock =
   | { kind: 'session'; session: SessionSummary; ts: number }
 
 // Strip a full run record to the fields a row renders — keeps the client payload small (no result/trace jsonb).
-export function toRow(r: Run): RunRowData {
+// `canonical` (a batch child's receipt verdict) rides along when the control plane sent it: the row draws the
+// superseded attempts of a retried case, and dropping it here would silently un-label them.
+export function toRow(r: RunListItem): RunRowData {
   return {
     id: r.id,
+    ...(r.canonical !== undefined ? { canonical: r.canonical } : {}),
     harness: r.harness,
     caseId: r.caseId,
     status: r.status,
@@ -68,7 +71,9 @@ export function buildActivityBlocks(standalone: Run[], scorecards: ScorecardReco
     bySession.set(turn.group.id, list)
   }
   const sessions: ActivityBlock[] = [...bySession.entries()].flatMap(([id, sessionTurns]) => {
-    const ordered = [...sessionTurns].sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt))
+    const ordered = [...sessionTurns].sort(
+      (a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt)
+    )
     const latest = ordered[ordered.length - 1]
     if (!latest) return []
     return [

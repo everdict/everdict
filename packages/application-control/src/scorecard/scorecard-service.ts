@@ -13,11 +13,13 @@ import {
   type ManifestCheck,
   type ManifestVerification,
   NotFoundError,
+  type RunRecord,
   type ScorecardOrigin,
   type ScorecardRecord,
   isConstitutionalMetric,
 } from "@everdict/contracts";
 import { CANCELLED_ERROR_CODE, JudgeIdSchema } from "@everdict/contracts";
+import type { CaseRunRef } from "@everdict/contracts/wire";
 import {
   type AnalysisConfig,
   type AnalysisResult,
@@ -1177,6 +1179,43 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     }
     // Trial roll-up is a pure record derivation — the domain model owns it (ETA stays here: it needs store IO).
     return ScorecardBatch.from(await this.withEta(hydrated)).withTrialSummary();
+  }
+
+  // ── WHICH CHILD RUN A CASE'S "open the replay" LINK MUST POINT AT (arch-review 44) ────────────────
+  //
+  // The same receipt-canonical answer `get()` hydrates its results from, exposed as a MAP so a client never
+  // has to re-derive it. Clients had no choice but to pair the Nth result with the Nth child by createdAt and
+  // fall back to "the last one" — position is not identity, so a retried case opened the SUPERSEDED attempt's
+  // trace while the row beside it showed the committed attempt's verdict. The ledger knew all along.
+  //
+  // `children` is the caller's already-listed child set (the runs-list route lists them anyway); without it
+  // the map is read for the batch itself. A receipt naming a child outside that set is dropped by the domain
+  // rule — never replaced with some other row.
+  //
+  // No ledger wired, or a batch with no receipts (ingested / pre-receipt) → an EMPTY map, which the client
+  // reads as "unknown" and answers with its own fallback. A ledger READ that fails is not caught: an
+  // unreadable ledger must not quietly degrade into the positional guess this exists to delete.
+  async canonicalCaseRuns(id: string, children?: RunRecord[]): Promise<CaseRunRef[]> {
+    if (!this.deps.caseReceipts) return [];
+    const rows = children ?? (await this.batchChildren(id));
+    if (!rows) return [];
+    const receipts = await this.deps.caseReceipts.list(id);
+    const canonical = ScorecardBatch.canonicalChildPerCase(rows, receipts);
+    return receipts
+      .flatMap((r) => {
+        const child = canonical.get(childKey(r.caseId, r.trial));
+        return child ? [{ caseId: r.caseId, trial: r.trial, runId: child.id }] : [];
+      })
+      .sort((a, b) => (a.caseId < b.caseId ? -1 : a.caseId > b.caseId ? 1 : a.trial - b.trial));
+  }
+
+  // The batch's children, read through its own tenant — a store list is tenant-scoped, and the caller of the
+  // map above may hold only an id. Undefined when there is no batch (or no run store) to read them from.
+  private async batchChildren(id: string): Promise<RunRecord[] | undefined> {
+    if (!this.deps.runStore) return undefined;
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    return this.deps.runStore.list(record.tenant, { scorecardId: id });
   }
 
   // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step): get(), plus

@@ -35,6 +35,12 @@ const unmeasured = (passId: string) => ({
 
 // The same clean report, from an OLDER observer — the shape a pre-stamp deployment left behind.
 const legacyClean = (passId: string) => ({ passId, stageParity: { completed: true, promotionSafe: true } });
+// …and from a NUMBERED older era. The version field exists to be compared, not merely to be present, and a
+// stamped-but-superseded observation is the shape a fleet actually accumulates across a deploy.
+const priorEraClean = (passId: string) => ({
+  passId,
+  stageParity: { version: CURRENT_STAGE_PARITY_VERSION - 1, completed: true, promotionSafe: true },
+});
 
 describeTrust("TRUST-124 — the contract step is gated on evidence, not on somebody's reading of a dashboard", () => {
   it("enough clean observations is READY — the gate is passable, or it is theatre", () => {
@@ -68,6 +74,15 @@ describeTrust("TRUST-124 — the contract step is gated on evidence, not on some
     // and from JSON.stringify to canonical equality — a green from any of those is a green about a different
     // question, and the contract step must not be able to consume it.
     const readiness = stagePromotionReadiness([legacyClean("p1"), legacyClean("p2"), legacyClean("p3")], 3);
+    expect(readiness).toMatchObject({ observed: 0, unobserved: 3, ready: false });
+  });
+
+  it("a green from the PREVIOUS numbered era is not current evidence either", () => {
+    // The era before this one gathered its greens while "the comparison is taken against the carriers" was a
+    // convention rather than a checked fact — and the contract step is exactly the change that breaks the
+    // convention. Counting those greens would let the migration be certified by observations taken before
+    // anything could tell whether the stage had been compared to the carriers or to itself.
+    const readiness = stagePromotionReadiness([priorEraClean("p1"), priorEraClean("p2"), priorEraClean("p3")], 3);
     expect(readiness).toMatchObject({ observed: 0, unobserved: 3, ready: false });
   });
 

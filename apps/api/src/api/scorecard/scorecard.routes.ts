@@ -605,7 +605,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         !ownedByVisibleTeam(record, await visibleTeamsFor(deps, principal))
       )
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-      return reply.send(serveScorecard(record));
+      // Which child run is each (case, trial)'s answer — served, never re-derived by the client (the web used
+      // to pair result rows with children positionally, which opens a retried case's SUPERSEDED attempt).
+      return reply.send(serveScorecard(record, await deps.scorecardService.canonicalCaseRuns(record.id)));
     } catch (err) {
       return sendError(reply, err);
     }

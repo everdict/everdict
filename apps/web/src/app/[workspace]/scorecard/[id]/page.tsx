@@ -339,8 +339,10 @@ export default async function ScorecardDetailPage({
   // links), or when the progress timeline names cases (a terminal-failed batch can have case steps but no results —
   // the step's run link is then the only door to that case's execution detail).
   const childRunByCase = new Map<string, string>()
-  // 트라이얼 배치는 한 caseId 에 자식 run 이 여러 개다 — 디스패치 순서(createdAt asc)의 run id 목록을
-  // 케이스별로 들고, 아래에서 결과 행의 등장 순번(=트라이얼 순번)과 짝지어 각 행이 제 run 으로 간다.
+  // A trialled batch fans one caseId out to several child runs, so the id list is kept per case in dispatch
+  // order (createdAt asc) and paired below with each result row's occurrence index. That pairing is POSITIONAL
+  // and therefore only a fallback — see canonicalRunByTrial: position stops being identity the moment a case is
+  // retried, because the abandoned attempt is still a child of this batch.
   const childRunsByCase = new Map<string, string[]>()
   let liveCases: { caseId: string; runId: string; status: RunStatus }[] = []
   if (results.length > 0 || live || steps.some((s) => s.caseId !== undefined)) {
@@ -352,7 +354,7 @@ export default async function ScorecardDetailPage({
         if (list) list.push(c.id)
         else childRunsByCase.set(c.caseId, [c.id])
       }
-      // 실행 중(queued/running)인 케이스 — 그 run 상세 페이지가 실행 중 화면·로그를 라이브로 스트리밍한다.
+      // In-flight (queued/running) cases — their run detail page streams the live screen and logs.
       liveCases = children
         .filter((c) => c.status === 'queued' || c.status === 'running')
         .map((c) => ({ caseId: c.caseId, runId: c.id, status: c.status }))
@@ -360,6 +362,20 @@ export default async function ScorecardDetailPage({
       // Child run lookup fails/missing → render without drilldown links (keep current behavior)
     }
   }
+
+  // WHICH child run is a case's answer — served by the control plane from the batch's commit receipts, so the
+  // page never has to guess. Keyed by (caseId, trial), which is the identity a result row already has. A case
+  // the ledger does not name (an ingested batch, a record predating receipts) is absent, and only then does the
+  // positional pairing above decide.
+  const canonicalRunByTrial = new Map<string, string>()
+  // Step links carry a caseId with no trial — they get the case's lowest-trial answer (caseRuns arrives sorted).
+  const canonicalRunByCase = new Map<string, string>()
+  for (const c of record.caseRuns ?? []) {
+    canonicalRunByTrial.set(`${c.caseId}#${c.trial}`, c.runId)
+    if (!canonicalRunByCase.has(c.caseId)) canonicalRunByCase.set(c.caseId, c.runId)
+  }
+  // The receipt outranks the "last child by createdAt" map for every case it names.
+  for (const [caseId, runId] of canonicalRunByCase) childRunByCase.set(caseId, runId)
 
   // Runner health for self-hosted case failures — a no_runner case names its runner (failure.runnerId); map it to the
   // roster (the workspace roster includes personal runners) so a failed case can show whether that runner is online.
@@ -462,10 +478,13 @@ export default async function ScorecardDetailPage({
     const datasetCase = datasetCaseById.get(r.caseId)
     const occurrence = occurrenceByResult.get(r) ?? 0
     const trialTotal = trialTotals.get(r.caseId) ?? 1
-    // 트라이얼 순번과 자식 run 을 짝짓는다(디스패치 순서 정렬). 수가 안 맞으면(재시도 등) 마지막 run 으로
-    // 물러난다 — 이전의 caseId→마지막 run 단일 매핑과 같은 보수적 폴백.
+    // The row's own child run: the receipt's answer for this (case, trial) first. Only a case the ledger cannot
+    // answer for falls back to pairing by dispatch order — and to the last run when even the counts disagree
+    // (a retry), which is precisely the guess that could open a SUPERSEDED attempt's replay.
     const runList = childRunsByCase.get(r.caseId) ?? []
-    const runId = runList.length === trialTotal ? runList[occurrence] : runList[runList.length - 1]
+    const runId =
+      canonicalRunByTrial.get(`${r.caseId}#${r.trial ?? occurrence}`) ??
+      (runList.length === trialTotal ? runList[occurrence] : runList[runList.length - 1])
     const exportCase = exportByCase.get(r.caseId)
     const screenshotSrc = osUseShotSrc(r.snapshot)
     const runnerHint = runnerHintFor(r.failure)

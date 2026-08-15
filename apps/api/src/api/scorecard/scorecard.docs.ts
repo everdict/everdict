@@ -382,7 +382,9 @@ const docs = {
     description:
       "Reads one scorecard record with the heavy detail (per-case results, steps, child run ids, trace-sink " +
       "export outcome). Workspace-scoped (another workspace's record reads 404 — no existence leak); requires " +
-      "scorecards:read (viewer+). A running batch carries a derived etaSeconds.",
+      "scorecards:read (viewer+). A running batch carries a derived etaSeconds. `caseRuns` is the " +
+      "receipt-canonical (case, trial) → child run map: the only correct way to open a case's execution " +
+      "detail, since a retried case has several child runs and only the receipted one is this batch's evidence.",
     tags: ["scorecard"],
     params: scorecardIdParams,
     response: {

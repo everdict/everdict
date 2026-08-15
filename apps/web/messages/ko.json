@@ -2499,7 +2499,9 @@
     "sessionTurns": "턴 {n}개",
     "sessionOpenTitle": "대화 열기",
     "turnCell": "턴 · {cause}",
-    "caseCell": "케이스 {id}"
+    "caseCell": "케이스 {id}",
+    "superseded": "대체됨",
+    "supersededHint": "이 케이스는 재시도됐습니다 — 스코어카드의 결과는 이 실행이 아니라 이후 시도에 근거합니다."
   },
   "runtimesPage": {
     "title": "런타임",

@@ -1,8 +1,10 @@
-import type { RunRecord } from "@everdict/contracts";
+import { type CaseResult, type RunRecord, UpstreamError } from "@everdict/contracts";
 import { type PolicyResolution, composeVerdictPolicy } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
+import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { RunStore } from "../ports/run-store.js";
+import type { SealInput } from "../ports/trajectory-store.js";
 import { RunService } from "./run-service.js";
 
 // Local store double (application-control cannot depend on @everdict/db — layer direction). Only the reads
@@ -279,6 +281,186 @@ describe("RunService verdict derivation — the application layer owns the inter
     });
     // Never a silent re-judgement under today's ladder: without the batch's rules, no claim is made.
     expect((await unresolvable.get("c1"))?.verdict).toBeUndefined();
+  });
+});
+
+// ── THE STANDALONE LANE'S PHYSICAL ATTEMPT REACHES A TERMINAL STATE (arch-review 44) ─────────────────
+//
+// The batch lane's terminal stamp rides `commitCase`; a standalone run has no receipt transaction to ride,
+// so its stamp stays a dual-write. What it owes instead is that it happens at all, on the right row, for
+// both endings — and that was never certified, which is how the two defects below survived: an attempt whose
+// recording claim was refused reached no terminal state ever, and the trajectory named an attempt coordinate
+// no other ledger uses.
+describe("standalone attempts — every dispatch's row ends where the run ends", () => {
+  const passing: CaseResult = {
+    caseId: "case-1",
+    harness: "cc@1.0.0",
+    trace: [{ t: 0, kind: "message", role: "assistant", text: "hello" }],
+    snapshot: { kind: "prompt" as const, output: "done" },
+    scores: [],
+  };
+
+  function standalone(opts: {
+    dispatch: () => Promise<CaseResult>;
+    // A recording store whose claim is REFUSED — the `unisolated` execution: it runs, its replay is not ours.
+    refuseRecording?: boolean;
+    seals?: SealInput[];
+  }): { service: RunService; store: RunStore; attempts: InMemoryExecutionAttemptStore } {
+    const rows = new Map<string, RunRecord>();
+    const store: RunStore = {
+      async create(record: RunRecord) {
+        rows.set(record.id, record);
+      },
+      async update(id: string, patch: Partial<RunRecord>) {
+        const cur = rows.get(id);
+        if (!cur) return undefined;
+        const next = { ...cur, ...patch, id: cur.id };
+        rows.set(id, next);
+        return next;
+      },
+      async get(id: string) {
+        return rows.get(id);
+      },
+      async list() {
+        return [...rows.values()];
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async inFlightByTenant() {
+        return {};
+      },
+      async liveSessions() {
+        return [];
+      },
+    };
+    const attempts = new InMemoryExecutionAttemptStore();
+    const seals = opts.seals;
+    const service = new RunService({
+      dispatcher: { dispatch: opts.dispatch },
+      store,
+      attempts,
+      ...(opts.refuseRecording
+        ? {
+            recordingStore: {
+              async open() {
+                throw new UpstreamError("UPSTREAM_ERROR", {}, "recording buffer unavailable");
+              },
+              async append() {},
+              async peek() {
+                return undefined;
+              },
+              async get() {
+                return undefined;
+              },
+              async seal() {
+                return undefined;
+              },
+            },
+          }
+        : {}),
+      ...(seals
+        ? {
+            trajectories: {
+              async seal(input: SealInput) {
+                seals.push(input);
+                return {
+                  runId: input.runId,
+                  tenant: input.tenant,
+                  source: "run",
+                  eventCount: 0,
+                  sealedAt: "now",
+                  created: true,
+                };
+              },
+              async get() {
+                return undefined;
+              },
+              async list() {
+                return { items: [] };
+              },
+              async ingestedSince() {
+                return { trajectories: 0, events: 0 };
+              },
+              async deleteOlderThan() {
+                return 0;
+              },
+            },
+          }
+        : {}),
+    } as never);
+    return { service, store, attempts };
+  }
+
+  async function settledRun(store: RunStore, id: string): Promise<RunRecord> {
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      const rec = await store.get(id);
+      if (rec && (rec.status === "succeeded" || rec.status === "failed")) return rec;
+      if (Date.now() > deadline) throw new Error(`run ${id} never settled (status ${rec?.status})`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  const submit = (service: RunService) =>
+    service.submit({
+      tenant: "acme",
+      harness: { id: "cc", version: "1.0.0" },
+      case: { id: "case-1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    });
+
+  it("stamps the dispatched attempt committed on success and failed on failure, naming the run it drove", async () => {
+    const ok = standalone({ dispatch: async () => passing });
+    const okRecord = await submit(ok.service);
+    expect((await settledRun(ok.store, okRecord.id)).status).toBe("succeeded");
+    const okRows = await ok.attempts.list(`evd-run-${okRecord.id}`);
+    expect(okRows.map((r) => r.state)).toEqual(["committed"]);
+    // The first physical execution owns generation 1 — g0 is what an untold producer stamps — and the row
+    // names the run it drove, so the two planes join with no derivation.
+    expect(okRows[0]?.attemptId).toBe(`evd-run-${okRecord.id}#g1`);
+    expect(okRows[0]?.childRunId).toBe(okRecord.id);
+
+    const boom = standalone({
+      dispatch: async () => {
+        throw new UpstreamError("UPSTREAM_ERROR", {}, "sandbox died");
+      },
+    });
+    const failedRecord = await submit(boom.service);
+    expect((await settledRun(boom.store, failedRecord.id)).status).toBe("failed");
+    const failedRows = await boom.attempts.list(`evd-run-${failedRecord.id}`);
+    expect(failedRows.map((r) => r.state)).toEqual(["failed"]);
+    // …carrying the exit's own code onto the ledger, not a flattened INTERNAL.
+    expect(failedRows[0]?.error?.code).toBe("UPSTREAM_ERROR");
+  });
+
+  it("stamps an attempt whose RECORDING claim was refused — an unisolated execution still ends", async () => {
+    // Regression: the terminal stamp addressed the row through the recording GENERATION, which is exactly
+    // what an unisolated attempt does not have. So the run succeeded, the ledger row stayed at `created`
+    // forever, and the one plane that exists to say what actually ran said the execution never finished.
+    const { service, store, attempts } = standalone({ dispatch: async () => passing, refuseRecording: true });
+    const record = await submit(service);
+    expect((await settledRun(store, record.id)).status).toBe("succeeded");
+
+    const rows = await attempts.list(`evd-run-${record.id}`);
+    expect(rows.map((r) => r.state)).toEqual(["committed"]);
+    expect(rows[0]?.unisolated).toBe(true); // …and it still says its replay was never claimed
+  });
+
+  it("seals the trajectory under the EXECUTION's attempt coordinate — the one the receipt and the ledger spell", async () => {
+    // Regression: the seal derived `attemptIdOf(runId, …)` from the RECORD id and from a map keyed by the
+    // execution id, so it always read undefined and published `<recordId>#g0` — a coordinate no receipt,
+    // artifact key or attempt row has ever used. The field exists solely so a reader can join the
+    // trajectory to the execution that produced it; a coordinate nobody else spells cannot.
+    const seals: SealInput[] = [];
+    const { service, store } = standalone({ dispatch: async () => passing, seals });
+    const record = await submit(service);
+    expect((await settledRun(store, record.id)).status).toBe("succeeded");
+
+    expect(seals.length).toBeGreaterThan(0);
+    for (const s of seals) expect(s.attemptId).toBe(`evd-run-${record.id}#g1`);
   });
 });
 

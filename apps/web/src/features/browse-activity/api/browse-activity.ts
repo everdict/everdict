@@ -1,6 +1,6 @@
 'use server'
 
-import { runsSchema, type RunRowData } from '@/entities/run'
+import { runListSchema, runsSchema, type RunRowData } from '@/entities/run'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -40,7 +40,9 @@ export async function listActivityAction(): Promise<ActivityFeedResult> {
 export async function listBatchCasesAction(scorecardId: string): Promise<BatchCasesResult> {
   const ctx = await authContext()
   try {
-    const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId }))
+    // runListSchema, not runsSchema: a batch's children carry the receipt's `canonical` verdict, and the plain
+    // run schema strips it — every retried case would then look like it had one attempt.
+    const children = runListSchema.parse(await controlPlane.listRuns(ctx, { scorecardId }))
     return { ok: true, runs: children.map(toRow) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

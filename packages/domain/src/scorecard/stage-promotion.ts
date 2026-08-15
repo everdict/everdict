@@ -37,6 +37,20 @@ export interface ScoringStageParity {
   // Staged for a case the plane has no row for at all. A promotion would INVENT a row here, which is why it
   // is counted apart from a plain value mismatch.
   orphaned: string[];
+  // WHICH PLANE THIS COMPARISON WAS TAKEN AGAINST (arch-review 44 ②) — the digest of the carrier plane the
+  // stage was compared to, pinned into the observation itself.
+  //
+  // Parity's entire meaning is "the stage agrees with the plane this pass WROTE". The contract step's whole
+  // job is to make the settled plane come from the stage instead — and at that moment the obvious refactor
+  // (compare against the plane being settled) turns the comparison into stage-vs-stage: perfect agreement,
+  // for free, on every pass, with the fleet gate reading it as evidence. Until now the only thing standing
+  // between the migration and that outcome was the ORDER of two statements in one private method, plus a
+  // comment asking the next reader not to move them.
+  //
+  // So the observation states its basis and the promotion checks it. A comparison taken against anything
+  // other than the plane being promoted FROM is refused by name rather than believed. Absent = an observation
+  // from before this era pinned one, which under the current era is itself a refusal (see below).
+  basisDigest?: string;
 }
 
 // THE OBSERVER'S ERA. Bumped whenever the parity comparison changes what it MEANS — a different expectation
@@ -44,7 +58,12 @@ export interface ScoringStageParity {
 // about the same question; it is data about a different one, and the readiness gate below refuses to count it.
 //
 //   1 — settled-plane expectation, per-judge units, canonical Score equality, `completed` reporting.
-export const CURRENT_STAGE_PARITY_VERSION = 1;
+//   2 — …and the comparison's BASIS is pinned (`basisDigest`): the observation names the carrier plane it was
+//       taken against, and a promotion refuses an observation taken against any other. Era 1's evidence was
+//       gathered while "compared against the carriers" was a convention rather than a checked fact, and the
+//       contract step is precisely the change that would break the convention — so era-1 greens are not
+//       weaker evidence about era 2's question, they are evidence about a different one.
+export const CURRENT_STAGE_PARITY_VERSION = 2;
 
 // The contract step's precondition, as code so nobody reconstructs it from a dashboard. `staged === matched`
 // is NOT it: that holds trivially when nothing was staged, which is the exact failure being guarded against.
@@ -61,9 +80,25 @@ export function stagePromotionSafe(parity: ScoringStageParity): boolean {
 
 // WHY a pass may not be promoted, as a sentence — the one spelling, so the revision, the step an operator
 // reads and any future gate cannot each describe the same refusal differently. `undefined` = nothing to say.
-export function stagePromotionRefusal(parity: ScoringStageParity): string | undefined {
+//
+// `promotingFrom` is the digest of the plane the caller is about to merge the stage ONTO. Passing it turns
+// the basis rule from a comment into a check (see `ScoringStageParity.basisDigest`): a comparison taken
+// against a different plane than the one being promoted from is not weak evidence, it is evidence about
+// another question — and in the one case that matters (the settled plane having become the PROMOTED plane)
+// it is a comparison of the stage with itself, which agrees perfectly and certifies nothing. Omit it and the
+// basis is not examined, which is what every caller that is not promoting wants.
+export function stagePromotionRefusal(parity: ScoringStageParity, promotingFrom?: string): string | undefined {
   if (!parity.completed)
     return `the stage/plane parity comparison did not complete (${parity.failure ?? "unknown"}) — an unmeasured pass is not an agreeing one`;
+  if (promotingFrom !== undefined) {
+    // Fail-closed on an UNPINNED observation too. Under the current era every comparison states its basis, so
+    // one that does not was produced by other code — and "we cannot tell what this was compared against" is
+    // exactly the answer that must not be read as "the carriers".
+    if (parity.basisDigest === undefined)
+      return "the parity comparison did not pin the plane it was taken against — a promotion cannot tell whether it was compared to the carriers or to itself";
+    if (parity.basisDigest !== promotingFrom)
+      return `the parity comparison was taken against a different plane than the one being promoted from (compared to ${parity.basisDigest}, promoting from ${promotingFrom}) — a comparison re-based onto the promoted plane compares the stage with itself`;
+  }
   if (stagePromotionSafe(parity)) return undefined;
   return (
     `the staged judgments do not match the plane this pass settled: judged=${parity.expectedJudged} staged=${parity.staged} ` +

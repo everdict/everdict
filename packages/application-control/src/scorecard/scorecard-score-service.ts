@@ -1003,6 +1003,11 @@ export class ScorecardScoreService {
           matched,
           mismatched,
           orphaned,
+          // …AND WHICH PLANE IT WAS ALL COMPARED TO (arch-review 44 ②). `settled` is the CARRIER plane, and
+          // that has to stay true through the contract step, when the plane a settle certifies starts coming
+          // from the stage. Pinning the basis here means the promotion can check the claim instead of the
+          // next reader having to preserve a statement order.
+          basisDigest: scorePlaneDigest(settled),
         },
         // The rows the promotion merges, from THIS read — never a second one (see the call site).
         staged,
@@ -1069,7 +1074,11 @@ export class ScorecardScoreService {
         "this pass has no stage observation (no scoring stage is wired, or the pass carries no identity) — the carriers stay authoritative";
       return { results: carrier, promotion: { applied: false, refusal }, refusal };
     }
-    const unsafe = stagePromotionRefusal(observation.parity);
+    // …and the observation must be about THIS plane (arch-review 44 ②). The comparison's basis is checked,
+    // not assumed: the contract step makes the settled plane come from the stage, and a comparison re-based
+    // onto that plane agrees with itself perfectly on every pass. Stating the basis and checking it is what
+    // keeps the step from being takeable by moving one statement.
+    const unsafe = stagePromotionRefusal(observation.parity, scorePlaneDigest(carrier));
     if (unsafe !== undefined)
       return {
         results: carrier,
@@ -1216,6 +1225,75 @@ export class ScorecardScoreService {
     return byKey;
   }
 
+  // STAGE this pass's judgments (expand step, scoring-plane-revisions.md) and return the arbitration the
+  // carrier write then obeys. Its own method, and called BEFORE the carrier guard, because a group that has
+  // no per-case carrier still has judgments to record (arch-review 44 ①).
+  //
+  // Written and never decided on: the carriers stay the source of truth for this deploy, so a rollback loses
+  // nothing, and the contract step later makes the finalize promote from here instead of writing through.
+  //
+  // A TRUE DELTA: only the SELECTED judges' rows (arch-review 11). The port called this a delta and the
+  // code staged the whole resulting case plane — inherited graders and other judges included. Two costs:
+  // the promotion could not tell what this pass PRODUCED from what it merely carried along, and a stage
+  // that contains the inherited plane silently becomes a full-plane snapshot whose correctness depends on
+  // the pass having read the inherited rows at exactly the right moment. Staging the delta makes the
+  // promotion's merge explicit — inherited evidence stays on the carrier, produced evidence comes from here.
+  // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch.
+  //
+  // …one row per (case, JUDGE) — the unit everything else about a judgment already uses (mig 0153) — and the
+  // stage CLAIMS them (mig 0158, arch-review 14 §11). The claim is the arbitration between two attempts of
+  // the SAME pass, which the pass fence structurally cannot perform: Temporal retries an activity inside one
+  // pass, so a timed-out attempt whose provider call is still running and its replacement both hold the same
+  // passId and both clear every guard.
+  //
+  // The CURRENT attempt wins, and a superseded one writes NOTHING further — including to the carrier. That
+  // last part is the point: the stage said "first wins" while the carrier said "last wins", so the two
+  // disagreed by construction and the revision took the carrier's answer while parity noticed afterwards.
+  // A report is not an arbitration. One decider, and the other follows it.
+  //
+  // Returns WHAT THIS ATTEMPT IS ALLOWED TO WRITE, per (case, JUDGE) — undefined maps mean no arbiter is
+  // wired, and the carrier write proceeds as it did before the stage existed.
+  private async stageJudgments(
+    record: ScorecardRecord,
+    results: CaseResult[],
+    pass: ScoringPass | undefined,
+    opts: { stage?: boolean; judges?: ReadonlyArray<{ id: string }>; claim?: JudgmentClaim },
+  ): Promise<{ acceptedByCase?: Map<string, Set<string>>; claimedCases?: Set<string> }> {
+    const stage = this.deps.scoringStage;
+    if (opts.stage === false || !stage || pass?.passId === undefined || !opts.judges) return {};
+    const selected = opts.judges;
+    const entries: StagedJudgment[] = results.flatMap((r) => {
+      const caseKey = childKey(r.caseId, r.trial);
+      return selected.flatMap((j) => {
+        const scores = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
+        // A judge with no rows on this case produced nothing here — staging an empty row would assert a
+        // judgment that does not exist, and the parity report would then count it as one.
+        return scores.length > 0
+          ? [{ caseKey, judgeId: j.id, scores, ...(opts.claim !== undefined ? { claim: opts.claim } : {}) }]
+          : [];
+      });
+    });
+    if (entries.length === 0) return {};
+    // FAIL-CLOSED (arch-review 15 P0-3). While the stage was shadow telemetry, swallowing its failure and
+    // writing anyway was the rollback-safe choice. It stopped being shadow the moment it became the ARBITER:
+    // an arbiter that cannot answer must not be read as "you won", or the very race it exists to settle is
+    // restored at exactly the moment it is least observable. The activity fails, Temporal retries, and the
+    // carrier is untouched — which now also means an embed group's settle fails rather than settling over a
+    // plane the arbiter never saw.
+    //
+    // Note the split this makes explicit: the stage's DATA authority is still shadow (the carriers remain the
+    // source of truth until the contract step), while its WRITE-CLAIM authority is already
+    // production-critical. Two different questions about one table.
+    const accepted = await stage.stage(record.id, pass.passId, entries);
+    const acceptedByCase = new Map<string, Set<string>>();
+    for (const e of accepted) {
+      const set = acceptedByCase.get(e.caseKey) ?? new Set<string>();
+      set.add(e.judgeId);
+      acceptedByCase.set(e.caseKey, set);
+    }
+    return { acceptedByCase, claimedCases: new Set(entries.map((e) => e.caseKey)) };
+  }
+
   // Every child write is FENCED by the owning pass (arch-review 8 P0): the store commits only while that
   // pass still owns the parent's marker, evaluated in the same statement as the write. Checking ownership
   // here instead would leave the window it exists to close — the winner settles between the check and the
@@ -1232,70 +1310,20 @@ export class ScorecardScoreService {
     // rotations nor retries to distinguish.
     opts: { stage?: boolean; judges?: ReadonlyArray<{ id: string }>; claim?: JudgmentClaim } = {},
   ): Promise<void> {
+    // THE STAGE WRITE COMES FIRST, AND IT IS NOT THE CARRIER'S TO SKIP (arch-review 44 ①). It used to sit
+    // below the guard on the next line, so a group with no child runs — an EMBED group, whose carrier is the
+    // embedded scorecard rather than a per-case row — was judged, carried, and never staged. Parity reported
+    // that correctly (`missingFromStage` = everything), and the correctness was the trap: the fleet readiness
+    // gate could never go green while embed groups ran, and a contract step taken anyway would have dropped
+    // every embed group's judgments. Two different questions shared one guard, and the carrier's answer
+    // decided the judgment's.
+    const arbitration = await this.stageJudgments(record, results, pass, opts);
     const store = this.deps.runStore;
+    // The CARRIER write keeps its own guard: an embed group writes its plane through the settle's embedded
+    // `scorecard` patch, not per case, so there is nothing for this loop to do.
     if (!store || !record.runIds?.length) return;
+    const { acceptedByCase, claimedCases } = arbitration;
     const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
-    // …and STAGE this pass's judgments (expand step, scoring-plane-revisions.md). Written and never decided
-    // on: the carriers below stay the source of truth for this deploy, so a rollback loses nothing, and the
-    // contract step later makes the finalize promote from here instead of writing through. A staging failure
-    // must not fail a pass that is writing its plane correctly — nothing depends on it yet, and the parity
-    // report at settle is what detects the failure (arch-review 11).
-    //
-    // A TRUE DELTA: only the SELECTED judges' rows (arch-review 11). The port called this a delta and the
-    // code staged the whole resulting case plane — inherited graders and other judges included. Two costs:
-    // the promotion could not tell what this pass PRODUCED from what it merely carried along, and a stage
-    // that contains the inherited plane silently becomes a full-plane snapshot whose correctness depends on
-    // the pass having read the inherited rows at exactly the right moment. Staging the delta makes the
-    // promotion's merge explicit — inherited evidence stays on the carrier, produced evidence comes from here.
-    // `stage: false` from the strip — a staged row is a JUDGMENT, never merely a touch.
-    // …one row per (case, JUDGE) — the unit everything else about a judgment already uses (mig 0153) — and
-    // the stage now CLAIMS them (mig 0158, arch-review 14 §11). The claim is the arbitration between two
-    // attempts of the SAME pass, which the pass fence structurally cannot perform: Temporal retries an
-    // activity inside one pass, so a timed-out attempt whose provider call is still running and its
-    // replacement both hold the same passId and both clear every guard.
-    //
-    // The CURRENT attempt wins, and a superseded one writes NOTHING further — including to the carrier. That
-    // last part is the point: the stage said "first wins" while the carrier said "last wins", so the two
-    // disagreed by construction and the revision took the carrier's answer while parity noticed afterwards.
-    // A report is not an arbitration. One decider, and the other follows it.
-    // WHAT THIS ATTEMPT IS ALLOWED TO WRITE, per (case, JUDGE) — the arbitration the stage performs and the
-    // carrier obeys (arch-review 15 P0-1/P0-3). Absent = no arbiter is wired, and the write proceeds as it
-    // did before the stage existed.
-    let acceptedByCase: Map<string, Set<string>> | undefined;
-    let claimedCases: Set<string> | undefined;
-    if (opts.stage !== false && this.deps.scoringStage && pass?.passId !== undefined && opts.judges) {
-      const selected = opts.judges;
-      const entries = results.flatMap((r) => {
-        const caseKey = childKey(r.caseId, r.trial);
-        return selected.flatMap((j) => {
-          const scores = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
-          // A judge with no rows on this case produced nothing here — staging an empty row would assert a
-          // judgment that does not exist, and the parity report would then count it as one.
-          return scores.length > 0
-            ? [{ caseKey, judgeId: j.id, scores, ...(opts.claim !== undefined ? { claim: opts.claim } : {}) }]
-            : [];
-        });
-      });
-      if (entries.length > 0) {
-        // FAIL-CLOSED (arch-review 15 P0-3). While the stage was shadow telemetry, swallowing its failure
-        // and writing anyway was the rollback-safe choice. It stopped being shadow the moment it became the
-        // ARBITER: an arbiter that cannot answer must not be read as "you won", or the very race it exists
-        // to settle is restored at exactly the moment it is least observable. The activity fails, Temporal
-        // retries, and the carrier is untouched.
-        //
-        // Note the split this makes explicit: the stage's DATA authority is still shadow (the carriers
-        // remain the source of truth until the contract step), while its WRITE-CLAIM authority is already
-        // production-critical. Two different questions about one table.
-        const accepted = await this.deps.scoringStage.stage(record.id, pass.passId, entries);
-        acceptedByCase = new Map();
-        for (const e of accepted) {
-          const set = acceptedByCase.get(e.caseKey) ?? new Set<string>();
-          set.add(e.judgeId);
-          acceptedByCase.set(e.caseKey, set);
-        }
-        claimedCases = new Set(entries.map((e) => e.caseKey));
-      }
-    }
     // The receipt-canonical carrier per case (see scoreCarriersByKey) — a re-score's verdicts belong on the
     // attempt that answered the case, which is the row every reader hydrates from.
     const byKey = await this.scoreCarriersByKey(record);

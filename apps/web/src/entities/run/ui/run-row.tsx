@@ -36,10 +36,12 @@ export function costLabel(usage?: Usage): string | undefined {
 }
 
 // The minimal run fields a row needs — the activity console strips full run records to this before sending to the client.
+// `canonical` rides only a scorecard child row: false = a superseded attempt (the batch's receipt named another
+// run as that case's answer). Absent means the ledger did not say, which is drawn as nothing at all.
 export type RunRowData = Pick<
   Run,
   'id' | 'harness' | 'caseId' | 'status' | 'kind' | 'trigger' | 'usage' | 'updatedAt'
->
+> & { canonical?: boolean }
 
 // One run row (self-contained: pulls its own i18n/locale). isChild = a scorecard case row (indented under its batch
 // header, caseId in place of the source badge). Shared by the dashboard runs-table and the activity console.
@@ -98,10 +100,19 @@ export function RunRow({
       </TD>
       <TD>
         {isChild ? (
-          <span className="font-mono text-[12px] text-muted-foreground">
-            {childKind === 'turn'
-              ? t('turnCell', { cause: run.caseId })
-              : t('caseCell', { id: run.caseId })}
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono text-[12px] text-muted-foreground">
+              {childKind === 'turn'
+                ? t('turnCell', { cause: run.caseId })
+                : t('caseCell', { id: run.caseId })}
+            </span>
+            {/* A superseded attempt — the batch retried this case and stands on another run. It stays listed
+                (it is real execution history) but must not read as the case's answer. */}
+            {run.canonical === false && (
+              <Badge tone="outline" title={t('supersededHint')}>
+                {t('superseded')}
+              </Badge>
+            )}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5">

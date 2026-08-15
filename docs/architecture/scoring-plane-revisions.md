@@ -232,12 +232,44 @@ unreadable" to what it should have been all along: a lease saying who may promot
    OBSERVATION (`completed: false`): a green `promotionSafe` beside a refused promotion would let the fleet
    gate be certified by the very report its own rehearsal contradicted.
 
-   **Known blocker this surfaces: embed-mode groups never stage.** The stage write lives inside
-   `writeBackScores`, which returns early when a group has no child runs — so an embed group's judgments are
-   judged, carried, and never staged. Parity reports it correctly (`missingFromStage` = everything, so the
-   pass is not promotion-safe and the readiness gate blocks), but it means the fleet gate cannot go green
-   while embed groups run, and a contract step taken anyway would drop every embed group's judgments. The
-   stage write has to be hoisted out of the carrier-write guard before step 4 is reachable.
+   **Blocker cleared: embed-mode groups now stage** (arch-review 44 ①). The stage write used to live inside
+   `writeBackScores`, which returns early when a group has no child runs — so an embed group's judgments were
+   judged, carried on the embedded scorecard, and never staged. Parity reported it correctly
+   (`missingFromStage` = everything, so the pass was not promotion-safe and the readiness gate blocked), and
+   that correctness was the trap: the fleet gate could never go green while embed groups ran, and a contract
+   step taken anyway would have dropped every embed group's judgments.
+
+   The two writes answer different questions — *this pass judged this case* versus *here is where the bytes
+   live* — and sharing one guard let the second decide the first. `stageJudgments` is now its own step, run
+   before the carrier guard; the carrier write keeps its guard, because an embed group writes its plane
+   through the settle's embedded `scorecard` patch rather than per case. The arbitration a staged claim
+   returns is still what the carrier obeys, so nothing about the per-judge claim changed. Fail-closed now
+   reaches embed groups too: an arbiter that cannot answer fails the pass instead of settling over a plane it
+   never saw.
+
+   **…and the comparison's BASIS is pinned rather than assumed** (arch-review 44 ②). Parity means *the stage
+   agrees with the plane this pass WROTE*, and step 4's entire content is making the settled plane come from
+   the stage instead. Write the comparison the obvious way at that point — against the plane being settled —
+   and it becomes the stage against itself: perfect agreement, on every pass, forever, with the readiness gate
+   reading it as evidence that the migration is safe. The only thing standing between the migration and that
+   outcome was the ORDER of two statements inside `aggregate` and a comment asking the next reader not to move
+   them. A migration whose safety rests on a comment is one nobody can take.
+
+   So the observation states what it was taken against (`ScoringStageParity.basisDigest`) and the promotion
+   checks it (`stagePromotionRefusal`'s second argument): a comparison whose basis is not the plane being
+   promoted from is REFUSED by name, and so is one that pinned no basis at all — "we cannot tell what this
+   was compared to" must never read as "the carriers". `promotionSafe` on the revision keeps its old meaning
+   (the DATA agreed); the basis is the promotion's admission check, so a code-defect guard never rewrites what
+   the observation recorded. `CURRENT_STAGE_PARITY_VERSION` is 2 accordingly — era 1's greens were gathered
+   while the basis was a convention, and the readiness gate counts only its own era.
+
+   Both are certified against a real database, not a fake: `packages/db/src/results/scoring-stage-round-trip.scenario.test.ts`
+   (env-gated on `EVERDICT_E2E_DATABASE_URL`) drives one embed-group re-score through `PgScoringStageStore` +
+   `PgScorecardStore` and asserts the staged bytes come back digest-identically through the jsonb column. It
+   has to be a real column: a fake `SqlClient` returns the object it was handed and the InMemory twin returns
+   the very array that was staged, so neither can disagree with itself — while the live paths differ by
+   design (`ScoreSchema.parse` defaults and declaration key order on one side, raw jsonb on the other), which
+   is the difference that made the comparison wrong for essentially every pass once before.
 
 4. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
    and with it the reason `prepareScore` exists at all.
@@ -254,6 +286,11 @@ expectedJudged === staged && staged === matched
 exactly the failure being guarded against. `orphaned` is separate from a value mismatch because it is the
 shape where a promotion would *invent* a row rather than write a different one.
 
+Neither is any of it the precondition on its own, because every one of those numbers is a statement about
+*some* plane. `basisDigest === scorePlaneDigest(the plane being promoted from)` is the clause that says
+**which** — without it the counts above are perfect for free the moment step 4 lands, since the plane they
+describe would be the one the stage produced (arch-review 44 ②).
+
 ## What this does NOT change
 
 - The revision ledger, its digests, and the gate pins — unchanged. This moves where judgments accumulate,
@@ -267,9 +304,10 @@ shape where a promotion would *invent* a row rather than write a different one.
 
 - **Stage lifetime.** An abandoned pass's rows are evidence of what it was doing (the same argument that kept
   the loser's analysis artifact). Sweep on a schedule, or keep them addressable as pass history?
-- **Embed groups.** They have no child rows; the stage would promote into the embedded scorecard. Not merely
-  "same shape, simpler": today they never reach the stage write at all (it sits inside `writeBackScores`,
-  behind the child-run early return), so they are a hard blocker on the fleet gate rather than a detail —
-  see step 3.
+- **Embed groups.** They have no child rows, so the stage promotes into the embedded scorecard. They now
+  reach the stage write (arch-review 44 ①, see step 3), which is what makes them observable at all; what is
+  still open is the contract-step shape — the settle already writes the whole embedded plane in one patch, so
+  there is no per-case carrier for step 4 to stop writing, and "scoreCase stops writing carriers" has no
+  embed-side counterpart to delete.
 - **Does `prepareScore` survive at all?** If the predicate reads the stage, the strip has no job. Deleting an
   activity is the clearest evidence this change paid for itself; keeping a vestigial one would be the opposite.

@@ -62,7 +62,9 @@ const docs = {
     description:
       "Lists the workspace's runs. Requires runs:read (viewer+). Without a query, scorecard child runs are " +
       "hidden (standalone activity list); with ?scorecardId only that batch's child runs are returned " +
-      "(case drill-down); with ?scope=all, standalone runs and scorecard children are returned together " +
+      "(case drill-down) — each row then carries `canonical`, the batch's commit-receipt verdict on that " +
+      "attempt (true = the case's answer, false = superseded, absent = no receipt for that case); with " +
+      "?scope=all, standalone runs and scorecard children are returned together " +
       "(the activity console's all-executions view, grouped by scorecard in the UI).",
     tags: ["run"],
     querystring: toJsonSchema(

@@ -1,5 +1,5 @@
 import type { CaseResult } from "@everdict/contracts";
-import type { ScorecardResponse, ServedCaseResult } from "@everdict/contracts/wire";
+import type { CaseRunRef, ScorecardResponse, ServedCaseResult } from "@everdict/contracts/wire";
 import type { ScorecardRecord } from "@everdict/db";
 import {
   evaluateVerdict,
@@ -29,8 +29,12 @@ function withEvidence(result: CaseResult): ServedCaseResult {
   return { ...result, evidenceStatus: evidenceStatus(result) };
 }
 
-export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
-  if (!record.scorecard) return { ...record, headlinePassRate: headlinePassRate(record) };
+// The receipt-canonical (case, trial) → child run map rides the detail (arch-review 44). It is served whether
+// or not the batch has results yet — a live batch's in-flight cases need the same door — and omitted entirely
+// when the ledger has nothing to say, so a client can tell "no answer" from "this answer".
+export function serveScorecard(record: ScorecardRecord, caseRuns?: CaseRunRef[]): ScorecardResponse {
+  const map = caseRuns !== undefined && caseRuns.length > 0 ? { caseRuns } : {};
+  if (!record.scorecard) return { ...record, ...map, headlinePassRate: headlinePassRate(record) };
   // The persisted summary is a snapshot of the aggregation semantics at settle time — a record aggregated
   // before the measurement gate can still carry a dead grader's mean:0 or a diagnostic's poisoned row. When
   // the per-case results are in hand (detail reads), the summary is RE-DERIVED under the current semantics,
@@ -48,6 +52,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   if (resolution.status === "unresolvable") {
     return {
       ...record,
+      ...map,
       summary,
       headlinePassRate: headline,
       policyResolution: "unresolvable",
@@ -69,6 +74,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   });
   return {
     ...record,
+    ...map,
     summary,
     scorecard: { ...record.scorecard, results },
     casePass: { pass, total },

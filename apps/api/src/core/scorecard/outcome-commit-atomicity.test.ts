@@ -182,6 +182,96 @@ describe("failure outcomes commit atomically — receipt + fenced terminal fail-
   });
 });
 
+// ── A FAILED BATCH'S SUMMARY IS THE LEDGER'S TOO (arch-review 44) ────────────────────────────────────
+//
+// The success settle counts receipt-vouched results only; the failure settle counted whatever this process
+// happened to hold. That asymmetry lands hardest exactly where it applies: a batch fails BECAUSE cases could
+// not be written, so the memory-derived summary over-counts precisely the cases nobody can find — and
+// ops-report, the flake lens and the workspace pulse read that number without knowing which path wrote it.
+
+// A receipt store whose commit throws for one case: the case ran, its outcome never reached the ledger.
+class UncommittableCase extends InMemoryCaseReceiptStore {
+  constructor(private readonly caseId: string) {
+    super();
+  }
+
+  override async commitCase(
+    receipt: CaseCommitReceipt,
+    settle: Parameters<InMemoryCaseReceiptStore["commitCase"]>[1],
+    runs: Parameters<InMemoryCaseReceiptStore["commitCase"]>[2],
+    attempts?: Parameters<InMemoryCaseReceiptStore["commitCase"]>[3],
+  ): ReturnType<InMemoryCaseReceiptStore["commitCase"]> {
+    if (receipt.caseId === this.caseId) throw new UpstreamError("UPSTREAM_ERROR", {}, "receipt store unreachable");
+    return super.commitCase(receipt, settle, runs, attempts);
+  }
+}
+
+describe("the failure settle summarizes over receipt-vouched results, not process memory", () => {
+  it("a failed batch counts only the case that committed — the uncommitted one is dropped and named", async () => {
+    const receipts = new UncommittableCase("c-lost");
+    const store = new InMemoryScorecardStore();
+    store.attachReceipts((id) => receipts.countFor(id));
+    const runs = new InMemoryRunStore();
+    runs.attachScorecards(store);
+    const datasets = new InMemoryDatasetRegistry();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch(job: CaseJob): Promise<CaseResult> {
+          // Two cases that genuinely disagree, so the two summaries cannot be confused: the vouched one
+          // passes, the one that never reached the ledger fails.
+          const pass = job.evalCase.id === "c-ok";
+          return {
+            caseId: job.evalCase.id,
+            harness: "h@1.0.0",
+            trace: [],
+            snapshot: { kind: "prompt", output: "" },
+            scores: [{ metric: "pass", graderId: "g", value: pass ? 1 : 0, pass }],
+          };
+        },
+      },
+      store,
+      runStore: runs,
+      datasets,
+      caseReceipts: receipts,
+      harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+    } as never);
+    await datasets.register("acme", {
+      id: "d",
+      version: "1.0.0",
+      tags: [],
+      cases: ["c-ok", "c-lost"].map((id) => ({
+        id,
+        env: { kind: "prompt" as const },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      })),
+    });
+
+    const record = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1.0.0" },
+      createdBy: "u",
+      retries: 0,
+    } as never);
+    // An unwritten case fails the batch (a summary may not count a result no reader will find).
+    expect(await settled(store, record.id)).toBe("failed");
+
+    // Only c-ok is on the ledger…
+    expect((await receipts.list(record.id)).map((r) => r.caseId)).toEqual(["c-ok"]);
+    // …and the persisted summary counts exactly that one: pre-fix it counted both, publishing passRate 0.5
+    // for a batch the ledger can only vouch for a pass in.
+    const failed = await store.get(record.id);
+    const pass = failed?.summary?.find((s) => s.metric === "pass");
+    expect(pass?.count).toBe(1);
+    expect(pass?.passRate).toBe(1);
+    // …and the drop is STATED on the batch's own timeline, never a silent shrink.
+    expect(failed?.steps?.some((s) => s.message.includes("uncommitted case(s) left out"))).toBe(true);
+  });
+});
+
 describe("carried retry results are INHERITED outcomes — materialized as child + receipt on the in-process driver", () => {
   it("retry-failed commits the carried pass to the retry batch's own ledger (it used to live only in process memory)", async () => {
     const { service, receipts, runs, store } = fixtures();

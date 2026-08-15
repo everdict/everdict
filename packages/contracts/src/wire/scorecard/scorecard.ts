@@ -38,7 +38,24 @@ export const ServedCaseResultSchema = CaseResultSchema.extend({
 });
 export type ServedCaseResult = z.infer<typeof ServedCaseResultSchema>;
 
+// WHICH CHILD RUN IS THIS (case, trial)'S ANSWER — the receipt ledger's answer, computed server-side.
+// Clients used to pair cases with child runs positionally (the Nth result ↔ the Nth child by createdAt),
+// which opens the WRONG replay the moment a case was retried: the superseded attempt is still a child of
+// the batch, and position is not identity. The ledger already knows; it just never rode the wire.
+export const CaseRunRefSchema = z.object({
+  caseId: z.string().describe("The dataset case this child run answers"),
+  trial: z.number().int().nonnegative().describe("Trial index within the case (0 on a single-trial batch)"),
+  runId: z.string().describe("The child run the batch's commit receipt named as this (case, trial)'s answer"),
+});
+export type CaseRunRef = z.infer<typeof CaseRunRefSchema>;
+
 export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
+  caseRuns: z
+    .array(CaseRunRefSchema)
+    .optional()
+    .describe(
+      "Receipt-canonical (case, trial) → child run map (detail only). The ONLY correct way to open a case's execution detail: a retried case has several children and only the receipted one is this batch's evidence. Absent = no receipt ledger for this batch (ingested/pre-receipt records)",
+    ),
   scorecard: ScorecardSchema.extend({ results: z.array(ServedCaseResultSchema) }).optional(),
   casePass: z
     .object({ pass: z.number().int().nonnegative(), total: z.number().int().nonnegative() })

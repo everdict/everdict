@@ -41,6 +41,17 @@ export interface OpenAttemptInput {
 // decision while any stamp of it is best-effort: a best-effort write that something depends on is a
 // fail-open wearing a ledger's clothes.
 //
+// WHAT THE STANDALONE LANE OWES IN THE MEANTIME (arch-review 44), since it cannot yet be atomic: ① the
+// terminal stamp is AWAITED at the settle it records, never fired and forgotten — a driver that exits after
+// settling has already written the row, so the only surviving window is a stamp that actually fails; and
+// ② the attempt is addressed by its OWN coordinate, so an execution the recording fence refused
+// (`unisolated`) still reaches a terminal state instead of standing at `created` for a run that succeeded.
+// A stamp that fails is still swallowed, deliberately: failing a SUCCEEDED run because its diagnostic row
+// could not be written would let the audit plane decide outcomes, which is the inversion this whole comment
+// exists to prevent. It costs an incomplete row, and the reconciliation for those is the same one every
+// pre-promotion row needs — an attempt row whose execution has a terminal child is not the child's authority
+// on anything.
+//
 // TWO MINTING AUTHORITIES WOULD DRIFT. `open` is THE authority for the attempt ordinal: it computes MAX+1
 // per executionId and returns the coordinate. The recording store, which used to mint its own by the same
 // rule over its own table, now CLAIMS the coordinate it is handed (RecordingStore.open's `generation`

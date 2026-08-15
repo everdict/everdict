@@ -825,6 +825,7 @@ export class RunService {
       { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
       { executionId: runId, tenant: record.tenant, childRunId: record.id, driverEpoch: epoch },
     );
+    this.rememberAttempt(runId, attempt);
     if (attempt.generation !== undefined) {
       this.attempt.set(runId, attempt.generation); // …and it rides onto the job below (CaseJob.recordingGeneration)
     }
@@ -885,6 +886,24 @@ export class RunService {
   // …and the recording ATTEMPT it is serving (mig 0173). Every append and the seal carry it; the store
   // refuses a producer holding any other number, which is what revokes an attempt that came back.
   private readonly attempt = new Map<string, number>();
+  // ── THE PHYSICAL ATTEMPT THIS DISPATCH IS, BY NAME (arch-review 44) ────────────────────────────────
+  //
+  // The map above is a RECORDING FENCE — a number producers stamp — and it is absent whenever the recording
+  // claim was refused (`unisolated`). Everything that has to NAME the attempt was deriving itself from that
+  // number, so an unisolated execution named nothing: its ledger row was opened, the run then succeeded, and
+  // the row still said `created` because the terminal stamp had no coordinate to address. Two ledgers that
+  // are opened together must be closed together, so the coordinate is kept in its own right.
+  private readonly attemptRow = new Map<string, string>();
+
+  // The one place a dispatch learns its attempt's name: the ledger's row id when a row was opened, else the
+  // coordinate the recording generation spells (a deployment with recordings and no attempt ledger still has
+  // real attempts — they are simply unrecorded as rows).
+  private rememberAttempt(executionId: string, attempt: { attemptId?: string; generation?: number }): void {
+    const named =
+      attempt.attemptId ??
+      (attempt.generation !== undefined ? attemptIdOf(executionId, attempt.generation) : undefined);
+    if (named !== undefined) this.attemptRow.set(executionId, named);
+  }
 
   // The settle's authority, as this process holds it. Absent = a run this process never dispatched (a
   // self-hosted lease reporting in, a legacy row) — unfenced exactly as before, never invented.
@@ -913,6 +932,7 @@ export class RunService {
           ...(epoch !== undefined ? { driverEpoch: epoch } : {}),
         },
       );
+      this.rememberAttempt(`evd-run-${id}`, attempt);
       if (attempt.generation !== undefined) this.attempt.set(`evd-run-${id}`, attempt.generation);
     }
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
@@ -972,6 +992,7 @@ export class RunService {
         // name it as the execution that produced the result.
         onAttempt: (generation) => {
           this.attempt.set(`evd-run-${id}`, generation);
+          this.rememberAttempt(`evd-run-${id}`, { generation });
         },
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
@@ -1057,6 +1078,7 @@ export class RunService {
       if (committed && result.trace.length > 0)
         void this.sealPlanes(id, input.tenant, result.trace, {
           ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
+          ...this.attemptIdentity(id),
         });
     } catch (err) {
       const error =
@@ -1075,9 +1097,11 @@ export class RunService {
       if (committed && failed.trace.length > 0)
         void this.sealPlanes(id, input.tenant, failed.trace, {
           ...(failed.traceT0 !== undefined ? { t0: failed.traceT0 } : {}),
+          ...this.attemptIdentity(id),
         });
     }
     this.attempt.delete(`evd-run-${id}`); // this process is done recording for this run
+    this.attemptRow.delete(`evd-run-${id}`); // …and its attempt has reached a terminal state above
     // Completion notification (Mattermost etc.) — with the latest record, and only for the writer whose
     // settlement COMMITTED. Failure is independent of the run result (swallow). Independent of the webhook.
     if (committed && this.deps.onComplete) {
@@ -1104,23 +1128,41 @@ export class RunService {
   // Still dual-write HERE, deliberately (arch-review 43): the batch lane's terminal stamps are transactional
   // now because a batch case commits through `commitCase`, one transaction that a stamp can join. A standalone
   // run's finalize is a fenced `settleRun` with no receipt transaction around it, so there is nothing to ride
-  // yet — this lane's promotion follows when runs get a receipt commit point of their own.
+  // yet — this lane's promotion follows when runs get a receipt commit point of their own. What the caller
+  // owes it in the meantime is the ORDER: every terminal stamp is awaited immediately after the settle whose
+  // answer it records, so a process that exits after settling has already written the row it is about to be
+  // asked about (arch-review 44).
+  //
+  // The coordinate is the ATTEMPT's, not the recording fence's (see `attemptRow`) — an attempt that ran
+  // unisolated has a row and no generation, and it is exactly the execution whose ending matters most.
   private async stampAttempt(
     id: string,
     to: ExecutionAttemptState,
     patch?: { error?: { code: string; message: string } },
   ): Promise<void> {
     const attempts = this.deps.attempts;
-    const generation = this.attempt.get(`evd-run-${id}`);
-    if (!attempts || generation === undefined) return;
-    await attempts
-      .transition(attemptIdOf(`evd-run-${id}`, generation), to, { childRunId: id, ...patch })
-      .catch(() => {});
+    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    if (!attempts || attemptId === undefined) return;
+    await attempts.transition(attemptId, to, { childRunId: id, ...patch }).catch(() => {});
+  }
+
+  // WHOSE EVIDENCE THIS IS, spelled the way the ledger spells it (arch-review 44). The seal used to derive
+  // `attemptIdOf(runId, …)` from the RECORD id, so a standalone run's trajectory claimed to come from
+  // `<recordId>#g0` — a coordinate no ledger, receipt or artifact key has ever used (they are all keyed on
+  // the EXECUTION id, `evd-run-<recordId>`). A reader holding that trajectory beside the attempt ledger could
+  // not join the two, which is the only thing the field is for. Absent when this dispatch opened no attempt:
+  // "not stated" is a fact, an invented coordinate is not.
+  private attemptIdentity(id: string): { attemptId?: string } {
+    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    return attemptId === undefined ? {} : { attemptId };
   }
 
   private async markRunning(id: string): Promise<void> {
     // Compute actually began — the ledger's `executing`, stamped beside the run's own queued→running flip.
-    void this.stampAttempt(id, "executing");
+    // Awaited: the caller already fires this hook with `void`, so nothing is blocked by ordering the two
+    // writes, and an un-awaited stamp could land after the terminal one (where the state machine refuses it
+    // and the row silently loses the fact that this attempt ever started).
+    await this.stampAttempt(id, "executing");
     try {
       const rec = await this.deps.store.get(id);
       if (!rec || rec.status !== "queued") return;
@@ -1294,7 +1336,11 @@ export class RunService {
     runId: string,
     tenant: string,
     events: TraceEvent[],
-    owned?: { record?: RunRecord; t0?: string },
+    // WHOSE evidence this is (review 39 P1, corrected in arch-review 44). A re-driven run keeps its
+    // correlation id on purpose, so the seal has to say which physical attempt produced the plane — and the
+    // caller is the one that knows: an eval run passes its dispatch's attempt (see `attemptIdentity`), an
+    // agent turn has no physical attempt and passes none.
+    owned?: { record?: RunRecord; t0?: string; attemptId?: string },
   ): Promise<void> {
     const store = this.deps.trajectories;
     if (!store) return;
@@ -1303,10 +1349,7 @@ export class RunService {
       runId,
       tenant,
       events,
-      // WHOSE evidence this is (review 39 P1). A re-driven run keeps its correlation id on purpose, so the
-      // seal has to say which physical attempt produced the plane — the same name the artifact key and the
-      // receipt use.
-      attemptId: attemptIdOf(runId, this.attempt.get(runId) ?? 0),
+      ...(owned?.attemptId !== undefined ? { attemptId: owned.attemptId } : {}),
       ...(audience?.scope === "member" ? { owner: audience.subject } : {}),
       ...(owned?.record !== undefined ? runEvidenceIdentity(owned.record) : {}),
       ...(owned?.t0 !== undefined ? { t0: owned.t0 } : {}),

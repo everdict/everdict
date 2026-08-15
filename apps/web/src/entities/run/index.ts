@@ -1,5 +1,7 @@
 export {
   runCaseSpecSchema,
+  runListItemSchema,
+  runListSchema,
   runSchema,
   runsSchema,
   scoreSchema,
@@ -9,6 +11,7 @@ export {
   usageSchema,
   type Run,
   type RunCaseSpec,
+  type RunListItem,
   type RunStatus,
   type Score,
   type TraceEvent,

@@ -1290,7 +1290,11 @@ export class ScorecardBatchService {
       harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
       results,
     };
-    await offloadResults(this.deps, id, results);
+    // No batch-level offload here at all (arch-review 44): these results are CHILD ROWS' copies — this
+    // finalize reads nothing else, and it refuses above when a planned case has no child carrying one — so
+    // every one of them was offloaded per attempt inside its own commit. The pass was a no-op over bytes
+    // that had already moved, and re-running it on rows the ledger has vouched for is worse than useless:
+    // it would edit the very copies the digest checks above just compared.
     await this.checkReceiptParity(id, results);
     const summary = summarizeScorecard(scorecard);
     // Read-guarded terminal write, checked BEFORE the artifact/export writes: a supersede that raced the
@@ -1932,7 +1936,19 @@ export class ScorecardBatchService {
     // batch is materialized as THIS batch's seeded child + inherited receipt at retry time, so every counted
     // outcome — executed, failed, inherited — is held to the same receipt gate. The exception was the one
     // hole in it: a counted case with no receipt, no child and no digest, invisible to every reader.
-  ): Promise<{ results: CaseResult[]; receipts?: CaseCommitReceipt[] }> {
+    //
+    // ── `lenient`: COUNT ONLY THE VOUCHED, BUT DO NOT REFUSE (arch-review 44) ────────────────────────
+    //
+    // The refusal above is the SUCCESS gate's: a batch that claims every case passed may not be summarized
+    // over results the ledger cannot vouch for, and failing it leaves the batch open for recovery. A batch
+    // that is already ending badly — failed, or reclaimed mid-flight — has nowhere better to be left: an
+    // unaccounted case there is the ordinary shape (the very failure being recorded is often why a case never
+    // committed), and throwing would only replace a failure record with an unhandled rejection and a batch
+    // stuck open. So the same accounting runs and the unaccounted cases are DROPPED rather than counted:
+    // the numbers ops-report, flake and pulse read stay receipt-vouched on every path, and `dropped` says
+    // what was left out instead of the summary quietly disagreeing with the ledger.
+    opts?: { lenient: true },
+  ): Promise<{ results: CaseResult[]; receipts?: CaseCommitReceipt[]; dropped?: string[] }> {
     const runStore = this.deps.runStore;
     const receipts = this.deps.caseReceipts;
     if (!runStore || !receipts || inMemory.length === 0) return { results: inMemory };
@@ -1975,15 +1991,55 @@ export class ScorecardBatchService {
       }
       unaccounted.push(`${key} (digest mismatch)`);
     }
-    if (unaccounted.length > 0)
-      throw new InternalError(
-        "UPSTREAM_ERROR",
-        { scorecard: id, unaccounted: unaccounted.slice(0, 20), count: unaccounted.length },
-        `${unaccounted.length} counted case(s) cannot be traced to a committed receipt — the batch cannot be summarized from results the ledger does not vouch for`,
-      );
+    if (unaccounted.length > 0) {
+      if (!opts?.lenient)
+        throw new InternalError(
+          "UPSTREAM_ERROR",
+          { scorecard: id, unaccounted: unaccounted.slice(0, 20), count: unaccounted.length },
+          `${unaccounted.length} counted case(s) cannot be traced to a committed receipt — the batch cannot be summarized from results the ledger does not vouch for`,
+        );
+      return { results: rebuilt, receipts: committed, dropped: unaccounted };
+    }
     // The receipts ride back with the rebuild: they are the settle's READ-SET, and the decision context
     // freezes exactly this list (never a re-read, which could see a ledger the summary was not built over).
     return { results: rebuilt, receipts: committed };
+  }
+
+  // ── A BADLY-ENDING BATCH IS COUNTED THE SAME WAY A GOOD ONE IS (arch-review 44) ──────────────────────
+  //
+  // The failure and supersede settles persist a `summary`, and nothing downstream knows it was built
+  // differently: ops-report, the flake lens and the workspace pulse read the same field on every record. They
+  // were reading this process's MEMORY on those paths — every result the loop happened to hold, receipted or
+  // not — while the success path had already been moved onto the ledger. That is not a small difference for
+  // exactly the batches it applies to: a batch fails BECAUSE cases went unwritten, so the memory-derived
+  // summary over-counts precisely where the discrepancy is largest.
+  //
+  // Lenient by construction (see resultsFromLedger): a failed batch may legitimately have unaccounted cases —
+  // it is failed, that is what the record says. What it may not have is a summary counting them.
+  private async vouchedForSettle(
+    id: string,
+    tenant: string,
+    scorecard: Scorecard,
+    note: (message: string) => void,
+  ): Promise<Scorecard> {
+    try {
+      const accounted = await this.resultsFromLedger(id, tenant, scorecard.results, { lenient: true });
+      const dropped = accounted.dropped ?? [];
+      if (dropped.length > 0)
+        note(
+          `summary counts ${accounted.results.length} receipt-vouched case(s); ${dropped.length} uncommitted case(s) left out (${dropped.slice(0, 3).join(", ")})`,
+        );
+      return { ...scorecard, results: accounted.results };
+    } catch (err) {
+      // A ledger that cannot be READ is the one thing this cannot resolve honestly, and refusing is not
+      // available here: the batch is ending either way, and a settle that throws leaves it open with nobody
+      // coming back for it. So it falls back to memory and SAYS SO on the timeline — a stated approximation,
+      // never a silent one.
+      note(
+        `summary could not be reconciled against the ledger (${err instanceof Error ? err.message : String(err)}) — counted from this process's results`,
+      );
+      return scorecard;
+    }
   }
 
   // ── THE LEDGER AND THE RECEIPTS MUST AGREE (review 39, Phase 1 parity) ───────────────────────────────
@@ -2003,10 +2059,10 @@ export class ScorecardBatchService {
       const committed = await receipts.list(id);
       if (committed.length === 0) return; // nothing claimed (a batch that predates the store) — nothing to say
       // Failures included: the failure exit commits a receipt too (review 40 P0), so a counted failure with
-      // no receipt is exactly the disagreement this exists to surface. The DIGESTS are no longer compared
-      // here — they are enforced at the gates (resultsFromLedger / the finalize divergence check), and this
-      // read runs after offloadResults may have touched the in-memory copies, so a byte comparison against
-      // memory would cry wolf about mutations the ledger never saw.
+      // no receipt is exactly the disagreement this exists to surface. The DIGESTS are not compared here —
+      // they are enforced at the gates (resultsFromLedger / the finalize divergence check), which own the
+      // question and answer it against the ledger's own bytes. A key-set comparison is the part memory can
+      // still be trusted with: which cases this process counted, not what it thinks they contain.
       const ledgerKeys = new Set(counted.map((r) => childKey(r.caseId, r.trial)));
       const receiptKeys = new Set(committed.map((r) => childKey(r.caseId, r.trial)));
       const uncounted = [...receiptKeys].filter((k) => !ledgerKeys.has(k));
@@ -3055,6 +3111,11 @@ export class ScorecardBatchService {
           "Replaced by a newer fire of the same PR — remaining cases not fired, only partial results kept",
         );
         const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
+        // …and the partial summary counts what the LEDGER holds, exactly as the success path's does — a
+        // reclaimed batch's partials are the numbers a reader compares against the fire that replaced it.
+        // Reconciled BEFORE the write-back, for the same reason the success path is ordered that way: the
+        // committed children are compared against their own receipts, never against later bytes.
+        const counted = await this.vouchedForSettle(id, tenant, scorecard, (m) => pushStep("persist", "info", m));
         if (hasChildren) await this.writeBackResults(id, caseToChild, scorecard.results, { scorecardId: id, epoch });
         // The record was already marked superseded by supersedeInFlight — settle it with the partial outcome
         // (a legal re-write of a superseded record; the domain rejects it over succeeded/failed).
@@ -3065,12 +3126,17 @@ export class ScorecardBatchService {
             id,
             ScorecardBatch.from(reclaimed).settleAborted(
               {
-                ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
+                ...(counted.results.length > 0 ? { summary: summarizeScorecard(counted) } : {}),
                 ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
                 steps: [...steps],
                 ...(hasChildren && seedChildBacked
                   ? { runIds: [...seedRunIds, ...caseToChild.values()] }
-                  : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
+                  : // The embed is the summary's own basis, never a wider set: a reader who re-derives the
+                    // numbers from the results this record carries must land on the numbers it published.
+                    {
+                      scorecard: counted,
+                      ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}),
+                    }),
               },
               this.now(),
             ).patch,
@@ -3139,7 +3205,22 @@ export class ScorecardBatchService {
         await flushSteps();
       }
       phase = "offload";
-      await offloadResults(this.deps, id, scorecard.results); // os-use screenshots → object storage (slim record)
+      // ── THE EMBED PATH'S OFFLOAD, AND ONLY ITS (arch-review 44) ──────────────────────────────────────
+      //
+      // Every case that has a CHILD had its snapshot offloaded per attempt, under `attempts/<attemptId>`, by
+      // `assembleCaseEvidence` inside the commit — which is where it belongs: keyed by the execution that
+      // produced the bytes, so a losing attempt cannot overwrite a winner's screenshot. Running this batch-
+      // level pass over the same results afterwards did nothing (`offloadSnapshot` finds an emptied
+      // `screenshot` and an already-sliced `dom` and returns the snapshot unchanged) and, for the results the
+      // reconciliation replaces with the committed child's copy a few lines below, the mutation was discarded
+      // even when it did fire. What it was NOT is harmless in principle: it mutates in-memory results between
+      // the receipt that vouched for their bytes and the digest comparison that checks them, which is a
+      // cry-wolf divergence waiting for the day it stops being a no-op.
+      //
+      // A batch with NO run store has no child, hence no per-attempt assembly (see finalizeCaseAttempt's
+      // early return) — its results are embedded on the parent record raw, and this is the only pass that
+      // slims them. That is the one case still served, so that is the case it now runs for.
+      if (!this.deps.runStore) await offloadResults(this.deps, id, scorecard.results);
       // Trace-sink export (when configured) — even if it fails, the scorecard succeeds (recorded via outcome.status only, no error.phase).
       // With streaming (exportStream), cases already went out right after judging — here it's just joining remaining tasks + summing the outcome.
       // If not wired, fall back to the current batched export. TraceSinkService already doesn't throw, but isolate here too just in case.
@@ -3300,17 +3381,31 @@ export class ScorecardBatchService {
       // Preserve partial results — on a post-dispatch (judge/offload) failure, persist the case results already gathered for visibility.
       // With child runs, mirror the success path: runIds references (partial) instead of embed + write back results to the children.
       const hasChildren = caseToChild.size > 0 || seedRunIds.length > 0;
+      // THE FAILED BATCH'S NUMBERS ARE THE LEDGER'S TOO (arch-review 44). A failure is the path most likely to
+      // hold results that never committed — that is often the very reason it failed — so counting this
+      // process's memory here published the least trustworthy summary in the system as an ordinary one.
+      // Lenient: the cases it cannot vouch for are dropped and named on the timeline, never a second throw
+      // inside the handler that exists to record the first one.
+      //
+      // BEFORE the write-back, which is the success path's order and for its reason: the reconciliation
+      // compares each committed child's bytes against its receipt, and a write-back that lands first would
+      // have it comparing against bytes written after the receipt was stamped.
+      const counted = scorecard
+        ? await this.vouchedForSettle(id, tenant, scorecard, (m) => pushStep("persist", "info", m))
+        : undefined;
+      // Partial evidence still reaches the children — every result this process holds, not only the counted
+      // ones: a case that could not commit is exactly the one whose row a reader will come looking at.
       if (scorecard && hasChildren)
         await this.writeBackResults(id, caseToChild, scorecard.results, { scorecardId: id, epoch });
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const extras: ScorecardOutcomeExtras = {
         steps: [...steps],
         ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}),
-        ...(scorecard
+        ...(counted
           ? {
-              summary: summarizeScorecard(scorecard),
-              models: scorecardModels(scorecard, declared),
-              ...(hasChildren ? {} : { scorecard }), // with children, skip embed (get hydrates)
+              summary: summarizeScorecard(counted),
+              models: scorecardModels(counted, declared),
+              ...(hasChildren ? {} : { scorecard: counted }), // with children, skip embed (get hydrates)
             }
           : {}),
       };

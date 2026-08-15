@@ -33,7 +33,14 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 records their ids in `runIds`. Child runs are **hidden from the default run/activity list**
 (`RunStore.list` filters `parentScorecardId IS NULL`) so a batch doesn't flood it; fetch a batch's children with
 `list(tenant, {scorecardId})` (`GET /runs?scorecardId=` / MCP `list_runs scorecard_id`), which powers the scorecard
-detail's case→run drill-down. The activity console can also show **all executions at once** —
+detail's case→run drill-down. **WHICH child is a case's answer is the receipt ledger's call, and it is now
+SERVED** (arch-review 44): the detail response carries `caseRuns` — the receipt-canonical `(caseId, trial) →
+runId` map (`ScorecardService.canonicalCaseRuns` over `ScorecardBatch.canonicalChildPerCase`) — and every row of
+`GET /runs?scorecardId=` carries `canonical` (true = the receipted attempt, false = a superseded one, **absent =
+no receipt for that case**, which is unknown and never drawn as superseded). Clients used to pair the Nth result
+with the Nth child by `createdAt` and fall back to the last child, which is exactly the shape a retry produces —
+so a retried case's replay link opened the SUPERSEDED attempt while the row beside it showed the committed one's
+verdict. Position is not identity. The activity console can also show **all executions at once** —
 `list(tenant, {includeChildren})` (`GET /runs?scope=all` / MCP `list_runs scope:"all"`), where the web groups
 children under their scorecard. The scorecard is the eval lens; the run list is the execution lens over the same runs.
 **Storage is deduped**: a dispatched scorecard stores `runIds` only (not the heavy `scorecard` embed) — `track`

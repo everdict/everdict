@@ -120,3 +120,39 @@ describe("stagePromotionRefusal — one spelling of why a pass may not be promot
     expect(refusal).toContain("missingFromStage=1");
   });
 });
+
+// arch-review 44 ②. A COMPARISON RE-BASED ONTO THE PROMOTED PLANE COMPARES THE STAGE WITH ITSELF.
+//
+// Parity means "the stage agrees with the plane this pass WROTE". The contract step's entire content is
+// making the settled plane come from the stage instead — and the natural way to write that (compare against
+// the plane being settled) produces perfect agreement on every pass, forever, with the fleet gate reading it
+// as evidence that the migration is safe. Nothing checked this: the basis was the order of two statements in
+// one private method and a comment asking the next reader not to move them.
+describe("stagePromotionRefusal — the comparison must be about the plane being promoted from", () => {
+  const carrierPlane = scorePlaneDigest([result("c1", [grader, judge("a", 1)])]);
+  const promotedPlane = scorePlaneDigest([result("c1", [grader, judge("a", 0)])]);
+
+  it("says nothing when the comparison's basis IS the plane being promoted from", () => {
+    expect(stagePromotionRefusal(parity({ basisDigest: carrierPlane }), carrierPlane)).toBeUndefined();
+  });
+
+  it("refuses a comparison taken against a DIFFERENT plane, and names both", () => {
+    // Pre-fix this returned undefined — a perfect parity report about some other plane promoted silently.
+    const refusal = stagePromotionRefusal(parity({ basisDigest: promotedPlane }), carrierPlane);
+    expect(refusal).toContain("compares the stage with itself");
+    expect(refusal).toContain(promotedPlane);
+    expect(refusal).toContain(carrierPlane);
+  });
+
+  it("refuses an observation that never pinned a basis — 'we cannot tell' is not 'the carriers'", () => {
+    // Fail-closed on the era gap too: an unpinned comparison was produced by code that did not state what it
+    // compared, which is precisely the answer a promotion must not read optimistically.
+    expect(stagePromotionRefusal(parity(), carrierPlane)).toContain("did not pin the plane");
+  });
+
+  it("does not examine the basis for a caller that is not promoting", () => {
+    // `promotionSafe` on the revision stays a statement about the DATA — the basis is the promotion's
+    // admission check, so a code-defect guard never rewrites what the observation recorded.
+    expect(stagePromotionRefusal(parity())).toBeUndefined();
+  });
+});

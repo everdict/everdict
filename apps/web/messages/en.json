@@ -2499,7 +2499,9 @@
     "sessionTurns": "{n, plural, one {# turn} other {# turns}}",
     "sessionOpenTitle": "Open the conversation",
     "turnCell": "turn · {cause}",
-    "caseCell": "case {id}"
+    "caseCell": "case {id}",
+    "superseded": "Superseded",
+    "supersededHint": "This case was retried — the scorecard's result stands on a later attempt, not on this run."
   },
   "runtimesPage": {
     "title": "Runtimes",
