@@ -8,7 +8,7 @@ import type {
   SeriesVerdict,
 } from "@everdict/contracts";
 import { contentDigest, digestsMatch } from "../provenance/content-digest.js";
-import { scoringPinInputDiverged } from "../scorecard/scoring-revision.js";
+import { decisionInputTrustOf, scoringPinInputDiverged } from "../scorecard/scoring-revision.js";
 import { type WorldCohort, crossWorldReason } from "../scorecard/world-cohort.js";
 
 // Release readiness is PURE arithmetic over what the caller already fetched — no store, no I/O (the tracker's
@@ -410,12 +410,23 @@ export interface SeriesGateReading {
 // that. Total and read-only: an absent or incomplete observation says nothing here (unmeasured is not
 // divergence), so every pre-ledger release keeps reading as it did.
 function inputDivergenceReason(side: "newest evaluation" | "baseline", pin: GateScoringPin | undefined): string[] {
-  const diverged = scoringPinInputDiverged(pin);
-  return diverged === undefined
-    ? []
-    : [
-        `this series' ${side} judged ${diverged} case(s) whose execution the receipt ledger no longer vouches for — those verdicts describe bytes that have since been replaced, so they cannot anchor a ship decision`,
-      ];
+  const trust = decisionInputTrustOf(pin);
+  if (trust === "diverged") {
+    const diverged = scoringPinInputDiverged(pin) ?? 0;
+    return [
+      `this series' ${side} judged ${diverged} case(s) whose execution the receipt ledger no longer vouches for — those verdicts describe bytes that have since been replaced, so they cannot anchor a ship decision`,
+    ];
+  }
+  // UNVERIFIED input blocks the release surface too (arch-review 47 P0-3): an ingest scorecard by design
+  // records that no receipt stands behind what its judges read, and "recorded but implicitly green" was the
+  // gap — a ship decision is the strictest reader, so there is no waiver channel here (the CI gate's
+  // allowUnverifiedInput is a per-decision acknowledgement; a release ships on vouched evidence). A LEGACY
+  // pin (pre-observation history) stays readable — history is not retroactively re-judged.
+  if (trust === "unavailable")
+    return [
+      `this series' ${side} states that no receipt vouches for what its judges read — unvouched evidence cannot anchor a ship decision`,
+    ];
+  return [];
 }
 
 // A series' release verdict. NOT EVALUATED IS NEVER GREEN: a required series with no run blocks the ship —

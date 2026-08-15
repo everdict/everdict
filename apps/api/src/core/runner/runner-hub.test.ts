@@ -418,6 +418,45 @@ describe("RunnerHub", () => {
     await expect(dispatched).resolves.toMatchObject({ generation: 11 });
   });
 
+  it("a SLOW mint whose lease expired mid-open cannot roll the entry back to its own attempt (arch-review 47 P0-2)", async () => {
+    // epoch-2's open stalls; the TTL expires; epoch-3 re-leases and restamps generation 12. When the stale
+    // open finally resolves, it must assign NOTHING — pre-fix it wrote its generation over the entry, and
+    // epoch-3's evidence (its token passes the epoch fence) was then attributed to epoch-2's attempt.
+    let t = 0;
+    let opened = 10;
+    const gate: Array<() => void> = [];
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: (() => {
+        let calls = 0;
+        return async () => {
+          calls += 1;
+          if (calls === 1) await new Promise<void>((r) => gate.push(r)); // epoch-2's open stalls here
+          return ++opened;
+        };
+      })(),
+    });
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 0); // epoch 1 — runs the dispatch's attempt (no mint)
+    t = 201;
+    const slowMint = hub.leaseWait(keyA, 0); // epoch 2 — its open parks on the gate
+    await new Promise((r) => setImmediate(r));
+    t = 402; // epoch 2's lease expires while its open sleeps
+    const third = await hub.leaseWait(keyA, 0); // epoch 3 — mints generation 11
+    expect(third?.attempt.leaseEpoch).toBe(3);
+    expect(third?.job.recordingGeneration).toBe(11);
+    gate[0]?.(); // the stale epoch-2 open finally resolves (generation 12)
+    const second = await slowMint;
+    // The lost claim yields NO job…
+    expect(second).toBeNull();
+    // …and the CURRENT attempt is still epoch-3's: the fence answers 11, never the stale mint's 12.
+    expect(await hub.authorizeAttempt(keyA, { jobId: "j1", leaseEpoch: 3 })).toMatchObject({
+      recordingGeneration: 11,
+    });
+  });
+
   it("a re-lease whose attempt cannot be opened carries NO generation — the durable lane refuses instead of merging", async () => {
     let t = 0;
     const hub = new RunnerHub({

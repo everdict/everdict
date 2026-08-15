@@ -230,6 +230,25 @@ export function currentScoringPin(scoring: ScoringRevision[] | undefined): GateS
 // Does a pinned judgment KNOW its verdicts were derived from bytes the ledger no longer vouches for? Total,
 // and deliberately conservative: only a COMPLETED observation reporting divergence answers yes. An absent or
 // incomplete observation is unmeasured — a different fact, whose consequences its readers decide.
+// ── THE INPUT'S TRUST CLASS, AS ONE VOCABULARY (arch-review 47 P0-3) ─────────────────────────────────
+//
+// Every decision surface (the CI gate, product readiness) classifies a pinned judgment's input the same
+// way, so "recorded doubt" cannot pass one gate and block another:
+//   receipt_vouched   — the observation completed and every judged case matched its receipt
+//   diverged          — the observation completed and REPORTED divergence (never waivable)
+//   unavailable       — the observation ran and could not vouch (ingest, ledger outage) — waivable only by
+//                       the recorded allowUnverifiedInput policy
+//   legacy_unverified — the revision predates input observation entirely; visible on the pin, not refused
+//                       (a pre-feature history is not retroactively re-judged)
+export type DecisionInputTrust = "receipt_vouched" | "diverged" | "unavailable" | "legacy_unverified";
+
+export function decisionInputTrustOf(pin: GateScoringPin | undefined): DecisionInputTrust {
+  const observed = pin?.inputObservation;
+  if (observed === undefined) return "legacy_unverified";
+  if (!observed.completed) return "unavailable";
+  return observed.diverged !== undefined && observed.diverged > 0 ? "diverged" : "receipt_vouched";
+}
+
 export function scoringPinInputDiverged(pin: GateScoringPin | undefined): number | undefined {
   const observed = pin?.inputObservation;
   if (observed === undefined || !observed.completed) return undefined;

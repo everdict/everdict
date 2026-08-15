@@ -129,7 +129,10 @@ export class StoreRunnerHub {
       });
       if (claimed) {
         const job = await this.mintAttempt(claimed, key);
-        return { jobId: claimed.jobId, job, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
+        // A lost mint (CAS miss — see mintAttempt) hands out NOTHING; the loop re-claims. Handing the
+        // runner a job whose row the store will never authorize is duplicate compute plus an orphan.
+        if (job !== null)
+          return { jobId: claimed.jobId, job, attempt: { jobId: claimed.jobId, leaseEpoch: claimed.leaseEpoch } };
       }
       const remaining = deadline - this.now();
       if (remaining <= 0) return null;
@@ -143,12 +146,17 @@ export class StoreRunnerHub {
   // that lived only in this reply would leave the durable lane still handing out the previous attempt's.
   // A failed open strips the inherited number (fail-closed → the live-only lane); a failed restamp is NOT
   // swallowed, so the runner never receives a lease whose row still points at the other execution.
-  private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob> {
+  private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob | null> {
     if (claimed.leaseEpoch <= 1 || !this.openAttempt) return claimed.job;
     const generation = await this.openAttempt(claimed.job).catch(() => undefined);
     const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
     const job = generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: generation };
-    await this.store.restampJob(claimed.jobId, key.runnerId, claimed.leaseEpoch, job);
+    // The restamp's answer IS the claim's answer (arch-review 47 P1-1): false means the row moved while the
+    // open was in flight — a cancel, an expiry sweep, another claim — and the store will refuse every
+    // authorize/complete under this lease. The boolean was ignored, so the runner received a job it could
+    // execute but never report: duplicate compute, an orphan attempt, and a result the ledger never saw.
+    const restamped = await this.store.restampJob(claimed.jobId, key.runnerId, claimed.leaseEpoch, job);
+    if (!restamped) return null;
     return job;
   }
 

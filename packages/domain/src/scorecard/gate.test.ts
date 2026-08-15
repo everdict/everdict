@@ -1,5 +1,6 @@
+import type { GateScoringPin } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type GateInput, evaluateGate } from "./gate.js";
+import { type GateEvaluation, type GateInput, applyInputTrust, evaluateGate } from "./gate.js";
 
 const base = (over: Partial<GateInput>): GateInput => ({
   baseline: "b",
@@ -583,5 +584,54 @@ describe("evaluateGate — per-metric coverage loss (silent grader omission)", (
       { maxRegressions: 0 },
     );
     expect(g.decision).toBe("pass");
+  });
+});
+
+// ── RECORDED DOUBT IS ENFORCED DOUBT (arch-review 47 P0-3) ───────────────────────────────────────────
+describe("applyInputTrust — the pins' input observation is a judgment condition, not an attachment", () => {
+  const passEvaluation = (): GateEvaluation => ({
+    decision: "pass",
+    reasons: [],
+    evidence: { comparability: "full" } as GateEvaluation["evidence"],
+  });
+  const pin = (inputObservation?: { completed: boolean; diverged?: number }): GateScoringPin =>
+    ({
+      revision: 1,
+      scorePlaneDigest: "sha256:x",
+      ...(inputObservation ? { inputObservation } : {}),
+    }) as GateScoringPin;
+
+  it("a COMPLETED divergence downgrades the decision to not_comparable — no policy waives a known-wrong subject", () => {
+    const out = applyInputTrust(
+      passEvaluation(),
+      { candidate: pin({ completed: true, diverged: 2 }) },
+      { maxRegressions: 0, allowUnverifiedInput: true }, // even the waiver does not cover divergence
+    );
+    expect(out.decision).toBe("not_comparable");
+    expect(out.reasons[0]).toMatchObject({ kind: "input_diverged", count: 2 });
+  });
+
+  it("an UNVERIFIED input (ingest, ledger outage) refuses by default and passes only under the recorded waiver", () => {
+    const unverified = { candidate: pin({ completed: false }) };
+    const blocked = applyInputTrust(passEvaluation(), unverified, { maxRegressions: 0 });
+    expect(blocked.decision).toBe("not_comparable");
+    expect(blocked.reasons[0]).toMatchObject({ kind: "input_unverified" });
+    const waived = applyInputTrust(passEvaluation(), unverified, { maxRegressions: 0, allowUnverifiedInput: true });
+    expect(waived.decision).toBe("pass"); // the waiver is a recorded policy choice, visible on the decision
+  });
+
+  it("the BASELINE side is held to the same condition — a comparison is only as vouched as its weaker half", () => {
+    const out = applyInputTrust(
+      passEvaluation(),
+      { baseline: pin({ completed: true, diverged: 1 }) },
+      { maxRegressions: 0 },
+    );
+    expect(out.decision).toBe("not_comparable");
+  });
+
+  it("a LEGACY pin (pre-observation revision) rides as information — history is not retroactively re-judged", () => {
+    const out = applyInputTrust(passEvaluation(), { baseline: pin(), candidate: pin() }, { maxRegressions: 0 });
+    expect(out.decision).toBe("pass");
+    expect(out.reasons).toEqual([]);
   });
 });

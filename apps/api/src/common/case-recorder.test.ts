@@ -53,6 +53,24 @@ describe("CaseRecorder", () => {
     expect(artifacts.objects.size).toBe(2); // no re-upload of the static screen
   });
 
+  it("dedup never crosses an ATTEMPT boundary — g2's identical first frame gets its own object (arch-review 47 P1-4)", async () => {
+    // Keyed by runId alone, attempt g2's first frame matching g1's last frame reused g1's offloaded object:
+    // g2's recording referenced g1's artifact namespace, and dropping g1's objects would orphan g2's replay.
+    const recordings = new InMemoryRecordingStore();
+    const artifacts = new InMemoryArtifactStore();
+    const recorder = new CaseRecorder(recordings, artifacts, fakeClock());
+    const g1 = await recordings.open("evd-run-1");
+    await recorder.recordFrame("evd-run-1", "SAME", g1);
+    await recordings.seal("evd-run-1", { envKind: "browser" }, g1);
+    const g2 = await recordings.open("evd-run-1");
+    await recorder.recordFrame("evd-run-1", "SAME", g2);
+    await recordings.seal("evd-run-1", { envKind: "browser" }, g2);
+
+    const g2Frames = (await recordings.get("evd-run-1", g2))?.tracks.frames ?? [];
+    expect(g2Frames[0]?.ref).toContain(`#g${g2}/`); // its OWN namespace, never g1's
+    expect(artifacts.objects.size).toBe(2); // one object per attempt, identical bytes or not
+  });
+
   it("records log lines onto the logs lane", async () => {
     // Given a runner pushing lifecycle log lines
     const recordings = new InMemoryRecordingStore();

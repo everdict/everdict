@@ -39,15 +39,15 @@ export async function openPhysicalAttempt(
     const generation = await recordings.open(input.executionId).catch(() => undefined);
     return generation === undefined ? { unisolated: true } : { generation, unisolated: false };
   }
-  // The ledger write is the one thing that must not be swallowed silently into "no attempt happened" — but it
-  // is still Phase-1 best-effort (nothing reads it), so a store fault degrades to the pre-ledger behaviour
-  // rather than failing the dispatch.
+  // A ledger fault must NOT fall back to the recording store's self-mint (arch-review 47 P0-4): with the
+  // ledger wired, the ledger is the ONLY ordinal authority — a self-mint during its outage re-activates the
+  // two-MAX+1 split the wiring exists to end. Concretely: attempt A minted g1 on the ledger but its
+  // recording claim failed (ledger row, no recording row); a ledger outage during attempt B would let the
+  // recording store mint MAX(empty)+1 = g1 again, and B's evidence/receipt/trajectory would then NAME A's
+  // ledger identity. So the outage degrades this attempt to UNFENCED — no generation, no row, the same
+  // fail-closed lane a refused recording claim takes — never to a coordinate another authority owns.
   const opened = await attempts.open(input).catch(() => undefined);
-  if (!opened) {
-    if (!recordings) return { unisolated: false };
-    const generation = await recordings.open(input.executionId).catch(() => undefined);
-    return generation === undefined ? { unisolated: true } : { generation, unisolated: false };
-  }
+  if (!opened) return { unisolated: true };
   if (!recordings) return { attemptId: opened.attemptId, generation: opened.generation, unisolated: false };
   const claimed = await recordings.open(input.executionId, opened.generation).catch(() => undefined);
   if (claimed === undefined) {

@@ -29,7 +29,14 @@ export {
   type ScorecardOutcomes,
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
-export { type GateEvaluation, type GateInput, evaluateGate, gateAudit, gatePolicyDigest } from "./scorecard/gate.js";
+export {
+  type GateEvaluation,
+  type GateInput,
+  applyInputTrust,
+  evaluateGate,
+  gateAudit,
+  gatePolicyDigest,
+} from "./scorecard/gate.js";
 export {
   type ExperimentAxis,
   type ExperimentConfound,
@@ -94,6 +101,8 @@ export {
   type ReceiptLedgerReading,
   scorePlaneDigest,
   type ScoringPassInput,
+  type DecisionInputTrust,
+  decisionInputTrustOf,
   scoringPinInputDiverged,
 } from "./scorecard/scoring-revision.js";
 export {

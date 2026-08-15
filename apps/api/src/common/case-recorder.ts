@@ -37,7 +37,12 @@ export class CaseRecorder {
     try {
       const t = this.now();
       const hash = createHash("sha256").update(frameBase64).digest("hex");
-      const prev = this.lastFrame.get(runId);
+      // Dedup is per ATTEMPT, not per run (arch-review 47 P1-4): keyed by runId alone, attempt g2's first
+      // frame matching g1's last frame reused g1's offloaded object — g2's recording then referenced g1's
+      // artifact namespace, breaking both attempt isolation and the retention unit (dropping g1's objects
+      // would orphan g2's replay).
+      const attemptKey = attemptIdOf(runId, generation);
+      const prev = this.lastFrame.get(attemptKey);
       let ref: string;
       if (prev && prev.hash === hash) {
         ref = prev.ref; // consecutive-identical frame → reuse the offloaded object (dedup a static screen)
@@ -50,7 +55,7 @@ export class CaseRecorder {
           Buffer.from(frameBase64, "base64"),
           "image/png",
         );
-        this.lastFrame.set(runId, { hash, ref });
+        this.lastFrame.set(attemptKey, { hash, ref });
       }
       await this.recordings.append(runId, { track: "frames", entry: { t, ref, hash } }, generation);
     } catch {

@@ -20,7 +20,7 @@ interface Entry {
   tenant?: string;
   job: CaseJob;
   requiredCaps: string[];
-  status: "queued" | "leased" | "completed" | "failed";
+  status: "queued" | "leased" | "completed" | "failed" | "cancelled";
   cancelRequested: boolean;
   leasedBy?: string;
   leaseEpoch?: number; // minted per claim — the physical attempt's identity (see the port)
@@ -29,7 +29,7 @@ interface Entry {
   error?: string;
   createdAt: number;
 }
-const isTerminal = (e: Entry): boolean => e.status === "completed" || e.status === "failed";
+const isTerminal = (e: Entry): boolean => e.status === "completed" || e.status === "failed" || e.status === "cancelled";
 const capsOk = (required: string[], advertised?: string[]): boolean =>
   advertised === undefined || required.every((c) => advertised.includes(c));
 
@@ -56,15 +56,16 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     // or claimed (in-memory-hub parity: requeueExpired/orderLeasable have always skipped it) — re-dispatching
     // work the control plane has already stopped is how a cancel became a hint the queue was free to ignore.
     for (const e of this.jobs.values()) {
-      if (
-        e.owner === input.owner &&
-        e.status === "leased" &&
-        !e.cancelRequested &&
-        input.now - e.activityAt > input.leaseTtlMs
-      ) {
-        e.status = "queued";
-        e.leasedBy = undefined;
+      if (e.owner !== input.owner || e.status !== "leased" || input.now - e.activityAt <= input.leaseTtlMs) continue;
+      if (e.cancelRequested) {
+        // A cancelled lease whose runner went silent terminalizes here (arch-review 47 P1-2) — the sweep is
+        // the non-compliant holder's reclaim, and limbo ("excluded from requeue, ended by nothing") is not
+        // a state.
+        e.status = "cancelled";
+        continue;
       }
+      e.status = "queued";
+      e.leasedBy = undefined;
     }
     const candidates = [...this.jobs.values()]
       .filter(
@@ -134,6 +135,10 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     now: number,
   ): Promise<{ extended: boolean; cancelled: boolean }> {
     const e = this.jobs.get(jobId);
+    // A row the sweep/ack already terminalized as CANCELLED still ANSWERS its late holder (arch-review 47
+    // P1-2): the heartbeat reply is the abort channel, and the holder's identity is still on the row.
+    if (e !== undefined && e.status === "cancelled" && e.leasedBy === runnerId && e.leaseEpoch === leaseEpoch)
+      return { extended: false, cancelled: true };
     if (!this.holdsLease(e, runnerId, leaseEpoch)) return { extended: false, cancelled: false };
     if (e.cancelRequested) return { extended: false, cancelled: true };
     e.activityAt = now;
@@ -142,7 +147,10 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
 
   async complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!this.holdsWritableLease(e, ranBy, leaseEpoch)) return false;
+    if (!this.holdsWritableLease(e, ranBy, leaseEpoch)) {
+      this.ackCancelled(jobId, ranBy, leaseEpoch);
+      return false;
+    }
     e.status = "completed";
     e.result = result;
     return true;
@@ -150,10 +158,21 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
 
   async fail(jobId: string, message: string, runnerId: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!this.holdsWritableLease(e, runnerId, leaseEpoch)) return false;
+    if (!this.holdsWritableLease(e, runnerId, leaseEpoch)) {
+      this.ackCancelled(jobId, runnerId, leaseEpoch);
+      return false;
+    }
     e.status = "failed";
     e.error = message;
     return true;
+  }
+
+  // The cancelled holder's refused report IS its ack (arch-review 47 P1-2): the lease identity matches, the
+  // write was revoked, and the row terminalizes instead of waiting for the TTL sweep.
+  private ackCancelled(jobId: string, runnerId: string, leaseEpoch: number): void {
+    const e = this.jobs.get(jobId);
+    if (e && this.holdsLease(e, runnerId, leaseEpoch) && e.cancelRequested && e.status === "leased")
+      e.status = "cancelled";
   }
 
   async expire(jobId: string): Promise<void> {
@@ -177,11 +196,17 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     };
   }
 
+  // ── A CANCELLED ROW REACHES A PERSISTED TERMINAL STATE (arch-review 47 P1-2) ──────────────────────
+  // The flag alone left a row `queued|leased, cancel_requested` FOREVER: pending counted it, the queue
+  // accumulated it, nothing ever ended it. A QUEUED row terminalizes immediately (nobody holds it); a
+  // LEASED row keeps the flag — the runner must still HEAR the cancel over its heartbeat — and terminalizes
+  // when the runner acks (its refused complete/fail) or the lease TTL sweeps it.
   async cancel(match: (job: CaseJob) => boolean): Promise<number> {
     let n = 0;
     for (const e of this.jobs.values()) {
       if (!isTerminal(e) && !e.cancelRequested && match(e.job)) {
         e.cancelRequested = true;
+        if (e.status === "queued") e.status = "cancelled";
         n++;
       }
     }
@@ -189,7 +214,10 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
   }
 
   async pending(owner: string, runnerId: string): Promise<number> {
-    return [...this.jobs.values()].filter((e) => e.owner === owner && e.runnerId === runnerId && !isTerminal(e)).length;
+    // A cancelling lease is on its way out, not pending work — the count excludes it with the terminals.
+    return [...this.jobs.values()].filter(
+      (e) => e.owner === owner && e.runnerId === runnerId && !isTerminal(e) && !e.cancelRequested,
+    ).length;
   }
 }
 
@@ -232,6 +260,15 @@ export class PgRunnerJobStore implements RunnerJobStore {
     await this.client.query(
       `UPDATE everdict_runner_jobs SET status = 'queued', leased_by = NULL
        WHERE owner = $1 AND status = 'leased' AND NOT cancel_requested
+         AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
+      [input.owner, input.now, input.leaseTtlMs / 1000],
+    );
+    // …and a CANCELLED expired lease terminalizes here instead of entering limbo (arch-review 47 P1-2):
+    // excluded from the requeue above and from the claim below, ended by nothing — the sweep is the
+    // non-compliant holder's reclaim.
+    await this.client.query(
+      `UPDATE everdict_runner_jobs SET status = 'cancelled'
+       WHERE owner = $1 AND status = 'leased' AND cancel_requested
          AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
       [input.owner, input.now, input.leaseTtlMs / 1000],
     );
@@ -300,14 +337,16 @@ export class PgRunnerJobStore implements RunnerJobStore {
     // looking alive and the idle-timeout path reclaims the job instead of it being renewed forever.
     const res = await this.client.query<{ cancel_requested: boolean }>(
       `UPDATE everdict_runner_jobs
-          SET activity_at = CASE WHEN cancel_requested THEN activity_at ELSE to_timestamp($4 / 1000.0) END
-       WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
-       RETURNING cancel_requested`,
+          SET activity_at = CASE WHEN cancel_requested OR status = 'cancelled' THEN activity_at ELSE to_timestamp($4 / 1000.0) END
+       WHERE job_id = $1 AND status IN ('leased', 'cancelled') AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
+       RETURNING cancel_requested, status`,
       [jobId, runnerId, leaseEpoch, now],
     );
     const row = res.rows[0];
     if (!row) return { extended: false, cancelled: false };
-    const cancelled = row.cancel_requested === true;
+    // A terminal-cancelled row (the sweep/ack got there first) still answers its late holder — the reply is
+    // the abort channel, and the holder's identity is still on the row (arch-review 47 P1-2).
+    const cancelled = row.cancel_requested === true || (row as { status?: string }).status === "cancelled";
     return { extended: !cancelled, cancelled };
   }
 
@@ -323,6 +362,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
        RETURNING job_id`,
       [jobId, JSON.stringify(result), ranBy, leaseEpoch],
     );
+    if (res.rows.length === 0) await this.ackCancelled(jobId, ranBy, leaseEpoch);
     return res.rows.length > 0;
   }
 
@@ -334,7 +374,19 @@ export class PgRunnerJobStore implements RunnerJobStore {
        RETURNING job_id`,
       [jobId, message, runnerId, leaseEpoch],
     );
+    if (res.rows.length === 0) await this.ackCancelled(jobId, runnerId, leaseEpoch);
     return res.rows.length > 0;
+  }
+
+  // The cancelled holder's refused report IS its ack (arch-review 47 P1-2): lease identity matches, the
+  // write was revoked, the row terminalizes — limbo is not a state.
+  private async ackCancelled(jobId: string, runnerId: string, leaseEpoch: number): Promise<void> {
+    await this.client.query(
+      `UPDATE everdict_runner_jobs SET status = 'cancelled'
+        WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
+          AND cancel_requested`,
+      [jobId, runnerId, leaseEpoch],
+    );
   }
 
   async expire(jobId: string): Promise<void> {
@@ -367,19 +419,29 @@ export class PgRunnerJobStore implements RunnerJobStore {
     };
   }
 
+  // A cancelled row reaches a persisted terminal state (arch-review 47 P1-2): a QUEUED row terminalizes in
+  // the same statement (nobody holds it); a LEASED one keeps the flag — the runner must still HEAR the
+  // cancel — and terminalizes on the holder's refused report (ack) or the claim-time TTL sweep.
   async cancel(match: (job: CaseJob) => boolean): Promise<number> {
     const res = await this.client.query<{ job_id: string; job: unknown; lease_epoch: number }>(
       `SELECT job_id, job FROM everdict_runner_jobs WHERE status IN ('queued', 'leased') AND NOT cancel_requested`,
     );
     const ids = res.rows.filter((r) => match(CaseJobSchema.parse(r.job))).map((r) => r.job_id);
     if (ids.length === 0) return 0;
-    await this.client.query("UPDATE everdict_runner_jobs SET cancel_requested = true WHERE job_id = ANY($1)", [ids]);
+    await this.client.query(
+      `UPDATE everdict_runner_jobs
+          SET cancel_requested = true,
+              status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END
+        WHERE job_id = ANY($1)`,
+      [ids],
+    );
     return ids.length;
   }
 
   async pending(owner: string, runnerId: string): Promise<number> {
     const res = await this.client.query<{ count: string }>(
-      "SELECT count(*)::text AS count FROM everdict_runner_jobs WHERE owner = $1 AND runner_id = $2 AND status IN ('queued', 'leased')",
+      // A cancelling lease is on its way out, not pending work (arch-review 47 P1-2).
+      "SELECT count(*)::text AS count FROM everdict_runner_jobs WHERE owner = $1 AND runner_id = $2 AND status IN ('queued', 'leased') AND NOT cancel_requested",
       [owner, runnerId],
     );
     return Number(res.rows[0]?.count ?? 0);

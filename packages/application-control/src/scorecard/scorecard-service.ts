@@ -33,6 +33,7 @@ import {
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
+  applyInputTrust,
   authorize,
   can,
   composeVerdictPolicy,
@@ -982,7 +983,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     this.inFlight.get(rec.id)?.abort();
     await this.cancelWorkflowIfAny(rec);
     this.deps.cancelQueued?.((j) => j.batchId === rec.id);
-    this.deps.cancelLeased?.((j) => j.batchId === rec.id);
+    // AWAITED (arch-review 47 P0-1): the store-backed hub's revocation is a durable write, and the previous
+    // fire-and-forget meant the API could report the cancel done while the lease revocation had not landed —
+    // or had failed, unobserved. A rejection surfaces as the cancel's own failure, which the convergent
+    // retry above re-runs.
+    await Promise.resolve(this.deps.cancelLeased?.((j) => j.batchId === rec.id));
     if (!this.deps.runStore) return;
     // NOT swallowed (arch-review 46): `.catch(() => [])` here turned a transient store failure into a cancel that
     // killed and settled NOTHING while still reporting success — every child left running, and the caller told the
@@ -1021,6 +1026,21 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     const rec = await this.deps.store.get(input.id);
     if (!rec || rec.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
+    // ── A CANCEL RETRY CONVERGES, IT DOES NOT CONFLICT (arch-review 47 P0-1) ─────────────────────────
+    //
+    // The protocol is terminal-first: the CANCELLED commit lands, THEN the teardown runs. A teardown that
+    // fails (a transient child-list read, a rejected lease revocation) surfaces as a 5xx — and the record is
+    // already terminal, so the retry used to bounce off the domain's terminal guard having re-run NOTHING:
+    // running children and leased compute were left behind with no durable owner. An already-aborted record
+    // is therefore not a conflict here — the DECISION is made; what the retry owes is the TEARDOWN, which is
+    // idempotent end to end (fenced child settles, best-effort kills, no-op queue drops). Succeeded/failed
+    // keep the conflict: cancelling finished work is a cancellation of something that no longer exists.
+    // (The durable CancellationOperation/reconciler is the target shape — arch-review 47 §5.2; this is the
+    // convergent interim that makes the retry honest without widening the status vocabulary.)
+    if (rec.status === "cancelled" || rec.status === "superseded") {
+      await this.stopInFlight(rec);
+      return (await this.get(rec.id)) ?? rec;
+    }
     // E0 outbox: the cancelled fact rides the transition (the domain is where "the completion path skips
     // aborted batches" is law, so the fact is born there) and persists atomically with the terminal write.
     const cancellation = ScorecardBatch.from(rec).cancel(this.now());
@@ -1815,6 +1835,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...(p?.allowMetricKindChange !== undefined ? { allowMetricKindChange: p.allowMetricKindChange } : {}),
       ...(p?.allowConfounds !== undefined ? { allowConfounds: p.allowConfounds } : {}),
       ...(p?.allowUnverifiedIdentity !== undefined ? { allowUnverifiedIdentity: p.allowUnverifiedIdentity } : {}),
+      ...(p?.allowUnverifiedInput !== undefined ? { allowUnverifiedInput: p.allowUnverifiedInput } : {}),
       ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
       ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
       ...(p?.fdrAlpha !== undefined ? { fdrAlpha: p.fdrAlpha } : {}),
@@ -1831,7 +1852,17 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
       ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
     });
-    const evaluation = evaluateGate(snapshot.diff, policy);
+    // …and the pins' INPUT TRUST is a judgment condition, not an attachment (arch-review 47 P0-3): a
+    // completed divergence or an unwaived unverified input downgrades the decision to not_comparable with
+    // its reason leading — the exact doubt the revision recorded, enforced where the green light is minted.
+    const evaluation = applyInputTrust(
+      evaluateGate(snapshot.diff, policy),
+      {
+        ...(snapshot.baseline.pin ? { baseline: snapshot.baseline.pin } : {}),
+        ...(snapshot.candidate.pin ? { candidate: snapshot.candidate.pin } : {}),
+      },
+      policy,
+    );
     const record = await this.deps.store.get(input.candidate);
     if (!record || record.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");

@@ -90,9 +90,10 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
     expect(opened).toEqual({ generation: 4, unisolated: false });
   });
 
-  it("a ledger fault degrades to the pre-ledger path rather than failing the dispatch", async () => {
-    // Given a ledger that cannot take the write (Phase 1: nothing reads these rows, so nothing may depend on
-    // them either — the case still has to run)
+  it("a ledger fault NEVER falls back to the recording self-mint — the attempt runs unfenced (arch-review 47 P0-4)", async () => {
+    // Given a wired ledger that cannot take the write. Pre-fix this degraded to the recording store's own
+    // MAX+1 — re-activating the two-authority split: attempt A holds g1 on the ledger (recording claim had
+    // failed), the outage lets attempt B self-mint g1 again, and B's evidence then NAMES A's identity.
     const attempts = new InMemoryExecutionAttemptStore();
     attempts.open = async () => {
       throw new InternalError("UPSTREAM_ERROR", {}, "attempt table unavailable");
@@ -104,8 +105,9 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
       { executionId: "evd-run-4", tenant: "acme" },
     );
 
-    expect(calls).toEqual([{ runId: "evd-run-4" }]); // self-minted, since nobody minted for it
-    expect(opened).toEqual({ generation: 7, unisolated: false });
+    // The recording store was never asked — no coordinate exists that another authority might own.
+    expect(calls).toEqual([]);
+    expect(opened).toEqual({ unisolated: true });
   });
 
   it("with neither store wired nothing is opened and nothing is unisolated", async () => {

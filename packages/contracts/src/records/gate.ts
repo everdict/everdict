@@ -43,6 +43,11 @@ export const GatePolicySchema = z.object({
   // Setting this acknowledges the gap EXPLICITLY (recorded on the decision); the informational reasons still
   // ride whatever gets decided.
   allowUnverifiedIdentity: z.boolean().optional(),
+  // The EXPLICIT waiver for input the ledger could not vouch (input_unverified — ingest scorecards, a ledger
+  // outage at judging time). Recorded on the decision like every other acknowledgement; never covers a
+  // COMPLETED divergence (arch-review 47 P0-3: recorded doubt must be enforced doubt, and an implicit pass
+  // over unvouched input was exactly the gap).
+  allowUnverifiedInput: z.boolean().optional(),
   // Share of the compared scores that may be non-measurements (dead graders / skipped judges). Enforced
   // INDEPENDENTLY of the comparability mode: unmeasured scores do not make a comparison `partial`, they
   // hollow it out from the inside, so a caller that sets this means it under either mode.
@@ -89,6 +94,14 @@ export const GateReasonSchema = z.object({
     "missing_cases",
     "missing_metrics",
     "unmeasured_evidence",
+    // The pinned judgment's INPUT is not evidence the ledger stands behind (arch-review 47 P0-3):
+    // `input_diverged` — the observation COMPLETED and reported divergence: the verdicts describe executions
+    // that have since been replaced. Never waivable — a known-wrong subject is not a policy choice.
+    // `input_unverified` — the observation could not vouch at all (an ingest with no receipts, a ledger
+    // outage): refused by default, waivable only by the recorded allowUnverifiedInput policy. A revision
+    // that PREDATES input observation entirely rides as legacy and is visible on the pin, not a reason.
+    "input_diverged",
+    "input_unverified",
   ]),
   detail: z.string(),
   caseId: z.string().optional(),

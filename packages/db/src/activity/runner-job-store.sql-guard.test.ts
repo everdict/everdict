@@ -32,6 +32,9 @@ function capture() {
 }
 
 const FENCE = [/status = 'leased'/, /leased_by = \$\d/, /lease_epoch = \$\d/];
+// touch() alone answers a swept terminal-cancelled holder too (its reply is the abort channel) — its
+// status predicate is wider than the mutation fence's, deliberately (arch-review 47 P1-2).
+const TOUCH_FENCE = [/status IN \('leased', 'cancelled'\)/, /leased_by = \$\d/, /lease_epoch = \$\d/];
 
 describe("PgRunnerJobStore — every runner-initiated mutation carries the current-lease fence", () => {
   it("complete() refuses anything but the CURRENT lease in the statement itself", async () => {
@@ -53,7 +56,7 @@ describe("PgRunnerJobStore — every runner-initiated mutation carries the curre
     const { client, statements } = capture();
     await new PgRunnerJobStore(client).touch("j1", "runner-1", 3, 1_000);
     const sql = statements[0]?.sql ?? "";
-    for (const predicate of FENCE) expect(sql).toMatch(predicate);
+    for (const predicate of TOUCH_FENCE) expect(sql).toMatch(predicate);
   });
 
   it("authorize() reads through the identical predicate — the evidence fence and the result fence are one", async () => {
@@ -73,12 +76,16 @@ describe("PgRunnerJobStore — every runner-initiated mutation carries the curre
 const REVOKED = /NOT cancel_requested/;
 
 describe("PgRunnerJobStore — a cancelled job is revoked in the statement, not merely flagged", () => {
-  it("claim() neither requeues nor takes a cancelled job (both statements)", async () => {
+  it("claim() neither requeues nor takes a cancelled job — and TERMINALIZES a cancelled expired lease (arch-review 47 P1-2)", async () => {
     const { client, statements } = capture();
     await new PgRunnerJobStore(client).claim({ owner: "u1", runnerId: "runner-1", leaseTtlMs: 1_000, now: 1_000 });
-    expect(statements).toHaveLength(2);
-    expect(statements[0]?.sql ?? "").toMatch(REVOKED); // the expired-lease requeue
-    expect(statements[1]?.sql ?? "").toMatch(REVOKED); // the candidate SELECT
+    expect(statements).toHaveLength(3);
+    expect(statements[0]?.sql ?? "").toMatch(REVOKED); // the expired-lease requeue skips cancelled work
+    // …which used to leave a cancelled expired lease in LIMBO (excluded from requeue AND claim, ended by
+    // nothing): the sweep now terminalizes it in its own statement.
+    expect(statements[1]?.sql ?? "").toMatch(/SET status = 'cancelled'/);
+    expect(statements[1]?.sql ?? "").toMatch(/cancel_requested/);
+    expect(statements[2]?.sql ?? "").toMatch(REVOKED); // the candidate SELECT
   });
 
   it("complete(), fail(), authorize() and restampJob() all require the job not to be cancelled", async () => {
@@ -98,8 +105,15 @@ describe("PgRunnerJobStore — a cancelled job is revoked in the statement, not 
       },
       harness: { id: "h", version: "1" },
     });
-    expect(statements).toHaveLength(4);
-    for (const s of statements) expect(s.sql).toMatch(REVOKED);
+    // complete() and fail() each issue TWO statements against this empty fixture: the revoked write, then
+    // the refused holder's ACK (a cancelled lease terminalizes on its own report — arch-review 47 P1-2).
+    expect(statements).toHaveLength(6);
+    const writes = [statements[0], statements[2], statements[4], statements[5]];
+    for (const s of writes) expect(s?.sql ?? "").toMatch(REVOKED);
+    for (const ack of [statements[1], statements[3]]) {
+      expect(ack?.sql ?? "").toMatch(/SET status = 'cancelled'/);
+      expect(ack?.sql ?? "").toMatch(/AND cancel_requested/);
+    }
   });
 
   it("touch() is the deliberate exception — it reports the cancel but freezes the activity clock", async () => {
@@ -110,6 +124,6 @@ describe("PgRunnerJobStore — a cancelled job is revoked in the statement, not 
     expect(sql).not.toMatch(REVOKED);
     expect(sql).toMatch(/RETURNING cancel_requested/);
     // …but the renewal stops, so a runner that ignores the signal is reclaimed by the idle-timeout path.
-    expect(sql).toMatch(/CASE WHEN cancel_requested THEN activity_at ELSE to_timestamp/);
+    expect(sql).toMatch(/CASE WHEN cancel_requested OR status = 'cancelled' THEN activity_at ELSE to_timestamp/);
   });
 });

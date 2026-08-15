@@ -4,6 +4,7 @@ import {
   type GateDecision,
   type GatePolicy,
   type GateReason,
+  type GateScoringPin,
   type ScorecardRecord,
   type VerdictPolicyRef,
   caseMatches,
@@ -11,6 +12,7 @@ import {
 import { contentDigest } from "../provenance/content-digest.js";
 import type { ExperimentIdentity } from "./experiment-identity.js";
 import type { MeasurementCoverage, ScorecardDiff } from "./scorecard.js";
+import { decisionInputTrustOf } from "./scoring-revision.js";
 import type { TrialDiff } from "./trials.js";
 
 // Release-gate evaluation (metrics commercialization A1) — ONE pure derivation from the diff the trust
@@ -42,6 +44,41 @@ export type GateEvaluation = Pick<GateDecision, "decision" | "reasons" | "eviden
 // Fail-closed default. A gate exists to withhold a green light the evidence does not support, so the
 // caller that wants to decide on a PARTIAL comparison is the one who has to say so.
 const DEFAULT_COMPARABILITY: NonNullable<GatePolicy["comparability"]> = "require_full";
+
+// ── RECORDED DOUBT IS ENFORCED DOUBT (arch-review 47 P0-3) ───────────────────────────────────────────
+//
+// The pins carry each side's input observation; this is where a decision CONSUMES it. A completed
+// divergence makes the comparison `not_comparable` on either side — the verdicts describe executions that
+// have since been replaced, and no policy waives a known-wrong subject. An UNVERIFIED input (ingest with no
+// receipts, a ledger outage at judging time) refuses by default and passes only under the recorded
+// allowUnverifiedInput acknowledgement. A legacy pin (pre-observation revision) rides as information on the
+// pin itself — history is not retroactively re-judged.
+export function applyInputTrust(
+  evaluation: GateEvaluation,
+  pins: { baseline?: GateScoringPin; candidate?: GateScoringPin },
+  policy: GatePolicy,
+): GateEvaluation {
+  const reasons: GateReason[] = [];
+  for (const [side, pin] of [
+    ["baseline", pins.baseline],
+    ["candidate", pins.candidate],
+  ] as const) {
+    const trust = decisionInputTrustOf(pin);
+    if (trust === "diverged")
+      reasons.push({
+        kind: "input_diverged",
+        detail: `the ${side}'s pinned judgment read ${pin?.inputObservation?.diverged ?? 0} case(s) whose execution the receipt ledger no longer vouches for — its verdicts describe bytes that have since been replaced`,
+        count: pin?.inputObservation?.diverged ?? 0,
+      });
+    else if (trust === "unavailable" && policy.allowUnverifiedInput !== true)
+      reasons.push({
+        kind: "input_unverified",
+        detail: `the ${side}'s pinned judgment states no receipt vouches for what its judges read — refused unless the policy records allowUnverifiedInput`,
+      });
+  }
+  if (reasons.length === 0) return evaluation;
+  return { ...evaluation, decision: "not_comparable", reasons: [...reasons, ...evaluation.reasons] };
+}
 
 export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluation {
   const reasons: GateReason[] = [];

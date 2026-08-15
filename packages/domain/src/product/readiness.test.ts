@@ -262,10 +262,12 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.ready).toBe(false);
   });
 
-  it("says nothing on an UNMEASURED observation — a check that could not run is not divergence", () => {
-    // The pass had no receipt ledger to compare against (an ingest batch, a pre-ledger record). That is
-    // honest ignorance, and reading it as an accusation would refuse every historical release.
-    const unmeasured = {
+  it("an UNVERIFIED observation blocks the ship — recorded doubt is enforced doubt (arch-review 47 P0-3)", () => {
+    // The pass RAN its observation and states that no receipt vouches for what its judges read (an ingest
+    // batch, a ledger outage at judging time). The 46차 reading treated that as "says nothing" — which made
+    // unvouched evidence implicitly green on the strictest surface. It is not_comparable now; only a LEGACY
+    // pin (no observation at all — pre-feature history) still says nothing, pinned below.
+    const unverified = {
       revision: 2,
       scorePlaneDigest: "sha256:plane",
       inputObservation: { setDigest: "sha256:judged", completed: false },
@@ -273,7 +275,22 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     const readiness = releaseReadiness(
       release(["quality"]),
       product(),
-      new Map([["quality", { ...point("sc-2", 0.95), scoring: unmeasured }]]),
+      new Map([["quality", { ...point("sc-2", 0.95), scoring: unverified }]]),
+      new Map([["quality", resolved("sc-1", 0.9)]]),
+      new Map([["quality", gate("pass")]]),
+      0,
+    );
+    expect(readiness.series[0]?.verdict).toBe("not_comparable");
+    expect(readiness.series[0]?.reasons?.[0]).toContain("no receipt vouches");
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("a LEGACY pin (no input observation at all) says nothing — history is not retroactively re-judged", () => {
+    const legacy = { revision: 2, scorePlaneDigest: "sha256:plane" };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product(),
+      new Map([["quality", { ...point("sc-2", 0.95), scoring: legacy }]]),
       new Map([["quality", resolved("sc-1", 0.9)]]),
       new Map([["quality", gate("pass")]]),
       0,

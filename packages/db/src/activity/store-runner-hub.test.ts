@@ -115,6 +115,39 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     await expect(d).resolves.toMatchObject({ generation: 21 }); // …and the parking replica seals THAT attempt
   });
 
+  it("a restamp the row REFUSED hands out no job — the runner never receives a lease the store will not authorize (arch-review 47 P1-1)", async () => {
+    // The row moves while the mint's open is in flight (a cancel here; an expiry sweep or another claim are
+    // the same shape). Pre-fix the boolean was ignored: the runner received the job, executed it, and every
+    // authorize/complete under that lease was refused — duplicate compute reporting into a void.
+    const store = new InMemoryRunnerJobStore();
+    let opened = 30;
+    const gate: Array<() => void> = [];
+    const hub = new StoreRunnerHub(
+      store,
+      opts({
+        leaseTtlMs: 0,
+        openAttempt: (() => {
+          let calls = 0;
+          return async () => {
+            calls += 1;
+            // The FIRST open call is the re-lease's (epoch 1 never mints) — park it.
+            if (calls === 1) await new Promise<void>((r) => gate.push(r));
+            return ++opened;
+          };
+        })(),
+      }),
+    );
+    hub.enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7 }).catch(() => {});
+    await hub.leaseWait(keyA, 200, ["repo"]); // epoch 1
+    const minting = hub.leaseWait(keyA, 200, ["repo"]); // epoch 2 — its open parks on the gate
+    // Wait until the open is actually parked (the claim + mint run across microtasks).
+    while (gate.length === 0) await new Promise((r) => setImmediate(r));
+    await store.cancel((j) => j.runId === "evd-run-1"); // the row moves under the sleeping mint
+    gate[0]?.();
+    // The refused restamp yields NO job (the loop found the row cancelled and the wait ran out).
+    expect(await minting).toBeNull();
+  });
+
   it("a re-lease whose attempt cannot be opened persists a job with NO generation (fail-closed, never merged)", async () => {
     const store = new InMemoryRunnerJobStore();
     const hub = new StoreRunnerHub(
@@ -184,6 +217,61 @@ describe("RunnerJobStore — a cancelled job's lease authorizes nothing", () => 
     expect(await store2.cancel(() => true)).toBe(1);
     expect(await claim(store2, 10_000, 0)).toBeNull(); // TTL long past — still not re-leased
     expect(await store2.touch("j-leased", keyA.runnerId, 1, 10_000)).toEqual({ extended: false, cancelled: true });
+  });
+
+  it("a cancelled row reaches a PERSISTED terminal state — queued at once, leased via ack or TTL sweep — and pending excludes it (arch-review 47 P1-2)", async () => {
+    // Pre-fix the flag was the whole record: a row sat `queued|leased, cancel_requested` forever — counted
+    // as pending, accumulated in the queue, ended by nothing.
+    const store = new InMemoryRunnerJobStore();
+    await store.park({
+      jobId: "j-q",
+      owner: keyA.owner,
+      runnerId: keyA.runnerId,
+      job: job("c1"),
+      requiredCaps: [],
+      now: 0,
+    });
+    await store.cancel(() => true);
+    expect((await store.outcome("j-q"))?.status).toBe("cancelled");
+    expect(await store.pending(keyA.owner, keyA.runnerId)).toBe(0); // terminal, not pending
+
+    // LEASED + runner ack (its refused report terminalizes the row on the spot)…
+    const ackStore = new InMemoryRunnerJobStore();
+    await ackStore.park({
+      jobId: "j-ack",
+      owner: keyA.owner,
+      runnerId: keyA.runnerId,
+      job: job("c1"),
+      requiredCaps: [],
+      now: 0,
+    });
+    const lease = await ackStore.claim({ owner: keyA.owner, runnerId: keyA.runnerId, leaseTtlMs: 60_000, now: 0 });
+    if (!lease) throw new Error("expected a lease");
+    await ackStore.cancel(() => true);
+    expect(await ackStore.pending(keyA.owner, keyA.runnerId)).toBe(0); // cancelling ≠ pending
+    expect(await ackStore.complete("j-ack", result, keyA.runnerId, lease.leaseEpoch)).toBe(false);
+    expect((await ackStore.outcome("j-ack"))?.status).toBe("cancelled"); // the refused report WAS the ack
+
+    // …and LEASED + silent runner: the claim-time TTL sweep terminalizes instead of leaving limbo.
+    const sweepStore = new InMemoryRunnerJobStore();
+    await sweepStore.park({
+      jobId: "j-ttl",
+      owner: keyA.owner,
+      runnerId: keyA.runnerId,
+      job: job("c1"),
+      requiredCaps: [],
+      now: 0,
+    });
+    const l2 = await sweepStore.claim({ owner: keyA.owner, runnerId: keyA.runnerId, leaseTtlMs: 100, now: 0 });
+    if (!l2) throw new Error("expected a lease");
+    await sweepStore.cancel(() => true);
+    await sweepStore.claim({ owner: keyA.owner, runnerId: keyA.runnerId, leaseTtlMs: 100, now: 10_000 }); // sweep
+    expect((await sweepStore.outcome("j-ttl"))?.status).toBe("cancelled");
+    // …and the swept holder's late heartbeat still HEARS the abort (the reply is the channel).
+    expect(await sweepStore.touch("j-ttl", keyA.runnerId, l2.leaseEpoch, 10_001)).toEqual({
+      extended: false,
+      cancelled: true,
+    });
   });
 
   it("refuses the cancelled holder's authorize/restamp/complete/fail, so the record still reads cancelled", async () => {

@@ -404,13 +404,22 @@ export class RunnerHub {
   //
   // The ENTRY is restamped, not just the reply: authorizeAttempt answers every evidence push out of it, and
   // complete() reads the generation back off it to tell the dispatcher which attempt actually ran.
-  private async mintAttempt(key: SelfHostedKey, leased: LeasedJob): Promise<LeasedJob> {
+  private async mintAttempt(key: SelfHostedKey, leased: LeasedJob): Promise<LeasedJob | null> {
     if (leased.attempt.leaseEpoch <= 1 || !this.openAttempt) return leased;
-    const entry = this.locate(key, leased.jobId)?.entry;
     const generation = await this.openAttempt(leased.job).catch(() => undefined);
+    // Re-validated AFTER the await (arch-review 47 P0-2). The entry used to be captured BEFORE it, and the
+    // assignment below ran unconditionally — so a SLOW open whose lease had meanwhile expired and been
+    // re-leased (epoch N+1, already restamped) rolled entry.job back to ITS generation: the newer runner's
+    // token still passed the epoch fence, but authorizeAttempt read the older attempt's number off the
+    // entry, and evidence produced by epoch N+1 was attributed to attempt N. A mint whose lease is no
+    // longer current assigns nothing and yields NO job — the claim was lost while it slept. (The opened
+    // ledger row stays behind as a `created` orphan: the number-only seam has no supersede handle — the
+    // attempt-claim transaction that closes that is the review's §5.1.)
+    const current = this.locate(key, leased.jobId)?.entry;
+    if (!current || !this.holdsWritableLease(current, key, leased.attempt)) return null;
     const { recordingGeneration: _inherited, ...withoutAttempt } = leased.job;
     const job: CaseJob = generation === undefined ? withoutAttempt : { ...leased.job, recordingGeneration: generation };
-    if (entry) entry.job = job;
+    current.job = job;
     return { ...leased, job };
   }
 
