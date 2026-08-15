@@ -55,6 +55,7 @@ import {
   applyGradingPlan,
   caseReason,
   childKey,
+  inputObservationOf,
   isRunTerminal,
   sealedExecutionMessage,
   selectSubsetCases,
@@ -115,7 +116,9 @@ interface PendingChildSettle {
   // The id this case was dispatched with — the key its replay buffer is written under (mig 0172) — and the
   // ATTEMPT under that id (mig 0173), which every append and the seal must carry.
   executionId: string;
-  generation: number;
+  // Absent when the attempt never opened one (recording claim refused) — never 0: that sentinel fabricated
+  // a `<executionId>#g0` coordinate no ledger mints, and every unisolated case collided on it (review 46).
+  generation?: number;
   // This attempt could not isolate its recording buffer — it runs, but its replay is not claimed as ours.
   unisolated?: boolean;
   // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
@@ -1135,7 +1138,10 @@ export class ScorecardBatchService {
             events: result.trace,
             // WHOSE evidence this is (review 39 P1) — the same identity the receipt records, so a reader can
             // ask whether the replay in front of them belongs to the execution that produced the verdict.
-            attemptId: attemptIdOf(executionId, winnerGeneration ?? 0),
+            // Only when the attempt is KNOWN (arch-review 46): `?? 0` fabricated `<executionId>#g0` — a
+            // coordinate the attempt ledger never mints (first attempt owns 1) — and every unisolated case
+            // collided on it. Unknown is stated as absent, exactly like the receipt does.
+            ...(winnerGeneration !== undefined ? { attemptId: attemptIdOf(executionId, winnerGeneration) } : {}),
             // Names the row on the browse page: an eval is known by the case it evaluated.
             ...runEvidenceIdentity(child),
             // The producer's declared clock anchor (a topology case: drive start) — what lets an inline
@@ -1184,7 +1190,9 @@ export class ScorecardBatchService {
         },
         ...(child ? { childId: child.id } : {}),
         executionId,
-        generation: winnerGeneration ?? 0,
+        // Absent when the attempt never opened one — finalizeCaseAttempt's own guard (unknown ⇒ no
+        // attemptId on the receipt, unisolated evidence) was DEAD CODE while this caller wrote 0.
+        ...(winnerGeneration !== undefined ? { generation: winnerGeneration } : {}),
         ...(unisolated || winnerUnisolated ? { unisolated: true } : {}),
         ...(ranOn ? { ranOn } : {}),
       });
@@ -1269,15 +1277,15 @@ export class ScorecardBatchService {
     // rows — never the in-memory copies a later offload may touch — and BEFORE anything downstream publishes:
     // counting the right case with another attempt's result is the subtler half of the missing-case defect.
     const receiptByKey = new Map(committed.map((r) => [childKey(r.caseId, r.trial), r] as const));
-    // Observation-first (arch-review 41 P1): a receipt carrying observationDigest is compared on the
-    // execution plane only — a legitimate re-score changed the scores, not the execution, and must not read
-    // as tampering. Legacy receipts (no observation half) keep the full-bytes comparison they were stamped with.
+    // FULL-BYTES comparison, deliberately (arch-review 46 revisiting 41): this gate runs at the SETTLE,
+    // which structurally predates any re-score (a re-score requires a settled batch), so the commit-time
+    // resultDigest is still the row's whole truth here — scores included — and comparing the observation
+    // half only would wave through a tampered score plane no revision owns. The observation digest's job is
+    // elsewhere: post-revision readers and the judgment input pin compare on it, where scores legally moved.
     const divergent = [...latest.entries()].filter(([key, child]) => {
       const receipt = receiptByKey.get(key);
       if (receipt === undefined || child.result === undefined) return false;
-      return receipt.observationDigest !== undefined
-        ? caseObservationDigest(child.result) !== receipt.observationDigest
-        : caseResultDigest(child.result) !== receipt.resultDigest;
+      return caseResultDigest(child.result) !== receipt.resultDigest;
     });
     if (divergent.length > 0)
       throw new InternalError(
@@ -1353,6 +1361,10 @@ export class ScorecardBatchService {
       // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
       // revision number no longer names the object a historical read has to fetch.
       ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
+      // WHAT THE JUDGES READ (arch-review 46), against the receipts this finalize already holds — the same
+      // `committed` list the divergence check above ran on, so the revision states the input the settle
+      // conditioned on rather than a second read of a ledger that can move between them.
+      inputObservation: inputObservationOf(results, { kind: "read", receipts: committed }),
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),
     });
@@ -1753,9 +1765,12 @@ export class ScorecardBatchService {
   // Best-effort by contract: a failed offload or an unsealed recording must never cost a case its verdict.
   private async assembleCaseEvidence(
     result: CaseResult,
-    where: { scorecardId: string; executionId: string; generation: number; unisolated?: boolean },
+    // `generation` absent = the attempt never opened one (arch-review 46): the snapshot stays INLINE rather
+    // than staged under a fabricated `#g0` key — the execution id is stable across a re-drive by
+    // construction, so two unisolated attempts of one case would share one object key with no CAS beneath.
+    where: { scorecardId: string; executionId: string; generation?: number; unisolated?: boolean },
   ): Promise<void> {
-    if (this.deps.artifacts) {
+    if (this.deps.artifacts && where.generation !== undefined) {
       try {
         // Keyed by the ATTEMPT, not by the case (arch-review 37 P0). `scorecards/<id>/<caseId>` gave every
         // trial of a case one object key, so trial 1 overwrote the bytes trial 0's result still points at —
@@ -1773,7 +1788,7 @@ export class ScorecardBatchService {
     }
     // …unless this attempt could not isolate its buffer (see `unisolated`): sealing then would publish an
     // earlier attempt's frames as this result's replay, which is worse than having none.
-    if (this.deps.recordingStore && !where.unisolated) {
+    if (this.deps.recordingStore && !where.unisolated && where.generation !== undefined) {
       try {
         await foldEnvDeltas(this.deps.recordingStore, where.executionId, result, where.generation);
         const ref = await this.deps.recordingStore.seal(
@@ -1843,7 +1858,7 @@ export class ScorecardBatchService {
       announce,
       ...(entry.childId ? { childId: entry.childId } : {}),
       executionId: entry.executionId,
-      generation: entry.generation,
+      ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
       ...(entry.unisolated ? { unisolated: true } : {}),
       ...(entry.ranOn ? { ranOn: entry.ranOn } : {}),
     });
@@ -1967,12 +1982,11 @@ export class ScorecardBatchService {
         continue;
       }
       const child = byId.get(receipt.childRunId);
-      // Observation-first (arch-review 41 P1): receipts with the execution-plane digest compare on it — a
-      // re-scored child's scores legally moved; the execution did not. Legacy receipts keep full-bytes.
-      const vouches = (candidate: CaseResult): boolean =>
-        receipt.observationDigest !== undefined
-          ? caseObservationDigest(candidate) === receipt.observationDigest
-          : caseResultDigest(candidate) === receipt.resultDigest;
+      // FULL-BYTES, deliberately (arch-review 46 revisiting 41): every caller of this rebuild is a SETTLE,
+      // and a settle structurally predates any re-score — so the commit-time resultDigest is still the whole
+      // truth, and an observation-only comparison would count a row whose score plane was tampered outside
+      // any revision. The observation digest serves post-revision readers and the judgment input pin.
+      const vouches = (candidate: CaseResult): boolean => caseResultDigest(candidate) === receipt.resultDigest;
       if (child?.result) {
         // The committed child's own copy is the answer — and its bytes must be the receipt's. A child row
         // that disagrees with its own receipt is a permanent divergence a reader will hydrate a year from
@@ -2198,7 +2212,7 @@ export class ScorecardBatchService {
       executionId: input.executionId,
       // An attempt that never opened a generation must not seal generation 0's buffer as its replay —
       // 0 is a real generation; "unknown" is `unisolated`, the same fail-closed answer the dispatch gives.
-      generation: input.generation ?? 0,
+      ...(input.generation !== undefined ? { generation: input.generation } : {}),
       ...(input.unisolated || input.generation === undefined ? { unisolated: true } : {}),
     });
     // The constructor guard couples the receipt store to the run store, so this branch is unreachable in a
@@ -2434,9 +2448,12 @@ export class ScorecardBatchService {
       // What remains is filling a HOLE: a child that settled with no result at all (the failure/partial path
       // writes results onto children the loop never got to settle). So the write is conditional on the row
       // having none, which is the difference between completing a record and revising one.
+      // The read is only a cheap skip; the CONDITION travels with the write (expectNoResult, arch-review
+      // 46) — a result landing between the two refuses this statement instead of being restated over.
       const current = await store.get(childId);
       if (current?.result) continue; // already published its evidence — this is not ours to restate
       await store.update(childId, { result: r, updatedAt: this.now() }, undefined, {
+        expectNoResult: true,
         expectNotCancelled: true,
         ...(parentDriver ? { parentDriver } : {}),
       });
@@ -2803,10 +2820,12 @@ export class ScorecardBatchService {
               tenant,
               events: result.trace,
               // WHOSE evidence this is (review 39 P1): the attempt this dispatch opened, spelled the way the
-              // receipt spells it, so a reader can compare rather than assume.
-              // WHOSE evidence: the WINNING physical attempt's generation (a spill/boost/duplicate opened
-              // its own), never the first dispatch's by default.
-              attemptId: attemptIdOf(executionIdOf(job, id), winnerJob.recordingGeneration ?? 0),
+              // receipt spells it, so a reader can compare rather than assume — the WINNING physical
+              // attempt's generation (a spill/boost/duplicate opened its own), never the first dispatch's.
+              // Only when KNOWN (arch-review 46): `?? 0` fabricated a coordinate no ledger mints.
+              ...(winnerJob.recordingGeneration !== undefined
+                ? { attemptId: attemptIdOf(executionIdOf(job, id), winnerJob.recordingGeneration) }
+                : {}),
               ...runEvidenceIdentity(child),
               ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});
@@ -2832,7 +2851,7 @@ export class ScorecardBatchService {
           ...(ranOn ? { ranOn } : {}),
           parentDriver: { scorecardId: id, epoch },
           executionId: executionIdOf(job, id),
-          generation: winnerJob.recordingGeneration ?? 0,
+          ...(winnerJob.recordingGeneration !== undefined ? { generation: winnerJob.recordingGeneration } : {}),
           ...(unisolated.has(executionIdOf(job, id)) || winnerUnisolated ? { unisolated: true } : {}),
           judges, // …and what this batch asked of the case, so its commit can state a judge that never answered
           ...(opts.sealedJudges ? { sealedJudges: opts.sealedJudges } : {}),
@@ -3328,6 +3347,19 @@ export class ScorecardBatchService {
             // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
             // revision number no longer names the object a historical read has to fetch.
             ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
+            // WHAT THE JUDGES READ (arch-review 46) — the receipts the rebuild READ, the same frozen set the
+            // terminal write conditions on. A run with no ledger says so rather than staying silent, because
+            // silence here is the shape a later gate would have read as agreement.
+            inputObservation: inputObservationOf(
+              scorecard.results,
+              accounted.receipts
+                ? { kind: "read", receipts: accounted.receipts }
+                : {
+                    kind: "unavailable",
+                    reason:
+                      "this batch has no case-commit receipt ledger — its cases were counted from the in-memory plane, so nothing vouches for the executions these judges read",
+                  },
+            ),
             createdAt: this.now(),
             ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
           });

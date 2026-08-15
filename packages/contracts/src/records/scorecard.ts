@@ -266,6 +266,46 @@ export const ScoringRevisionSchema = z.object({
   // contentDigest over the FULL score plane as of this pass (caseId#trial → judgment-projected scores) — two
   // reads that disagree on it read different judgments, whatever the record id says.
   scorePlaneDigest: z.string(),
+  // WHAT THE JUDGES READ (arch-review 46) — the INPUT half of scoring identity.
+  //
+  // `scorePlaneDigest` pins what a pass CONCLUDED. Nothing pinned what it concluded it FROM, and the two are
+  // not the same statement: a verdict is a claim about an observation, so a revision that names only its own
+  // output certifies an answer whose question is unrecorded. The receipt ledger already vouches for each
+  // case's execution bytes (`CaseCommitReceipt.observationDigest`), and until now no judgment ever compared
+  // itself against it — a case re-driven between the pass's hydration and its settle would leave the verdicts
+  // of one execution certified over the bytes of another, with every digest in the record agreeing.
+  //
+  // `setDigest` is the digest of the observation SET the pass judged (childKey → observationDigest, canonically
+  // ordered); `receiptSetDigest` is the same digest rebuilt from the committed receipts. Equal digests mean
+  // "what the judge read is what the ledger vouches for". Absent = the pass could not compute it at all, which
+  // is why `completed` exists: a comparison that could not run says so, and is never read as agreement.
+  inputObservation: z
+    .object({
+      // Did this observation COMPLETE — the plane digested AND checked against the receipt ledger? False =
+      // the check could not run (`failure` says why: no ledger, an unreadable one, receipts predating the
+      // observation digest, ingested traces with no execution behind them). A `false` here is honest
+      // ignorance; what it must never be confusable with is agreement.
+      completed: z.boolean(),
+      failure: z.string().optional(),
+      // The judged plane's own observation-set digest. Absent only when digesting the plane itself failed.
+      setDigest: z.string().optional(),
+      cases: z.number().int().nonnegative(), // units in that set
+      // The same digest rebuilt from the receipts — present only when every judged case has a receipt
+      // carrying an observation digest, because a partial rebuild is not the same set.
+      receiptSetDigest: z.string().optional(),
+      // Units whose judged observation is NOT the one their receipt vouches for. 0 with `completed: true` is
+      // the measurement that lets a gate trust the verdicts; absent means it was never counted.
+      diverged: z.number().int().nonnegative().optional(),
+      // WHICH units, bounded — the counts decide, these make the decision diagnosable (same posture as
+      // `stageParity.units`, and the same reason: by the time anyone asks, the plane has moved on).
+      divergedCases: z.array(z.string()).optional(),
+    })
+    .optional(),
+  // The pass that wrote this revision. The marker is CLEARED in the same write the revision appends (that is
+  // the revision boundary), so afterwards nothing else in the record says which pass produced it — and the
+  // pass id is what the analysis artifact and the judges' sealed evidence planes are keyed by. Absent on
+  // revisions from before this, and on passes that never carried an identity.
+  passId: z.string().optional(),
   // The analysis artifact frozen from THIS pass's plane (absent: no artifact store / offload failed / the
   // stamped verdict policy could not be restored, in which case re-freezing would rewrite history).
   analysisRef: z.string().optional(),

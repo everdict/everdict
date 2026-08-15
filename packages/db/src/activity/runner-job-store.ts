@@ -52,9 +52,16 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
   }
 
   async claim(input: ClaimInput): Promise<RunnerJobLease | null> {
-    // Requeue this owner's expired leases (silent runner) before claiming.
+    // Requeue this owner's expired leases (silent runner) before claiming. A cancelled job is NEVER requeued
+    // or claimed (in-memory-hub parity: requeueExpired/orderLeasable have always skipped it) — re-dispatching
+    // work the control plane has already stopped is how a cancel became a hint the queue was free to ignore.
     for (const e of this.jobs.values()) {
-      if (e.owner === input.owner && e.status === "leased" && input.now - e.activityAt > input.leaseTtlMs) {
+      if (
+        e.owner === input.owner &&
+        e.status === "leased" &&
+        !e.cancelRequested &&
+        input.now - e.activityAt > input.leaseTtlMs
+      ) {
         e.status = "queued";
         e.leasedBy = undefined;
       }
@@ -64,6 +71,7 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
         (e) =>
           e.owner === input.owner &&
           e.status === "queued" &&
+          !e.cancelRequested &&
           (e.runnerId === input.runnerId || e.runnerId === POOL_RUNNER) &&
           capsOk(e.requiredCaps, input.advertisedCaps),
       )
@@ -82,20 +90,19 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
 
   async restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!this.holdsLease(e, runnerId, leaseEpoch)) return false;
+    if (!this.holdsWritableLease(e, runnerId, leaseEpoch)) return false;
     e.job = job;
     return true;
   }
 
   async authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null> {
     const e = this.jobs.get(jobId);
-    if (!e || e.status !== "leased" || e.leasedBy !== runnerId) return null;
-    if (!e.leaseEpoch || e.leaseEpoch !== leaseEpoch) return null;
-    return e.job;
+    return this.holdsWritableLease(e, runnerId, leaseEpoch) ? e.job : null;
   }
 
-  // The current-lease fence every runner-initiated mutation shares (the same predicate `authorize` reads):
-  // a report from a lease that was requeued or re-leased acts on nothing.
+  // The current-lease fence: a report from a lease that was requeued or re-leased acts on nothing. This is the
+  // LIVENESS half — it says the caller is who it claims to be, which is what a heartbeat needs in order to be
+  // told about a cancel.
   private holdsLease(e: Entry | undefined, runnerId: string, leaseEpoch: number): e is Entry {
     return (
       e !== undefined &&
@@ -106,6 +113,20 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
     );
   }
 
+  // ── A CANCEL REVOKES THE CAPABILITY, IT DOES NOT ASK FOR ONE ────────────────────────────────────────
+  //
+  // The predicate every runner-initiated MUTATION shares (the same one `authorize` reads, so the evidence
+  // wire and the result wire revoke together). A cancelled job's holder could previously still complete it —
+  // and `outcome` reports a terminal row verbatim, so the cancellation simply vanished from the record and
+  // the batch settled as "completed". The runner is told to stop; until it does, its lease authorizes nothing.
+  private holdsWritableLease(e: Entry | undefined, runnerId: string, leaseEpoch: number): e is Entry {
+    return this.holdsLease(e, runnerId, leaseEpoch) && !e.cancelRequested;
+  }
+
+  // Deliberately fenced on the lease only, NOT on the cancel flag: a cancelled lease must still HEAR its
+  // cancel on the heartbeat reply (that is how the runner learns to abort and free the runtime). What it
+  // stops getting is the extension — activity_at freezes, so a runner that ignores the signal is reclaimed by
+  // the idle-timeout path instead of holding the job alive forever with a compliant-looking heartbeat.
   async touch(
     jobId: string,
     runnerId: string,
@@ -114,13 +135,14 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
   ): Promise<{ extended: boolean; cancelled: boolean }> {
     const e = this.jobs.get(jobId);
     if (!this.holdsLease(e, runnerId, leaseEpoch)) return { extended: false, cancelled: false };
+    if (e.cancelRequested) return { extended: false, cancelled: true };
     e.activityAt = now;
-    return { extended: true, cancelled: e.cancelRequested };
+    return { extended: true, cancelled: false };
   }
 
   async complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!this.holdsLease(e, ranBy, leaseEpoch)) return false;
+    if (!this.holdsWritableLease(e, ranBy, leaseEpoch)) return false;
     e.status = "completed";
     e.result = result;
     return true;
@@ -128,7 +150,7 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
 
   async fail(jobId: string, message: string, runnerId: string, leaseEpoch: number): Promise<boolean> {
     const e = this.jobs.get(jobId);
-    if (!this.holdsLease(e, runnerId, leaseEpoch)) return false;
+    if (!this.holdsWritableLease(e, runnerId, leaseEpoch)) return false;
     e.status = "failed";
     e.error = message;
     return true;
@@ -203,10 +225,14 @@ export class PgRunnerJobStore implements RunnerJobStore {
   }
 
   async claim(input: ClaimInput): Promise<RunnerJobLease | null> {
-    // Requeue this owner's expired leases (silent runner) before claiming.
+    // Requeue this owner's expired leases (silent runner) before claiming. `NOT cancel_requested` on BOTH
+    // statements: a cancelled job is neither requeued nor claimed. Without it the queue kept re-dispatching
+    // work the control plane had already stopped — the in-memory hub's requeueExpired/orderLeasable have
+    // always skipped a cancelled entry, and this is the store lane catching up to that guard.
     await this.client.query(
       `UPDATE everdict_runner_jobs SET status = 'queued', leased_by = NULL
-       WHERE owner = $1 AND status = 'leased' AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
+       WHERE owner = $1 AND status = 'leased' AND NOT cancel_requested
+         AND activity_at < to_timestamp($2 / 1000.0) - make_interval(secs => $3)`,
       [input.owner, input.now, input.leaseTtlMs / 1000],
     );
     // Own queue before the owner pool (ORDER BY runner_id <> '*' DESC), FIFO; capability gate via array containment.
@@ -215,7 +241,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
               activity_at = to_timestamp($5 / 1000.0)
        WHERE job_id = (
          SELECT job_id FROM everdict_runner_jobs
-         WHERE owner = $1 AND (runner_id = $2 OR runner_id = $3) AND status = 'queued'
+         WHERE owner = $1 AND (runner_id = $2 OR runner_id = $3) AND status = 'queued' AND NOT cancel_requested
            AND ($4::text[] IS NULL OR required_caps <@ $4::text[])
          ORDER BY (runner_id <> $3) DESC, created_at ASC
          LIMIT 1
@@ -235,6 +261,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
     const res = await this.client.query<{ job_id: string }>(
       `UPDATE everdict_runner_jobs SET job = $4
        WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
+         AND NOT cancel_requested
        RETURNING job_id`,
       [jobId, runnerId, leaseEpoch, JSON.stringify(job)],
     );
@@ -243,11 +270,14 @@ export class PgRunnerJobStore implements RunnerJobStore {
 
   // The authorization read, in ONE statement so it cannot see a lease that a concurrent claim has already
   // moved on from. `status = 'leased'` matters as much as the epoch: a completed job's holder has no further
-  // right to publish evidence under it.
+  // right to publish evidence under it — and neither has a CANCELLED one, which is why the same
+  // `NOT cancel_requested` that guards the mutations guards this read (arch-review 46: cancellation is
+  // capability revocation, so the evidence endpoints stop accepting the moment the cancel lands).
   async authorize(jobId: string, runnerId: string, leaseEpoch: number): Promise<CaseJob | null> {
     const res = await this.client.query<{ job: unknown }>(
       `SELECT job FROM everdict_runner_jobs
-       WHERE job_id = $1 AND leased_by = $2 AND lease_epoch = $3 AND status = 'leased' AND lease_epoch > 0`,
+       WHERE job_id = $1 AND leased_by = $2 AND lease_epoch = $3 AND status = 'leased' AND lease_epoch > 0
+         AND NOT cancel_requested`,
       [jobId, runnerId, leaseEpoch],
     );
     const row = res.rows[0];
@@ -264,21 +294,32 @@ export class PgRunnerJobStore implements RunnerJobStore {
     leaseEpoch: number,
     now: number,
   ): Promise<{ extended: boolean; cancelled: boolean }> {
+    // The one mutation NOT gated on `NOT cancel_requested` — a cancelled lease must still HEAR its cancel here
+    // (that reply is how the runner learns to abort the local run and free the runtime). What it loses is the
+    // EXTENSION: the CASE freezes activity_at, so a runner that keeps heartbeating without complying stops
+    // looking alive and the idle-timeout path reclaims the job instead of it being renewed forever.
     const res = await this.client.query<{ cancel_requested: boolean }>(
-      `UPDATE everdict_runner_jobs SET activity_at = to_timestamp($4 / 1000.0)
+      `UPDATE everdict_runner_jobs
+          SET activity_at = CASE WHEN cancel_requested THEN activity_at ELSE to_timestamp($4 / 1000.0) END
        WHERE job_id = $1 AND status = 'leased' AND leased_by = $2 AND lease_epoch = $3 AND lease_epoch > 0
        RETURNING cancel_requested`,
       [jobId, runnerId, leaseEpoch, now],
     );
     const row = res.rows[0];
     if (!row) return { extended: false, cancelled: false };
-    return { extended: true, cancelled: row.cancel_requested === true };
+    const cancelled = row.cancel_requested === true;
+    return { extended: !cancelled, cancelled };
   }
 
+  // A CANCELLED lease may not end the job either (arch-review 46). `outcome` reports a terminal row verbatim —
+  // it only synthesizes "cancelled" while the row is still queued/leased — so a cancelled job's holder landing
+  // its complete() erased the cancellation from the record: the batch read back "completed" and the user's stop
+  // had, on the evidence, never happened.
   async complete(jobId: string, result: CaseResult, ranBy: string, leaseEpoch: number): Promise<boolean> {
     const res = await this.client.query<{ job_id: string }>(
       `UPDATE everdict_runner_jobs SET status = 'completed', result = $2
        WHERE job_id = $1 AND status = 'leased' AND leased_by = $3 AND lease_epoch = $4 AND lease_epoch > 0
+         AND NOT cancel_requested
        RETURNING job_id`,
       [jobId, JSON.stringify(result), ranBy, leaseEpoch],
     );
@@ -289,6 +330,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
     const res = await this.client.query<{ job_id: string }>(
       `UPDATE everdict_runner_jobs SET status = 'failed', error = $2
        WHERE job_id = $1 AND status = 'leased' AND leased_by = $3 AND lease_epoch = $4 AND lease_epoch > 0
+         AND NOT cancel_requested
        RETURNING job_id`,
       [jobId, message, runnerId, leaseEpoch],
     );

@@ -19,6 +19,7 @@ import {
   ScorecardBatch,
   type ScorecardTransition,
   appendScoringRevision,
+  inputObservationOf,
   nextScoringRevision,
   scorecardModels,
   summarizeScorecard,
@@ -392,6 +393,16 @@ export class ScorecardIngestService {
       // …and its durable KEY: the ref expires, and artifacts are keyed by the writing PASS now, so the
       // revision number no longer names the object a historical read has to fetch.
       ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
+      // WHAT THE JUDGES READ (arch-review 46). An ingest batch runs nothing: its cases are traces a tenant's
+      // platform handed us, so there is no execution of ours behind them and no receipt vouching for their
+      // bytes. That is a real and permanent gap, and the revision states it — an ingested judgment must never
+      // be confusable with one whose inputs the ledger stands behind. The plane's own set digest still rides
+      // along, so two ingests of the same traces are still comparable to each other.
+      inputObservation: inputObservationOf(results, {
+        kind: "unavailable",
+        reason:
+          "ingested traces have no execution receipts — this platform did not run these cases, so nothing here vouches for the bytes these judges read",
+      }),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });

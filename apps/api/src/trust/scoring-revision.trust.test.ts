@@ -1,7 +1,7 @@
 import { ScorecardService } from "@everdict/application-control";
-import type { CaseResult, ScorecardRecord } from "@everdict/contracts";
+import type { CaseCommitReceipt, CaseResult, ScorecardRecord } from "@everdict/contracts";
 import { PgScorecardStore } from "@everdict/db";
-import { appendScoringRevision, currentScoringPin } from "@everdict/domain";
+import { appendScoringRevision, caseObservationDigest, currentScoringPin, inputObservationOf } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
@@ -16,6 +16,17 @@ import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-co
 // in jsonb columns, and a column the store silently drops (the manifest UPDATE lane was exactly such a hole)
 // keeps every unit test green while production forgets.
 const describeTrust = TRUST_PG_ENABLED ? describe : describe.skip;
+
+// The receipt that vouches for one case's execution — the ledger row a judgment's input is checked against.
+const vouching = (result: CaseResult): CaseCommitReceipt => ({
+  scorecardId: "sc",
+  caseId: result.caseId,
+  trial: 0,
+  childRunId: `child-${result.caseId}`,
+  resultDigest: "sha256:committed",
+  observationDigest: caseObservationDigest(result),
+  committedAt: new Date().toISOString(),
+});
 
 const judged = (caseId: string, value: number, pass: boolean): CaseResult => ({
   caseId,
@@ -65,6 +76,9 @@ describeTrust("TRUST-35 — the scoring ledger survives Postgres, and the gate's
         kind: "initial",
         judges: [{ id: "quality", version: "1.0.0", model: "m1" }],
         results,
+        // …and WHAT those judges read, vouched for by the case-commit ledger (arch-review 46). It rides the
+        // same jsonb column, so this trip is what certifies it survives Postgres at all.
+        inputObservation: inputObservationOf(results, { kind: "read", receipts: results.map(vouching) }),
         createdAt: new Date().toISOString(),
       }),
       manifest: {
@@ -85,7 +99,14 @@ describeTrust("TRUST-35 — the scoring ledger survives Postgres, and the gate's
     const stored = (await store.get(`${tenant}-cand`)) as ScorecardRecord;
     const baseStored = (await store.get(`${tenant}-base`)) as ScorecardRecord;
     expect(decision.baselineScoring).toEqual(currentScoringPin(baseStored.scoring));
-    expect(decision.candidateScoring).toEqual({ revision: 1, scorePlaneDigest: stored.scoring?.[0]?.scorePlaneDigest });
+    expect(decision.candidateScoring).toMatchObject({
+      revision: 1,
+      scorePlaneDigest: stored.scoring?.[0]?.scorePlaneDigest,
+    });
+    // …and the pin carries the INPUT half too (arch-review 46): what the judges read, and the ledger's answer
+    // about whether it still vouches for it. Both halves round-tripped through jsonb.
+    expect(decision.candidateScoring?.inputObservation).toMatchObject({ completed: true, diverged: 0 });
+    expect(decision.candidateScoring?.inputObservation?.setDigest).toMatch(/^sha256:/);
 
     // A re-score pass rewrites the plane (quality flips its verdict) and APPENDS — history intact, the
     // manifest's judge view refreshed in the same write (the update lane that used to drop `manifest`).
@@ -94,6 +115,9 @@ describeTrust("TRUST-35 — the scoring ledger survives Postgres, and the gate's
       kind: "rescore",
       judges: [{ id: "quality", version: "2.0.0", model: "m2" }],
       results: rescored,
+      // The SAME executions, judged again — so the input observation is unchanged while the plane moves,
+      // which is precisely the split the two digests exist to express.
+      inputObservation: inputObservationOf(rescored, { kind: "read", receipts: rescored.map(vouching) }),
       createdAt: new Date().toISOString(),
     });
     await store.update(`${tenant}-cand`, {
@@ -115,5 +139,8 @@ describeTrust("TRUST-35 — the scoring ledger survives Postgres, and the gate's
     const now = currentScoringPin(fresh.scoring);
     expect(now?.revision).toBe(2);
     expect(now?.scorePlaneDigest).not.toBe(decision.candidateScoring?.scorePlaneDigest);
+    // …while the INPUT stayed put: the same executions were judged twice, so the judgment moved and what it
+    // was judged FROM did not. A pin that could not tell those apart cannot say why a verdict changed.
+    expect(now?.inputObservation?.setDigest).toBe(decision.candidateScoring?.inputObservation?.setDigest);
   });
 });

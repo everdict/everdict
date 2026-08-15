@@ -1029,12 +1029,17 @@ export class RunService {
           // store has no compare-and-set — and the ledger ends up holding the winner's result beside the
           // loser's screenshot. The batch path already keys per attempt; this one did not, which is the same
           // defect wearing the standalone lane's clothes.
-          const attempt = this.attempt.get(`evd-run-${id}`) ?? 0;
-          result.snapshot = await offloadSnapshot(
-            result.snapshot,
-            this.deps.artifacts,
-            `attempts/${attemptIdOf(`evd-run-${id}`, attempt)}`,
-          );
+          // The ATTEMPT's own coordinate (attemptRow), never `?? 0`: with the sentinel every unisolated
+          // attempt of every run shared one `…#g0` object key — and an object store has no CAS, so the
+          // exact overwrite this key exists to prevent came back through the fallback (arch-review 46).
+          // No known attempt coordinate → keep the snapshot inline rather than stage it under a lie.
+          const attemptKey =
+            this.attemptRow.get(`evd-run-${id}`) ??
+            (this.attempt.get(`evd-run-${id}`) !== undefined
+              ? attemptIdOf(`evd-run-${id}`, this.attempt.get(`evd-run-${id}`) as number)
+              : undefined);
+          if (attemptKey !== undefined)
+            result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `attempts/${attemptKey}`);
         } catch {}
       }
       // ── PREPARE THE EVIDENCE, THEN COMMIT — the batch lane's order, here too (arch-review 41 P1) ─────
@@ -1050,9 +1055,13 @@ export class RunService {
       // sealed recording is an orphan attempt's evidence — referenced by nothing, overwriting nothing. The
       // TRAJECTORY seal stays downstream of the committed settle (arch-review 32 P0): that store keeps the
       // FIRST segment per emitter, so only the settle's winner may plant it.
-      if (this.deps.recordingStore) {
+      // …and only for an attempt that OWNS its buffer (arch-review 46, the batch lane's own rule): with no
+      // known generation the recording claim was refused — sealing would publish an earlier attempt's frames
+      // as this result's replay, which is worse than having none. Unknown is absent, never generation 0.
+      const sealGeneration = this.attempt.get(`evd-run-${id}`);
+      if (this.deps.recordingStore && sealGeneration !== undefined) {
         try {
-          const generation = this.attempt.get(`evd-run-${id}`) ?? 0;
+          const generation = sealGeneration;
           await foldEnvDeltas(this.deps.recordingStore, `evd-run-${id}`, result, generation);
           const ref = await this.deps.recordingStore.seal(
             `evd-run-${id}`,

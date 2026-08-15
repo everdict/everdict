@@ -221,6 +221,67 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
     expect(readiness.series[0]?.baseline?.scoring).toEqual(gatePin);
   });
 
+  // arch-review 46: a scoring revision now records what its judges READ, and whether the receipt ledger still
+  // vouches for it. A green gate over verdicts derived from executions that have since been replaced is an
+  // answer about something else — and until now the ship path could not see the difference at all.
+  it("REFUSES a green series whose pinned judgment disowns its own input", () => {
+    const diverged = {
+      revision: 2,
+      scorePlaneDigest: "sha256:plane",
+      inputObservation: { setDigest: "sha256:judged", completed: true, diverged: 3 },
+    };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product(),
+      new Map([["quality", point("sc-2", 0.95)]]),
+      new Map([["quality", resolved("sc-1", 0.9)]]),
+      // The gate itself is perfectly happy — it compares judgments, not the executions beneath them
+      new Map([["quality", { verdict: "pass" as const, candidateScoring: diverged }]]),
+      0,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "not_comparable", regressed: true });
+    expect(readiness.series[0]?.reasons?.[0]).toContain("3 case(s)");
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("refuses on the BASELINE side too — either end of the comparison is enough", () => {
+    const diverged = {
+      revision: 1,
+      scorePlaneDigest: "sha256:plane",
+      inputObservation: { completed: true, diverged: 1 },
+    };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product(),
+      new Map([["quality", point("sc-2", 0.95)]]),
+      new Map([["quality", { kind: "resolved" as const, point: { ...point("sc-1", 0.9), scoring: diverged } }]]),
+      new Map([["quality", gate("pass")]]),
+      0,
+    );
+    expect(readiness.series[0]?.reasons?.[0]).toContain("baseline");
+    expect(readiness.ready).toBe(false);
+  });
+
+  it("says nothing on an UNMEASURED observation — a check that could not run is not divergence", () => {
+    // The pass had no receipt ledger to compare against (an ingest batch, a pre-ledger record). That is
+    // honest ignorance, and reading it as an accusation would refuse every historical release.
+    const unmeasured = {
+      revision: 2,
+      scorePlaneDigest: "sha256:plane",
+      inputObservation: { setDigest: "sha256:judged", completed: false },
+    };
+    const readiness = releaseReadiness(
+      release(["quality"]),
+      product(),
+      new Map([["quality", { ...point("sc-2", 0.95), scoring: unmeasured }]]),
+      new Map([["quality", resolved("sc-1", 0.9)]]),
+      new Map([["quality", gate("pass")]]),
+      0,
+    );
+    expect(readiness.series[0]).toMatchObject({ verdict: "pass", regressed: false });
+    expect(readiness.ready).toBe(true);
+  });
+
   it("a comparable pair with NO gate reading refuses — the seam being unconfigured is never a pass", () => {
     const readiness = releaseReadiness(
       release(["quality"]),

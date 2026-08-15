@@ -52,6 +52,9 @@ export interface ClaimInput {
 // (status='leased' AND leased_by=runner AND lease_epoch=epoch) — the same predicate `authorize` reads. A
 // signature with nowhere to put the epoch is how the result wire stayed unfenced while the evidence wire
 // was: the store must be UNABLE to accept an outcome from a lease it no longer considers current.
+// ⚠️ A CANCELLED job is revoked, not merely notified (arch-review 46): `restampJob`/`authorize`/`complete`/
+// `fail` additionally require the job not to be cancel-requested, and `claim` neither requeues nor takes one.
+// `touch` is the deliberate exception — see its note.
 export interface RunnerJobStore {
   park(input: ParkInput): Promise<void>;
   // Atomically requeue this owner's expired leases, then claim the next queued job this runner can run
@@ -65,7 +68,10 @@ export interface RunnerJobStore {
   // uses. false = not this runner's current lease, and nothing was written.
   restampJob(jobId: string, runnerId: string, leaseEpoch: number, job: CaseJob): Promise<boolean>;
   // Liveness — refresh activity_at; returns whether the CALLER'S lease is still current and the control-plane
-  // cancel flag. A stale holder's touch extends nothing (it would keep the successor's lease alive).
+  // cancel flag. A stale holder's touch extends nothing (it would keep the successor's lease alive). A
+  // CANCELLED lease is still answered (`{extended:false, cancelled:true}`) — the reply is how the runner is
+  // told to abort — but it is no longer extended, so a runner that ignores the signal stops looking alive and
+  // is reclaimed by the idle-timeout path rather than renewing the job forever.
   touch(
     jobId: string,
     runnerId: string,

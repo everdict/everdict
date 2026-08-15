@@ -113,6 +113,19 @@ export type GateOverride = z.infer<typeof GateOverrideSchema>;
 export const GateScoringPinSchema = z.object({
   revision: z.number().int().positive(),
   scorePlaneDigest: z.string(),
+  // …AND WHAT THAT JUDGMENT READ (arch-review 46). The plane digest pins the verdicts; this pins the
+  // observations they were derived from, projected off the revision's own `inputObservation`. Two decisions
+  // whose plane digests agree can still have judged different executions (a case re-driven under the same
+  // scoring pass), and `diverged > 0` says the revision itself already knows its verdicts describe bytes the
+  // receipt ledger no longer vouches for. Absent = a revision from before this existed; `completed: false` =
+  // the check could not run — neither is agreement, and readers that gate say so out loud.
+  inputObservation: z
+    .object({
+      setDigest: z.string().optional(),
+      completed: z.boolean(),
+      diverged: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 export type GateScoringPin = z.infer<typeof GateScoringPinSchema>;
 

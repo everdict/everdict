@@ -9,7 +9,7 @@ import type {
   ScoringPass,
 } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
-import { scorePlaneDigest } from "@everdict/domain";
+import { caseObservationDigest, scorePlaneDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
@@ -1586,5 +1586,130 @@ describe("ScorecardScoreService carrier selection — the receipt names the row,
     // Then the pass still scores it rather than skipping the case for want of a receipt
     expect(out.scored).toBe(true);
     expect(written).toEqual(["child-superseded"]);
+  });
+
+  // arch-review 46: the pass hydrated c1, judged that copy, and is writing back. A recovery re-driving the
+  // case in between commits a NEW receipt over a different execution — and every guard in the write path
+  // still passes, because the pass genuinely owns the marker and the fence genuinely holds. What lands is one
+  // execution's verdicts on another execution's row, and afterwards nothing in the record can say so.
+  it("REFUSES the write-back when the case's execution was re-committed while the pass was judging it", async () => {
+    const { svc, written } = harness([
+      { ...receiptFor("child-committed"), observationDigest: "sha256:some-other-execution" },
+    ]);
+    await expect(
+      svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1"),
+    ).rejects.toBeInstanceOf(ConflictError);
+    // Nothing was written — a judgment about bytes nobody vouches for is not evidence
+    expect(written).toEqual([]);
+  });
+
+  it("writes when the receipt vouches for exactly the execution the judge read", async () => {
+    const { svc, written } = harness([
+      { ...receiptFor("child-committed"), observationDigest: caseObservationDigest(result("c1", [])) },
+    ]);
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
+    expect(out.scored).toBe(true);
+    expect(written).toEqual(["child-committed"]);
+  });
+});
+
+// ── WHAT THE SETTLED REVISION SAYS ITS JUDGES READ (arch-review 46) ──────────────────────────────────
+//
+// The write-back refuses a case whose execution moved under the pass. This is the durable half: the settled
+// revision states the input it judged and whether the receipt ledger vouches for it, so a release gate
+// reading the pin afterwards is not left inferring it from silence.
+describe("ScorecardScoreService — the settled revision records its input observation", () => {
+  const judged = result("c1", [measuredVerdict]);
+
+  function settleHarness(receipts: CaseCommitReceipt[] | "unreadable"): {
+    svc: ScorecardScoreService;
+    updates: Array<Partial<ScorecardRecord>>;
+  } {
+    const record: ScorecardRecord = {
+      ...recordWith([judged]),
+      scoringPass: livePass({ targetRevision: 1, baseRevision: 0, judges: [{ id: "j", version: "1.0.0" }] }),
+    };
+    const updates: Array<Partial<ScorecardRecord>> = [];
+    const store: ScorecardStore = {
+      ...unusedStore,
+      async get() {
+        return record;
+      },
+      async update(_id, patch) {
+        updates.push(patch);
+        return { ...record, ...patch };
+      },
+    };
+    const caseReceipts = {
+      async commit() {
+        throw new Error("unused");
+      },
+      async commitCase() {
+        throw new Error("unused");
+      },
+      async list() {
+        if (receipts === "unreadable") throw new Error("receipt ledger unreachable");
+        return receipts;
+      },
+    } as unknown as CaseReceiptStore;
+    const svc = new ScorecardScoreService(
+      { ...deps, store, caseReceipts },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    return { svc, updates };
+  }
+
+  const observationOf = (updates: Array<Partial<ScorecardRecord>>) => updates.at(-1)?.scoring?.at(-1)?.inputObservation;
+
+  it("digests the judged plane and finds it equal to the receipts-rebuilt digest", async () => {
+    const { svc, updates } = settleHarness([
+      {
+        scorecardId: "sc-1",
+        caseId: "c1",
+        trial: 0,
+        childRunId: "child-1",
+        resultDigest: "sha256:result",
+        observationDigest: caseObservationDigest(judged),
+        committedAt: "2026-08-07T00:00:00.000Z",
+      },
+    ]);
+    await svc.finalizeScore("sc-1", [{ id: "j", version: "1.0.0" }], "bob", "pass-1");
+    const observed = observationOf(updates);
+    expect(observed).toMatchObject({ completed: true, diverged: 0, cases: 1 });
+    expect(observed?.receiptSetDigest).toBe(observed?.setDigest);
+    // …and the revision names the pass that wrote it — the marker clears in this same write
+    expect(updates.at(-1)?.scoring?.at(-1)?.passId).toBe("pass-1");
+  });
+
+  it("states that a LEGACY receipt cannot answer — no execution digest is not agreement", async () => {
+    const { svc, updates } = settleHarness([
+      {
+        scorecardId: "sc-1",
+        caseId: "c1",
+        trial: 0,
+        childRunId: "child-1",
+        resultDigest: "sha256:result",
+        committedAt: "2026-08-07T00:00:00.000Z",
+      },
+    ]);
+    await svc.finalizeScore("sc-1", [{ id: "j", version: "1.0.0" }], "bob", "pass-1");
+    expect(observationOf(updates)).toMatchObject({ completed: false });
+    expect(observationOf(updates)?.failure).toContain("no receipt carrying an execution digest");
+  });
+
+  it("records an UNREADABLE ledger as an incomplete observation — and still settles the pass", async () => {
+    // A measurement must never be able to fail the thing it measures; what it must also never do is stay
+    // silent, because silence is what a later gate would read as agreement.
+    const { svc, updates } = settleHarness("unreadable");
+    await svc.finalizeScore("sc-1", [{ id: "j", version: "1.0.0" }], "bob", "pass-1");
+    expect(observationOf(updates)).toMatchObject({ completed: false });
+    expect(observationOf(updates)?.failure).toContain("receipt ledger unreachable");
+    expect(updates.at(-1)?.scoringPass).toBeNull(); // the settle went through and closed the revision boundary
   });
 });

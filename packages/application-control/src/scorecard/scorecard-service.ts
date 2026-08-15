@@ -959,7 +959,15 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         },
       );
       if (superseded === undefined) continue;
-      await this.stopInFlight(r);
+      // stopInFlight now propagates a store failure (see its note) — correct for the user-facing cancel, which the
+      // caller can retry. This path cannot: it runs INSIDE submit, after the new record is persisted and before the
+      // driver starts, so a throw here would abandon the batch that just superseded this one as a queued zombie.
+      // Loud rather than silent, and the superseded record is already terminal either way.
+      await this.stopInFlight(r).catch((e: unknown) => {
+        console.warn(
+          `[scorecard] superseded ${r.id} but could not tear its work down: ${e instanceof Error ? e.message : e}`,
+        );
+      });
     }
   }
 
@@ -976,7 +984,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     this.deps.cancelQueued?.((j) => j.batchId === rec.id);
     this.deps.cancelLeased?.((j) => j.batchId === rec.id);
     if (!this.deps.runStore) return;
-    const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id }).catch(() => []);
+    // NOT swallowed (arch-review 46): `.catch(() => [])` here turned a transient store failure into a cancel that
+    // killed and settled NOTHING while still reporting success — every child left running, and the caller told the
+    // stop had happened. A throw surfaces as a 5xx the user can retry, which is the honest answer; the record is
+    // already terminal, so a retried cancel simply re-runs this teardown.
+    const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id });
     for (const c of children) {
       if (c.status !== "running" && c.status !== "queued") continue;
       if (c.status === "running" && this.deps.killCase)

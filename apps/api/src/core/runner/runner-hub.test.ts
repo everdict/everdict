@@ -644,6 +644,32 @@ describe("RunnerHub — requestCancel (user stop / supersede)", () => {
     hub.enqueue(keyA, withBatch("c1", "sc-3")).catch(() => {});
     expect(hub.requestCancel((j) => j.batchId === "other")).toBe(0);
   });
+
+  // ── A CANCEL REVOKES THE LEASE'S AUTHORITY, IT DOES NOT ASK THE RUNNER NICELY (arch-review 46) ──────
+  //
+  // The cancel used to be advisory on everything except the claim: the holder could keep pushing evidence
+  // under the attempt and could still land its result, so a stopped case came back reporting a completion
+  // nobody had asked for. What the runner keeps is the SIGNAL — it rides the heartbeat reply, which is the
+  // only reason that one call still answers a cancelled lease.
+  it("revokes a cancelled lease: its evidence, result and failure are refused while the heartbeat still says stop", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const dispatched = hub.enqueue(keyA, { ...withBatch("c1", "sc-4"), runId: "evd-run-1", recordingGeneration: 3 });
+    dispatched.catch(() => {}); // rejected by the cancel below — this test watches the revocation
+    const leased = hub.lease(keyA);
+    if (!leased) throw new Error("expected a lease");
+    expect(await hub.authorizeAttempt(keyA, leased.attempt)).toMatchObject({ runId: "evd-run-1" });
+
+    expect(hub.requestCancel((j) => j.batchId === "sc-4")).toBe(1);
+
+    // The evidence wire and the result wire close together — one predicate governs both.
+    expect(await hub.authorizeAttempt(keyA, leased.attempt)).toBeUndefined();
+    expect(hub.complete(keyA, leased.attempt, result)).toBe(false);
+    expect(hub.fail(keyA, leased.attempt, "late failure")).toBe(false);
+    // …and the runner is still told to abort, without its lease being renewed: a holder that keeps
+    // heartbeating instead of complying stops looking alive and ages out on the idle timeout.
+    expect(hub.heartbeat(keyA, leased.attempt)).toEqual({ extended: false, cancelled: true });
+  });
 });
 
 // ── EVIDENCE IS AUTHORIZED BY THE LEASE, AND A REQUEUE REVOKES IT (review 39 P0-1) ───────────────────

@@ -231,3 +231,50 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
     expect(attemptId).toBe("evd-run-r1#g1");
   });
 });
+
+// ── THE PAYLOAD FENCE TRAVELS WITH THE WRITE (arch-review 46, expectNoResult) ────────────────────────
+describe("expectNoResult — a result that landed between a caller's read and its write refuses the write", () => {
+  it("Pg spells it as a condition of the statement (result IS NULL), never a read-then-write", async () => {
+    const statements: Array<{ sql: string; params: unknown[] }> = [];
+    const client = {
+      async query<T>(sql: string, params?: unknown[]) {
+        statements.push({ sql, params: params ?? [] });
+        return { rows: [] as T[] };
+      },
+    } as unknown as SqlClient;
+    await new PgRunStore(client).update(
+      "r1",
+      { result: { caseId: "c1", harness: "h@1", trace: [], snapshot: { kind: "prompt", output: "" }, scores: [] } },
+      undefined,
+      { expectNoResult: true },
+    );
+    const update = statements.find((s) => s.sql.includes("UPDATE"));
+    expect(update?.sql).toContain("result IS NULL");
+  });
+
+  it("in memory (twin), a row that already carries a result refuses the fill; an empty one takes it", async () => {
+    const store = new InMemoryRunStore();
+    const base = {
+      id: "r1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "failed",
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    } as RunRecord;
+    const result = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "prompt" as const, output: "" },
+      scores: [],
+    };
+    await store.create(base);
+    expect(await store.update("r1", { result }, undefined, { expectNoResult: true })).toBeDefined();
+    // A second fill against the now-published row is refused — completing a record, never revising one.
+    const other = { ...result, snapshot: { kind: "prompt" as const, output: "other bytes" } };
+    expect(await store.update("r1", { result: other }, undefined, { expectNoResult: true })).toBeUndefined();
+    expect((await store.get("r1"))?.result?.snapshot).toMatchObject({ output: "" });
+  });
+});

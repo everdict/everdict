@@ -87,9 +87,14 @@ export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.
 export {
   appendScoringRevision,
   currentScoringPin,
+  inputObservationOf,
+  inputObservationSetDigest,
   nextScoringRevision,
+  observationSetDigest,
+  type ReceiptLedgerReading,
   scorePlaneDigest,
   type ScoringPassInput,
+  scoringPinInputDiverged,
 } from "./scorecard/scoring-revision.js";
 export {
   composeVerdictPolicy,

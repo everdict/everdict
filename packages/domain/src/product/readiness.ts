@@ -8,6 +8,7 @@ import type {
   SeriesVerdict,
 } from "@everdict/contracts";
 import { contentDigest, digestsMatch } from "../provenance/content-digest.js";
+import { scoringPinInputDiverged } from "../scorecard/scoring-revision.js";
 import { type WorldCohort, crossWorldReason } from "../scorecard/world-cohort.js";
 
 // Release readiness is PURE arithmetic over what the caller already fetched — no store, no I/O (the tracker's
@@ -401,6 +402,22 @@ export interface SeriesGateReading {
   candidateScoring?: GateScoringPin;
 }
 
+// A JUDGMENT THAT KNOWS ITS OWN INPUT MOVED (arch-review 46). Each pinned revision records whether the
+// executions its judges read are the ones the receipt ledger vouches for; a completed observation reporting
+// divergence means the verdicts on that side describe bytes that have since been replaced. That is not a
+// regression and not a missing comparison — it is evidence whose subject changed underneath it, so the
+// comparison cannot stand on either side, and `not_comparable` is exactly what this system already calls
+// that. Total and read-only: an absent or incomplete observation says nothing here (unmeasured is not
+// divergence), so every pre-ledger release keeps reading as it did.
+function inputDivergenceReason(side: "newest evaluation" | "baseline", pin: GateScoringPin | undefined): string[] {
+  const diverged = scoringPinInputDiverged(pin);
+  return diverged === undefined
+    ? []
+    : [
+        `this series' ${side} judged ${diverged} case(s) whose execution the receipt ledger no longer vouches for — those verdicts describe bytes that have since been replaced, so they cannot anchor a ship decision`,
+      ];
+}
+
 // A series' release verdict. NOT EVALUATED IS NEVER GREEN: a required series with no run blocks the ship —
 // the pre-verdict arithmetic read "absence of evidence as not regressed", which made the product readiness a
 // second, weaker release constitution underneath the scorecard gate. Opting a series out of the gate is the
@@ -530,7 +547,7 @@ export function releaseReadiness(
     const resolution = baselineBySeries.get(entry.key) ?? { kind: "none_first_ship" as const };
     const gate = gateBySeries.get(entry.key);
     const baseline = resolution.kind === "resolved" ? resolution.point : undefined;
-    const { verdict, reasons: baseReasons } = seriesVerdict(
+    const { verdict: baseVerdict, reasons: baseReasons } = seriesVerdict(
       latest,
       resolution,
       gate,
@@ -542,6 +559,16 @@ export function releaseReadiness(
     // first ship): there is no second read to disagree with.
     const candidateScoring = gate?.candidateScoring ?? latest?.scoring;
     const baselineScoring = gate?.baselineScoring ?? baseline?.scoring;
+    // …AND WHETHER EITHER PINNED JUDGMENT DISOWNS ITS OWN INPUT (arch-review 46). Checked on the pins the
+    // decision actually recorded — the same two values the ship is audited against — so a divergence found
+    // at settle cannot be shipped over by a reader that only compares pass rates. It overrides the verdict
+    // rather than riding beside it: a `pass` computed from verdicts whose executions were replaced is not a
+    // weaker pass, it is an answer about something else.
+    const divergence = [
+      ...inputDivergenceReason("newest evaluation", candidateScoring),
+      ...inputDivergenceReason("baseline", baselineScoring),
+    ];
+    const verdict = divergence.length > 0 ? ("not_comparable" as const) : baseVerdict;
     // A series blocks when it is REQUIRED (the fail-closed default) and its verdict is not a passing one.
     // The explicit `requiredForRelease: false` is the only way evidence-less green exists — a recorded
     // product policy, never an inference.
@@ -593,7 +620,9 @@ export function releaseReadiness(
       // says what it says should not have to know to look somewhere else for the one condition that makes
       // the comparison weaker than it appears.
       ...(() => {
-        const reasons = [...(baseReasons ?? []), ...(crossWorld !== undefined ? [crossWorld] : [])];
+        // Divergence leads: it is the reason the verdict says what it says, and burying it under the reasons
+        // for the verdict it replaced is how an operator reads past it.
+        const reasons = [...divergence, ...(baseReasons ?? []), ...(crossWorld !== undefined ? [crossWorld] : [])];
         return reasons.length > 0 ? { reasons } : {};
       })(),
       regressed: blocks,

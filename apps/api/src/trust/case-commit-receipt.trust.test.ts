@@ -361,11 +361,13 @@ describeTrust("TRUST-171 — a failure is committed, not merely recorded", () =>
     expect(loser?.status).toBe("failed"); // the died-first attempt is terminal, not a zombie
   }, 20_000);
 
-  it("a failure whose fenced settle was REFUSED claims no receipt — the batch refuses instead of poisoning the case", async () => {
-    // The displaced-driver shape: the fail-settle bounces off the parent-driver fence, so this exit
-    // terminalized NOTHING. Claiming the receipt anyway (the receipt store has no epoch fence) would
-    // permanently name a child that never carried the result — the commitCase poison pill, reopened through
-    // the failure path. The judged exit must report the case unwritten and the batch must refuse.
+  it("a failure whose fenced settle was REFUSED claims no receipt — this driver publishes nothing and the batch stays OPEN for its successor", async () => {
+    // The displaced-driver shape: the fail-settle bounces off the fence inside the atomic commit, so the
+    // claim rolled back with it — no receipt, no terminal child, the poison pill structurally impossible.
+    // Since failures commit through the SAME protocol as successes (arch-review 41), a refused fence reads
+    // the same way on both: the case belongs to whoever holds the authority now, this driver stops
+    // publishing (AuthorityLostError), and the batch is left OPEN — recovery re-drives it and the second
+    // pass commits. The old asymmetric reading (fail the batch loudly) pre-dated the unified commit.
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", { ...dataset, id: "fenced" });
     const receipts = new InMemoryCaseReceiptStore();
@@ -404,8 +406,9 @@ describeTrust("TRUST-171 — a failure is committed, not merely recorded", () =>
     await new Promise((r) => setTimeout(r, 2000));
 
     const settled = await store.get(record.id);
-    expect(settled?.status).toBe("failed");
-    expect(settled?.error?.message).toContain("could not be written to the ledger");
+    // The displaced driver published NOTHING: no success, no failure record — the batch is the successor's,
+    // including its ending, and it is left open in exactly the state recovery re-drives.
+    expect(settled?.status).toBe("running");
     // No receipt was claimed for the refused case — the successor can still commit it.
     const committed = await receipts.list(record.id);
     expect(committed.some((r) => r.caseId === "c-boom")).toBe(false);

@@ -1,5 +1,6 @@
 import {
   BadRequestError,
+  type CaseCommitReceipt,
   type CaseResult,
   ConflictError,
   type Dataset,
@@ -18,10 +19,13 @@ import {
 } from "@everdict/contracts";
 import {
   CURRENT_STAGE_PARITY_VERSION,
+  type ReceiptLedgerReading,
   ScorecardBatch,
   type ScorecardOutcomeExtras,
   type ScoringStageParity,
+  caseObservationDigest,
   contentDigest,
+  inputObservationOf,
   judgeGradeable,
   nextScoringRevision,
   promoteStagedJudgments,
@@ -844,6 +848,13 @@ export class ScorecardScoreService {
       // …and remembers its durable KEY: the ref expires, and a pass-scoped key is not derivable from the
       // revision number, so without this a historical read has only a dead URL.
       ...(analysis.revisionKey ? { analysisKey: analysis.revisionKey } : {}),
+      // WHAT THIS PASS'S JUDGES READ (arch-review 46) — over the plane the revision certifies, checked
+      // against the receipt ledger. The write-back already refuses a case whose execution moved under it;
+      // this is the durable statement that the refusal had something to refuse ON, and it is what a release
+      // gate reads afterwards. An unreadable ledger is recorded as an incomplete observation, never as
+      // agreement — the same rule stageParity settled on.
+      inputObservation: inputObservationOf(plane, await this.receiptLedgerReading(record.id)),
+      ...(pass?.passId !== undefined ? { passId: pass.passId } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });
@@ -925,6 +936,27 @@ export class ScorecardScoreService {
     // failure is still swallowed: a settled revision is not undone by a cleanup that could not run, and the
     // next pass's strip is pass-scoped anyway, so a leftover row is dead weight rather than a hazard.
     if (pass?.passId !== undefined) await this.deps.scoringStage?.clear(record.id, pass.passId).catch(() => undefined);
+  }
+
+  // The receipt ledger, as a READING (arch-review 46) — "there are no receipts" and "the receipts could not
+  // be fetched" are opposite facts about a comparison, and an empty array says both. The failure is caught
+  // here rather than allowed to fail the settle: this is a measurement of the pass, and a measurement must
+  // never be able to fail the thing it measures.
+  private async receiptLedgerReading(scorecardId: string): Promise<ReceiptLedgerReading> {
+    const store = this.deps.caseReceipts;
+    if (!store)
+      return {
+        kind: "unavailable",
+        reason: "no case-commit receipt ledger is wired — nothing vouches for the executions these judges read",
+      };
+    try {
+      return { kind: "read", receipts: await store.list(scorecardId) };
+    } catch (err) {
+      return {
+        kind: "unavailable",
+        reason: `the case-commit receipt ledger could not be read (${err instanceof Error ? err.message : String(err)})`,
+      };
+    }
   }
 
   // Compare what THIS pass staged against the plane it settled — and, first, against what it actually JUDGED.
@@ -1182,7 +1214,7 @@ export class ScorecardScoreService {
   ): Promise<((caseId: string, trial?: number) => string | undefined) | undefined> {
     if (!this.deps.runStore || !record.runIds?.length) return undefined;
     try {
-      const byKey = await this.scoreCarriersByKey(record);
+      const { byKey } = await this.scoreCarriersByKey(record);
       return (caseId, trial) => byKey.get(childKey(caseId, trial))?.id;
     } catch {
       // Best-effort by contract, including an unreadable receipt ledger: the judges still run and meter, and
@@ -1209,9 +1241,16 @@ export class ScorecardScoreService {
   // The ledger read is NOT caught here. An unreadable ledger cannot answer which attempt is canonical, and a
   // write that proceeds anyway lands bytes on a row nobody vouched for; the caller decides what that means
   // (the resolver degrades to no plane, the write-back fails the pass and is retried).
-  private async scoreCarriersByKey(record: ScorecardRecord): Promise<Map<string, RunRecord>> {
+  //
+  // …and it hands the RECEIPTS back with the rows (arch-review 46). The read already happens here, and every
+  // caller that resolves a carrier also needs to know what the ledger vouches for it — dropping the receipts
+  // meant a second reader had to fetch them again, which is a second read of a moving ledger and therefore a
+  // second answer.
+  private async scoreCarriersByKey(
+    record: ScorecardRecord,
+  ): Promise<{ byKey: Map<string, RunRecord>; receiptByKey: Map<string, CaseCommitReceipt> }> {
     const store = this.deps.runStore;
-    if (!store) return new Map();
+    if (!store) return { byKey: new Map(), receiptByKey: new Map() };
     const children = await store.list(record.tenant, { scorecardId: record.id });
     // Only children WITH a result can carry scores — and a result-less child must not enter the map:
     // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW
@@ -1222,7 +1261,7 @@ export class ScorecardScoreService {
     const committed = (await this.deps.caseReceipts?.list(record.id)) ?? [];
     for (const [key, child] of ScorecardBatch.canonicalChildPerCase(children, committed))
       if (child.result) byKey.set(key, child);
-    return byKey;
+    return { byKey, receiptByKey: new Map(committed.map((r) => [childKey(r.caseId, r.trial), r] as const)) };
   }
 
   // STAGE this pass's judgments (expand step, scoring-plane-revisions.md) and return the arbitration the
@@ -1326,11 +1365,33 @@ export class ScorecardScoreService {
     const fence = pass?.passId !== undefined ? { scorecardId: record.id, passId: pass.passId } : undefined;
     // The receipt-canonical carrier per case (see scoreCarriersByKey) — a re-score's verdicts belong on the
     // attempt that answered the case, which is the row every reader hydrates from.
-    const byKey = await this.scoreCarriersByKey(record);
+    const { byKey, receiptByKey } = await this.scoreCarriersByKey(record);
     for (const r of results) {
       const child = byKey.get(childKey(r.caseId, r.trial));
       if (!child?.result) continue;
       const caseKey = childKey(r.caseId, r.trial);
+      // WHAT THE JUDGE READ MUST STILL BE WHAT THE LEDGER VOUCHES FOR (arch-review 46).
+      //
+      // The pass hydrated this case's result once, judged that copy, and is now writing verdicts back onto
+      // the carrier. Between those two moments the case can legitimately be RE-DRIVEN — a recovery, a
+      // re-attempt — which commits a new receipt naming a different child and a different execution. Every
+      // guard in this file would still pass: the pass owns the marker, the fence holds, the write lands. What
+      // it would land is one execution's verdicts on another execution's row, and afterwards nothing in the
+      // record can tell: the scores are well-formed, the digests all agree with themselves.
+      //
+      // So the receipt's own execution digest is checked against the bytes this pass judged, and a mismatch
+      // REFUSES — the same posture as the superseded-write refusal below, for the same reason: a judgment
+      // derived from bytes nobody vouches for is not evidence. On Temporal the activity retries against the
+      // new canonical child; the in-process pass flips its marker failed and a takeover re-scores. A legacy
+      // receipt (no observation half) has nothing to compare and is not treated as agreement — it simply
+      // cannot answer, which is what those rows can support.
+      const receipt = receiptByKey.get(caseKey);
+      if (receipt?.observationDigest !== undefined && caseObservationDigest(r) !== receipt.observationDigest)
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: record.id, case: caseKey, passId: pass?.passId, childRunId: receipt.childRunId },
+          "this case's execution was re-committed while the pass was judging it — the verdicts describe bytes the ledger no longer vouches for, so the write-back is refused.",
+        );
       // MERGE PER JUDGE — never per case (arch-review 15 P0-1). The stage arbitrates at (case, judge) and
       // the first version collapsed its answer back to a case-level boolean: one accepted judge let the
       // WHOLE case plane through, so a REJECTED judge's bytes rode along on its neighbour's win. Deciding in

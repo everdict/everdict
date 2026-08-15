@@ -117,6 +117,7 @@ export class InMemoryRunStore implements RunStore {
     // allowed the overwrite would make the in-memory path the one place "first terminal write wins" is false.
     if (guard?.expectNonTerminal === true && isRunTerminal(cur)) return undefined;
     if (guard?.expectNotCancelled === true && cur.error?.code === CANCELLED_ERROR_CODE) return undefined;
+    if (guard?.expectNoResult === true && cur.result !== undefined) return undefined;
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
       return undefined;
     // The driver's fencing token (mig 0170) — a displaced loop's write fails against a number that moved.

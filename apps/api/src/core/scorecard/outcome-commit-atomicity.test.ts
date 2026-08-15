@@ -119,6 +119,13 @@ describe("failure outcomes commit atomically — receipt + fenced terminal fail-
     // …each stamped with the outcome ledger's discriminant (arch-review 42): what KIND of outcome it is.
     expect(committed.find((r) => r.caseId === "c-ok")?.kind).toBe("executed");
     expect(committed.find((r) => r.caseId === "c-fail")?.kind).toBe("failed");
+    // No fabricated coordinate (arch-review 46): with no recording attempt opened, the receipt states the
+    // attempt as ABSENT — `?? 0` used to stamp `<executionId>#g0`, a coordinate no ledger ever mints, and
+    // every unisolated case of every batch collided on it.
+    for (const r of committed) {
+      expect(r.attemptId).toBeUndefined();
+      expect(r.generation).toBeUndefined();
+    }
     const failChild = await runs.get((committed.find((r) => r.caseId === "c-fail") as CaseCommitReceipt).childRunId);
     expect(failChild?.status).toBe("failed");
     expect(failChild?.error?.code).toBe("BAD_REQUEST"); // the exit's own code, preserved through the atomic settle

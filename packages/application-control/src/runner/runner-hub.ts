@@ -454,7 +454,7 @@ export class RunnerHub {
   async authorizeAttempt(key: SelfHostedKey, token: AttemptToken): Promise<AttemptAuthority | undefined> {
     const loc = this.locate(key, token.jobId);
     const entry = loc?.entry;
-    if (!entry || !this.holdsCurrentLease(entry, key, token)) return undefined;
+    if (!entry || !this.holdsWritableLease(entry, key, token)) return undefined;
     return {
       ...(entry.job.runId ? { runId: entry.job.runId } : {}),
       ...(entry.job.tenant ? { tenant: entry.job.tenant } : {}),
@@ -522,6 +522,17 @@ export class RunnerHub {
     return entry.leasedBy === key.runnerId; // the token belongs to another runner's lease
   }
 
+  // ── AND A CANCEL REVOKES THAT LEASE'S AUTHORITY, IT DOES NOT MERELY ASK ──────────────────────────
+  //
+  // Holding the current lease is necessary but no longer sufficient for anything that WRITES. Cancellation
+  // used to be a hint the holder was free to ignore: it could still publish evidence under the attempt and
+  // still land its result as the canonical completion, so a stopped job could come back reporting "completed"
+  // and the user's cancel left no trace on the record. `heartbeat` deliberately keeps using the predicate
+  // above instead of this one — the cancel is delivered ON that reply, so the runner has to still be heard.
+  private holdsWritableLease(entry: PendingEntry, key: SelfHostedKey, token: AttemptToken): boolean {
+    return this.holdsCurrentLease(entry, key, token) && entry.cancelRequested !== true;
+  }
+
   // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. It also carries
   // the control plane's cancel decision back to the runner: `cancelled` = stop this job now (→ the runner aborts the
   // local run, freeing the runtime mid-case). `extended` is false if the job isn't in a queue (own/pool) or the
@@ -538,16 +549,22 @@ export class RunnerHub {
     this.touchByRunner(key, capabilities);
     const loc = this.locate(key, token.jobId);
     if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return { extended: false, cancelled: false };
+    // A cancelled job is TOLD to stop and stops being kept alive: no lease renewal, no idle-timer rearm. A
+    // runner that keeps heartbeating without aborting therefore lets the job age out on its own clock instead
+    // of holding it open indefinitely with a heartbeat that looks compliant.
+    if (loc.entry.cancelRequested === true) return { extended: false, cancelled: true };
     loc.entry.leasedAt = this.now();
     this.rearm(loc.key, loc.entry); // liveness signal → reset idle timeout (so a long-running job isn't wrongly rejected)
-    return { extended: true, cancelled: loc.entry.cancelRequested === true };
+    return { extended: true, cancelled: false };
   }
 
   // Cancel matching in-flight/parked jobs (a user stopped the scorecard, or supersede reclaimed it). The parked/leased
   // promise is rejected NOW so the batch settles without waiting on the runner (cooperative — a cancelled case becomes
   // an interrupted failure in the partial). The entry lingers (marked cancelRequested → neither leasable nor requeuable)
-  // ONLY so the runner's next heartbeat returns cancelled and it aborts the local run + frees the runtime; the runner's
-  // submit (or the idle timeout) then removes it. Returns how many jobs were signalled. Single-process, best-effort —
+  // ONLY so the runner's next heartbeat returns cancelled and it aborts the local run + frees the runtime. From this
+  // point the entry authorizes nothing: its evidence pushes and its submit are refused (holdsWritableLease) and its
+  // heartbeat no longer extends, so the idle timeout is what finally removes it. Returns how many jobs were
+  // signalled. Single-process, best-effort —
   // the same assumption as the lease hub itself. Predicate keys on the job (e.g. j.batchId === scorecardId).
   requestCancel(predicate: (job: CaseJob) => boolean): number {
     let count = 0;
@@ -606,7 +623,7 @@ export class RunnerHub {
   // become the canonical completion of an attempt someone else now owns.
   complete(key: SelfHostedKey, token: AttemptToken, result: CaseResult): boolean {
     const loc = this.locate(key, token.jobId);
-    if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return false;
+    if (!loc || !this.holdsWritableLease(loc.entry, key, token)) return false;
     this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
     // ranBy = the real id of the runner that called complete (key.runnerId). For a pool job this is the real runner, not "*" (the pool key).
@@ -621,7 +638,7 @@ export class RunnerHub {
   // or the token is not the current lease — a stale holder must not end a healthy successor's attempt as a failure.
   fail(key: SelfHostedKey, token: AttemptToken, message: string): boolean {
     const loc = this.locate(key, token.jobId);
-    if (!loc || !this.holdsCurrentLease(loc.entry, key, token)) return false;
+    if (!loc || !this.holdsWritableLease(loc.entry, key, token)) return false;
     this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
     loc.entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId: token.jobId }, message));

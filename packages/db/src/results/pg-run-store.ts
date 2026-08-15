@@ -312,6 +312,9 @@ export class PgRunStore implements RunStore {
       vals.push(CANCELLED_ERROR_CODE);
       fenceSql += ` AND (error->>'code' IS DISTINCT FROM $${vals.length})`;
     }
+    // A result that landed between a caller's read and this write refuses the write (arch-review 46) — the
+    // fence form of `if (current?.result) continue`, which was a TOCTOU on the payload.
+    if (guard?.expectNoResult === true) fenceSql += " AND result IS NULL";
     // The recovery claim: exactly one replica takes a dead one's run.
     if (guard?.expectOwnerReplica !== undefined) {
       if (guard.expectOwnerReplica === null) fenceSql += " AND owner_replica IS NULL";

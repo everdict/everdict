@@ -153,3 +153,91 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     expect(r).toMatchObject({ ok: false, e: { code: "UPSTREAM_ERROR", extra: { reason: "cancelled" } } });
   });
 });
+
+// ── CANCELLATION IS CAPABILITY REVOCATION, NOT A HINT (arch-review 46) ───────────────────────────────
+//
+// The store lane treated `cancel_requested` as a flag to READ on the heartbeat and nothing else: the claim
+// did not filter it (so a cancelled job was handed straight back out), and complete/fail/authorize/restampJob
+// did not check it (so the holder could land its result as canonical — and `outcome` reports a terminal row
+// verbatim, which is how a stopped batch read back "completed" and the cancellation disappeared from the
+// record). The in-memory RunnerHub had the CLAIM half of this guard from the start; these pin both halves on
+// the store, which is the lane a multi-replica control plane actually runs on.
+describe("RunnerJobStore — a cancelled job's lease authorizes nothing", () => {
+  const park = async (store: InMemoryRunnerJobStore, jobId: string) =>
+    store.park({ jobId, owner: keyA.owner, runnerId: keyA.runnerId, job: job("c1"), requiredCaps: [], now: 0 });
+  const claim = (store: InMemoryRunnerJobStore, now: number, leaseTtlMs = 60_000) =>
+    store.claim({ owner: keyA.owner, runnerId: keyA.runnerId, leaseTtlMs, now });
+
+  it("is never claimable once cancelled — a queued one is passed over and an expired lease is not requeued", async () => {
+    const store = new InMemoryRunnerJobStore();
+    await park(store, "j-queued");
+    expect(await store.cancel(() => true)).toBe(1);
+    expect(await claim(store, 1_000)).toBeNull(); // parked + cancelled → a runner never picks it up
+
+    // …and the same holds for one already in a runner's hands whose lease then expires: the requeue path must
+    // not hand cancelled work back out under a fresh epoch — nor DISSOLVE the lease, because that lease is the
+    // channel the abort is delivered on. A cancelled job swept back to 'queued' leaves its holder heartbeating
+    // against a row that no longer recognizes it, so it is never told to stop and runs to the end.
+    const store2 = new InMemoryRunnerJobStore();
+    await park(store2, "j-leased");
+    expect(await claim(store2, 0)).toMatchObject({ jobId: "j-leased", leaseEpoch: 1 });
+    expect(await store2.cancel(() => true)).toBe(1);
+    expect(await claim(store2, 10_000, 0)).toBeNull(); // TTL long past — still not re-leased
+    expect(await store2.touch("j-leased", keyA.runnerId, 1, 10_000)).toEqual({ extended: false, cancelled: true });
+  });
+
+  it("refuses the cancelled holder's authorize/restamp/complete/fail, so the record still reads cancelled", async () => {
+    const store = new InMemoryRunnerJobStore();
+    await park(store, "j1");
+    const lease = await claim(store, 0);
+    if (!lease) throw new Error("expected a lease");
+    expect(await store.authorize("j1", keyA.runnerId, lease.leaseEpoch)).not.toBeNull(); // authorized while live
+    expect(await store.cancel(() => true)).toBe(1);
+
+    // The evidence surface closes with the result surface — one predicate, both wires.
+    expect(await store.authorize("j1", keyA.runnerId, lease.leaseEpoch)).toBeNull();
+    expect(await store.restampJob("j1", keyA.runnerId, lease.leaseEpoch, job("c1"))).toBe(false);
+    expect(await store.fail("j1", "late failure", keyA.runnerId, lease.leaseEpoch)).toBe(false);
+    expect(await store.complete("j1", result, keyA.runnerId, lease.leaseEpoch)).toBe(false);
+    // The point of the whole guard: a landed complete() made `outcome` report "completed" and the user's stop
+    // left no trace on the record at all.
+    expect(await store.outcome("j1")).toMatchObject({ status: "cancelled" });
+  });
+
+  it("still tells a cancelled lease to stop on its heartbeat, but stops renewing it", async () => {
+    const store = new InMemoryRunnerJobStore();
+    await park(store, "j1");
+    const lease = await claim(store, 0);
+    if (!lease) throw new Error("expected a lease");
+    expect(await store.touch("j1", keyA.runnerId, lease.leaseEpoch, 1_000)).toEqual({
+      extended: true,
+      cancelled: false,
+    });
+    expect(await store.cancel(() => true)).toBe(1);
+
+    // Heard, not renewed: the reply is how the runner learns to abort, while the frozen activity clock means a
+    // runner that ignores it ages out on the idle-timeout path instead of holding the job open forever.
+    expect(await store.touch("j1", keyA.runnerId, lease.leaseEpoch, 9_000)).toEqual({
+      extended: false,
+      cancelled: true,
+    });
+    expect(await store.outcome("j1")).toMatchObject({ activityAt: 1_000 });
+  });
+
+  it("a cancelled in-flight job's late result cannot resurrect the dispatch as completed (through the hub)", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const hub = new StoreRunnerHub(store, opts());
+    const d = hub.enqueue(keyA, job("c1"));
+    const settled = d.then(
+      () => ({ ok: true as const }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    const leased = await hub.leaseWait(keyA, 200, ["repo"]);
+    if (!leased) throw new Error("expected a lease");
+    expect(await hub.requestCancel((j) => j.evalCase.id === "c1")).toBe(1);
+    expect(await settled).toMatchObject({ ok: false, e: { extra: { reason: "cancelled" } } });
+
+    expect(await hub.complete(keyA, leased.attempt, result)).toBe(false); // the runner reports back anyway
+    expect(await store.outcome(leased.jobId)).toMatchObject({ status: "cancelled" });
+  });
+});

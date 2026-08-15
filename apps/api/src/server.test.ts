@@ -3608,6 +3608,14 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
       expect.arrayContaining(["tool_calls", "usd", "span", "judge:correctness"]),
     );
     expect(scores.find((s) => s.metric === "usd")?.value).toBeCloseTo(0.01); // re-derived from the trace
+    // …and the revision SAYS that nothing vouches for what its judges read (arch-review 46). An ingest runs
+    // no case, so it has no commit receipt behind its bytes — a permanent, honest gap that must never be
+    // confusable with a judgment whose inputs the ledger stands behind.
+    const record = (await app.inject({ method: "GET", url: `/scorecards/${ingest.json().id}`, headers: h })).json();
+    const observed = record.scoring?.at(-1)?.inputObservation;
+    expect(observed?.completed).toBe(false);
+    expect(observed?.failure).toContain("ingested traces have no execution receipts");
+    expect(observed?.setDigest).toMatch(/^sha256:/); // the plane's own inputs are still identified
     await app.close();
   });
 
