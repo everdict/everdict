@@ -1997,7 +1997,9 @@ describe("host guards", () => {
         {
           toolName: "write_magazine",
           check: ({ args }) =>
-            typeof args.body === "string" ? "magazine bodies come from the region-editor worker, never hand-written" : null,
+            typeof args.body === "string"
+              ? "magazine bodies come from the region-editor worker, never hand-written"
+              : null,
         },
       ],
       onEvent: (e) => events.push(e),
@@ -2040,7 +2042,10 @@ describe("host guards", () => {
       systemPrompt: "s",
       history,
       registry: new ToolRegistry([]),
-      exitGuard: { check: ({ attempt }) => `not yet — do the required step first (attempt ${attempt})`, maxAttempts: 2 },
+      exitGuard: {
+        check: ({ attempt }) => `not yet — do the required step first (attempt ${attempt})`,
+        maxAttempts: 2,
+      },
       onEvent: (e) => events.push(e),
     });
     expect(result.stopReason).toBe("end_turn");
