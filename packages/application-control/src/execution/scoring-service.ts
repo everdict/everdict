@@ -9,6 +9,7 @@ import type {
   Score,
   SealedJudgeEntry,
 } from "@everdict/contracts";
+import type { JudgeEvidenceScope } from "@everdict/domain";
 import {
   contentDigest,
   executionEvidenceTrace,
@@ -283,9 +284,10 @@ export class ScoringService {
     runId?: string, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
     // Asked immediately before that seal, never before the judge starts — see the port's note.
     publishWhen?: () => Promise<boolean>,
-    // The judgment pass this scoring belongs to — scopes the sealed evidence plane so a re-score's judge
-    // execution is not dropped by first-write-wins against revision 1's (arch-review 41 P0-audit).
-    scoringPass?: string,
+    // WHICH JUDGMENT INVOCATION this scoring is — scopes the sealed evidence plane so it is not dropped by
+    // first-write-wins against an earlier one's (arch-review 41 P0-audit + 51 Track C). A bare pass id where
+    // the path cannot re-invoke a (case, judge); the pass id AND its claim where it can. See the port.
+    scoringPass?: string | JudgeEvidenceScope,
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -356,8 +358,9 @@ export class ScoringService {
     sealed?: SealedJudgeClosure[],
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
     publishWhen?: () => Promise<boolean>,
-    // The judgment pass identity — see applyJudgesToCase; re-score callers pass their passId.
-    scoringPass?: string,
+    // The judgment invocation identity — see applyJudgesToCase; re-score callers pass their pass (and, on
+    // the Temporal path, the claim that tells two invocations of that pass apart).
+    scoringPass?: string | JudgeEvidenceScope,
   ): Promise<JudgeStream> {
     const { specs, unresolved } = await this.resolveJudges(tenant, judges, sealed);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
@@ -433,8 +436,9 @@ export class ScoringService {
     sealed?: SealedJudgeClosure[],
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
     publishWhen?: () => Promise<boolean>,
-    // The judgment pass identity — see applyJudgesToCase; re-score callers pass their passId.
-    scoringPass?: string,
+    // The judgment invocation identity — see applyJudgesToCase; re-score callers pass their pass (and, on
+    // the Temporal path, the claim that tells two invocations of that pass apart).
+    scoringPass?: string | JudgeEvidenceScope,
   ): Promise<void> {
     const stream = await this.createJudgeStream(
       tenant,

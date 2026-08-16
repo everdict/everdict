@@ -51,6 +51,8 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
       requiredCaps: input.requiredCaps,
       status: "queued",
       cancelRequested: false,
+      // The attempt the DISPATCH opened (arch-review 51) — the predecessor the first re-lease supersedes.
+      ...(input.attemptId !== undefined ? { currentAttemptId: input.attemptId } : {}),
       activityAt: input.now,
       createdAt: input.now,
     });
@@ -272,8 +274,12 @@ export class PgRunnerJobStore implements RunnerJobStore {
 
   async park(input: ParkInput): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_runner_jobs (job_id, owner, runner_id, tenant, job, required_caps, activity_at)
-       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0))`,
+      // `current_attempt_id` is written HERE, at park (arch-review 51), not only by a re-lease's mint: the
+      // column is how the dispatch's own attempt reaches the replica that later re-leases the job, and it was
+      // NULL until a successor was minted — so the first mint read no predecessor and the dispatch's attempt
+      // stood `executing` for ever beside the execution that replaced it.
+      `INSERT INTO everdict_runner_jobs (job_id, owner, runner_id, tenant, job, required_caps, activity_at, current_attempt_id)
+       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), $8)`,
       [
         input.jobId,
         input.owner,
@@ -282,6 +288,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
         JSON.stringify(input.job),
         input.requiredCaps,
         input.now,
+        input.attemptId ?? null,
       ],
     );
   }

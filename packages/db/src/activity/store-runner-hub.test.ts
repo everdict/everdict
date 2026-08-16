@@ -475,6 +475,44 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
     ]);
   });
 
+  // ── THE FIRST ATTEMPT IS ON THE ROW FROM PARK (arch-review 51) ─────────────────────────────────────
+  //
+  // `current_attempt_id` was written only by a re-lease's mint, so the FIRST re-lease read no predecessor:
+  // the attempt the DISPATCH opened — the one actually running when the job was requeued — was superseded by
+  // nobody and stood `executing` for ever beside its successor's `committed`. The dispatch's attempt reaches
+  // this replica the only way it can, on the job, and the park puts it on the row.
+  it("supersedes the DISPATCH's own attempt on the first re-lease, because park wrote it to the row", async () => {
+    const store = new InMemoryRunnerJobStore();
+    const ledger = new InMemoryExecutionAttemptStore();
+    // The attempt the dispatch opened before the job was ever parked, executing on the runner that went silent.
+    const dispatched = await ledger.open({ executionId: "evd-run-1", tenant: "acme" });
+    await ledger.transition(dispatched.attemptId, "executing");
+    const { priors, openLeaseAttempt } = seam(ledger);
+    const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openLeaseAttempt }));
+    hub
+      .enqueue(keyA, {
+        ...job("c1"),
+        runId: "evd-run-1",
+        recordingGeneration: dispatched.generation,
+        attemptId: dispatched.attemptId,
+      })
+      .catch(() => {});
+
+    await hub.leaseWait(keyA, 200, ["repo"]); // epoch 1 — runs the dispatch's attempt, mints nothing
+    const second = await hub.leaseWait(keyA, 200, ["repo"]); // epoch 2 — a second physical execution
+
+    // The claim was told what the PARK recorded, not merely what a previous mint left behind.
+    expect(priors).toEqual([dispatched.attemptId]);
+    expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state])).toEqual([
+      ["evd-run-1#g1", "superseded"], // the dispatch's attempt, ended by the lease that replaced it
+      ["evd-run-1#g2", "executing"],
+    ]);
+    // …and the re-leased job names its OWN attempt: the name and the generation are one coordinate, so
+    // leaving the replaced attempt's name on the job would have every later read address the abandoned row.
+    expect(second?.job.attemptId).toBe("evd-run-1#g2");
+    expect(second?.job.recordingGeneration).toBe(2);
+  });
+
   it("a mint that throws rolls the claim back — the job is still claimable and no lease was handed out", async () => {
     const store = new InMemoryRunnerJobStore();
     const ledger = new InMemoryExecutionAttemptStore();

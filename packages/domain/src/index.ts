@@ -36,6 +36,7 @@ export {
   evaluateGate,
   gateAudit,
   gatePolicyDigest,
+  refuseGateForInputTrust,
 } from "./scorecard/gate.js";
 export {
   type ExperimentAxis,
@@ -121,7 +122,12 @@ export {
 } from "./scorecard/verdict-policy.js";
 export { contentDigest, digestHex, digestUnder, digestsMatch } from "./provenance/content-digest.js";
 export { caseObservationDigest, caseResultDigest } from "./scorecard/case-result-digest.js";
-export { executionEvidenceTrace, judgeExecutionSpans } from "./scorecard/judge-execution-spans.js";
+export {
+  executionEvidenceTrace,
+  type JudgeEvidenceScope,
+  judgeEvidenceEmitter,
+  judgeExecutionSpans,
+} from "./scorecard/judge-execution-spans.js";
 export { type EvidenceStatus, evidenceStatus } from "./scorecard/evidence-status.js";
 export {
   benjaminiHochberg,

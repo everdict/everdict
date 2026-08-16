@@ -52,7 +52,12 @@ import {
   resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
 import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
-import { type SeriesContractResolution, evaluateGate, perTenantTrustZones } from "@everdict/domain";
+import {
+  type SeriesContractResolution,
+  evaluateGate,
+  perTenantTrustZones,
+  refuseGateForInputTrust,
+} from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -823,6 +828,18 @@ async function main(): Promise<void> {
   );
   setInterval(reconcileCancellations, 60_000).unref();
   reconcileCancellations();
+  // One-shot legacy gap sweep (arch-review 51 P0): aborts decided before the settle owned its teardown row
+  // (or in the best-effort era's crash window) have live children and no operation — hand them to the
+  // reconciler once per boot. Leader-gated for the same reason the reconciler is.
+  whenLeader(leader, () => {
+    void scorecardService
+      .sweepAbortedTeardownGaps()
+      .then((requested) => {
+        if (requested > 0)
+          console.log(`▶ cancellation gap sweep: ${requested} unowned teardown(s) handed to the reconciler`);
+      })
+      .catch(() => {});
+  })();
 
   const mattermostCommandService = buildMattermostCommand({ settingsStore, runtimeSecretsFor, scorecardService });
   const { benchmarkService, bundleService } = buildCatalog({
@@ -1055,6 +1072,20 @@ async function main(): Promise<void> {
     // whatever a separate trend-list read saw a moment earlier, which a re-score landing in between made a
     // different judgment entirely.
     seriesGate: async (tenant, baselineId, candidateId) => {
+      // TRUST BEFORE ARITHMETIC (arch-review 51 P1): the release lane runs under the strictest policy —
+      // receipt-vouched input only, no waiver — and an untrusted pin refuses BEFORE the diff is computed,
+      // so no regression count derived from unauthoritative input ever exists to leak into readiness
+      // reasons or issue automation. The pins the refusal read ride back exactly like the snapshot's would.
+      const pins = await scorecardService.comparisonPins(tenant, baselineId, candidateId);
+      const refusal = refuseGateForInputTrust(pins, { maxRegressions: 0 });
+      if (refusal !== undefined) {
+        return {
+          decision: refusal.decision,
+          reasons: refusal.reasons,
+          ...(pins.baseline !== undefined ? { baselineScoring: pins.baseline } : {}),
+          ...(pins.candidate !== undefined ? { candidateScoring: pins.candidate } : {}),
+        };
+      }
       const snapshot = await scorecardService.diffSnapshot(tenant, baselineId, candidateId, {});
       const evaluation = evaluateGate(snapshot.diff, { maxRegressions: 0 });
       return {

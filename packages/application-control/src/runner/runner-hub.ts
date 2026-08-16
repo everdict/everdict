@@ -104,12 +104,38 @@ export interface OpenedAttempt {
 
 // The seam both hubs bind. A bare number stays legal and means `{ generation }` — the recording-only
 // composition answers with one, and so does every caller that never wired the ledger.
-export type OpenAttempt = (job: CaseJob, lease?: { leaseEpoch: number }) => Promise<OpenedAttempt | number | undefined>;
+// `prior` is the attempt this lease REPLACES, when the hub can name one: the last attempt it minted itself,
+// or — on the FIRST re-lease, where it minted nothing yet — the DISPATCH's own attempt, which reaches the hub
+// on the job (`CaseJob.attemptId`). The opener supersedes it; before the job carried the name, that first
+// predecessor was unreachable and stood `executing` for ever beside its successor (arch-review 51).
+export type OpenAttempt = (
+  job: CaseJob,
+  lease?: { leaseEpoch: number; prior?: string },
+) => Promise<OpenedAttempt | number | undefined>;
 
 // One spelling of the legacy normalization, shared by both hubs — two hand-written `typeof === "number"`
 // branches is how one of them silently keeps ignoring the handles.
 export function normalizeOpenedAttempt(opened: OpenedAttempt | number | undefined): OpenedAttempt {
   return typeof opened === "number" ? { generation: opened } : (opened ?? {});
+}
+
+// ── A RE-LEASED JOB NAMES ITS OWN ATTEMPT, BOTH HALVES OF THE COORDINATE (arch-review 51) ───────────
+//
+// The mint used to move only `recordingGeneration` onto the re-leased job. `attemptId` — the ledger row the
+// DISPATCH opened, which now travels on the job — stayed exactly as it was, so the job handed to the second
+// runner (and the row every later `authorize` answers out of) named the ABANDONED attempt while its evidence
+// went to the successor's generation. The two halves are one coordinate: they move together, or the job
+// describes two different physical executions at once.
+//
+// A mint that produced NO coordinate strips both — no generation (the fail-closed live-only lane) and no
+// attempt name, because the name it was carrying belongs to the execution this lease replaced.
+export function restampedJob(job: CaseJob, opened: OpenedAttempt): CaseJob {
+  const { recordingGeneration: _inherited, attemptId: _replaced, ...bare } = job;
+  return {
+    ...bare,
+    ...(opened.generation !== undefined ? { recordingGeneration: opened.generation } : {}),
+    ...(opened.attemptId !== undefined ? { attemptId: opened.attemptId } : {}),
+  };
 }
 
 interface PendingEntry {
@@ -449,8 +475,16 @@ export class RunnerHub {
   // complete() reads the generation back off it to tell the dispatcher which attempt actually ran.
   private async mintAttempt(key: SelfHostedKey, leased: LeasedJob): Promise<LeasedJob | null> {
     if (leased.attempt.leaseEpoch <= 1 || !this.openAttempt) return leased;
+    // WHAT THIS LEASE REPLACES. An attempt this hub minted itself is held as a handle (`lastAttempt`, ended
+    // below); the FIRST re-lease replaces the DISPATCH's attempt instead, which no handle here ever reaches —
+    // its name arrives on the job, and the opener is what supersedes it (arch-review 51).
+    const priorFromJob =
+      this.locate(key, leased.jobId)?.entry.lastAttempt === undefined ? leased.job.attemptId : undefined;
     const opened = normalizeOpenedAttempt(
-      await this.openAttempt(leased.job, { leaseEpoch: leased.attempt.leaseEpoch }).catch(() => undefined),
+      await this.openAttempt(leased.job, {
+        leaseEpoch: leased.attempt.leaseEpoch,
+        ...(priorFromJob !== undefined ? { prior: priorFromJob } : {}),
+      }).catch(() => undefined),
     );
     // Re-validated AFTER the await (arch-review 47 P0-2). The entry used to be captured BEFORE it, and the
     // assignment below ran unconditionally — so a SLOW open whose lease had meanwhile expired and been
@@ -466,9 +500,7 @@ export class RunnerHub {
       await opened.supersede?.("lease lost during mint").catch(() => {});
       return null;
     }
-    const { recordingGeneration: _inherited, ...withoutAttempt } = leased.job;
-    const job: CaseJob =
-      opened.generation === undefined ? withoutAttempt : { ...leased.job, recordingGeneration: opened.generation };
+    const job: CaseJob = restampedJob(leased.job, opened);
     current.job = job;
     // Compute starts under this attempt NOW — the lease is what dispatches it — so the row says so, stamped
     // with the epoch that authorized it. Best-effort: there is no transaction here to ride, and refusing a

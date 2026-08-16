@@ -1,3 +1,4 @@
+import { attemptIdOf } from "@everdict/contracts";
 import type { ExecutionAttemptStore, OpenAttemptInput } from "../ports/execution-attempt-store.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 
@@ -11,6 +12,24 @@ export interface PhysicalAttempt {
   // happened either way, and that is the whole reason the ledger exists.
   attemptId?: string;
   unisolated: boolean;
+}
+
+// ── WHICH ATTEMPT A DISPATCHED JOB IS (arch-review 51) ───────────────────────────────────────────────
+//
+// One reading of the coordinate, for every lane that has a job in its hand and needs the ledger row it names.
+// The carried id WINS: it is what the open actually returned, and it is present exactly in the case the
+// derivation cannot serve — an UNISOLATED attempt, whose row exists under a generation the recording fence
+// refused to hand back. Where a generation IS carried, the derivation is not a guess: `open` mints the
+// ordinal and the row's id is `attemptIdOf(executionId, generation)` by construction, so the two agree.
+//
+// Absent means absent: no carried name and no generation is an execution whose attempt nobody opened (no
+// ledger wired), and inventing a coordinate there would address somebody else's row.
+export function jobAttemptId(
+  job: { attemptId?: string; recordingGeneration?: number },
+  executionId: string,
+): string | undefined {
+  if (job.attemptId !== undefined) return job.attemptId;
+  return job.recordingGeneration === undefined ? undefined : attemptIdOf(executionId, job.recordingGeneration);
 }
 
 // ── ONE VERB FOR "A PHYSICAL EXECUTION BEGINS" (arch-review 42, Three-Ledger Phase 1) ────────────────

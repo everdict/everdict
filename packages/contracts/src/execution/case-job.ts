@@ -128,6 +128,22 @@ export const CaseJobSchema = z.object({
   // which no opened attempt owns, and the store refuses it. Absent = a dispatch that opened no attempt (an
   // in-job collection with no recording store), which has nothing to write into either.
   recordingGeneration: z.number().int().nonnegative().optional(),
+  // ── WHICH LEDGER ROW THIS JOB'S PHYSICAL EXECUTION IS (arch-review 51) ─────────────────────────────
+  //
+  // The generation above is the RECORDING fence, and it is absent exactly when the recording claim was
+  // refused — while the attempt LEDGER row for that execution exists all the same. Everything downstream
+  // therefore re-derived the row's name as `attemptIdOf(executionId, generation)` and got nothing for an
+  // unisolated attempt: it opened, it ran, and no terminal stamp could address it. The name travels with the
+  // job instead, so a lane that lost the generation has not lost the attempt.
+  //
+  // It is also what makes the SELF-HOSTED park able to say which attempt it is parking (runner_jobs
+  // .current_attempt_id, mig 0183): the first re-lease reads that column as the predecessor it supersedes,
+  // and with nothing written there the dispatch's own attempt stood `executing` for ever beside its successor.
+  //
+  // ⚠️ It names the attempt that opened THIS job. A path that restamps `recordingGeneration` with another
+  // attempt's number (a re-lease's mint) must drop or replace this together with it — the two are one
+  // coordinate, and disagreeing halves address two different executions.
+  attemptId: z.string().optional(),
   // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
   // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =
   // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md

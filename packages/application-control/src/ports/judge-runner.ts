@@ -1,4 +1,5 @@
 import type { GradeContext, JudgeSpec, Placement, Score } from "@everdict/contracts";
+import type { JudgeEvidenceScope } from "@everdict/domain";
 
 // The digests a pass pinned for the documents THIS judge names — its rubric, its delegated harness, its model.
 // They travel to the runner because VERIFICATION BELONGS AT THE READ THAT PRODUCES THE BYTES ACTUALLY USED
@@ -45,11 +46,17 @@ export interface JudgeRunner {
     // case whose child settle is refused a moment later, and the successor's re-drive loses its own seal to
     // it. Absent = nothing to prove (ingest, a single-replica install), and the plane seals as before.
     publishWhen?: () => Promise<boolean>,
-    // WHICH JUDGMENT PASS this execution belongs to (arch-review 41 P0-audit). The trajectory ledger keeps
-    // the FIRST seal per (runId, emitter), so a re-score's judge execution sealed under the same bare
-    // `judge:<id>` emitter as revision 1's was silently dropped — current score from revision N, evidence
-    // from revision 1. A caller re-scoring passes its pass identity and the runner scopes the emitter
-    // (`judge:<id>#<pass>`); absent = the initial pass, whose bare emitter IS revision 1's plane.
-    scoringPass?: string,
+    // WHICH JUDGMENT INVOCATION this execution belongs to. The trajectory ledger keeps the FIRST seal per
+    // (runId, emitter), so a judge execution sealed under an emitter a LATER execution will reuse is the one
+    // that becomes the permanent evidence — whoever wins the score.
+    //
+    // A bare pass id closed only half of that (arch-review 41 P0-audit): it separates revisions, and within
+    // ONE Temporal pass a case/judge is legitimately re-invoked — a retry, a later round — with the winner
+    // decided by the judgment CLAIM, not by who sealed first. So a caller that HAS a claim passes the whole
+    // scope and the emitter carries it (`judge:<id>#<pass>.<gen>.<attempt>`, arch-review 51 Track C); a
+    // caller whose path cannot re-invoke passes the bare pass id it always did; absent = the initial batch's
+    // judging, whose bare `judge:<id>` emitter is that one shot. `judgeEvidenceEmitter` (@everdict/domain)
+    // owns the grammar — never spell it at a call site.
+    scoringPass?: string | JudgeEvidenceScope,
   ): Promise<Score[]>;
 }

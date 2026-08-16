@@ -119,8 +119,16 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runC
   A ledger fault refuses the lease (rollback; the job stays claimable) rather than handing out a lease whose
   attempt the ledger never saw; a refused RECORDING claim still inserts the attempt row (unisolated) and
   strips the job's generation — the fail-closed live-only lane. The in-memory hub keeps the sequential
-  equivalent (post-await lease re-proof, predecessor supersede via the entry's own handle). The dispatch's
-  first attempt (epoch 1) is never superseded by a re-lease — it is ended by whatever settles the dispatch.
+  equivalent (post-await lease re-proof, predecessor supersede via the entry's own handle).
+- **The DISPATCH's own attempt is a predecessor too (arch-review 51)** — the job carries its name
+  (`CaseJob.attemptId`, written by the lane that opened it), the park records it (`current_attempt_id` at
+  INSERT, not only at a re-lease's mint), and the FIRST re-lease therefore supersedes the attempt that was
+  actually running when the runner went silent. Until it travelled, that row stood `executing` for ever beside
+  its successor: no handle to it reaches the lease lane, and the settle names the attempt that PRODUCED the
+  result, which after a re-lease is a different one. The in-memory hub reads the same name off the job (it has
+  no row to read). A re-leased job is restamped with BOTH halves of its new coordinate — generation and
+  attempt name — because a job carrying one attempt's name beside another's generation addresses two
+  different physical executions.
 - **`RuntimeDispatcher` branch** — when `placement.target` matches `self:<runnerId>`, resolve it against the
   **submitter's** `RunnerStore` (owner = `principal.subject`), exactly as Phase 3a resolves a `connectionId`
   against the submitter's subject. **Reject** if the runner isn't owned by the submitter (you cannot target

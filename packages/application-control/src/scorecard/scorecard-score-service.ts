@@ -563,9 +563,13 @@ export class ScorecardScoreService {
       runIdOf,
       pass.judges,
       undefined,
-      // The pass identity scopes each judge's sealed evidence plane (judge:<id>#<pass>) — without it the
-      // trajectory's first-write-wins dropped every re-score's judge execution (arch-review 41 P0-audit).
-      pass.passId,
+      // …AND WHICH INVOCATION OF IT (arch-review 51 Track C). The pass identity alone scoped the evidence
+      // plane per revision (41 P0-audit), which is exactly as far as it goes: THIS path re-invokes one
+      // (pass, case, judge) — an activity retry, a later round — and the winner among those invocations is
+      // decided by the CLAIM at `stageJudgments` below, not by who sealed first. So invocation 1 could seal
+      // `judge:J#P`, lose the claim, and still own the permanent evidence for invocation 2's score. The
+      // claim rides into the emitter so each invocation writes its own plane and no seal is refused.
+      pass.passId !== undefined ? { passId: pass.passId, ...(claim !== undefined ? { claim } : {}) } : undefined,
     );
     // Count the attempt onto whatever this produced. A verdict ends the counting; another unmeasured row
     // carries prior+1, so a judge that keeps failing the same way exhausts its budget and the pass can end.
@@ -698,7 +702,12 @@ export class ScorecardScoreService {
         runIdOf,
         (fresh ?? record).scoringPass?.judges,
         undefined,
-        pass.passId, // scope the judge evidence planes to THIS pass (arch-review 41 P0-audit)
+        // Scope the judge evidence planes to THIS pass (arch-review 41 P0-audit) — and to nothing finer,
+        // because there is nothing finer to say. This pass judges the WHOLE plane in ONE applyJudges call
+        // with no per-case retry seam (that is the same fact the heartbeat above exists for), so a given
+        // (case, judge) is invoked exactly once per pass; a takeover mints a NEW passId and is therefore a
+        // new emitter already. It also carries no claim to state — `stageJudgments` gets none below.
+        pass.passId,
       );
       await this.writeBackScores(record, results, pass, { judges });
       await this.aggregate(record, scorecard, results, judges, submittedBy, pass);

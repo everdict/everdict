@@ -16,6 +16,7 @@ import {
   type RunRecord,
   type ScorecardOrigin,
   type ScorecardRecord,
+  UpstreamError,
   isConstitutionalMetric,
 } from "@everdict/contracts";
 import { CANCELLED_ERROR_CODE, JudgeIdSchema } from "@everdict/contracts";
@@ -30,6 +31,7 @@ import {
   type RetryableUnmeasured,
   Run,
   ScorecardBatch,
+  type GateEvaluation,
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
@@ -42,6 +44,7 @@ import {
   duplicateJudgeIds,
   evaluateGate,
   gatePolicyDigest,
+  refuseGateForInputTrust,
   retryableUnmeasured,
   seriesContractDigest,
   seriesContractFromManifest,
@@ -963,6 +966,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         undefined,
         {
           over: "open",
+          // The teardown is owed by the settle's own transaction (arch-review 51 P0). Supersede is the abort
+          // with NO user-facing retry, so a crash between this commit and a post-hoc request was a permanent
+          // leak of live compute — the reconciler sweeps operation rows, and there was none to find.
+          ...(this.deps.cancellations ? { requestCancellation: true as const } : {}),
         },
       );
       if (superseded === undefined) continue;
@@ -1000,10 +1007,18 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // stop had happened. A throw surfaces as a 5xx the user can retry, which is the honest answer; the record is
     // already terminal, so a retried cancel simply re-runs this teardown.
     const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id });
+    // Command failures are COLLECTED, not swallowed (arch-review 51 P0): a kill that failed means compute
+    // may still be burning, and an operation that completes over it is a completion certificate for a
+    // teardown that did not happen. They surface after the loop so one bad child does not stop the others
+    // from being torn down first.
+    const failures: string[] = [];
     for (const c of children) {
       if (c.status !== "running" && c.status !== "queued") continue;
       if (c.status === "running" && this.deps.killCase)
-        void this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => {});
+        // AWAITED — fire-and-forget made `completed` mean "commands were issued", never "the work stopped".
+        await this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch((err: unknown) => {
+          failures.push(`kill ${c.caseId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
       // Settle the child's LEDGER row here, not just its compute: the drain path (dispatch rejection → the
       // batch loop's catch) is in-process and best-effort — after a control-plane restart, under a Temporal
       // worker, or when a kill misses, nobody else ever flips the record, and a forever-"running" child both
@@ -1019,8 +1034,29 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       // the shape the suite's own rules warn about: the decision helper is right and the wiring does not use it.
       //
       // `undefined` = another terminal outcome won. That is a normal race result, not a failure: the child is
-      // settled either way, which is all this loop needs.
-      await settleRun(this.deps.runStore, c.id, stop.patch).catch(() => {});
+      // settled either way, which is all this loop needs. A THROW is different — the store could not take the
+      // write, and the child may still read as live; collected so the operation stays owed.
+      await settleRun(this.deps.runStore, c.id, stop.patch).catch((err: unknown) => {
+        failures.push(`settle ${c.id}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+    // ── THE POSTCONDITION, READ BACK (arch-review 51 P0) ──────────────────────────────────────────────
+    // "Commands were issued" is not the teardown's contract — "no child still reads as live" is. The
+    // re-read is the only proof this process can honestly give: a child whose fenced settle lost to a late
+    // completion is terminal (fine); a child that is STILL running/queued after the loop — a kill that
+    // missed, a settle the store refused — means the teardown is not done, and the operation must stay owed
+    // rather than complete over live work. (Lease revocation is verified upstream: `cancelLeased` is awaited
+    // and its rejection is this method's own failure.)
+    const after = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id });
+    const live = after.filter((c) => c.status === "running" || c.status === "queued");
+    if (failures.length > 0 || live.length > 0) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { scorecard: rec.id, liveChildren: live.length, failures: failures.length },
+        `Teardown of ${rec.id} has not converged: ${live.length} child(ren) still live${
+          failures.length > 0 ? `; ${failures.slice(0, 3).join("; ")}${failures.length > 3 ? "; …" : ""}` : ""
+        }. The cancellation stays owed and the reconciler retries.`,
+      );
     }
   }
 
@@ -1037,13 +1073,13 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   private async tearDownDurably(rec: ScorecardRecord): Promise<void> {
     const operations = this.deps.cancellations;
     if (!operations) return await this.stopInFlight(rec);
-    // BEST-EFFORT REQUEST, deliberately. Failing the cancel because this auxiliary row could not be written
-    // would make the ledger's presence strictly worse than its absence: the teardown would not run at all,
-    // for a batch whose decision is already committed. A request that fails degrades to the convergent
-    // behavior this ledger was added on top of — loudly, because the operation is then unowned.
+    // RE-REQUEST, best-effort — the DURABLE request already rode the abort settle's own transaction
+    // (arch-review 51 P0: `requestCancellation` on the settle), so this upsert only re-opens the row for the
+    // convergent-retry path (a cancel of an already-terminal record, whose settle never ran) and for legacy
+    // records aborted before the settle carried the pair. Its failure therefore degrades nothing new.
     await operations.request(rec.id, this.now()).catch((err: unknown) => {
       console.warn(
-        `[scorecard] cancel of ${rec.id} is running without a durable teardown owner: ${err instanceof Error ? err.message : err}`,
+        `[scorecard] teardown re-request for ${rec.id} failed (the settle-time row, if any, still owns it): ${err instanceof Error ? err.message : err}`,
       );
     });
     try {
@@ -1130,7 +1166,13 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       rec.id,
       cancellation.patch,
       stamped.map((f) => f.record),
-      { over: "open" },
+      {
+        over: "open",
+        // The teardown is owed by the SAME transaction that decides the cancel (arch-review 51 P0): the
+        // post-hoc best-effort request left a crash window in which the CANCELLED decision was durable and
+        // its teardown had no owner — the reconciler sweeps operation rows, not scorecards.
+        ...(this.deps.cancellations ? { requestCancellation: true as const } : {}),
+      },
     );
     // A cancel that lost to the batch's own completion publishes nothing and tears nothing down: the durable
     // outbox already refused the fact, and stopping the work of a batch that finished is a cancellation of
@@ -1165,10 +1207,50 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         "You are not allowed to delete this scorecard (only the batch's creator or a workspace admin).",
       );
     }
+    // A teardown still owed REFUSES the delete (arch-review 51 P0): deleting the batch and its children while
+    // the cancellation operation is incomplete erases the very rows the reconciler reads convergence from —
+    // it would then close the operation as unactionable ("batch gone") while the leased runner work or
+    // backend allocations the operation was owed for keep burning. Finish (or let the reconciler finish) the
+    // teardown first; the 409 is retryable by construction.
+    if (this.deps.cancellations && (rec.status === "cancelled" || rec.status === "superseded")) {
+      const operation = await this.deps.cancellations.get(rec.id);
+      if (operation !== undefined && operation.state !== "completed")
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: rec.id, cancellation: operation.state },
+          "This batch's cancellation teardown has not finished — deleting it now would orphan the live work. Retry after the teardown completes (the reconciler converges it automatically).",
+        );
+    }
     // Children first — if the record delete then failed, orphaned children are already gone (never the reverse).
     const childRuns = this.deps.runStore ? await this.deps.runStore.deleteByScorecard(rec.id) : 0;
     await this.deps.store.delete(rec.id);
     return { workspace: ws, id: rec.id, deleted: true, childRuns };
+  }
+
+  // ── THE LEGACY GAP SWEEP (arch-review 51 P0, one-shot at boot) ─────────────────────────────────────
+  //
+  // The settle now writes the operation row in its own transaction, so no NEW abort can be decided without
+  // its teardown being owed. This sweep is for the records aborted BEFORE that pair existed (or during the
+  // best-effort era's crash window): a cancelled/superseded batch that still has live children and no
+  // incomplete operation row is a decided abort nobody owns. Requesting the operation hands it to the
+  // reconciler — the sweep itself tears nothing down (the reconciler is the one owner of unowned teardowns).
+  async sweepAbortedTeardownGaps(): Promise<number> {
+    const operations = this.deps.cancellations;
+    const runStore = this.deps.runStore;
+    if (!operations || !runStore) return 0;
+    let requested = 0;
+    for (const status of ["cancelled", "superseded"] as const) {
+      const aborted = await this.deps.store.list(undefined, { status });
+      for (const rec of aborted) {
+        const operation = await operations.get(rec.id);
+        if (operation !== undefined && operation.state !== "completed") continue; // already owed — the reconciler has it
+        const children = await runStore.list(rec.tenant, { scorecardId: rec.id });
+        if (!children.some((c) => c.status === "running" || c.status === "queued")) continue;
+        await operations.request(rec.id, this.now());
+        requested += 1;
+      }
+    }
+    return requested;
   }
 
   // Re-file a batch under a different team. A scorecard is the EVIDENCE a capability produced, and it is read
@@ -1527,6 +1609,17 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["diffSnapshot"]> {
     return this.analytics.diffSnapshot(tenant, baselineId, candidateId, opts);
+  }
+
+  // The pins-only pre-read (arch-review 51 P1) — what a decision seam asks BEFORE computing any diff, so an
+  // untrusted input can refuse without the arithmetic ever running. Same scope contract as diffSnapshot.
+  comparisonPins(
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+    visibleTeams?: string[],
+  ): ReturnType<ScorecardAnalyticsService["comparisonPins"]> {
+    return this.analytics.comparisonPins(tenant, baselineId, candidateId, visibleTeams);
   }
 
   trend(
@@ -1952,6 +2045,24 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     };
     // The gate's statistical policy IS the trials diff's policy — a caller that raised the significance bar
     // for its release decision must have the diff computed under that bar, not under diffTrials' defaults.
+    // ── TRUST IS A PRECONDITION, NOT A POST-PROCESSOR (arch-review 51 P1) ────────────────────────────
+    // The pins are asked BEFORE any diff exists: an untrusted input refuses here and the regression
+    // arithmetic never runs — the pre-fix order computed the numbers first and downgraded the decision
+    // after, so persisted evidence and the decided-fact message carried counts derived from input the
+    // decision itself declared unauthoritative. Same scope/status contract as the diff read (no leak).
+    const preRead = await this.analytics.comparisonPins(
+      input.tenant,
+      input.baseline,
+      input.candidate,
+      input.visibleTeams,
+    );
+    const trustRefusal = refuseGateForInputTrust(preRead, policy);
+    if (trustRefusal !== undefined) {
+      const record = await this.deps.store.get(input.candidate);
+      if (!record || record.tenant !== input.tenant)
+        throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
+      return this.recordGateDecision(input, record, trustRefusal, policy, preRead.baseline, preRead.candidate);
+    }
     // The SNAPSHOT (I4): the diff and the pins come from the SAME single read per side — the decision pins
     // exactly the revisions whose planes it compared. The pre-fix refetch was a TOCTOU: a re-score landing
     // between the diff and the pin read stamped a revision that did not produce the compared numbers (and
@@ -1962,9 +2073,9 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
       ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
     });
-    // …and the pins' INPUT TRUST is a judgment condition, not an attachment (arch-review 47 P0-3): a
-    // completed divergence or an unwaived unverified input downgrades the decision to not_comparable with
-    // its reason leading — the exact doubt the revision recorded, enforced where the green light is minted.
+    // …and the pins' INPUT TRUST is re-checked on the SNAPSHOT's own pins (arch-review 47 P0-3 + 51 P1):
+    // the precondition above read separately, so a re-score landing between the two reads is caught here on
+    // the atomic same-read authority — and the downgrade strips the verdict-derived numbers.
     const evaluation = applyInputTrust(
       evaluateGate(snapshot.diff, policy),
       {
@@ -1978,6 +2089,19 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
     const baselinePin = snapshot.baseline.pin;
     const candidatePin = snapshot.candidate.pin;
+    return this.recordGateDecision(input, record, evaluation, policy, baselinePin, candidatePin);
+  }
+
+  // The decision's RECORD tail — one writer for both lanes (the trust-precondition refusal and the computed
+  // evaluation), so a refusal is a first-class recorded decision exactly like a comparison's.
+  private async recordGateDecision(
+    input: { tenant: string; baseline: string; candidate: string; decidedBy?: string },
+    record: ScorecardRecord,
+    evaluation: GateEvaluation,
+    policy: GatePolicy,
+    baselinePin: GateDecision["baselineScoring"],
+    candidatePin: GateDecision["candidateScoring"],
+  ): Promise<GateDecision> {
     const decision: GateDecision = {
       id: this.newId(),
       baseline: input.baseline,

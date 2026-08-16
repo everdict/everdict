@@ -17,8 +17,10 @@ import type {
   UsageCost,
 } from "@everdict/contracts";
 import { NotFoundError, type ScoreProducer, isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
+import type { JudgeEvidenceScope } from "@everdict/domain";
 import {
   billingCharges,
+  judgeEvidenceEmitter,
   judgeExecutionSpans,
   modelApiKeySecretName,
   normalizeModelBinding,
@@ -184,9 +186,11 @@ async function reportJudgeExecution(
     runId?: string;
     billing?: CaseResult;
     publishWhen?: () => Promise<boolean>;
-    // The judgment pass this execution belongs to — scopes the sealed emitter so a re-score's evidence is a
-    // NEW plane instead of a dropped second seal (arch-review 41 P0-audit). Absent = the initial pass.
-    scoringPass?: string;
+    // WHICH JUDGMENT INVOCATION this execution belongs to — scopes the sealed emitter so a later invocation's
+    // evidence is a NEW plane instead of a dropped second seal (arch-review 41 P0-audit + 51 Track C).
+    // Absent = the initial batch's one-shot judging. Normalized from the seam's `string | JudgeEvidenceScope`
+    // by `run()`, so only ONE shape reaches the mint below.
+    scope?: JudgeEvidenceScope;
   },
 ): Promise<void> {
   if (input.events.length === 0) return;
@@ -222,10 +226,12 @@ async function reportJudgeExecution(
         runId: input.runId,
         tenant: input.tenant,
         source: "run",
-        // Pass-scoped for a re-score: the trajectory keeps the FIRST segment per (runId, emitter), so the
-        // bare name would silently drop every revision after the first — current score from revision N,
-        // evidence forever from revision 1.
-        emitter: `judge:${input.spec.id}${input.scoringPass !== undefined ? `#${input.scoringPass}` : ""}`,
+        // INVOCATION-SCOPED. The trajectory keeps the FIRST segment per (runId, emitter), so an emitter a
+        // later execution of this judge will reuse makes THIS execution the permanent evidence for whatever
+        // verdict eventually wins. The bare name dropped every revision after the first; the pass-scoped name
+        // dropped every retry within a pass. `judgeEvidenceEmitter` (@everdict/domain) owns the grammar and
+        // documents all three forms — the format is never spelled here.
+        emitter: judgeEvidenceEmitter(input.spec.id, input.scope),
         events: input.events,
         t0: input.t0,
       })
@@ -455,7 +461,7 @@ async function runCodeJudge(
   submittedBy?: string,
   runId?: string,
   publishWhen?: () => Promise<boolean>,
-  scoringPass?: string,
+  scope?: JudgeEvidenceScope,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -482,7 +488,7 @@ async function runCodeJudge(
       t0: startedAt,
       ...(runId !== undefined ? { runId } : {}),
       ...(publishWhen ? { publishWhen } : {}),
-      ...(scoringPass !== undefined ? { scoringPass } : {}),
+      ...(scope !== undefined ? { scope } : {}),
       billing: result,
     });
     if (result.failure) {
@@ -506,6 +512,12 @@ async function runCodeJudge(
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen, scoringPass) {
+      // ONE SHAPE past this line. The seam accepts a bare pass id (a caller whose path invokes a
+      // (case, judge) once per pass) or the full invocation scope (the Temporal path, which retries within
+      // one pass and arbitrates the winner on the claim) — normalized here so the emitter mint below has a
+      // single input and no branch of its own.
+      const scope: JudgeEvidenceScope | undefined =
+        typeof scoringPass === "string" ? { passId: scoringPass } : scoringPass;
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
@@ -536,7 +548,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       }
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
       if (spec.kind === "code")
-        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen, scoringPass);
+        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen, scope);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
@@ -732,7 +744,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           t0: judgeStartedAt,
           ...(runId !== undefined ? { runId } : {}),
           ...(publishWhen ? { publishWhen } : {}),
-          ...(scoringPass !== undefined ? { scoringPass } : {}),
+          ...(scope !== undefined ? { scope } : {}),
           ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
         });
       }

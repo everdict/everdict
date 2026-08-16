@@ -154,6 +154,57 @@ const unmeasuredPlaceholder: Score = {
   detail: "[grader-error] judge transport died",
 };
 
+const scoreJudgeSpec: JudgeSpec = {
+  kind: "model",
+  id: "j",
+  version: "1.0.0",
+  provider: "anthropic",
+  model: "claude-opus-4-8",
+  rubric: "good?",
+  inputs: ["trace"],
+  tags: [],
+};
+
+// The smallest registry that resolves ONE judge — enough for a test whose subject is what the scoring seam
+// carries, not which document it resolves.
+function judgeRegistryFor(spec: JudgeSpec): JudgeRegistry {
+  return {
+    async register() {
+      throw new Error("unused");
+    },
+    async has() {
+      return true;
+    },
+    async get() {
+      return spec;
+    },
+    async versions() {
+      return [spec.version];
+    },
+    async ownVersions() {
+      return [spec.version];
+    },
+    async list() {
+      return [];
+    },
+    async moveToTeam() {
+      throw new Error("unused");
+    },
+    async creatorOfVersion() {
+      return undefined;
+    },
+    async softDelete() {
+      throw new Error("unused");
+    },
+    async setVersionTags() {
+      throw new Error("unused");
+    },
+    async versionTags() {
+      return {};
+    },
+  };
+}
+
 describe("ScorecardScoreService planScore (measured-aware worklist)", () => {
   it("lists a case whose judge verdict is an unmeasured placeholder — presence is not judgment", async () => {
     // Given a case whose only judge:j row is the unmeasured placeholder a dead judge left behind
@@ -320,6 +371,55 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
     expect(out.scored).toBe(true);
     expect(seenRunIds).toEqual(["child-c1"]);
+  });
+
+  it("threads the judgment CLAIM into the judge's evidence scope — the retry it arbitrates gets its own plane (arch-review 51 Track C)", async () => {
+    // Regression: scoreCase held the claim (it hands it to stageJudgments, which decides WHICH invocation of
+    // this (case, judge) may write the score) but told the runner only the pass id. The trajectory keeps the
+    // FIRST seal per (runId, emitter), so a superseded invocation's evidence stayed permanent under
+    // `judge:j#pass-1` while the winning invocation's seal was refused — score and evidence describing two
+    // different physical judge executions, indistinguishable afterwards.
+    const seenScopes: Array<unknown> = [];
+    const judgeRunner: JudgeRunner = {
+      async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, _pins, _publishWhen, scoringPass) {
+        seenScopes.push(scoringPass);
+        return [measuredVerdict];
+      },
+    };
+    const svc = new ScorecardScoreService(deps, {
+      newId: () => "id-1",
+      now: () => "2026-08-07T00:00:00.000Z",
+      scoring: new ScoringService({ judges: judgeRegistryFor(scoreJudgeSpec), judgeRunner }),
+      getRecord: async () => recordWith([result("c1", [unmeasuredPlaceholder])]),
+      pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+    });
+    // When the pass re-invokes this case under its second attempt of round 1
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1", {
+      generation: 1,
+      attempt: 2,
+    });
+    expect(out.scored).toBe(true);
+    // Then the runner is told the whole invocation coordinate, not just the pass
+    expect(seenScopes).toEqual([{ passId: "pass-1", claim: { generation: 1, attempt: 2 } }]);
+  });
+
+  it("an invocation with no claim still scopes the evidence to its pass — the in-process pass has nothing finer to say", async () => {
+    const seenScopes: Array<unknown> = [];
+    const judgeRunner: JudgeRunner = {
+      async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, _pins, _publishWhen, scoringPass) {
+        seenScopes.push(scoringPass);
+        return [measuredVerdict];
+      },
+    };
+    const svc = new ScorecardScoreService(deps, {
+      newId: () => "id-1",
+      now: () => "2026-08-07T00:00:00.000Z",
+      scoring: new ScoringService({ judges: judgeRegistryFor(scoreJudgeSpec), judgeRunner }),
+      getRecord: async () => recordWith([result("c1", [unmeasuredPlaceholder])]),
+      pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+    });
+    await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }], undefined, "pass-1");
+    expect(seenScopes).toEqual([{ passId: "pass-1" }]);
   });
 });
 

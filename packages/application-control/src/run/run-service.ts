@@ -948,6 +948,9 @@ export class RunService {
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
     // Judge model: request override → workspace default (DB) → none (the judge grader is skipped). The key is injected by the backend as secretEnv.
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
+    // The attempt this dispatch is, as the ledger named it (see rememberAttempt) — read once, so the job
+    // literal below states it rather than re-deriving it.
+    const attemptRowId = this.attemptRow.get(`evd-run-${id}`);
     const job: CaseJob = {
       evalCase: input.case,
       harness: input.harness,
@@ -964,6 +967,11 @@ export class RunService {
       ...(this.attempt.get(`evd-run-${id}`) !== undefined
         ? { recordingGeneration: this.attempt.get(`evd-run-${id}`) as number }
         : {}),
+      // …and the ledger ROW by name (arch-review 51). The generation above is absent whenever the recording
+      // claim was refused, while the attempt row exists all the same — and it is this name a SELF-HOSTED park
+      // writes to `runner_jobs.current_attempt_id`, which is what lets a later re-lease supersede the attempt
+      // it replaced instead of leaving it `executing` for ever.
+      ...(attemptRowId !== undefined ? { attemptId: attemptRowId } : {}),
     };
     // Did THIS driver's settlement land? Everything after the fork below hangs off it (arch-review 31 P2).
     let committed = false;

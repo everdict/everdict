@@ -95,7 +95,7 @@ export {
   type CancellationStore,
   InMemoryCancellationStore,
 } from "./ports/cancellation-store.js";
-export { openPhysicalAttempt, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
+export { openPhysicalAttempt, jobAttemptId, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
 export {

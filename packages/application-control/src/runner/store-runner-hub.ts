@@ -19,6 +19,7 @@ import {
   type SelfHostedKey,
   normalizeOpenedAttempt,
   requiredRunnerCapabilities,
+  restampedJob,
 } from "./runner-hub.js";
 
 // What the CLAIM lane's attempt open is told (arch-review 47 §5.1). The dispatch lanes keep `OpenAttempt`,
@@ -90,6 +91,10 @@ export class StoreRunnerHub {
       job,
       requiredCaps: requiredRunnerCapabilities(job),
       now: this.now(),
+      // …and the attempt the DISPATCH opened lands on the row with it (arch-review 51). It is the only way
+      // that attempt's id reaches the replica serving a later re-lease — which reads it as `prior` and ends
+      // it. Absent when the dispatch opened none (no ledger wired), exactly as this park behaved before.
+      ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
     });
     // The parking replica polls the shared store; when the (cross-replica) claim first marks the row "leased" it
     // fires onLease once → the caller flips the run record queued→running. The run store is shared, so this works
@@ -207,11 +212,9 @@ export class StoreRunnerHub {
       });
       // The lease IS the dispatch, so compute starts under this attempt the moment the claim commits.
       await opened.markExecuting?.();
-      const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
       // A mint that produced no coordinate strips the inherited one (fail-closed → the live-only lane); the
       // attempt ROW still exists and still says what ran, which is the point of the ledger.
-      const job =
-        opened.generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: opened.generation };
+      const job = restampedJob(claimed.job, opened);
       return { job, ...(opened.attemptId !== undefined ? { attemptId: opened.attemptId } : {}) };
     };
   }
@@ -223,20 +226,25 @@ export class StoreRunnerHub {
   // A failed open strips the inherited number (fail-closed → the live-only lane); a failed restamp is NOT
   // swallowed, so the runner never receives a lease whose row still points at the other execution.
   //
-  // ⚠️ WHAT THIS PATH STILL CANNOT DO: supersede the attempt this re-lease REPLACED. The prior attempt's id
-  // reaches this replica only on the row, and reading it here would not help — ending it and claiming the
-  // lease would still be two decisions with a window between them. That is what `claimWithAttempt` above is
-  // for, and a deployment whose store offers `claimAttempt` never reaches this method. This one remains for
-  // the stores that cannot transact, where the replaced rows are reconciled like every other pre-promotion
-  // row (an attempt row whose execution has a terminal outcome is not that outcome's authority).
+  // The attempt this re-lease REPLACES is named by the job it claimed (`CaseJob.attemptId`, arch-review 51)
+  // and superseded by the opener — so the predecessor no longer stands `executing` for ever on this path
+  // either. What this path still cannot do is make that ONE decision: the supersede, the open and the restamp
+  // are separate round-trips, so a crash between them leaves a predecessor ended by a lease that never
+  // committed. That is what `claimWithAttempt` above is for, and a deployment whose store offers
+  // `claimAttempt` never reaches this method. This one remains for the stores that cannot transact, where the
+  // residue is reconciled like every other pre-promotion row (an attempt row whose execution has a terminal
+  // outcome is not that outcome's authority).
   private async mintAttempt(claimed: RunnerJobLease, key: SelfHostedKey): Promise<CaseJob | null> {
     if (claimed.leaseEpoch <= 1 || !this.openAttempt) return claimed.job;
     const opened = normalizeOpenedAttempt(
-      await this.openAttempt(claimed.job, { leaseEpoch: claimed.leaseEpoch }).catch(() => undefined),
+      await this.openAttempt(claimed.job, {
+        leaseEpoch: claimed.leaseEpoch,
+        // The attempt this re-lease replaces, as the JOB names it (arch-review 51): the dispatch's own on the
+        // first re-lease, and thereafter whichever attempt the previous mint restamped the job with.
+        ...(claimed.job.attemptId !== undefined ? { prior: claimed.job.attemptId } : {}),
+      }).catch(() => undefined),
     );
-    const { recordingGeneration: _inherited, ...withoutAttempt } = claimed.job;
-    const job =
-      opened.generation === undefined ? withoutAttempt : { ...claimed.job, recordingGeneration: opened.generation };
+    const job = restampedJob(claimed.job, opened);
     // The restamp's answer IS the claim's answer (arch-review 47 P1-1): false means the row moved while the
     // open was in flight — a cancel, an expiry sweep, another claim — and the store will refuse every
     // authorize/complete under this lease. The boolean was ignored, so the runner received a job it could

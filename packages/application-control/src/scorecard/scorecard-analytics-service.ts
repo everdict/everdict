@@ -3,6 +3,7 @@ import {
   BadRequestError,
   type CaseMatcher,
   ConflictError,
+  type GateScoringPin,
   NotFoundError,
   type Scorecard,
   type ScorecardRecord,
@@ -511,5 +512,45 @@ export class ScorecardAnalyticsService {
           : `scorecard '${id}' has a scoring pass in flight (revision ${pass.targetRevision}) — its score plane is between revisions; retry after it settles.`,
       );
     return { scorecard: record.scorecard, record };
+  }
+
+  // ── THE PINS-ONLY PRE-READ (arch-review 51 P1) ─────────────────────────────────────────────────────
+  //
+  // What the gate asks BEFORE it computes anything: the two sides' current scoring pins, under the same
+  // scope/status/boundary contract as `requireSucceeded` (a caller must not learn through the trust refusal
+  // what the 404/400/409 would have hidden) — but WITHOUT the decision hydration, because the pins live on
+  // the record row and the per-case planes are only needed if the comparison actually runs. The diff that
+  // may follow re-reads atomically and re-checks trust on its own pins (I4 stays the authority); this read
+  // exists so untrusted input refuses before any verdict arithmetic runs, not after.
+  async comparisonPins(
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+    visibleTeams?: string[],
+  ): Promise<{ baseline?: GateScoringPin; candidate?: GateScoringPin }> {
+    const read = async (id: string): Promise<GateScoringPin | undefined> => {
+      const record = await this.deps.store.get(id);
+      if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
+        throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
+      if (record.status !== "succeeded")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { id, status: record.status },
+          `scorecard '${id}' did not succeed (status=${record.status}) — a ${record.status} batch's partial results are not comparable evidence.`,
+        );
+      const pass = record.scoringPass ?? undefined;
+      if (pass !== undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { id, scoringPass: { status: pass.status, targetRevision: pass.targetRevision, startedAt: pass.startedAt } },
+          pass.status === "failed"
+            ? `scorecard '${id}' carries an ABANDONED scoring pass (revision ${pass.targetRevision} failed mid-plane) — its score plane is not readable evidence; re-score to settle it.`
+            : `scorecard '${id}' has a scoring pass in flight (revision ${pass.targetRevision}) — its score plane is between revisions; retry after it settles.`,
+        );
+      return currentScoringPin(record.scoring);
+    };
+    const baseline = await read(baselineId);
+    const candidate = await read(candidateId);
+    return { ...(baseline !== undefined ? { baseline } : {}), ...(candidate !== undefined ? { candidate } : {}) };
   }
 }

@@ -38,6 +38,13 @@ export interface ParkInput {
   job: CaseJob;
   requiredCaps: string[]; // functional caps this job needs — filtered against the runner's advertised set on claim
   now: number;
+  // THE ATTEMPT THIS PARK IS FOR (arch-review 51). The dispatch opened a physical attempt before it reached
+  // the hub, and its id is what `current_attempt_id` (mig 0183) exists to carry: the FIRST re-lease reads that
+  // column as the predecessor to supersede. Written at park, that predecessor is the dispatch's own attempt —
+  // which is precisely the row that used to stand `executing` for ever, because the column was NULL until a
+  // re-lease minted a successor and the first mint therefore superseded nothing. Optional: a composition with
+  // no attempt ledger parks exactly as before, and so does a dispatch whose open was refused.
+  attemptId?: string;
 }
 
 export interface ClaimInput {

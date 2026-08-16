@@ -432,6 +432,18 @@ export class PgScorecardStore implements ScorecardStore {
         vals.push(guard.expectScoringPassEpoch);
       }
     }
+    // The abort settle owns its teardown in the SAME statement (arch-review 51 P0): the cancellation
+    // operation upsert rides the update exactly like the outbox events — applied only when the settle
+    // matched a row (WHERE EXISTS on the updating CTE), so a refused settle owes nothing. Requested-at is
+    // the database's own clock; a re-request re-opens a completed row (idempotent-by-key, see the port).
+    const cancelSql =
+      guard?.requestCancellation === true
+        ? `, cancel_op AS (INSERT INTO everdict_cancellation_operations (scorecard_id, state)
+                SELECT $${idIdx}, 'requested'
+                WHERE EXISTS (SELECT 1 FROM upd)
+                ON CONFLICT (scorecard_id) DO UPDATE
+                  SET state = 'requested', last_error = NULL, completed_at = NULL)`
+        : "";
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
@@ -440,9 +452,17 @@ export class PgScorecardStore implements ScorecardStore {
         `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
-                WHERE EXISTS (SELECT 1 FROM upd))
+                WHERE EXISTS (SELECT 1 FROM upd))${cancelSql}
          SELECT * FROM upd`,
         [...vals, ...ev.params],
+      );
+      return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
+    }
+    if (cancelSql !== "") {
+      const res = await this.client.query<ScorecardRow>(
+        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *)${cancelSql}
+         SELECT * FROM upd`,
+        vals,
       );
       return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
     }

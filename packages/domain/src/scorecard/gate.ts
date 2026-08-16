@@ -53,11 +53,10 @@ const DEFAULT_COMPARABILITY: NonNullable<GatePolicy["comparability"]> = "require
 // receipts, a ledger outage at judging time) refuses by default and passes only under the recorded
 // allowUnverifiedInput acknowledgement. A legacy pin (pre-observation revision) rides as information on the
 // pin itself — history is not retroactively re-judged.
-export function applyInputTrust(
-  evaluation: GateEvaluation,
+function inputTrustReasons(
   pins: { baseline?: GateScoringPin; candidate?: GateScoringPin },
   policy: GatePolicy,
-): GateEvaluation {
+): GateReason[] {
   const reasons: GateReason[] = [];
   for (const [side, pin] of [
     ["baseline", pins.baseline],
@@ -82,8 +81,50 @@ export function applyInputTrust(
             : `the ${side}'s pinned judgment states no receipt vouches for what its judges read — refused unless the policy records allowUnverifiedInput`,
       });
   }
+  return reasons;
+}
+
+// ── TRUST IS A PRECONDITION, NOT A POST-PROCESSOR (arch-review 51 P1) ────────────────────────────────
+//
+// Asked of the pins BEFORE any diff is computed: an untrusted input refuses here and the arithmetic never
+// runs — the pre-fix order computed regressions/improvements first and then downgraded the decision, so the
+// system could simultaneously say "this input has no decision authority" and "I counted 7 regressions in
+// it", numbers an issue-automation or a reasons-reading operator would act on. The evidence carries only
+// what refusing without comparing can honestly claim: comparability `none` and nothing verdict-derived
+// (missingCases 0 / trialsGated false are the schema's required floor — "nothing was compared" is what
+// comparability `none` states).
+export function refuseGateForInputTrust(
+  pins: { baseline?: GateScoringPin; candidate?: GateScoringPin },
+  policy: GatePolicy,
+): GateEvaluation | undefined {
+  const reasons = inputTrustReasons(pins, policy);
+  if (reasons.length === 0) return undefined;
+  return {
+    decision: "not_comparable",
+    reasons,
+    evidence: { comparability: "none", missingCases: 0, trialsGated: false },
+  };
+}
+
+// The post-arithmetic double-check on the SNAPSHOT's own pins (the atomic same-read authority, I4): the
+// precondition above asks a separate earlier read, so a re-score landing between the two is caught here —
+// and the downgrade STRIPS the verdict-derived numbers (regressions/improvements/criticals/FDR) rather than
+// carrying them: structural facts (what was and wasn't compared) survive, verdict claims do not.
+export function applyInputTrust(
+  evaluation: GateEvaluation,
+  pins: { baseline?: GateScoringPin; candidate?: GateScoringPin },
+  policy: GatePolicy,
+): GateEvaluation {
+  const reasons = inputTrustReasons(pins, policy);
   if (reasons.length === 0) return evaluation;
-  return { ...evaluation, decision: "not_comparable", reasons: [...reasons, ...evaluation.reasons] };
+  const {
+    regressions: _regressions,
+    improvements: _improvements,
+    criticalFailures: _criticalFailures,
+    suppressedByFdr: _suppressedByFdr,
+    ...structural
+  } = evaluation.evidence;
+  return { decision: "not_comparable", reasons: [...reasons, ...evaluation.reasons], evidence: structural };
 }
 
 export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluation {

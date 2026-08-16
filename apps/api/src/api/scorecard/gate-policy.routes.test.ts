@@ -189,3 +189,68 @@ describe("POST /scorecards/gate — experiment identity refuses a confounded pai
     await app.close();
   });
 });
+
+// ── TRUST IS A PRECONDITION, NOT A POST-PROCESSOR (arch-review 51 P1) ────────────────────────────────
+describe("POST /scorecards/gate — untrusted input refuses before any regression arithmetic exists", () => {
+  it("an unvouched pair with a real regression refuses with input reasons and NO regression count anywhere", async () => {
+    // Pre-fix the gate computed the diff first and downgraded after: the decision said not_comparable while
+    // its persisted evidence still said "regressions: 1" — a number derived from input the decision itself
+    // declared unauthoritative, ready to be consumed by issue automation or a reasons-reading operator.
+    const store = new InMemoryScorecardStore();
+    const unvouched = (id: string, pass: boolean): ScorecardRecord => {
+      const rec = record(id, [result("a", ["tests_pass"])]);
+      const scores = [{ graderId: "tests_pass", metric: "tests_pass", value: pass ? 1 : 0, pass }];
+      return {
+        ...rec,
+        scorecard: {
+          suiteId: "smoke",
+          harness: "h@1",
+          results: [{ ...result("a", []), scores }],
+        },
+        // IDENTICAL seals on both sides — identity passes, so the ONLY thing standing between this pair and
+        // a computed "regressions: 1" is the input-trust precondition under test.
+        manifest: {
+          identityVersion: MANIFEST_IDENTITY_VERSION,
+          dataset: { id: "smoke", version: "1.0.0", digest: "sha256:composite-same" },
+          cases: { a: "sha256:content-same" },
+          grading: "sha256:grading-same",
+          harness: { id: "h", version: "1" },
+        },
+        // The pin exists but its input observation never completed — `unverified`, refused by default.
+        scoring: [
+          {
+            kind: "initial",
+            revision: 1,
+            judges: [],
+            scorePlaneDigest: "sha256:plane",
+            inputObservation: { completed: false, cases: 1 },
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      } as ScorecardRecord;
+    };
+    await store.create(unvouched("base", true));
+    await store.create(unvouched("cand", false)); // a → broke: the diff WOULD count one regression
+    const app = buildServer({
+      service: new RunService({ dispatcher, store: new InMemoryRunStore() }),
+      scorecardService: new ScorecardService({
+        dispatcher,
+        store,
+        datasets: new InMemoryDatasetRegistry(),
+        harnesses: new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry()),
+      }),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards/gate",
+      headers: tenant,
+      payload: { baseline: "base", candidate: "cand" },
+    });
+    expect(res.json().decision).toBe("not_comparable");
+    expect(res.json().reasons[0].kind).toBe("input_unverified");
+    expect(res.json().evidence.regressions).toBeUndefined();
+    expect(res.json().evidence.improvements).toBeUndefined();
+    expect(res.json().evidence.comparability).toBe("none"); // nothing was compared — the arithmetic never ran
+    await app.close();
+  });
+});

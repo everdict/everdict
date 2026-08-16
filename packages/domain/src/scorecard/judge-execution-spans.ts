@@ -20,6 +20,45 @@ export function executionEvidenceTrace(trace: TraceEvent[]): TraceEvent[] {
   return trace.filter((e) => e.kind !== "infra" && !(e.kind === "span" && e.name.startsWith("judge:")));
 }
 
+// ── THE EVIDENCE PLANE'S NAME: WHICH INVOCATION PRODUCED IT (arch-review 51 Track C) ─────────────────
+//
+// A judge's own execution seals as its own plane on the judged case's trajectory, and the ledger keeps the
+// FIRST seal per (runId, emitter) — so the emitter IS the identity of the execution that evidence describes.
+// Naming a plane after the JUDGE alone lost every re-score's evidence (arch-review 41 P0-audit). Naming it
+// after the judge and the PASS still loses every retry WITHIN a pass, and that one is worse: the score plane
+// arbitrates retries per (case, judge) on the judgment CLAIM, so invocation 2 can win the score while
+// invocation 1's seal — written first, refused for nobody — stays the evidence. Score and evidence then
+// describe two different physical judge executions and nothing in the record can say which is which.
+//
+// GRAMMAR — each part narrows the one before it, and each is minted ONLY here:
+//
+//   judge:<judgeId>                            no pass identity — the initial batch's judging, one shot
+//                                              per case, so the judge id alone is the invocation.
+//   judge:<judgeId>#<passId>                   a pass with no invocation ordinals: the IN-PROCESS pass
+//                                              judges the whole plane in ONE `applyJudges` call and has no
+//                                              per-case retry seam (`ScorecardScoreService.track`); a
+//                                              takeover mints a NEW passId, so the pass id alone separates
+//                                              every invocation that path can produce.
+//   judge:<judgeId>#<passId>.<gen>.<attempt>   ONE Temporal invocation of (pass, case, judge) — the claim
+//                                              the stage arbitrates on (`JudgmentClaim`, mig 0158/0159).
+//
+// Reading it back: `passId` is an opaque minted id, so the ordinals are recovered right-anchored
+// (`/\.(\d+)\.(\d+)$/` after the first `#`) — no reader needs that today, and one that does belongs HERE
+// beside the minter rather than re-deriving the grammar at its own call site.
+export interface JudgeEvidenceScope {
+  passId: string;
+  // The pass-global (generation, attempt) ordinal this invocation holds. Absent = the pass has no
+  // per-invocation identity to state (the in-process pass — see the grammar above).
+  claim?: { generation: number; attempt: number };
+}
+
+export function judgeEvidenceEmitter(judgeId: string, scope?: JudgeEvidenceScope): string {
+  if (scope === undefined) return `judge:${judgeId}`;
+  const { passId, claim } = scope;
+  if (claim === undefined) return `judge:${judgeId}#${passId}`;
+  return `judge:${judgeId}#${passId}.${claim.generation}.${claim.attempt}`;
+}
+
 export function judgeExecutionSpans(judgeId: string, events: TraceEvent[]): TraceEvent[] {
   const spans: TraceEvent[] = [];
   for (const e of events) {

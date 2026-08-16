@@ -21,6 +21,14 @@ export class InMemoryScorecardStore implements ScorecardStore {
     this.receiptCountOf = countOf;
   }
 
+  // The cancellation pair (arch-review 51 P0): Postgres upserts the operation row in the settle's own
+  // statement; in memory the stores are separate objects, so the pairing is explicit (same attach idiom as
+  // the receipts fence). Applied right after a matched write — the dev-store degradation of "same tx".
+  private requestCancellationOf?: (scorecardId: string) => void;
+  attachCancellations(request: (scorecardId: string) => void): void {
+    this.requestCancellationOf = request;
+  }
+
   // E0 outbox pair: in-memory has no transaction to share, so "same tx" degrades to "append right after the
   // write" — the ordering guarantee tests rely on (same as InMemoryRunStore).
   constructor(private readonly events?: PlatformEventStore) {}
@@ -108,6 +116,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
       };
     }
     this.cards.set(id, next);
+    if (guard?.requestCancellation === true) this.requestCancellationOf?.(id);
     await this.appendEvents(events);
     return next;
   }

@@ -72,4 +72,12 @@ export class PgCancellationStore implements CancellationStore {
     );
     return rows.map(toOperation);
   }
+
+  async get(scorecardId: string): Promise<CancellationOperation | undefined> {
+    const { rows } = await this.client.query<CancellationRow>(
+      "SELECT * FROM everdict_cancellation_operations WHERE scorecard_id = $1",
+      [scorecardId],
+    );
+    return rows[0] ? toOperation(rows[0]) : undefined;
+  }
 }

@@ -158,13 +158,21 @@ export function buildDispatch(deps: {
     // be back to the two-decision shape the transaction exists to end.
     const ledger = opts.attempts ?? attempts;
     if (job.runId === undefined) return {};
-    // The attempt this claim REPLACES, ended by the claim that replaced it. Only the transactional lane can
-    // name one (the row carries it); on the three-step path `prior` is always absent. Refused transitions are
-    // silent no-ops by contract, so an already-terminal predecessor costs nothing.
-    if (opts.prior !== undefined && ledger)
-      await ledger.transition(opts.prior, "superseded", {
+    // The attempt this claim REPLACES, ended by the claim that replaced it. The transactional lane names it
+    // from the ROW; the three-step lanes name it from the JOB (`CaseJob.attemptId`, arch-review 51). Refused
+    // transitions are silent no-ops by contract, so an already-terminal predecessor costs nothing.
+    //
+    // A THROWING supersede is fatal only where it rides the claim's transaction (`opts.attempts`): there it
+    // must take the lease with it, exactly like every other write in that transaction. On the ambient ledger
+    // it is a diagnostic with nothing to ride, and failing the open there would strip the successor's
+    // generation and drop a healthy execution onto the live-only lane because an audit row could not be
+    // written — the inversion ports/execution-attempt-store.ts forbids.
+    if (opts.prior !== undefined && ledger) {
+      const supersede = ledger.transition(opts.prior, "superseded", {
         error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
       });
+      await (opts.attempts ? supersede : supersede.catch(() => false));
+    }
     // A job carrying no tenant gets the recording lane exactly as it did before — the ledger's tenant
     // is not a value to invent, and losing an audit row is the lesser of the two failures. No ledger
     // row means no handles either, so this path answers with the bare coordinate it always did.
@@ -205,8 +213,14 @@ export function buildDispatch(deps: {
   };
   const openAttempt =
     recordingStore || attempts
-      ? (job: CaseJob, lease?: { leaseEpoch: number }): Promise<OpenedAttempt> =>
-          openLeaseAttemptOn(job, lease ? { leaseEpoch: lease.leaseEpoch } : {})
+      ? (job: CaseJob, lease?: { leaseEpoch: number; prior?: string }): Promise<OpenedAttempt> =>
+          openLeaseAttemptOn(
+            job,
+            // …including the PREDECESSOR the hub can now name (arch-review 51). The three-step lanes reach the
+            // attempt they replace through the job (`CaseJob.attemptId`), which is the same supersede the
+            // transactional lane makes from the row — best-effort here, since these stamps ride no transaction.
+            lease ? { leaseEpoch: lease.leaseEpoch, ...(lease.prior !== undefined ? { prior: lease.prior } : {}) } : {},
+          )
       : undefined;
   // ── THE CLAIM LANE'S OPEN (arch-review 47 §5.1) ───────────────────────────────────────────────────
   //

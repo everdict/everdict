@@ -61,6 +61,9 @@ export interface SettleOptions {
   epoch?: number;
   // The receipt count the settle read (see ScorecardUpdateGuard.expectReceiptCount).
   expectReceiptCount?: number;
+  // The abort settle also OWNS its teardown, durably (arch-review 51 P0). See
+  // ScorecardUpdateGuard.requestCancellation.
+  requestCancellation?: true;
 }
 
 export interface ScorecardUpdateGuard {
@@ -133,6 +136,19 @@ export interface ScorecardUpdateGuard {
   // database considered expired on arrival, and its own healthy pass became reclaimable while it worked.
   // Producer and judge of an interval must share a clock; this makes them.
   stampScoringLeaseSeconds?: number;
+  // ── THE TEARDOWN IS OWED BY THE SAME TRANSACTION THAT DECIDES IT (arch-review 51 P0) ──────────────
+  //
+  // A WRITE INSTRUCTION like `claimOwnership`, here because only the store can make the pair atomic: the
+  // cancellation-operation row used to be requested AFTER the terminal settle, best-effort — so a crash
+  // between the CANCELLED/SUPERSEDED commit and the request left a decided abort whose teardown had no
+  // durable owner, and the reconciler (which sweeps operation rows, not scorecards) could never find it.
+  // Supersede had no user-facing retry at all, so its window was a permanent leak of live compute.
+  //
+  // With this set, the store upserts the operation row (state `requested`) in the SAME transaction as the
+  // settle — the decision cannot commit without its teardown being owed. Applied only when the settle
+  // matched a row, exactly like the outbox events. The in-memory store applies it through the attached
+  // cancellation pair (no transaction to share — the documented dev-store degradation, same as E0).
+  requestCancellation?: true;
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

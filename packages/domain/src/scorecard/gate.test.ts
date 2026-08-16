@@ -1,6 +1,6 @@
 import type { GateScoringPin } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type GateEvaluation, type GateInput, applyInputTrust, evaluateGate } from "./gate.js";
+import { type GateEvaluation, type GateInput, applyInputTrust, evaluateGate, refuseGateForInputTrust } from "./gate.js";
 
 const base = (over: Partial<GateInput>): GateInput => ({
   baseline: "b",
@@ -637,5 +637,69 @@ describe("applyInputTrust — the pins' input observation is a judgment conditio
     expect(blocked.reasons[0]?.detail).toContain("predates input observation");
     const waived = applyInputTrust(passEvaluation(), legacy, { maxRegressions: 0, allowUnverifiedInput: true });
     expect(waived.decision).toBe("pass"); // gating over history is a recorded choice, never a default
+  });
+
+  it("the downgrade STRIPS the verdict-derived numbers — a refused input's regressions must not survive as evidence", () => {
+    // Pre-fix the downgrade spread the computed evaluation whole: the decision said "no authority" while the
+    // persisted evidence still said "7 regressions" — numbers an operator or issue automation would act on.
+    const computed: GateEvaluation = {
+      decision: "block",
+      reasons: [{ kind: "regression", detail: "7 over the shared cases" }],
+      evidence: {
+        comparability: "full",
+        regressions: 7,
+        improvements: 2,
+        criticalFailures: 1,
+        suppressedByFdr: 1,
+        missingCases: 0,
+        trialsGated: false,
+      },
+    };
+    const out = applyInputTrust(computed, { candidate: pin({ completed: false }) }, { maxRegressions: 0 });
+    expect(out.decision).toBe("not_comparable");
+    expect(out.evidence.regressions).toBeUndefined();
+    expect(out.evidence.improvements).toBeUndefined();
+    expect(out.evidence.criticalFailures).toBeUndefined();
+    expect(out.evidence.suppressedByFdr).toBeUndefined();
+    expect(out.evidence.comparability).toBe("full"); // structural facts survive — what was compared is not a verdict claim
+  });
+});
+
+// ── TRUST IS A PRECONDITION, NOT A POST-PROCESSOR (arch-review 51 P1) ────────────────────────────────
+describe("refuseGateForInputTrust — the pre-arithmetic refusal", () => {
+  const pin = (inputObservation?: { completed: boolean; diverged?: number; cases?: number }): GateScoringPin =>
+    ({
+      revision: 1,
+      scorePlaneDigest: "sha256:x",
+      ...(inputObservation ? { inputObservation } : {}),
+    }) as GateScoringPin;
+
+  it("an untrusted pin refuses BEFORE any diff exists — the evaluation carries no verdict-derived number at all", () => {
+    const refusal = refuseGateForInputTrust({ candidate: pin({ completed: false }) }, { maxRegressions: 0 });
+    expect(refusal?.decision).toBe("not_comparable");
+    expect(refusal?.reasons[0]).toMatchObject({ kind: "input_unverified" });
+    expect(refusal?.evidence.regressions).toBeUndefined();
+    expect(refusal?.evidence.improvements).toBeUndefined();
+    expect(refusal?.evidence.comparability).toBe("none"); // nothing was compared — the honest structural claim
+  });
+
+  it("vouched pins (or a recorded waiver) return undefined — the comparison may run", () => {
+    const vouched = { baseline: pin({ completed: true, cases: 3 }), candidate: pin({ completed: true, cases: 3 }) };
+    expect(refuseGateForInputTrust(vouched, { maxRegressions: 0 })).toBeUndefined();
+    expect(
+      refuseGateForInputTrust(
+        { candidate: pin({ completed: false }) },
+        { maxRegressions: 0, allowUnverifiedInput: true },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("divergence refuses even under the waiver — same rule as the post-check, asked earlier", () => {
+    const refusal = refuseGateForInputTrust(
+      { candidate: pin({ completed: true, diverged: 1 }) },
+      { maxRegressions: 0, allowUnverifiedInput: true },
+    );
+    expect(refusal?.decision).toBe("not_comparable");
+    expect(refusal?.reasons[0]).toMatchObject({ kind: "input_diverged" });
   });
 });

@@ -61,11 +61,11 @@ import {
 } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { executeCase } from "../execution/execute-case.js";
-import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
+import { type PhysicalAttempt, jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { AdaptiveConcurrencyGate } from "../ops/adaptive-concurrency.js";
 import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js";
-import { executeWithSpillover } from "../ops/runtime-spillover.js";
+import { type SpilloverOutcome, executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
@@ -513,6 +513,7 @@ export class ScorecardBatchService {
                   tenant: rec.tenant,
                   scorecardId: id,
                   driverEpoch: rec.ownerEpoch ?? 0,
+                  concurrent: true, // the duplicate races the primary — neither supersedes the other at open
                 });
                 return reattempt ? { reattempt } : {};
               })(),
@@ -526,7 +527,7 @@ export class ScorecardBatchService {
                   caseId: cid,
                 });
               },
-              onLoser: (outcome, cid: string) => this.meterLostAttempt(rec.tenant, outcome.result, cid, id),
+              onLoser: (outcome, cid: string) => this.meterLostAttempt(rec.tenant, outcome, cid, id),
               ...(this.deps.cancelQueued
                 ? {
                     cancelQueued: (cid: string) =>
@@ -600,9 +601,26 @@ export class ScorecardBatchService {
     tenant: string;
     scorecardId: string;
     driverEpoch?: number;
+    // ── DOES THE ATTEMPT THIS ONE REPLACES STOP HERE? (arch-review 51) ────────────────────────────────
+    //
+    // A spill, an OOM boost and a control-plane retry all re-dispatch because the previous physical
+    // execution is DEAD — it failed, or the kernel killed it — so its row is superseded the moment the
+    // successor opens, which is the only moment anybody knows it. A speculation duplicate is not that: the
+    // two run CONCURRENTLY and the race decides which one is the answer, so superseding at open time would
+    // terminalize an execution that is still producing (its own loser stamp is made at the race's end).
+    concurrent?: boolean;
+    // Told about every attempt this opens, so the lane's own bookkeeping can follow the CURRENT physical
+    // execution instead of the one its dispatch opened. Without it, a case that spilled and then failed
+    // recorded the FIRST attempt as the failed one — a row already superseded, so the stamp was refused and
+    // the attempt that actually failed stayed non-terminal. Per-batch by construction: the closure the caller
+    // passes owns the state (arch-review 34 — never an instance field).
+    onOpen?: (executionId: string, opened: PhysicalAttempt) => void;
   }): ((job: CaseJob) => Promise<CaseJob>) | undefined {
     const store = this.deps.recordingStore;
-    if (!store) return undefined;
+    // A deployment with the attempt LEDGER and no recording store still has physical attempts, and they are
+    // exactly the ones this opens (arch-review 51): re-dispatches used to open nothing at all there, so a
+    // spill/boost/duplicate left no row while the dispatch lanes beside it were writing theirs.
+    if (!store && !this.deps.attempts) return undefined;
     return async (job: CaseJob): Promise<CaseJob> => {
       const executionId = job.runId;
       if (!executionId) return job;
@@ -620,11 +638,26 @@ export class ScorecardBatchService {
           ...(cx.driverEpoch !== undefined ? { driverEpoch: cx.driverEpoch } : {}),
         },
       );
-      if (opened.generation === undefined) {
-        const { recordingGeneration: _stale, ...rest } = job;
-        return rest;
+      cx.onOpen?.(executionId, opened);
+      // …and the attempt it REPLACES reaches its terminal state here (arch-review 51). Only the abandoning
+      // re-dispatches (see `concurrent`) — and only best-effort, the posture every stamp with no transaction
+      // to ride keeps: an abandoned attempt commits nothing, so nothing reads this to decide anything.
+      if (!cx.concurrent) {
+        const replaced = jobAttemptId(job, executionId);
+        if (replaced !== undefined && replaced !== opened.attemptId)
+          await this.commit.stampAttempt(replaced, "superseded", {
+            error: { code: "ATTEMPT_SUPERSEDED", message: "re-dispatched as a new physical attempt" },
+          });
       }
-      return { ...job, recordingGeneration: opened.generation };
+      // BOTH HALVES OF THE COORDINATE MOVE (arch-review 51). Stamping only the generation left the job naming
+      // the attempt it just replaced — and when the recording claim was refused it named it with nothing at
+      // all, so this execution's row (which exists, marked unisolated) could never be addressed again.
+      const { recordingGeneration: _stale, attemptId: _replacedName, ...rest } = job;
+      return {
+        ...rest,
+        ...(opened.generation !== undefined ? { recordingGeneration: opened.generation } : {}),
+        ...(opened.attemptId !== undefined ? { attemptId: opened.attemptId } : {}),
+      };
     };
   }
 
@@ -712,7 +745,13 @@ export class ScorecardBatchService {
       // a wrapper rebuilt the job object on the way back — unambiguous, so it still attributes.)
       const leased =
         attemptByJob.get(outcome.job) ?? (attemptByJob.size === 1 ? [...attemptByJob.values()][0] : undefined);
-      return leased === undefined ? outcome : { ...outcome, job: { ...outcome.job, recordingGeneration: leased } };
+      if (leased === undefined) return outcome;
+      // …and the carried attempt NAME goes with the number it contradicts (arch-review 51). The lease minted
+      // its own attempt and reported only the generation (DispatchOptions.onAttempt); the name on this job
+      // still points at the attempt that lease REPLACED, so keeping it would seal, claim and terminalize the
+      // abandoned row. Dropped, the coordinate is read off the generation — which is this attempt's own.
+      const { attemptId: _replaced, ...withoutName } = outcome.job;
+      return { ...outcome, job: { ...withoutName, recordingGeneration: leased } };
     });
   }
 
@@ -791,6 +830,10 @@ export class ScorecardBatchService {
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
         runId: executionId, // trace correlation (Temporal path parity — no trial fan-out here)
         ...(generation !== undefined ? { recordingGeneration: generation } : {}),
+        // …and the LEDGER row this execution is, by name (arch-review 51). Present even when the recording
+        // claim was refused, which is the case the generation cannot cover: it is how a self-hosted park
+        // records which attempt it parked, and how an unisolated attempt stays addressable at all.
+        ...(attemptId !== undefined ? { attemptId } : {}),
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
         ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
@@ -887,6 +930,12 @@ export class ScorecardBatchService {
       // a synthesized failure belongs to the LAST attempt dispatched. Absent = no attempt was isolatable.
       const winnerGeneration = (winnerJob ?? currentJob).recordingGeneration;
       const winnerUnisolated = this.deps.recordingStore !== undefined && winnerGeneration === undefined;
+      // …and its LEDGER ROW, by name (arch-review 51). The job carries it, so an UNISOLATED winner — whose
+      // generation is absent by definition — still has a row to terminalize, which is the case where the
+      // derivation from the generation could only answer "unknown" and the attempt stood `created` for ever.
+      // No fallback to the DISPATCH's attempt: a winner carrying neither half ran under an attempt whose open
+      // failed outright, and naming its predecessor would stamp a row this execution never used.
+      const winnerAttemptId = jobAttemptId(winnerJob ?? currentJob, executionId);
       // Bill the case, itemized per model: managed/ws-runner bill the whole cost; an own-pays personal self-hosted run
       // bills the workspace only for calls on a workspace-billed model. The same lines feed the meter + enforcement budget.
       let caseUsd = 0;
@@ -925,7 +974,9 @@ export class ScorecardBatchService {
             // Only when the attempt is KNOWN (arch-review 46): `?? 0` fabricated `<executionId>#g0` — a
             // coordinate the attempt ledger never mints (first attempt owns 1) — and every unisolated case
             // collided on it. Unknown is stated as absent, exactly like the receipt does.
-            ...(winnerGeneration !== undefined ? { attemptId: attemptIdOf(executionId, winnerGeneration) } : {}),
+            // …read through the one place that knows both halves (jobAttemptId, arch-review 51), so an
+            // unisolated attempt names its row here too instead of sealing anonymously.
+            ...(winnerAttemptId !== undefined ? { attemptId: winnerAttemptId } : {}),
             // Names the row on the browse page: an eval is known by the case it evaluated.
             ...runEvidenceIdentity(child),
             // The producer's declared clock anchor (a topology case: drive start) — what lets an inline
@@ -977,6 +1028,9 @@ export class ScorecardBatchService {
         // Absent when the attempt never opened one — finalizeCaseAttempt's own guard (unknown ⇒ no
         // attemptId on the receipt, unisolated evidence) was DEAD CODE while this caller wrote 0.
         ...(winnerGeneration !== undefined ? { generation: winnerGeneration } : {}),
+        // …and the ledger row BY NAME (arch-review 51): the terminal stamp used to be derivable only from the
+        // generation, so an unisolated attempt — which has a row and no generation — was never terminalized.
+        ...(winnerAttemptId !== undefined ? { attemptId: winnerAttemptId } : {}),
         ...(unisolated || winnerUnisolated ? { unisolated: true } : {}),
         ...(ranOn ? { ranOn } : {}),
       });
@@ -1702,7 +1756,17 @@ export class ScorecardBatchService {
   //
   // Metered, never scored: this touches the usage/budget ledgers and nothing that answers "how did the agent
   // do". `evaluations` is deliberately left out of the count — a loser is spend, not an evaluation.
-  private meterLostAttempt(tenant: string, result: CaseResult, caseId: string, id: string): void {
+  private meterLostAttempt(tenant: string, outcome: SpilloverOutcome, caseId: string, id: string): void {
+    const result = outcome.result;
+    // …and the PHYSICAL ledger records that this execution stopped being the case's (arch-review 51). The
+    // duplicate opened its own attempt row (see reattemptOf) and nothing ever ended it: the loser of a race
+    // it lost stood `executing` for ever beside the winner's committed row. Superseded, not failed — it ran
+    // to completion, it simply is not the answer. Best-effort, like every stamp with no transaction to ride.
+    const executionId = outcome.job.runId;
+    if (executionId !== undefined)
+      void this.commit.stampAttempt(jobAttemptId(outcome.job, executionId), "superseded", {
+        error: { code: "SPECULATION_LOST", message: "a concurrent attempt answered the case first" },
+      });
     let usd = 0;
     for (const charge of billingCharges(result, tenant)) {
       this.deps.budget?.settle(charge.tenant, charge.cost);
@@ -1985,7 +2049,10 @@ export class ScorecardBatchService {
         // ledger records is that this execution stopped being the case's, carrying the error that ended it.
         // Stamped even when the attempt had no child row: a physical execution happened either way.
         await this.commit.stampAttempt(
-          reopened.generation === undefined ? undefined : attemptIdOf(reopened.executionId, reopened.generation),
+          // Named by the failure record itself when it carries one (arch-review 51) — an unisolated attempt
+          // has a row and no generation, so the derivation alone left exactly those rows non-terminal.
+          reopened.attemptId ??
+            (reopened.generation === undefined ? undefined : attemptIdOf(reopened.executionId, reopened.generation)),
           "superseded",
           { error: reopened.error },
         );
@@ -2086,10 +2153,27 @@ export class ScorecardBatchService {
         // The attempt opened above travels WITH the job (review 39 P0-1), so a producer in another process
         // stamps the generation IT was leased rather than whatever the receiving process last heard about.
         const openedGeneration = attemptGeneration.get(executionIdOf(job, id));
-        const dispatchable: CaseJob =
-          openedGeneration === undefined ? enriched : { ...enriched, recordingGeneration: openedGeneration };
-        const reattempt = this.reattemptOf({ tenant, scorecardId: id, driverEpoch: epoch });
         const openedAttemptId = attemptLedgerId.get(executionIdOf(job, id));
+        const dispatchable: CaseJob = {
+          ...enriched,
+          ...(openedGeneration !== undefined ? { recordingGeneration: openedGeneration } : {}),
+          // …and the ledger row this dispatch opened, by name (arch-review 51) — present even when the
+          // recording claim was refused, which is what makes an unisolated attempt addressable and what lets
+          // a self-hosted park record which attempt it parked (runner_jobs.current_attempt_id).
+          ...(openedAttemptId !== undefined ? { attemptId: openedAttemptId } : {}),
+        };
+        const reattempt = this.reattemptOf({
+          tenant,
+          scorecardId: id,
+          driverEpoch: epoch,
+          // Every spill/boost this case makes moves the lane's idea of "the current attempt" (arch-review
+          // 51) — so the failure exit below records the attempt that actually failed, not the first one.
+          onOpen: (execution, opened) => {
+            if (opened.generation !== undefined) attemptGeneration.set(execution, opened.generation);
+            if (opened.attemptId !== undefined) attemptLedgerId.set(execution, opened.attemptId);
+            if (opened.unisolated) unisolated.add(execution);
+          },
+        });
         const {
           result,
           target: ranOn,
@@ -2150,9 +2234,12 @@ export class ScorecardBatchService {
               // receipt spells it, so a reader can compare rather than assume — the WINNING physical
               // attempt's generation (a spill/boost/duplicate opened its own), never the first dispatch's.
               // Only when KNOWN (arch-review 46): `?? 0` fabricated a coordinate no ledger mints.
-              ...(winnerJob.recordingGeneration !== undefined
-                ? { attemptId: attemptIdOf(executionIdOf(job, id), winnerJob.recordingGeneration) }
-                : {}),
+              // …through the one reading that knows both halves (jobAttemptId, arch-review 51): an unisolated
+              // winner carries its row's NAME and no generation, and named nothing here until it did.
+              ...(() => {
+                const named = jobAttemptId(winnerJob, executionIdOf(job, id));
+                return named !== undefined ? { attemptId: named } : {};
+              })(),
               ...runEvidenceIdentity(child),
               ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});
@@ -2179,6 +2266,12 @@ export class ScorecardBatchService {
           parentDriver: { scorecardId: id, epoch },
           executionId: executionIdOf(job, id),
           ...(winnerJob.recordingGeneration !== undefined ? { generation: winnerJob.recordingGeneration } : {}),
+          // …and the ledger row the commit must terminalize, by name (arch-review 51): with only the
+          // generation, an unisolated attempt's row could not be addressed and stayed non-terminal for ever.
+          ...(() => {
+            const named = jobAttemptId(winnerJob, executionIdOf(job, id));
+            return named !== undefined ? { attemptId: named } : {};
+          })(),
           ...(unisolated.has(executionIdOf(job, id)) || winnerUnisolated ? { unisolated: true } : {}),
           judges, // …and what this batch asked of the case, so its commit can state a judge that never answered
           ...(opts.sealedJudges ? { sealedJudges: opts.sealedJudges } : {}),
@@ -2210,10 +2303,15 @@ export class ScorecardBatchService {
         const finalizedKey = childKey(job.evalCase.id, job.trial);
         pendingChildSettle.delete(finalizedKey);
         const failedGeneration = attemptGeneration.get(executionIdOf(job, id));
+        // The attempt that FAILED, by name — the last one this case opened (see the reattempt's onOpen), so a
+        // case that spilled and then died terminalizes the execution that died rather than its predecessor,
+        // which the supersede at re-dispatch had already ended (arch-review 51).
+        const failedAttemptId = attemptLedgerId.get(executionIdOf(job, id));
         finalizedByFailure.set(finalizedKey, {
           ...(child !== undefined ? { childId: child.id } : {}),
           executionId: executionIdOf(job, id),
           ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
+          ...(failedAttemptId !== undefined ? { attemptId: failedAttemptId } : {}),
           parentDriver: { scorecardId: id, epoch },
           ...(unisolated.has(executionIdOf(job, id)) ? { unisolated: true } : {}),
           error,
@@ -2255,7 +2353,12 @@ export class ScorecardBatchService {
           breaker: this.breaker,
           totalCases: cases.length,
           ...(() => {
-            const reattempt = this.reattemptOf({ tenant, scorecardId: id, driverEpoch: epoch });
+            const reattempt = this.reattemptOf({
+              tenant,
+              scorecardId: id,
+              driverEpoch: epoch,
+              concurrent: true, // the duplicate races the primary — neither supersedes the other at open
+            });
             return reattempt ? { reattempt } : {};
           })(),
           ...(history.seedMedianSec !== undefined ? { seedMedianMs: history.seedMedianSec * 1000 } : {}),
@@ -2268,7 +2371,7 @@ export class ScorecardBatchService {
             if (speculated)
               this.deps.onOrchestrationEvent?.({ kind: "speculation_settled", winnerSpeculated: speculated });
           },
-          onLoser: (outcome, cid) => this.meterLostAttempt(tenant, outcome.result, cid, id),
+          onLoser: (outcome, cid) => this.meterLostAttempt(tenant, outcome, cid, id),
           ...(this.deps.cancelQueued
             ? {
                 cancelQueued: (cid: string) =>

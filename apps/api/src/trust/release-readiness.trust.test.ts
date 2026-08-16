@@ -9,7 +9,12 @@ import {
   InMemoryReleaseStore,
   InMemoryScorecardStore,
 } from "@everdict/db";
-import { evaluateGate, productEvaluationDefinitionDigest, productReleasePolicyDigest } from "@everdict/domain";
+import {
+  evaluateGate,
+  productEvaluationDefinitionDigest,
+  productReleasePolicyDigest,
+  refuseGateForInputTrust,
+} from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, TRUST_SUITE_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
@@ -109,6 +114,18 @@ function build(store?: ScorecardStore, idPrefix = "t37") {
     // (arch-review 10 P0). A certificate that wires the seam differently from production certifies the wiring
     // it invented.
     seriesGate: async (tenant, baselineId, candidateId) => {
+      // TRUST BEFORE ARITHMETIC (arch-review 51 P1) — mirrored from main.ts: an untrusted pin refuses
+      // before the diff is computed, so no regression count derived from unauthoritative input exists.
+      const pins = await scorecardService.comparisonPins(tenant, baselineId, candidateId);
+      const refusal = refuseGateForInputTrust(pins, { maxRegressions: 0 });
+      if (refusal !== undefined) {
+        return {
+          decision: refusal.decision,
+          reasons: refusal.reasons,
+          ...(pins.baseline !== undefined ? { baselineScoring: pins.baseline } : {}),
+          ...(pins.candidate !== undefined ? { candidateScoring: pins.candidate } : {}),
+        };
+      }
       const snapshot = await scorecardService.diffSnapshot(tenant, baselineId, candidateId, {});
       const evaluation = evaluateGate(snapshot.diff, { maxRegressions: 0 });
       return {

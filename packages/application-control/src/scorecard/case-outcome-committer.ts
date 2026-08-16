@@ -56,6 +56,11 @@ export interface PendingChildSettle {
   // Absent when the attempt never opened one (recording claim refused) — never 0: that sentinel fabricated
   // a `<executionId>#g0` coordinate no ledger mints, and every unisolated case collided on it (review 46).
   generation?: number;
+  // …and the attempt's LEDGER ROW by name (arch-review 51). The generation above is the RECORDING fence, and
+  // it is absent exactly when the claim was refused — while the row exists all the same. Deriving the name
+  // from the generation therefore left every UNISOLATED attempt unaddressable: opened, run, and never
+  // terminalized. Optional because callers that predate the field still derive (see finalizeCaseAttempt).
+  attemptId?: string;
   // This attempt could not isolate its recording buffer — it runs, but its replay is not claimed as ours.
   unisolated?: boolean;
   // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
@@ -77,6 +82,8 @@ export interface FailureFinalization {
   childId?: string;
   executionId: string;
   generation?: number;
+  // The failed attempt's ledger row by name — same rule as PendingChildSettle.attemptId (arch-review 51).
+  attemptId?: string;
   // The batch this attempt ran under — the fence the atomic commit must re-prove inside the transaction.
   parentDriver: { scorecardId: string; epoch: number };
   // What the dispatch could not isolate (see PendingChildSettle.unisolated) — a failure seals no replay then.
@@ -194,6 +201,7 @@ export class CaseOutcomeCommitter {
         ...(failure.childId ? { childId: failure.childId } : {}),
         executionId: failure.executionId,
         ...(failure.generation !== undefined ? { generation: failure.generation } : {}),
+        ...(failure.attemptId !== undefined ? { attemptId: failure.attemptId } : {}),
         ...(failure.unisolated ? { unisolated: true } : {}),
       });
       if (outcome.kind === "committed") result.scores = outcome.result.scores;
@@ -215,6 +223,7 @@ export class CaseOutcomeCommitter {
       ...(entry.childId ? { childId: entry.childId } : {}),
       executionId: entry.executionId,
       ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
+      ...(entry.attemptId !== undefined ? { attemptId: entry.attemptId } : {}),
       ...(entry.unisolated ? { unisolated: true } : {}),
       ...(entry.ranOn ? { ranOn: entry.ranOn } : {}),
     });
@@ -323,6 +332,14 @@ export class CaseOutcomeCommitter {
     executionId: string;
     // Absent when the attempt never opened one (fail-closed: nothing seals then — see assembleCaseEvidence).
     generation?: number;
+    // WHICH LEDGER ROW to terminalize, said rather than derived (arch-review 51). EXPLICIT WINS: the caller
+    // holding the open's answer knows the row, and it is the only thing that can name an UNISOLATED attempt
+    // (a row with no generation). The derivation below stays as the fallback for callers that predate the
+    // field — for a generation-carrying attempt the two are equal by construction (`open` mints the ordinal
+    // and the row's id IS `attemptIdOf(executionId, generation)`), so this is a widening, not a second
+    // authority. ⚠️ A caller passing both must pass ONE attempt's pair: a name from one execution beside
+    // another's generation would terminalize the wrong row and seal under the right one.
+    attemptId?: string;
     unisolated?: boolean;
     ranOn?: string;
     // The completion FACT's ingredients (review 40 follow-up, E0): with a ledger, the fact rides the commit
@@ -390,7 +407,9 @@ export class CaseOutcomeCommitter {
     // WHICH PHYSICAL ATTEMPT this commit is made by — the same spelling the receipt records, so the two
     // ledgers can be compared rather than assumed to agree (arch-review 42). Absent when no attempt was
     // minted; there is then no row to stamp, and inventing a coordinate would address somebody else's.
-    const attemptId = input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation);
+    const attemptId =
+      input.attemptId ??
+      (input.generation === undefined ? undefined : attemptIdOf(input.executionId, input.generation));
     // `failed` is a terminal outcome of a REAL execution, not a supersede: the case ended here, with this
     // attempt's frozen failure as the answer.
     const terminalState: ExecutionAttemptState = input.outcome === "failed" ? "failed" : "committed";

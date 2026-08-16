@@ -76,6 +76,48 @@ describe("PgRunnerJobStore — every runner-initiated mutation carries the curre
 // these predicates compiles and passes every test that never cancels mid-lease, so the text is pinned here.
 const REVOKED = /NOT cancel_requested/;
 
+// ── THE PARK RECORDS WHICH ATTEMPT IT PARKED (arch-review 51) ───────────────────────────────────────
+//
+// `current_attempt_id` (mig 0183) is how the attempt a job is CURRENTLY running reaches the replica that
+// later re-leases it — the claim reads it as the predecessor to supersede. It was written only by a
+// re-lease's own mint, so on the first re-lease the column was NULL: the dispatch's attempt was superseded
+// by nobody and stayed `executing` for ever. A park that drops the column compiles and passes every
+// single-replica test, so the INSERT's text is pinned here.
+describe("PgRunnerJobStore — park writes the dispatch's attempt onto the row", () => {
+  it("carries current_attempt_id in the INSERT, so the first re-lease has a predecessor to end", async () => {
+    const { client, statements } = capture();
+    await new PgRunnerJobStore(client).park({
+      jobId: "j1",
+      owner: "u-alice",
+      runnerId: "laptop",
+      job: {
+        evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      } as never,
+      requiredCaps: [],
+      now: 1_000,
+      attemptId: "evd-run-1#g1",
+    });
+    const parked = statements[0];
+    expect(parked?.sql).toMatch(/INSERT INTO everdict_runner_jobs \([^)]*current_attempt_id/);
+    expect(parked?.params).toContain("evd-run-1#g1");
+  });
+
+  it("writes NULL when the dispatch opened no attempt — a composition with no ledger parks as it always did", async () => {
+    const { client, statements } = capture();
+    await new PgRunnerJobStore(client).park({
+      jobId: "j2",
+      owner: "u-alice",
+      runnerId: "laptop",
+      job: {
+        evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      } as never,
+      requiredCaps: [],
+      now: 1_000,
+    });
+    expect(statements[0]?.params.at(-1)).toBeNull();
+  });
+});
+
 describe("PgRunnerJobStore — a cancelled job is revoked in the statement, not merely flagged", () => {
   it("claim() neither requeues nor takes a cancelled job — and TERMINALIZES a cancelled expired lease (arch-review 47 P1-2)", async () => {
     const { client, statements } = capture();

@@ -792,6 +792,54 @@ describe("judge execution evidence + metering", () => {
     expect(deps.seals[0]?.emitter).toBe("judge:correctness#pass-7");
   });
 
+  it("two invocations of ONE (pass, case, judge) seal under DISTINCT emitters — the winner's evidence is its own (arch-review 51 Track C)", async () => {
+    // Given a Temporal pass that re-invokes one judge on one case (an activity retry / a later round): the
+    // score winner is arbitrated on the judgment CLAIM, but the trajectory keeps the FIRST seal per
+    // (runId, emitter). Under a pass-only emitter, invocation 1 sealed `judge:correctness#pass-7` and
+    // invocation 2's seal was REFUSED — so the record showed invocation 2's score beside invocation 1's
+    // evidence, describing two different physical judge executions with no way to tell.
+    const ledger: string[] = []; // a first-write-wins ledger, exactly like the trajectory store's
+    const seals: SealInput[] = [];
+    const trajectories = {
+      seal: async (input: SealInput) => {
+        const emitter = input.emitter ?? "run";
+        const created = !ledger.includes(`${input.runId}|${emitter}`);
+        if (created) {
+          ledger.push(`${input.runId}|${emitter}`);
+          seals.push(input);
+        }
+        return {
+          runId: input.runId,
+          tenant: input.tenant,
+          source: input.source,
+          eventCount: input.events?.length ?? 0,
+          sealedAt: "sealed",
+          created,
+        };
+      },
+    };
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: verdictWithUsage('{"pass":true,"score":0.9,"reason":"ok"}') as typeof fetch,
+      trajectories,
+    });
+    const invoke = (generation: number, attempt: number) =>
+      runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, {
+        passId: "pass-7",
+        claim: { generation, attempt },
+      });
+    // When invocation 1 seals and is then superseded by invocation 2 (the retry) and invocation 3 (next round)
+    await invoke(0, 1);
+    await invoke(0, 2);
+    await invoke(1, 1);
+    // Then every one of them is on the record under its own name — no seal was refused
+    expect(seals.map((s) => s.emitter)).toEqual([
+      "judge:correctness#pass-7.0.1",
+      "judge:correctness#pass-7.0.2",
+      "judge:correctness#pass-7.1.1",
+    ]);
+  });
+
   it("model judge without a child run id: still metered, no evidence plane (nowhere to land)", async () => {
     const deps = captureDeps();
     const runner = defaultJudgeRunner({

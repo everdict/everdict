@@ -45,6 +45,10 @@ export interface CancellationStore {
   fail(scorecardId: string, error: string, now: string): Promise<void>;
   // What the reconciler sweeps: operations whose teardown is not known to have finished, oldest first.
   listIncomplete(limit: number): Promise<CancellationOperation[]>;
+  // One row by key — what `delete` asks before removing an aborted batch (arch-review 51 P0): a batch whose
+  // teardown is still owed must not be deleted, because the reconciler closes a missing batch's operation
+  // as unactionable while the leased/running work it was owed for is still burning compute.
+  get(scorecardId: string): Promise<CancellationOperation | undefined>;
 }
 
 // In-process ledger for dev/test — same posture as the other InMemory stores in this package.
@@ -87,5 +91,9 @@ export class InMemoryCancellationStore implements CancellationStore {
       .filter((op) => op.state !== "completed")
       .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
       .slice(0, limit);
+  }
+
+  async get(scorecardId: string): Promise<CancellationOperation | undefined> {
+    return this.operations.get(scorecardId);
   }
 }

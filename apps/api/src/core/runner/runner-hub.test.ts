@@ -454,6 +454,54 @@ describe("RunnerHub", () => {
     await expect(dispatched).resolves.toMatchObject({ generation: 11 });
   });
 
+  // ── THE FIRST RE-LEASE REPLACES THE DISPATCH'S ATTEMPT, AND CAN NOW SAY SO (arch-review 51) ────────
+  //
+  // Only attempts this hub minted itself were reachable (PendingEntry.lastAttempt), so the FIRST re-lease —
+  // the one that replaces the attempt the DISPATCH opened, i.e. the one that was actually running when the
+  // runner went silent — superseded nothing. That row stood `executing` beside its successor for ever. The
+  // name reaches this process the only way it can: on the job.
+  it("ends the DISPATCH's attempt on the first re-lease, then its own on the next", async () => {
+    let t = 0;
+    const priors: Array<string | undefined> = [];
+    const calls: AttemptEvent[] = [];
+    let opened = 10;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      openAttempt: async (_job: CaseJob, lease?: { leaseEpoch: number; prior?: string }) => {
+        priors.push(lease?.prior);
+        opened += 1;
+        const attemptId = `evd-run-1#g${opened}`;
+        return {
+          generation: opened,
+          attemptId,
+          supersede: async (reason: string) => void calls.push({ attemptId, kind: "superseded", reason }),
+        };
+      },
+    });
+    hub
+      .enqueue(keyA, { ...job("c1"), runId: "evd-run-1", recordingGeneration: 7, attemptId: "evd-run-1#g7" })
+      .catch(() => {});
+
+    await hub.leaseWait(keyA, 0); // epoch 1 — runs the dispatch's attempt, mints nothing
+    t = 201; // past the TTL → requeue + re-lease: a second physical execution
+    const second = await hub.leaseWait(keyA, 0);
+    // The predecessor is the one the JOB named — the dispatch's own, unreachable here until it travelled.
+    expect(priors).toEqual(["evd-run-1#g7"]);
+    // …and the re-leased job names ITS attempt: the name and the generation are one coordinate, so leaving
+    // the replaced one on the job would have the park, the seal and the terminal stamp address the dead row.
+    expect(second?.job.attemptId).toBe("evd-run-1#g11");
+
+    t = 402;
+    const third = await hub.leaseWait(keyA, 0);
+    expect(third?.job.attemptId).toBe("evd-run-1#g12");
+    // From here the hub holds a handle to what it minted, so the second supersede goes through that instead
+    // of through the opener — one predecessor per re-lease either way, never two endings of one attempt.
+    expect(priors).toEqual(["evd-run-1#g7", undefined]);
+    expect(calls).toEqual([{ attemptId: "evd-run-1#g11", kind: "superseded", reason: "re-leased to another runner" }]);
+  });
+
   it("a SLOW mint whose lease expired mid-open cannot roll the entry back to its own attempt (arch-review 47 P0-2)", async () => {
     // epoch-2's open stalls; the TTL expires; epoch-3 re-leases and restamps generation 12. When the stale
     // open finally resolves, it must assign NOTHING — pre-fix it wrote its generation over the entry, and
