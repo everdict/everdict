@@ -4,7 +4,7 @@ import type { NotificationService, PlatformEventService } from "@everdict/applic
 import { RunService } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
-import type { GradeContext, JudgeSpec, RegistryAuth, TraceEvent } from "@everdict/contracts";
+import type { CaseJob, GradeContext, JudgeSpec, RegistryAuth, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
@@ -112,6 +112,12 @@ export function buildRun(deps: {
   attempts?: ExecutionAttemptStore;
   // Run-workbench fs rendezvous (self-hosted lane) — parked reads the runner's in-case servicing loop answers.
   caseFsRequests?: CaseFsRequestHub;
+  // The standalone cancel's teardown arms (RunService.cancel) — the same three the batch lane uses, keyed on
+  // the run's own job identity: force-kill a dispatched managed job, drop a queued scheduler entry, revoke a
+  // self-hosted lease.
+  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
+  cancelQueued: (predicate: (job: CaseJob) => boolean) => number;
+  cancelLeased: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
 }) {
   const {
     store,
@@ -199,6 +205,10 @@ export function buildRun(deps: {
       topologyServiceLogsFn(tenant, runtimeList, harness, service),
     dispatcher: meteredDispatcher,
     store,
+    // User stop (POST /runs/:id/cancel): the terminal commit is the decision, these free the compute.
+    killCase: deps.killCase,
+    cancelQueued: deps.cancelQueued,
+    cancelLeased: deps.cancelLeased,
     // Grader factory (@everdict/graders) for executeCase's control-plane collection-mode scoring — the application
     // layer never imports the grader impls, so the composition root supplies it (re-architecture P2 S3).
     makeGraders,

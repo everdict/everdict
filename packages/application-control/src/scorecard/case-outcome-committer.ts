@@ -569,6 +569,13 @@ export class CaseOutcomeCommitter {
     await attempts.transition(attemptId, to, patch).catch(() => {});
   }
 
+  // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on
+  // managed dispatch / self-hosted lease). Best-effort and idempotent: acts only on a still-queued child (a re-fire
+  // from spillover/speculation, or a race with settlement, is a no-op), and a store error never disturbs the run.
+  // First terminal write wins: a child settled by cancel (failed{CANCELLED} via stopInFlight) must not be
+  // resurrected or rewritten by a late-landing drain — the killed dispatch's rejection, or a case that was
+  // already past the point of no return when the user stopped the batch. The transition is built from the
+  // CURRENT record (never the creation-time snapshot) so the domain's terminal guard sees the truth.
   async markChildRunning(childId: string): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;

@@ -36,6 +36,23 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  cancel: {
+    summary: "Stop a running run",
+    description:
+      "User-initiated stop of a queued/running run: settles it `failed` with error code CANCELLED (the run " +
+      "lifecycle's cancellation shape — the status union is not widened) and then frees its compute (a " +
+      "dispatched managed job is killed, a still-queued scheduler entry dropped, a self-hosted lease revoked " +
+      "so the runner aborts the case on its next heartbeat). Requires runs:submit (member+), workspace-scoped. " +
+      "Re-cancelling an already-cancelled run is 200 and re-runs the teardown (idempotent); a succeeded / " +
+      "otherwise-failed / suspended run and a scorecard child (stop the scorecard instead) are 409; a missing / " +
+      "other-workspace / other-member's run is 404.",
+    tags: ["run"],
+    params: toJsonSchema(z.object({ id: z.string().describe("Run id") })),
+    response: {
+      200: { description: "The cancelled run record", ...toJsonSchema(RunResponseSchema) },
+      ...errorResponses(401, 403, 404, 409),
+    },
+  },
   trajectory: {
     summary: "Get a run's owned trajectory",
     description:

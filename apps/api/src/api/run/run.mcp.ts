@@ -347,4 +347,19 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
         return ok(rec);
       }),
   );
+
+  // BFF twin of POST /runs/:id/cancel — same service core, second transport.
+  server.registerTool(
+    "cancel_run",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Stop a queued/running run (user cancel): settle it failed with error code CANCELLED (the run lifecycle's cancellation shape) and free its compute — a dispatched managed job is killed, a queued scheduler entry dropped, a self-hosted lease revoked (the runner aborts the case on its next heartbeat). Re-cancelling an already-cancelled run succeeds and re-runs the teardown; a succeeded / otherwise-failed / suspended run and a scorecard child (stop the scorecard instead) → conflict; other workspace / other member / missing → NOT_FOUND.",
+      inputSchema: { id: z.string().describe("run id to stop (must be queued/running)") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:submit", async () =>
+        ok(await deps.service.cancel({ tenant: ws, id, viewer: principal.subject })),
+      ),
+  );
 }

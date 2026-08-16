@@ -746,6 +746,7 @@ describe("MCP tools", () => {
       "assign_harness_trace_source",
       "attest_dataset_constitution",
       "backfill_scorecard_models",
+      "cancel_run",
       "cancel_scorecard",
       "close_sandbox",
       "comment_on_github_issue",

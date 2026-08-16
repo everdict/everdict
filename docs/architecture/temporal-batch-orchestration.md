@@ -41,7 +41,7 @@ scorecardBatchWorkflow(input: {scorecardId, tenant, dataset ref, harness ref, ju
   judge, persist) is an activity — same rule the repo already enforces for `workflows.ts`.
 - ~~**Failure classes map to Temporal retry policies**~~ — **this half of the design was deliberately
   NOT implemented, and the reversal matters when justifying Temporal.** Case-level retry stayed
-  CP-side (`scorecard-batch-service.ts`, the `for (attempt…)` loop over `failure.retryable`): the
+  CP-side (`workflow-batch-driver.ts`, the `for (attempt…)` loop over `failure.retryable`): the
   workflow's generous activity retry is for **TRANSPORT** failures (the control plane unreachable),
   never for eval semantics. So "Temporal gives us retry" is NOT a reason this design holds — the
   reasons are durable timers, cross-restart progress, and (below) batch ownership across MORE THAN ONE

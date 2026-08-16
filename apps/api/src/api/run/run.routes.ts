@@ -55,6 +55,24 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
+  // Stop a queued/running run — the user cancel. Settles it failed{CANCELLED} (terminal-first), then frees its
+  // compute (managed job killed, queued entry dropped, self-hosted lease revoked). Same gate as submit.
+  // Already-terminal → 409, except a re-cancel of an already-cancelled run, which re-runs the teardown and
+  // returns 200 (the decision is made; what a retry owes is the teardown). Another workspace's / another
+  // member's / a missing run → 404 (no existence leak).
+  app.post<{ Params: { id: string } }>("/runs/:id/cancel", { schema: runDocs.cancel }, async (req, reply) => {
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:submit");
+      return reply.send(
+        await deps.service.cancel({ tenant: principal.workspace, id: req.params.id, viewer: principal.subject }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not found 404 / already terminal 409 / teardown failure 502
+    }
+  });
+
   // The OWNED trajectory (P5 dual-read): the sealed copy from the trajectory store, falling back to the
   // run row's embed in the same shape — consumers never care which copy served.
   app.get<{ Params: { id: string } }>("/runs/:id/trajectory", { schema: runDocs.trajectory }, async (req, reply) => {

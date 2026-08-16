@@ -150,7 +150,13 @@ untouched:
 
 ```
 scorecard-service.ts            ← the facade: submit/get/list + composition; public surface UNCHANGED
-scorecard-batch-service.ts      ← batch contexts + plan/run/finalize/retry/resume (Temporal bridge included)
+scorecard-batch-service.ts      ← the batch facade: resume + composition; what BOTH drivers ask of the batch
+  in-process-batch-driver.ts    ← the in-process fan-out loop (one INSTANCE per batch — no cross-batch state)
+  workflow-batch-driver.ts      ← batch contexts + plan/runBatchCase/finalize (the Temporal bridge)
+  retry-failed-batch.ts         ← a terminal batch's successor (retry-failed lineage)
+  resilient-case-runner.ts      ← how ONE case physically runs, shared by both drivers
+  case-outcome-committer.ts     ← where a case ENDS (receipt + the child's one terminal write)
+  recovery-planner.ts           ← what a re-drive must not run again
 scorecard-ingest-service.ts     ← push + pull ingest lifecycles
 scorecard-analytics-service.ts  ← diff / trend / leaderboard / backfillModels (reads over the store + suite)
 ```

@@ -6,11 +6,13 @@ import {
   type CaseJob,
   type CaseRecording,
   type CaseResult,
+  ConflictError,
   type DomainFact,
   type EvalCase,
   type ExecutionAttemptState,
   type HarnessSpec,
   type JudgeRunConfig,
+  NotFoundError,
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
@@ -18,6 +20,7 @@ import {
   type TraceSource,
   type TraceSourceConfig,
   type TraceSpan,
+  UpstreamError,
   attemptIdOf,
   isPulledCommandTrace,
 } from "@everdict/contracts";
@@ -145,6 +148,18 @@ export interface RunServiceDeps {
   // Cascade cancel (§5.5, O8) — wired by the composition to ScorecardService.cancelCausedBy (late-bound:
   // the scorecard service is built after the run service). Fired when an agent run settles cancelled.
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
+  // ── THE STANDALONE CANCEL'S TEARDOWN ARMS (see `cancel`) ──────────────────────────────────────────
+  // The same three the batch lane tears down with, at run scale and keyed on the run's OWN job identity
+  // (`CaseJob.runId` = `evd-run-<id>`) rather than a batchId. All optional: a deployment without them can
+  // still DECIDE a cancel (the terminal commit is the decision) — it just cannot force-free the compute,
+  // which is exactly what the unit tests run as.
+  // Force-kill an already-dispatched managed backend job (the run is `running`).
+  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
+  // Drop a still-queued scheduler entry — it would otherwise dispatch only to be discarded.
+  cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
+  // Revoke a self-hosted lease: the runner aborts the in-flight case on its next heartbeat. AWAITED by the
+  // teardown (a store-backed hub's revocation is a durable write), so its failure is the cancel's failure.
+  cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
   // The OWNED trajectory store (P5 rung 1) — dual-write: the run row keeps its embed for now, and the
   // trajectory ALSO seals here (first write wins). Reads that want the owned copy go through this store.
   trajectories?: TrajectoryStore;
@@ -894,6 +909,10 @@ export class RunService {
   // the row still said `created` because the terminal stamp had no coordinate to address. Two ledgers that
   // are opened together must be closed together, so the coordinate is kept in its own right.
   private readonly attemptRow = new Map<string, string>();
+  // The dispatch this process is awaiting, by run id — the cooperative half of `cancel`'s teardown. Present
+  // only while THIS replica drives the run; a cancel served by another replica tears down through the kill
+  // and lease arms instead, which is why none of them is sufficient alone.
+  private readonly inFlight = new Map<string, AbortController>();
 
   // The one place a dispatch learns its attempt's name: the ledger's row id when a row was opened, else the
   // coordinate the recording generation spells (a deployment with recordings and no attempt ledger still has
@@ -914,6 +933,12 @@ export class RunService {
 
   private async track(id: string, input: SubmitInput, envelopeId?: string, epoch?: number): Promise<void> {
     if (epoch !== undefined) this.driverEpoch.set(id, epoch);
+    // The cooperative abort a user cancel pulls (the batch lane's `inFlight`, at run scale): the signal
+    // reaches the dispatcher, which rejects a not-yet-started dispatch and stops the pollers waiting on a
+    // started one. Registered BEFORE the first await — `submit` fires this method with `void`, so a cancel
+    // arriving in the same tick would otherwise find no controller and fall back to the kill/lease arms.
+    const abort = new AbortController();
+    this.inFlight.set(id, abort);
     // ── AN ATTEMPT IS OPENED BY EVERY DISPATCH, THE FIRST ONE INCLUDED (review 40 P1) ─────────────────
     //
     // A re-drive opened one in resume(); a FIRST dispatch opened none, so the job shipped with no
@@ -992,6 +1017,7 @@ export class RunService {
       // while the run is alive, instead of a person polling the placement read.
       let waitingAnnounced = false;
       const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
+        signal: abort.signal,
         onStarted: () => void this.markRunning(id),
         // ── THE ATTEMPT THAT RAN, NOT THE ONE THIS DISPATCH OPENED (arch-review 41 P0-evidence) ────────
         // A self-hosted requeue hands the job to a second runner, and that re-lease opens its own recording
@@ -1119,6 +1145,7 @@ export class RunService {
     }
     this.attempt.delete(`evd-run-${id}`); // this process is done recording for this run
     this.attemptRow.delete(`evd-run-${id}`); // …and its attempt has reached a terminal state above
+    this.inFlight.delete(id); // …and there is nothing left for a cancel to abort in this process
     // Completion notification (Mattermost etc.) — with the latest record, and only for the writer whose
     // settlement COMMITTED. Failure is independent of the run result (swallow). Independent of the webhook.
     if (committed && this.deps.onComplete) {
@@ -1275,6 +1302,115 @@ export class RunService {
     // Same shape as the live-push leak a review ago; the side effect here is real work being revoked.
     if (settled !== undefined && outcome === "cancelled")
       void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
+  }
+
+  // ── USER STOP FOR A STANDALONE RUN (the batch protocol, at run scale) ────────────────────────────────
+  //
+  // TERMINAL FIRST, then teardown — the order the scorecard lane settled on: the decision is committed under
+  // the first-terminal-wins CAS, and only a settlement that COMMITTED earns the right to stop work. A cancel
+  // that lost to the run's own completion tears nothing down (stopping the work of a run that finished is a
+  // cancellation of something that no longer exists) and simply serves the record that won.
+  //
+  // WHAT IT SETTLES AS: `failed{code:"CANCELLED"}` — the run lifecycle's cancellation shape (the same one
+  // `settleAgent("cancelled")` and the batch's child settles write). The status union is deliberately NOT
+  // widened: "cancelled" is a REASON on a failed run here, and every reader already knows that spelling.
+  //
+  // WHY THERE IS NO RUN-LEVEL CANCELLATION LEDGER: the batch teardown owns N children, a Temporal workflow and
+  // a fan-out loop, so a crashed teardown there needs a reconciler to converge it. A run's teardown is three
+  // idempotent commands against ONE job identity, and the convergent retry below (a cancel of an
+  // already-cancelled run re-runs the teardown and returns the record, never a conflict) gives every one of
+  // them an owner the caller can invoke. If this ever grows a durable operation row, it grows one for the same
+  // reason the batch did — a teardown no caller is left to retry — not because the shape looks similar.
+  //
+  // `viewer` is the member asking, and the audience rule answers it exactly as the read does: another
+  // member's agent turn or shell session is NOT FOUND, never a 403 (no existence leak, `runAudience`).
+  async cancel(input: { tenant: string; id: string; viewer?: string }): Promise<RunRecord> {
+    const rec = await this.deps.store.get(input.id);
+    if (!rec || rec.tenant !== input.tenant || (input.viewer !== undefined && !canReadRun(rec, input.viewer)))
+      throw new NotFoundError("NOT_FOUND", { run: input.id }, "Run not found.");
+    // A batch child is not independently stoppable: its parent's loop would keep dispatching and its receipt
+    // ledger would be told about an outcome nobody asked for. Cancel the SCORECARD — that teardown settles
+    // every child, this one included.
+    if (rec.parentScorecardId !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { run: rec.id, scorecard: rec.parentScorecardId },
+        "This run is a scorecard's child — stop the scorecard instead (its teardown settles every child).",
+      );
+    const run = Run.from(rec);
+    if (run.isTerminal()) {
+      // ── A CANCEL RETRY CONVERGES, IT DOES NOT CONFLICT (the batch lane's rule) ──────────────────────
+      // The DECISION is already durable; what a retry owes is the TEARDOWN, which is idempotent end to end.
+      // Bouncing off the terminal guard here would leave a killed-nothing run whose compute is still burning
+      // and no caller with a way to try again. Succeeded / failed-for-another-reason / suspended keep the
+      // conflict: cancelling finished work is a cancellation of something that no longer exists.
+      if (rec.status === "failed" && rec.error?.code === "CANCELLED") {
+        await this.stopRun(rec);
+        return (await this.get(rec.id)) ?? rec;
+      }
+      throw new ConflictError(
+        "CONFLICT",
+        { run: rec.id, status: rec.status },
+        `Run is already ${rec.status} — cancel rejected.`,
+      );
+    }
+    const message = `Run ${rec.id} was stopped.`;
+    // An AGENT run settles through its own verb: the agent lane maps `cancelled` onto the same
+    // failed{CANCELLED} row but emits no run.* fact (the agent.run.* family still carries that lifecycle —
+    // see Run.settleAgent), and stopping one revokes the whole tree it caused.
+    const isAgentRun = rec.kind === "agent";
+    const { patch, facts } = isAgentRun
+      ? run.settleAgent("cancelled", message, this.now())
+      : run.fail({ code: "CANCELLED", message }, this.now());
+    const stamped = this.stampFacts(rec.tenant, facts);
+    // UNFENCED on purpose: the epoch proves "I am still the driver", and a cancel is not the driver — it is
+    // an outside decision about the driver's work. The terminal CAS (`expectNonTerminal`) is the whole guard
+    // it needs, and it is the same one the batch's child settles use.
+    const settled = await settleRun(
+      this.deps.store,
+      rec.id,
+      patch,
+      stamped.map((f) => f.record),
+    );
+    if (settled === undefined) return (await this.get(rec.id)) ?? rec; // the run finished first — nothing to stop
+    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    // The physical attempt was abandoned before it could claim the case — `superseded` is the ledger's word
+    // for exactly that. Best-effort (a diagnostic row, never an outcome), and awaited so a process that exits
+    // after cancelling has already written the row it is about to be asked about.
+    await this.stampAttempt(rec.id, "superseded");
+    if (isAgentRun) void this.deps.onAgentRunCancelled?.(rec.tenant, rec.id)?.catch?.(() => {});
+    // The decision has committed — from here the teardown is owed, and a failure surfaces as this call's
+    // failure so the caller's retry re-runs it.
+    await this.stopRun(rec);
+    return (await this.get(rec.id)) ?? settled;
+  }
+
+  // Stop a cancelled run's live work. Every arm is idempotent (that is what makes the convergent retry above
+  // safe): (1) the cooperative abort of a dispatch THIS replica is awaiting, (2) drop a still-queued scheduler
+  // entry, (3) revoke a self-hosted lease — awaited, because a fire-and-forget revocation let the API report
+  // the cancel done while the runner kept going, (4) force-kill an already-dispatched managed backend job.
+  // A kill that failed means compute may still be burning, so it is reported rather than swallowed: the
+  // record is already terminal, so the retry costs nothing and re-runs the whole teardown.
+  private async stopRun(rec: RunRecord): Promise<void> {
+    this.inFlight.get(rec.id)?.abort();
+    const executionId = `evd-run-${rec.id}`;
+    this.deps.cancelQueued?.((j) => j.runId === executionId);
+    await Promise.resolve(this.deps.cancelLeased?.((j) => j.runId === executionId));
+    // UNCONDITIONAL, not gated on `status === "running"`. Two reasons, and the second is the one that bites:
+    // the status is a snapshot (a run read as queued may have been dispatched a millisecond later), and by
+    // the time a RETRY gets here the record is already terminal — so a status gate would make the convergent
+    // retry, the one path that exists to finish an unfinished teardown, the one path that never kills. A kill
+    // of a case with no job is a no-op at the backend.
+    if (!this.deps.killCase) return;
+    await this.deps.killCase(rec.tenant, rec.runtime, rec.caseId).catch((err: unknown) => {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: rec.id, caseId: rec.caseId },
+        `Run ${rec.id} is cancelled but its compute could not be stopped: ${
+          err instanceof Error ? err.message : String(err)
+        }. Retry the cancel — the teardown is idempotent.`,
+      );
+    });
   }
 
   // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route

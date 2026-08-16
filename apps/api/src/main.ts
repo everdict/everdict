@@ -739,6 +739,12 @@ async function main(): Promise<void> {
     liveLogs,
     liveTraces,
     caseFsRequests,
+    // User stop (POST /runs/:id/cancel) — the run-scale twin of the batch teardown: kill the dispatched
+    // managed job, drop the queued scheduler entry, revoke the self-hosted lease (the runner aborts the
+    // in-flight case on its next heartbeat).
+    killCase,
+    cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
+    cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     ...(recordingStore ? { recordingStore } : {}),
     // A re-drive begins a new attempt; the recorder serving this process stamps it from here on, and the
     // store refuses the previous attempt's appends (mig 0173).
