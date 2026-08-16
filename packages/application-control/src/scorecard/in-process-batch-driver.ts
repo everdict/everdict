@@ -260,7 +260,21 @@ export class InProcessBatchDriver {
     // Seeds carried WITHOUT child-run backing (retry-failed carries another scorecard's results) can't be
     // hydrated from this batch's children — those batches embed the full scorecard alongside runIds.
     const seedChildBacked = seedRunIds.length >= seed.length;
-    const seededIds = new Set(seed.map((r) => r.caseId));
+    // WHAT A RE-DRIVE ALREADY HAS AN ANSWER FOR, ON THE TRIAL AXIS (arch-review 52, wave 1). A seed is one
+    // committed (case, trial) execution — the receipt ledger's own unit — so the exclusion is stated in that
+    // unit. Reducing it to a case id gave a trialled resume only two wrong choices: skip the whole case (and
+    // lose the trials that never committed) or re-run it (and pay for the ones that did). It is why a
+    // multi-trial batch was refused a faithful resume at all.
+    const seededKeys = new Set(seed.map((r) => childKey(r.caseId, r.trial)));
+    // A case leaves the dispatch list only when EVERY one of its trials is already answered. At trials=1 this
+    // is the old case-level test exactly (one trial per case), so the single-run path is unchanged.
+    const fullySeededIds = new Set(
+      dataset.cases
+        .filter((c) =>
+          Array.from({ length: trials }, (_, t) => childKey(c.id, trials > 1 ? t : 0)).every((k) => seededKeys.has(k)),
+        )
+        .map((c) => c.id),
+    );
     if (opts.resumeNote) pushStep("resume", "info", opts.resumeNote);
     // Child runs this batch fanned out: caseId → childId (when runStore is set). Used after completion for the final write-back + storing runIds references.
     const caseToChild = new Map<string, string>();
@@ -609,7 +623,7 @@ export class InProcessBatchDriver {
       // A comma-separated list SHARDS the batch: cases round-robin across the listed runtimes (per-case placement,
       // per-case failure isolation unchanged) — one 601-case batch can drain a Nomad pool and a K8s pool at once.
       // Seeded cases (already-finished results carried in by resume/retry) are excluded from dispatch entirely.
-      const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !seededIds.has(c.id)) : dataset.cases;
+      const casesToRun = seed.length > 0 ? dataset.cases.filter((c) => !fullySeededIds.has(c.id)) : dataset.cases;
       // History-weighted split: fast runtimes take proportionally more cases so the shards finish together
       // (speculation stays a safety net, not a scheduler). No history → the old uniform round-robin.
       const history =
@@ -738,6 +752,9 @@ export class InProcessBatchDriver {
         concurrency,
         ...(opts.retries !== undefined ? { retries: opts.retries } : {}), // transient dispatch retry (throw-only)
         ...(trials > 1 ? { trials } : {}), // fan each case into N trials (pass@k / flakiness)
+        // …minus the trials this batch already committed. A partially-seeded case stays in `casesToRun` (its
+        // remaining trials still need dispatching); this is what stops the fan-out re-running the answered ones.
+        ...(seededKeys.size > 0 ? { done: seededKeys } : {}),
         signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
           // A CASE IS "COMPLETED" WHEN ITS VERDICT IS FINAL, NOT WHEN ITS HARNESS RETURNS (arch-review 34 P1).

@@ -1020,13 +1020,20 @@ export class RunService {
         signal: abort.signal,
         onStarted: () => void this.markRunning(id),
         // ── THE ATTEMPT THAT RAN, NOT THE ONE THIS DISPATCH OPENED (arch-review 41 P0-evidence) ────────
-        // A self-hosted requeue hands the job to a second runner, and that re-lease opens its own recording
-        // generation. Everything downstream reads this map — the seal, the snapshot's artifact key, the
-        // receipt's attemptId — so leaving it on the parked number would seal an abandoned attempt's row and
-        // name it as the execution that produced the result.
-        onAttempt: (generation) => {
-          this.attempt.set(`evd-run-${id}`, generation);
-          this.rememberAttempt(`evd-run-${id}`, { generation });
+        // A self-hosted requeue hands the job to a second runner, and that re-lease is its own physical
+        // attempt. Everything downstream reads these maps — the seal, the snapshot's artifact key, the
+        // receipt's attemptId — so leaving them on the parked coordinate would seal an abandoned attempt's
+        // row and name it as the execution that produced the result.
+        //
+        // The ref NAMES the attempt (arch-review 52), so the row coordinate no longer has to be re-derived
+        // from a fence that may not exist. And when it does not exist the fence is DROPPED rather than kept:
+        // an unisolated re-lease owns no recording, so the generation still in this map is the PREDECESSOR's,
+        // and sealing under it would publish the abandoned attempt's frames as this result's replay.
+        onAttempt: (attempt) => {
+          const executionId = `evd-run-${id}`;
+          if (attempt.recording) this.attempt.set(executionId, attempt.recording.generation);
+          else this.attempt.delete(executionId);
+          this.rememberAttempt(executionId, { attemptId: attempt.attemptId });
         },
         onWaiting: (reason) => {
           if (waitingAnnounced) return;

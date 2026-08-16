@@ -7,7 +7,7 @@ import {
   type Probeable,
   dispatchAborted,
 } from "@everdict/backends";
-import type { CaseJob, CaseResult } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, attemptRefOf } from "@everdict/contracts";
 
 // Personally-owned self-hosted runner backend — pull, not push. dispatch(job) parks the job in the RunnerHub and
 // returns a promise. When the runner client (everdict runner) leases it via MCP, runs it on its own machine, and reports
@@ -28,13 +28,20 @@ export class SelfHostedBackend implements Backend, Probeable {
     if (opts?.signal?.aborted) throw dispatchAborted(job); // best-effort: refuse a pre-cancelled park
     // onStarted fires on LEASE (not here at park) — a self-hosted job is "waiting" until a runner takes it. The hub
     // fires the hook the moment it hands the job to a runner, so the caller flips the run record queued→running then.
-    const { result, ranBy, generation } = await this.hub.enqueue(this.key, job, opts?.onStarted);
-    // A RE-LEASE RAN THIS JOB UNDER ITS OWN RECORDING ATTEMPT (arch-review 41 P0-evidence). The number this
-    // dispatch parked with names an attempt that a requeue abandoned; the evidence lives under the one the
-    // lease minted. Report it before returning so the caller seals THAT attempt, not the one it opened.
-    if (generation !== undefined) {
+    const { result, ranBy, generation, attemptId } = await this.hub.enqueue(this.key, job, opts?.onStarted);
+    // A RE-LEASE RAN THIS JOB UNDER ITS OWN ATTEMPT (arch-review 41 P0-evidence). The coordinate this dispatch
+    // parked with names an attempt that a requeue abandoned; the evidence lives under the one the lease
+    // minted. Report it before returning so the caller seals THAT attempt, not the one it opened.
+    //
+    // The NAME is what travels (arch-review 52). This used to fire only when a recording generation came back,
+    // so an unisolated re-lease — a real execution whose recording claim was refused — reported nothing at
+    // all, and the caller went on naming its own attempt. A job with no runId has no execution id to key a
+    // ref by; `attemptRefOf` answers `undefined` rather than inventing one.
+    const attempt =
+      job.runId === undefined ? undefined : attemptRefOf({ executionId: job.runId, attemptId, generation });
+    if (attempt !== undefined) {
       try {
-        opts?.onAttempt?.(generation);
+        opts?.onAttempt?.(attempt);
       } catch (e) {
         console.warn(`[self-hosted] onAttempt hook threw for job ${job.runId ?? job.evalCase.id}: ${String(e)}`);
       }

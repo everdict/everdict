@@ -6,6 +6,8 @@ import {
   type Scorecard,
   type ScorecardExport,
   type VerdictPolicy,
+  caseKeyAddress,
+  caseKeyOf,
   measuredScores,
 } from "@everdict/contracts";
 import { type ScorecardOutcomes, caseVerdict, scorecardOutcomes } from "@everdict/domain";
@@ -81,7 +83,16 @@ export async function offloadResults(
   if (!deps.artifacts) return;
   for (const r of results) {
     try {
-      r.snapshot = await offloadSnapshot(r.snapshot, deps.artifacts, `scorecards/${id}/${r.caseId}`);
+      // ADDRESSED BY THE TRIAL THAT PRODUCED IT (arch-review 52, wave 1). A trialled case is k physical
+      // executions of one case id, and this key carried only the id — so k screenshots landed on one object
+      // and the last put silently replaced the evidence a judge had already looked at for the others. Object
+      // stores have no compare-and-swap to notice. A case with no trial axis keeps its bare-caseId address,
+      // so everything already stored stays readable at the ref its record points at.
+      r.snapshot = await offloadSnapshot(
+        r.snapshot,
+        deps.artifacts,
+        `scorecards/${id}/${caseKeyAddress(caseKeyOf(r.caseId, r.trial))}`,
+      );
     } catch {}
   }
 }
@@ -93,7 +104,18 @@ export interface AnalysisBundle {
   dataset: string;
   harness: string;
   summary: MetricSummary[];
-  cases: Array<{ caseId: string; verdict: boolean | undefined; scores: Score[]; failure?: CaseFailure }>;
+  // One row per RESULT, and a trialled batch has k results per case id — so the row carries the trial that
+  // produced it (arch-review 52, wave 1). Without it a frozen bundle showed k rows sharing one identity and
+  // no way to tell which verdict belonged to which execution, which is the one question a frozen artifact
+  // exists to answer years later. Absent = no trial axis (single-run), byte-identical to every bundle
+  // already in the store.
+  cases: Array<{
+    caseId: string;
+    trial?: number;
+    verdict: boolean | undefined;
+    scores: Score[];
+    failure?: CaseFailure;
+  }>;
   // M5 — the infra lens: the batch's classified-failure aggregation ("was this the agent or the platform").
   // Derived from the SAME per-case failures below, so a consumer can render the trend without re-walking cases.
   infra: {
@@ -134,6 +156,7 @@ export function analysisBundle(
     summary,
     cases: results.map((r) => ({
       caseId: r.caseId,
+      ...(r.trial !== undefined ? { trial: r.trial } : {}),
       verdict: caseVerdict(r, policy),
       scores: r.scores,
       ...(r.failure ? { failure: r.failure } : {}),

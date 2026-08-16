@@ -45,10 +45,12 @@ const trialResult = (trial: number, marker: string): CaseResult => ({
   scores: [],
 });
 
-// [WAVE-1 COUNTEREXAMPLE #2] RED as of 02a3e15e: `AssertionError: expected 1 to be 2 // Object.is equality` — both
-// trials offload to the one key `scorecards/sc-1/c1.png` (scorecard-observability.ts keys by `<id>/<caseId>`), so
-// trial 1 overwrites trial 0's screenshot in place. Un-skip when wave 1 lands.
-describe.skip("a trial's evidence is addressed by the trial that produced it", () => {
+// [WAVE-1 COUNTEREXAMPLE #2 — CLOSED] RED as of 02a3e15e: `AssertionError: expected 1 to be 2 // Object.is
+// equality` — both trials offloaded to the one key `scorecards/sc-1/c1.png` (scorecard-observability.ts keyed by
+// `<id>/<caseId>`), so trial 1 overwrote trial 0's screenshot in place. GREEN since wave 1: the key is
+// `caseKeyAddress`, so a trialled result carries its trial and a trial-less one keeps its bare-caseId address.
+// This is now the regression, not a pending counterexample.
+describe("a trial's evidence is addressed by the trial that produced it", () => {
   it("two trials of one case offload to two objects, each holding its own screenshot", async () => {
     // Given two trials of the same case, each with its own screen
     const { store, keys } = recordingArtifacts();

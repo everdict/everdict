@@ -654,12 +654,12 @@ describe("Scheduler", () => {
       },
     };
     const sched = new Scheduler(new BackendRegistry().register("a", spy));
-    const seen: number[] = [];
-    const p = sched.dispatch(job(), { onAttempt: (generation) => seen.push(generation) });
+    const seen: string[] = [];
+    const p = sched.dispatch(job(), { onAttempt: (attempt) => seen.push(attempt.attemptId) });
     await flush();
 
-    received?.onAttempt?.(41);
-    expect(seen).toEqual([41]);
+    received?.onAttempt?.({ attemptId: "evd-run-1#g41", executionId: "evd-run-1", recording: { generation: 41 } });
+    expect(seen).toEqual(["evd-run-1#g41"]);
 
     b.releaseAll();
     await flush();

@@ -119,12 +119,15 @@ export class StoreRunnerHub {
         );
       }
       if (o.status === "completed" && o.result) {
-        // The generation comes off the ROW, not off the job this replica parked: a re-lease restamped it, and
-        // this replica never saw that claim (it may not even have served it).
+        // The attempt's coordinate comes off the ROW, not off the job this replica parked: a re-lease
+        // restamped it, and this replica never saw that claim (it may not even have served it). Both halves —
+        // an unisolated re-lease carries the NAME and no generation, and reading only the generation left
+        // this reply empty on exactly that lane (arch-review 52).
         return {
           result: o.result,
           ranBy: o.ranBy ?? key.runnerId,
           ...(o.recordingGeneration !== undefined ? { generation: o.recordingGeneration } : {}),
+          ...(o.attemptId !== undefined ? { attemptId: o.attemptId } : {}),
         };
       }
       if (o.status === "failed") {

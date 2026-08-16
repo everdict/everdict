@@ -390,10 +390,14 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       const provided = req.headers["x-internal-token"];
       if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
         return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
-      const body = z.object({ caseId: z.string().min(1) }).safeParse(req.body);
+      // `trial` is optional on the wire: a workflow execution started before the plan carried trials sends
+      // only `caseId`, and absent means "no trial axis" — exactly what a single-trial batch has always been.
+      const body = z
+        .object({ caseId: z.string().min(1), trial: z.number().int().nonnegative().optional() })
+        .safeParse(req.body);
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
-        return reply.send(await deps.scorecardService.runBatchCase(req.params.id, body.data.caseId));
+        return reply.send(await deps.scorecardService.runBatchCase(req.params.id, body.data.caseId, body.data.trial));
       } catch (err) {
         return sendError(reply, err);
       }

@@ -28,6 +28,11 @@ export interface RunnerJobOutcome {
   // The recording generation the row's job currently carries. A re-lease restamps it (see restampJob), so the
   // parking replica reads the attempt that actually ran back off the store rather than assuming its own.
   recordingGeneration?: number;
+  // …and that attempt's NAME (arch-review 52). The generation above is stripped by a re-lease whose recording
+  // claim was refused — the `unisolated` lane — and the row still knows exactly which attempt ran, because the
+  // mint restamped the job with its id and wrote it to `current_attempt_id`. Without this the parking replica
+  // had no channel at all on that lane and went on naming the attempt its own dispatch opened.
+  attemptId?: string;
 }
 
 export interface ParkInput {

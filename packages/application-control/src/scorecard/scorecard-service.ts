@@ -1,5 +1,6 @@
 import {
   BadRequestError,
+  type CaseKey,
   type CaseResult,
   ConflictError,
   type Dataset,
@@ -558,13 +559,15 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // Batch-on-Temporal: when the driver is configured, a durable workflow owns the driver loop (the record is
     // stamped with its workflowId so boot recovery leaves it alone). A failed START degrades gracefully to the
     // in-process loop — the batch must never silently hang on a Temporal outage.
-    // Multi-trial batches (N children per case) stay on the in-process loop — the Temporal driver keys planBatch/
-    // runBatchCase by caseId and would collapse the trials. docs/architecture/trial-based-verdict.md
+    // Multi-trial batches ride the durable driver TOO (arch-review 52, wave 1): planBatch/runBatchCase are
+    // keyed by (case, trial) now, so the trials no longer collapse into one plan entry. They were the batches
+    // most in need of durability and the ones excluded from it — k× the runtime is k× the exposure to a
+    // control-plane restart. docs/architecture/trial-based-verdict.md
     // Inline-dataset batches (ad-hoc experiments) must NOT take the Temporal driver: the workflow re-plans
     // from the DATASET REGISTRY (planBatch → datasets.get), which cannot see an inline dataset — the plan
-    // activity would 404-retry forever (caught live by the ops surface on day one). Same exclusion as
-    // multi-trial batches; the in-process loop drives them.
-    if (this.deps.temporalBatches && trials <= 1 && !input.inlineDataset) {
+    // activity would 404-retry forever (caught live by the ops surface on day one). The in-process loop
+    // drives them.
+    if (this.deps.temporalBatches && !input.inlineDataset) {
       const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
       await this.deps.store.update(record.id, {
         orchestration: { ...(record.orchestration ?? { judges: [], concurrency, retries }), workflowId },
@@ -1568,12 +1571,12 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return this.batch.retryFailed(input);
   }
 
-  planBatch(id: string): Promise<{ caseIds: string[]; concurrency: number }> {
+  planBatch(id: string): Promise<{ caseIds: string[]; items: CaseKey[]; concurrency: number }> {
     return this.batch.planBatch(id);
   }
 
-  runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
-    return this.batch.runBatchCase(id, caseId);
+  runBatchCase(id: string, caseId: string, trial?: number): Promise<{ settled: boolean; skipped?: boolean }> {
+    return this.batch.runBatchCase(id, caseId, trial);
   }
 
   finalizeBatch(id: string): Promise<void> {

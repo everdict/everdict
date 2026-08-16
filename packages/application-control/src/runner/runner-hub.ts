@@ -76,6 +76,16 @@ export interface EnqueueResult {
   // RunnerHubDeps.openAttempt), so the number the dispatcher parked with no longer addresses the evidence this
   // execution wrote. Absent = the job still carries the generation its dispatch opened (or none at all).
   generation?: number;
+  // ── …AND ITS NAME, WHICH THE GENERATION CANNOT ALWAYS SPELL (arch-review 52, Wave 1) ───────────────
+  //
+  // `generation` was the only identity channel here, and it is empty in precisely the case it is needed: an
+  // UNISOLATED re-lease has a ledger row and no recording fence (openPhysicalAttempt's fail-closed shape). So
+  // the reply said nothing, the parking caller kept naming the attempt its dispatch opened, and the receipt,
+  // the artifact key and the terminal stamp all filed the second runner's work under the first one's row.
+  //
+  // Read off the JOB the completing lease held (both hubs restamp it at the mint), so it is the coordinate the
+  // producer's own evidence was authorized under — not a number this replica inferred.
+  attemptId?: string;
 }
 
 // ── WHAT A LEASE'S ATTEMPT OPEN ANSWERS WITH (arch-review 47 P1-3) ───────────────────────────────
@@ -728,10 +738,17 @@ export class RunnerHub {
     this.remove(loc.key, token.jobId);
     clearTimeout(loc.entry.timer);
     // ranBy = the real id of the runner that called complete (key.runnerId). For a pool job this is the real runner, not "*" (the pool key).
-    // …and `generation` is the attempt the entry ENDED UP on: a re-lease restamped the job, so the dispatcher
-    // learns which recording it must seal instead of assuming the one it parked with.
-    const generation = loc.entry.job.recordingGeneration;
-    loc.entry.resolve({ result, ranBy: key.runnerId, ...(generation !== undefined ? { generation } : {}) });
+    // …and the coordinate is the attempt the entry ENDED UP on: a re-lease restamped the job, so the dispatcher
+    // learns which execution it must seal instead of assuming the one it parked with. BOTH halves travel —
+    // an unisolated re-lease restamped the name and stripped the fence, and reporting only the fence would
+    // leave that execution unnameable (arch-review 52).
+    const { recordingGeneration: generation, attemptId } = loc.entry.job;
+    loc.entry.resolve({
+      result,
+      ranBy: key.runnerId,
+      ...(generation !== undefined ? { generation } : {}),
+      ...(attemptId !== undefined ? { attemptId } : {}),
+    });
     return true;
   }
 

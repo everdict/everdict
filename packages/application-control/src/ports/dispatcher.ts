@@ -1,4 +1,4 @@
-import type { CaseJob, CaseResult } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
@@ -19,13 +19,21 @@ export interface DispatchOptions {
   // decides how to show it (the scorecard batch appends it as a step). Best-effort; a throw must not break dispatch.
   // NOT fired when a runner is merely busy (healthy queuing) — only when nothing online can pick the job up.
   onWaiting?: (reason: string) => void;
-  // Fired when a physical attempt's RECORDING COORDINATE becomes known — i.e. when the executing attempt is
-  // not the one the caller dispatched. The self-hosted lane is where that happens: a requeued job is re-leased
-  // as a second physical execution, and the lease opens a new recording generation for it (a further re-lease
-  // fires this again, so the LAST value is the attempt that produced the evidence). The caller must seal, key
-  // its artifacts by, and name on the receipt the generation reported here rather than the one it parked with.
+  // Fired when the EXECUTING attempt turns out not to be the one the caller dispatched. The self-hosted lane
+  // is where that happens: a requeued job is re-leased as a second physical execution, and that lease opens
+  // its own attempt (a further re-lease fires this again, so the LAST ref is the attempt that produced the
+  // evidence). The caller must seal, key its artifacts by, and name on the receipt the attempt reported here
+  // rather than the one it parked with.
+  //
+  // It reports the attempt's NAME (arch-review 52, Wave 1), not just its recording generation. The generation
+  // is absent exactly when the recording claim was refused — the `unisolated` attempt — so a hook that could
+  // only speak in generations stayed SILENT on the one lane where the caller's own coordinate was already
+  // wrong, and every downstream name (receipt, artifact key, terminal stamp) kept pointing at the abandoned
+  // attempt. `recording` carries the fence when this attempt owns one; its absence is the fail-closed lane,
+  // and a consumer must drop the generation it was holding rather than keep the predecessor's.
+  //
   // Managed backends never fire it — their dispatch is the attempt. Best-effort; a throw must not break dispatch.
-  onAttempt?: (generation: number) => void;
+  onAttempt?: (attempt: AttemptRef) => void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

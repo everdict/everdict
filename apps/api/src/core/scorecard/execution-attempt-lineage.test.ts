@@ -4,7 +4,7 @@ import {
   type RecordingStore,
   ScorecardService,
 } from "@everdict/application-control";
-import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type AttemptRef, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
   InMemoryDatasetRegistry,
@@ -37,7 +37,7 @@ const passing = (job: CaseJob): CaseResult => ({
 });
 
 function serviceWith(
-  dispatch: (job: CaseJob, opts?: { onAttempt?: (generation: number) => void }) => Promise<CaseResult>,
+  dispatch: (job: CaseJob, opts?: { onAttempt?: (attempt: AttemptRef) => void }) => Promise<CaseResult>,
   extra: Record<string, unknown> = {},
   // The ledger, when the test needs to hold it BEFORE the service exists — a dispatch that opens its own
   // attempt (the self-hosted re-lease's shape) writes into the same store the assertions read.
@@ -212,7 +212,7 @@ describe("the physical attempt travels by name, so every execution can be ended"
 
   it("commits the attempt a self-hosted RE-LEASE ran, not the one the dispatch parked", async () => {
     // Given a dispatch that reports back a DIFFERENT physical attempt — what a self-hosted requeue does: the
-    // second runner's lease opens its own attempt and tells the caller its generation (DispatchOptions.onAttempt).
+    // second runner's lease opens its own attempt and names it to the caller (DispatchOptions.onAttempt).
     const ledger = new InMemoryExecutionAttemptStore();
     const built = serviceWith(
       async (job, opts) => {
@@ -223,7 +223,11 @@ describe("the physical attempt travels by name, so every execution can be ended"
             tenant: "acme",
             ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}), // as the lease lane opens it
           });
-          opts?.onAttempt?.(leased.generation);
+          opts?.onAttempt?.({
+            attemptId: leased.attemptId,
+            executionId: runId,
+            recording: { generation: leased.generation },
+          });
         }
         return passing(job);
       },

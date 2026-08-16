@@ -257,10 +257,26 @@ export class CaseOutcomeCommitter {
       sourceScorecardId?: string;
       executionId?: string;
       generation?: number;
+      // The attempt's NAME as the committer was TOLD it (arch-review 52), when a caller holds one. It is the
+      // answer in the case the derivation below cannot serve: an UNISOLATED attempt has a ledger row and no
+      // generation, so the receipt for the execution that most needs naming was the one receipt that named
+      // nothing. Absent ⇒ the pair still spells it, exactly as before.
+      attemptId?: string;
       judges: ReadonlyArray<{ id: string }>;
       sealedJudges?: SealedJudgeClosure[];
     },
   ): CaseCommitReceipt {
+    // The joined identity, so a reader comparing a receipt with a sealed replay or an artifact key compares
+    // STRINGS rather than re-deriving the pair and hoping both sides did it the same way. The CARRIED name
+    // wins where the caller has one — it is what the ledger actually minted, and it is present precisely
+    // where the derivation has nothing to work with (an unisolated attempt, arch-review 52). Where neither
+    // exists the field is OMITTED: this receipt was made by a caller who never opened the attempt.
+    const attemptId =
+      entry.attemptId !== undefined
+        ? entry.attemptId
+        : entry.executionId !== undefined && entry.generation !== undefined
+          ? attemptIdOf(entry.executionId, entry.generation)
+          : undefined;
     return {
       scorecardId,
       caseId: result.caseId,
@@ -270,11 +286,7 @@ export class CaseOutcomeCommitter {
       ...(entry.sourceScorecardId !== undefined ? { sourceScorecardId: entry.sourceScorecardId } : {}),
       ...(entry.executionId !== undefined ? { executionId: entry.executionId } : {}),
       ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
-      // …and the joined identity, so a reader comparing a receipt with a sealed replay or an artifact key
-      // compares STRINGS rather than re-deriving the pair and hoping both sides did it the same way.
-      ...(entry.executionId !== undefined && entry.generation !== undefined
-        ? { attemptId: attemptIdOf(entry.executionId, entry.generation) }
-        : {}),
+      ...(attemptId !== undefined ? { attemptId } : {}),
       // Through the ONE spelling (caseResultDigest): the digest must match across the jsonb round-trip —
       // ScoreSchema's read-time normalizer reshapes what a producer literally wrote (see case-result-digest.ts).
       resultDigest: caseResultDigest(result),
@@ -420,6 +432,11 @@ export class CaseOutcomeCommitter {
           kind: input.outcome === "failed" ? "failed" : "executed",
           executionId: input.executionId,
           ...(input.generation !== undefined ? { generation: input.generation } : {}),
+          // …under the SAME name the ledger stamp below uses (arch-review 52). The receipt used to re-derive
+          // it from (executionId, generation) on its own, so an unisolated attempt — the one case where the
+          // stamp had a name and the pair did not — committed a receipt that named no attempt at all, while
+          // the row it terminalized right beside it did. Two ledgers, one commit, one coordinate.
+          ...(attemptId !== undefined ? { attemptId } : {}),
           judges: input.judges,
           ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
         }),

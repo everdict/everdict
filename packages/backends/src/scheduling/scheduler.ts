@@ -1,5 +1,12 @@
 import type { AdmissionLedger } from "@everdict/application-control";
-import { type CaseJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/contracts";
+import {
+  type AttemptRef,
+  type CaseJob,
+  type CaseResult,
+  InternalError,
+  NotFoundError,
+  RateLimitError,
+} from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
 import { type BackendCapacity, type DispatchOptions, dispatchAborted, isCaseCapacityAware } from "../backend.js";
 import type { BackendRegistry } from "../placement/registry.js";
@@ -61,7 +68,7 @@ interface QueueEntry {
   onAbort?: () => void; // the queued-abort listener, detached when the entry leaves the queue
   onStarted?: () => void; // fires when the entry leaves the wait queue and is dispatched — forwarded to the backend
   onWaiting?: (reason: string) => void; // "cannot start now + why" (blocked placement / no online runner) — forwarded to the backend
-  onAttempt?: (generation: number) => void; // "the executing attempt's recording coordinate" (self-hosted re-lease) — forwarded to the backend
+  onAttempt?: (attempt: AttemptRef) => void; // "the attempt that is actually executing" (self-hosted re-lease) — forwarded to the backend
 }
 
 export interface SchedulerOptions {

@@ -239,8 +239,12 @@ export class RecoveryPlanner {
 
   // …and the same question with no adoption to do: which cases a rebuilt batch context already considers
   // finished. The Temporal plan asks it per re-attach, so a re-planned batch never re-runs an answered case.
-  async doneCaseIds(id: string, tenant: string): Promise<Set<string>> {
-    const doneIds = new Set<string>();
+  // Returns encoded (case, trial) keys — `childKey`, the same spelling `canonicalChildPerCase` already keys
+  // its map by (arch-review 52, wave 1). It used to fold that map's values back down to bare case ids, which
+  // is why the Temporal driver could not carry a trialled batch: N trials of one case collapsed to one
+  // "done", so the plan dropped the N−1 that had never run.
+  async doneCaseKeys(id: string, tenant: string): Promise<Set<string>> {
+    const doneKeys = new Set<string>();
     if (this.deps.runStore) {
       const children = await this.deps.runStore.list(tenant, { scorecardId: id });
       // …and the same rule decides what a rebuilt context already considers done (review 39, Phase 4): a
@@ -249,8 +253,8 @@ export class RecoveryPlanner {
       // "nothing is done" (review 40 P0).
       const committedReceipts = (await this.deps.caseReceipts?.list(id)) ?? [];
       const canonical = ScorecardBatch.canonicalChildPerCase(children, committedReceipts);
-      for (const c of canonical.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
+      for (const [key, c] of canonical) if (c.status === "succeeded" && c.result) doneKeys.add(key);
     }
-    return doneIds;
+    return doneKeys;
   }
 }

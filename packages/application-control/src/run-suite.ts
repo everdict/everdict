@@ -4,6 +4,8 @@ import {
   type CaseResult,
   type Scorecard,
   type Suite,
+  caseKeyOf,
+  encodeCaseKey,
 } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 
@@ -100,17 +102,25 @@ export async function runSuite(
     // Run each case this many times for pass@k / flakiness — one job per (case, trial), each carrying its trial index.
     // Default 1 leaves trial unset → byte-identical single-run behavior. docs/architecture/trial-based-verdict.md
     trials?: number;
+    // (case, trial) pairs a re-drive already has an answer for — encoded CaseKeys, so the exclusion is stated
+    // on the axis the fan-out actually runs on (arch-review 52, wave 1). A resume of a trialled batch keeps
+    // the trials that committed and re-dispatches only the ones that did not; the caller's older, case-level
+    // exclusion could only choose between re-running a finished trial and dropping an unfinished one.
+    done?: ReadonlySet<string>;
   } = {},
 ): Promise<Scorecard> {
   // Fan out each case into `trials` jobs. trials=1 keeps the single-run shape (no trial field) for backward compatibility.
   const trials = Math.max(1, opts.trials ?? 1);
-  const jobs: CaseJob[] = suite.cases.flatMap((evalCase) =>
-    Array.from({ length: trials }, (_, trial) => ({
-      evalCase,
-      harness: { id: suite.harness.id, version },
-      ...(trials > 1 ? { trial } : {}),
-    })),
-  );
+  const done = opts.done;
+  const jobs: CaseJob[] = suite.cases
+    .flatMap((evalCase) =>
+      Array.from({ length: trials }, (_, trial) => ({
+        evalCase,
+        harness: { id: suite.harness.id, version },
+        ...(trials > 1 ? { trial } : {}),
+      })),
+    )
+    .filter((job) => done === undefined || !done.has(encodeCaseKey(caseKeyOf(job.evalCase.id, job.trial))));
   const retries = Math.max(0, opts.retries ?? 0);
   const backoff = opts.retryBackoffMs ?? 1_000;
   // Isolate dispatch failures per case — even if one case throws, the rest keep running and the failure is captured as a result.

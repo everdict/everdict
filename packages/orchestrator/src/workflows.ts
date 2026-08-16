@@ -110,12 +110,17 @@ export async function scorecardBatchWorkflow(input: {
   const plan = await batchActivities.planBatch({ scorecardId: input.scorecardId });
   const limit = Math.max(1, input.continueEvery ?? BATCH_CONTINUE_EVERY);
   const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? HISTORY_ROTATE_AT);
+  // THE DRIVEN UNIT IS (case, trial) (arch-review 52, wave 1). `items` is the plan; `caseIds` is what a
+  // control plane that predates it answers, and it is complete for the single-trial batches such a control
+  // plane can produce. Reading `items` first is deterministic — the value comes from the activity result the
+  // history already recorded, so a replay of an old execution reads the same absent field it did originally.
+  const work: Array<{ caseId: string; trial?: number }> = plan.items ?? plan.caseIds.map((caseId) => ({ caseId }));
   // Only this slice runs in THIS execution — the rest belongs to the continued one.
-  const ids = plan.caseIds.slice(0, limit);
+  const items = work.slice(0, limit);
   let next = 0;
   let rotatedEarly = false;
   const lane = async (): Promise<void> => {
-    while (next < ids.length) {
+    while (next < items.length) {
       // History pressure — stop TAKING new cases and drain in-flight lanes; the continued execution re-plans.
       // workflowInfo() is deterministic (replay reads the recorded history), so this is replay-safe.
       const info = workflowInfo();
@@ -124,14 +129,18 @@ export async function scorecardBatchWorkflow(input: {
         return;
       }
       const i = next++;
-      const caseId = ids[i];
-      if (caseId === undefined) continue;
-      await batchActivities.runBatchCase({ scorecardId: input.scorecardId, caseId });
+      const item = items[i];
+      if (item === undefined) continue;
+      await batchActivities.runBatchCase({
+        scorecardId: input.scorecardId,
+        caseId: item.caseId,
+        ...(item.trial !== undefined ? { trial: item.trial } : {}),
+      });
     }
   };
-  const lanes = Math.max(1, Math.min(plan.concurrency, MAX_BATCH_LANES, ids.length || 1));
+  const lanes = Math.max(1, Math.min(plan.concurrency, MAX_BATCH_LANES, items.length || 1));
   await Promise.all(Array.from({ length: lanes }, () => lane()));
-  if (rotatedEarly || plan.caseIds.length > limit) {
+  if (rotatedEarly || work.length > limit) {
     await continueAsNew<typeof scorecardBatchWorkflow>(input); // ends this execution — the chain continues under the same workflowId
     return;
   }

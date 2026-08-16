@@ -2,6 +2,7 @@ import {
   BadRequestError,
   CURRENT_EVIDENCE_VERSION,
   type CaseJob,
+  type CaseKey,
   type CaseResult,
   type Dataset,
   type EvalCase,
@@ -13,6 +14,8 @@ import {
   type Scorecard,
   type ScorecardStep,
   type VerdictPolicy,
+  caseKeyOf,
+  encodeCaseKey,
 } from "@everdict/contracts";
 import {
   type CircuitBreaker,
@@ -39,6 +42,14 @@ import {
   worldCohortOf,
 } from "@everdict/domain";
 import { jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";
+
+// The correlation id a (case, trial) is DISPATCHED with — the same spelling the in-process driver's
+// `executionIdOf` produces, so the frames, logs, live trajectory and replay of a case land under one id
+// whichever driver ran it. It used to be `evd-<batch>-<case>` here with a comment saying the Temporal path
+// has no trial fan-out; it does now, and two trials sharing a correlation id would interleave into one replay.
+function executionIdFor(batchId: string, key: CaseKey): string {
+  return `evd-${batchId}-${key.caseId}${key.trial !== undefined ? `-t${key.trial}` : ""}`;
+}
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
@@ -108,6 +119,9 @@ export class WorkflowBatchDriver {
       concurrency: number;
       secretMap?: HarnessSecretMaps;
       caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
+      // How many PHYSICAL executions each case fans into (pass@k). The workflow drives one activity per
+      // (case, trial) pair, so this is what turns the case index into the plan (arch-review 52, wave 1).
+      trials: number;
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
       runtime?: string; // the batch's runtime selector — the judge co-locate placement (downstream report §6)
       speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
@@ -121,11 +135,13 @@ export class WorkflowBatchDriver {
       // CHILD write proves it, because a parent takeover raises the SCORECARD's epoch and leaves the child's
       // where it was — the child's own number cannot answer "am I still this batch's driver".
       driverEpoch: number;
-      doneIds: Set<string>;
-      // Cases currently executing in THIS process — a synchronous claim so a same-worker Temporal retry of an
-      // in-flight case skips instead of double-executing (gap 12). Empty on a fresh ctx (a dead worker → cross-process
-      // retry re-executes, so recovery is unaffected).
-      inFlightIds: Set<string>;
+      // Encoded (case, trial) keys, not case ids — the unit the ledger commits and the workflow drives.
+      doneKeys: Set<string>;
+      // Executions currently running in THIS process — a synchronous claim so a same-worker Temporal retry of
+      // an in-flight execution skips instead of double-executing (gap 12). Empty on a fresh ctx (a dead worker
+      // → cross-process retry re-executes, so recovery is unaffected). Keyed by (case, trial) for the same
+      // reason the done set is: under trials, a case-id claim blocked a case's OTHER trials from starting.
+      inFlightKeys: Set<string>;
       stepChain: Promise<void>;
     }
   >();
@@ -210,7 +226,7 @@ export class WorkflowBatchDriver {
     const owner = rec.createdBy ?? rec.tenant;
     const secretMap =
       harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(rec.tenant, owner) : undefined;
-    const doneIds = await this.recovery.doneCaseIds(id, rec.tenant);
+    const doneKeys = await this.recovery.doneCaseKeys(id, rec.tenant);
     const ctx = {
       tenant: rec.tenant,
       owner,
@@ -226,6 +242,7 @@ export class WorkflowBatchDriver {
       concurrency: orch.concurrency,
       ...(secretMap ? { secretMap } : {}),
       caseIndex,
+      trials: Math.max(1, orch.trials ?? 1),
       targets,
       // The batch's runtime SELECTOR, kept for the judge co-locate placement — the durable driver used to
       // pass undefined here, so a co-located code/harness judge fell to the topology backend and skipped on
@@ -276,12 +293,12 @@ export class WorkflowBatchDriver {
             }),
           }
         : {}),
-      doneIds,
+      doneKeys,
       // The parent's token as this driver reads it when it takes the batch up. The Temporal path rebuilds
       // this context after a restart, which is exactly when it must be re-read: the worker that rebuilds it
       // IS the current driver, and a worker holding an older context has already lost its activities.
       driverEpoch: rec.ownerEpoch ?? 0,
-      inFlightIds: new Set<string>(),
+      inFlightKeys: new Set<string>(),
       stepChain: Promise.resolve(),
     };
     this.batchContexts.set(id, ctx);
@@ -305,9 +322,16 @@ export class WorkflowBatchDriver {
   }
 
   // planBatch — resolve the remaining work (idempotent: a re-attached workflow gets only unfinished cases).
-  async planBatch(id: string): Promise<{ caseIds: string[]; concurrency: number }> {
+  //
+  // THE PLAN'S UNIT IS (case, trial) (arch-review 52, wave 1). It was case ids, so a batch with trials > 1
+  // could not be driven here at all — N executions of one case collapsed to one plan entry — and submit had
+  // to route every pass@k batch away from the durable driver onto the in-process loop, which is precisely the
+  // work that most wants durability (k× the runtime, k× the exposure to a restart). `items` carries the pair;
+  // `caseIds` stays beside it so a workflow execution started before this shipped keeps driving from its own
+  // history without seeing an unknown field.
+  async planBatch(id: string): Promise<{ caseIds: string[]; items: CaseKey[]; concurrency: number }> {
     const ctx = await this.buildBatchContext(id);
-    const remaining = [...ctx.caseIndex.keys()].filter((cid) => !ctx.doneIds.has(cid));
+    const remaining = this.planItems(ctx).filter((key) => !ctx.doneKeys.has(encodeCaseKey(key)));
     // Read-guarded start: a re-attached workflow re-plans a running batch (legal), but a settled/superseded
     // record is never revived to running (first terminal write wins; runBatchCase skips per case anyway).
     const rec = await this.deps.store.get(id);
@@ -319,31 +343,50 @@ export class WorkflowBatchDriver {
     await this.appendBatchStep(id, {
       phase: "dispatch",
       status: "started",
-      message: `Running ${remaining.length} case(s) via Temporal workflow${ctx.doneIds.size > 0 ? ` (${ctx.doneIds.size} finished case(s) kept)` : ""}`,
+      message: `Running ${remaining.length} case(s) via Temporal workflow${ctx.doneKeys.size > 0 ? ` (${ctx.doneKeys.size} finished case(s) kept)` : ""}`,
     });
-    return { caseIds: remaining, concurrency: ctx.concurrency };
+    // `caseIds` is the legacy projection for an in-flight workflow that predates `items` — it can only spell
+    // one entry per case, so under trials it deduplicates. A pre-`items` workflow driving a trialled batch is
+    // impossible (submit refused to start one), which is what makes the narrowing safe rather than lossy.
+    return { caseIds: [...new Set(remaining.map((k) => k.caseId))], items: remaining, concurrency: ctx.concurrency };
+  }
+
+  // The batch's full plan as (case, trial) pairs, in dispatch order (all trials of a case adjacent, mirroring
+  // the in-process fan-out). A single-trial batch yields keys with no trial axis, so its plan entries encode
+  // and address exactly as they always did.
+  private planItems(ctx: { caseIndex: Map<string, EvalCase>; trials: number }): CaseKey[] {
+    return [...ctx.caseIndex.keys()].flatMap((cid) =>
+      ctx.trials > 1 ? Array.from({ length: ctx.trials }, (_, t) => caseKeyOf(cid, t)) : [caseKeyOf(cid)],
+    );
   }
 
   // runBatchCase — execute + settle exactly one case (idempotent). Mirrors the in-process track dispatch closure:
   // budget admit → child run → secret resolve → executeCase (CP-side transient retry by failure class) → settle →
   // per-case judges → progress step. Kept deliberately parallel to track() — the two drivers share every primitive
   // (executeCase, classifyFailure, applyJudges, billing), only the loop ownership differs.
-  async runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
+  //
+  // `trial` absent = a single-trial batch, byte-identical to every call this activity has ever received. When
+  // it is present the whole execution — the claim, the child row, the correlation id, the job, the result's
+  // own stamp and the done marker — carries it, because a trial is a separate physical execution with its own
+  // receipt, not a repetition of the same one (arch-review 52, wave 1).
+  async runBatchCase(id: string, caseId: string, trial?: number): Promise<{ settled: boolean; skipped?: boolean }> {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
+    const caseKey = caseKeyOf(caseId, trial);
+    const workKey = encodeCaseKey(caseKey);
     // Aborted mid-flight (a newer fire superseded this batch, or the user cancelled it) — don't spend more
     // compute/LLM on it. The workflow is cancelled cooperatively; this guard covers activities already in the
     // queue, and it keys on TERMINAL (not just superseded): a user-cancelled batch's queued activities would
     // otherwise run whole cases — and mint fresh queued child runs — for a batch that is already dead.
     const current = await this.deps.store.get(id);
     if (current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
-    if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
+    if (ctx.doneKeys.has(workKey)) return { settled: true, skipped: true };
     // Concurrent-dispatch guard (gap 12): a Temporal retry can re-invoke runBatchCase for the SAME caseId (same worker)
     // while the original is still in-flight — before doneIds is set — so both used to execute the harness (wasted
     // compute; the durable result was already at-most-once via doneIds/planBatch). Claim the caseId SYNCHRONOUSLY here
     // so the second invocation skips; release in `finally` so a failed/incomplete attempt is retryable. A cross-process
     // retry (a dead worker → ctx rebuilt) has an empty claim set, so genuine recovery is unaffected.
-    if (ctx.inFlightIds.has(caseId)) return { settled: true, skipped: true };
-    ctx.inFlightIds.add(caseId);
+    if (ctx.inFlightKeys.has(workKey)) return { settled: true, skipped: true };
+    ctx.inFlightKeys.add(workKey);
     try {
       const evalCase = ctx.caseIndex.get(caseId);
       if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");
@@ -359,7 +402,7 @@ export class WorkflowBatchDriver {
           harness: { id: ctx.harnessId, version: ctx.harnessVersion },
           caseId,
           parentScorecardId: id,
-          executionId: `evd-${id}-${caseId}`, // Temporal parity — one attempt per case, no trial fan-out here
+          executionId: executionIdFor(id, caseKey),
           ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
           ...(current ? { origin: ScorecardBatch.childRunOrigin(current) } : {}),
           ...(caseEnvelope ? { envelope: caseEnvelope } : {}),
@@ -376,7 +419,7 @@ export class WorkflowBatchDriver {
       // its producers wrote under whatever number the receiving process held. An `open` that throws is a
       // fence we could not raise, not a fence that was unnecessary — the case still runs, knowing its replay
       // is not canonical (`unisolated`).
-      const executionId = `evd-${id}-${caseId}`;
+      const executionId = executionIdFor(id, caseKey);
       // …and the attempt LEDGER records it happened at all (arch-review 42): the recording row is where the
       // evidence goes, this is where the fact that a physical execution began goes — including when the
       // recording claim is refused and the case runs unisolated.
@@ -401,7 +444,8 @@ export class WorkflowBatchDriver {
         harness: { id: ctx.harnessId, version: ctx.harnessVersion },
         tenant: ctx.tenant,
         batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
-        runId: executionId, // trace correlation (Temporal path parity — no trial fan-out here)
+        runId: executionId, // trace correlation — one correlation id per (case, trial)
+        ...(trial !== undefined ? { trial } : {}),
         ...(generation !== undefined ? { recordingGeneration: generation } : {}),
         // …and the LEDGER row this execution is, by name (arch-review 51). Present even when the recording
         // claim was refused, which is the case the generation cannot cover: it is how a self-hosted park
@@ -467,7 +511,12 @@ export class WorkflowBatchDriver {
             onStep: (message, cid) =>
               void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),
           });
-          result = outcome.result;
+          // Stamp the trial from the job — the harness runs one case and does not know which repetition it
+          // is (the same stamp `runSuite` applies on the in-process path, which this driver has no runSuite
+          // to inherit it from). Without it the receipt, the child row and the score plane would all record
+          // trial 0 for every repetition of a case.
+          result =
+            trial !== undefined && outcome.result.trial === undefined ? { ...outcome.result, trial } : outcome.result;
           ranOn = outcome.target;
           winnerJob = outcome.job;
           break;
@@ -477,6 +526,7 @@ export class WorkflowBatchDriver {
             const message = err instanceof Error ? err.message : String(err);
             result = {
               caseId,
+              ...(trial !== undefined ? { trial } : {}),
               harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
               evidenceVersion: CURRENT_EVIDENCE_VERSION, // synthesized after retries ran out — nothing to vouch for
               trace: [{ t: 0, kind: "error", message }],
@@ -619,21 +669,21 @@ export class WorkflowBatchDriver {
       // pass the finalizer's missing-case check.
       if (outcome.kind !== "committed") return { settled: false };
       result = outcome.result; // what the child carries is what this activity counts
-      ctx.doneIds.add(caseId);
+      ctx.doneKeys.add(workKey);
       const v = caseVerdict(result, ctx.verdictPolicy);
       const reason = caseReason(result);
       const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
       await this.appendBatchStep(id, {
         phase: "case",
         status: v === false ? "failed" : "ok",
-        message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+        message: `${trial === undefined ? caseId : `${caseId} · trial ${trial}`} → ${verdict}${reason ? ` · ${reason}` : ""}`,
         caseId,
       });
       // The lifecycle FACT rode the commit transaction itself (finalizeCaseAttempt, E0) — persisted with the
       // child's terminal write and pushed to the live bus there, so nothing is emitted here.
       return { settled: true };
     } finally {
-      ctx.inFlightIds.delete(caseId); // release the claim so a failed/incomplete attempt (or the next case) is unblocked
+      ctx.inFlightKeys.delete(workKey); // release the claim so a failed/incomplete attempt (or the next one) is unblocked
     }
   }
 
@@ -655,7 +705,9 @@ export class WorkflowBatchDriver {
     const results = [...latest.values()]
       .map((c) => c.result)
       .filter((r): r is CaseResult => r !== undefined)
-      .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0));
+      // …then by trial, so a pass@k batch's results read in the order it dispatched them rather than in
+      // whichever order the ledger happened to hand back rows sharing one case id.
+      .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0) || (a.trial ?? 0) - (b.trial ?? 0));
     // A FILTER IS NOT AN ACCOUNTING (arch-review 38 P0). `filter(r => r !== undefined)` silently turns "this
     // case has no result on the ledger" into "this batch has fewer cases", and the Temporal driver then
     // summarized, scored and settled SUCCEEDED over the remainder. Every earlier fix in this file protects the
@@ -670,7 +722,8 @@ export class WorkflowBatchDriver {
     // rebuilt context (another worker, a restart) has an empty set, which made the same batch answer
     // differently depending on where the finalizer happened to run. A case is accounted for when a row on the
     // ledger carries its result, and by nothing else.
-    const missing = [...ctx.caseIndex.keys()].filter((cid) => !latest.get(childKey(cid))?.result);
+    const plan = this.planItems(ctx);
+    const missing = plan.map(encodeCaseKey).filter((key) => !latest.get(key)?.result);
     if (missing.length > 0)
       throw new InternalError(
         "UPSTREAM_ERROR",
@@ -680,9 +733,9 @@ export class WorkflowBatchDriver {
     // …AND THE RECEIPT SET IS EXACTLY THE PLAN'S (arch-review 41 P1). The check above notices a planned case
     // the ledger cannot answer; this one notices the inverse — a receipt the plan never asked for (a stray
     // seed, a case from a superseded plan) — and it compares on the (caseId, trial) axis, which the id-only
-    // check drops. The Temporal driver is single-trial by construction (trialled batches are routed to the
-    // in-process loop), so the plan's pairs are (caseId, 0).
-    const expectedSet = [...ctx.caseIndex.keys()].map((cid) => ({ caseId: cid, trial: 0 }));
+    // check drops — and the plan now genuinely carries trials, so a pass@k batch is held to its whole ask
+    // rather than to one execution per case.
+    const expectedSet = plan.map((key) => ({ caseId: key.caseId, trial: key.trial ?? 0 }));
     const setDelta = ScorecardBatch.caseSetDelta(expectedSet, committed);
     if (setDelta.missing.length > 0 || setDelta.extra.length > 0)
       throw new InternalError(

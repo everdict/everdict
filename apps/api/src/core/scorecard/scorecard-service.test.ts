@@ -3132,7 +3132,13 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     await store.create(record());
 
     const plan = await service.planBatch("sc-t");
-    expect(plan).toEqual({ caseIds: ["c1", "c2", "c3"], concurrency: 2 });
+    // `items` is the plan's unit (arch-review 52, wave 1); a single-trial batch's entries carry no trial
+    // axis, and `caseIds` is unchanged so a workflow started before `items` shipped drives it as before.
+    expect(plan).toEqual({
+      caseIds: ["c1", "c2", "c3"],
+      items: [{ caseId: "c1" }, { caseId: "c2" }, { caseId: "c3" }],
+      concurrency: 2,
+    });
 
     for (const cid of plan.caseIds) {
       expect(await service.runBatchCase("sc-t", cid)).toEqual({ settled: true });

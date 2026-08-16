@@ -16,8 +16,19 @@ export interface Activities {
   // forks); the workflow owns the DRIVER LOOP's durability. planBatch resolves the remaining case ids (idempotent —
   // a re-attached workflow gets only what is still unfinished), runBatchCase executes+settles exactly one case
   // (idempotent — an already-settled case returns skipped), finalizeBatch aggregates and persists the record.
-  planBatch(input: { scorecardId: string }): Promise<{ caseIds: string[]; concurrency: number }>;
-  runBatchCase(input: { scorecardId: string; caseId: string }): Promise<{ settled: boolean; skipped?: boolean }>;
+  // `items` is the plan's real unit — one entry per (case, trial), because a trialled batch runs a case k
+  // times and each of those is its own execution with its own receipt. `caseIds` remains as the pre-`items`
+  // projection so a workflow mid-flight across the upgrade keeps driving from its recorded history.
+  planBatch(input: { scorecardId: string }): Promise<{
+    caseIds: string[];
+    items?: Array<{ caseId: string; trial?: number }>;
+    concurrency: number;
+  }>;
+  runBatchCase(input: {
+    scorecardId: string;
+    caseId: string;
+    trial?: number;
+  }): Promise<{ settled: boolean; skipped?: boolean }>;
   finalizeBatch(input: { scorecardId: string }): Promise<void>;
 
   // --- Score-on-Temporal (orchestration.md T-c, `score:<groupId>`) — the detached phase-2 pass as a durable

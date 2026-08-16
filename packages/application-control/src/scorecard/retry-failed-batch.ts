@@ -303,9 +303,11 @@ export class RetryFailedBatch {
       // restart mid-retry must not lose it. The materialized seeds above mean the idempotent planBatch
       // naturally skips them and finalize aggregates them; the workflow then drives only the re-dispatch
       // remainder. Start failure degrades to the in-process loop (same as submit).
-      // …and a TRIALLED source degrades to the in-process loop, exactly like submit (review 40 follow-up):
-      // the Temporal finalize's missing-case gate iterates case ids (the workflow drives per-case, no trial
-      // fan-out), so a workflow-owned trialled retry would under-enforce the very accounting it exists for.
+      // The trialled-source degradation is now REDUNDANT, and kept as a belt (arch-review 52, wave 1): the
+      // Temporal finalize's gates iterate the plan's (case, trial) pairs, so the accounting reason this
+      // exclusion was written for is gone — but retry-failed itself is still single-trial by domain rule
+      // (`canRetryFailed` refuses a trialled source, because "the failed cases" is not a statable subset of a
+      // pass@k batch), so nothing here can produce a trialled retry to route either way.
       if (this.deps.temporalBatches && this.deps.runStore && !ScorecardBatch.from(src).isMultiTrial()) {
         const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
         await this.deps.store.update(record.id, {

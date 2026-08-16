@@ -294,7 +294,7 @@ const internal = {
       "returns skipped=true without re-running. Guarded by x-internal-token (403 on mismatch; fail-closed 404).",
     tags: ["internal"],
     params: batchIdParams,
-    body: toJsonSchema(z.object({ caseId: z.string().min(1) })),
+    body: toJsonSchema(z.object({ caseId: z.string().min(1), trial: z.number().int().nonnegative().optional() })),
     response: {
       200: { description: "Case settle outcome", ...toJsonSchema(BatchCaseResponseSchema) },
       ...errorResponses(400, 403, 404),

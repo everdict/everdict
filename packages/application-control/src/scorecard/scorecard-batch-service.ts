@@ -1,6 +1,7 @@
 import {
   BadRequestError,
   type CaseJob,
+  type CaseKey,
   type CaseResult,
   ConflictError,
   type Dataset,
@@ -232,9 +233,12 @@ export class ScorecardBatchService {
     // A Temporal-owned batch owns itself: the workflow's activity retries ride out a control-plane restart, so
     // boot recovery must neither tombstone nor double-drive it.
     if (batch.isWorkflowOwned()) return true;
-    // A multi-trial batch keys child runs by (case, trial); the seed path below dedups by caseId, so a faithful
-    // resume needs (case, trial) seeding — not yet supported. Fall back to the INTERRUPTED tombstone. docs/architecture/trial-based-verdict.md
-    if (batch.isMultiTrial()) return false;
+    // A MULTI-TRIAL BATCH IS RESUMABLE (arch-review 52, wave 1). It used to fall to the INTERRUPTED tombstone
+    // — a control-plane restart threw away every committed trial of a pass@k run and told the submitter their
+    // batch was interrupted, because the exclusion downstream was stated in case ids and a case is not the
+    // unit a trialled batch executes. It is now stated in (case, trial): the seeds already come one per
+    // committed child (the receipt ledger's own unit), and the fan-out skips exactly those.
+    // docs/architecture/trial-based-verdict.md
     // ONE plan, consumed many times (arch-review 21). Every facet this batch sealed is asked of the plan
     // rather than re-read off the manifest per call site — which is how a sealed facet used to reach one
     // execution path and not the other.
@@ -306,7 +310,9 @@ export class ScorecardBatchService {
       }
       harnessSpec = plan.pinSpec(resolvedSpec);
     }
-    const remaining = dataset.cases.length - seed.length;
+    // Counted in EXECUTIONS, not cases — a trialled batch's ask is cases × trials, and the note is what a
+    // submitter reads to know how much of their run survived the restart.
+    const remaining = dataset.cases.length * Math.max(1, orch.trials ?? 1) - seed.length;
     void this.track(
       id,
       rec.tenant,
@@ -323,6 +329,9 @@ export class ScorecardBatchService {
         seed,
         seedRunIds,
         retries: orch.retries,
+        // The batch's OWN trial count — without it a resumed pass@k batch re-drove its remainder as
+        // single-trial, which is a different experiment from the one the submitter asked for.
+        ...(orch.trials !== undefined && orch.trials > 1 ? { trials: orch.trials } : {}),
         ...(plan.sealedJudges ? { sealedJudges: plan.sealedJudges } : {}),
         ...(plan.modelPins ? { modelPins: plan.modelPins } : {}),
         ...(orch.traceSink ? { sinkOverride: orch.traceSink } : {}),
@@ -372,12 +381,12 @@ export class ScorecardBatchService {
   }
 
   // Batch-on-Temporal — plan the remaining work, run one case, aggregate + settle. See WorkflowBatchDriver.
-  planBatch(id: string): Promise<{ caseIds: string[]; concurrency: number }> {
+  planBatch(id: string): Promise<{ caseIds: string[]; items: CaseKey[]; concurrency: number }> {
     return this.workflow.planBatch(id);
   }
 
-  runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
-    return this.workflow.runBatchCase(id, caseId);
+  runBatchCase(id: string, caseId: string, trial?: number): Promise<{ settled: boolean; skipped?: boolean }> {
+    return this.workflow.runBatchCase(id, caseId, trial);
   }
 
   finalizeBatch(id: string): Promise<void> {

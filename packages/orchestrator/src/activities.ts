@@ -117,24 +117,44 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
 
     // --- Batch-on-Temporal — the same internal bridge (the control plane owns execution/scoring/streaming;
     // these activities are pure transport, so a CP restart mid-call is just a retryable activity failure). ---
-    async planBatch(input: { scorecardId: string }): Promise<{ caseIds: string[]; concurrency: number }> {
+    async planBatch(input: {
+      scorecardId: string;
+    }): Promise<{ caseIds: string[]; items?: Array<{ caseId: string; trial?: number }>; concurrency: number }> {
       if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/plan`,
         { method: "POST", headers: { "x-internal-token": schedule.internalToken } },
       );
       if (!res.ok) throw new Error(`Batch plan failed: ${res.status} ${await res.text()}`);
-      const json = (await res.json()) as { caseIds?: unknown; concurrency?: unknown };
+      const json = (await res.json()) as { caseIds?: unknown; items?: unknown; concurrency?: unknown };
       if (!Array.isArray(json.caseIds)) throw new Error("The plan response has no caseIds.");
+      // A control plane that predates the (case, trial) plan answers without `items`; the workflow falls back
+      // to `caseIds`, which is the whole plan for the single-trial batches such a control plane can produce.
+      const items = Array.isArray(json.items)
+        ? json.items.flatMap((raw) => {
+            const item = raw as { caseId?: unknown; trial?: unknown };
+            if (typeof item.caseId !== "string" || item.caseId.length === 0) return [];
+            return [
+              typeof item.trial === "number" && Number.isInteger(item.trial) && item.trial >= 0
+                ? { caseId: item.caseId, trial: item.trial }
+                : { caseId: item.caseId },
+            ];
+          })
+        : undefined;
       return {
         caseIds: json.caseIds.map(String),
+        ...(items ? { items } : {}),
         concurrency: typeof json.concurrency === "number" ? json.concurrency : 4,
       };
     },
     // The batch seam, and the one production actually drives: this request stays open while the control plane
     // runs a WHOLE eval case. It beats for the same reason `dispatchCase` does — the hour it is allowed to
     // take must not also be the hour before anyone notices the worker died (arch-review 27 P1).
-    runBatchCase: (input: { scorecardId: string; caseId: string }): Promise<{ settled: boolean; skipped?: boolean }> =>
+    runBatchCase: (input: {
+      scorecardId: string;
+      caseId: string;
+      trial?: number;
+    }): Promise<{ settled: boolean; skipped?: boolean }> =>
       withHeartbeat(async () => {
         if (!schedule)
           throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
@@ -143,7 +163,10 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
           {
             method: "POST",
             headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
-            body: JSON.stringify({ caseId: input.caseId }),
+            body: JSON.stringify({
+              caseId: input.caseId,
+              ...(input.trial !== undefined ? { trial: input.trial } : {}),
+            }),
           },
         );
         if (!res.ok) throw new Error(`Batch case failed: ${res.status} ${await res.text()}`);

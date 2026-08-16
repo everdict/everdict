@@ -45,10 +45,11 @@ const hubOpts = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-// [WAVE-1 COUNTEREXAMPLE #8] RED as of 02a3e15e: `AssertionError: expected undefined to be 'evd-run-1#g2' //
-// Object.is equality` — EnqueueResult carries only `generation`, which an unisolated re-lease does not have, so the
-// parking replica falls back to the dispatch's attempt A. Un-skip when wave 1 lands.
-describe.skip("a self-hosted re-lease reports the attempt it actually ran, even with no recording fence", () => {
+// [WAVE-1 COUNTEREXAMPLE #8] Was RED as of 02a3e15e: `AssertionError: expected undefined to be 'evd-run-1#g2'
+// // Object.is equality` — EnqueueResult carried only `generation`, which an unisolated re-lease does not have, so
+// the parking replica fell back to the dispatch's attempt A. GREEN since wave 1: the reply carries `attemptId`,
+// read off the row the mint restamped (RunnerJobOutcome.attemptId).
+describe("a self-hosted re-lease reports the attempt it actually ran, even with no recording fence", () => {
   it("names the re-lease's own attempt when its recording claim was refused (unisolated)", async () => {
     // Given a job parked under the attempt the DISPATCH opened (A), with its recording generation
     const store = new InMemoryRunnerJobStore();
@@ -97,9 +98,9 @@ describe.skip("a self-hosted re-lease reports the attempt it actually ran, even 
     // Then the parking replica is told WHICH attempt produced this result. `generation` cannot say it here —
     // there is none — so the answer has to carry the name, and without it every downstream coordinate (the
     // commit receipt, the attempt ledger's terminal stamp, the artifact key) files B's work under A.
-    const enqueued: EnqueueResult & { attemptId?: string } = await parked;
+    const enqueued: EnqueueResult = await parked;
     expect(enqueued.attemptId).toBe("evd-run-1#g2");
-    expect(enqueued.generation).toBeUndefined(); // …the channel that exists today is empty exactly when it is needed
+    expect(enqueued.generation).toBeUndefined(); // …the channel that existed before is empty exactly when it is needed
 
     // …and the ledger already agrees about which execution was live: A ended, B ran.
     expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state, a.unisolated])).toEqual([

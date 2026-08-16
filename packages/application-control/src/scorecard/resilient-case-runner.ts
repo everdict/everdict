@@ -1,4 +1,4 @@
-import type { CaseJob, CaseResult } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
 import { type CircuitBreaker, type HarnessSecretMaps, resolveHarnessSecrets } from "@everdict/domain";
 import { executeCase } from "../execution/execute-case.js";
 import { type PhysicalAttempt, jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";
@@ -143,12 +143,13 @@ export class ResilientCaseRunner {
             },
           }
         : resolved;
-    // The recording attempt a self-hosted RE-LEASE actually ran under (arch-review 41 P0-evidence): the hub
-    // mints a fresh generation at the second lease and reports it via onAttempt — the job the control plane
-    // dispatched still carries the first one. Keyed BY THE DISPATCHED JOB, not a shared slot: speculation
-    // runs two branches concurrently, and a shared capture would attribute the last lease to whichever
-    // branch happened to win.
-    const attemptByJob = new Map<CaseJob, number>();
+    // The attempt a self-hosted RE-LEASE actually ran under (arch-review 41 P0-evidence): the hub mints a
+    // fresh attempt at the second lease and reports it via onAttempt — the job the control plane dispatched
+    // still carries the first one. Keyed BY THE DISPATCHED JOB, not a shared slot: speculation runs two
+    // branches concurrently, and a shared capture would attribute the last lease to whichever branch happened
+    // to win. The value is the whole REF (arch-review 52): with only a generation, a re-lease whose recording
+    // claim was refused reported nothing and this map stayed empty for the one case it exists to catch.
+    const attemptByJob = new Map<CaseJob, AttemptRef>();
     // Spillover wraps executeCase; tail speculation wraps that (a straggler gets a duplicate, first result wins).
     const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string; job: CaseJob }> =>
       executeWithSpillover(
@@ -158,7 +159,7 @@ export class ResilientCaseRunner {
             // The dispatched job rides into the hook — `jj` is THIS physical dispatch's job (a reattempt
             // rebuilt it), so the caller's executing-stamp names the attempt that actually started.
             ...(cfg.onStarted ? { onStarted: () => cfg.onStarted?.(jj) } : {}),
-            onAttempt: (generation) => attemptByJob.set(jj, generation),
+            onAttempt: (attempt) => attemptByJob.set(jj, attempt),
           }),
         j,
         {
@@ -180,18 +181,26 @@ export class ResilientCaseRunner {
       },
       ...(cfg.reattempt ? { reattempt: cfg.reattempt } : {}),
     }).then((outcome) => {
-      // Restamp the WINNER's job with the generation its own dispatch was leased under. Identity-keyed:
-      // never another branch's number. (A single recorded attempt with an unmatched winner reference means
-      // a wrapper rebuilt the job object on the way back — unambiguous, so it still attributes.)
+      // Restamp the WINNER's job with the attempt its own dispatch was leased under. Identity-keyed: never
+      // another branch's coordinate. (A single reported attempt with an unmatched winner reference means a
+      // wrapper rebuilt the job object on the way back — unambiguous, so it still attributes.)
       const leased =
         attemptByJob.get(outcome.job) ?? (attemptByJob.size === 1 ? [...attemptByJob.values()][0] : undefined);
       if (leased === undefined) return outcome;
-      // …and the carried attempt NAME goes with the number it contradicts (arch-review 51). The lease minted
-      // its own attempt and reported only the generation (DispatchOptions.onAttempt); the name on this job
-      // still points at the attempt that lease REPLACED, so keeping it would seal, claim and terminalize the
-      // abandoned row. Dropped, the coordinate is read off the generation — which is this attempt's own.
-      const { attemptId: _replaced, ...withoutName } = outcome.job;
-      return { ...outcome, job: { ...withoutName, recordingGeneration: leased } };
+      // BOTH HALVES MOVE TOGETHER (arch-review 51 · 52). The name on this job points at the attempt the lease
+      // REPLACED, so keeping it would seal, claim and terminalize the abandoned row — and the generation
+      // beside it belongs to that same abandoned attempt. The ref states this attempt's own: its name always,
+      // its recording fence only if it owns one. An unisolated re-lease therefore ends up NAMED and unfenced,
+      // which is exactly what it is — where before it was silently left wearing its predecessor's coordinate.
+      const { attemptId: _replaced, recordingGeneration: _stale, ...bare } = outcome.job;
+      return {
+        ...outcome,
+        job: {
+          ...bare,
+          attemptId: leased.attemptId,
+          ...(leased.recording ? { recordingGeneration: leased.recording.generation } : {}),
+        },
+      };
     });
   }
 }

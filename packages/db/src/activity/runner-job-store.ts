@@ -228,6 +228,15 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
       ...(e.error !== undefined ? { error: e.error } : {}),
       ...(e.leasedBy !== undefined ? { ranBy: e.leasedBy } : {}),
       ...(e.job.recordingGeneration !== undefined ? { recordingGeneration: e.job.recordingGeneration } : {}),
+      // WHICH ATTEMPT THE ROW SAYS RAN (arch-review 52). The job's own name first — it is what the lease
+      // handed the runner and what its evidence was authorized under — falling back to the row pointer the
+      // mint wrote. They are set together; a row that has only the pointer is one whose restamp is the
+      // predecessor's, and the pointer is then the more recent of the two.
+      ...(e.job.attemptId !== undefined
+        ? { attemptId: e.job.attemptId }
+        : e.currentAttemptId !== undefined
+          ? { attemptId: e.currentAttemptId }
+          : {}),
       activityAt: e.activityAt,
     };
   }
@@ -266,6 +275,7 @@ interface JobRow {
   error: string | null;
   leased_by: string | null;
   recording_generation: number | null; // job->>'recordingGeneration' — the attempt the row's job currently names
+  attempt_id: string | null; // job->>'attemptId', else current_attempt_id — that attempt's name (arch-review 52)
   activity_ms: string; // extract(epoch ...) comes back as a numeric string
 }
 
@@ -505,10 +515,13 @@ export class PgRunnerJobStore implements RunnerJobStore {
   }
 
   async outcome(jobId: string): Promise<RunnerJobOutcome | null> {
-    // The generation is projected OUT of the job document rather than parsing the whole CaseJob back: this is
-    // the parking replica's poll loop (once per pollMs, per in-flight job), and only that one number is read.
+    // The attempt coordinate is projected OUT of the job document rather than parsing the whole CaseJob back:
+    // this is the parking replica's poll loop (once per pollMs, per in-flight job), and only those two fields
+    // are read. The NAME falls back to `current_attempt_id` — the mint writes both, and on a row whose restamp
+    // is still the predecessor's the column is the more recent of the two (arch-review 52).
     const res = await this.client.query<JobRow>(
       `SELECT status, cancel_requested, result, error, leased_by, (job->>'recordingGeneration')::int AS recording_generation,
+              COALESCE(job->>'attemptId', current_attempt_id) AS attempt_id,
               extract(epoch from activity_at) * 1000 AS activity_ms
        FROM everdict_runner_jobs WHERE job_id = $1`,
       [jobId],
@@ -522,6 +535,7 @@ export class PgRunnerJobStore implements RunnerJobStore {
       ...(row.error != null ? { error: row.error } : {}),
       ...(row.leased_by != null ? { ranBy: row.leased_by } : {}),
       ...(row.recording_generation != null ? { recordingGeneration: Number(row.recording_generation) } : {}),
+      ...(row.attempt_id != null ? { attemptId: row.attempt_id } : {}),
       activityAt: Number(row.activity_ms),
     };
   }

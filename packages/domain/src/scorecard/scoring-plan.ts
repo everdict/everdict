@@ -7,6 +7,8 @@ import {
   type Score,
   type ScorecardManifest,
   type ScorecardSubset,
+  caseKeyOf,
+  encodeCaseKey,
   isMeasured,
   measuredScores,
 } from "@everdict/contracts";
@@ -19,9 +21,14 @@ import { contentDigest } from "../provenance/content-digest.js";
 
 // Child-run key for a (case, trial) pair — a batch with trials>1 fans N children per case, so caseId alone is
 // ambiguous. trial absent (single-run) collapses to "<caseId>#0", so single-run keying is byte-identical.
-// docs/architecture/trial-based-verdict.md
+//
+// ONE SPELLING, IN THE ROOT (arch-review 52, wave 1). This was the original home of the idea, and it kept
+// being re-derived at every boundary that had to address a trial (a trajectory runId, an artifact key) —
+// each derivation its own literal, each free to drop the trial. The encoder now lives in `@everdict/contracts`
+// beside `CaseKey`, so the digest planes here and the durable addresses down in the execution cone are the
+// same function; this stays as the domain's name for it. docs/architecture/trial-based-verdict.md
 export function childKey(caseId: string, trial?: number): string {
-  return `${caseId}#${trial ?? 0}`;
+  return encodeCaseKey(caseKeyOf(caseId, trial));
 }
 
 // ── Judge-metric ownership (one predicate for BOTH scoring paths) ────────────────────────────────────────

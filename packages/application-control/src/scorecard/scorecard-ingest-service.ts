@@ -2,6 +2,7 @@ import {
   AppError,
   BadRequestError,
   CURRENT_EVIDENCE_VERSION,
+  type CaseKey,
   type CaseResult,
   type Dataset,
   EVERDICT_TRACE_SOURCE,
@@ -12,6 +13,8 @@ import {
   TRACE_EVAL_REF,
   type TraceEvent,
   type TraceSourceConfig,
+  caseKeyAddress,
+  caseKeyOf,
   snapshotFromEvidence,
   toScores,
 } from "@everdict/contracts";
@@ -334,10 +337,11 @@ export class ScorecardIngestService {
       trialIndex.set(up.caseId, trial + 1);
       // Own-store pulls skip materialize: the evidence already lives in the owned store under its own runId
       // (attach.externalIdByCase is that provenance) — a second sealed copy per scorecard would add nothing.
+      // The SAME key the result below is stamped with — a batch with any repeat puts every one of its
+      // results on the trial axis, so its evidence has to be addressed on that axis too.
+      const key = caseKeyOf(up.caseId, repeated.size > 0 ? trial : undefined);
       const trace =
-        attach?.sourceKind === EVERDICT_TRACE_SOURCE
-          ? up.trace
-          : await this.materialize(id, tenant, up.caseId, up.trace);
+        attach?.sourceKind === EVERDICT_TRACE_SOURCE ? up.trace : await this.materialize(id, tenant, key, up.trace);
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
       const ctx: GradeContext = {
         case: evalCase,
@@ -351,8 +355,8 @@ export class ScorecardIngestService {
       const traceGraders = this.deps.defaultTraceGraders?.() ?? [];
       const derived = (await Promise.all(traceGraders.map((g) => g.grade(ctx)))).flatMap(toScores);
       results.push({
-        caseId: up.caseId,
-        ...(repeated.size > 0 ? { trial } : {}),
+        caseId: key.caseId,
+        ...(key.trial !== undefined ? { trial: key.trial } : {}),
         harness: harnessLabel,
         // Stamped with the era but deliberately NOT sealed: ingest scores a trace someone else collected, on
         // both the push and pull paths. Nobody here watched that collection run to completion, so vouching for
@@ -454,15 +458,28 @@ export class ScorecardIngestService {
   private async materialize(
     scorecardId: string,
     tenant: string,
-    caseId: string,
+    key: CaseKey,
     events: TraceEvent[],
   ): Promise<TraceEvent[]> {
     if (!this.deps.trajectories || events.length === 0) return events;
     try {
-      const runId = `ingest:${scorecardId}:${caseId}`;
+      // KEYED BY (case, trial), NOT BY CASE (arch-review 52, wave 1). Repeated caseIds in one upload ARE
+      // trials — this service stamps them as such three lines below the call site — and the trajectory store
+      // is first-seal-wins BY DESIGN (a retried settle must never rewrite evidence). Under a caseId-only key
+      // that design turned into corruption rather than a missing copy: trials 1..N-1 sealed nothing, read
+      // trial 0's trace back, and were then scored, judged, exported and diffed against evidence they did not
+      // produce, with no error anywhere. A case with no trial axis keeps its exact old runId, so every
+      // single-trace ingest already in the store stays addressable.
+      const runId = `ingest:${scorecardId}:${caseKeyAddress(key)}`;
       // `source` already says this is an import; the label says WHICH case it is, so the browse row is
       // findable among a workspace's other materialized traces.
-      await this.deps.trajectories.seal({ runId, tenant, source: "import", events, label: caseId });
+      await this.deps.trajectories.seal({
+        runId,
+        tenant,
+        source: "import",
+        events,
+        label: key.trial === undefined ? key.caseId : `${key.caseId} · trial ${key.trial}`,
+      });
       return (await this.deps.trajectories.get(tenant, runId))?.events ?? events;
     } catch {
       return events;

@@ -41,11 +41,12 @@ async function waitTerminal(store: InMemoryScorecardStore, id: string): Promise<
   }
 }
 
-// [WAVE-1 COUNTEREXAMPLE #1] RED as of 02a3e15e: `AssertionError: expected [ [ { t: +0, …(2) }, …(1) ], …(2) ] to
-// deeply equal [ … ]` — trials 1 and 2 read back trial 0's events ("model-first"), because
-// scorecard-ingest-service.ts seals under `ingest:<scorecardId>:<caseId>` (no trial) into a first-seal-wins store.
-// Un-skip when wave 1 lands.
-describe.skip("a trial's evidence is its own", () => {
+// [WAVE-1 COUNTEREXAMPLE #1 — CLOSED] RED as of 02a3e15e: `AssertionError: expected [ [ { t: +0, …(2) }, …(1) ],
+// …(2) ] to deeply equal [ … ]` — trials 1 and 2 read back trial 0's events ("model-first"), because
+// scorecard-ingest-service.ts sealed under `ingest:<scorecardId>:<caseId>` (no trial) into a first-seal-wins
+// store. GREEN since wave 1: the seal is keyed by `caseKeyAddress` — the trial-bearing case carries its trial,
+// the trial-less one keeps its exact old runId. This is now the regression, not a pending counterexample.
+describe("a trial's evidence is its own", () => {
   it("three ingested traces under one caseId materialize three trajectories, one per trial", async () => {
     // Given three tries of one scenario uploaded together — the agent-eval shape the trial stamping exists for
     const store = new InMemoryScorecardStore();

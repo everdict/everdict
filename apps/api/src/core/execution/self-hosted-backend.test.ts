@@ -1,5 +1,5 @@
 import { RunnerHub, type SelfHostedKey } from "@everdict/application-control";
-import type { CaseJob, CaseResult } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 
@@ -50,10 +50,10 @@ describe("SelfHostedBackend", () => {
       openAttempt: async () => ++opened,
     });
     const backend = new SelfHostedBackend(key, hub);
-    const seen: number[] = [];
+    const seen: AttemptRef[] = [];
     const dispatched = backend.dispatch(
       { ...job, runId: "evd-run-1", recordingGeneration: 7 },
-      { onAttempt: (generation) => seen.push(generation) },
+      { onAttempt: (attempt) => seen.push(attempt) },
     );
 
     await hub.leaseWait(key, 0); // the first runner takes it, then goes silent
@@ -63,7 +63,42 @@ describe("SelfHostedBackend", () => {
     hub.complete(key, { jobId: "j1", leaseEpoch: 2 }, result);
 
     await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
-    expect(seen).toEqual([41]); // …and never the 7 this dispatch opened
+    // …and never the 7 this dispatch opened. The RECORDING-ONLY composition (no attempt ledger wired) hands
+    // back a bare generation, so the ref's name is the coordinate that generation spells — the one documented
+    // fallback left (attemptRefOf), and exact: `open` mints the ordinal the row's id is built from.
+    expect(seen).toEqual([
+      { attemptId: "evd-run-1#g41", executionId: "evd-run-1", recording: { generation: 41 } },
+    ] satisfies AttemptRef[]);
+  });
+
+  // …and the lane the generation channel could never describe (arch-review 52): a re-lease whose RECORDING
+  // claim was refused has a ledger row and no fence, so the old hook — which fired only on a generation —
+  // stayed silent about a second physical execution and left the caller naming the attempt it had parked with.
+  it("reports an unisolated re-lease by name, where there is no recording generation to report", async () => {
+    let t = 0;
+    const hub = new RunnerHub({
+      newJobId: () => "j1",
+      now: () => t,
+      leaseTtlMs: 100,
+      // openPhysicalAttempt's fail-closed shape: the row exists, the fence does not.
+      openAttempt: async () => ({ attemptId: "evd-run-1#g2" }),
+    });
+    const backend = new SelfHostedBackend(key, hub);
+    const seen: AttemptRef[] = [];
+    const dispatched = backend.dispatch(
+      { ...job, runId: "evd-run-1", recordingGeneration: 1, attemptId: "evd-run-1#g1" },
+      { onAttempt: (attempt) => seen.push(attempt) },
+    );
+
+    await hub.leaseWait(key, 0);
+    t = 201;
+    const second = await hub.leaseWait(key, 0);
+    expect(second?.job.attemptId).toBe("evd-run-1#g2");
+    expect(second?.job.recordingGeneration).toBeUndefined();
+    hub.complete(key, { jobId: "j1", leaseEpoch: 2 }, result);
+
+    await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
+    expect(seen).toEqual([{ attemptId: "evd-run-1#g2", executionId: "evd-run-1" }] satisfies AttemptRef[]);
   });
 
   it("capacity is total=maxConcurrent, used=0 (parking uses no real resources)", async () => {
