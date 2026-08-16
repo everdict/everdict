@@ -1975,7 +1975,13 @@ describe("host guards", () => {
 
   it("a tool guard blocks the named call and the model reads the reason instead of the tool running", async () => {
     let executed = 0;
-    const guarded: ToolDefinition = { ...write, call: async () => (executed += 1, { content: "written", isError: false }) };
+    const guarded: ToolDefinition = {
+      ...write,
+      call: async () => {
+        executed += 1;
+        return { content: "written", isError: false };
+      },
+    };
     const { transport } = fakeTransport([
       toolCallResult("g1", "write_magazine", JSON.stringify({ body: "hand-written" })),
       textResult("ok, dispatching the worker instead"),
