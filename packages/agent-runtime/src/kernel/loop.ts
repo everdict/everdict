@@ -70,6 +70,27 @@ export interface SubagentType {
   model?: { transport: LlmTransport; model: string }; // a per-type model tier (else subagentModel / the parent's)
 }
 
+// Pre-invocation gate for one NAMED tool — the seam a host uses to hold the model to an invariant the
+// system prompt alone can't enforce (digo's precedent: "magazine bodies come from the region-editor
+// worker, never hand-written"). Returning a string BLOCKS the call: the string becomes the tool's error
+// result, so the model reads the reason and corrects course instead of the run dying on it. Distinct from
+// the envelope scope gate (a security decision, contracts-owned) and from `permit` (a human's consent) —
+// a guard is the host's own domain invariant, advisory in ownership but enforced in effect.
+export interface ToolGuard {
+  toolName: string;
+  check: (ctx: { messages: ChatMessage[]; args: Record<string, unknown> }) => string | null;
+}
+
+// Runs at the ONE moment the loop would hand back an answer with no tool call pending. Returning a string
+// sends that text to the model (as a user message) and the loop continues instead of finishing. A ToolGuard
+// cannot cover this: it fires only when a tool IS called, and the failure guarded here is not calling one.
+// Bounded by maxAttempts (default 2) — after that many interventions the answer is accepted regardless, so
+// a guard the model cannot satisfy degrades to a worse answer, never to a spin.
+export interface ExitGuard {
+  check: (ctx: { messages: ChatMessage[]; content: string; attempt: number }) => string | null;
+  maxAttempts?: number;
+}
+
 export type AgentEvent =
   | { type: "turn_start"; turn: number }
   | { type: "text_delta"; delta: string }
@@ -101,6 +122,7 @@ export type AgentEvent =
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
   | { type: "retry"; attempt: number; delayMs: number; persistent?: boolean } // waiting out a transient model-call failure
   | { type: "truncated"; finishReason: string } // the turn hit the output-token cap (max_tokens/length) — output may be cut off
+  | { type: "exit_guard"; attempt: number; reason: string } // the host's exit guard refused a no-tool answer and the loop continued
   | { type: "done"; stopReason: StopReason };
 
 export interface AgentLoopOptions {
@@ -212,6 +234,9 @@ export interface AgentLoopOptions {
   // Per-tool wall-clock deadline (ms). A tool call that outruns it is aborted and returned as an error the model sees,
   // so a hung MCP tool can't pin the turn's Promise.all forever. Absent → no per-tool timeout (the run signal still applies).
   toolTimeoutMs?: number;
+  // Host domain invariants, enforced per named tool call (see ToolGuard) and at the answer boundary (see ExitGuard).
+  toolGuards?: ToolGuard[];
+  exitGuard?: ExitGuard;
   // Plan mode: start read-only-only; the agent must present_plan and get it approved (onPlan) before any write tool
   // runs. onPlan defaults to auto-approve. Off unless the host opts in.
   planMode?: boolean;
@@ -644,6 +669,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let structuredOutput: unknown;
   let hasStructuredOutput = false;
   let structuredNudged = false;
+  let exitGuardInterventions = 0;
   const structuredTools: ToolDefinition[] = opts.outputSchema
     ? [
         {
@@ -1080,6 +1106,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         await opts.onMessage?.(nudge);
         continue;
       }
+      // The host's exit guard: refuse the no-tool answer and hand the reason back as a user turn, bounded
+      // so an unsatisfiable guard degrades to a worse answer, never to a spin.
+      if (opts.exitGuard && exitGuardInterventions < (opts.exitGuard.maxAttempts ?? 2)) {
+        const reason = opts.exitGuard.check({
+          messages,
+          content: finalText,
+          attempt: exitGuardInterventions + 1,
+        });
+        if (reason) {
+          exitGuardInterventions += 1;
+          emit({ type: "exit_guard", attempt: exitGuardInterventions, reason });
+          const push: ChatMessage = { role: "user", content: reason };
+          messages = [...messages, push];
+          produced.push(push);
+          await opts.onMessage?.(push);
+          continue;
+        }
+      }
       return finish("end_turn", turn);
     }
 
@@ -1191,6 +1235,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             content: `Permission denied: the tool "${tool.name}" was not approved by the user.`,
             isError: true,
           };
+      }
+      const guard = opts.toolGuards?.find((g) => g.toolName === tool.name);
+      if (guard) {
+        const blocked = guard.check({ messages, args: parsed.value });
+        if (blocked) return { content: blocked, isError: true };
       }
       const result = await invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, stepSignal);
       // …and NOW the runtime knows how it went. A tool that answered with an error reached its object and

@@ -1964,3 +1964,99 @@ describe("runAgentLoop — consent gate for exfiltration-shaped reads", () => {
     expect(result.content).toBe("done");
   });
 });
+
+describe("host guards", () => {
+  const write: ToolDefinition = {
+    name: "write_magazine",
+    description: "write",
+    parametersJsonSchema: { type: "object" },
+    call: async () => ({ content: "written", isError: false }),
+  };
+
+  it("a tool guard blocks the named call and the model reads the reason instead of the tool running", async () => {
+    let executed = 0;
+    const guarded: ToolDefinition = { ...write, call: async () => (executed += 1, { content: "written", isError: false }) };
+    const { transport } = fakeTransport([
+      toolCallResult("g1", "write_magazine", JSON.stringify({ body: "hand-written" })),
+      textResult("ok, dispatching the worker instead"),
+    ]);
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([guarded]),
+      toolGuards: [
+        {
+          toolName: "write_magazine",
+          check: ({ args }) =>
+            typeof args.body === "string" ? "magazine bodies come from the region-editor worker, never hand-written" : null,
+        },
+      ],
+      onEvent: (e) => events.push(e),
+    });
+    expect(executed).toBe(0);
+    expect(result.toolCalls).toEqual([{ name: "write_magazine", ok: false }]);
+    const toolResult = events.find((e) => e.type === "tool_result");
+    expect(toolResult && toolResult.type === "tool_result" && toolResult.output).toContain("region-editor worker");
+    expect(result.content).toBe("ok, dispatching the worker instead");
+  });
+
+  it("a tool guard leaves other tools and passing calls alone", async () => {
+    const { transport } = fakeTransport([
+      toolCallResult("g2", "write_magazine", JSON.stringify({ dispatch: true })),
+      textResult("done"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([write]),
+      toolGuards: [
+        { toolName: "write_magazine", check: ({ args }) => (typeof args.body === "string" ? "blocked" : null) },
+      ],
+    });
+    expect(result.toolCalls).toEqual([{ name: "write_magazine", ok: true }]);
+  });
+
+  it("the exit guard refuses a bare answer, feeds the reason back, and is bounded by maxAttempts", async () => {
+    const { transport, requests } = fakeTransport([
+      textResult("premature answer"),
+      textResult("still premature"),
+      textResult("final answer accepted regardless"),
+    ]);
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      exitGuard: { check: ({ attempt }) => `not yet — do the required step first (attempt ${attempt})`, maxAttempts: 2 },
+      onEvent: (e) => events.push(e),
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.turns).toBe(3);
+    expect(result.content).toBe("final answer accepted regardless");
+    expect(events.filter((e) => e.type === "exit_guard")).toHaveLength(2);
+    const lastRequest = requests[2];
+    const lastMessage = lastRequest?.messages[lastRequest.messages.length - 1];
+    expect(typeof lastMessage?.content === "string" && lastMessage.content.includes("attempt 2")).toBe(true);
+  });
+
+  it("the exit guard accepting (null) finishes without intervention", async () => {
+    const { transport } = fakeTransport([textResult("clean answer")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      exitGuard: { check: () => null },
+    });
+    expect(result.turns).toBe(1);
+    expect(result.content).toBe("clean answer");
+  });
+});
