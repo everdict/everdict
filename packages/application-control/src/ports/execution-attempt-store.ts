@@ -1,6 +1,7 @@
 import {
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
+  type RuntimeWorkRef,
   attemptIdOf,
   isTerminalAttemptState,
 } from "@everdict/contracts";
@@ -85,6 +86,19 @@ export interface ExecutionAttemptStore {
       error?: { code: string; message: string };
     },
   ): Promise<boolean>;
+  // WHERE this attempt's compute is, as the placement backend named it (arch-review 52, Wave 2). Stamped when
+  // the backend reports the handle (`DispatchOptions.onWork`), which is the only moment it exists in memory.
+  //
+  // Its own verb rather than a `transition` patch for the same reason `markUnisolated` is one: it says nothing
+  // about where the attempt stands in its life. It lands while the attempt is `created` or `executing`, and —
+  // unlike a transition — it must still land on a TERMINAL row, because the row can go terminal before the
+  // stamp does and a teardown holding no handle then reaches for the case id instead.
+  //
+  // BEST-EFFORT, and this one is honest about the consequence rather than harmless: a stamp that fails leaves
+  // the handle unpersisted, and the teardown falls back to the case-id kill — the over-broad path this whole
+  // wave exists to retire. It is still best-effort because the alternative is failing a dispatch that already
+  // succeeded, which would make the audit plane able to kill live work.
+  recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void>;
   // The attempt ran with no fence raised — the recording coordinate it minted could not be claimed. Its own
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
@@ -152,6 +166,12 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
       updatedAt: this.now(),
     });
     return true;
+  }
+
+  async recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void> {
+    const current = this.attempts.get(attemptId);
+    if (!current) return;
+    this.attempts.set(attemptId, { ...current, runtimeWork: work, updatedAt: this.now() });
   }
 
   async markUnisolated(attemptId: string): Promise<void> {

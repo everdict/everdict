@@ -130,4 +130,32 @@ describe("PgExecutionAttemptStore", () => {
     expect(calls[0]?.text).toContain("WHERE execution_id = $1 ORDER BY generation");
     expect(calls[1]?.text).toContain("WHERE scorecard_id = $1 ORDER BY execution_id, generation");
   });
+
+  // ── WHERE THE COMPUTE IS (arch-review 52, Wave 2) ──────────────────────────────────────────────────
+  it("recordWork stamps the handle unconditionally — a terminal row must still be able to take it", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const store = new PgExecutionAttemptStore(client);
+
+    await store.recordWork("evd-run-r1#g1", {
+      tenant: "acme",
+      runtimeId: "nomad-1",
+      runId: "evd-run-r1",
+      externalJobId: "everdict-c1-evd-run-r1-aaaaa",
+      namespace: "everdict-acme",
+    });
+
+    // No state guard in the WHERE clause: a fast case can commit before this hook lands, and refusing the
+    // write then would leave the ledger with no handle for work that ran — which is exactly when a teardown
+    // falls back to the over-broad case-id kill this column exists to retire.
+    const text = calls[0]?.text ?? "";
+    expect(text).toContain("UPDATE everdict_execution_attempts");
+    expect(text).toContain("runtime_work = $2::jsonb");
+    expect(text).not.toContain("state");
+    expect(calls[0]?.params?.[0]).toBe("evd-run-r1#g1");
+    expect(JSON.parse(String(calls[0]?.params?.[1]))).toMatchObject({
+      externalJobId: "everdict-c1-evd-run-r1-aaaaa",
+      namespace: "everdict-acme",
+      runId: "evd-run-r1",
+    });
+  });
 });

@@ -17,8 +17,9 @@ import {
   isScreenCapturable,
   isShellable,
   isTopologyInspectable,
+  isWorkAddressable,
 } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeSpec, TraceEvent } from "@everdict/contracts";
+import type { CaseResult, RegistryAuth, RuntimeSpec, RuntimeWorkRef, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -222,8 +223,24 @@ export function buildRuntimeAccess(deps: {
     return text;
   };
 
+  // Stop the EXACT work a dispatch created (arch-review 52, Wave 2) — the handle the backend reported and the
+  // attempt ledger persisted. Every runtime of the shard list still gets the call, because the handle says
+  // which cluster's object it is only as far as the recorded lane goes; on a cluster that never placed it, an
+  // exact id simply matches nothing, which is the difference from the case-id kill below (that one MATCHES on
+  // every cluster, and stops whatever it finds there).
+  const killWork = async (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef): Promise<void> => {
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isWorkAddressable(backend)) return false;
+      await backend.killWork(work).catch(() => {});
+      return false;
+    });
+  };
+
   // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
   // (the case may live on any of them), so this never stops early (each fn returns false). Best-effort.
+  //
+  // ⚠️ THE NO-HANDLE FALLBACK (arch-review 52, Wave 2). `kill(caseId)` reaches every run's job of the case —
+  // and on Nomad, every namespace's. Callers route here only when the attempt ledger recorded no handle.
   const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<void> => {
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isRecoverable(backend)) return false;
@@ -243,6 +260,7 @@ export function buildRuntimeAccess(deps: {
     inspectCasePlacementFn,
     inspectTopologyFn,
     topologyServiceLogsFn,
+    killWork,
     killCase,
   };
 }

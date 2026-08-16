@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RuntimeWorkRefSchema } from "../execution/runtime-work-ref.js";
 
 // ── EVERY PHYSICAL EXECUTION LEAVES A ROW (arch-review 42, Three-Ledger Phase 1) ─────────────────────
 //
@@ -66,6 +67,14 @@ export const ExecutionAttemptRecordSchema = z.object({
   // What ended it, for the terminal states that have a reason (failed, and a superseded attempt abandoned by
   // a retry carries the failure that triggered the retry).
   error: z.object({ code: z.string(), message: z.string() }).optional(),
+  // WHERE this attempt's compute actually is (arch-review 52, Wave 2) — the orchestrator object the placement
+  // backend created for it, stamped when the backend reports it (`DispatchOptions.onWork`). The ledger is the
+  // only place a handle can survive the process that dispatched it, which is the whole point: a teardown after
+  // a control-plane restart has nothing else to address the work by, and addressing it by case id reaches
+  // other runs' compute. Absent = this lane minted no handle (a self-hosted lease, a legacy row, an attempt
+  // whose stamp lost the race with the crash) — and absence is what makes the case-id fallback conditional
+  // rather than the default.
+  runtimeWork: RuntimeWorkRefSchema.optional(),
   openedAt: z.string(),
   updatedAt: z.string(),
 });

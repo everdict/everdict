@@ -26,6 +26,7 @@ export {
   isSessionable,
   isShellable,
   isTopologyInspectable,
+  isWorkAddressable,
   type LogStream,
   type TopologyInspectable,
   type Observable,
@@ -37,6 +38,7 @@ export {
   type ScreenAttachable,
   type ScreenCapturable,
   type Shellable,
+  type WorkAddressable,
 } from "./backend.js";
 export { LocalBackend } from "./orchestrators/local.js";
 export { DockerBackend } from "./orchestrators/docker-backend.js";

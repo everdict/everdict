@@ -681,6 +681,7 @@ async function main(): Promise<void> {
     inspectTopologyFn,
     topologyServiceLogsFn,
     killCase,
+    killWork,
   } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
   // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness
@@ -743,6 +744,8 @@ async function main(): Promise<void> {
     // managed job, drop the queued scheduler entry, revoke the self-hosted lease (the runner aborts the
     // in-flight case on its next heartbeat).
     killCase,
+    // …and the exact-handle stop the attempt ledger makes reachable after a restart (arch-review 52, Wave 2).
+    killWork,
     cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     ...(recordingStore ? { recordingStore } : {}),
@@ -802,6 +805,7 @@ async function main(): Promise<void> {
     traceSinkService,
     preflightPlacement,
     killCase,
+    killWork,
     adoptCaseFn,
   });
   cascadeCancel.fn = (tenant, runId) => scorecardService.cancelCausedBy(tenant, runId);

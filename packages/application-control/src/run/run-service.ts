@@ -16,6 +16,7 @@ import {
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
+  type RuntimeWorkRef,
   type TraceEvent,
   type TraceSource,
   type TraceSourceConfig,
@@ -153,7 +154,13 @@ export interface RunServiceDeps {
   // (`CaseJob.runId` = `evd-run-<id>`) rather than a batchId. All optional: a deployment without them can
   // still DECIDE a cancel (the terminal commit is the decision) — it just cannot force-free the compute,
   // which is exactly what the unit tests run as.
-  // Force-kill an already-dispatched managed backend job (the run is `running`).
+  // Force-stop the EXACT external work this run placed (arch-review 52, Wave 2) — the handle the backend
+  // reported at dispatch and the attempt ledger persisted. Preferred over `killCase` wherever a handle
+  // exists, because "every job of this case" is also every OTHER run's job of that case.
+  killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<void>;
+  // Force-kill an already-dispatched managed backend job (the run is `running`). ⚠️ CASE-ID ADDRESSED —
+  // the fallback for a run whose attempts recorded no handle (legacy rows, a lane that mints none, a stamp
+  // that lost the race with a crash). See `stopRun`.
   killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
   // Drop a still-queued scheduler entry — it would otherwise dispatch only to be discarded.
   cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
@@ -1035,6 +1042,11 @@ export class RunService {
           else this.attempt.delete(executionId);
           this.rememberAttempt(executionId, { attemptId: attempt.attemptId });
         },
+        // ── WHERE THE COMPUTE IS, WRITTEN DOWN WHILE IT EXISTS (arch-review 52, Wave 2) ───────────────
+        // The backend just created the external object and this is the only moment its exact name is in
+        // memory. Persist it on the attempt row so a teardown that outlives this process — a cancel after a
+        // restart, a supersede from another replica — can stop THAT job instead of every job of this case.
+        onWork: (work) => void this.stampWork(id, work),
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;
@@ -1185,6 +1197,17 @@ export class RunService {
   //
   // The coordinate is the ATTEMPT's, not the recording fence's (see `attemptRow`) — an attempt that ran
   // unisolated has a row and no generation, and it is exactly the execution whose ending matters most.
+  // Stamp the placement handle onto the attempt row this dispatch opened. Swallowed like the other
+  // diagnostics-plane writes, and with the same asymmetry the port documents: the cost of a lost stamp is a
+  // teardown that falls back to the case-id kill, not a wrong outcome — while failing a dispatch that already
+  // placed compute because an audit row would not take would be the audit plane deciding executions.
+  private async stampWork(id: string, work: RuntimeWorkRef): Promise<void> {
+    const attempts = this.deps.attempts;
+    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    if (!attempts || attemptId === undefined) return;
+    await attempts.recordWork(attemptId, { ...work, attemptId }).catch(() => {});
+  }
+
   private async stampAttempt(
     id: string,
     to: ExecutionAttemptState,
@@ -1408,8 +1431,20 @@ export class RunService {
     // the time a RETRY gets here the record is already terminal — so a status gate would make the convergent
     // retry, the one path that exists to finish an unfinished teardown, the one path that never kills. A kill
     // of a case with no job is a no-op at the backend.
-    if (!this.deps.killCase) return;
-    await this.deps.killCase(rec.tenant, rec.runtime, rec.caseId).catch((err: unknown) => {
+    // ── STOP THE WORK, NOT THE CASE (arch-review 52, Wave 2) ─────────────────────────────────────────
+    //
+    // Every attempt this run opened recorded the exact external object its dispatch created, so the stop is
+    // addressed by THAT: this job, in this namespace, on this cluster. The case-id kill below is what it
+    // replaces — a selector that says nothing about which run placed the job, so cancelling one run stopped
+    // every concurrent execution of the same case, and the batch that owned one read an infra failure it
+    // never caused.
+    //
+    // The fallback is CONDITIONAL ON HAVING NO HANDLE, never a belt-and-braces second call: firing both would
+    // reintroduce the blast radius the handles exist to remove. Runs with no handle are the legacy ones
+    // (attempts opened before this column existed) and the lanes that mint none (self-hosted leases, which
+    // arm (3) above already revoked).
+    const works = await this.workHandles(executionId);
+    const failure = (err: unknown): never => {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { run: rec.id, caseId: rec.caseId },
@@ -1417,7 +1452,21 @@ export class RunService {
           err instanceof Error ? err.message : String(err)
         }. Retry the cancel — the teardown is idempotent.`,
       );
-    });
+    };
+    if (works.length > 0 && this.deps.killWork) {
+      for (const work of works) await this.deps.killWork(rec.tenant, rec.runtime, work).catch(failure);
+      return;
+    }
+    if (!this.deps.killCase) return;
+    await this.deps.killCase(rec.tenant, rec.runtime, rec.caseId).catch(failure);
+  }
+
+  // The exact work this execution placed, oldest attempt first. Best-effort READ: a ledger that cannot be
+  // listed must not stop a cancel from tearing down by the fallback — an unreadable ledger is the same
+  // situation as an empty one, and both mean "address it the old way".
+  private async workHandles(executionId: string): Promise<RuntimeWorkRef[]> {
+    const attempts = await this.deps.attempts?.list(executionId).catch(() => []);
+    return (attempts ?? []).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : []));
   }
 
   // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route

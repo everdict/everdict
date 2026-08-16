@@ -4,6 +4,7 @@ import {
   ExecutionAttemptRecordSchema,
   type ExecutionAttemptState,
   InternalError,
+  type RuntimeWorkRef,
   TERMINAL_ATTEMPT_STATES,
   attemptIdOf,
 } from "@everdict/contracts";
@@ -22,6 +23,7 @@ interface AttemptRow {
   lease_epoch: number | null;
   state: string;
   unisolated: boolean;
+  runtime_work: unknown;
   error: unknown;
   opened_at: string | Date;
   updated_at: string | Date;
@@ -43,6 +45,7 @@ function toAttempt(row: AttemptRow): ExecutionAttemptRecord {
     ...(row.lease_epoch !== null ? { leaseEpoch: Number(row.lease_epoch) } : {}),
     state: row.state,
     unisolated: row.unisolated,
+    ...(row.runtime_work !== null && row.runtime_work !== undefined ? { runtimeWork: row.runtime_work } : {}),
     ...(row.error !== null && row.error !== undefined ? { error: row.error } : {}),
     openedAt: new Date(row.opened_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -151,6 +154,19 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
       ],
     );
     return rows.length > 0;
+  }
+
+  // UNCONDITIONAL on the attempt's state, unlike `transition` (arch-review 52, Wave 2): the row can reach a
+  // terminal state before this stamp lands (a fast case commits while the hook is still in flight), and
+  // refusing the write then would leave the ledger holding no handle for work that ran — which is precisely
+  // when a teardown falls back to the case-id kill this column exists to retire. COALESCE-free, last write
+  // wins: a second handle for one attempt means the backend re-created the external object, and the newer one
+  // is the live one.
+  async recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_execution_attempts SET runtime_work = $2::jsonb, updated_at = now() WHERE attempt_id = $1",
+      [attemptId, JSON.stringify(work)],
+    );
   }
 
   // Unconditional on purpose: the fence this records could not be raised at ANY point in the attempt's life,

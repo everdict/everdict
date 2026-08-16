@@ -4,6 +4,7 @@ import {
   type DomainFact,
   type ExecutionAttemptState,
   type RunRecord,
+  type RuntimeWorkRef,
   type VerdictPolicy,
   attemptIdOf,
 } from "@everdict/contracts";
@@ -584,6 +585,19 @@ export class CaseOutcomeCommitter {
     const attempts = this.deps.attempts;
     if (!attempts || attemptId === undefined) return;
     await attempts.transition(attemptId, to, patch).catch(() => {});
+  }
+
+  // WHERE this attempt's compute is, recorded while it exists (arch-review 52, Wave 2). The handle names its
+  // own attempt — the dispatched job carries `attemptId`, and the backend copies it onto the handle — so this
+  // needs no map: an attempt that opened no ledger row has no handle to stamp either.
+  //
+  // Swallowed like the other diagnostics-plane writes, with the consequence the port spells out: a lost stamp
+  // costs the batch's teardown its exact handle for THIS case and drops it to the case-id kill, which is
+  // over-broad but never wrong about the case. Failing a dispatch that already placed compute would be worse.
+  async stampWork(work: RuntimeWorkRef): Promise<void> {
+    const attempts = this.deps.attempts;
+    if (!attempts || work.attemptId === undefined) return;
+    await attempts.recordWork(work.attemptId, work).catch(() => {});
   }
 
   // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on

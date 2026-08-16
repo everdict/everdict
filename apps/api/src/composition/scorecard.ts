@@ -18,7 +18,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type { CaseResult, RegistryAuth } from "@everdict/contracts";
+import type { CaseResult, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -42,6 +42,8 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 export interface ScorecardRuntimeAccess {
   adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
   killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
+  // The exact-handle stop (arch-review 52, Wave 2) — `killCase` is the no-handle fallback beside it.
+  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<void>;
 }
 
 // The manifest's model-binding resolution, as ONE function (arch-review 15 P1-5). A judge or harness spec
@@ -102,6 +104,7 @@ export function buildScorecard(deps: {
   traceSinkService: TraceSinkService;
   preflightPlacement: PlacementPreflight;
   killCase: ScorecardRuntimeAccess["killCase"];
+  killWork: ScorecardRuntimeAccess["killWork"];
   adoptCaseFn: ScorecardRuntimeAccess["adoptCaseFn"];
 }): ScorecardService {
   const {
@@ -137,6 +140,7 @@ export function buildScorecard(deps: {
     traceSinkService,
     preflightPlacement,
     killCase,
+    killWork,
     adoptCaseFn,
   } = deps;
 
@@ -242,6 +246,7 @@ export function buildScorecard(deps: {
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     adoptCase: adoptCaseFn,
     killCase,
+    killWork,
     ...(temporalDriver
       ? {
           temporalBatches: temporalDriver,

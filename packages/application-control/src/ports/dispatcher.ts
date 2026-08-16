@@ -1,4 +1,4 @@
-import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult, RuntimeWorkRef } from "@everdict/contracts";
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
@@ -34,6 +34,19 @@ export interface DispatchOptions {
   //
   // Managed backends never fire it — their dispatch is the attempt. Best-effort; a throw must not break dispatch.
   onAttempt?: (attempt: AttemptRef) => void;
+  // Fired the moment a placement backend CREATES external work — the K8s Job is applied, the Nomad job is
+  // submitted — carrying the exact handle to it (arch-review 52, Wave 2).
+  //
+  // Dispatch is `(job) → result`: the caller learns the work exists only by it finishing, so the only thing it
+  // could ever address the live compute by was the case id it sent in. That is not an execution (two runs of
+  // one case are two jobs), and every control path built on it — stop, adopt, tail — reached strangers' work.
+  // This hook is the reply the shape was missing, without splitting dispatch into start/wait: the caller
+  // persists the handle (the physical-attempt ledger row) and teardown addresses THAT.
+  //
+  // A backend that creates no addressable external object (in-process, self-hosted lease) never fires it, and
+  // a job with no `runId` does not either — a handle that cannot say which run it belongs to is the case-id
+  // ambiguity again, wearing a new type. Best-effort; a throw must not break dispatch.
+  onWork?: (work: RuntimeWorkRef) => void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

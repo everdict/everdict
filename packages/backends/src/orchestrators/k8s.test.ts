@@ -1,6 +1,12 @@
 import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { BadRequestError, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type CaseResult,
+  type RuntimeWorkRef,
+  UpstreamError,
+} from "@everdict/contracts";
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
@@ -9,6 +15,7 @@ import {
   type K8sApi,
   K8sBackend,
   buildK8sJob,
+  caseLabelValue,
   k8sCpuToMillicores,
   k8sJobName,
   k8sMemToMiB,
@@ -196,7 +203,10 @@ describe("buildK8sJob / k8sJobName", () => {
     const { api, deleted } = mockApi();
     const backend = new K8sBackend({ image: "i", api });
     await backend.kill("Case_1");
-    expect(deleted).toEqual(["label:everdict.dev/case=case-1"]); // slugged the same way as the job label
+    // Slugged the same way as the job label — and a LOSSY id (the underscore was replaced) carries a
+    // discriminator, so two ids that slug to one value stay separately addressable (arch-review 52, Wave 2).
+    expect(deleted).toEqual([`label:everdict.dev/case=${caseLabelValue("Case_1")}`]);
+    expect(deleted[0]).toMatch(/^label:everdict\.dev\/case=case-1-[0-9a-f]{8}$/);
   });
 
   it("adopt finds the NEWEST case-labeled job, waits for it, harvests the sentinel, and cleans up", async () => {
@@ -430,6 +440,53 @@ describe("K8sBackend.dispatch", () => {
     await backend.dispatch(JOB);
     expect(deleted).toHaveLength(2);
     expect(deleted[0]).not.toBe(deleted[1]);
+  });
+
+  // ── THE HANDLE THE DISPATCH HANDS BACK (arch-review 52, Wave 2) ───────────────────────────────────
+  it("reports the exact Job it applied — name, namespace, run and tenant — before it starts waiting", async () => {
+    const { api, applied } = mockApi();
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1, trustZones: perTenantTrustZones() });
+    const works: RuntimeWorkRef[] = [];
+
+    await backend.dispatch(
+      { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
+      { onWork: (w) => works.push(w) },
+    );
+
+    // The handle names the object that now exists on the cluster — the same name the manifest carries, in the
+    // namespace the zone put it in. Everything a teardown needs after this process is gone.
+    expect(works).toHaveLength(1);
+    expect(works[0]).toEqual({
+      tenant: "acme",
+      runId: "evd-run-r1",
+      attemptId: "evd-run-r1#g1",
+      externalJobId: applied[0]?.metadata.name,
+      namespace: "everdict-acme",
+    });
+    // …and the Job carries the RUN, which is what makes the handle's stop scoped to one execution of the case.
+    expect(applied[0]?.metadata.labels["everdict.dev/run"]).toBe(caseLabelValue("evd-run-r1"));
+  });
+
+  it("a job with no control-plane run id reports no handle — a handle that cannot name its run is the ambiguity again", async () => {
+    const { api } = mockApi();
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    const works: unknown[] = [];
+    await backend.dispatch(JOB, { onWork: (w) => works.push(w) }); // JOB has no runId
+    expect(works).toEqual([]);
+  });
+
+  it("a throwing onWork consumer does not fail the dispatch — the hook is best-effort by contract", async () => {
+    const { api } = mockApi();
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    const result = await backend.dispatch(
+      { ...JOB, runId: "evd-run-r1" },
+      {
+        onWork: () => {
+          throw new Error("ledger down");
+        },
+      },
+    );
+    expect(result.caseId).toBe("c1"); // the compute ran and its result came back regardless
   });
 
   it("trustZones: applies the tenant zone per job (namespace + runtimeClassName=gvisor)", async () => {

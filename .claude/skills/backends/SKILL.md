@@ -22,6 +22,18 @@ whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT
 capability interface it *also* implements, narrowed by a guard — so the compiler tracks who can do what, instead of
 a runtime `backend.logs?.()` returning `undefined` on backends that never had it:
 - `Recoverable` (`adopt` + `kill`) — jobs that outlive the control plane (Nomad/K8s). In-process/pull backends omit it.
+  ⚠️ Both are CASE-ID addressed and therefore ambiguous — see `WorkAddressable` below; they are the no-handle fallback.
+- `WorkAddressable` (`killWork(work: RuntimeWorkRef)`) — control addressed by the EXACT work, not by what the work
+  was about (arch-review 52, Wave 2). Semantic case identity ≠ physical runtime work identity: two runs of one case
+  (a re-evaluation beside a scheduled batch, a shadow beside its baseline, a retry) are two live jobs, so
+  `kill(caseId)` stopped strangers' compute — silently, since kill returns void. The backend mints the handle when
+  it creates the external object (`DispatchOptions.onWork` — K8s after `applyJob`, Nomad after the submit), the
+  caller persists it on the physical-attempt ledger row (`ExecutionAttemptStore.recordWork`, mig 0185) so it
+  outlives the dispatching process, and teardown calls `killWork` with it. `kill(caseId)` stays ONLY for callers
+  holding no handle (legacy attempt rows, lanes that mint none) — never as a second call beside `killWork`, which
+  would restore the blast radius. Nomad kills by exact job id in the handle's own namespace (no listing at all);
+  K8s deletes the named Job in its namespace plus one `(app, tenant, run)` label sweep for the same run's
+  handle-less siblings. Nomad/K8s implement it; in-process/pull backends have no external object to name.
 - `Observable` (`logs` + `caseEvents` + `exec`) — live-progress read + one-shot exec (Nomad + K8s). `logs` is the
   human view (result sentinel AND live-event lines stripped); `caseEvents` decodes the job's `EVENT_SENTINEL`
   stdout lines to `TraceEvent[]` (live-observability ⑨ — the managed lane's live trajectory, snapshot semantics).
@@ -60,7 +72,7 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
   action (distinct from `runtimes:write` viewer+ registration). Command/result SSOT = `RuntimeControlCommand` /
   `RuntimeControlResult` in `@everdict/contracts/wire`. See `docs/architecture/runtime-inspection.md`.
 
-Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShellable` / `isScreenCapturable` /
+Guards live next to the interfaces: `isRecoverable` / `isWorkAddressable` / `isObservable` / `isShellable` / `isScreenCapturable` /
 `isProbeable` / `isInspectable` / `isCaseInspectable` / `isTopologyInspectable` / `isReclaimable`. A consumer does
 `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
 overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.

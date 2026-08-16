@@ -4,6 +4,7 @@ import {
   type Driver,
   InternalError,
   type RuntimeSample,
+  type RuntimeWorkRef,
   type TraceEvent,
 } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
@@ -102,9 +103,32 @@ export interface Recoverable {
   // submitted for the case, wait for it, and harvest its result — instead of re-dispatching and double-spending
   // compute. Best-effort and TOTAL — never throws; the ambiguity is encoded in AdoptOutcome, not swallowed to a
   // bare undefined, so the caller decides re-dispatch policy per `absent` (safe) vs `unknown` (may double-spend).
+  //
+  // ⚠️ CASE-ID ADDRESSED, therefore AMBIGUOUS (arch-review 52, Wave 2). It picks the NEWEST job carrying the
+  // case id — which, with two runs of one case live at once, is somebody else's execution, and adopting it
+  // attributes their verdict to this run. A caller that HOLDS a work handle must not come here; the exact
+  // path is `WorkAddressable`. This stays for the callers that hold none (legacy attempt rows written before
+  // the handle was persisted, and the lanes that never mint one).
   adopt(caseId: string): Promise<AdoptOutcome>;
   // Force-stop every live orchestrator job of a case (superseded batch reclaim). Best-effort, never throws.
+  //
+  // ⚠️ SAME AMBIGUITY, with a destructive blast radius: "every live job of this case" includes the ones other
+  // runs — and, before the K8s case label became injective, other CASES — placed. Use `WorkAddressable.
+  // killWork` wherever a handle exists; this is the no-handle fallback and nothing else.
   kill(caseId: string): Promise<void>;
+}
+
+// WorkAddressable — CONTROL ADDRESSED BY THE EXACT WORK, not by what the work was about (arch-review 52,
+// Wave 2). The backend minted the handle when it created the external object (`DispatchOptions.onWork`); the
+// caller persisted it; this is the other end. `killWork` stops the object that handle names, in the namespace
+// it names, and nothing else — no prefix scan, no cross-namespace sweep, no label that another run shares.
+//
+// Backends whose work outlives the dispatch call implement it (Nomad/K8s), the same set that implements
+// `Recoverable`. In-process and pull backends do not: they have no external object to hand out a name for.
+export interface WorkAddressable {
+  // Best-effort and idempotent, like every stop on this layer: work that is already gone is a no-op, and a
+  // handle from another cluster simply matches nothing there. Never throws.
+  killWork(work: RuntimeWorkRef): Promise<void>;
 }
 
 // Observable — live-progress introspection into a case's running sandbox (logs + one-shot exec). The sandbox is
@@ -247,6 +271,10 @@ export interface Reclaimable {
 export function isRecoverable(backend: Backend): backend is Backend & Recoverable {
   const b = backend as Partial<Recoverable>;
   return typeof b.adopt === "function" && typeof b.kill === "function";
+}
+
+export function isWorkAddressable(backend: Backend): backend is Backend & WorkAddressable {
+  return typeof (backend as Partial<WorkAddressable>).killWork === "function";
 }
 
 export function isPoolReporting(backend: Backend): backend is Backend & PoolReporting {

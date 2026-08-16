@@ -12,6 +12,7 @@ import {
   InternalError,
   NotFoundError,
   OOM_KILLED,
+  type RuntimeWorkRef,
   type TraceEvent,
   UpstreamError,
   judgeAuthEnv,
@@ -44,6 +45,7 @@ import {
   type Reclaimable,
   type Recoverable,
   type Shellable,
+  type WorkAddressable,
   dispatchAborted,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
@@ -160,8 +162,25 @@ export interface NomadJobSpec {
   };
 }
 
+// The job's id on the cluster. The RUN is in it (arch-review 52, Wave 2) so two concurrent executions of one
+// case — a re-evaluation beside a scheduled batch, a shadow beside its baseline — are two distinct objects
+// rather than two names that a `prefix=everdict-<caseId>-` search cannot tell apart. It stays AFTER the case
+// so the legacy case-prefix lookups keep matching: `everdict-<caseId>-` is still this id's prefix.
+//
+// Not a uniqueness device — the dispatch suffix already is one. It makes the id SELF-DESCRIBING, which is
+// what an operator reading `nomad job status` and a future run-scoped sweep both need.
 export function nomadJobId(job: CaseJob, suffix?: string): string {
-  return `everdict-${job.evalCase.id}${suffix ? `-${suffix}` : ""}`;
+  const run = job.runId === undefined ? "" : `-${nomadIdPart(job.runId)}`;
+  return `everdict-${job.evalCase.id}${run}${suffix ? `-${suffix}` : ""}`;
+}
+
+// Keep an id fragment to what a Nomad job id may hold without escaping. The case id is passed through raw
+// (long-standing behavior, and Nomad accepts it); only the fragments THIS layer adds are normalized.
+function nomadIdPart(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 // One task event as the alloc API reports it (Type = short phase, DisplayMessage = the human cause,
@@ -574,6 +593,7 @@ export class NomadBackend
     // carry the same `everdict-` prefix the probe counts) instead of being invisible to the Scheduler.
     Driver,
     Recoverable,
+    WorkAddressable,
     Observable,
     Shellable,
     Probeable,
@@ -823,6 +843,23 @@ export class NomadBackend
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
+    // The job now EXISTS on the cluster, and this is the only moment its exact id and namespace are in
+    // anyone's hands (arch-review 52, Wave 2). Report it before the wait: the wait is where the control plane
+    // may die, and a teardown that starts after that has only the case id — which addresses every tenant's and
+    // every run's job of that case. Best-effort by contract; a throwing consumer must not fail the dispatch.
+    if (job.runId !== undefined) {
+      try {
+        options?.onWork?.({
+          tenant: job.tenant ?? "default",
+          runId: job.runId,
+          externalJobId: jobId,
+          ...(ns !== undefined ? { namespace: ns } : {}),
+          ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+        });
+      } catch (e) {
+        console.warn(`[nomad] onWork hook threw for job ${jobId}: ${String(e)}`);
+      }
+    }
     try {
       const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting, mark);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
@@ -1176,8 +1213,31 @@ export class NomadBackend
     }
   }
 
+  // Stop the work a HANDLE names, and nothing else (WorkAddressable — arch-review 52, Wave 2).
+  //
+  // ONE request: deregister the exact job id, in the namespace the handle carries. No listing at all — the
+  // listing was the defect. `kill(caseId)` below asks `prefix=everdict-<caseId>-&namespace=*` and deregisters
+  // every live match, so a tenant's cancellation reached ANOTHER TENANT'S job of the same case in another
+  // namespace; a stop that crosses a trust zone is the same violation as a read that does, and it was silent
+  // because kill returns void. A handle knows which namespace its work is in, so nothing has to be searched
+  // for. Deregister WITHOUT purge (the purge saga: purging a job a client still tracks panics its alloc
+  // watcher). Best-effort/idempotent, never throws.
+  async killWork(work: RuntimeWorkRef): Promise<void> {
+    try {
+      const nsq =
+        work.namespace && work.namespace !== "default" ? `?namespace=${encodeURIComponent(work.namespace)}` : "";
+      await this.http.request("DELETE", `/v1/job/${encodeURIComponent(work.externalJobId)}${nsq}`);
+    } catch {
+      // best-effort
+    }
+  }
+
   // Force-stop every live job of a case (superseded batch reclaim) — deregister WITHOUT purge (the purge saga:
   // purging a job a client still tracks panics its alloc watcher). Best-effort, never throws.
+  //
+  // ⚠️ FALLBACK ONLY (arch-review 52, Wave 2 counterexample #5). `namespace=*` makes this cross every trust
+  // zone and the case prefix makes it cross every run — a caller holding a `RuntimeWorkRef` must call
+  // `killWork`. This remains for the callers that hold none (legacy attempt rows, lanes that mint no handle).
   async kill(caseId: string): Promise<void> {
     try {
       const prefix = `everdict-${caseId}-`;

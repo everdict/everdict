@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import {
   NotFoundError,
   OOM_KILLED,
   type RegistryAuth,
+  type RuntimeWorkRef,
   type TraceEvent,
   UpstreamError,
   judgeAuthEnv,
@@ -40,6 +42,7 @@ import {
   type Probeable,
   type Reclaimable,
   type Recoverable,
+  type WorkAddressable,
   dispatchAborted,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
@@ -836,6 +839,47 @@ export function caseSlug(caseId: string, max = 50): string {
     .slice(0, max);
 }
 
+// ── LABEL VALUES MUST BE INJECTIVE, BECAUSE SELECTORS ARE DESTRUCTIVE (arch-review 52, Wave 2) ───────
+//
+// `caseSlug` is LOSSY twice over: it replaces every character outside [a-z0-9-] and it truncates. So
+// `case-<46 a's>-alpha` and `case-<46 a's>-omega` — one long prefix, the discriminator at the end, the shape a
+// generated benchmark's ids actually have — used to carry ONE `everdict.dev/case` value. That value is what
+// kill deletes by and what adopt harvests by, so two distinct cases were one addressable unit: one case's
+// cancellation stopped the other's job, and one case's adopt attributed the other's result.
+//
+// The fix is a discriminator, added ONLY when the slug lost information. An id that survives slugging
+// unchanged already distinguishes itself, and leaving those values byte-identical keeps every job dispatched
+// under the previous spelling addressable by the same selector.
+const LABEL_VALUE_MAX = 63; // K8s label values: ≤63 chars, alphanumeric at both ends, [-_.] inside
+const LABEL_DIGEST_LEN = 8; // 32 bits of the id's sha256 — collision-free at any batch size we place
+
+function labelValue(raw: string): string {
+  const lossless = caseSlug(raw, LABEL_VALUE_MAX);
+  if (lossless === raw) return lossless;
+  const digest = createHash("sha256").update(raw).digest("hex").slice(0, LABEL_DIGEST_LEN);
+  const head = caseSlug(raw, LABEL_VALUE_MAX - LABEL_DIGEST_LEN - 1);
+  return head === "" ? digest : `${head}-${digest}`;
+}
+
+// What `everdict.dev/case` carries. Injective over case ids (see labelValue).
+export function caseLabelValue(caseId: string): string {
+  return labelValue(caseId);
+}
+
+// What `everdict.dev/run` carries — the coordinate that makes a stop addressable at all. A case id names a
+// GROUP of executions (a re-evaluation, a shadow and a scheduled batch can all run case `c1` right now); the
+// run is the one of them a cancellation was issued for.
+export function runLabelValue(runId: string): string {
+  return labelValue(runId);
+}
+
+// The selector a `killWork` sweeps by: every Job this RUN placed in this TENANT, and nothing else. Tenant is
+// in it because a cross-tenant stop is the same defect as a cross-tenant read; the run is in it because the
+// case is not an execution.
+export function runWorkSelector(work: { tenant: string; runId: string }): string {
+  return `app=everdict,everdict.dev/tenant=${work.tenant},everdict.dev/run=${runLabelValue(work.runId)}`;
+}
+
 function dispatchSuffix(): string {
   return Math.random().toString(36).slice(2, 7);
 }
@@ -893,8 +937,17 @@ export function buildK8sJob(
     metadata: {
       name,
       namespace: ns,
-      // The case label is the kill(caseId) selector — a superseded batch force-stops its live jobs by it.
-      labels: { app: "everdict", "everdict.dev/tenant": tenant, "everdict.dev/case": caseSlug(job.evalCase.id) },
+      // The identity a control call selects on. THREE coordinates, not one: the case says what ran (injective
+      // now — see caseLabelValue), the tenant says whose trust zone it is, and the RUN says which of the
+      // several concurrent executions of that case this Job is (arch-review 52, Wave 2). A stop scoped to
+      // (tenant, run) reaches exactly the work its run placed; the case label alone reached every run's.
+      // The run label is omitted for a job with no control-plane run id — nothing addresses those by run.
+      labels: {
+        app: "everdict",
+        "everdict.dev/tenant": tenant,
+        "everdict.dev/case": caseLabelValue(job.evalCase.id),
+        ...(job.runId ? { "everdict.dev/run": runLabelValue(job.runId) } : {}),
+      },
     },
     spec: {
       backoffLimit: 0,
@@ -935,7 +988,16 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 // Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
 export class K8sBackend
-  implements Backend, Recoverable, Observable, Probeable, Inspectable, CaseInspectable, CaseSampleable, Reclaimable
+  implements
+    Backend,
+    Recoverable,
+    WorkAddressable,
+    Observable,
+    Probeable,
+    Inspectable,
+    CaseInspectable,
+    CaseSampleable,
+    Reclaimable
 {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
@@ -984,7 +1046,7 @@ export class K8sBackend
   async adopt(caseId: string): Promise<AdoptOutcome> {
     try {
       return await this.withApi(async (api): Promise<AdoptOutcome> => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
         // jobsByLabel returns undefined when the label query itself failed — we can't tell if a job is live → unknown.
         if (jobs === undefined) return { status: "unknown" };
         const newest = jobs.sort((a, b) => (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""))[0];
@@ -1008,7 +1070,7 @@ export class K8sBackend
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
     try {
       return await this.withApi(async (api) => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
         const newest = (jobs ?? []).sort((a, b) =>
           (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
         )[0];
@@ -1031,7 +1093,7 @@ export class K8sBackend
   async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
     try {
       return await this.withApi(async (api) => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
         const newest = (jobs ?? []).sort((a, b) =>
           (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
         )[0];
@@ -1052,7 +1114,7 @@ export class K8sBackend
   // pod reads as undefined and the caller polls again.
   private async rawCaseLogs(caseId: string): Promise<string | undefined> {
     return await this.withApi(async (api) => {
-      const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+      const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
       const newest = (jobs ?? []).sort((a, b) =>
         (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
       )[0];
@@ -1092,7 +1154,7 @@ export class K8sBackend
   async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
     try {
       return await this.withApi(async (api): Promise<CasePlacement | undefined> => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
         const newest = (jobs ?? []).sort((a, b) =>
           (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
         )[0];
@@ -1137,10 +1199,39 @@ export class K8sBackend
     }
   }
 
+  // Stop the work a HANDLE names, and nothing else (WorkAddressable — arch-review 52, Wave 2).
+  //
+  // Two deletions, both inside the same blast radius — this run's own compute in its own tenant:
+  //   ① the exact Job the handle names, in the namespace it was placed in. This is the whole point of the
+  //      handle: one dispatch, one object, addressed by the orchestrator's own name for it.
+  //   ② a sweep of `(tenant, run)`-labelled Jobs, because ONE RUN CAN HAVE MORE THAN ONE. A re-dispatch after
+  //      a retryable throw applies a new Job under a fresh random name, and only the newest handle was
+  //      stamped on the ledger; a crash between apply and stamp leaves a Job with no handle at all. Neither
+  //      is reachable by ①, and both are unambiguously this run's.
+  // What is NOT here is the thing that made the old kill dangerous: no case-only selector, so a concurrent
+  // run of the same case — and, since the case label became injective, a different case that truncated to the
+  // same value — is not this cancellation's business. Best-effort/idempotent, never throws.
+  async killWork(work: RuntimeWorkRef): Promise<void> {
+    try {
+      await this.withApi(async (api) => {
+        if (work.namespace !== undefined) await api.deleteJob(work.externalJobId, work.namespace).catch(() => {});
+        await api.deleteJobsByLabel(runWorkSelector(work));
+      });
+    } catch {
+      // best-effort
+    }
+  }
+
   // Force-stop every live job of a case (superseded batch reclaim) — by the everdict.dev/case label. Best-effort.
+  //
+  // ⚠️ FALLBACK ONLY (arch-review 52, Wave 2 counterexample #3). The selector says nothing about WHICH run
+  // placed the job, so this stops every concurrent execution of the case — including another run's, whose
+  // batch then reads an infra failure it never caused. A caller holding a `RuntimeWorkRef` must call
+  // `killWork`; this remains for the ones that hold none (attempt rows written before the handle was
+  // persisted, and lanes that mint no handle).
   async kill(caseId: string): Promise<void> {
     try {
-      await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`));
+      await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`));
     } catch {
       // best-effort
     }
@@ -1478,6 +1569,23 @@ export class K8sBackend
         : manifest;
       const t0 = Date.now();
       await api.applyJob(payload, ns);
+      // The external work now EXISTS, and this is the only moment its exact name is in anyone's hands
+      // (arch-review 52, Wave 2). Report it before waiting: the wait is where the process may die, and a
+      // teardown that starts after that has nothing but the case id — which addresses other runs' jobs too.
+      // Best-effort by contract; a consumer that throws must not take the dispatch down with it.
+      if (job.runId !== undefined) {
+        try {
+          options?.onWork?.({
+            tenant: job.tenant ?? "default",
+            runId: job.runId,
+            externalJobId: name,
+            namespace: ns,
+            ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+          });
+        } catch (e) {
+          console.warn(`[k8s] onWork hook threw for job ${name}: ${String(e)}`);
+        }
+      }
       try {
         await this.waitForJob(api, name, ns, options?.signal);
         const result = parseResult(await api.podLogs(name, ns));

@@ -1,6 +1,12 @@
 import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { BadRequestError, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type CaseResult,
+  type RuntimeWorkRef,
+  UpstreamError,
+} from "@everdict/contracts";
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
@@ -306,6 +312,68 @@ describe("NomadBackend.dispatch", () => {
     // Dead-job purge after capturing the result — without it batch churn crosses the client's gc_max_allocs and
     // later cases lose the alloc-log race (the whole batch reads as dispatch failures).
     expect(calls.some((c) => c.startsWith("DELETE /v1/job/everdict-c1") && c.includes("purge=true"))).toBe(true);
+  });
+
+  // ── THE HANDLE THE DISPATCH HANDS BACK (arch-review 52, Wave 2) ───────────────────────────────────
+  it("reports the exact job id it submitted — with the run in the id — before it starts waiting", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      namespace: "everdict-acme",
+    });
+    const works: RuntimeWorkRef[] = [];
+
+    await backend.dispatch(
+      { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
+      { onWork: (w) => works.push(w) },
+    );
+
+    // The handle names the job that now exists, in the namespace it was submitted to — everything a stop
+    // needs without listing anything, which is what keeps it inside one trust zone.
+    expect(works).toHaveLength(1);
+    expect(works[0]?.tenant).toBe("acme");
+    expect(works[0]?.runId).toBe("evd-run-r1");
+    expect(works[0]?.attemptId).toBe("evd-run-r1#g1");
+    expect(works[0]?.namespace).toBe("everdict-acme");
+    // …and the id it names is the one that was actually submitted, carrying the RUN so two executions of one
+    // case are two distinct objects rather than two names a case-prefix search cannot tell apart.
+    expect(works[0]?.externalJobId).toMatch(/^everdict-c1-evd-run-r1-/);
+    expect(calls.some((c) => c.includes(`/v1/job/${works[0]?.externalJobId}/allocations`))).toBe(true);
+  });
+
+  it("killWork deregisters the handle's own id in its own namespace, with no listing at all", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        return { status: 200, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+
+    await backend.killWork({
+      tenant: "acme",
+      runId: "evd-run-r1",
+      externalJobId: "everdict-c1-evd-run-r1-aaaaa",
+      namespace: "everdict-globex",
+    });
+
+    // One request, and it is the deregistration. The listing this replaces (`prefix=…&namespace=*`) is what
+    // let one tenant's cancel reach another tenant's job of the same case.
+    expect(calls).toEqual(["DELETE /v1/job/everdict-c1-evd-run-r1-aaaaa?namespace=everdict-globex"]);
   });
 
   it("purges the dead job even when the log fetch fails (finally path)", async () => {

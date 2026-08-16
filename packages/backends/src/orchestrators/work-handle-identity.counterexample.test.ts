@@ -1,4 +1,4 @@
-import type { CaseJob } from "@everdict/contracts";
+import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type K8sApi, K8sBackend, buildK8sJob, k8sJobName } from "./k8s.js";
 import { NomadBackend, type NomadHttp } from "./nomad.js";
@@ -16,18 +16,15 @@ import { NomadBackend, type NomadHttp } from "./nomad.js";
 // The invariant these three pin: a stop is scoped to the WORK it was issued for. Wave 2 gives the backends an
 // exact handle (`RuntimeWorkRef`) to carry that scope — the shape asserted below.
 
-// The handle Wave 2 hands the placement layer. `caseId` alone can address several live executions; the run
-// (and, on Nomad, the namespace the work was placed in) is what makes it one.
-interface RuntimeWorkRef {
-  caseId: string;
-  runId: string;
-  namespace?: string;
-}
+// The handle the placement layer now takes (`RuntimeWorkRef`, @everdict/contracts — Wave 2 landed it as the
+// shape below was drafted, with the orchestrator's own external id in place of the case id the draft used).
+// `caseId` alone can address several live executions; the run, the tenant, the exact external id and the
+// namespace the work was placed in are what make it one.
 interface ExactHandleBackend {
-  kill(work: RuntimeWorkRef): Promise<void>;
+  killWork(work: RuntimeWorkRef): Promise<void>;
 }
-// The kill under test is the future one; today's `kill(caseId: string)` cannot express the scope at all.
-const exact = (backend: K8sBackend | NomadBackend): ExactHandleBackend => backend as unknown as ExactHandleBackend;
+// `kill(caseId: string)` survives beside it as the no-handle fallback and cannot express the scope at all.
+const exact = (backend: K8sBackend | NomadBackend): ExactHandleBackend => backend;
 
 const caseJob = (caseId: string, runId: string, tenant = "acme"): CaseJob => ({
   harness: { id: "h", version: "1.0.0" },
@@ -93,8 +90,8 @@ function nomadRecorder(jobs: Array<{ ID: string; Namespace: string; Status: stri
 // [WAVE-2 COUNTEREXAMPLE #3] RED as of 02a3e15e: `AssertionError: expected [] to have a length of 1 but got +0`
 // — K8sBackend.kill takes a caseId, so the run-scoped handle reaches caseSlug as an object, throws inside the
 // best-effort try, and no selector is ever issued (today's caseId kill would instead delete BOTH runs' jobs).
-// Un-skip when wave 2 lands.
-describe.skip("a stop reaches only the work it was issued for (K8s)", () => {
+// UN-SKIPPED (wave 2): `killWork` takes the handle and selects on (app, tenant, run).
+describe("a stop reaches only the work it was issued for (K8s)", () => {
   it("cancelling one run of a case leaves a concurrent run of the SAME case running", async () => {
     // Given two runs of one case, live at the same time on one cluster
     const runA = caseJob("c1", "evd-run-a");
@@ -102,8 +99,13 @@ describe.skip("a stop reaches only the work it was issued for (K8s)", () => {
     const { api, selectors } = k8sRecorder();
     const backend = new K8sBackend({ image: "reg/job-runner:1", api });
 
-    // When run A is cancelled
-    await exact(backend).kill({ caseId: "c1", runId: "evd-run-a" });
+    // When run A is cancelled — by the handle its dispatch reported, not by the case it was about
+    await exact(backend).killWork({
+      tenant: "acme",
+      runId: "evd-run-a",
+      externalJobId: k8sJobName(runA, "aaaaa"),
+      namespace: "everdict-acme",
+    });
 
     // Then exactly one selector was issued, and it addresses A's job and only A's. A selector that matches
     // both is a cancellation of somebody else's evaluation — the compute is gone and the batch that owned it
@@ -136,7 +138,8 @@ describe.skip("a stop reaches only the work it was issued for (K8s)", () => {
 // received `[ "GET /v1/jobs?prefix=everdict-%5Bobject%20Object%5D-&namespace=*" ]` — NomadBackend.kill sweeps every
 // namespace by caseId prefix, so a tenant's cancellation deregisters another tenant's job of the same case.
 // Un-skip when wave 2 lands.
-describe.skip("a stop stays inside the namespace its work was placed in (Nomad)", () => {
+// UN-SKIPPED (wave 2): killWork deregisters the handle's own id in its own namespace — no listing at all.
+describe("a stop stays inside the namespace its work was placed in (Nomad)", () => {
   it("cancelling one namespace's run of a case does not deregister another namespace's job of the same case", async () => {
     // Given the same case live in two trust zones — one job per namespace, both alive
     const jobs = [
@@ -146,8 +149,13 @@ describe.skip("a stop stays inside the namespace its work was placed in (Nomad)"
     const { http, requests } = nomadRecorder(jobs);
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "reg/job-runner:1", http });
 
-    // When acme's run is cancelled
-    await exact(backend).kill({ caseId: "c1", runId: "evd-run-a", namespace: "everdict-acme" });
+    // When acme's run is cancelled — by the handle its dispatch reported
+    await exact(backend).killWork({
+      tenant: "acme",
+      runId: "evd-run-a",
+      externalJobId: "everdict-c1-aaaaa",
+      namespace: "everdict-acme",
+    });
 
     // Then nothing was looked up across all namespaces…
     expect(requests.filter((r) => r.includes("namespace=*"))).toEqual([]);

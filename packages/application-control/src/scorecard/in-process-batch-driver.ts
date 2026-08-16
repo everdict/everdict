@@ -483,6 +483,11 @@ export class InProcessBatchDriver {
           // queued→running, and the attempt ledger records that this execution reached the machine. Keyed
           // to the STARTED job (arch-review 51 residue): after a spill/OOM reattempt the dispatch-time
           // capture named the abandoned attempt, not the one that reached the machine.
+          // WHERE THIS CASE'S COMPUTE IS (arch-review 52, Wave 2) — persisted the moment the backend creates
+          // it, so a cancel that outlives this process stops THAT job. The handle names its own attempt (it
+          // carries the dispatched job's attemptId), which is what makes it correct under spillover and
+          // speculation: those dispatch several attempts, and each reports its own.
+          onWork: (work) => void this.commit.stampWork(work),
           onStarted: (startedJob) => {
             const started = startedJob.runId !== undefined ? jobAttemptId(startedJob, startedJob.runId) : undefined;
             void this.commit.stampAttempt(started ?? openedAttemptId, "executing", {

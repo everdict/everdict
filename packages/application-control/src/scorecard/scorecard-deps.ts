@@ -5,6 +5,7 @@ import type {
   JudgeRunConfig,
   ModelBinding,
   RegistryAuth,
+  RuntimeWorkRef,
   ScorecardExport,
   ScorecardRecord,
   SpanAttrMapping,
@@ -147,6 +148,10 @@ export interface ScorecardServiceDeps {
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
+  // …and the EXACT version of it (arch-review 52, Wave 2): stop the one orchestrator object a child's attempt
+  // placed, addressed by the handle the backend reported and the attempt ledger persisted. Preferred wherever
+  // a handle exists — `killCase` selects on the case alone, which is also every other run's job of that case.
+  killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<void>;
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).

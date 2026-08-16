@@ -4,7 +4,7 @@ import type { NotificationService, PlatformEventService } from "@everdict/applic
 import { RunService } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
-import type { CaseJob, GradeContext, JudgeSpec, RegistryAuth, TraceEvent } from "@everdict/contracts";
+import type { CaseJob, GradeContext, JudgeSpec, RegistryAuth, RuntimeWorkRef, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
@@ -116,6 +116,9 @@ export function buildRun(deps: {
   // the run's own job identity: force-kill a dispatched managed job, drop a queued scheduler entry, revoke a
   // self-hosted lease.
   killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
+  // …and the EXACT one (arch-review 52, Wave 2): stop the object the dispatch actually created, from the
+  // handle the attempt ledger persisted. `killCase` above is the fallback for runs that recorded none.
+  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<void>;
   cancelQueued: (predicate: (job: CaseJob) => boolean) => number;
   cancelLeased: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
 }) {
@@ -207,6 +210,7 @@ export function buildRun(deps: {
     store,
     // User stop (POST /runs/:id/cancel): the terminal commit is the decision, these free the compute.
     killCase: deps.killCase,
+    killWork: deps.killWork,
     cancelQueued: deps.cancelQueued,
     cancelLeased: deps.cancelLeased,
     // Grader factory (@everdict/graders) for executeCase's control-plane collection-mode scoring — the application

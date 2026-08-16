@@ -15,6 +15,7 @@ import {
   type ManifestVerification,
   NotFoundError,
   type RunRecord,
+  type RuntimeWorkRef,
   type ScorecardOrigin,
   type ScorecardRecord,
   UpstreamError,
@@ -1015,10 +1016,27 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // teardown that did not happen. They surface after the loop so one bad child does not stop the others
     // from being torn down first.
     const failures: string[] = [];
+    // ── THE EXACT WORK EACH CHILD PLACED (arch-review 52, Wave 2) ────────────────────────────────────
+    //
+    // One read of the batch's attempt ledger, keyed back to the children by `childRunId`. What it buys is
+    // the difference between stopping THIS batch's jobs and stopping every job of every case name this
+    // batch happens to contain: `killCase(caseId)` selects on the case alone, so a re-evaluation of `c1`
+    // running beside this batch — or another tenant's `c1` on a shared Nomad cluster, which the old kill
+    // swept across all namespaces — was cancelled by this batch's stop. Best-effort read: a ledger that
+    // will not list leaves every child on the fallback, which is where they all were before.
+    const worksByChild = await this.workHandlesByChild(rec.id);
     for (const c of children) {
       if (c.status !== "running" && c.status !== "queued") continue;
-      if (c.status === "running" && this.deps.killCase)
+      const works = worksByChild.get(c.id) ?? [];
+      if (c.status === "running" && works.length > 0 && this.deps.killWork) {
         // AWAITED — fire-and-forget made `completed` mean "commands were issued", never "the work stopped".
+        for (const work of works)
+          await this.deps.killWork(rec.tenant, c.runtime ?? rec.runtime, work).catch((err: unknown) => {
+            failures.push(`kill ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      } else if (c.status === "running" && this.deps.killCase)
+        // No handle for this child — a legacy attempt row, or a lane that mints none. The over-broad kill is
+        // the only thing left that can reach the compute, and leaving it running is worse than its blast radius.
         await this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch((err: unknown) => {
           failures.push(`kill ${c.caseId}: ${err instanceof Error ? err.message : String(err)}`);
         });
@@ -1061,6 +1079,21 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         }. The cancellation stays owed and the reconciler retries.`,
       );
     }
+  }
+
+  // Every work handle this batch's attempts recorded, grouped by the child run each attempt wrote to. An
+  // attempt with no `childRunId` is not droppable silently — but it is also not attributable to a child, and
+  // this teardown only kills what it can attribute, so those fall to the case-id fallback with their child.
+  // Best-effort: an unreadable ledger reads as "no handles", which is the pre-Wave-2 behavior exactly.
+  private async workHandlesByChild(scorecardId: string): Promise<Map<string, RuntimeWorkRef[]>> {
+    const byChild = new Map<string, RuntimeWorkRef[]>();
+    if (!this.deps.attempts) return byChild;
+    const attempts = await this.deps.attempts.listForScorecard(scorecardId).catch(() => []);
+    for (const a of attempts) {
+      if (!a.runtimeWork || a.childRunId === undefined) continue;
+      byChild.set(a.childRunId, [...(byChild.get(a.childRunId) ?? []), a.runtimeWork]);
+    }
+    return byChild;
   }
 
   // ── THE TEARDOWN AS A DURABLE OPERATION (arch-review 47 §5.2) ───────────────────────────────────────

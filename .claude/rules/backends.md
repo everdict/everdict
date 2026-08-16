@@ -52,6 +52,20 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
   optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
   capability, it simply doesn't implement that interface (e.g. K8s is not `Shellable` — no interactive stream exec).
+
+- **Destructive control takes the WORK HANDLE, never a semantic case id** (`WorkAddressable.killWork(work:
+  RuntimeWorkRef)`, arch-review 52 Wave 2). A case id names a GROUP of executions — two runs of one case are two
+  live jobs — so `Recoverable.kill(caseId)` stops other runs' (and, on Nomad's `namespace=*` sweep, other TENANTS')
+  compute, silently, because kill returns void. Every backend that creates external work therefore REPORTS the
+  exact handle at the moment it creates it (`DispatchOptions.onWork`, best-effort, right after the K8s apply /
+  Nomad submit; never fired for a job with no `runId`), and the control plane PERSISTS it on the physical-attempt
+  ledger row (`ExecutionAttemptStore.recordWork`, `runtime_work` jsonb, mig 0185) so it outlives the dispatching
+  process — a teardown after a restart has nothing else to address live compute with. `killWork` addresses the
+  exact external id in the WORK'S OWN namespace: never a prefix scan, never `namespace=*`, never a selector another
+  run shares. `kill(caseId)` survives only as the no-handle fallback (legacy rows, lanes that mint none) and is
+  called INSTEAD of `killWork`, never beside it. K8s label values a selector selects on must be INJECTIVE —
+  `caseSlug` truncates at 50 chars, so `caseLabelValue`/`runLabelValue` append a digest whenever slugging lost
+  information, and every job carries `everdict.dev/run` beside `everdict.dev/case`.
 - **Failure evidence rides the throw.** The orchestrator job + raw log are deleted/GC'd right after settlement, so
   dispatch-failure paths capture evidence AT THROW TIME: attach `extra.placement {unit,node,events[]}` +
   `extra.logTail` (stderr-preferred, sentinel-stripped, 16 KB tail) to the thrown `UpstreamError` —

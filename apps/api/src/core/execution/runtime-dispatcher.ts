@@ -14,6 +14,7 @@ import {
   NotFoundError,
   type RegistryAuth,
   type RuntimeSpec,
+  type RuntimeWorkRef,
 } from "@everdict/contracts";
 import {
   capabilityKind,
@@ -108,6 +109,14 @@ export class RuntimeDispatcher implements Dispatcher {
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
+    // WHICH RUNTIME THE WORK LANDED ON (arch-review 52, Wave 2). The backend mints the work handle and knows
+    // its own cluster, but not the name the tenant chose for it — this layer is where that name lives, so the
+    // handle picks it up on the way back out. A teardown then knows which lane to try first instead of
+    // offering an exact id to every shard in the recorded list.
+    const opted =
+      opts?.onWork && target !== undefined
+        ? { ...opts, onWork: (work: RuntimeWorkRef) => opts.onWork?.({ ...work, runtimeId: target }) }
+        : opts;
 
     // Pool target ("any runner", no runner id, N runners drain):
     //  - self:ws = workspace pool (owner=ws:<tenant> — any member; owner derived from the job's tenant → membership = access).
@@ -160,7 +169,7 @@ export class RuntimeDispatcher implements Dispatcher {
           ...job,
           evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
         },
-        opts,
+        opted,
       );
     }
 
@@ -210,7 +219,7 @@ export class RuntimeDispatcher implements Dispatcher {
           ...job,
           evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
         },
-        opts,
+        opted,
       );
     }
 
@@ -259,6 +268,6 @@ export class RuntimeDispatcher implements Dispatcher {
       }
       // If the spec isn't found, keep target as-is → the Scheduler fails NOT_FOUND on the unregistered backend (explicit failure).
     }
-    return this.deps.inner.dispatch(routed, opts);
+    return this.deps.inner.dispatch(routed, opted);
   }
 }

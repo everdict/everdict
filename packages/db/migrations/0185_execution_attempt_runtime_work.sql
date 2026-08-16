@@ -1,0 +1,25 @@
+-- WHERE the attempt's compute actually is (arch-review 52, Wave 2) — the placement backend's own name for the
+-- external object it created, stamped when the backend reports it (DispatchOptions.onWork).
+--
+-- WHY IT HAS TO BE PERSISTED AT ALL. The handle is minted inside `dispatch()` and, until now, died with the
+-- process that held the promise. So every teardown that outlived its dispatch — a cancel after a control-plane
+-- restart, a supersede driven by a different replica, boot recovery — had nothing to address live compute by
+-- except the CASE ID. A case id is not an execution: two runs of one case (a re-evaluation beside a scheduled
+-- batch, a shadow beside its baseline) are two jobs, and the case-id kill reached both. This column is what
+-- makes the exact stop reachable from a cold start.
+--
+-- WHY ON THIS ROW. The attempt ledger is already the one unconditional, audit-lifetime record of a physical
+-- execution (mig 0182) — one row per attempt, written before anyone knows how it ends, never swept. That is
+-- exactly the lifetime a work handle needs: it must outlive the dispatch, survive a crash, and still be there
+-- when a retry's teardown comes looking. The alternative homes are all worse — the run row is per EXECUTION
+-- (it cannot hold two attempts' handles), and the recording row is conditional and prunable.
+--
+-- jsonb rather than discrete columns: the shape is the contracts type `RuntimeWorkRef` (tenant, runtimeId,
+-- runId, attemptId, externalJobId, namespace) and it is read as a whole, never filtered on. A column per field
+-- would buy indexes nothing queries by and a migration per orchestrator that names its work differently.
+--
+-- No new index. The two reads that enumerate handles — a run's attempts and a batch's — go through
+-- `execution_id` (covered by the UNIQUE (execution_id, generation)) and `scorecard_id` (covered by the
+-- (scorecard_id, case_id, trial) index). A third index over the same rows is write cost bought for nothing.
+ALTER TABLE everdict_execution_attempts
+  ADD COLUMN IF NOT EXISTS runtime_work jsonb;
