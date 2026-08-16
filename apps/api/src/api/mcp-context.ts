@@ -93,6 +93,7 @@ export interface AgentTryRelayInput {
   workspace: string;
   subject: string;
   agentId?: string;
+  version?: string; // pin a SAVED agent to one immutable version (default latest) — candidate-version evals
   draft?: { instructions?: string; task?: string };
   event: {
     kind: string;

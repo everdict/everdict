@@ -1103,6 +1103,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const parsed = z
       .object({
         agentId: z.string().min(1).optional(),
+        version: z.string().min(1).optional(),
         draft: z.object({ instructions: z.string().optional(), task: z.string().optional() }).optional(),
         event: z.object({
           kind: z.string().min(1),
@@ -1114,12 +1115,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      const { agentId, draft, event } = parsed.data;
+      const { agentId, version, draft, event } = parsed.data;
       const result = await runAgentTry(
         deps,
         principal,
         forwardHeaders(req),
-        { ...(agentId !== undefined ? { agentId } : {}), ...(draft !== undefined ? { draft } : {}) },
+        {
+          ...(agentId !== undefined ? { agentId } : {}),
+          ...(version !== undefined ? { version } : {}),
+          ...(draft !== undefined ? { draft } : {}),
+        },
         event,
       );
       return reply.send(result);
@@ -1506,6 +1511,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     workspace: z.string().min(1),
     subject: z.string().min(1),
     agentId: z.string().min(1).optional(),
+    version: z.string().min(1).optional(),
     draft: z.object({ instructions: z.string().optional(), task: z.string().optional() }).optional(),
     event: z.object({
       kind: z.string().min(1),
@@ -1523,14 +1529,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const keyStore = deps.keyStore;
     const parsed = internalTrySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    const { workspace, subject, agentId, draft, event } = parsed.data;
+    const { workspace, subject, agentId, version, draft, event } = parsed.data;
     const minted = await issueAgentToken(keyStore, workspace, subject, ["read"], `agent-try:${agentId ?? "draft"}`);
     try {
       const result = await runAgentTry(
         deps,
         { subject, workspace, roles: [] },
         { authorization: `Bearer ${minted.token}`, workspace },
-        { ...(agentId !== undefined ? { agentId } : {}), ...(draft !== undefined ? { draft } : {}) },
+        {
+          ...(agentId !== undefined ? { agentId } : {}),
+          ...(version !== undefined ? { version } : {}),
+          ...(draft !== undefined ? { draft } : {}),
+        },
         event,
       );
       return reply.send(result);

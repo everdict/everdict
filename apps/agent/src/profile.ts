@@ -39,7 +39,10 @@ export interface AgentProfile {
 // agentId overrides which registered AgentSpec shapes the turn — a trigger activation runs with the CRAFTED
 // agent's config (its instructions/tools/model ARE its identity), not the workspace's chat default
 // (agent-automation A3). Unset → the resolver's configured default ("default", the chat config).
-export type ProfileResolver = (principal: Principal, agentId?: string) => Promise<AgentProfile>;
+// `version` narrows a SAVED agent to one immutable version (default "latest") — the evolution loop's evaluate
+// step needs it to try a candidate version that changed tools/model, not just the newest row. Meaningless
+// without agentId; resolvers ignore it then.
+export type ProfileResolver = (principal: Principal, agentId?: string, version?: string) => Promise<AgentProfile>;
 
 // Compose the base persona with the workspace's own instructions (appended, so the persona + tool protocol stay
 // fixed), a note when any workspace tool can mutate, and a note when the workspace has authored skills.
@@ -229,7 +232,7 @@ export function registryProfileResolver(opts: {
   // (current | behind | unverified) that use_skill surfaces as a listing badge + as-of body banner. Best-effort.
   latestVersionOf?: LatestVersionResolver;
 }): ProfileResolver {
-  return async (principal, agentId) => {
+  return async (principal, agentId, version) => {
     // The consumer's secret tiers (workspace + personal) — the auth for raw mcpServers, adopted capabilities, AND the
     // first-party defaults resolves from here. Fetched once, best-effort (a failure degrades to no secrets).
     let scoped: Awaited<ReturnType<SecretStore["scopedEntries"]>> = { workspace: {}, user: {} };
@@ -246,7 +249,12 @@ export function registryProfileResolver(opts: {
 
     let spec: AgentSpec | undefined;
     try {
-      spec = await opts.agentRegistry.get(principal.workspace, agentId ?? opts.configId, "latest");
+      // A version pin only makes sense against the agent the caller NAMED — the config fallback always floats.
+      spec = await opts.agentRegistry.get(
+        principal.workspace,
+        agentId ?? opts.configId,
+        agentId !== undefined && version !== undefined ? version : "latest",
+      );
     } catch {
       spec = undefined; // no workspace agent registered (or lookup failed) → base persona + skills + defaults only
     }

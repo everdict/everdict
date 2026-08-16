@@ -56,14 +56,16 @@ export async function runAgentTry(
   deps: AgentTryDeps,
   principal: Principal,
   headers: ForwardHeaders,
-  input: { agentId?: string; draft?: { instructions?: string; task?: string } },
+  input: { agentId?: string; version?: string; draft?: { instructions?: string; task?: string } },
   event: AgentTryEvent,
   signal?: AbortSignal,
 ): Promise<AgentTryResult> {
-  // Saved agent → its full registered profile (instructions/tools/skills/model). Draft → base + overlay.
+  // Saved agent → its full registered profile (instructions/tools/skills/model), optionally pinned to ONE
+  // immutable version — the evolution loop evaluates candidate versions, not just the newest row. Draft →
+  // base + overlay.
   const profile =
     input.agentId !== undefined && deps.resolveProfile
-      ? await deps.resolveProfile(principal, input.agentId)
+      ? await deps.resolveProfile(principal, input.agentId, input.version)
       : undefined;
   let systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
   if (input.draft?.instructions) systemPrompt += `\n\n## Workspace instructions (draft)\n${input.draft.instructions}`;

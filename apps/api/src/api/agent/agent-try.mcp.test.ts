@@ -57,6 +57,18 @@ describe("MCP try_agent", () => {
     expect(seen[0]?.draft?.instructions).toBe("candidate instructions");
   });
 
+  it("relays a saved agent's version pin", async () => {
+    const seen: AgentTryRelayInput[] = [];
+    const client = await connect(makeDeps(seen));
+    const res = await client.callTool({
+      name: "try_agent",
+      arguments: { agentId: "helper", version: "1.2.0", event: args.event },
+    });
+    expect(isError(res)).toBe(false);
+    expect(seen[0]?.agentId).toBe("helper");
+    expect(seen[0]?.version).toBe("1.2.0");
+  });
+
   it("refuses a caller without agents:write", async () => {
     const seen: AgentTryRelayInput[] = [];
     const client = await connect(makeDeps(seen), ["viewer"]);

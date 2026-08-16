@@ -84,4 +84,26 @@ describe("POST /internal/try", () => {
     // One-shot: nothing remains in the key store once the try returned.
     expect(await keyStore.list("acme")).toHaveLength(0);
   });
+
+  it("pins a saved agent to the requested version — candidate-version evals, not just the newest row", async () => {
+    const resolved: Array<{ agentId?: string; version?: string }> = [];
+    const d = deps(new InMemoryTenantKeyStore(), []);
+    (d as { resolveProfile?: unknown }).resolveProfile = async (
+      _principal: unknown,
+      agentId?: string,
+      version?: string,
+    ) => {
+      resolved.push({ ...(agentId !== undefined ? { agentId } : {}), ...(version !== undefined ? { version } : {}) });
+      return { systemPrompt: "pinned persona", mcpServers: [], skills: [], codeTools: [] };
+    };
+    const app = buildServer(d);
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/try",
+      headers: { "x-internal-token": "shhh" },
+      payload: { workspace: "acme", subject: "member-1", agentId: "helper", version: "1.2.0", event: body.event },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(resolved).toEqual([{ agentId: "helper", version: "1.2.0" }]);
+  });
 });

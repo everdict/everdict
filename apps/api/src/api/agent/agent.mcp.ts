@@ -177,7 +177,11 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           "version); draft overlays candidate instructions/task on the base persona WITHOUT saving a version; " +
           "omit both to try the base persona.",
         inputSchema: {
-          agentId: z.string().optional().describe("Saved agent id to try (latest version)"),
+          agentId: z.string().optional().describe("Saved agent id to try"),
+          version: z
+            .string()
+            .optional()
+            .describe("Pin the saved agent to one immutable version (default latest) — candidate-version evals"),
           draft: z
             .object({ instructions: z.string().optional(), task: z.string().optional() })
             .optional()
@@ -192,13 +196,14 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
             .describe("The (replayed or hand-built) platform event to fire at the configuration"),
         },
       },
-      ({ agentId, draft, event }) =>
+      ({ agentId, version, draft, event }) =>
         run(principal, "agents:write", async () =>
           ok(
             await tryAgent({
               workspace: ws,
               subject: principal.subject,
               ...(agentId !== undefined ? { agentId } : {}),
+              ...(version !== undefined ? { version } : {}),
               ...(draft !== undefined ? { draft } : {}),
               event,
             }),
