@@ -142,7 +142,15 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     const table = this.table();
     await this.command(`CREATE DATABASE IF NOT EXISTS ${this.database()}`, {});
     await this.command(schemaSql(table), {});
-    for (const alter of [ADD_EMITTER_SQL, ADD_T0_SQL, ADD_OWNER_SQL, ADD_BODY_FORMAT_SQL, ADD_KIND_SQL, ADD_LABEL_SQL])
+    for (const alter of [
+      ADD_EMITTER_SQL,
+      ADD_T0_SQL,
+      ADD_OWNER_SQL,
+      ADD_BODY_FORMAT_SQL,
+      ADD_KIND_SQL,
+      ADD_LABEL_SQL,
+      ADD_ATTEMPT_SQL,
+    ])
       await this.command(alter(table), {});
   }
 

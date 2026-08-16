@@ -163,6 +163,24 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
     expect(calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).length).toBeGreaterThan(0);
   });
 
+  it("ALTERs every column the CREATE declares beyond the base row — a table from an older install must serve today's reads", async () => {
+    // attempt_id shipped in the CREATE and in the read queries but was left out of the ALTER list: fresh
+    // installs worked while every pre-existing deployment failed each `get` with UNKNOWN_IDENTIFIER (Code 47)
+    // — after a boot that reported success. Pin the invariant structurally: the CREATE's additive columns
+    // (String DEFAULT '') and the ALTER set must agree, so the next column cannot repeat this.
+    const { calls, fetchImpl } = fakeClickHouse(() => "");
+    await new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl).ensureSchema();
+    const create = calls.find(({ sql }) => sql.startsWith("CREATE TABLE"))?.sql ?? "";
+    const declared = [...create.matchAll(/^\s*(\w+) String DEFAULT ''/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
+    expect(declared).toContain("attempt_id");
+    const alters = calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).map(({ sql }) => sql);
+    for (const column of declared)
+      expect(
+        alters.some((sql) => sql.includes(`ADD COLUMN IF NOT EXISTS ${column} String`)),
+        `column "${column}" is created for fresh installs but never ALTERed onto existing tables`,
+      ).toBe(true);
+  });
+
   it("refuses a database name that is not a plain identifier — it becomes SQL text, not a bound param", async () => {
     const { fetchImpl } = fakeClickHouse(() => "");
     const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123", database: "ever;DROP" }, fetchImpl);
