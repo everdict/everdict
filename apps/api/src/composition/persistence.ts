@@ -15,7 +15,6 @@ import {
   InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
-  NamingTrajectoryStore,
   soleLeader,
   soloReplicas,
 } from "@everdict/application-control";
@@ -325,13 +324,6 @@ function resolveSecretCipher(): SecretCipher {
 // DATABASE_URL → Postgres (migrations applied at startup), else in-memory.
 // The secret store is always active (on by default). The at-rest encryption KEK is EVERDICT_SECRETS_KEY (base64 32B); if unset, an ephemeral key is
 // auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
-// Every sealed trajectory is named at seal, whichever rung holds it (in-memory · Postgres · ClickHouse) —
-// the decorator derives the line that tells one row from its siblings from the body it was handed, so no
-// seal path has to remember to. Wrapped HERE, once, for the same reason RevisionedWorkspaceFs is.
-function named(store: TrajectoryStore): TrajectoryStore {
-  return new NamingTrajectoryStore(store);
-}
-
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   // The trajectory store's ops-scale rung (native-observability N-O1 rung 2): EVERDICT_CLICKHOUSE_URL swaps
@@ -426,7 +418,7 @@ export async function makePersistence(): Promise<Persistence> {
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
-      trajectoryStore: named(clickhouseTrajectories ?? new InMemoryTrajectoryStore()),
+      trajectoryStore: clickhouseTrajectories ?? new InMemoryTrajectoryStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -497,7 +489,7 @@ export async function makePersistence(): Promise<Persistence> {
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
-    trajectoryStore: named(clickhouseTrajectories ?? new PgTrajectoryStore(client)),
+    trajectoryStore: clickhouseTrajectories ?? new PgTrajectoryStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),
