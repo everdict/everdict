@@ -1,0 +1,269 @@
+import type {
+  CaseCommitReceipt,
+  CaseResult,
+  Dataset,
+  EvalCase,
+  RunRecord,
+  ScorecardExport,
+  ScorecardRecord,
+} from "@everdict/contracts";
+import { caseResultDigest } from "@everdict/domain";
+import { describe, expect, it } from "vitest";
+import { ScoringService } from "../execution/scoring-service.js";
+import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
+import type { DatasetRegistry } from "../ports/dataset-registry.js";
+import type { RunStore } from "../ports/run-store.js";
+import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
+import type { BatchDriverShared } from "./batch-driver-shared.js";
+import type { ScorecardBatchDeps } from "./scorecard-deps.js";
+import { WorkflowBatchDriver } from "./workflow-batch-driver.js";
+
+// ── A FINALIZER THAT LOST THE SETTLE MUST NOT HAVE PUBLISHED ─────────────────────────────────────────
+//
+// `finalizeBatch` already knows the rule and states it twice: the terminal write is read-guarded and epoch-
+// fenced (`settleScorecard(… { over: "open", epoch })`), and when it comes back `undefined` the attempt
+// publishes nothing — no facts, no metrics, no notification, "the winner publishes, counts and notifies; this
+// attempt does none of the three".
+//
+// Two effects escape that rule, because they happen BEFORE the fence rather than after it:
+//
+//   1. `offloadAnalysis(this.deps, id, initialBundle, initialPassId(...))` writes the MUTABLE current key
+//      (`analyses/<id>.json`) — the object `ScorecardRecord.analysisRef` points at and the analysis surface
+//      re-reads. The per-pass frozen key is pass-scoped precisely so two finalizers cannot collide on it
+//      (review 39 P0-6); the current key has no such protection and is overwritten unconditionally.
+//   2. `exportResults(...)` ships the batch's cases to the tenant's observability platform. An export is not
+//      a local write: it creates traces in someone else's system, and no later CAS result can recall them.
+//
+// So a Temporal activity that paused between its read and its settle — the ordinary at-least-once shape this
+// whole file is built around — republishes the current analysis artifact of a batch that a user CANCELLED
+// while it slept, and exports the cases of a batch that will never be reported as succeeded. The record ends
+// up cancelled while the artifact behind `analysisRef` and the rows in the tenant's MLflow describe a
+// successful run. Every guard in the file holds; the effects simply ran on the wrong side of it.
+//
+// The fix this pins is ordering, not another check: the settlement's outward effects hang off the settlement
+// that COMMITTED (the wave-4 publication outbox), so there is no window in which they can be performed by an
+// attempt that has not yet won.
+const CASE_ID = "c1";
+const SCORECARD_ID = "sc-1";
+const CHILD_ID = "child-c1";
+const ANALYSIS_CURRENT_KEY = `analyses/${SCORECARD_ID}.json`;
+
+const caseResult: CaseResult = {
+  caseId: CASE_ID,
+  harness: "h@1",
+  trace: [],
+  snapshot: { kind: "prompt", output: "done" },
+  scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+};
+
+const child: RunRecord = {
+  id: CHILD_ID,
+  tenant: "acme",
+  harness: { id: "h", version: "1" },
+  caseId: CASE_ID,
+  status: "succeeded",
+  result: caseResult,
+  createdAt: "2026-08-15T00:00:00.000Z",
+  updatedAt: "2026-08-15T00:00:01.000Z",
+} as unknown as RunRecord;
+
+const receipt: CaseCommitReceipt = {
+  scorecardId: SCORECARD_ID,
+  caseId: CASE_ID,
+  trial: 0,
+  kind: "executed",
+  childRunId: CHILD_ID,
+  resultDigest: caseResultDigest(caseResult),
+  committedAt: "2026-08-15T00:00:01.000Z",
+};
+
+// The record as the finalizer READS it: still open, so the `isTerminal()` early-out lets it through. The
+// concurrent cancel commits after this read — which the store below models by refusing the fenced write.
+const openRecord: ScorecardRecord = {
+  id: SCORECARD_ID,
+  tenant: "acme",
+  dataset: { id: "d", version: "1.0.0" },
+  harness: { id: "h", version: "1" },
+  status: "running",
+  createdAt: "2026-08-15T00:00:00.000Z",
+  updatedAt: "2026-08-15T00:00:00.000Z",
+  orchestration: { judges: [], retries: 0, concurrency: 1 },
+} as unknown as ScorecardRecord;
+
+const unusedDatasets: DatasetRegistry = {
+  async register() {
+    throw new Error("unused");
+  },
+  async has() {
+    return false;
+  },
+  async get(): Promise<Dataset> {
+    throw new Error("unused");
+  },
+  async versions() {
+    return [];
+  },
+  async ownVersions() {
+    return [];
+  },
+  async list() {
+    return [];
+  },
+  async creatorOf() {
+    return undefined;
+  },
+  async moveToTeam() {
+    throw new Error("unused");
+  },
+  async softDelete() {
+    throw new Error("unused");
+  },
+  async setVersionTags() {
+    throw new Error("unused");
+  },
+  async versionTags() {
+    return {};
+  },
+};
+
+// The private per-batch context, injected directly: `buildBatchContext` re-resolves registries and verifies
+// the sealed plan, none of which is the subject here — the subject is the ORDER of three statements inside
+// `finalizeBatch`.
+type InjectableContext = {
+  tenant: string;
+  owner: string;
+  dataset: Dataset;
+  harnessId: string;
+  harnessVersion: string;
+  judges: Array<{ id: string; version: string }>;
+  retries: number;
+  concurrency: number;
+  caseIndex: Map<string, EvalCase>;
+  targets: string[];
+  driverEpoch: number;
+  doneIds: Set<string>;
+  inFlightIds: Set<string>;
+  stepChain: Promise<void>;
+};
+
+function harness(): { driver: WorkflowBatchDriver; putKeys: string[]; exports: string[] } {
+  const putKeys: string[] = [];
+  const exports: string[] = [];
+
+  const artifacts: ArtifactStore = {
+    async put(key) {
+      putKeys.push(key);
+      return `https://artifacts.invalid/${key}`;
+    },
+    async get() {
+      return undefined;
+    },
+    async publicUrlFor() {
+      return undefined;
+    },
+  };
+
+  const store: ScorecardStore = {
+    async create() {
+      throw new Error("unused");
+    },
+    // A GUARDED write is the settle; it LOSES, because a user cancel committed between this finalizer's read
+    // and its terminal write. An unguarded write is the step-timeline append, which is not the subject.
+    async update(_id: string, _patch: Partial<ScorecardRecord>, _events, guard?: ScorecardUpdateGuard) {
+      if (guard?.expectNonTerminal === true) return undefined;
+      return openRecord;
+    },
+    async get() {
+      return openRecord;
+    },
+    async list() {
+      return [];
+    },
+    async delete() {
+      return false;
+    },
+  };
+
+  const runStore = {
+    async list() {
+      return [child];
+    },
+  } as unknown as RunStore;
+
+  const caseReceipts = {
+    async list() {
+      return [receipt];
+    },
+  } as unknown as CaseReceiptStore;
+
+  const deps: ScorecardBatchDeps = {
+    dispatcher: {
+      async dispatch() {
+        throw new Error("unused");
+      },
+    },
+    store,
+    datasets: unusedDatasets,
+    runStore,
+    caseReceipts,
+    artifacts,
+    async exportResults(_tenant, ctx): Promise<ScorecardExport | undefined> {
+      exports.push(ctx.scorecardId);
+      return { status: "ok" } as unknown as ScorecardExport;
+    },
+  };
+
+  const shared = {
+    newId: () => "id-1",
+    now: () => "2026-08-15T00:00:02.000Z",
+    scoring: new ScoringService({}),
+    inFlight: new Map<string, AbortController>(),
+    async checkReceiptParity() {
+      /* the ledger↔receipt parity note; not the subject */
+    },
+  } as unknown as BatchDriverShared;
+
+  const driver = new WorkflowBatchDriver(deps, shared);
+  const ctx: InjectableContext = {
+    tenant: "acme",
+    owner: "acme",
+    dataset: { id: "d", version: "1.0.0", cases: [{ id: CASE_ID, prompt: "p" }] } as unknown as Dataset,
+    harnessId: "h",
+    harnessVersion: "1",
+    judges: [],
+    retries: 0,
+    concurrency: 1,
+    caseIndex: new Map<string, EvalCase>([[CASE_ID, { id: CASE_ID, prompt: "p" } as unknown as EvalCase]]),
+    targets: [],
+    driverEpoch: 0,
+    doneIds: new Set<string>([CASE_ID]),
+    inFlightIds: new Set<string>(),
+    stepChain: Promise.resolve(),
+  };
+  (driver as unknown as { batchContexts: Map<string, InjectableContext> }).batchContexts.set(SCORECARD_ID, ctx);
+
+  return { driver, putKeys, exports };
+}
+
+describe.skip("a Temporal finalize that loses the terminal CAS", () => {
+  // [WAVE-4 COUNTEREXAMPLE #12] RED as of 02a3e15e: `AssertionError: expected [ 'analyses/sc-1.json', …(1) ]
+  // to not include 'analyses/sc-1.json'` (and, with that line removed, `expected [ 'sc-1' ] to deeply equal
+  // []` — BOTH effects fire) — `offloadAnalysis` and `exportResults` run at workflow-batch-driver.ts:743-760,
+  // BEFORE the `settleScorecard` fence at :776, so a finalizer that loses the settle has already overwritten
+  // the mutable current-analysis artifact and shipped the batch's cases to the tenant's platform. Un-skip when
+  // wave 4 lands.
+  it("leaves the mutable analysis artifact and the tenant's trace sink untouched", async () => {
+    // Given a finalizer whose read saw an OPEN batch and whose terminal write will be refused, because a
+    // cancel committed in between — the at-least-once shape this driver is built around.
+    const { driver, putKeys, exports } = harness();
+
+    await driver.finalizeBatch(SCORECARD_ID);
+
+    // Then it published nothing outward. The mutable key is what `analysisRef` resolves to, so rewriting it
+    // makes a cancelled batch's analysis surface describe a successful run…
+    expect(putKeys).not.toContain(ANALYSIS_CURRENT_KEY);
+    // …and an export cannot be taken back: the traces live in the tenant's platform from the moment it runs.
+    expect(exports).toEqual([]);
+  });
+});
