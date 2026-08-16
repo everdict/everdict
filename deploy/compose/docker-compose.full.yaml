@@ -240,6 +240,10 @@ services:
       EVERDICT_SELF_HOSTED_STORE_HUB: "1"
       # Idle timeout for a parked self-hosted job with no lease/heartbeat activity (ms). Default 300000 (5 min).
       EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS: ${EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS:-300000}
+      # ── Scoring-stage contract step (docs: /internal/scoring-stage-promotion): "1" = a settled pass builds
+      # the plane it certifies by promoting its staged judgments (where its own parity observation vouches).
+      # Flip only after the readiness report is green on real traffic under the CURRENT parity era. ──
+      EVERDICT_SCORING_STAGE_AUTHORITATIVE: ${EVERDICT_SCORING_STAGE_AUTHORITATIVE:-}
       # ── Temporal: durable scorecard batches + scheduled/cron evals ──
       EVERDICT_TEMPORAL_ADDRESS: temporal:7233
       # ── Store-backed front-door callback rendezvous (topology/A2A completion across replicas) ──
