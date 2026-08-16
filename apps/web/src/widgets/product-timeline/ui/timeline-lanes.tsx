@@ -101,21 +101,19 @@ export function TimelineLanes({
       onPointerLeave={() => setHover(undefined)}
     >
       <div className="relative space-y-0">
-        {/* 예정 구간 — "지금"부터 창의 끝(가장 먼 목표일)까지. 계획은 사건이 아니라서 같은 바닥에 그리면
-            안 된다: 밴드로 눌러 두고 경계에 오늘 선을 세운다. 레인 행들이 뒤에 오므로(둘 다 positioned)
-            마커는 이 밴드 위에 그려진다 — 라벨 폭 w-28 = left-28 이 레인 영역의 왼쪽 끝. */}
-        {hasFuture && (
-          <div
-            className="pointer-events-none absolute inset-y-0 left-28 right-0"
-            aria-hidden="true"
-          >
+        {/* 오늘 선은 항상 선다 — 창이 오늘로 끝나도 "지금이 축의 어디인가"는 이 그래프가 답해야 하는
+            질문이다(그때는 오른쪽 끝에 선다). 예정 구간의 밴드만 창이 미래까지 뻗었을 때 생긴다: 계획은
+            사건이 아니라서 같은 바닥에 그리면 안 된다. 레인 행들이 뒤에 오므로(둘 다 positioned) 마커는
+            이 레이어 위에 그려진다 — 라벨 폭 w-28 = left-28 이 레인 영역의 왼쪽 끝. */}
+        <div className="pointer-events-none absolute inset-y-0 left-28 right-0" aria-hidden="true">
+          {hasFuture && (
             <div
               className="absolute inset-y-0 right-0 bg-muted/50"
               style={{ left: `${nowPct}%` }}
             />
-            <div className="absolute inset-y-0 w-px bg-primary/40" style={{ left: `${nowPct}%` }} />
-          </div>
-        )}
+          )}
+          <div className="absolute inset-y-0 w-px bg-primary/40" style={{ left: `${nowPct}%` }} />
+        </div>
         {hasReleases && (
           <div className="relative flex items-center">
             <span className={label}>{t('laneReleases')}</span>
@@ -330,7 +328,7 @@ export function TimelineLanes({
         <div className="relative h-4 flex-1">
           {ticks.map((tick, index) => {
             // 오늘 라벨과 겹치는 눈금은 뺀다 — 두 날짜가 한 자리에서 서로를 못 읽게 만드는 쪽이 손해다.
-            if (hasFuture && Math.abs(tick.pct - nowPct) < 9) return null
+            if (Math.abs(tick.pct - nowPct) < 9) return null
             return (
               <span
                 key={tick.at}
@@ -347,15 +345,18 @@ export function TimelineLanes({
               </span>
             )
           })}
-          {/* 오늘 — 창이 미래까지 뻗었을 때만. 축에서 유일하게 강조되는 날짜다. */}
-          {hasFuture && (
-            <span
-              className="absolute top-0 whitespace-nowrap font-mono text-[10px] text-primary"
-              style={{ left: `${nowPct}%`, transform: 'translateX(-50%)' }}
-            >
-              {t('today')}
-            </span>
-          )}
+          {/* 오늘 — 축에서 유일하게 강조되는 날짜, 위의 선과 같은 자리. 오른쪽 끝에 붙으면(창이 오늘로
+              끝나는 보통의 경우) 가운데 정렬이 라벨을 컨테이너 밖으로 자르니 선에 오른끝을 맞춘다. */}
+          <span
+            className="absolute top-0 whitespace-nowrap font-mono text-[10px] text-primary"
+            style={
+              nowPct > 93
+                ? { right: `${Math.max(0, 100 - nowPct)}%` }
+                : { left: `${nowPct}%`, transform: 'translateX(-50%)' }
+            }
+          >
+            {t('today')}
+          </span>
         </div>
       </div>
     </div>
