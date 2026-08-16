@@ -1393,6 +1393,43 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
     });
   });
 
+  it("repeated caseIds in one upload ingest as TRIALS (occurrence-indexed), a repeat-free upload stays trial-less", async () => {
+    // Regression: the agent-eval loop (B5 / agent-evolve) uploads N tries per scenario as repeated caseIds,
+    // but ingest never stamped `trial` — so the diff's statistical regression gate (which engages on
+    // `result.trial`) silently never attached to ingested pairs, and the evolve loop had no significance
+    // verdict to decide on.
+    const { store, service } = build(new InMemoryTrajectoryStore(), {
+      fetch: async () => {
+        throw new Error("push ingest never pulls");
+      },
+    });
+    const created = await service.ingest({
+      tenant: "acme",
+      traces: [
+        { caseId: "s1", trace: pulled },
+        { caseId: "s1", trace: pulled },
+        { caseId: "s2", trace: pulled },
+      ],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    const rows = (done.scorecard?.results ?? []).map((r) => ({ caseId: r.caseId, trial: r.trial }));
+    expect(rows).toEqual([
+      { caseId: "s1", trial: 0 },
+      { caseId: "s1", trial: 1 },
+      { caseId: "s2", trial: 0 },
+    ]);
+
+    const single = await service.ingest({
+      tenant: "acme",
+      traces: [{ caseId: "s1", trace: pulled }],
+      judges: [],
+    });
+    const singleDone = await waitTerminal(store, single.id);
+    expect(singleDone.scorecard?.results.every((r) => r.trial === undefined)).toBe(true);
+  });
+
   it("an ingested case stamps the evidence era WITHOUT a seal, so its evidence reads partial", async () => {
     // Regression: pre-fix, an absent seal was indistinguishable from a pre-seal-era row, so every ingested
     // case claimed COMPLETE trace evidence. Ingest scores a trace someone else collected — nobody here

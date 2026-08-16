@@ -312,10 +312,26 @@ export class ScorecardIngestService {
     // so requested − executed stays statable for pulls too. Push-ingest already sealed it at create;
     // re-writing the same number is a harmless idempotent patch.
     await this.deps.store.update(id, { requested: perCase.length, updatedAt: this.now() });
+    // Repeated caseIds ARE trials (agent evals, B5: N tries per scenario land in one upload). Stamp the
+    // occurrence index so the trial machinery — grouping, pass@k, and the diff's statistical regression gate —
+    // engages on ingested batches too; without the stamp the diff saw N same-id rows and no trials, so the
+    // significance gate the evolve loop decides on never attached. A batch with no repeats stays trial-less,
+    // exactly like a single-attempt live run.
+    const repeated = new Set<string>();
+    {
+      const seen = new Set<string>();
+      for (const up of perCase) {
+        if (seen.has(up.caseId)) repeated.add(up.caseId);
+        seen.add(up.caseId);
+      }
+    }
+    const trialIndex = new Map<string, number>();
     const results: CaseResult[] = [];
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);
       if (!evalCase) continue; // skip caseIds not in the dataset (can't align)
+      const trial = trialIndex.get(up.caseId) ?? 0;
+      trialIndex.set(up.caseId, trial + 1);
       // Own-store pulls skip materialize: the evidence already lives in the owned store under its own runId
       // (attach.externalIdByCase is that provenance) — a second sealed copy per scorecard would add nothing.
       const trace =
@@ -336,6 +352,7 @@ export class ScorecardIngestService {
       const derived = (await Promise.all(traceGraders.map((g) => g.grade(ctx)))).flatMap(toScores);
       results.push({
         caseId: up.caseId,
+        ...(repeated.size > 0 ? { trial } : {}),
         harness: harnessLabel,
         // Stamped with the era but deliberately NOT sealed: ingest scores a trace someone else collected, on
         // both the push and pull paths. Nobody here watched that collection run to completion, so vouching for
