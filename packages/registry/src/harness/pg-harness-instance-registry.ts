@@ -77,6 +77,9 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec> {
     return this.store.get(tenant, id, ref);
   }

@@ -382,7 +382,18 @@ regression watch's, and an issue it reopened blocks the release through the link
 
 - `GET /products/:id/timeline?from&to` — the axis in one read (the pulse's treatment: composed from stores
   server-side, drawn by the web): releases + windowed version ledger + per-series points (oldest first, with
-  pass rate via `headlinePassRate` and the triggering `serviceVersion`) + the issues' lifecycle markers.
+  pass rate via `headlinePassRate` and the triggering `serviceVersion`) + the issues' lifecycle markers +
+  the watched capabilities' version registrations.
+
+  **The evaluation contract is on the axis too** (`capabilities[]`): a new version of a watched harness,
+  dataset or judge changes what the next auto-run asks, which makes it an event on this product's timeline
+  exactly like a service release. It is derived from the series the product declares TODAY (a capability it
+  stopped watching is no longer its news), windowed like the version ledger, and each event carries the
+  `seriesKeys` that watch it — a product with several series needs the marker to answer "whose contract
+  moved". The instants come from the registries' `versionDates` read (per-version registration time, live
+  versions only, owner-first incl. the `_shared` fallback), wired through the optional
+  `capabilityVersions` seam in `ProductServiceDeps` — a deployment without it serves the honest empty array,
+  and a dangling series ref answers an empty map rather than failing the read.
 
   **An issue reaches the axis three ways, and only two of them are declared by a person.** `product` and
   `release` are explicit links; `evidence` is an issue that one of this product's own watch-series scorecards
@@ -438,6 +449,20 @@ regression watch's, and an issue it reopened blocks the release through the link
   resolution (● at `resolvedAt`) are what people look for on a timeline; a bar alone reads as "something was
   open in early August" and stops there. An unresolved issue gets no end marker — its span still stops at
   `now`, because a bar reaching into the future is a prediction rather than a fact.
+  **Overlapping lifespans pack onto real tracks** (greedy interval assignment): the former odd/even-index
+  split only separated neighbours, so three issues opened the same week drew the first and third exactly on
+  top of each other. Track count = the actual maximum concurrency, and the lane grows its height for a dense
+  window instead of hiding a span.
+- **The detail page reads the same axis two more ways.** A day-grouped, newest-first EVENT FEED
+  (`widgets/product-timeline` `timeline-feed.tsx`, the `detailed` prop — GitHub's project-timeline reading):
+  every event the lanes draw — version published, release shipped / target day, issue opened/resolved (with
+  the closing scorecard as an `evidence` link), series evaluated (pass rate + triggering version), capability
+  version registered — told as sentences over the shared `ActivityFeed` atoms, capped with a show-more.
+  Dates and day headers read in the SAME UTC the lanes' ticks use — a lane dot on 8/12 and a feed row saying
+  8/13 would discredit both. And a WINDOW RANGE control (`?range=1m|3m|6m|1y` on `/product/[slug]`; the
+  default quarter lives on no parameter, so the server keeps the one definition of "default"): a filter
+  decides the set, so it rides the URL and a pasted link opens the same window. The home summary renders
+  neither — lanes + trend only.
 
 ## Where the code lives
 

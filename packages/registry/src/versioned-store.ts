@@ -152,6 +152,19 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return out;
   }
 
+  // version → registration instant (live versions only). Reads resolve the owner like versions() does — a
+  // `_shared` capability's timeline is its own registration history, not an empty map. The product timeline
+  // reads this to place capability-version events on the axis.
+  versionDates(tenant: string, id: string): Record<string, string> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, string> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.deletedAt === undefined) out[e.item.version] = e.createdAt;
+    }
+    return out;
+  }
+
   // version → origin (only stamped live versions). Reads resolve the owner like versions() does, so a `_shared`
   // fallback answers with its own provenance rather than an empty map.
   versionOrigins(tenant: string, id: string): Record<string, CapabilityOrigin> {

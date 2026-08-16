@@ -56,6 +56,9 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  async versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
 
   async list(tenant: string): Promise<DatasetListEntry[]> {
     const out: DatasetListEntry[] = [];

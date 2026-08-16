@@ -138,6 +138,9 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  async versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
   async getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec> {
     return this.store.get(tenant, id, ref);
   }

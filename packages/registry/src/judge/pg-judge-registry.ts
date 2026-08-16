@@ -65,6 +65,9 @@ export class PgJudgeRegistry implements JudgeRegistry {
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
 
   // JudgeListEntry = shared version meta + judgeDerived over the latest spec (the per-entity display fields).
   async list(tenant: string): Promise<JudgeListEntry[]> {

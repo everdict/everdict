@@ -70,6 +70,9 @@ export class PgDatasetRegistry implements DatasetRegistry {
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
 
   async list(tenant: string): Promise<DatasetListEntry[]> {
     const r = await this.client.query<{ id: string }>(

@@ -32,25 +32,49 @@ import { SectionHeader } from '@/shared/ui/section-header'
 
 export const dynamic = 'force-dynamic'
 
+// 타임라인의 보이는 과거 — 서버 기본은 한 분기(release 대화가 보는 폭)이고, 그 밖의 폭은 사람이 URL 로
+// 고른다. 필터는 URL 의 것이라(웹 규칙) 붙여넣은 링크가 같은 창을 연다; 기본 폭(3m)은 파라미터 없이 산다.
+const TIMELINE_RANGES = [
+  { key: '1m', days: 30 },
+  { key: '3m', days: 90 },
+  { key: '6m', days: 180 },
+  { key: '1y', days: 365 },
+] as const
+type TimelineRangeKey = (typeof TIMELINE_RANGES)[number]['key']
+
 // 프로덕트 상세 — 타임라인이 본문이다: 릴리즈(과거+계획) · 워치 시리즈의 추이 · 버전 원장 · 링크된 이슈.
 // 전부 서버가 합성한 두 번의 read(상세 + 타임라인)로 그려진다. 웹은 파생하지 않는다.
 export default async function ProductPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string; id: string }>
+  searchParams: Promise<{ range?: string }>
 }) {
   const { workspace, id } = await params
+  const { range } = await searchParams
   const t = await getTranslations('productPage')
   const locale = await getLocale()
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
+
+  // 알 수 없는 range 는 기본 폭으로 — 잘못 친 파라미터가 빈 화면이 되는 것보다 낫다.
+  const activeRange: TimelineRangeKey =
+    TIMELINE_RANGES.find((preset) => preset.key === range)?.key ?? '3m'
+  const rangeDays = TIMELINE_RANGES.find((preset) => preset.key === activeRange)?.days
+  const window =
+    activeRange === '3m' || rangeDays === undefined
+      ? undefined // 서버 기본(한 분기) — from 을 다시 계산해 보내면 서버와 웹이 "기본"을 두 번 정의한다
+      : { from: new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString() }
 
   let product: ProductDetail
   let timeline: ProductTimeline
   try {
     ;[product, timeline] = await Promise.all([
       controlPlane.getProduct(ctx, id).then((raw) => productDetailSchema.parse(raw)),
-      controlPlane.getProductTimeline(ctx, id).then((raw) => productTimelineSchema.parse(raw)),
+      controlPlane
+        .getProductTimeline(ctx, id, window)
+        .then((raw) => productTimelineSchema.parse(raw)),
     ])
   } catch {
     notFound()
@@ -58,7 +82,10 @@ export default async function ProductPage({
   // 주소는 하나로 모은다 — 컨트롤 플레인은 슬러그와 id 를 둘 다 같은 레코드로 해석하지만(옛 링크가
   // 깨지지 않는다), 화면에 남는 주소는 슬러그여야 한다. 이슈 상세가 `ENG-12` 로 정규화하는 것과 같은
   // 규칙이고, 여기가 그 정규화가 일어나는 유일한 지점이다(릴리즈 상세의 뒤로가기는 productId 를 쓴다).
-  if (id !== productRef(product)) redirect(productHref(workspace, productRef(product)))
+  if (id !== productRef(product))
+    redirect(
+      `${productHref(workspace, productRef(product))}${activeRange !== '3m' ? `?range=${activeRange}` : ''}`
+    )
   // 히스토리 행의 배우 이름 — 실패해도 화면은 뜬다(주체가 subject 문자열로 남을 뿐).
   let members: Member[] = []
   try {
@@ -164,6 +191,25 @@ export default async function ProductPage({
         productId={product.id}
         timeline={timeline}
         canWrite={canWrite}
+        detailed
+        toolbar={
+          // 기간 프리셋 — 어느 폭의 창을 보고 있는가. 필터라 URL 이 실어 나른다(기본 3m 은 파라미터 없이).
+          <span className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5">
+            {TIMELINE_RANGES.map((preset) => (
+              <Link
+                key={preset.key}
+                href={`${productHref(workspace, productRef(product))}${preset.key !== '3m' ? `?range=${preset.key}` : ''}`}
+                className={
+                  preset.key === activeRange
+                    ? 'rounded bg-secondary px-2 py-0.5 text-[11px] font-[510] text-foreground'
+                    : 'rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground'
+                }
+              >
+                {t(`range.${preset.key}`)}
+              </Link>
+            ))}
+          </span>
+        }
       />
 
       {/* 릴리즈 목록 — 최근 계획부터. 준비도(게이트)는 릴리즈 자신의 페이지가 답한다(팬아웃 read 라 목록엔 없다). */}

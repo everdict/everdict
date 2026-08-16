@@ -223,6 +223,27 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     // Another tenant's owned dataset can't be deleted either.
     await expect(r.softDelete("beta", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it("versionDates maps each live version to its registration instant — owner-first, tombstones excluded", async () => {
+    // The product timeline's read: WHEN each version of a watched capability arrived. Live versions only —
+    // a deleted version is invisible to every read, and this one is no exception.
+    const r = new InMemoryDatasetRegistry();
+    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.register("acme", ds("d", "1.1.0"));
+
+    const dates = await r.versionDates("acme", "d");
+    expect(Object.keys(dates).sort()).toEqual(["1.0.0", "1.1.0"]);
+    for (const at of Object.values(dates)) expect(Number.isNaN(Date.parse(at))).toBe(false);
+
+    // The _shared fallback answers with its OWN history — a first-party benchmark has a timeline too.
+    expect(Object.keys(await r.versionDates("acme", "bench"))).toEqual(["1.0.0"]);
+    // An unknown id answers empty (a dangling series ref draws nothing, it does not fail the read).
+    expect(await r.versionDates("acme", "nope")).toEqual({});
+
+    await r.softDelete("acme", "d", "1.0.0");
+    expect(Object.keys(await r.versionDates("acme", "d"))).toEqual(["1.1.0"]);
+  });
 });
 
 describe("loadDatasetDir", () => {
@@ -325,6 +346,18 @@ function fakePg(): SqlClient {
               team_id: x.team_id ?? null,
               tags: x.tags,
             })) as R[],
+        };
+      }
+      // versionDates — source for the (version, registeredAt) map of live versions (the product timeline's read).
+      if (
+        t.startsWith(
+          "SELECT version, created_at FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+      ) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
+            .map((x) => ({ version: x.version, created_at: x.created_at })) as R[],
         };
       }
       // versionTags — source for the (version, tags) map of live versions.
@@ -454,6 +487,18 @@ describe("PgDatasetRegistry (tenant-owned)", () => {
     });
     // the fake bumps created_at by 1 second per INSERT → update time > creation time.
     expect(new Date(entry?.updatedAt ?? 0).getTime()).toBeGreaterThan(new Date(entry?.createdAt ?? 0).getTime());
+  });
+
+  it("versionDates (Pg) maps live versions to ISO registration instants, excluding tombstones", async () => {
+    const r = new PgDatasetRegistry(fakePg());
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.register("acme", ds("d", "1.1.0"));
+    const dates = await r.versionDates("acme", "d");
+    expect(Object.keys(dates).sort()).toEqual(["1.0.0", "1.1.0"]);
+    for (const at of Object.values(dates)) expect(at).toMatch(/^\d{4}-\d{2}-\d{2}T/); // normalized to ISO
+    await r.softDelete("acme", "d", "1.0.0");
+    expect(Object.keys(await r.versionDates("acme", "d"))).toEqual(["1.1.0"]);
+    expect(await r.versionDates("acme", "nope")).toEqual({});
   });
 
   it("setVersionTags (version tags) — exposed via versionTags/list, empty array = remove, missing version → NotFound", async () => {

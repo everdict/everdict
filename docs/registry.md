@@ -103,6 +103,14 @@ reuse `judges:write` like the rest of their surface; no new authz action); MCP
 parity via `set_*_version_tags`. Input is normalized in `apps/api` `version-tag-service.ts` (trim, drop empties,
 order-preserving dedupe; ≤20 tags × ≤60 chars).
 
+## When a version arrived (`versionDates`)
+
+`versionDates(tenant, id)` → `Record<version, ISO instant>` — each **live** version's registration time, on the
+harness-instance / dataset / judge registries (in-memory + Pg; same owner-first `_shared`-fallback visibility as
+`versions()`, tombstones excluded, unknown id = empty map). It exists for the product timeline's capability
+lane — "the evaluation contract moved" is an event on the product's axis — and is **optional on the ports**
+(`versionDates?`): a registry impl without it degrades to an empty lane, never a failed read.
+
 ## Where a version came from (`origin`)
 
 `created_by` answers WHO registered a version; **`origin`** answers why it exists at all — the issue whose

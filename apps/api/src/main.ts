@@ -1100,6 +1100,15 @@ async function main(): Promise<void> {
       hasHarness: async (tenant, id) => (await harnessInstanceRegistry.versions(tenant, id)).length > 0,
       hasJudge: async (tenant, id) => (await judgeRegistry.versions(tenant, id)).length > 0,
     },
+    // The timeline's capability lane — when each version of a watched harness/dataset/judge was registered,
+    // read from the same registries the refs validate against. A dangling id answers an empty map, and a
+    // registry impl without the (optional) read degrades to the same honest empty.
+    capabilityVersions: async (tenant, kind, id) =>
+      (kind === "dataset"
+        ? await datasetRegistry.versionDates?.(tenant, id)
+        : kind === "harness"
+          ? await harnessInstanceRegistry.versionDates?.(tenant, id)
+          : await judgeRegistry.versionDates?.(tenant, id)) ?? {},
     resolveSeriesContract,
     // Declaring a series seeds its first evaluation, and a member can ask for one at any time — until this
     // seam existed a series only ever ran off a genuinely new import, so one declared on an already-backfilled

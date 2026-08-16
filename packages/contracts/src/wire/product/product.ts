@@ -70,6 +70,20 @@ export const ProductTimelineIssueSchema = z.object({
 });
 export type ProductTimelineIssue = z.infer<typeof ProductTimelineIssueSchema>;
 
+// One capability-version registration on the axis — WHAT THE EVALUATION CONTRACT DID while the services moved.
+// A watch series names a harness, a dataset and judges; a new version of any of them is an event on this
+// product's timeline exactly like a service release is: it changes what the next auto-run asks. `seriesKeys`
+// says which of the product's series watch this capability, because a product with several series needs the
+// marker to answer "whose contract moved", not just "something moved".
+export const ProductTimelineCapabilityVersionSchema = z.object({
+  kind: z.enum(["harness", "dataset", "judge"]),
+  id: z.string(),
+  version: z.string(),
+  registeredAt: z.string(),
+  seriesKeys: z.array(z.string()),
+});
+export type ProductTimelineCapabilityVersion = z.infer<typeof ProductTimelineCapabilityVersionSchema>;
+
 export const ProductTimelineResponseSchema = z.object({
   // The axis the caller may draw. `to` REACHES THE FURTHEST PLANNED TARGET DATE, not the present instant: a
   // release is planned before it ships, so an axis that stops at now cannot place the one marker the planning
@@ -81,6 +95,10 @@ export const ProductTimelineResponseSchema = z.object({
   versions: z.array(ProductServiceVersionRecordSchema),
   series: z.array(ProductTimelineSeriesSchema),
   issues: z.array(ProductTimelineIssueSchema),
+  // Windowed like `versions`, and DERIVED from what the product's series declare today: a capability the
+  // product stopped watching is no longer this product's news. Deployments whose composition cannot read the
+  // registries serve an empty array — absent evidence, not "nothing happened".
+  capabilities: z.array(ProductTimelineCapabilityVersionSchema),
 });
 export type ProductTimelineResponse = z.infer<typeof ProductTimelineResponseSchema>;
 

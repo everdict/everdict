@@ -6061,7 +6061,37 @@
     "runSeriesDone": "Submitted {triggered} evaluation(s).",
     "runSeriesNone": "There is no series to run.",
     "runSeriesPartial": "Submitted {triggered}; could not submit: {failed}",
-    "runSeriesError": "Could not run the series."
+    "runSeriesError": "Could not run the series.",
+    "laneCapability": {
+      "harness": "Harness",
+      "dataset": "Dataset",
+      "judge": "Judge"
+    },
+    "capabilityKind": {
+      "harness": "Harness",
+      "dataset": "Dataset",
+      "judge": "Judge"
+    },
+    "tipRegisteredAt": "Registered {at}",
+    "tipWatchedBy": "Watched by: {series}",
+    "feedHeading": "Activity",
+    "feed": {
+      "versionPublished": "published a version",
+      "releaseShipped": "shipped",
+      "releasePlanned": "is targeted for this day",
+      "issueOpened": "opened",
+      "issueResolved": "resolved",
+      "evidence": "evidence",
+      "seriesEvaluated": "evaluated",
+      "capabilityRegistered": "registered"
+    },
+    "feedShowMore": "Show {count} earlier events",
+    "range": {
+      "1m": "1 month",
+      "3m": "3 months",
+      "6m": "6 months",
+      "1y": "1 year"
+    }
   },
   "releasePage": {
     "backToProduct": "Back to product",

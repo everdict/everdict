@@ -78,3 +78,77 @@ describe('TimelineLanes today marker', () => {
     expect(html).toContain('ENG-12')
   })
 })
+
+describe('TimelineLanes capability lanes', () => {
+  it('stands one lane per capability kind present, with marks linking to the capability detail', () => {
+    const html = render(
+      timelineWith({
+        capabilities: [
+          {
+            kind: 'harness',
+            id: 'copilot',
+            version: '2.0.0',
+            registeredAt: '2026-08-06T00:00:00.000Z',
+            seriesKeys: ['quality'],
+          },
+          {
+            kind: 'dataset',
+            id: 'support-cases',
+            version: '1.1.0',
+            registeredAt: '2026-08-08T00:00:00.000Z',
+            seriesKeys: ['quality'],
+          },
+        ],
+      })
+    )
+    expect(html).toContain(`>${en.productPage.laneCapability.harness}<`)
+    expect(html).toContain(`>${en.productPage.laneCapability.dataset}<`)
+    // 저지 사건이 없으면 저지 레인도 없다 — 빈 레인은 정보가 아니다.
+    expect(html).not.toContain(`>${en.productPage.laneCapability.judge}<`)
+    expect(html).toContain('copilot@2.0.0')
+    expect(html).toContain('href="/acme/harness/copilot"')
+    expect(html).toContain('href="/acme/dataset/support-cases"')
+  })
+})
+
+describe('TimelineLanes issue track packing', () => {
+  const issue = (id: string, createdAt: string, resolvedAt?: string) => ({
+    id,
+    identifier: id.toUpperCase(),
+    title: `issue ${id}`,
+    status: resolvedAt !== undefined ? 'done' : 'todo',
+    via: 'product' as const,
+    createdAt,
+    ...(resolvedAt !== undefined ? { resolvedAt } : {}),
+  })
+
+  it('spreads three overlapping lifespans onto three distinct tracks', () => {
+    // 예전의 index 홀짝 배정은 첫째와 셋째를 같은 트랙에 눕혀 정확히 겹치게 했다 — 겹침이 실제로 있는
+    // 만큼만 트랙이 생겨야 한다.
+    const html = render(
+      timelineWith({
+        issues: [
+          issue('eng-1', '2026-08-02T00:00:00.000Z', '2026-08-14T00:00:00.000Z'),
+          issue('eng-2', '2026-08-03T00:00:00.000Z', '2026-08-13T00:00:00.000Z'),
+          issue('eng-3', '2026-08-04T00:00:00.000Z', '2026-08-12T00:00:00.000Z'),
+        ],
+      })
+    )
+    expect(html).toContain('top:10px')
+    expect(html).toContain('top:22px')
+    expect(html).toContain('top:34px')
+  })
+
+  it('reuses the first track once a lifespan has ended (no overlap → no extra track)', () => {
+    const html = render(
+      timelineWith({
+        issues: [
+          issue('eng-1', '2026-08-01T12:00:00.000Z', '2026-08-04T00:00:00.000Z'),
+          issue('eng-2', '2026-08-10T00:00:00.000Z', '2026-08-14T00:00:00.000Z'),
+        ],
+      })
+    )
+    expect(html).toContain('top:10px')
+    expect(html).not.toContain('top:22px')
+  })
+})

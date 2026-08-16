@@ -6061,7 +6061,37 @@
     "runSeriesDone": "평가 {triggered}건을 제출했습니다.",
     "runSeriesNone": "실행할 시리즈가 없습니다.",
     "runSeriesPartial": "{triggered}건 제출, 제출하지 못한 시리즈: {failed}",
-    "runSeriesError": "시리즈를 실행하지 못했습니다."
+    "runSeriesError": "시리즈를 실행하지 못했습니다.",
+    "laneCapability": {
+      "harness": "하네스",
+      "dataset": "데이터셋",
+      "judge": "저지"
+    },
+    "capabilityKind": {
+      "harness": "하네스",
+      "dataset": "데이터셋",
+      "judge": "저지"
+    },
+    "tipRegisteredAt": "{at} 등록",
+    "tipWatchedBy": "워치 시리즈: {series}",
+    "feedHeading": "활동",
+    "feed": {
+      "versionPublished": "버전 발행",
+      "releaseShipped": "릴리즈 출하",
+      "releasePlanned": "릴리즈 목표일",
+      "issueOpened": "이슈 열림",
+      "issueResolved": "이슈 해결됨",
+      "evidence": "증거",
+      "seriesEvaluated": "시리즈 평가",
+      "capabilityRegistered": "버전 등록"
+    },
+    "feedShowMore": "이전 사건 {count}건 더 보기",
+    "range": {
+      "1m": "1개월",
+      "3m": "3개월",
+      "6m": "6개월",
+      "1y": "1년"
+    }
   },
   "releasePage": {
     "backToProduct": "프로덕트로 돌아가기",

@@ -55,4 +55,9 @@ export interface JudgeRegistry {
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
   // version → tag map (tagged versions only). Reads resolve owner like versions() (incl. _shared fallback).
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
+  // version → registration instant (ISO, live versions only). Owner resolution matches versions() (incl. the
+  // _shared fallback). The product timeline reads it to place capability-version events on the axis.
+  // Optional (the fake-heavy test surface predates it): a registry without it simply has no capability
+  // timeline — the caller treats absence as an empty map.
+  versionDates?(tenant: string, id: string): Promise<Record<string, string>>;
 }

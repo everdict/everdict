@@ -24,6 +24,7 @@ import {
 } from "@everdict/contracts";
 import type {
   ProductDetailResponse,
+  ProductTimelineCapabilityVersion,
   ProductTimelineIssue,
   ProductTimelineResponse,
   ProductTimelineSeries,
@@ -166,6 +167,17 @@ export interface ProductServiceDeps {
     candidateScoring?: GateScoringPin;
   }>;
   capabilities?: ProductCapabilityCheck;
+  // Per-version registration instants of a capability a watch series declares — the timeline's "what did the
+  // evaluation contract do while the services moved" lane. A seam (like resolveSeriesContract) because
+  // resolving names belongs to the registries; the product layer must not learn their shapes. Absent = the
+  // capability lane serves empty — absent evidence, never "nothing happened". A dangling id answers an empty
+  // map (registry semantics), so a series watching a deleted capability draws nothing rather than failing
+  // the whole read.
+  capabilityVersions?: (
+    tenant: string,
+    kind: "harness" | "dataset" | "judge",
+    id: string,
+  ) => Promise<Record<string, string>>;
   // Resolve a series' CONCRETE evaluation contract — the dataset/harness/judge versions a run of it would
   // actually use right now (arch-review 13 P0). A seam, like `seriesGate`, because resolving `latest`
   // belongs to the registries and the product layer must not learn their shapes.
@@ -514,7 +526,34 @@ export class ProductService {
       const evidence = [...new Set(series.flatMap((entry) => entry.points.map((point) => point.scorecardId)))];
       if (evidence.length > 0) collect(await this.deps.issues.list(tenant, { scorecards: evidence }), "evidence");
     }
-    return { window: { from, to, now }, releases, versions, series, issues };
+    // …AND what the EVALUATION CONTRACT did while the services moved: a new version of a watched harness,
+    // dataset or judge changes what the next auto-run asks, which makes it an event on this axis exactly like
+    // a service release. Derived from the series the product declares TODAY — a capability it stopped
+    // watching is no longer this product's news — and windowed like the version ledger.
+    const capabilities: ProductTimelineCapabilityVersion[] = [];
+    if (this.deps.capabilityVersions !== undefined) {
+      const watched = new Map<string, { kind: "harness" | "dataset" | "judge"; id: string; seriesKeys: string[] }>();
+      const watch = (kind: "harness" | "dataset" | "judge", capabilityId: string, seriesKey: string): void => {
+        const key = `${kind}:${capabilityId}`;
+        const entry = watched.get(key) ?? { kind, id: capabilityId, seriesKeys: [] };
+        if (!entry.seriesKeys.includes(seriesKey)) entry.seriesKeys.push(seriesKey);
+        watched.set(key, entry);
+      };
+      for (const entry of product.series) {
+        watch("dataset", entry.dataset.id, entry.key);
+        watch("harness", entry.harness.id, entry.key);
+        for (const judge of entry.judges) watch("judge", judge.id, entry.key);
+      }
+      for (const ref of watched.values()) {
+        const dates = await this.deps.capabilityVersions(tenant, ref.kind, ref.id);
+        for (const [version, registeredAt] of Object.entries(dates)) {
+          if (registeredAt >= from && registeredAt <= to)
+            capabilities.push({ kind: ref.kind, id: ref.id, version, registeredAt, seriesKeys: ref.seriesKeys });
+        }
+      }
+      capabilities.sort((a, b) => a.registeredAt.localeCompare(b.registeredAt));
+    }
+    return { window: { from, to, now }, releases, versions, series, issues, capabilities };
   }
 
   // --- Releases -----------------------------------------------------------------------------------------------

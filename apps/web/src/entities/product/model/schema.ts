@@ -221,6 +221,17 @@ export const productSeriesPointSchema = z.object({
   releaseId: z.string().optional(),
 })
 
+// 워치 시리즈가 선언한 능력(하네스·데이터셋·저지)의 버전 등록 사건 — 서비스가 움직이는 동안 평가 계약이
+// 무엇을 했는가. seriesKeys 는 이 능력을 지켜보는 시리즈들(시리즈가 여럿인 제품에서 "누구의 계약이
+// 움직였나"의 답).
+export const productTimelineCapabilitySchema = z.object({
+  kind: z.enum(['harness', 'dataset', 'judge']),
+  id: z.string(),
+  version: z.string(),
+  registeredAt: z.string(),
+  seriesKeys: z.array(z.string()),
+})
+
 export const productTimelineSchema = z.object({
   // `to` 는 "지금"이 아니라 프로덕트가 약속한 가장 먼 목표일까지다 — 계획된 릴리즈를 축 위에 놓으려면
   // 창이 미래를 덮어야 한다. `now` 는 그래서 창의 일부다: 일어난 구간과 예정 구간의 경계이고,
@@ -250,6 +261,9 @@ export const productTimelineSchema = z.object({
       releaseId: z.string().optional(),
     })
   ),
+  // 경계 default — 이 필드가 생기기 전의 컨트롤 플레인과 웹이 한 배포 주기 어긋나도 타임라인 전체가
+  // 죽지 않는다(능력 레인만 비는 정직한 강등).
+  capabilities: z.array(productTimelineCapabilitySchema).default([]),
 })
 
 // GET /products/repo-options — GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는 집합).
@@ -382,6 +396,7 @@ type _timelineFwd = AssertAssignable<
 >
 
 export type Product = WireProductRecord
+export type ProductTimelineCapability = WireProductTimelineResponse['capabilities'][number]
 export type ProductService = WireProductService
 export type ProductSeries = WireProductSeries
 export type ProductDetail = WireProductDetailResponse

@@ -284,6 +284,20 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return out;
   }
 
+  // version → registration instant (live versions only). Owner resolution matches versions() (incl. the
+  // _shared fallback). The product timeline reads this to place capability-version events on the axis.
+  async versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; created_at: string | Date }>(
+      `SELECT version, created_at FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
+      [owner, id],
+    );
+    const out: Record<string, string> = {};
+    for (const row of r.rows) out[row.version] = new Date(row.created_at).toISOString();
+    return out;
+  }
+
   // version → origin (only stamped live versions). Owner resolution matches versions() (incl. the _shared fallback).
   async versionOrigins(tenant: string, id: string): Promise<Record<string, CapabilityOrigin>> {
     if (!this.hasOrigin) return {};

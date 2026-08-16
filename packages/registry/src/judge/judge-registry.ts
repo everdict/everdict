@@ -84,6 +84,9 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     return this.store.versionTags(tenant, id);
   }
+  async versionDates(tenant: string, id: string): Promise<Record<string, string>> {
+    return this.store.versionDates(tenant, id);
+  }
 
   async list(tenant: string): Promise<JudgeListEntry[]> {
     const out: JudgeListEntry[] = [];

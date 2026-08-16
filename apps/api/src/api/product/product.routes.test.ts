@@ -28,7 +28,13 @@ const unusedDispatcher: Dispatcher = {
 const H = { "x-everdict-tenant": "acme" };
 const NOW = "2026-08-08T00:00:00.000Z";
 
-function build() {
+function build(options?: {
+  capabilityVersions?: (
+    tenant: string,
+    kind: "harness" | "dataset" | "judge",
+    id: string,
+  ) => Promise<Record<string, string>>;
+}) {
   const productStore = new InMemoryProductStore();
   const releaseStore = new InMemoryReleaseStore();
   const versionStore = new InMemoryProductVersionStore();
@@ -69,6 +75,8 @@ function build() {
     // A fixed clock: the regression test backdates its batches around this instant, and a real clock would
     // make the baseline anchor race the records' own timestamps.
     now: () => "2026-08-04T00:00:00.000Z",
+    // The capability lane's registry seam — faked per test; absent = the lane serves empty.
+    ...(options?.capabilityVersions !== undefined ? { capabilityVersions: options.capabilityVersions } : {}),
   });
   const productVersionSync = new ProductVersionSync({
     products: productStore,
@@ -508,6 +516,72 @@ describe("product routes", () => {
     });
     expect(named.json().window.to).toBe("2026-08-01T00:00:00.000Z");
     expect(named.json().window.from).toBe("2026-05-03T00:00:00.000Z");
+  });
+
+  it("puts the watched capabilities' version registrations on the axis, windowed and attributed to their series", async () => {
+    // A new version of a watched harness/dataset/judge changes what the next auto-run asks — an event on this
+    // product's axis exactly like a service release. The lane is derived from what the series declare TODAY,
+    // and each event says WHICH series watch it (a product with several series needs "whose contract moved").
+    const dates: Record<string, Record<string, string>> = {
+      "dataset:support-cases": { "1.0.0": "2026-06-01T00:00:00.000Z", "1.1.0": "2026-08-01T00:00:00.000Z" },
+      // 0.9.0 predates the quarter window — history the axis is not being read against stays off it.
+      "harness:copilot": { "0.9.0": "2025-01-01T00:00:00.000Z", "2.0.0": "2026-07-15T00:00:00.000Z" },
+      "judge:strict-judge": { "1.0.0": "2026-07-20T00:00:00.000Z" },
+    };
+    const { app } = build({ capabilityVersions: async (_tenant, kind, id) => dates[`${kind}:${id}`] ?? {} });
+    const product = await createProduct(app, {
+      series: [
+        {
+          key: "quality",
+          label: "Quality",
+          dataset: { id: "support-cases" },
+          harness: { id: "copilot" },
+          judges: [{ id: "strict-judge" }],
+        },
+        // A second series sharing the dataset/harness — the shared events carry BOTH keys, once.
+        { key: "latency", label: "Latency", dataset: { id: "support-cases" }, harness: { id: "copilot" }, judges: [] },
+      ],
+    });
+
+    const timeline = (await app.inject({ method: "GET", url: `/products/${product.id}/timeline`, headers: H })).json();
+    expect(timeline.capabilities).toEqual([
+      {
+        kind: "dataset",
+        id: "support-cases",
+        version: "1.0.0",
+        registeredAt: "2026-06-01T00:00:00.000Z",
+        seriesKeys: ["quality", "latency"],
+      },
+      {
+        kind: "harness",
+        id: "copilot",
+        version: "2.0.0",
+        registeredAt: "2026-07-15T00:00:00.000Z",
+        seriesKeys: ["quality", "latency"],
+      },
+      {
+        kind: "judge",
+        id: "strict-judge",
+        version: "1.0.0",
+        registeredAt: "2026-07-20T00:00:00.000Z",
+        seriesKeys: ["quality"],
+      },
+      {
+        kind: "dataset",
+        id: "support-cases",
+        version: "1.1.0",
+        registeredAt: "2026-08-01T00:00:00.000Z",
+        seriesKeys: ["quality", "latency"],
+      },
+    ]);
+
+    // A deployment whose composition carries no registry seam serves the honest empty — never a missing field.
+    const bare = build();
+    const bareProduct = await createProduct(bare.app);
+    const bareTimeline = (
+      await bare.app.inject({ method: "GET", url: `/products/${bareProduct.id}/timeline`, headers: H })
+    ).json();
+    expect(bareTimeline.capabilities).toEqual([]);
   });
 
   it("addresses a product by its SLUG, minted from the name and unique per workspace", async () => {

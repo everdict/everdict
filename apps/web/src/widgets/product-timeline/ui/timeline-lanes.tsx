@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useLocale, useTranslations } from 'next-intl'
 
-import { issueHref } from '@/entities/issue'
+import { issueHref, issueLinkHref } from '@/entities/issue'
 import { releaseHref, type ProductTimeline } from '@/entities/product'
 import { cn } from '@/shared/lib/utils'
 import { seriesColorAt } from '@/shared/ui/charts'
@@ -75,9 +75,46 @@ export function TimelineLanes({
   }, [locale])
 
   const services = [...new Set(timeline.versions.map((version) => version.service))]
+  // 능력 레인 — 서비스가 움직이는 동안 평가 계약이 무엇을 했나. 종류(하네스·데이터셋·저지)별로 한 레인,
+  // 그 종류의 사건이 창 안에 있을 때만 선다(빈 섹션 숨김과 같은 규칙).
+  const capabilityKinds = (['harness', 'dataset', 'judge'] as const).filter((kind) =>
+    timeline.capabilities.some((capability) => capability.kind === kind)
+  )
+  const seriesLabelOf = new Map(timeline.series.map((entry) => [entry.key, entry.label]))
   const hasReleases = timeline.releases.length > 0
   const hasIssues = timeline.issues.length > 0
-  if (!hasReleases && services.length === 0 && !hasIssues) return null
+  if (!hasReleases && services.length === 0 && !hasIssues && capabilityKinds.length === 0)
+    return null
+
+  // 이슈 스팬의 트랙 배정 — 겹치는 수명끼리만 다른 트랙으로 흩는다(그리디 인터벌 패킹). 예전의 index
+  // 홀짝 배정은 이웃끼리만 흩어서, 같은 주에 이슈 셋이 열리면 첫째와 셋째가 한 트랙에서 정확히 겹쳤다.
+  // 트랙 수 = 실제 최대 동시 겹침이라, 밀도가 높은 창에서는 레인이 그만큼 키를 늘린다(겹쳐 그려서
+  // 안 보이는 것보다 낫다).
+  const issueSpans = timeline.issues
+    .map((issue) => {
+      const start = pct(issue.createdAt)
+      // 열린 스팬의 끝은 오늘 — 단, 창 전체가 미래인(호출자가 from 을 미래로 지정한) 퇴화 케이스에서
+      // 뒤로 그리지 않게 시작점 아래로는 내려가지 않는다.
+      const resolved = issue.resolvedAt !== undefined
+      const end = issue.resolvedAt !== undefined ? pct(issue.resolvedAt) : Math.max(start, nowPct)
+      return { issue, start, end, resolved }
+    })
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+  const trackEnds: number[] = []
+  const trackedIssues = issueSpans.map((span) => {
+    // 발생/해결 마커(축 위 ±1% 남짓)까지 여유를 두고 비어 있는 첫 트랙을 재사용한다.
+    let track = trackEnds.findIndex((end) => span.start > end + 2)
+    if (track === -1) {
+      track = trackEnds.length
+      trackEnds.push(span.end)
+    } else {
+      trackEnds[track] = span.end
+    }
+    return { ...span, track }
+  })
+  const issueTrackCount = Math.max(1, trackEnds.length)
+  // 트랙 피치 12px, 위아래 여백 10px — 두 트랙까지는 예전 레인 높이(h-8) 그대로다.
+  const issueLaneHeight = Math.max(32, 20 + (issueTrackCount - 1) * 12)
 
   // 축 눈금 4칸 — 창을 균등 분할한 날짜 라벨.
   const ticks = [0, 1, 2, 3, 4].map((step) => ({
@@ -231,22 +268,63 @@ export function TimelineLanes({
           </div>
         ))}
 
+        {capabilityKinds.map((kind) => (
+          <div key={kind} className="relative flex items-center">
+            <span className={label}>{t(`laneCapability.${kind}`)}</span>
+            <div className={cn(lane, 'flex-1')}>
+              {timeline.capabilities
+                .filter((capability) => capability.kind === kind)
+                .map((capability) => {
+                  const atPct = pct(capability.registeredAt)
+                  const reference = `${capability.id}@${capability.version}`
+                  return (
+                    // 마크는 능력 자신의 상세로 나가는 문이다 — "계약이 움직였다"를 본 사람의 다음 질문은
+                    // "그래서 그 버전이 뭔데"다. info 톤: 시리즈 점(팔레트)·릴리즈(primary)와 다른 축의
+                    // 사건임을 색이 먼저 말한다.
+                    <Link
+                      key={`${reference}:${capability.registeredAt}`}
+                      href={issueLinkHref(workspace, capability.kind, capability.id)}
+                      aria-label={reference}
+                      {...enter(`capability:${kind}`, {
+                        atPct,
+                        title: reference,
+                        badge: t(`capabilityKind.${capability.kind}`),
+                        lines: [
+                          t('tipRegisteredAt', { at: stamp.instant(capability.registeredAt) }),
+                          // 이 능력을 지켜보는 시리즈들 — 시리즈가 여럿인 제품에서 "누구의 계약이
+                          // 움직였나"의 답. 키만 있고 라벨이 사라진 시리즈는 키 그대로 말한다.
+                          ...(capability.seriesKeys.length > 0
+                            ? [
+                                t('tipWatchedBy', {
+                                  series: capability.seriesKeys
+                                    .map((key) => seriesLabelOf.get(key) ?? key)
+                                    .join(', '),
+                                }),
+                              ]
+                            : []),
+                        ],
+                      })}
+                      className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1"
+                      style={{ left: `${atPct}%` }}
+                    >
+                      <span className="block size-2 rounded-[3px] border border-[var(--color-link)] bg-[var(--color-link)]/25 transition-transform group-hover:scale-125" />
+                    </Link>
+                  )
+                })}
+              {hover?.lane === `capability:${kind}` && <LaneTooltip card={hover.card} />}
+            </div>
+          </div>
+        ))}
+
         {hasIssues && (
           <div className="relative flex items-center">
             <span className={label}>{t('laneIssues')}</span>
-            <div className={cn(lane, 'flex-1')}>
+            <div className={cn(lane, 'flex-1')} style={{ height: `${issueLaneHeight}px` }}>
               {/* 이슈는 수명이 스팬이지만, 사람이 타임라인에서 찾는 건 두 순간이다: 언제 터졌고 언제
                   끝났나. 그래서 스팬은 배경이 되고 그 위에 발생(◆)과 해결(●) 마커를 따로 세운다 —
                   막대만 있으면 "8월 초에 뭔가 열려 있었다"까지밖에 못 읽는다.
-                  해결됨=success, 회귀=danger, 열림=warning — 배지와 같은 시맨틱 토큰만 쓴다.
-                  겹침은 위아래 두 트랙으로만 흩는다. */}
-              {timeline.issues.map((issue, index) => {
-                const start = pct(issue.createdAt)
-                // 열린 스팬의 끝은 오늘 — 단, 창 전체가 미래인(호출자가 from 을 미래로 지정한) 퇴화
-                // 케이스에서 뒤로 그리지 않게 시작점 아래로는 내려가지 않는다.
-                const resolved = issue.resolvedAt !== undefined
-                const end =
-                  issue.resolvedAt !== undefined ? pct(issue.resolvedAt) : Math.max(start, nowPct)
+                  해결됨=success, 회귀=danger, 열림=warning — 배지와 같은 시맨틱 토큰만 쓴다. */}
+              {trackedIssues.map(({ issue, start, end, resolved, track }) => {
                 const tone =
                   issue.status === 'regressed' ? 'danger' : resolved ? 'success' : 'warning'
                 const bar = {
@@ -259,7 +337,6 @@ export function TimelineLanes({
                   success: 'border-[var(--color-success)] bg-[var(--color-success)]',
                   warning: 'border-[var(--color-warning)] bg-[var(--color-warning)]',
                 }[tone]
-                const track = index % 2 === 0 ? 'top-[10px]' : 'bottom-[10px]'
                 // `moment` 는 지금 가리키고 있는 순간 — 마커일 때만 붙는다. 수명 막대 위에서는 어느
                 // 순간도 가리키고 있지 않으므로 배지 없이 이슈 자체를 말한다.
                 const card = (atPct: number, moment?: string): HoverCard => ({
@@ -282,8 +359,12 @@ export function TimelineLanes({
                     key={issue.id}
                     href={issueHref(workspace, issue.identifier, issue.title)}
                     aria-label={`${issue.identifier} · ${issue.title}`}
-                    className={cn('absolute', track, 'h-3 -translate-y-1/2')}
-                    style={{ left: `${start}%`, width: `${Math.max(1.2, end - start)}%` }}
+                    className="absolute h-3 -translate-y-1/2"
+                    style={{
+                      left: `${start}%`,
+                      width: `${Math.max(1.2, end - start)}%`,
+                      top: `${10 + track * 12}px`,
+                    }}
                   >
                     {/* 수명 — 배경. `evidence` 로 올라온 이슈는 점선 테두리로 눕힌다: 사람이 선언한
                         링크가 아니라 증거에서 유도된 관계라는 사실 자체가 정보다. */}

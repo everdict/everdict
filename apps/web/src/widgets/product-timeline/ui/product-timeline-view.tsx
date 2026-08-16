@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 
@@ -12,6 +12,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { SectionHeader } from '@/shared/ui/section-header'
 
+import { TimelineFeed } from './timeline-feed'
 import { TimelineLanes } from './timeline-lanes'
 
 // 프로덕트 타임라인 — 서버가 합성해 준 한 번의 read 를 그린다(웹은 파생하지 않는다).
@@ -22,11 +23,17 @@ export function ProductTimelineView({
   productId,
   timeline,
   canWrite,
+  toolbar,
+  detailed = false,
 }: {
   workspace: string
   productId: string
   timeline: ProductTimeline
   canWrite: boolean
+  // 레인 제목 옆에 서는 페이지 소유의 컨트롤(기간 프리셋) — 홈 요약에는 없다.
+  toolbar?: ReactNode
+  // 상세 페이지에서만 켜지는 사건 피드 — 홈은 요약이라 레인과 추이까지만 그린다.
+  detailed?: boolean
 }) {
   const t = useTranslations('productPage')
   const locale = useLocale()
@@ -65,9 +72,13 @@ export function ProductTimelineView({
     <div className="space-y-6">
       {/* 비례 시간축 개요 — 언제 무슨 일이 있었나(릴리즈·버전·이슈). 시리즈의 품질 추이는 아래 차트가 답한다.
           그릴 사건이 하나도 없으면 섹션째 숨긴다(빈 섹션 숨김). */}
-      {timeline.releases.length + timeline.versions.length + timeline.issues.length > 0 && (
+      {timeline.releases.length +
+        timeline.versions.length +
+        timeline.issues.length +
+        timeline.capabilities.length >
+        0 && (
         <section className="space-y-2.5">
-          <SectionHeader title={t('timelineHeading')} />
+          <SectionHeader title={t('timelineHeading')} action={toolbar} />
           <TimelineLanes workspace={workspace} timeline={timeline} />
         </section>
       )}
@@ -167,27 +178,33 @@ export function ProductTimelineView({
         ))
       )}
 
-      {timeline.issues.length > 0 && (
-        <section className="space-y-2.5">
-          <SectionHeader title={t('issuesOverlay')} />
-          <ul className="space-y-1">
-            {timeline.issues.map((issue) => (
-              <li key={issue.id} className="flex items-center gap-2 text-sm">
-                <Link
-                  href={issueHref(workspace, issue.identifier, issue.title)}
-                  className="font-mono text-xs text-muted-foreground hover:text-foreground"
-                >
-                  {issue.identifier}
-                </Link>
-                <span className="truncate">{issue.title}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {dayLabel(issue.createdAt)}
-                  {issue.resolvedAt ? ` → ${dayLabel(issue.resolvedAt)}` : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* 상세 페이지는 GitHub 식 사건 피드가 이슈 목록을 대체한다 — 축의 모든 사건(버전·릴리즈·이슈·
+          평가·계약)이 날짜로 묶여 한 흐름으로 읽힌다. 홈 요약은 가벼운 이슈 목록까지만. */}
+      {detailed ? (
+        <TimelineFeed workspace={workspace} timeline={timeline} />
+      ) : (
+        timeline.issues.length > 0 && (
+          <section className="space-y-2.5">
+            <SectionHeader title={t('issuesOverlay')} />
+            <ul className="space-y-1">
+              {timeline.issues.map((issue) => (
+                <li key={issue.id} className="flex items-center gap-2 text-sm">
+                  <Link
+                    href={issueHref(workspace, issue.identifier, issue.title)}
+                    className="font-mono text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {issue.identifier}
+                  </Link>
+                  <span className="truncate">{issue.title}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {dayLabel(issue.createdAt)}
+                    {issue.resolvedAt ? ` → ${dayLabel(issue.resolvedAt)}` : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
       )}
     </div>
   )
