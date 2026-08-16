@@ -688,8 +688,116 @@ const POSTGRES_MCP: CapabilityRecord = {
 // conversation, stamped with its own versions. That is also why the GitHub gate that used to guard scorecard_fix_pr is
 // gone: nothing is auto-attached, so there is nothing to gate. The copy tells the agent to use the GitHub tools, and
 // those are gated on their own.
+// The self-evolution campaign (docs/architecture/agent-automation.md B5 closed into a procedure). A SKILL — not
+// code: every step is a tool the agent already has (try_agent + ingest_scorecard + diff_scorecards + save_agent),
+// so what this adds is the DISCIPLINE — the trust harness as the oracle, a measured noise floor before any delta
+// is read, one hypothesis per round, and adoption only over a statistically significant diff. The target may be
+// the running agent itself: "self-evolving" is this skill pointed at its own configuration.
+const AGENT_EVOLVE_INSTRUCTIONS = `
+# Evolve an agent configuration (self-evolution campaign)
+
+Improve an agent configuration — including your own — with the trust harness as the oracle: a candidate is
+adopted only when a statistically significant scorecard diff proves it better on held-out scenarios. You never
+adopt on impression, and you never touch the oracle to make a candidate pass.
+
+Everdict's tools load on demand. Before anything else:
+\`ToolSearch\` with \`select:get_agent,try_agent,ingest_scorecard,get_scorecard,diff_scorecards,save_agent,create_issue,update_issue\`.
+
+## 0. Frame the campaign
+- Name the target (\`get_agent\`), the goal (which judge scores define "better"), and the scenario set: 5-10
+  representative platform events — REPLAYED real events over invented ones — plus the trial count N per
+  scenario (at least 3; 5 when budget allows).
+- Hold out at least 2 scenarios you will never quote or paraphrase while writing candidates — a candidate
+  tuned to the eval verbatim is memorization, and the held-out rows are what catch it.
+- Open a campaign issue (\`create_issue\`): the hypothesis log. Every round appends what was tried, the two
+  scorecard ids, and what the diff said — the campaign must be auditable without this conversation.
+- State the budget cap up front (rounds x scenarios x N tries, \`try_agent\` spends real LLM budget) and stop
+  when it is spent, whatever round you are in.
+
+## 1. Baseline — and its noise floor
+- For each scenario run \`try_agent\` { agentId } N times; collect each result's \`trace\`.
+- Ingest ONE scorecard (\`ingest_scorecard\`): \`harness: { id: "agent:<agentId>", version: <its version> }\`,
+  one \`traces[]\` entry PER TRY with \`caseId\` = the scenario id (repeated caseIds ARE the trials), and the
+  goal judges in \`judges\`.
+- Read the batch's trial summary (\`get_scorecard\`): the per-case variance and flake rate are the NOISE FLOOR.
+  A delta smaller than this floor is not information. If the baseline itself is wildly flaky (flake rate
+  above ~0.4), stop and fix scenario determinism first — evolution on a noisy oracle adopts noise.
+
+## 2. Mutate — one hypothesis per round
+- Prefer STRUCTURE over wording: tool/skill selection, stop conditions, escalation rules, model choice move
+  outcomes; prompt micro-edits measure as noise (the ExitGuard campaign's lesson).
+- A candidate that only changes instructions rides \`try_agent\`'s \`draft.instructions\` overlay — evaluated
+  WITHOUT saving a version. A candidate that changes tools/skills/model must be saved first (\`save_agent\`
+  auto-bumps an immutable version); evaluate that saved id and delete rejected experiment versions after.
+- One variable per round, and write the hypothesis to the campaign issue BEFORE running it.
+
+## 3. Evaluate the candidate
+- Same scenarios, same N, same judges → a second ingested scorecard (candidate version label in \`harness\`).
+- \`diff_scorecards\` { baseline, candidate }. Read \`comparability\` FIRST — 'none' means the comparison does
+  not hold, which is a different fact from "no difference". The trials diff is the verdict: per-case Fisher/z
+  significance with the FDR correction and the practical minDelta floor already applied.
+
+## 4. Decide — adoption is a gate, not a feeling
+- Adopt only when ALL hold: at least one significant improvement · zero significant regressions · the
+  aggregate delta clears the noise floor measured in step 1 (never a fixed magic number).
+- Adoption = \`save_agent\` (a NEW immutable version) + the campaign issue updated with both scorecard ids and
+  the diff. Present the diff and ask the member BEFORE saving when working interactively; in headless
+  automation park the save behind an approval — never silently swap a live configuration.
+- Rejection changes nothing: record the hypothesis and the diff in the issue and move on.
+- Close the campaign (\`update_issue\`) naming the adopted version and the scorecard that proved it — or close
+  as no-improvement after 3 consecutive rejected rounds; a longer walk is spending, not learning.
+
+## Constraints
+- NEVER weaken judges, verdict policy, or scenarios mid-campaign to make a candidate pass — changing the
+  oracle to manufacture a win is the exact failure this procedure exists to prevent. If the oracle is wrong,
+  fix it first, then restart with a fresh baseline under the fixed oracle.
+- \`try_agent\` is shadow (reads run for real, writes are captured and denied) — it can never leave side
+  effects, but it spends the workspace's real budget; respect the frame's cap.
+- Evolving YOURSELF changes nothing mid-conversation: the adopted version applies to future sessions, so say
+  that in the closing report instead of implying the current conversation improved.
+- Load \`references/campaign-log.md\` (via \`read_skill_file\`) for the campaign issue's mandatory structure.
+`.trim();
+
+// The campaign issue's structure — a supporting file (progressive disclosure), so the audit trail is uniform
+// across campaigns whoever (or whatever) ran them.
+const AGENT_EVOLVE_CAMPAIGN_LOG = `
+# Campaign log structure (mandatory)
+
+The campaign issue must let a reader judge the walk without this conversation:
+
+- **Frame** — target agent@version, goal judges, scenario ids (held-out rows marked), N trials, budget cap.
+- **Noise floor** — baseline scorecard id, flake rate, per-case variance; the adoption threshold derived from it.
+- **Rounds** — one row per round: hypothesis (the ONE variable) · candidate (draft or saved version) ·
+  baseline/candidate scorecard ids · diff verdict (significant improvements/regressions after correction) ·
+  decision (adopted/rejected) and why.
+- **Close** — adopted version + the proving scorecard id, or "no improvement in K rounds" with the strongest
+  rejected hypothesis named. Never close a campaign without one of the two.
+`.trim();
+
+const AGENT_EVOLVE: CapabilityRecord = {
+  id: "agent-evolve",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "agent_evolve",
+  description:
+    "Run a self-evolution campaign on an agent configuration (your own included): baseline it with repeated " +
+    "shadow tries scored as trials, measure the noise floor, mutate ONE variable per round, and adopt a new " +
+    "version only over a statistically significant scorecard diff on held-out scenarios. Use when a member asks " +
+    "to improve an agent — or when the agent's own regressions warrant a measured walk.",
+  spec: {
+    type: "skill",
+    instructions: AGENT_EVOLVE_INSTRUCTIONS,
+    files: [{ path: "references/campaign-log.md", content: AGENT_EVOLVE_CAMPAIGN_LOG }],
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["agent", "evolution", "scorecard", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-08-16T00:00:00.000Z",
+};
+
 export function firstPartySkillExamples(): CapabilityRecord[] {
-  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK];
+  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK, AGENT_EVOLVE];
 }
 
 // The DELEGATOR's side of a delegation. The delegation profile (CODE_DELEGATE below) is written in the

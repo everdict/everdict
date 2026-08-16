@@ -107,6 +107,32 @@ describe("firstPartySkillExamples", () => {
     }
   });
 
+  it("the agent-evolve example carries the baseline→mutate→diff→adopt campaign and its statistical discipline", () => {
+    const skill = examples.find((r) => r.id === "agent-evolve");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    // The loop's load-bearing steps: shadow tries as trials, an ingested baseline, a significance-gated diff,
+    // and adoption as a saved immutable version — plus the two disciplines that keep it honest (a measured
+    // noise floor before any delta is read; never touching the oracle mid-campaign).
+    for (const anchor of [
+      "try_agent",
+      "ingest_scorecard",
+      "diff_scorecards",
+      "save_agent",
+      "NOISE FLOOR",
+      "one hypothesis per round",
+      "NEVER weaken judges",
+      "references/campaign-log.md",
+    ]) {
+      expect(skill.spec.instructions).toContain(anchor);
+    }
+    const log = skill.spec.files.find((f) => f.path === "references/campaign-log.md");
+    expect(log).toBeDefined();
+    for (const anchor of ["Frame", "Noise floor", "Rounds", "Close"]) {
+      expect(log?.content).toContain(anchor);
+    }
+  });
+
   it("the memory-consolidation example carries the orient→gather→consolidate→prune pass over memory/", () => {
     const skill = examples.find((r) => r.id === "memory-consolidation");
     expect(skill).toBeDefined();

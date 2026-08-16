@@ -86,6 +86,23 @@ import type { AgentAttribution } from "./fs/fs-actor.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
+// One shadow try on the agent runtime: reads run for real under a one-shot agt_ credential minted for
+// `subject`, mutations are captured as would-have-done and denied. Returns the agent service's AgentTryResult
+// ({messages, wouldHave, trace}) — served as-is, never re-shaped here.
+export interface AgentTryRelayInput {
+  workspace: string;
+  subject: string;
+  agentId?: string;
+  draft?: { instructions?: string; task?: string };
+  event: {
+    kind: string;
+    message: string;
+    subject?: { type: string; id: string };
+    payload?: Record<string, unknown>;
+  };
+}
+export type AgentTryRelay = (input: AgentTryRelayInput) => Promise<unknown>;
+
 export interface McpDeps {
   service: RunService;
   cycleService?: CycleService;
@@ -128,6 +145,10 @@ export interface McpDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) register/read — the conversational agent per workspace
   agentService?: AgentService; // Agent version-free save/edit upsert
+  // Shadow try-drive relay to the agent service (`POST /internal/try`) — the `try_agent` tool's transport, which
+  // is what lets an agent evaluate an agent configuration (its own included: the self-evolution loop). WHO the
+  // try acts for travels explicitly, because this layer holds a Principal, not the caller's raw bearer.
+  agentTry?: AgentTryRelay;
   agentMemberToolingService?: AgentMemberToolingService; // the caller's OWN tools + skills (workspace baseline ⊕ their overrides)
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
   fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove

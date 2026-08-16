@@ -52,6 +52,7 @@ import {
   resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
 import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
+import { UpstreamError } from "@everdict/contracts";
 import {
   type SeriesContractResolution,
   evaluateGate,
@@ -60,6 +61,7 @@ import {
 } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
+import type { AgentTryRelay } from "./api/mcp-context.js";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseFsRequestHub } from "./common/case-fs-request-hub.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -1540,6 +1542,33 @@ async function main(): Promise<void> {
     agentRegistry,
     // Agent config version-free save/edit upsert (the interactive web path) — the workspace's conversational-agent customization.
     agentService: new AgentService({ agents: agentRegistry }),
+    // Shadow try-drive relay (`try_agent` MCP tool → agent service /internal/try) — the self-evolution loop's
+    // evaluate step. A refused relay throws rather than shaping a fake result: "the runtime said no" and "the
+    // try produced nothing" are different facts.
+    ...(approvalAgentUrl && approvalAgentToken
+      ? {
+          agentTry: (async (input) => {
+            const res = await fetch(new URL("/internal/try", approvalAgentUrl), {
+              method: "POST",
+              headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
+              body: JSON.stringify(input),
+            }).catch((err: unknown) => {
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                {},
+                `the agent runtime could not be reached: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+            if (!res.ok)
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { status: res.status },
+                `the agent runtime refused the try (${res.status}).`,
+              );
+            return res.json();
+          }) satisfies AgentTryRelay,
+        }
+      : {}),
     // Settings › Agent › Tools + › Skills — the CALLER's own agent: the workspace baseline (AgentSpec + the authored
     // skill library) overlaid with that member's on/off. This is what keeps one workspace from meaning one agent
     // (see agent-member-tooling-service.ts).

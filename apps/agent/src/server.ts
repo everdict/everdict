@@ -1495,6 +1495,52 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     }
   });
 
+  // Service-to-service try-drive — the control plane's `try_agent` MCP tool lands here, which is what lets an
+  // agent shadow-run an agent configuration (its own included: the self-evolution loop's evaluate step) and
+  // read the normalized trace back as evidence. Same semantics as the public /agent/agents/try: reads run for
+  // real, every mutation is captured as would-have-done and denied. The caller names WHO the try acts for; the
+  // loop's tool calls run under a ONE-SHOT agt_ token minted as that member (read scope — the shadow permit
+  // denies writes before they leave anyway), revoked when the try returns, so no standing credential outlives
+  // the run.
+  const internalTrySchema = z.object({
+    workspace: z.string().min(1),
+    subject: z.string().min(1),
+    agentId: z.string().min(1).optional(),
+    draft: z.object({ instructions: z.string().optional(), task: z.string().optional() }).optional(),
+    event: z.object({
+      kind: z.string().min(1),
+      message: z.string().min(1),
+      subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+      payload: z.record(z.unknown()).optional(),
+    }),
+  });
+  app.post("/internal/try", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    if (!deps.keyStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Agent execution tokens are not configured." });
+    const keyStore = deps.keyStore;
+    const parsed = internalTrySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const { workspace, subject, agentId, draft, event } = parsed.data;
+    const minted = await issueAgentToken(keyStore, workspace, subject, ["read"], `agent-try:${agentId ?? "draft"}`);
+    try {
+      const result = await runAgentTry(
+        deps,
+        { subject, workspace, roles: [] },
+        { authorization: `Bearer ${minted.token}`, workspace },
+        { ...(agentId !== undefined ? { agentId } : {}), ...(draft !== undefined ? { draft } : {}) },
+        event,
+      );
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    } finally {
+      await keyStore.revoke(workspace, minted.id).catch(() => {});
+    }
+  });
+
   app.post("/internal/discussion-turn", async (req, reply) => {
     const presented = req.headers["x-internal-token"];
     if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))

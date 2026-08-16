@@ -159,4 +159,51 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
         }),
     );
   }
+
+  if (deps.agentTry) {
+    const tryAgent = deps.agentTry;
+    server.registerTool(
+      "try_agent",
+      {
+        // Not readOnly: the try itself has no side effects (shadow permit), but it spends the workspace's LLM
+        // budget — a crafting operation, gated like the rest of the family.
+        annotations: { readOnlyHint: false },
+        description:
+          "Shadow-run an agent configuration against a platform event with NO side effects: read tools run for " +
+          "real on the workspace's data, every mutation is captured as would-have-done and denied. Returns " +
+          "{messages, wouldHave, trace}. The trace is directly ingestable via ingest_scorecard — the agent-eval " +
+          "loop: run N tries per scenario as trials, judge the batch, then diff_scorecards against a baseline to " +
+          "decide whether a candidate configuration is actually better. agentId tries a saved agent (latest " +
+          "version); draft overlays candidate instructions/task on the base persona WITHOUT saving a version; " +
+          "omit both to try the base persona.",
+        inputSchema: {
+          agentId: z.string().optional().describe("Saved agent id to try (latest version)"),
+          draft: z
+            .object({ instructions: z.string().optional(), task: z.string().optional() })
+            .optional()
+            .describe("Candidate overlay evaluated without saving a version"),
+          event: z
+            .object({
+              kind: z.string().describe("Platform event kind, e.g. scorecard.completed"),
+              message: z.string().describe("The one-line event message the agent wakes on"),
+              subject: z.object({ type: z.string(), id: z.string() }).optional(),
+              payload: z.record(z.unknown()).optional(),
+            })
+            .describe("The (replayed or hand-built) platform event to fire at the configuration"),
+        },
+      },
+      ({ agentId, draft, event }) =>
+        run(principal, "agents:write", async () =>
+          ok(
+            await tryAgent({
+              workspace: ws,
+              subject: principal.subject,
+              ...(agentId !== undefined ? { agentId } : {}),
+              ...(draft !== undefined ? { draft } : {}),
+              event,
+            }),
+          ),
+        ),
+    );
+  }
 }

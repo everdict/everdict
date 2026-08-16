@@ -215,6 +215,20 @@ becomes the full lifecycle, and agent quality gets the same regression disciplin
 the platform. (Later phase; the only architectural prerequisite is keeping transcripts convertible —
 they are.)
 
+**Self-evolution wiring (2026-08-16).** The loop is now drivable BY an agent, its own configuration
+included: the try-drive gained a service-to-service door (`POST /internal/try` on apps/agent —
+internal-token gated; the loop's tools run under a one-shot `agt_` token minted for the named member and
+revoked when the try returns) and the control plane relays it as the **`try_agent` MCP tool**
+(`agents:write`; shadow semantics unchanged — reads real, mutations captured-and-denied). The procedure
+that turns those parts into a campaign is the first-party example skill **`agent-evolve`**
+(`packages/application-control/src/capability/first-party.ts`): baseline N shadow tries per scenario as
+TRIALS (`ingest_scorecard` with repeated caseIds, `harness: {id: "agent:<id>"}`), read the trial
+summary's flake/variance as the NOISE FLOOR, mutate one hypothesis per round (draft overlay for
+instruction candidates, saved versions for tool/model candidates), judge the candidate with
+`diff_scorecards`' statistically-gated trials diff (Fisher/z + FDR + minDelta), and adopt only over a
+significant win on held-out scenarios — adoption is `save_agent` (a new immutable version) behind HITL,
+lineage is a campaign issue closed with the proving scorecard. The oracle is never edited mid-campaign.
+
 ## Flagship scenarios (acceptance tests for the whole design)
 
 1. **Scorecard Sentinel** — triggers: `scorecard.submitted`, `scorecard.case.completed`,

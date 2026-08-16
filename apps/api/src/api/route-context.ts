@@ -160,6 +160,7 @@ import type { SkillGenerator } from "../core/skill/skill-generator.js";
 import type { WorkspacePulseService } from "../core/workspace/workspace-pulse-service.js";
 import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import { buildMcpServer } from "../mcp.js";
+import type { AgentTryRelay } from "./mcp-context.js";
 
 export interface ServerDeps {
   service: RunService;
@@ -221,6 +222,9 @@ export interface ServerDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert (routes disabled if absent)
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
   agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
+  // Shadow try-drive relay to the agent service — consumed only by the MCP `try_agent` tool (the try's HTTP
+  // home is apps/agent itself, which the web reaches directly; this closes the BFF↔MCP parity from the MCP side).
+  agentTry?: AgentTryRelay;
   // The CALLER's own agent (Settings › Agent › Tools + › Skills) — the workspace baseline overlaid with that
   // member's on/off, so two members of one workspace get two different agents (routes disabled if absent).
   agentMemberToolingService?: AgentMemberToolingService;
