@@ -50,6 +50,11 @@ export async function runSkillTry(
       systemPrompt: `${deps.systemPrompt}\n\n## Skill test\n${TEST_PREAMBLE} Skill under test: "${skill.name}".`,
       history: [{ role: "user", content: message }],
       registry: tools.registry,
+      // "ONLY this skill plus the built-in READ-ONLY tools" was a sentence in the system prompt and nowhere else:
+      // the loop ran with no permit hook and no mode, so a skill under test could drive any mutating tool the base
+      // catalog exposes, for real, before anyone had saved the skill. It is the same run shape as the agent try, so
+      // it takes the same guarantee — the attested reads execute, everything else is captured.
+      mode: { kind: "shadow", executableReads: tools.attestedReads },
       onMessage: (m: ChatMessage) => {
         if (m.role === "assistant") {
           const tc = extractToolCalls(m);

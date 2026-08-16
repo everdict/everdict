@@ -48,7 +48,12 @@ function reportDeps(): {
     keyStore: new InMemoryTenantKeyStore(),
     internalToken: "shhh",
     resolveModel: async () => ({ transport: reportingTransport(), model: "test-model" }),
-    toolProvider: async () => ({ registry: new ToolRegistry([]), call: null, close: async () => {} }),
+    toolProvider: async () => ({
+      registry: new ToolRegistry([]),
+      call: null,
+      attestedReads: new Set<string>(),
+      close: async () => {},
+    }),
     systemPrompt: "test",
     now: () => "2026-07-27T00:00:00.000Z",
     newId: () => `id-${n++}`,

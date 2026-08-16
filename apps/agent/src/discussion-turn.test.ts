@@ -87,6 +87,7 @@ function discussionDeps(transport: LlmTransport): {
         },
       ]),
       call: null,
+      attestedReads: new Set<string>(),
       close: async () => {},
     }),
     systemPrompt: "test",

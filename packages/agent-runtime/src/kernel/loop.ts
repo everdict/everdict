@@ -38,6 +38,14 @@ import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { type WaitRequest, buildWaitForTool } from "../tools/wait-for-tool.js";
+import {
+  ENVELOPE_REFUSAL_PREFIX,
+  type ExecutionMode,
+  PERMISSION_DENIED_PREFIX,
+  SHADOW_DENIED,
+  modeInvokes,
+  shadowCaptureMessage,
+} from "./execution-mode.js";
 import { normalizeHistory, wellFormedArguments } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
@@ -91,6 +99,11 @@ export interface ExitGuard {
   maxAttempts?: number;
 }
 
+// What ONE tool call came back with, from the loop's point of view: the tool's own ToolResult, plus the facts the
+// KERNEL knows about the call and the tool cannot state for itself. `shadowDenied` is the first: this run captured
+// the call instead of invoking it. Internal — a tool never authors it.
+type DispatchedResult = ToolResult & { shadowDenied?: boolean };
+
 export type AgentEvent =
   | { type: "turn_start"; turn: number }
   | { type: "text_delta"; delta: string }
@@ -101,7 +114,14 @@ export type AgentEvent =
   | { type: "tool_call"; name: string; args: string; id?: string }
   // `output` is what the model saw (an offloaded result carries its preview), capped for the evidence stream —
   // without it a recorded tool span can only say a result EXISTED, never what it said.
-  | { type: "tool_result"; name: string; isError: boolean; id?: string; output?: string }
+  // `outcome` names WHY a result is what it is when the kernel — not the tool — produced it: "shadow_denied" is a
+  // call a shadow run captured instead of invoking. A consumer building evidence off this stream must be able to tell
+  // a withheld call from one that ran and failed, and both from one that worked.
+  | { type: "tool_result"; name: string; isError: boolean; id?: string; output?: string; outcome?: "shadow_denied" }
+  // A shadow run's whole product: the call the agent WOULD have made, with the arguments it chose. Emitted at the
+  // moment the kernel declines to invoke it, so the intent is a runtime fact rather than something a host reconstructs
+  // from a permission hook it happened to install.
+  | { type: "shadow_intent"; name: string; input: unknown; id?: string }
   // One model call's own token spend, emitted when the call returns — the per-call fact that `onUsage` (a
   // metering aggregate) reports but the EVENT stream never carried, so a span recorder listening on events
   // could not put tokens on the call it was timing. `model` is the model that actually answered (the fallback
@@ -201,6 +221,12 @@ export interface AgentLoopOptions {
   // it (auto-allow); absent hook = allow (write tools are already opt-in). A denied call becomes an error result the
   // model sees and can adapt to.
   permit?: PermissionHook;
+  // What this execution is allowed to DO (see ExecutionMode). Absent → "live": every call the gates admit is
+  // invoked, which is what every run did before this option existed. `shadow` runs a try: only the host-attested
+  // first-party reads (and the kernel's own cognition tools) are invoked, everything else is captured as an intent
+  // and answered with a capture result. The permission hook keeps firing for everything it covered in live mode —
+  // it is a separate question (a human's consent), and its answer cannot resurrect an effect the mode withheld.
+  mode?: ExecutionMode;
   // Mid-run user steering: called at each turn boundary (context balanced) to pull any user messages the host has
   // queued since the run started, which are appended to the conversation before the next model call — Claude Code's
   // queued-message model. Absent → strict turn-based (the historical behaviour). The messages must be role:"user".
@@ -591,6 +617,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         // scoped parent could spawn an unscoped child — the delegation escape the envelope exists to close.
         // The child re-counts spend from zero (a per-run bound, not a shared pool with the parent).
         ...(opts.envelope ? { envelope: opts.envelope } : {}),
+        // …and so does the MODE, for the same reason: a shadow run that could spawn a live child would perform its
+        // effects one level down, which is the delegation escape all over again in a different currency.
+        ...(opts.mode ? { mode: opts.mode } : {}),
       }).then((r) => r.content),
     );
   };
@@ -1136,9 +1165,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments, id: tc.id });
 
     const dispatchOne = async (
-      tc: { name: string; arguments: string },
+      tc: { name: string; arguments: string; id?: string },
       stepSignal: AbortSignal,
-    ): Promise<ToolResult> => {
+    ): Promise<DispatchedResult> => {
       const tool = registry.get(tc.name);
       const parsed = parseArgs(tc.arguments);
       // The objects the object-gate admitted for this call, reported with their outcome once the tool ran.
@@ -1160,7 +1189,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         );
         if (!decision.allowed) {
           return {
-            content: `Envelope refusal (${decision.reason}): the tool "${tool.name}" is ${
+            content: `${ENVELOPE_REFUSAL_PREFIX}${decision.reason}): the tool "${tool.name}" is ${
               decision.reason === "forbidden"
                 ? "explicitly forbidden by this task's envelope."
                 : "outside this task's granted scope."
@@ -1182,14 +1211,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         if (opts.envelope.scope.resources !== undefined && tool.intrinsic !== true) {
           if (tool.resourceTargets === undefined) {
             return {
-              content: `Envelope refusal (out_of_scope): this task is scoped to specific objects, and the tool "${tool.name}" does not declare which object a call would touch — so it cannot be checked against that scope and is refused. Use a tool that names its target, or stop and request the access you need (refuse_and_replan).`,
+              content: `${ENVELOPE_REFUSAL_PREFIX}out_of_scope): this task is scoped to specific objects, and the tool "${tool.name}" does not declare which object a call would touch — so it cannot be checked against that scope and is refused. Use a tool that names its target, or stop and request the access you need (refuse_and_replan).`,
               isError: true,
             };
           }
           const targets = tool.resourceTargets(parsed.value);
           if (targets.kind === "indeterminate") {
             return {
-              content: `Envelope refusal (out_of_scope): this task is scoped to specific objects, and the arguments given to "${tool.name}" do not name which object it would touch — so the call cannot be checked against that scope and is refused. Call it with an explicit target (refuse_and_replan).`,
+              content: `${ENVELOPE_REFUSAL_PREFIX}out_of_scope): this task is scoped to specific objects, and the arguments given to "${tool.name}" do not name which object it would touch — so the call cannot be checked against that scope and is refused. Call it with an explicit target (refuse_and_replan).`,
               isError: true,
             };
           }
@@ -1197,7 +1226,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             const objectDecision = authorizeResourceAccess(target, opts.envelope);
             if (!objectDecision.allowed) {
               return {
-                content: `Envelope refusal (out_of_scope): this task may read ${target.type} objects only within its granted evidence, and "${target.id}" is not part of it. Do NOT try another route to the same object. Stop this approach and request the access you need, naming why the granted evidence is insufficient (refuse_and_replan).`,
+                content: `${ENVELOPE_REFUSAL_PREFIX}out_of_scope): this task may read ${target.type} objects only within its granted evidence, and "${target.id}" is not part of it. Do NOT try another route to the same object. Stop this approach and request the access you need, naming why the granted evidence is insufficient (refuse_and_replan).`,
                 isError: true,
               };
             }
@@ -1218,8 +1247,16 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       // reach an outside network is exfiltration-shaped (effectsRequireConsent reason ④), so it consults the
       // permission hook exactly like a write. Plain reads (no consent-requiring declaration) stay ungated —
       // reads are the agent's senses.
+      //
+      // …and the EXECUTION MODE, which is a third question again (see ExecutionMode): not "may this task call it"
+      // and not "does a human consent", but "does this run perform effects at all". A shadow run answers no, and it
+      // answers it HERE — at the invocation point — because the read-only flag the permit gate keys on is a fact
+      // only for tools we ourselves attest. The gate below therefore ignores that flag entirely and consults the
+      // host's attested set.
+      const captured = opts.mode !== undefined && !modeInvokes(opts.mode, tool);
       const needsPermit =
-        tool.isReadOnly !== true || (tool.effects !== undefined && effectsRequireConsent(tool.effects));
+        captured || tool.isReadOnly !== true || (tool.effects !== undefined && effectsRequireConsent(tool.effects));
+      let denied = false;
       if (needsPermit && opts.permit) {
         const decision = await opts.permit({
           name: tool.name,
@@ -1230,12 +1267,19 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           ...(tool.effects ? { effects: tool.effects } : {}),
         });
         emit({ type: "permission", name: tool.name, decision });
-        if (decision === "deny")
-          return {
-            content: `Permission denied: the tool "${tool.name}" was not approved by the user.`,
-            isError: true,
-          };
+        denied = decision === "deny";
       }
+      // A captured call is never invoked, whatever the permission hook said — consent to an effect this run does not
+      // perform is not consent to perform it. The intent is the run's product, so it is emitted before the answer.
+      if (captured) {
+        emit({ type: "shadow_intent", name: tool.name, input: parsed.value, ...(tc.id ? { id: tc.id } : {}) });
+        return { content: shadowCaptureMessage(tool.name), isError: true, shadowDenied: true };
+      }
+      if (denied)
+        return {
+          content: `${PERMISSION_DENIED_PREFIX} the tool "${tool.name}" was not approved by the user.`,
+          isError: true,
+        };
       const guard = opts.toolGuards?.find((g) => g.toolName === tool.name);
       if (guard) {
         const blocked = guard.check({ messages, args: parsed.value });
@@ -1262,7 +1306,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
     // The whole dispatch runs as ONE step: a soft interrupt (or run abort) stops the WAIT even when a tool
     // ignores its signal, and the pairing is closed with synthetic results so the transcript stays balanced.
-    const outputs: ToolResult[] = [];
+    const outputs: DispatchedResult[] = [];
     let batchInterrupted = false;
     await withStep(async (stepSignal) => {
       const interruption = new Promise<"interrupted">((resolve) => {
@@ -1280,7 +1324,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           }
         }
         const slice = result.toolCalls.slice(start, end);
-        const settled: (ToolResult | undefined)[] = [];
+        const settled: (DispatchedResult | undefined)[] = [];
         const all = Promise.all(
           slice.map((tc, i) =>
             dispatchOne(tc, stepSignal).then((r) => {
@@ -1335,6 +1379,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         isError: output.isError,
         id: tc.id,
         output: content.slice(0, TOOL_RESULT_EVENT_CHARS),
+        ...(output.shadowDenied === true ? { outcome: SHADOW_DENIED } : {}),
       });
       await opts.onMessage?.(toolMessage);
     }

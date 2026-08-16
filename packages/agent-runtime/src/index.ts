@@ -22,6 +22,7 @@ export * from "./tools/wait-for-tool.js";
 export * from "./mcp/bridge.js";
 export * from "./context/token-budget.js";
 export * from "./context/compaction.js";
+export * from "./kernel/execution-mode.js";
 export * from "./kernel/normalize.js";
 export * from "./kernel/system-prompt.js";
 export * from "./kernel/loop.js";

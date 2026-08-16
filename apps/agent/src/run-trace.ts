@@ -1,3 +1,4 @@
+import { isKernelRefusal } from "@everdict/agent-runtime";
 import type { AgentMessageRecord, TraceEvent } from "@everdict/contracts";
 
 // O2 (execution-model: "transcripts are traces"): project a turn's transcript slice onto the platform's
@@ -90,7 +91,13 @@ export function transcriptToTrace(
         ...stamp,
         kind: "tool_result",
         id,
-        ok: !m.content.startsWith("Error"),
+        // A REFUSAL IS NOT A SUCCESS. The persisted transcript row carries no outcome flag (AgentMessageRecord is
+        // chat protocol), so this projection still reads the text — but it reads the kernel's own refusal constants
+        // (isKernelRefusal: permission denial, envelope refusal, a shadow capture) instead of a hand-guessed "Error"
+        // prefix, so a withheld call scores as the failure it is and a reword of the kernel's sentence moves both
+        // ends together. Carrying the flag on the ROW is the honest fix and needs the record + its store to say it —
+        // a contracts/db change outside this seam.
+        ok: !(m.content.startsWith("Error") || isKernelRefusal(m.content)),
         output: m.content,
         parentId: id,
       });

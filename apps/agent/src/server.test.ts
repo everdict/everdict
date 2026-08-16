@@ -32,6 +32,7 @@ function makeDeps(over: Partial<AgentServerDeps> = {}): AgentServerDeps {
   const toolProvider: ToolProvider = async () => ({
     registry: new ToolRegistry([]),
     call: null,
+    attestedReads: new Set<string>(),
     close: async () => {},
   });
   return {
@@ -80,7 +81,12 @@ function writeToolDeps(writeCall: () => Promise<{ content: string; isError: bool
   };
   return {
     resolveModel: async () => ({ transport: callThenText("do_write"), model: "test-model" }),
-    toolProvider: async () => ({ registry: new ToolRegistry([writeTool]), call: null, close: async () => {} }),
+    toolProvider: async () => ({
+      registry: new ToolRegistry([writeTool]),
+      call: null,
+      attestedReads: new Set<string>(),
+      close: async () => {},
+    }),
   };
 }
 
@@ -805,7 +811,12 @@ describe("agent server", () => {
       const app = buildServer(
         makeDeps({
           resolveModel: async () => ({ transport, model: "test-model" }),
-          toolProvider: async () => ({ registry: new ToolRegistry([writeTool]), call: null, close: async () => {} }),
+          toolProvider: async () => ({
+            registry: new ToolRegistry([writeTool]),
+            call: null,
+            attestedReads: new Set<string>(),
+            close: async () => {},
+          }),
         }),
       );
       const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
@@ -1239,7 +1250,12 @@ describe("agent server", () => {
 
   it("resolves @-references via the read tool and records them on the user message", async () => {
     const call = vi.fn(async () => ({ content: '{"id":"demo-qa","caseCount":2}', isError: false }));
-    const toolProvider: ToolProvider = async () => ({ registry: new ToolRegistry([]), call, close: async () => {} });
+    const toolProvider: ToolProvider = async () => ({
+      registry: new ToolRegistry([]),
+      call,
+      attestedReads: new Set<string>(),
+      close: async () => {},
+    });
     const app = buildServer(makeDeps({ toolProvider }));
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
     await app.inject({

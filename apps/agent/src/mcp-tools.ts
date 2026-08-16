@@ -1,6 +1,7 @@
 import {
   type McpInvoke,
   type SkillEntry,
+  TOOL_SEARCH_TOOL_NAME,
   type ToolDefinition,
   ToolRegistry,
   buildSkillTools,
@@ -142,6 +143,13 @@ export function imageAllowed(image: string, allow: readonly string[]): boolean {
 
 export interface ToolSession {
   registry: ToolRegistry;
+  // The tools this process can ATTEST are pure reads — the kernel's `ExecutionMode.shadow.executableReads`, which is
+  // the only set a shadow run will actually invoke. Membership is a statement about PROVENANCE, not about a name or
+  // about a flag on the wire: the control plane's own catalog (its handlers gate on our Action strings, and it tells
+  // us which are reads), plus the tools this file builds itself out of data already in memory. A workspace-registered
+  // MCP server is NEVER in it — its read-only classification is a third party's claim about a third party's code, and
+  // `get_or_create_ticket` is what that claim is worth.
+  attestedReads: ReadonlySet<string>;
   // Direct read-tool invocation for @-reference resolution (get_*) — always the BASE everdict client (its read tools
   // resolve workspace entities); null when no base MCP session is available.
   call: McpInvoke | null;
@@ -165,7 +173,12 @@ export type ToolProvider = (
   codeTools?: ResolvedCodeTool[],
 ) => Promise<ToolSession>;
 
-const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
+const EMPTY_SESSION: ToolSession = {
+  registry: new ToolRegistry([]),
+  call: null,
+  attestedReads: new Set<string>(),
+  close: async () => {},
+};
 
 // The mutable client slot a resilient invoke reconnects through. `current` is what calls go to; `refresh` shares
 // one in-flight reconnect across concurrently-failing calls (no reconnect storm). close() must close `current`,
@@ -252,6 +265,8 @@ export function mcpToolProvider(
   return async (headers, extraServers = [], skills = [], codeTools = []) => {
     const boxes: McpClientBox[] = [];
     const bridged: ToolDefinition[] = [];
+    // Filled ONLY where this file can vouch for the tool (see ToolSession.attestedReads).
+    const attestedReads = new Set<string>();
     let baseCall: McpInvoke | null = null;
     let platformToolsError: string | undefined;
 
@@ -285,6 +300,12 @@ export function mcpToolProvider(
         baseCall = invoke;
         const baseDefs: ToolDefinition[] = [];
         for (const t of baseTools) {
+          const readOnly = baseToolReadOnly({
+            name: t.name,
+            annotations: t.annotations as { readOnlyHint?: boolean } | undefined,
+          });
+          // A read of OUR control plane, gated by OUR handler on an Action we defined — attestable.
+          if (readOnly) attestedReads.add(t.name);
           baseDefs.push(
             mcpToolToDefinition(
               {
@@ -293,12 +314,7 @@ export function mcpToolProvider(
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
               invoke,
-              {
-                isReadOnly: baseToolReadOnly({
-                  name: t.name,
-                  annotations: t.annotations as { readOnlyHint?: boolean } | undefined,
-                }),
-              },
+              { isReadOnly: readOnly },
             ),
           );
         }
@@ -422,10 +438,17 @@ export function mcpToolProvider(
     if (bridged.length > 0) tools.push(buildToolSearchTool(new ToolRegistry(bridged)), ...bridged);
     tools.push(...codeDefs); // native code tools — always loaded (not deferred behind ToolSearch)
     tools.push(...skillTools);
+    // ToolSearch and the skill tools are built HERE, out of data already in this process (the registry it was handed,
+    // the skill bodies passed in) — they reach nothing and change nothing, so they are attestable in the same sense the
+    // control plane's reads are. Without ToolSearch a shadow try cannot even see the deferred catalog it is meant to
+    // reason over. The code tools (`code__*`) are deliberately absent: running someone's code is the effect.
+    attestedReads.add(TOOL_SEARCH_TOOL_NAME);
+    for (const t of skillTools) if (t.isReadOnly === true) attestedReads.add(t.name);
     const registry = new ToolRegistry(tools);
     return {
       registry,
       call: baseCall,
+      attestedReads,
       ...(platformToolsError !== undefined ? { platformToolsError } : {}),
       close: async () => {
         // Close through the boxes — a reconnect may have swapped the live client since connect time.

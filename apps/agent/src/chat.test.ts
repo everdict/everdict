@@ -22,7 +22,12 @@ async function seededDeps(transport: LlmTransport): Promise<{ deps: ChatDeps; se
   const deps: ChatDeps = {
     sessions,
     resolveModel: async () => ({ transport, model: "test-model" }),
-    toolProvider: async () => ({ registry: new ToolRegistry([]), call: null, close: async () => {} }),
+    toolProvider: async () => ({
+      registry: new ToolRegistry([]),
+      call: null,
+      attestedReads: new Set<string>(),
+      close: async () => {},
+    }),
     systemPrompt: "test",
     now: () => "2026-07-31T00:00:00.000Z",
     newId: () => `id-${n++}`,
@@ -511,7 +516,12 @@ describe("workspace memory recall", () => {
     const { deps } = await seededDeps(mainTransport);
     const withExtraction: ChatDeps = {
       ...deps,
-      toolProvider: async () => ({ registry: new ToolRegistry([]), call, close: async () => {} }),
+      toolProvider: async () => ({
+        registry: new ToolRegistry([]),
+        call,
+        attestedReads: new Set<string>(),
+        close: async () => {},
+      }),
       memoryExtraction: true,
       smallModelRef: "small",
       resolveModelById: async () => ({ transport: smallTransport, model: "small-model" }),
@@ -552,6 +562,7 @@ describe("workspace memory recall", () => {
       toolProvider: async () => ({
         registry: new ToolRegistry([]),
         call: async () => ({ content: "NOT_FOUND", isError: true }),
+        attestedReads: new Set<string>(),
         close: async () => {},
       }),
       memoryExtraction: true,
@@ -619,7 +630,12 @@ describe("workspace memory recall", () => {
         : { content: "NOT_FOUND", isError: true };
     const withFs: ChatDeps = {
       ...deps,
-      toolProvider: async () => ({ registry: new ToolRegistry([]), call, close: async () => {} }),
+      toolProvider: async () => ({
+        registry: new ToolRegistry([]),
+        call,
+        attestedReads: new Set<string>(),
+        close: async () => {},
+      }),
     };
     // When a plain turn (no references) runs
     await runChat(withFs, PRINCIPAL, {}, "s-1", "what do we know about billing?");
@@ -721,6 +737,7 @@ describe("runChat knowledge auto-recall", () => {
           return { content: "Known: web@2.1.0 fails case-7 under judge strictness", isError: false };
         return { content: `resolved:${name}`, isError: false };
       },
+      attestedReads: new Set<string>(),
       close: async () => {},
     });
     // When the user sends a message carrying a harness reference (with its version coordinate)

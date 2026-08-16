@@ -195,8 +195,11 @@ The crux of "craft until it actually works":
 - **Chat try** — talk to the *draft* config ephemerally (profile built from the form, not the registry;
   same pattern as skill try / judge preview).
 - **Event replay try** — pick a **real recorded event** from the log (e.g. last week's
-  `scorecard.completed` with 3 failures) and fire it at the draft in **shadow mode**: permission mode
-  forced to `plan` (read tools live, every mutation captured as *would-have-done* instead of executed).
+  `scorecard.completed` with 3 failures) and fire it at the draft in **shadow mode** — the kernel's
+  `ExecutionMode.shadow`, decided at the INVOCATION point, not a permission hook: only the tools the agent
+  service can ATTEST as first-party pure reads (the control-plane catalog's reads + the tools it builds
+  in-process) run live; every mutation AND every workspace-registered server's tool — however that server
+  classifies it — is captured as *would-have-done* (a `shadow_intent`) instead of executed.
   Watch the live transcript; iterate; save a version when satisfied. The event log (A1) is what makes
   this possible — replay is a query, not a fixture.
 - Try transcripts attach to the draft/version for before/after comparison.
@@ -293,7 +296,8 @@ P4 → `5b596abf` P5 → `88542c6c` P6 → P7 with this doc update):
   parking reuses the discussion turn's PermissionRegistry + `GET /pending` + `POST /permission`; the fleet
   shows an inline Allow/Deny prompt; fail-closed deny when no approval channel exists.
 - **Crafting**: `POST /agent/agents/try` — replay a real (or hand-built) event at a saved agent or draft
-  in SHADOW mode (reads live under the caller's bearer, mutations captured as `wouldHave` + denied).
+  in SHADOW mode (the platform's own reads live under the caller's bearer; everything else — mutations and
+  any external server's tool — captured as `wouldHave`, never invoked).
 - **Conversational crafting studio (B2, user decision 2026-07-28: NOT a wizard)**: `/[workspace]/agents/craft`
   mirrors the analysis studio — the LEFT canvas is the agent being built, the RIGHT chat panel shapes it
   multi-turn. The crafting chat holds `craft_agent` (PATCHes the draft; the host streams it as the SSE

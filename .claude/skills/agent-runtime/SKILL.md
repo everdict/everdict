@@ -45,6 +45,18 @@ precedent: `authorizeToolInvocation`, `budgetExhausted`, `effectsRequireConsent`
    (published|failed|absent). See docs/architecture/ownership-protocol.md.
 6. Tool results feed back as `tool` messages; large results offload through the ResultStore and page via
    `read_tool_result`. MCP-bridged tools default `isReadOnly: true` and validate on the server side.
+7. **"This run performs no effects" is `ExecutionMode`, enforced at the INVOCATION point** — never a host permit
+   hook answering deny. The permit gate is consulted only for writes/consent-requiring reads, so a hook cannot
+   bound a run whose read-only flags come from a third party (an external server's `get_or_create_*` walked through
+   a shadow try and filed a ticket). `mode: {kind:"shadow", executableReads}` invokes ONLY the host-ATTESTED
+   first-party reads (`ToolSession.attestedReads` in apps/agent: the control plane's own catalog + tools built
+   in-process; never a workspace server's, never `code__*`) plus intrinsic kernel cognition; everything else is
+   captured — `shadow_intent` event + a `shadow_denied` tool_result — and the mode binds sub-agents like the
+   envelope does. Absent = live, byte-identical to before.
+8. **A withheld call is not a successful one.** Downstream evidence (`tool_result.ok` in an ingested trace) comes
+   from the kernel's `tool_result` event (`isError`/`outcome`), never from reading the result text; where a
+   transcript carries no attribution, match the kernel's exported refusal constants (`isKernelRefusal`) rather
+   than a guessed `"Error"` prefix — the kernel owns the wording and both ends move together.
 
 SSOT: `docs/architecture/ownership-protocol.md` (envelope/checkpoint/effect contracts) +
 `docs/architecture/agent-automation.md` (activation) + rule `.claude/rules/events.md` (facts).
