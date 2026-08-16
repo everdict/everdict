@@ -353,12 +353,15 @@ describe("SpeculationController — a branch that REJECTED while its sibling ans
       onLoserFailure: (job) => lostJobs.push(`${job.evalCase.id}@${job.evalCase.placement?.target}`),
     });
     const p = ctl.run(exec.execute, jobOn("a", "slow-rt"));
+    // The rejection expectation attaches BEFORE the race fails — the rejection lands mid-advance, and a
+    // handler attached only afterwards reads as an unhandled rejection under the runner's error watch.
+    const settledRejecting = expect(p).rejects.toThrow("primary died"); // first error wins the report
     await time.advance(1500); // duplicate fires
     exec.fail("a@slow-rt", new Error("primary died"));
     await time.advance(1550);
     exec.fail("a@fast-rt", new Error("duplicate died too"));
     await time.advance(1600);
-    await expect(p).rejects.toThrow("primary died"); // first error wins the report
+    await settledRejecting;
     expect(lostJobs).toEqual(["a@fast-rt"]); // the duplicate ends here; the case's own failure exit owns the primary
   });
 });
