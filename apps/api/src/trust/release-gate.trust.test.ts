@@ -85,6 +85,19 @@ describeTrust(
           ),
           harness: { id: "h", version: "1" },
         },
+        // A vouched scoring pass — the gate refuses unvouched input by default (owner decision, arch-review
+        // 47 follow-up), and these scenarios certify OTHER refusal reasons, which input_unverified would
+        // otherwise pre-empt at the trust precondition.
+        scoring: [
+          {
+            kind: "initial",
+            revision: 1,
+            judges: [],
+            scorePlaneDigest: "sha256:plane",
+            inputObservation: { completed: true, cases: results.length },
+            createdAt: new Date().toISOString(),
+          },
+        ],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         ...over,

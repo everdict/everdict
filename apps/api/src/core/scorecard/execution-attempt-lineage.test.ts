@@ -244,4 +244,40 @@ describe("the physical attempt travels by name, so every execution can be ended"
       [2, "committed"],
     ]);
   });
+
+  it("stamps EXECUTING on the attempt that reached the machine — not the one a spill abandoned", async () => {
+    // Given a ledger that records every transition (the executing stamp is transient — committed overwrites
+    // it — so the final row cannot testify about who was stamped as having started)
+    const ledger = new InMemoryExecutionAttemptStore();
+    const transitions: Array<[string, string]> = [];
+    const originalTransition = ledger.transition.bind(ledger);
+    ledger.transition = async (...args: Parameters<typeof originalTransition>) => {
+      transitions.push([args[0], args[1]]);
+      return originalTransition(...args);
+    };
+    // …and a dispatcher that FIRES onStarted for every dispatch that begins compute (rt-a dies before
+    // starting; rt-b starts and succeeds)
+    const { service, store, datasets } = serviceWith(
+      async (job, opts) => {
+        const target = job.evalCase.placement?.target;
+        if (target === "rt-a") throw new UpstreamError("UPSTREAM_ERROR", {}, "runtime rt-a is gone");
+        (opts as { onStarted?: () => void } | undefined)?.onStarted?.();
+        return passing(job);
+      },
+      {},
+      ledger,
+    );
+    await registerDataset(datasets, ["c1"]);
+
+    // When the case spills and the SECOND attempt is the one that actually starts
+    const record = await submit(service, { runtime: "rt-a,rt-b" });
+    expect(await settled(store, record.id)).toBe("succeeded");
+
+    // Then the executing stamp names generation 2. The dispatch-time capture named generation 1 — already
+    // superseded by the spill, so the stamp was silently refused and the attempt that reached the machine
+    // went created → committed with no record of having started (arch-review 51 residue).
+    const executing = transitions.filter(([, to]) => to === "executing").map(([id]) => id);
+    expect(executing.some((id) => id.endsWith("#g2"))).toBe(true);
+    expect(executing.some((id) => id.endsWith("#g1"))).toBe(false);
+  });
 });

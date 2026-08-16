@@ -528,6 +528,7 @@ export class ScorecardBatchService {
                 });
               },
               onLoser: (outcome, cid: string) => this.meterLostAttempt(rec.tenant, outcome, cid, id),
+              onLoserFailure: (lostJob, cid: string) => this.stampLostBranch(lostJob, cid),
               ...(this.deps.cancelQueued
                 ? {
                     cancelQueued: (cid: string) =>
@@ -682,7 +683,11 @@ export class ScorecardBatchService {
       oomAutoBoost?: boolean;
       speculation?: SpeculationController;
       onWaiting: (reason: string) => void;
-      onStarted?: () => void;
+      // Fired when compute ACTUALLY starts, per physical dispatch — handed the job that started, because a
+      // spill/OOM reattempt inside this call dispatches a DIFFERENT attempt than the one the caller opened,
+      // and an executing-stamp keyed to the dispatch-time capture named the abandoned row (arch-review 51
+      // residue). The started job's own coordinates are the attempt that reached the machine.
+      onStarted?: (startedJob: CaseJob) => void;
       onStep: (message: string, caseId: string) => void;
       // Opens a fresh recording attempt for a NEW physical execution (spill / OOM boost / speculation
       // duplicate) and returns the job stamped with it — see SpilloverOpts.reattempt.
@@ -717,7 +722,9 @@ export class ScorecardBatchService {
         (jj) =>
           executeCase(this.deps, cfg.owner, jj, {
             onWaiting: cfg.onWaiting,
-            ...(cfg.onStarted ? { onStarted: cfg.onStarted } : {}),
+            // The dispatched job rides into the hook — `jj` is THIS physical dispatch's job (a reattempt
+            // rebuilt it), so the caller's executing-stamp names the attempt that actually started.
+            ...(cfg.onStarted ? { onStarted: () => cfg.onStarted?.(jj) } : {}),
             onAttempt: (generation) => attemptByJob.set(jj, generation),
           }),
         j,
@@ -881,8 +888,10 @@ export class ScorecardBatchService {
             },
             // COMPUTE ACTUALLY STARTED — the child flips queued→running, and the attempt ledger records that
             // this execution reached the machine rather than only having been intended (arch-review 42).
-            onStarted: () => {
-              void this.commit.stampAttempt(attemptId, "executing");
+            // Keyed to the STARTED job's own coordinates (arch-review 51 residue): a spill/OOM reattempt
+            // dispatches a different attempt, and the dispatch-time capture named the abandoned one.
+            onStarted: (startedJob) => {
+              void this.commit.stampAttempt(jobAttemptId(startedJob, executionId) ?? attemptId, "executing");
               if (childId && runStore) void this.commit.markChildRunning(childId);
             },
             onStep: (message, cid) =>
@@ -1756,6 +1765,22 @@ export class ScorecardBatchService {
   //
   // Metered, never scored: this touches the usage/budget ledgers and nothing that answers "how did the agent
   // do". `evaluations` is deliberately left out of the count — a loser is spend, not an evaluation.
+  // A speculation branch that REJECTED while its sibling answered the case (arch-review 51 residue): the
+  // branch's attempt row would otherwise stand non-terminal forever — the failure exit stamps only the
+  // attempt the CASE dies with, and a branch whose error was absorbed by a sibling's success never reaches
+  // it. `failed` because it physically failed; best-effort, and idempotent against the ledger's terminal
+  // guard (an overlap with the case's own failure stamp is a silent no-op).
+  private stampLostBranch(lostJob: CaseJob, caseId: string): void {
+    const executionId = lostJob.runId;
+    if (executionId === undefined) return;
+    void this.commit.stampAttempt(jobAttemptId(lostJob, executionId), "failed", {
+      error: {
+        code: "SPECULATION_BRANCH_FAILED",
+        message: `the speculation branch for ${caseId} failed while a sibling answered the case`,
+      },
+    });
+  }
+
   private meterLostAttempt(tenant: string, outcome: SpilloverOutcome, caseId: string, id: string): void {
     const result = outcome.result;
     // …and the PHYSICAL ledger records that this execution stopped being the case's (arch-review 51). The
@@ -2189,9 +2214,12 @@ export class ScorecardBatchService {
           ...(reattempt ? { reattempt } : {}),
           onWaiting,
           // COMPUTE ACTUALLY STARTED — the same pair the Temporal driver stamps: the child flips
-          // queued→running, and the attempt ledger records that this execution reached the machine.
-          onStarted: () => {
-            void this.commit.stampAttempt(openedAttemptId, "executing", {
+          // queued→running, and the attempt ledger records that this execution reached the machine. Keyed
+          // to the STARTED job (arch-review 51 residue): after a spill/OOM reattempt the dispatch-time
+          // capture named the abandoned attempt, not the one that reached the machine.
+          onStarted: (startedJob) => {
+            const started = startedJob.runId !== undefined ? jobAttemptId(startedJob, startedJob.runId) : undefined;
+            void this.commit.stampAttempt(started ?? openedAttemptId, "executing", {
               ...(childId ? { childRunId: childId } : {}),
             });
             if (childId && runStore) void this.commit.markChildRunning(childId);
@@ -2372,6 +2400,7 @@ export class ScorecardBatchService {
               this.deps.onOrchestrationEvent?.({ kind: "speculation_settled", winnerSpeculated: speculated });
           },
           onLoser: (outcome, cid) => this.meterLostAttempt(tenant, outcome, cid, id),
+          onLoserFailure: (lostJob, cid) => this.stampLostBranch(lostJob, cid),
           ...(this.deps.cancelQueued
             ? {
                 cancelQueued: (cid: string) =>

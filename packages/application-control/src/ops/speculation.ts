@@ -42,6 +42,15 @@ export interface SpeculationOpts {
   // never scoring: it must not reach the scorecard, the trajectory, or any aggregate that answers "how did
   // the agent do".
   onLoser?: (outcome: SpilloverOutcome, caseId: string) => void;
+  // …and the loser that REJECTED is a physical execution too (arch-review 51 residue). A branch that threw
+  // after the race settled — or whose sibling later answered the case — opened an attempt row that nothing
+  // else will ever end: the failure exit stamps the attempt the CASE dies with, not a branch whose error was
+  // absorbed by a sibling's success. Handed the branch's JOB (the rejection value carries no coordinates).
+  // Fired for every rejected branch once the race has an answer, and for the non-primary rejected branches
+  // when every branch failed (the primary's rejection IS the case failure — its own exit stamps it). The
+  // stamp this drives is idempotent against the ledger's terminal guard, so an overlap with the case's own
+  // failure stamp costs nothing.
+  onLoserFailure?: (job: CaseJob, caseId: string) => void;
   // The DUPLICATE is a new physical attempt — the caller opens a fresh recording generation for it (see
   // SpilloverOpts.reattempt; same contract), so the race's two executions never share an evidence buffer.
   reattempt?: (job: CaseJob) => Promise<CaseJob>;
@@ -89,19 +98,26 @@ export class SpeculationController {
     const assigned = job.evalCase.placement?.target;
     let cancelTimer: (() => void) | undefined;
     let speculated = false;
+    // The duplicate's job AS DISPATCHED (post-reattempt) — what a loser-failure must name; the pre-reattempt
+    // shell's coordinates were replaced by the fresh attempt open.
+    let duplicateJob: CaseJob | undefined;
 
     return new Promise<SpilloverOutcome>((resolve, reject) => {
       // Dynamic first-success race: the duplicate may join after the primary is already pending.
       let pending = 0;
       let settled = false;
       let firstError: unknown;
+      // Branches that REJECTED before the race settled — their attempt rows still need an ending once the
+      // race has an answer (see onLoserFailure). The rejection value has no coordinates, so the branch's
+      // JOB is what travels.
+      const rejectedBranches: CaseJob[] = [];
       const finish = (fn: () => void): void => {
         if (settled) return;
         settled = true;
         cancelTimer?.();
         fn();
       };
-      const join = (p: Promise<SpilloverOutcome>): void => {
+      const join = (p: Promise<SpilloverOutcome>, branchJobOf: () => CaseJob): void => {
         pending += 1;
         p.then(
           (v) => {
@@ -116,13 +132,27 @@ export class SpeculationController {
               this.durations.push(elapsed);
               this.opts.onWin?.(job.evalCase.id, v.target ?? assigned ?? "", speculated);
               if (speculated) this.opts.cancelQueued?.(job.evalCase.id); // the loser may still be queued — reclaim it
+              // The branches that failed before this answer landed lost the race by rejecting — their
+              // physical attempts end here, because nobody downstream will ever see their jobs again.
+              for (const lost of rejectedBranches) this.opts.onLoserFailure?.(lost, job.evalCase.id);
               resolve(v);
             });
           },
           (e) => {
+            // Rejected AFTER the race settled → this branch is a loser outright. Rejected before → stashed
+            // until the race answers (a sibling may still win; if every branch fails, the PRIMARY's
+            // rejection is the case's own failure and its exit stamps that attempt — only the others are
+            // orphans this hook must end).
+            if (settled) this.opts.onLoserFailure?.(branchJobOf(), job.evalCase.id);
+            else rejectedBranches.push(branchJobOf());
             if (firstError === undefined) firstError = e;
             pending -= 1;
-            if (pending === 0) finish(() => reject(firstError));
+            if (pending === 0)
+              finish(() => {
+                for (const lost of rejectedBranches)
+                  if (lost !== job) this.opts.onLoserFailure?.(lost, job.evalCase.id);
+                reject(firstError);
+              });
           },
         );
       };
@@ -151,11 +181,20 @@ export class SpeculationController {
             ...job,
             evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target } },
           };
-          join((async () => execute((await this.opts.reattempt?.(duplicate)) ?? duplicate))());
+          // The duplicate's job is captured as the reattempted one so a loser-failure ends the attempt the
+          // duplicate ACTUALLY ran under, not the pre-reattempt shell whose coordinates were replaced.
+          join(
+            (async () => {
+              const reattempted = (await this.opts.reattempt?.(duplicate)) ?? duplicate;
+              duplicateJob = reattempted;
+              return execute(reattempted);
+            })(),
+            () => duplicateJob ?? duplicate,
+          );
         }, waitMs);
       };
 
-      join(execute(job));
+      join(execute(job), () => job);
       if (this.duplicateTarget(assigned) !== undefined) {
         arm(this.thresholdMs() ?? this.opts.minStragglerMs ?? DEFAULT_MIN_STRAGGLER_MS);
       }

@@ -285,3 +285,80 @@ describe("SpeculationController — the loser's outcome is handed back, not drop
     expect(losers).toEqual([]);
   });
 });
+
+// ── A REJECTING LOSER'S ATTEMPT IS ENDED TOO (arch-review 51 residue) ────────────────────────────────
+describe("SpeculationController — a branch that REJECTED while its sibling answered is handed back as a loser", () => {
+  it("a duplicate that fails after the primary won fires onLoserFailure with the job it actually dispatched", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const lostJobs: Array<{ caseId: string; target?: string; attemptId?: string }> = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 2),
+      // The duplicate is reattempted — a fresh attempt name replaces the shell's. The loser-failure must
+      // carry the REATTEMPTED job, or the stamp would end an attempt that never dispatched.
+      reattempt: async (j) => ({ ...j, attemptId: "attempt-dup" }),
+      onLoserFailure: (job, caseId) =>
+        lostJobs.push({
+          caseId,
+          ...(job.evalCase.placement?.target ? { target: job.evalCase.placement.target } : {}),
+          ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+        }),
+    });
+
+    const fast = ctl.run(exec.execute, jobOn("a", "fast-rt"));
+    const slow = ctl.run(exec.execute, jobOn("b", "slow-rt"));
+    await time.advance(200);
+    exec.release("a@fast-rt", "a", "fast-rt");
+    await time.advance(300);
+    await fast;
+
+    await time.advance(1500); // straggler → duplicate fires
+    exec.release("b@slow-rt", "b", "slow-rt"); // the PRIMARY wins this time
+    await time.advance(1501);
+    await slow;
+    expect(lostJobs).toEqual([]); // the duplicate is still running — nothing lost yet
+
+    exec.fail("b@fast-rt", new Error("duplicate runtime died"));
+    await time.advance(1600);
+    expect(lostJobs).toEqual([{ caseId: "b", target: "fast-rt", attemptId: "attempt-dup" }]);
+  });
+
+  it("a primary that failed before the duplicate's win is ended AT the win — not left dangling", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const lostJobs: string[] = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 1),
+      onLoserFailure: (job) => lostJobs.push(`${job.evalCase.id}@${job.evalCase.placement?.target}`),
+    });
+    const p = ctl.run(exec.execute, jobOn("a", "slow-rt"));
+    await time.advance(1500); // duplicate fires
+    exec.fail("a@slow-rt", new Error("primary died mid-race")); // primary rejects BEFORE the race settles
+    await time.advance(1550);
+    exec.release("a@fast-rt", "a", "fast-rt"); // the duplicate answers the case
+    await time.advance(1600);
+    await p;
+    expect(lostJobs).toEqual(["a@slow-rt"]); // the primary's attempt got its ending at the win
+  });
+
+  it("when EVERY branch fails, only the non-primary branches are handed back — the primary's rejection IS the case failure", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const lostJobs: string[] = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 1),
+      onLoserFailure: (job) => lostJobs.push(`${job.evalCase.id}@${job.evalCase.placement?.target}`),
+    });
+    const p = ctl.run(exec.execute, jobOn("a", "slow-rt"));
+    await time.advance(1500); // duplicate fires
+    exec.fail("a@slow-rt", new Error("primary died"));
+    await time.advance(1550);
+    exec.fail("a@fast-rt", new Error("duplicate died too"));
+    await time.advance(1600);
+    await expect(p).rejects.toThrow("primary died"); // first error wins the report
+    expect(lostJobs).toEqual(["a@fast-rt"]); // the duplicate ends here; the case's own failure exit owns the primary
+  });
+});
