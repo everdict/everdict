@@ -2923,6 +2923,41 @@ describe("API — benchmarks (catalog → tenant dataset import)", () => {
     await app.close();
   });
 
+  it("viewer: fetch a benchmark's official scorer as a registerable code judge", async () => {
+    // The half of a benchmark that used to be un-gettable: importers got the cases and re-derived the criterion,
+    // which is how two workspaces "running GAIA" end up with two different numbers.
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "GET",
+      url: "/benchmarks/gaia/judge",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(200);
+    const judge = res.json() as { kind: string; id: string; language: string; code: string };
+    expect(judge.kind).toBe("code");
+    expect(judge.id).toBe("gaia-question-scorer");
+    expect(judge.language).toBe("node");
+    expect(judge.code.length).toBeGreaterThan(0);
+    await app.close();
+  });
+
+  it("a benchmark with no official port answers 404 — an approximation is never served under that name", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "GET",
+      url: "/benchmarks/osworld/judge",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(404);
+    const unknown = await app.inject({
+      method: "GET",
+      url: "/benchmarks/not-a-benchmark/judge",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(unknown.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("member: import a jsonl-source benchmark (webvoyager) from text → registered as a tenant dataset", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };

@@ -4,6 +4,7 @@ import {
   type DatasetProvenance,
   type DatasetSourceRef,
   ForbiddenError,
+  NotFoundError,
 } from "@everdict/contracts";
 import {
   type BenchmarkAdapterSpec,
@@ -18,6 +19,7 @@ import {
   fetchHfSplits,
   fetchSourceRows,
   getBenchmark,
+  getBenchmarkJudge,
   importBenchmark,
   importFromSpec,
   listBenchmarks,
@@ -127,6 +129,27 @@ export class BenchmarkService {
   // first-party catalog (code).
   list(): ReturnType<typeof listBenchmarks> {
     return listBenchmarks();
+  }
+
+  // The benchmark's OWN evaluator as a registerable code judge (`@everdict/datasets` judges.ts). Importing a
+  // benchmark used to hand over the cases only, leaving every workspace to re-derive the scoring from the paper —
+  // which is how two workspaces evaluating "the same benchmark" end up with two criteria and one incomparable
+  // number. 404 for an unknown benchmark; 404 too when the benchmark ships no official port, because offering an
+  // approximation under this name would be the claim the catalog's `proxy` semantics exist to refuse.
+  judge(benchmarkId: string, version?: string): ReturnType<typeof getBenchmarkJudge> {
+    let judge: ReturnType<typeof getBenchmarkJudge>;
+    try {
+      judge = getBenchmarkJudge(benchmarkId, version);
+    } catch (e) {
+      throw new NotFoundError("NOT_FOUND", { benchmark: benchmarkId }, e instanceof Error ? e.message : String(e));
+    }
+    if (!judge)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { benchmark: benchmarkId },
+        `Benchmark "${benchmarkId}" ships no official scorer — its evaluator cannot run harness-agnostically, so scoring is the importer's to supply (see the catalog entry's scoring.approximates).`,
+      );
+    return judge;
   }
 
   private registry(): BenchmarkRegistry {

@@ -1,4 +1,4 @@
-import { BenchmarkCatalogResponseSchema } from "@everdict/contracts/wire";
+import { BenchmarkCatalogResponseSchema, BenchmarkJudgeResponseSchema } from "@everdict/contracts/wire";
 import { BenchmarkRecipeListResponseSchema } from "@everdict/contracts/wire";
 import { HfDatasetSearchResponseSchema } from "@everdict/contracts/wire";
 import { HfFileListResponseSchema } from "@everdict/contracts/wire";
@@ -26,6 +26,28 @@ const recipeIdVersionParams = {
 };
 
 const docs = {
+  judge: {
+    summary: "Get a benchmark's official scorer as a registerable code judge",
+    description:
+      "The benchmark's OWN evaluator, ported to the code-judge contract and ready for POST /judges — so the " +
+      "criterion travels with the cases instead of being re-derived per workspace. 404 when the benchmark is " +
+      "unknown, and 404 when it ships no official port (its evaluator needs its own database/plan schema; see the " +
+      "catalog entry's scoring.approximates). Requires datasets:read (viewer+).",
+    tags: ["benchmark"],
+    params: {
+      type: "object",
+      properties: { id: { type: "string", description: "Catalog benchmark id (e.g. gaia, gsm8k)" } },
+      required: ["id"],
+    },
+    querystring: {
+      type: "object",
+      properties: { version: { type: "string", description: "Version to stamp on the judge (default 1.0.0)" } },
+    },
+    response: {
+      200: { description: "The registerable code judge", ...toJsonSchema(BenchmarkJudgeResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   list: {
     summary: "List the first-party benchmark catalog",
     description:

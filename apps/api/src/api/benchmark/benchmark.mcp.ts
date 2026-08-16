@@ -10,6 +10,22 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
   if (deps.benchmarkService) {
     const benchmarks = deps.benchmarkService;
     server.registerTool(
+      "get_benchmark_judge",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "The benchmark's OWN evaluator as a registerable code judge {kind,id,version,language,code} — register it " +
+          "with create_judge so the criterion is the paper's, not one you re-derived. Pair it with import_benchmark " +
+          "(cases) to evaluate a benchmark end to end. NOT_FOUND when the benchmark ships no official port: its " +
+          "evaluator needs the benchmark's own database, and list_benchmarks marks that entry scoring.kind=proxy.",
+        inputSchema: {
+          benchmark: z.string().describe("Catalog benchmark id (e.g. gaia, gsm8k)"),
+          version: z.string().optional().describe("Version to stamp on the judge (default 1.0.0)"),
+        },
+      },
+      ({ benchmark, version }) => run(principal, "datasets:read", async () => ok(benchmarks.judge(benchmark, version))),
+    );
+    server.registerTool(
       "search_hf_datasets",
       {
         annotations: { readOnlyHint: true },

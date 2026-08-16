@@ -2,6 +2,7 @@ import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contract
 // Benchmark adapters + catalog: "adding a new benchmark = one adapter (descriptor), not code".
 // An adapter = {source (where to pull from), mapping (fields→EvalCase), scoring (graders), optional row normalization}. First-party adapters are
 // shipped as a catalog (to seed _shared); users add their own adapter to register a private/new benchmark in their workspace.
+import { type BenchmarkJudge, GAIA_QUESTION_SCORER, GSM8K_EXACT_MATCH } from "./judges.js";
 import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowToCase, rowsToDataset } from "./mapping.js";
 import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
 import { TRAVEL_BENCHMARKS } from "./travel.js";
@@ -54,6 +55,10 @@ export interface BenchmarkAdapter {
   // Per-row structured grader (something the mapping's field-based form can't express — e.g. SWE-bench's swe-bench grader{test_patch,
   // FAIL_TO_PASS, PASS_TO_PASS}). The return value is appended to the case graders.
   graderBuilder?: (row: Record<string, unknown>) => GraderSpec[];
+  // The benchmark's OWN evaluator, ported to the code-judge contract (see judges.ts). Present only where the port
+  // reproduces the official decision; absent means this package ships the cases and leaves scoring to the importer,
+  // which is the honest state for a benchmark whose evaluator needs its own database.
+  officialJudge?: BenchmarkJudge;
 }
 
 // Rows → Dataset (pure, no network). Apply rowTransform then map (+per-row graderBuilder) → a validated Dataset.
@@ -191,9 +196,15 @@ export const BENCHMARK_CATALOG = {
     description: "GSM8K — grade-school math word problems, exact-answer (openai/gsm8k)",
     category: "qa",
     defaultVersion: "main",
+    scoring: {
+      kind: "official",
+      officialEvaluator: "openai/grade-school-math exact-match on the #### answer",
+      license: "MIT",
+    },
     source: { kind: "huggingface", dataset: "openai/gsm8k", config: "main", split: "test" },
     mapping: { idField: "id", taskField: "question", answerField: "_final", promptEnv: true },
     rowTransform: gsm8kFinal,
+    officialJudge: GSM8K_EXACT_MATCH,
   },
   // General assistant benchmark (tool use + final answer). HF **gated** → needs a tenant HF token (opts.token / SecretStore).
   // Field names follow the public GAIA schema (unverified live, since it's gated).
@@ -209,7 +220,14 @@ export const BENCHMARK_CATALOG = {
       split: "validation",
       gated: true,
     },
-    // GAIA scoring is quasi-exact-match → answer-match exact. Environment-less QA → prompt env.
+    // The mapping's answer-match is a plain exact comparison — enough to align cases, NOT what GAIA scores with.
+    // The official quasi-exact-match (number/list/string normalization) ships as `officialJudge`, which is why this
+    // entry may claim `official`: importers get the paper's own decision instead of re-deriving it.
+    scoring: {
+      kind: "official",
+      officialEvaluator: "gaia-benchmark question_scorer (scorer.py)",
+      license: "CC-BY-4.0 (gated: accept the terms on the Hub)",
+    },
     mapping: {
       idField: "task_id",
       taskField: "Question",
@@ -218,6 +236,7 @@ export const BENCHMARK_CATALOG = {
       promptEnv: true,
       tagFields: ["Level"],
     },
+    officialJudge: GAIA_QUESTION_SCORER,
   },
   // Real-website browsing tasks (jsonl source, github). Scoring=judge (official WebVoyager is model-judged) + answer-match + steps.
   webvoyager: {
@@ -312,13 +331,52 @@ export function listBenchmarks(): Array<{
   gated: boolean;
   defaultVersion: string;
   description: string;
+  scoring?: BenchmarkScoringSemantics;
+  // The official scorer this entry ships, as a POINTER — id/description only, never the source, because a catalog
+  // listing that carried every judge's code would be mostly code. `getBenchmarkJudge` hands over the body.
+  // Absent = this package ships the cases and the importer supplies the scoring.
+  officialJudge?: { id: string; description: string; officialEvaluator: string };
 }> {
-  return Object.values(BENCHMARK_CATALOG).map((a) => ({
+  // Read through the declared adapter type: the literal object types differ per entry (only some carry `scoring`
+  // or `officialJudge`), and a union of those has no such property to read.
+  return Object.values(BENCHMARK_CATALOG as Record<string, BenchmarkAdapter>).map((a) => ({
     id: a.id,
     category: a.category,
     source: a.source.kind,
     gated: a.source.kind === "huggingface" && "gated" in a.source && a.source.gated === true,
     defaultVersion: a.defaultVersion,
     description: a.description,
+    // Which of these numbers are leaderboard-comparable is the first thing a reader needs and the last thing a
+    // prose description can be trusted to carry — so the listing states it (arch-review 16 P2-8).
+    ...(a.scoring ? { scoring: a.scoring } : {}),
+    ...(a.officialJudge
+      ? {
+          officialJudge: {
+            id: a.officialJudge.id,
+            description: a.officialJudge.description,
+            officialEvaluator: a.officialJudge.officialEvaluator,
+          },
+        }
+      : {}),
   }));
+}
+
+// The official scorer's BODY, shaped as the code judge a workspace registers (`POST /judges`). This is the half of a
+// benchmark that used to be un-gettable: the cases could be imported, and the scoring had to be re-derived by hand
+// from the paper — which is how two workspaces evaluating "the same benchmark" end up with two different criteria.
+// Throws for an unknown benchmark; returns undefined when the benchmark ships no official port (see judges.ts).
+export function getBenchmarkJudge(
+  benchmarkId: string,
+  version = "1.0.0",
+): { kind: "code"; id: string; version: string; language: "node"; description: string; code: string } | undefined {
+  const judge = getBenchmark(benchmarkId).officialJudge;
+  if (!judge) return undefined;
+  return {
+    kind: "code",
+    id: judge.id,
+    version,
+    language: judge.language,
+    description: `${judge.description} (official evaluator: ${judge.officialEvaluator})`,
+    code: judge.code,
+  };
 }

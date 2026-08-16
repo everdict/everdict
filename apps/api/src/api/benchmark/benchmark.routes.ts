@@ -19,6 +19,25 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
+  // The benchmark's own evaluator, ready to register as a code judge. Pairs with the import: cases from
+  // POST /benchmarks, criterion from here, so "we ran benchmark X" means the same thing in two workspaces.
+  app.get<{ Params: { id: string }; Querystring: { version?: string } }>(
+    "/benchmarks/:id/judge",
+    { schema: benchmarkDocs.judge },
+    async (req, reply) => {
+      if (!deps.benchmarkService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "datasets:read");
+        return reply.send(deps.benchmarkService.judge(req.params.id, req.query.version));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // HF Hub dataset search — the wizard picks candidates by query (avoids typing an exact id). Discovery → viewer+.
   app.get("/benchmarks/hf/datasets", { schema: benchmarkDocs.hfDatasets }, async (req, reply) => {
     if (!deps.benchmarkService)
