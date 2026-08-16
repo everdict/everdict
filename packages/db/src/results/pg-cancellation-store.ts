@@ -1,64 +1,82 @@
-import type { CancellationOperation, CancellationStore } from "@everdict/application-control";
+import type {
+  CancellationCertificate,
+  CancellationOperation,
+  CancellationStore,
+  CancellationTarget,
+  CancellationTargetKind,
+} from "@everdict/application-control";
 import type { SqlClient } from "../client.js";
 
 interface CancellationRow {
   scorecard_id: string;
+  target_kind: string;
   state: string;
   last_error: string | null;
   requested_at: string | Date;
   completed_at: string | Date | null;
+  certificate: unknown;
 }
 
 // The row's `state` is a column this adapter writes and nothing else does, so the only way it can hold a
 // string outside the vocabulary is a hand-edited database. The reconciler treats anything that is not
 // "completed" as owed (the WHERE clause below), which is the fail-safe direction: an unrecognizable state
 // gets one more idempotent teardown rather than a silently abandoned operation.
+//
+// `target_kind` is read the other way round — an UNRECOGNIZED kind stays unrecognized (it is passed through
+// as-is and the coordinator finds no teardown for it, leaving the row owed). Coercing it to "scorecard"
+// would hand a run's teardown to the batch lane, which would then close it as unactionable over live work.
 function toOperation(row: CancellationRow): CancellationOperation {
   return {
-    scorecardId: row.scorecard_id,
+    target: { kind: row.target_kind as CancellationTargetKind, id: row.scorecard_id },
     state: row.state === "completed" ? "completed" : "requested",
     ...(row.last_error !== null ? { lastError: row.last_error } : {}),
     requestedAt: new Date(row.requested_at).toISOString(),
     ...(row.completed_at !== null ? { completedAt: new Date(row.completed_at).toISOString() } : {}),
+    ...(row.certificate !== null && row.certificate !== undefined
+      ? { certificate: row.certificate as CancellationCertificate }
+      : {}),
   };
 }
 
-// Postgres-backed cancellation-operation ledger (mig 0184). See ports/cancellation-store.ts for what this
-// row is: the teardown's durable owner, separate from the decision it follows.
+// Postgres-backed cancellation-operation ledger (mig 0184; generalized to any target kind by mig 0186). See
+// ports/cancellation-store.ts for what this row is: the teardown's durable owner, separate from the decision
+// it follows. The id column keeps its original name — the table predates the second kind, and renaming a
+// column an in-flight replica is still writing buys nothing the `target_kind` beside it does not already say.
 export class PgCancellationStore implements CancellationStore {
   constructor(private readonly client: SqlClient) {}
 
   // `requested_at` is NOT overwritten on conflict: a re-request is the same operation being attempted again,
-  // and the reconciler orders by age. `last_error` IS cleared — it described the attempt that just ended.
-  async request(scorecardId: string, now: string): Promise<void> {
+  // and the reconciler orders by age. `last_error` and `certificate` ARE cleared — both described the
+  // attempt that just ended, and a certificate left behind would outlive the completion it certified.
+  async request(target: CancellationTarget, now: string): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_cancellation_operations (scorecard_id, state, requested_at)
-       VALUES ($1, 'requested', $2)
+      `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, requested_at)
+       VALUES ($1, $2, 'requested', $3)
        ON CONFLICT (scorecard_id) DO UPDATE
-         SET state = 'requested', last_error = NULL, completed_at = NULL`,
-      [scorecardId, now],
+         SET state = 'requested', target_kind = $2, last_error = NULL, completed_at = NULL, certificate = NULL`,
+      [target.id, target.kind, now],
     );
   }
 
   // Unconditional rather than "only from requested": completing an operation is idempotent, and a guard here
   // would mean a reconciler and a retrying caller finishing the same teardown could leave the row owed.
-  async complete(scorecardId: string, now: string): Promise<void> {
+  async complete(target: CancellationTarget, now: string, certificate?: CancellationCertificate): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_cancellation_operations (scorecard_id, state, requested_at, completed_at)
-       VALUES ($1, 'completed', $2, $2)
+      `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, requested_at, completed_at, certificate)
+       VALUES ($1, $2, 'completed', $3, $3, $4)
        ON CONFLICT (scorecard_id) DO UPDATE
-         SET state = 'completed', last_error = NULL, completed_at = $2`,
-      [scorecardId, now],
+         SET state = 'completed', target_kind = $2, last_error = NULL, completed_at = $3, certificate = $4`,
+      [target.id, target.kind, now, certificate === undefined ? null : JSON.stringify(certificate)],
     );
   }
 
-  async fail(scorecardId: string, error: string, now: string): Promise<void> {
+  async fail(target: CancellationTarget, error: string, now: string): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_cancellation_operations (scorecard_id, state, last_error, requested_at)
-       VALUES ($1, 'requested', $2, $3)
+      `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, last_error, requested_at)
+       VALUES ($1, $2, 'requested', $3, $4)
        ON CONFLICT (scorecard_id) DO UPDATE
-         SET state = 'requested', last_error = $2, completed_at = NULL`,
-      [scorecardId, error, now],
+         SET state = 'requested', target_kind = $2, last_error = $3, completed_at = NULL, certificate = NULL`,
+      [target.id, target.kind, error, now],
     );
   }
 
@@ -73,10 +91,12 @@ export class PgCancellationStore implements CancellationStore {
     return rows.map(toOperation);
   }
 
-  async get(scorecardId: string): Promise<CancellationOperation | undefined> {
+  // Keyed on the id AND the kind: a row for a different kind of target is not this operation, and answering
+  // with it would let a run's incomplete teardown block a same-id batch's delete (or, worse, the reverse).
+  async get(target: CancellationTarget): Promise<CancellationOperation | undefined> {
     const { rows } = await this.client.query<CancellationRow>(
-      "SELECT * FROM everdict_cancellation_operations WHERE scorecard_id = $1",
-      [scorecardId],
+      "SELECT * FROM everdict_cancellation_operations WHERE scorecard_id = $1 AND target_kind = $2",
+      [target.id, target.kind],
     );
     return rows[0] ? toOperation(rows[0]) : undefined;
   }

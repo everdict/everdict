@@ -1,4 +1,4 @@
-import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
+import type { CaseJob, KillOutcome, RuntimeWorkRef } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type K8sApi, K8sBackend, buildK8sJob, k8sJobName } from "./k8s.js";
 import { NomadBackend, type NomadHttp } from "./nomad.js";
@@ -21,7 +21,9 @@ import { NomadBackend, type NomadHttp } from "./nomad.js";
 // `caseId` alone can address several live executions; the run, the tenant, the exact external id and the
 // namespace the work was placed in are what make it one.
 interface ExactHandleBackend {
-  killWork(work: RuntimeWorkRef): Promise<void>;
+  // Wave 3 made the answer honest as well as the address (`KillOutcome`) — the scope assertions below are
+  // unchanged, they just no longer read a stop that reports nothing.
+  killWork(work: RuntimeWorkRef): Promise<KillOutcome>;
 }
 // `kill(caseId: string)` survives beside it as the no-handle fallback and cannot express the scope at all.
 const exact = (backend: K8sBackend | NomadBackend): ExactHandleBackend => backend;
@@ -63,8 +65,11 @@ function k8sRecorder(): { api: K8sApi; selectors: string[] } {
     async applyJob() {},
     async deleteJobsByLabel(selector: string) {
       selectors.push(selector);
+      return { status: "stopped" as const };
     },
-    async deleteJob() {},
+    async deleteJob() {
+      return { status: "stopped" as const };
+    },
     async jobsByLabel() {
       return [];
     },

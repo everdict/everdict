@@ -23,6 +23,10 @@ export interface ScorecardListFilter {
   seriesKey?: string;
   // Cascade-cancel walk (§5.5): the batches a given run caused (origin.causedByRunId) — the kill switch's read.
   causedByRunId?: string;
+  // The publication sweep's read (arch-review 52, Wave 4): batches whose committed settlement still owes its
+  // outward effects (`publication.state === "pending"`). Tenant-agnostic on purpose — the reconciler converges
+  // rows nobody is asking about, so it sweeps the whole install and each row carries the tenant it acts for.
+  publicationPending?: true;
   // Group kind (P1): "experiment" = only ungraded phase-1 groups; "scorecard" = only real scorecards (incl. every
   // pre-mig-0093 NULL row). Unset = everything (current behavior — the web list shows both, badged).
   kind?: "experiment" | "scorecard";
@@ -101,6 +105,12 @@ export interface ScorecardUpdateGuard {
   claimOwnership?: true;
   expectScoringCount?: number;
   expectGatesCount?: number;
+  // THE PUBLICATION'S OWN FENCE (arch-review 52, Wave 4). The drain writes the receipt and flips the plan to
+  // `published` in one update, conditioned on the plan still being the one it read — so two publishers (a
+  // driver's inline drain and the reconciler, or two replicas that both believe they lead) produce exactly
+  // ONE receipt. It is the same shape as every other guard here: a miss returns undefined, and the loser
+  // must not treat its own drain as the published one.
+  expectPublicationState?: "pending";
   // The decision context's freshness CAS (review 40): the receipt count the settle READ. Receipts are
   // insert-only, so equality proves the ledger did not move between the read and this terminal write — the
   // recorded read-set can never describe a ledger the summary was not computed over.

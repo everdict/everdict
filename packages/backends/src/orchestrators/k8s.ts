@@ -9,6 +9,7 @@ import {
   type CaseJob,
   type CaseResult,
   InternalError,
+  type KillOutcome,
   NotFoundError,
   OOM_KILLED,
   type RegistryAuth,
@@ -17,6 +18,7 @@ import {
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
+  worstKillOutcome,
 } from "@everdict/contracts";
 import type {
   CasePlacement,
@@ -64,9 +66,15 @@ export interface K8sApi {
   podLogs(name: string, ns: string): Promise<string>; // stdout of job/<name>
   // One-shot exec into the job's pod (sh -c command) — non-interactive; live terminal / screen capture.
   exec(name: string, ns: string, command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
-  deleteJob(name: string, ns: string): Promise<void>;
-  // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). Best-effort, no wait.
-  deleteJobsByLabel(selector: string): Promise<void>;
+  // ── A DELETE REPORTS WHAT IT DID (arch-review 52, Wave 3) ───────────────────────────────────────
+  // Both used to return `Promise<void>` over a `kubectl` call whose exit code was discarded, so an API
+  // server that refused the delete was indistinguishable from one that performed it — and the teardown
+  // above them then certified freed compute on the strength of "the process exited". `--ignore-not-found`
+  // exits 0 for "nothing matched" too, which is why the answer is read off stdout: kubectl names what it
+  // deleted, and an empty listing with a zero exit is genuinely `absent`.
+  deleteJob(name: string, ns: string): Promise<KillOutcome>;
+  // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
+  deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
   jobsByLabel(
     selector: string,
@@ -154,6 +162,19 @@ interface RunResult {
   code: number;
   stdout: string;
   stderr: string;
+}
+
+// Read a `kubectl delete --ignore-not-found` result honestly (arch-review 52, Wave 3).
+//
+// The exit code alone cannot answer this: `--ignore-not-found` exits 0 whether it deleted three Jobs or
+// found none, and that is precisely the distinction a cancellation needs — "the work is gone because we
+// stopped it" and "there was nothing there" are both convergence, but a non-zero exit is neither. kubectl
+// prints one `<kind>/<name> deleted` line per object it removed, so an empty stdout with a clean exit is
+// the `absent` case and anything else on a clean exit is `stopped`.
+function deleteOutcome(what: string, res: RunResult): KillOutcome {
+  if (res.code !== 0)
+    return { status: "failed", reason: `kubectl delete ${what}: exit ${res.code} ${res.stderr.trim()}`.trim() };
+  return res.stdout.includes("deleted") ? { status: "stopped" } : { status: "absent" };
 }
 function run(bin: string, args: string[], stdin?: string): Promise<RunResult> {
   return new Promise((resolve, reject) => {
@@ -357,30 +378,36 @@ export function kubectlApi(
       }
     },
     async deleteJob(name, ns) {
-      await run(bin, [
-        ...ctx,
-        "-n",
-        ns,
-        "delete",
-        "job",
-        name,
-        "--ignore-not-found",
-        "--cascade=background",
-        "--wait=false",
-      ]);
+      return deleteOutcome(
+        `job ${name}`,
+        await run(bin, [
+          ...ctx,
+          "-n",
+          ns,
+          "delete",
+          "job",
+          name,
+          "--ignore-not-found",
+          "--cascade=background",
+          "--wait=false",
+        ]),
+      );
     },
     async deleteJobsByLabel(selector) {
-      await run(bin, [
-        ...ctx,
-        "delete",
-        "jobs",
-        "--all-namespaces",
-        "-l",
-        selector,
-        "--ignore-not-found",
-        "--cascade=background",
-        "--wait=false",
-      ]);
+      return deleteOutcome(
+        `jobs -l ${selector}`,
+        await run(bin, [
+          ...ctx,
+          "delete",
+          "jobs",
+          "--all-namespaces",
+          "-l",
+          selector,
+          "--ignore-not-found",
+          "--cascade=background",
+          "--wait=false",
+        ]),
+      );
     },
     async jobsByLabel(selector) {
       const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", selector, "-o", "json"]);
@@ -1211,14 +1238,30 @@ export class K8sBackend
   // What is NOT here is the thing that made the old kill dangerous: no case-only selector, so a concurrent
   // run of the same case — and, since the case label became injective, a different case that truncated to the
   // same value — is not this cancellation's business. Best-effort/idempotent, never throws.
-  async killWork(work: RuntimeWorkRef): Promise<void> {
+  async killWork(work: RuntimeWorkRef): Promise<KillOutcome> {
     try {
-      await this.withApi(async (api) => {
-        if (work.namespace !== undefined) await api.deleteJob(work.externalJobId, work.namespace).catch(() => {});
-        await api.deleteJobsByLabel(runWorkSelector(work));
+      return await this.withApi(async (api): Promise<KillOutcome> => {
+        const outcomes: KillOutcome[] = [];
+        if (work.namespace !== undefined)
+          outcomes.push(
+            await api.deleteJob(work.externalJobId, work.namespace).catch(
+              (err: unknown): KillOutcome => ({
+                status: "failed",
+                reason: `delete job ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+              }),
+            ),
+          );
+        outcomes.push(await api.deleteJobsByLabel(runWorkSelector(work)));
+        // Both arms address THIS run's own compute, so the run's stop has converged only if both did — the
+        // exact Job the handle names AND the label sweep that catches the re-dispatched siblings it cannot.
+        return worstKillOutcome(outcomes);
       });
-    } catch {
-      // best-effort
+    } catch (err) {
+      // The api itself could not be built (kubeconfig materialization, auth) — nothing was even attempted.
+      return {
+        status: "failed",
+        reason: `k8s killWork ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 
@@ -1229,11 +1272,11 @@ export class K8sBackend
   // batch then reads an infra failure it never caused. A caller holding a `RuntimeWorkRef` must call
   // `killWork`; this remains for the ones that hold none (attempt rows written before the handle was
   // persisted, and lanes that mint no handle).
-  async kill(caseId: string): Promise<void> {
+  async kill(caseId: string): Promise<KillOutcome> {
     try {
-      await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`));
-    } catch {
-      // best-effort
+      return await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`));
+    } catch (err) {
+      return { status: "failed", reason: `k8s kill ${caseId}: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 

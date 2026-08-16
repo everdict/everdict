@@ -32,8 +32,9 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { settleScorecard } from "../ports/settle.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
+import { drainPublication, planPublication } from "./publication.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
-import { analysisBundle, initialPassId, offloadAnalysis, offloadResults } from "./scorecard-observability.js";
+import { analysisBundle, initialPassId, offloadResults, stageAnalysis } from "./scorecard-observability.js";
 import type {
   IngestScorecardBody,
   IngestScorecardInput,
@@ -371,22 +372,13 @@ export class ScorecardIngestService {
     const scorecard: Scorecard = { suiteId: effectiveDataset.id, harness: harnessLabel, results };
     await this.scoring.applyJudges(tenant, effectiveDataset, results, judges, undefined, submittedBy); // trace → judge scores (control plane)
     await offloadResults(this.deps, id, results); // os-use screenshots → object storage (slim record)
-    // Trace-sink export (when configured) — same place as the live batch (after scoring). pull attaches scores only to the original trace via attach.
-    const exported = this.deps.exportResults
-      ? await this.deps
-          .exportResults(
-            tenant,
-            {
-              scorecardId: id,
-              dataset: `${effectiveDataset.id}@${effectiveDataset.version}`,
-              harness: harnessLabel,
-              // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
-              judgeModels: await this.scoring.collectJudgeModelMap(tenant, judges).catch(() => ({})),
-            },
-            results,
-            attach,
-          )
-          .catch(() => undefined)
+    // Trace-sink export (when configured) — DEFERRED to the publication drain (arch-review 52, Wave 4). It
+    // used to run here, before `settleIngest`'s read-guarded terminal write below: an ingest that a cancel beat
+    // to the record had already created traces in the tenant's platform for a batch that will never be
+    // reported as succeeded, and no CAS result can recall them. Judge attribution is still collected HERE —
+    // it is a registry read, and the settlement should export under the attribution it decided.
+    const judgeModelMap = this.deps.exportResults
+      ? await this.scoring.collectJudgeModelMap(tenant, judges).catch(() => ({}))
       : undefined;
     const summary = summarizeScorecard(scorecard);
     const initialBundle = analysisBundle(
@@ -397,7 +389,21 @@ export class ScorecardIngestService {
     // Digest-keyed like every other pass (review 39 P0-6). An ingest record is freshly minted and has one
     // writer today — but "one writer" is a property of the caller, not of the key, and this is the same
     // literal that let two batch finalizers write one object.
-    const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
+    // …and STAGED rather than published, for the same reason the export is deferred: `offloadAnalysis` also
+    // wrote the MUTABLE current-analysis alias, which an ingest that lost the settle would have overwritten.
+    const passId = initialPassId(initialBundle);
+    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+    const publication = planPublication({
+      scorecardId: id,
+      bundle: initialBundle,
+      staged: analysis,
+      passId,
+      exports: this.deps.exportResults !== undefined,
+      results,
+      ...(judgeModelMap ? { judgeModels: judgeModelMap } : {}),
+      ...(attach ? { attach } : {}),
+      now: this.now(),
+    });
     // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
     // judge axis: ingest has no inline judge, so only the models of the applied registered judges.
@@ -437,13 +443,20 @@ export class ScorecardIngestService {
           verdictSummary: verdictSummaryOf(results, undefined),
           models,
           ...(judgeModels.length > 0 ? { judgeModels } : {}),
-          ...(exported ? { export: exported } : {}),
-          ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
+          // The FROZEN artifact's ref — the alias does not exist until the drain promotes it.
+          ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+          // …and the outward effects this settlement owes, persisted by the write that decides it won.
+          ...(publication ? { publication } : {}),
           scoring,
         },
         this.now(),
       ),
     );
+    // …AND ONLY NOW IS ANYTHING PUBLISHED. `settleIngest` swallows a refused settle by design, so the drain
+    // re-reads: a record whose plan is not `pending` (because this settle lost, or because another publisher
+    // got there first) publishes nothing. A crash before this line leaves the plan owed for the reconciler.
+    const settled = await this.deps.store.get(id);
+    if (settled) await drainPublication(this.deps, settled, results, this.now).catch(() => undefined /* stays owed */);
   }
 
   // Materialize-on-import (native-observability N-O1 / master plan W4): an imported trace is sealed as OUR

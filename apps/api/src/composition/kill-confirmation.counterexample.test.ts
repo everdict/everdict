@@ -1,5 +1,6 @@
 import type { Backend, BackendCapacity } from "@everdict/backends";
-import type { CaseResult, RuntimeSpec } from "@everdict/contracts";
+import type { CaseResult, KillOutcome, RuntimeSpec } from "@everdict/contracts";
+import { killConverged } from "@everdict/contracts";
 import type { RuntimeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildRuntimeAccess } from "./runtime-access.js";
@@ -55,10 +56,11 @@ const registryOf = (spec: RuntimeSpec): RuntimeRegistry =>
   }) as unknown as RuntimeRegistry;
 
 // [WAVE-3 COUNTEREXAMPLE #7] RED as of 02a3e15e: `AssertionError: expected { settled: 'resolved', value: undefined }
-// to not deeply equal { settled: 'resolved', value: undefined }` — runtime-access.ts killCase does
-// `backend.kill(caseId).catch(() => {})`, so an unreachable cluster is reported to the caller as a completed teardown.
-// Un-skip when wave 3 lands.
-describe.skip("the runtime-access seam never reports a teardown it could not confirm", () => {
+// to not deeply equal { settled: 'resolved', value: undefined }` — runtime-access.ts killCase did
+// `backend.kill(caseId).catch(() => {})`, so an unreachable cluster was reported to the caller as a completed
+// teardown. UN-SKIPPED (wave 3): the seam answers with a `KillOutcome`, and this backend's rejection becomes
+// `failed` rather than silence.
+describe("the runtime-access seam never reports a teardown it could not confirm", () => {
   it("surfaces a backend kill that failed instead of resolving as if the compute were freed", async () => {
     // Given a run placed on a runtime whose cluster API is down
     const killed: string[] = [];
@@ -80,5 +82,13 @@ describe.skip("the runtime-access seam never reports a teardown it could not con
     // ("unknown") is the other; silently resolving with nothing is the one answer that makes a live job look
     // like a freed one.
     expect(outcome).not.toEqual({ settled: "resolved", value: undefined });
+    // …and the answer it DID give says NOT CONVERGED. The line above was written before the seam had a
+    // vocabulary and only rules out silence; this is the semantics the callers act on, and it is what a
+    // re-swallow would break (a re-swallow that returned `stopped` still satisfies the line above).
+    if (outcome.settled === "resolved") {
+      const value = outcome.value as KillOutcome;
+      expect(killConverged(value), `an unreachable cluster answered ${value.status}`).toBe(false);
+      expect(value.reason).toBeDefined(); // …with the cluster's own words, for the operation's lastError
+    }
   });
 });

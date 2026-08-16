@@ -26,7 +26,7 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
 - `WorkAddressable` (`killWork(work: RuntimeWorkRef)`) — control addressed by the EXACT work, not by what the work
   was about (arch-review 52, Wave 2). Semantic case identity ≠ physical runtime work identity: two runs of one case
   (a re-evaluation beside a scheduled batch, a shadow beside its baseline, a retry) are two live jobs, so
-  `kill(caseId)` stopped strangers' compute — silently, since kill returns void. The backend mints the handle when
+  `kill(caseId)` stopped strangers' compute — silently, since kill then returned void. The backend mints the handle when
   it creates the external object (`DispatchOptions.onWork` — K8s after `applyJob`, Nomad after the submit), the
   caller persists it on the physical-attempt ledger row (`ExecutionAttemptStore.recordWork`, mig 0185) so it
   outlives the dispatching process, and teardown calls `killWork` with it. `kill(caseId)` stays ONLY for callers
@@ -34,6 +34,10 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
   would restore the blast radius. Nomad kills by exact job id in the handle's own namespace (no listing at all);
   K8s deletes the named Job in its namespace plus one `(app, tenant, run)` label sweep for the same run's
   handle-less siblings. Nomad/K8s implement it; in-process/pull backends have no external object to name.
+  Both `kill` and `killWork` return a **`KillOutcome`** (`stopped|absent|unknown|failed` + `reason`), never
+  `void` (arch-review 52, Wave 3): they still never throw, but the caller can now tell a stop that happened
+  from one that could not be confirmed, and only `stopped`/`absent` (`killConverged`) let a cancellation
+  operation complete. A failed LISTING is `unknown`, not `absent`; a fan-out reports `worstKillOutcome`.
 - `Observable` (`logs` + `caseEvents` + `exec`) — live-progress read + one-shot exec (Nomad + K8s). `logs` is the
   human view (result sentinel AND live-event lines stripped); `caseEvents` decodes the job's `EVENT_SENTINEL`
   stdout lines to `TraceEvent[]` (live-observability ⑨ — the managed lane's live trajectory, snapshot semantics).

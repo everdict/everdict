@@ -43,6 +43,15 @@ export class InMemoryRunStore implements RunStore {
   // than being a production-only behavior the dev path silently lacks.
   constructor(private readonly events?: PlatformEventStore) {}
 
+  // The cancellation pair (arch-review 52, Wave 3): Postgres upserts the operation row in the settle's own
+  // statement; in memory the stores are separate objects, so the pairing is explicit (the same attach idiom
+  // `InMemoryScorecardStore` uses for the batch lane's identical write). Applied right after a matched
+  // write — the dev-store degradation of "same tx".
+  private requestCancellationOf?: (runId: string) => void;
+  attachCancellations(request: (runId: string) => void): void {
+    this.requestCancellationOf = request;
+  }
+
   // Pair this store with the scorecard store so the scoring FENCE can be evaluated (the same
   // `attachIssues` idiom the issue/label pair uses). Postgres answers the fence with a sub-select inside
   // the write statement; in memory the two stores are separate objects, so the pairing is explicit.
@@ -129,6 +138,9 @@ export class InMemoryRunStore implements RunStore {
       id: cur.id,
     };
     this.runs.set(id, next);
+    // AFTER the guards, like the Pg CTE's `WHERE EXISTS (SELECT 1 FROM upd)`: a settle that lost the
+    // terminal race decided nothing, so it owes no teardown.
+    if (guard?.requestCancellation === true) this.requestCancellationOf?.(id);
     await this.appendEvents(events);
     return withRunUsage(next);
   }

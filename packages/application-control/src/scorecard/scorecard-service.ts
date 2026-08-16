@@ -10,6 +10,7 @@ import {
   type GatePolicy,
   type GraderSpec,
   type HarnessSpec,
+  type KillOutcome,
   MANIFEST_IDENTITY_VERSION,
   type ManifestCheck,
   type ManifestVerification,
@@ -20,6 +21,7 @@ import {
   type ScorecardRecord,
   UpstreamError,
   isConstitutionalMetric,
+  killConverged,
 } from "@everdict/contracts";
 import { CANCELLED_ERROR_CODE, JudgeIdSchema } from "@everdict/contracts";
 import type { CaseRunRef } from "@everdict/contracts/wire";
@@ -60,16 +62,19 @@ import {
   selectSubsetCases,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
+import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { refreshSnapshotRefs } from "../ports/artifact-store.js";
+import type { CancellationCertificate, CancellationTarget } from "../ports/cancellation-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ExecutionPlan } from "./execution-plan.js";
+import { PublicationCoordinator } from "./publication.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
@@ -763,21 +768,32 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
 
   // Cascade cancel (§5.5, O8): the causal tree is the kill switch — cancelling a run revokes every
   // NON-TERMINAL batch it caused, one by one through the normal cancel machinery (record flip + in-flight
-  // stop + queued-job reclaim). Best-effort per batch: one stuck teardown never blocks the rest. The
-  // batches' own case children are torn down by cancel itself, so one level of walk covers the tree.
-  async cancelCausedBy(tenant: string, causedByRunId: string): Promise<number> {
+  // stop + queued-job reclaim). One stuck teardown never blocks the rest. The batches' own case children are
+  // torn down by cancel itself, so one level of walk covers the tree.
+  //
+  // FAILURES ARE REPORTED, NOT SWALLOWED (arch-review 52, Wave 3). This was `catch {}` behind a
+  // fire-and-forget caller, so a descendant whose teardown could not run left nothing owed anywhere — the
+  // parent's cancel reported success over a subtree that was still burning compute. The counts and reasons
+  // go back to `RunService.stopRun`, which is inside the parent's own cancellation operation: a cascade that
+  // did not converge keeps that operation owed, and the reconciler re-runs the whole walk.
+  //
+  // A ConflictError is NOT a failure: it means the batch settled between the list and the cancel, which is
+  // the outcome this walk wanted. Anything else is the teardown genuinely not converging.
+  async cancelCausedBy(tenant: string, causedByRunId: string): Promise<{ cancelled: number; failures: string[] }> {
     const caused = await this.deps.store.list(tenant, { causedByRunId });
     let cancelled = 0;
+    const failures: string[] = [];
     for (const record of caused) {
       if (ScorecardBatch.from(record).isTerminal()) continue;
       try {
         await this.cancel({ tenant, id: record.id });
         cancelled++;
-      } catch {
-        // already settled in a race / teardown failure — the next batch still gets revoked
+      } catch (err) {
+        if (err instanceof ConflictError) continue; // settled in the race — already revoked
+        failures.push(`cascade ${record.id}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    return cancelled;
+    return { cancelled, failures };
   }
 
   // Score-on-Temporal internal bridge (worker activities → these; orchestration.md T-c `score:<groupId>`).
@@ -996,7 +1012,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // self-hosted lease jobs (they'd otherwise dispatch/run only to be discarded), (4) force-kill the already-fired
   // managed backend jobs (killCase) — so a reclaimed 601-case batch stops burning cluster compute instead of running
   // to the end. self-hosted lease jobs are force-freed by (3)'s cancelLeased (which aborts the run on the runner).
-  private async stopInFlight(rec: ScorecardRecord): Promise<void> {
+  private async stopInFlight(rec: ScorecardRecord): Promise<CancellationCertificate> {
     this.inFlight.get(rec.id)?.abort();
     await this.cancelWorkflowIfAny(rec);
     this.deps.cancelQueued?.((j) => j.batchId === rec.id);
@@ -1004,8 +1020,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // fire-and-forget meant the API could report the cancel done while the lease revocation had not landed —
     // or had failed, unobserved. A rejection surfaces as the cancel's own failure, which the convergent
     // retry above re-runs.
-    await Promise.resolve(this.deps.cancelLeased?.((j) => j.batchId === rec.id));
-    if (!this.deps.runStore) return;
+    const leasesSignalled = (await Promise.resolve(this.deps.cancelLeased?.((j) => j.batchId === rec.id))) ?? 0;
+    // No child store to read back means no postconditions to certify — the arms above are all this
+    // deployment has, and the certificate says exactly that much and no more.
+    if (!this.deps.runStore) return { at: this.now(), leasesSignalled };
     // NOT swallowed (arch-review 46): `.catch(() => [])` here turned a transient store failure into a cancel that
     // killed and settled NOTHING while still reporting success — every child left running, and the caller told the
     // stop had happened. A throw surfaces as a 5xx the user can retry, which is the honest answer; the record is
@@ -1016,6 +1034,21 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // teardown that did not happen. They surface after the loop so one bad child does not stop the others
     // from being torn down first.
     const failures: string[] = [];
+    // Every stop's ANSWER (arch-review 52, Wave 3). The `.catch` below used to be the only way a failed kill
+    // could be seen, and the seam under it swallowed the rejection — so a cluster that never took the delete
+    // reported the same thing as one that did. `unknown`/`failed` join `failures` and keep the operation
+    // owed; the converged pair is what the certificate counts.
+    const kills: KillOutcome[] = [];
+    const attempted = async (call: Promise<KillOutcome>, what: string): Promise<void> => {
+      const outcome = await call.catch(
+        (err: unknown): KillOutcome => ({
+          status: "failed",
+          reason: `${what}: ${err instanceof Error ? err.message : String(err)}`,
+        }),
+      );
+      kills.push(outcome);
+      if (!killConverged(outcome)) failures.push(`${what}: ${outcome.reason ?? outcome.status}`);
+    };
     // ── THE EXACT WORK EACH CHILD PLACED (arch-review 52, Wave 2) ────────────────────────────────────
     //
     // One read of the batch's attempt ledger, keyed back to the children by `childRunId`. What it buys is
@@ -1031,15 +1064,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       if (c.status === "running" && works.length > 0 && this.deps.killWork) {
         // AWAITED — fire-and-forget made `completed` mean "commands were issued", never "the work stopped".
         for (const work of works)
-          await this.deps.killWork(rec.tenant, c.runtime ?? rec.runtime, work).catch((err: unknown) => {
-            failures.push(`kill ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`);
-          });
+          await attempted(this.deps.killWork(rec.tenant, c.runtime ?? rec.runtime, work), `kill ${work.externalJobId}`);
       } else if (c.status === "running" && this.deps.killCase)
         // No handle for this child — a legacy attempt row, or a lane that mints none. The over-broad kill is
         // the only thing left that can reach the compute, and leaving it running is worse than its blast radius.
-        await this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch((err: unknown) => {
-          failures.push(`kill ${c.caseId}: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        await attempted(this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId), `kill ${c.caseId}`);
       // Settle the child's LEDGER row here, not just its compute: the drain path (dispatch rejection → the
       // batch loop's catch) is in-process and best-effort — after a control-plane restart, under a Temporal
       // worker, or when a kill misses, nobody else ever flips the record, and a forever-"running" child both
@@ -1079,6 +1108,19 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         }. The cancellation stays owed and the reconciler retries.`,
       );
     }
+    // …AND WHAT THE READ-BACK SAW IS RECORDED (arch-review 52, Wave 3). The operation row used to close on
+    // "the teardown function returned"; it closes on this instead — the population the zero-live-children
+    // check was measured over, and the stops that answered converged. The honest gap is visible in what is
+    // NOT here: no field claims the orchestrator was re-probed for the killed jobs afterwards.
+    return {
+      at: this.now(),
+      childrenTerminal: after.length,
+      kills: {
+        stopped: kills.filter((k) => k.status === "stopped").length,
+        absent: kills.filter((k) => k.status === "absent").length,
+      },
+      leasesSignalled,
+    };
   }
 
   // Every work handle this batch's attempts recorded, grouped by the child run each attempt wrote to. An
@@ -1106,68 +1148,50 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // `reconcileCancellations` re-runs whatever is still owed.
   //
   // Absent store = today's behavior exactly: the teardown runs, a failure throws, the retry converges.
+  //
+  // The wrapper itself is SHARED with the standalone run lane (arch-review 52, Wave 3): one protocol over
+  // one ledger, so a defect fixed in one lane cannot survive in the other.
   private async tearDownDurably(rec: ScorecardRecord): Promise<void> {
-    const operations = this.deps.cancellations;
-    if (!operations) return await this.stopInFlight(rec);
-    // RE-REQUEST, best-effort — the DURABLE request already rode the abort settle's own transaction
-    // (arch-review 51 P0: `requestCancellation` on the settle), so this upsert only re-opens the row for the
-    // convergent-retry path (a cancel of an already-terminal record, whose settle never ran) and for legacy
-    // records aborted before the settle carried the pair. Its failure therefore degrades nothing new.
-    await operations.request(rec.id, this.now()).catch((err: unknown) => {
-      console.warn(
-        `[scorecard] teardown re-request for ${rec.id} failed (the settle-time row, if any, still owns it): ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    try {
-      await this.stopInFlight(rec);
-    } catch (err) {
-      // The 5xx keeps its meaning — the caller is still told the teardown did not finish. What changes is
-      // that the caller is no longer the only one who can finish it.
-      await operations
-        .fail(rec.id, err instanceof Error ? err.message : String(err), this.now())
-        .catch(() => undefined);
-      throw err;
-    }
-    await operations.complete(rec.id, this.now()).catch(() => undefined);
+    await runDurableTeardown(
+      { ...(this.deps.cancellations ? { cancellations: this.deps.cancellations } : {}), now: () => this.now() },
+      { kind: "scorecard", id: rec.id } satisfies CancellationTarget,
+      () => this.stopInFlight(rec),
+    );
   }
 
-  // The reconciler: re-run every teardown that is still owed. Called on a timer by the composition root
-  // (leader-gated — it acts on rows this process does not own). Returns how many operations it closed.
+  // The teardown the `CancellationCoordinator` re-runs for an owed `scorecard` operation, on this replica or
+  // another. Re-reads the record rather than trusting the row: a batch that is gone (deleted) or not aborted
+  // has no teardown this operation is entitled to run — tearing down a live batch because a stale row names
+  // it would be the reconciler cancelling work nobody cancelled, and closing the row is the honest end.
   //
-  // The steps it re-runs are the same idempotent ones the retry runs: a fenced child settle that loses is a
-  // normal race result, a kill of a job that is already gone is a no-op, a queue drop that matches nothing
-  // removes nothing. So a reconciliation that overlaps a caller's own retry costs work, never correctness.
-  async reconcileCancellations(limit = 50): Promise<number> {
-    const operations = this.deps.cancellations;
-    if (!operations) return 0;
-    const owed = await operations.listIncomplete(limit);
-    let closed = 0;
-    for (const operation of owed) {
-      const rec = await this.deps.store.get(operation.scorecardId);
-      // A batch that is gone (deleted) or not aborted has no teardown this operation is entitled to run —
-      // tearing down a live batch because a stale row names it would be the reconciler cancelling work
-      // nobody cancelled. Closing the row is the honest end: the operation cannot be completed by doing
-      // anything, so it is over.
-      if (!rec || (rec.status !== "cancelled" && rec.status !== "superseded")) {
-        await operations.complete(operation.scorecardId, this.now()).catch(() => undefined);
-        closed += 1;
-        continue;
-      }
-      try {
-        await this.stopInFlight(rec);
-      } catch (err) {
-        // Stays owed, with the reason recorded. The next sweep tries again — this is the whole point of the
-        // row, so a failure here is not escalated into the sweep's own failure (one stuck batch must not
-        // stop the reconciler from converging the others).
-        await operations
-          .fail(operation.scorecardId, err instanceof Error ? err.message : String(err), this.now())
-          .catch(() => undefined);
-        continue;
-      }
-      await operations.complete(operation.scorecardId, this.now()).catch(() => undefined);
-      closed += 1;
-    }
-    return closed;
+  // The steps it re-runs are the same idempotent ones a caller's retry runs: a fenced child settle that
+  // loses is a normal race result, a kill of a job that is already gone answers `absent`, a queue drop that
+  // matches nothing removes nothing. So a reconciliation that overlaps a retry costs work, never correctness.
+  cancellationTeardown(): (scorecardId: string) => Promise<CancellationTeardownResult> {
+    return async (scorecardId) => {
+      const rec = await this.deps.store.get(scorecardId);
+      if (!rec) return { kind: "unactionable", reason: `scorecard ${scorecardId} no longer exists` };
+      if (rec.status !== "cancelled" && rec.status !== "superseded")
+        return { kind: "unactionable", reason: `scorecard ${scorecardId} is ${rec.status}, not aborted` };
+      return { kind: "converged", certificate: await this.stopInFlight(rec) };
+    };
+  }
+
+  // ── THE OWNER OF A SETTLEMENT WHOSE PUBLISHER DIED (arch-review 52, Wave 4) ────────────────────────
+  //
+  // A settle's outward effects — the mutable current-analysis alias and the trace-sink export — are owed by a
+  // plan written in the terminal transaction and drained by the winner inline. A crash between the two leaves
+  // the plan durable and nobody running it, which is the cancellation teardown's gap one aggregate over, and
+  // closed the same way: a leader-gated sweep the composition root ticks. The hydrating `get` is the read the
+  // drain needs — a settled batch keeps its results on the child rows, and those results are the payload.
+  publicationCoordinator(): PublicationCoordinator {
+    return new PublicationCoordinator({
+      store: this.deps.store,
+      ...(this.deps.artifacts ? { artifacts: this.deps.artifacts } : {}),
+      ...(this.deps.exportResults ? { exportResults: this.deps.exportResults } : {}),
+      getRecord: (id) => this.get(id),
+      now: () => this.now(),
+    });
   }
 
   // User stop — terminate a queued/running batch as cancelled and free its runtime. Mark the record cancelled first
@@ -1249,7 +1273,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // backend allocations the operation was owed for keep burning. Finish (or let the reconciler finish) the
     // teardown first; the 409 is retryable by construction.
     if (this.deps.cancellations && (rec.status === "cancelled" || rec.status === "superseded")) {
-      const operation = await this.deps.cancellations.get(rec.id);
+      const operation = await this.deps.cancellations.get({ kind: "scorecard", id: rec.id });
       if (operation !== undefined && operation.state !== "completed")
         throw new ConflictError(
           "CONFLICT",
@@ -1278,11 +1302,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     for (const status of ["cancelled", "superseded"] as const) {
       const aborted = await this.deps.store.list(undefined, { status });
       for (const rec of aborted) {
-        const operation = await operations.get(rec.id);
+        const operation = await operations.get({ kind: "scorecard", id: rec.id });
         if (operation !== undefined && operation.state !== "completed") continue; // already owed — the reconciler has it
         const children = await runStore.list(rec.tenant, { scorecardId: rec.id });
         if (!children.some((c) => c.status === "running" || c.status === "queued")) continue;
-        await operations.request(rec.id, this.now());
+        await operations.request({ kind: "scorecard", id: rec.id }, this.now());
         requested += 1;
       }
     }

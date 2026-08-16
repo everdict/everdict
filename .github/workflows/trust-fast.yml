@@ -1,0 +1,64 @@
+# trust-fast — the trust subset that gates a PUSH, not a night.
+#
+# `trust-nightly.yml` boots Temporal and MinIO and runs every scenario; that is tens of minutes and it lands
+# at 03:00, on nobody. So the invariants it certifies were only ever certified AFTER the code that broke them
+# had merged. This workflow is the other half of that trade: the scenarios that need nothing but a real
+# Postgres, run on every push and pull request, as a REQUIRED check.
+#
+# Scope = `apps/api/src/trust`, minus the two Temporal durability files (they start a test server and cost
+# ~70s each — the nightly's job). It runs through `scripts/trust/trust-suite.mjs` rather than a bare
+# `vitest run` for one reason: that script refuses to certify a suite whose scenarios SKIPPED. A required
+# check that quietly skips is worse than no check — it prints the word a reviewer is looking for over an
+# empty run.
+#
+# What the full suite certifies, and what this subset leaves to the nightly: docs/trust-certification.md.
+name: trust-fast
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: trust-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trust-fast:
+    # This name is the branch-protection contract — renaming the job silently un-requires the check.
+    name: trust fast (real Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: everdict
+          POSTGRES_PASSWORD: everdict # throwaway container on the runner's private network, never reachable off-box
+          POSTGRES_DB: everdict_trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U everdict -d everdict_trust"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      EVERDICT_TRUST_DATABASE_URL: postgresql://everdict:everdict@127.0.0.1:5432/everdict_trust
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6 # version resolved from package.json "packageManager"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The trust files import built package entrypoints (@everdict/db, @everdict/domain, …), same as any test.
+      - run: pnpm build
+
+      # No Temporal and no MinIO here, deliberately: the excluded prefix is what keeps this job a few minutes
+      # long, and the scenarios it drops are exactly the ones that need a server this job does not start.
+      # They are NOT unowned — trust-nightly runs them with the infrastructure they require.
+      - name: Trust suite (Postgres-only subset)
+        run: >-
+          node scripts/trust/trust-suite.mjs
+          apps/api/src/trust
+          '!apps/api/src/trust/temporal-'

@@ -171,7 +171,19 @@ collector and the store**.
   `EVERDICT_CLICKHOUSE_URL` alone (ONLY the trajectory store moves; everything else keeps Postgres), with
   the opt-in `--profile clickhouse` compose service. Rung-2 honesties documented in the adapter:
   `sealed_at` as ISO String, first-write-wins resolved at READ (earliest row / argMin) over
-  check-then-insert. Remaining: byte quotas and sampling policy.
+  check-then-insert — and that clock read is now documented as the BEST-EFFORT answer it is. It resolves
+  "which row sealed first" from a stamp each writer takes from its own clock, while WHICH attempt a case's
+  verdict rests on was already decided in Postgres by the commit receipt; a duplicate carrying a backdated
+  stamp therefore won the read and served the abandoned attempt's bytes under the run the receipt named. So
+  the port carries an EXACT-IDENTITY read beside it — `get(tenant, runId, { attemptId })` — which ranks the
+  asked-for attempt above the clock and REFUSES a plane declaring a different one (a plane declaring none is
+  kept: absence is not agreement, but it is not contradiction either). One rule, three impls:
+  `segmentDeclaresAttempt` / `trajectoryForAttempt` (`@everdict/application-control`) for Postgres and
+  in-memory, the same ranking stated in SQL for ClickHouse because there the duplicates are physical rows and
+  they collapse before a caller could filter them (certified live — `clickhouse-trajectory-store.scenario`).
+  ClickHouse's CREATE and its additive ALTERs are also derived from ONE column descriptor now, so a column
+  cannot ship to fresh installs and be missing from the upgrade path. Remaining: byte quotas and sampling
+  policy.
 - **N5 — The system plane (multi-emitter trajectories).** A run is a SYSTEM, not one process: the agent
   under test, the orchestrator that placed it, and every service it drives. Before this rung the owned
   ledger held exactly one sealed body per run, so a service pushing its own OTel spans into a live run

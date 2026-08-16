@@ -36,7 +36,9 @@ export {
   sealExecutionPlanes,
   type SealedTrajectory,
   type SealInput,
+  segmentDeclaresAttempt,
   type TrajectoryBodyFormat,
+  trajectoryForAttempt,
   type TrajectoryListResult,
   type TrajectoryMeta,
   trajectoryReadableBy,
@@ -90,11 +92,20 @@ export {
   type OpenAttemptInput,
 } from "./ports/execution-attempt-store.js";
 export {
+  type CancellationCertificate,
   type CancellationOperation,
   type CancellationOperationState,
   type CancellationStore,
+  type CancellationTarget,
+  type CancellationTargetKind,
   InMemoryCancellationStore,
 } from "./ports/cancellation-store.js";
+export {
+  CancellationCoordinator,
+  type CancellationTeardown,
+  type CancellationTeardownResult,
+  runDurableTeardown,
+} from "./cancellation/cancellation-coordinator.js";
 export { openPhysicalAttempt, jobAttemptId, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
@@ -632,7 +643,16 @@ export {
   analysisRevisionKey,
   offloadAnalysis,
   offloadResults,
+  stageAnalysis,
 } from "./scorecard/scorecard-observability.js";
+export {
+  type PublicationDeps,
+  type PublicationOutcome,
+  type PublicationPlanInput,
+  PublicationCoordinator,
+  drainPublication,
+  planPublication,
+} from "./scorecard/publication.js";
 export type { ScorecardServiceDeps } from "./scorecard/scorecard-deps.js";
 export { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
 export { ScorecardService } from "./scorecard/scorecard-service.js";

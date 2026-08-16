@@ -56,8 +56,8 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 - **Destructive control takes the WORK HANDLE, never a semantic case id** (`WorkAddressable.killWork(work:
   RuntimeWorkRef)`, arch-review 52 Wave 2). A case id names a GROUP of executions — two runs of one case are two
   live jobs — so `Recoverable.kill(caseId)` stops other runs' (and, on Nomad's `namespace=*` sweep, other TENANTS')
-  compute, silently, because kill returns void. Every backend that creates external work therefore REPORTS the
-  exact handle at the moment it creates it (`DispatchOptions.onWork`, best-effort, right after the K8s apply /
+  compute — and it did so silently, because kill returned void. Every backend that creates external work
+  therefore REPORTS the exact handle at the moment it creates it (`DispatchOptions.onWork`, best-effort, right after the K8s apply /
   Nomad submit; never fired for a job with no `runId`), and the control plane PERSISTS it on the physical-attempt
   ledger row (`ExecutionAttemptStore.recordWork`, `runtime_work` jsonb, mig 0185) so it outlives the dispatching
   process — a teardown after a restart has nothing else to address live compute with. `killWork` addresses the
@@ -66,6 +66,16 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   called INSTEAD of `killWork`, never beside it. K8s label values a selector selects on must be INJECTIVE —
   `caseSlug` truncates at 50 chars, so `caseLabelValue`/`runLabelValue` append a digest whenever slugging lost
   information, and every job carries `everdict.dev/run` beside `everdict.dev/case`.
+- **A stop ANSWERS — `KillOutcome`, never `void`** (arch-review 52 Wave 3). `kill`/`killWork` return
+  `{status: "stopped"|"absent"|"unknown"|"failed", reason?}` and still never throw: `stopped`/`absent` are
+  convergence (`killConverged`), `unknown`/`failed` mean the compute is probably still burning. "The delete
+  request returned" and "the job stopped" were the same observation before, so a cancellation certified freed
+  compute on the strength of a process exiting. Rules for a new backend: a listing that FAILED is `unknown`,
+  never `absent` (a sweep that learned nothing stopped nothing); a sweep that ran and matched nothing IS
+  `absent`; a 404 / `--ignore-not-found` with no output is `absent`; anything else non-2xx is `failed` with
+  the cluster's own words. A fan-out (shard list, several handles) reports the WORST outcome
+  (`worstKillOutcome`) — a teardown that stopped three jobs and could not reach the fourth has not converged.
+  The seams above it (`composition/runtime-access.ts`) aggregate and never `.catch(() => {})`.
 - **Failure evidence rides the throw.** The orchestrator job + raw log are deleted/GC'd right after settlement, so
   dispatch-failure paths capture evidence AT THROW TIME: attach `extra.placement {unit,node,events[]}` +
   `extra.logTail` (stderr-preferred, sentinel-stripped, 16 KB tail) to the thrown `UpstreamError` —

@@ -39,6 +39,24 @@ if it blocks you wrongly, fix the hook, don't dodge it.
 
 When iterating on ONE failed step, run that step directly, then finish with a full `pnpm ci:local`.
 
+## The required check the gate does NOT mirror — `trust-fast`
+`.github/workflows/trust-fast.yml` (job **`trust fast (real Postgres)`**) is a **required check** and runs
+outside `ci:local` on purpose: it needs a real Postgres service, and booting a database before every push is
+the cost the local gate exists to avoid. It runs the Postgres-only trust subset (`apps/api/src/trust` minus
+the Temporal durability files) through `scripts/trust/trust-suite.mjs`, whose rule is that a scenario which
+SKIPPED is a FAILED certification — a required check that quietly skips would be worse than none.
+
+Touching a trust-suite subject (the commit ledger, the fences, settle, the receipt/attempt stores)? Run it
+before pushing, against any throwaway Postgres:
+```bash
+docker run -d --rm --name pg-trust -e POSTGRES_USER=everdict -e POSTGRES_PASSWORD=everdict \
+  -e POSTGRES_DB=everdict_trust -p 55440:5432 postgres:16
+EVERDICT_TRUST_DATABASE_URL=postgresql://everdict:everdict@127.0.0.1:55440/everdict_trust \
+  node scripts/trust/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'
+```
+~5 min after `pnpm build`. The FULL suite (Temporal + MinIO + Windows) stays nightly and non-blocking —
+`trust-nightly.yml`, `docs/trust-certification.md`.
+
 ## Failure protocol
 1. **Your change broke it** → fix, re-run, push only on stamp.
    Fixes stay scoped to files you changed — never run repo-wide formatters here (shared WIP tree).

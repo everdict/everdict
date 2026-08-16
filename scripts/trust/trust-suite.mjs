@@ -13,6 +13,7 @@
 //
 // Usage:
 //   EVERDICT_TRUST_DATABASE_URL=postgresql://… node scripts/trust/trust-suite.mjs
+//   …/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'   (a named SUBSET — see below)
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,8 +58,30 @@ function packageOf(file) {
   throw new Error(`no package.json above ${file}`);
 }
 
+// ── THE SAME RUNNER, A NAMED SUBSET (arch-review 52, wave 7) ─────────────────────────────────────────
+//
+// The full suite boots Temporal and MinIO and takes tens of minutes, which is why it is nightly. A subset of
+// it needs nothing but Postgres and finishes in a few — fast enough to be a REQUIRED check on every push
+// (.github/workflows/trust-fast.yml). That subset runs through this script rather than through a bare
+// `vitest run`, because the rule that makes a certification mean anything lives here: a scenario that did not
+// run is a FAILED certification. A required check that quietly skipped its scenarios would be worse than no
+// check at all — it would print the word the reviewer is looking for over an empty run.
+//
+// A positional argument is a repo-relative path PREFIX to include; one prefixed with `!` excludes. No
+// arguments = the whole suite, exactly as the nightly has always run it.
+const scopeArgs = process.argv.slice(2);
+const includePrefixes = scopeArgs.filter((arg) => !arg.startsWith("!"));
+const excludePrefixes = scopeArgs.filter((arg) => arg.startsWith("!")).map((arg) => arg.slice(1));
+const scoped = scopeArgs.length > 0;
+function inScope(file) {
+  const rel = path.relative(root, file).split(path.sep).join("/");
+  if (excludePrefixes.some((prefix) => rel.startsWith(prefix))) return false;
+  return includePrefixes.length === 0 || includePrefixes.some((prefix) => rel.startsWith(prefix));
+}
+
 const byPackage = new Map();
 for (const file of [...findTrustFiles(path.join(root, "packages")), ...findTrustFiles(path.join(root, "apps"))]) {
+  if (!inScope(file)) continue;
   const pkg = packageOf(file);
   const entry = byPackage.get(pkg.name) ?? { dir: pkg.dir, files: [] };
   entry.files.push(path.relative(pkg.dir, file));
@@ -66,12 +89,14 @@ for (const file of [...findTrustFiles(path.join(root, "packages")), ...findTrust
 }
 
 if (byPackage.size === 0) {
-  console.error("✖ TRUST SUITE NOT RUN — no *.trust.test.ts files found. The suite cannot certify an empty set.");
+  console.error(
+    `✖ TRUST SUITE NOT RUN — no *.trust.test.ts files ${scoped ? `matched the scope [${scopeArgs.join(" ")}]` : "found"}. The suite cannot certify an empty set.`,
+  );
   process.exit(1);
 }
 
 console.log(
-  `▶ trust suite — ${byPackage.size} package(s), ${[...byPackage.values()].reduce((n, e) => n + e.files.length, 0)} file(s)\n`,
+  `▶ trust suite${scoped ? ` [scope: ${scopeArgs.join(" ")}]` : ""} — ${byPackage.size} package(s), ${[...byPackage.values()].reduce((n, e) => n + e.files.length, 0)} file(s)\n`,
 );
 
 rmSync(reportDir, { recursive: true, force: true });
@@ -124,7 +149,10 @@ const passed = scenarios.filter((s) => s.status === "pass");
 const certified = !hardFailure && failed.length === 0 && skipped.length === 0 && passed.length > 0;
 
 const lines = [];
-lines.push(`# Everdict Trust Certification: ${certified ? "PASS" : "FAIL"}`);
+// The scope is in the HEADLINE, not a footnote: a green summary from a subset must never read as the full
+// certification to whoever is scanning a check list.
+lines.push(`# Everdict Trust Certification${scoped ? " — SUBSET" : ""}: ${certified ? "PASS" : "FAIL"}`);
+if (scoped) lines.push(`- scope: \`${scopeArgs.join(" ")}\``);
 lines.push("");
 lines.push(`- executed: **${passed.length}**`);
 if (failed.length > 0) lines.push(`- failed: **${failed.length}**`);
@@ -142,7 +170,11 @@ if (skipped.length > 0) {
   lines.push("");
 }
 if (certified) {
-  lines.push("Every trust scenario ran against real infrastructure and held.");
+  lines.push(
+    scoped
+      ? "Every trust scenario IN SCOPE ran against real infrastructure and held — this is the fast subset, not the full certification. The nightly runs the rest."
+      : "Every trust scenario ran against real infrastructure and held.",
+  );
   lines.push("What this certifies — and what it deliberately does not — is in `docs/trust-certification.md`.");
 }
 

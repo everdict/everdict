@@ -14,8 +14,15 @@ restore is not today's policy. A replica that stopped answering is not a replica
 budget is not a budget.
 
 - **Where it runs**: `.github/workflows/trust-nightly.yml` — nightly at 03:00 UTC, plus `workflow_dispatch`.
-  It is deliberately **not** part of the push gate (`ci.yml`); see [Why it is not in ci.yml](#why-it-is-not-in-ciyml).
-- **What runs it**: `scripts/trust/trust-suite.mjs`.
+  The full suite is deliberately **not** part of the push gate (`ci.yml`); see
+  [Why the full suite is not in ci.yml](#why-the-full-suite-is-not-in-ciyml).
+- **…and the subset that DOES gate a push**: `.github/workflows/trust-fast.yml` (job name
+  `trust fast (real Postgres)`) — the scenarios that need nothing but a real Postgres, on every push and pull
+  request, as a **required check**. Certifying invariants only at 03:00 means certifying them after the change
+  that broke them merged.
+- **What runs it**: `scripts/trust/trust-suite.mjs` — for both, so the rule below cannot differ between them.
+  A positional argument scopes it to a repo-relative path prefix (`!prefix` excludes); no arguments runs
+  everything, which is what the nightly does.
 - **What it runs**: every `*.trust.test.ts` file in the repo, colocated with its subject.
 
 ## The one rule that makes the certification worth anything
@@ -371,21 +378,29 @@ Expanding the lane means running the excluded package on `windows-latest`, readi
 fixing either the test's POSIX assumption or the code's. Adding a package to the filter without doing that
 would turn a red lane green by not looking, which is the same move the trust suite exists to refuse.
 
-## Why it is not in ci.yml
+## Why the full suite is not in ci.yml
 
 `ci.yml` is the **push gate**, and its value is that it is fast enough that nobody is tempted to work around
-it. Booting Postgres and MinIO on every push, and running a Windows matrix that takes several times an ubuntu
-job's minutes, would trade that away. The two workflows answer different questions:
+it. Booting Temporal and MinIO on every push, and running a Windows matrix that takes several times an ubuntu
+job's minutes, would trade that away. Three workflows, three questions:
 
-| | `ci.yml` (every push) | `trust-nightly.yml` (nightly) |
-| --- | --- | --- |
-| asks | did this change break the code? | do the guarantees still hold? |
-| runs against | fakes, in-memory stores | real Postgres, real MinIO |
-| blocks | yes — a red `main` blocks everyone | no — it reports |
+| | `ci.yml` (every push) | `trust-fast.yml` (every push) | `trust-nightly.yml` (nightly) |
+| --- | --- | --- | --- |
+| asks | did this change break the code? | do the guarantees that need only a database still hold? | do ALL the guarantees still hold? |
+| runs against | fakes, in-memory stores | real Postgres | real Postgres, real MinIO, real Temporal, Windows |
+| scope | every unit test | `apps/api/src/trust`, minus the Temporal durability files | every `*.trust.test.ts` |
+| blocks | yes — a red `main` blocks everyone | yes — required check | no — it reports |
 
-`scripts/ci-local.mjs` mirrors `ci.yml` step for step and is **not** extended to cover this workflow: a
-scheduled job is not part of the push gate, and putting it there would mean booting a database before every
-push.
+The middle column is not a second push gate so much as an admission: an invariant certified only at 03:00 is
+certified after the change that broke it merged, and the scenarios that need nothing but a database are cheap
+enough that there was never a reason to wait. Its scope is a PATH PREFIX rather than a file list, so a trust
+scenario added to `apps/api` is required from the moment it exists — nobody has to remember to enlist it.
+What stays nightly is what needs a server the fast job does not start.
+
+`scripts/ci-local.mjs` mirrors `ci.yml` step for step and is **not** extended to cover either trust workflow:
+the local gate must not require a database before every push. `trust-fast` is therefore the one required
+check that `pnpm ci:local` cannot pre-run — to reproduce it, point `EVERDICT_TRUST_DATABASE_URL` at any
+throwaway Postgres and run the same command the workflow does.
 
 ## Tier B — the process-level scenarios (roadmap)
 

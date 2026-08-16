@@ -279,6 +279,45 @@ export function trajectorySegmentsWire(sealed: SealedTrajectory): TrajectorySegm
   }));
 }
 
+// ── ASKING FOR AN IDENTITY INSTEAD OF FOR A CLOCK (arch-review 52, wave 7) ───────────────────────────
+//
+// WHICH attempt's evidence a case's verdict rests on is decided in Postgres, by the commit receipt. The
+// evidence store answers a different question by default — "which row sealed first", resolved from a
+// `sealed_at` string each writer stamps from its own clock — and those two answers are not the same answer.
+// A duplicate seal carrying a backdated stamp (ordinary replica skew; nothing validates the value) then wins
+// the read, and the reader is served the ABANDONED attempt's bytes under the run id the receipt named. Both
+// halves stay internally consistent, so no digest downstream disagrees; only the join between them is wrong.
+//
+// This predicate is that join, in one place, so the three store impls cannot answer it differently: a plane
+// AGREES with the identity a receipt selected when it declares that identity — or declares none at all.
+// Absence is not agreement, but it is not contradiction either: evidence sealed before attempts had a name
+// (and every plane whose producer does not declare one — a judge's, a service's) is still this run's
+// evidence, and dropping it would decay the record to protect it. A plane declaring a DIFFERENT attempt is
+// the one case that must never be served: it is another execution's bytes.
+export function segmentDeclaresAttempt(segment: Pick<TrajectorySegment, "attemptId">, attemptId: string): boolean {
+  return segment.attemptId === undefined || segment.attemptId === attemptId;
+}
+
+// The exact-identity read, applied to an already-resolved trajectory — the shape a store with a UNIQUE key
+// per (run, emitter) needs, since it cannot hold two rows for one plane in the first place (Postgres,
+// in-memory). ClickHouse states the SAME rule in SQL, because there the duplicates ARE rows and they collapse
+// before a caller could filter them.
+//
+// Undefined when no plane agrees: the answer to "this attempt's evidence" is then honestly nothing, never
+// somebody else's execution. `eventCount` is recomputed over the surviving planes for the same reason — a
+// count that includes evidence the read did not return describes a trajectory nobody is holding.
+export function trajectoryForAttempt(sealed: SealedTrajectory, attemptId: string): SealedTrajectory | undefined {
+  const segments = sealed.segments.filter((segment) => segmentDeclaresAttempt(segment, attemptId));
+  if (segments.length === 0) return undefined;
+  const execution = executionSegment(segments);
+  return {
+    meta: { ...sealed.meta, eventCount: segments.reduce((sum, s) => sum + s.eventCount, 0) },
+    events: execution?.events ?? [],
+    ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
+    segments,
+  };
+}
+
 // May this reader open this evidence? The read-side half of `TrajectoryMeta.owner`, kept beside the port so
 // every surface that serves a sealed trajectory (the ledger's own detail read and its MCP twin) asks the same
 // question — the list side asks it in the query instead, for pagination. Unowned evidence is the workspace's.
@@ -348,7 +387,18 @@ export interface TrajectoryStore {
   // `created` says whether THIS call wrote something (false = a re-offer that lost to an earlier seal) —
   // the perception decorator announces only on true, so at-least-once callers never double-emit a fact.
   seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }>;
-  get(tenant: string, runId: string): Promise<SealedTrajectory | undefined>;
+  // A run's sealed evidence, workspace-scoped (a foreign run reads undefined — no existence leak).
+  //
+  // WITHOUT `opts` the store resolves duplicate seals by the CLOCK — first-write-wins over `sealed_at`. That
+  // is best-effort by construction and documented as such: the stamp is the writer's own, so the answer is
+  // "whose clock was smallest", which is the right answer only for a caller that holds no identity to ask by
+  // (the browse ledger, a legacy reader, retention).
+  //
+  // WITH `opts.attemptId` it is the EXACT-IDENTITY read: the caller already holds the attempt a Postgres
+  // receipt (or an fs revision) selected as canonical, and asks for THAT execution's evidence rather than for
+  // whatever the clock elected. Planes declaring a different attempt are refused, not substituted, and a run
+  // with nothing agreeing reads undefined — see `segmentDeclaresAttempt` for the rule every impl shares.
+  get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined>;
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
   // store). Metas only: a page never hauls bodies. `viewer` (the member asking) drops evidence owned by
   // someone else IN THE QUERY — filtering afterwards would hand the reader a short page and let one member's

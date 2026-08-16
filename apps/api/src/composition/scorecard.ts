@@ -18,7 +18,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
+import type { CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -41,9 +41,9 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 // Per-runtime kill of an already-dispatched case (supersede / speculation loser) — from buildRuntimeAccess.
 export interface ScorecardRuntimeAccess {
   adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
-  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
+  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<KillOutcome>;
   // The exact-handle stop (arch-review 52, Wave 2) — `killCase` is the no-handle fallback beside it.
-  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<void>;
+  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
 }
 
 // The manifest's model-binding resolution, as ONE function (arch-review 15 P1-5). A judge or harness spec

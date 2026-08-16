@@ -1,4 +1,4 @@
-import type { CaseCommitReceipt, CaseResult, Score, TraceEvent } from "@everdict/contracts";
+import type { CaseCommitReceipt, CaseResult, JudgmentReceipt, Score, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { caseObservationDigest } from "./case-result-digest.js";
 import {
@@ -6,6 +6,7 @@ import {
   currentScoringPin,
   inputObservationOf,
   inputObservationSetDigest,
+  judgmentReceiptSetDigest,
   observationSetDigest,
   scorePlaneDigest,
   scoringPinInputDiverged,
@@ -115,6 +116,73 @@ describe("appendScoringRevision / currentScoringPin — the append-only ledger",
     });
     expect(currentScoringPin(undefined)).toBeUndefined();
     expect(currentScoringPin([])).toBeUndefined();
+  });
+
+  // The provenance half (arch-review 52 wave 5): a decision has to be able to say which judge INVOCATIONS it
+  // shipped on. Two invocations that agree leave identical plane digests, so nothing else on the pin can.
+  it("births the receipt vector with its own digest and carries that digest onto the gate's pin", () => {
+    const receipt = {
+      ref: { scoringPassId: "pass-1", case: { caseId: "c1" }, judgeId: "j", claim: { generation: 2, attempt: 1 } },
+      scoreDigest: "sha256:score",
+      evidenceEmitter: "judge:j#pass-1.2.1",
+    };
+    const ledger = appendScoringRevision(undefined, {
+      kind: "rescore",
+      judges: [],
+      results,
+      judgments: [receipt],
+      inputObservation: unvouched,
+      createdAt: "t1",
+    });
+    expect(ledger[0]?.judgments).toEqual([receipt]);
+    expect(ledger[0]?.judgmentReceiptSetDigest).toBe(judgmentReceiptSetDigest([receipt]));
+    expect(currentScoringPin(ledger)?.judgmentReceiptSetDigest).toBe(ledger[0]?.judgmentReceiptSetDigest);
+
+    // An EMPTY vector is a measurement ("this pass adopted nothing") and gets a digest; an ABSENT one is a
+    // revision that predates the vector, and must stay silent rather than be pinned as an empty judgment.
+    const emptied = appendScoringRevision(undefined, {
+      kind: "rescore",
+      judges: [],
+      results,
+      judgments: [],
+      inputObservation: unvouched,
+      createdAt: "t1",
+    });
+    expect(emptied[0]?.judgments).toEqual([]);
+    expect(emptied[0]?.judgmentReceiptSetDigest).toBe(judgmentReceiptSetDigest([]));
+    expect(emptied[0]?.judgmentReceiptSetDigest).not.toBe(ledger[0]?.judgmentReceiptSetDigest);
+    const legacy = appendScoringRevision(undefined, {
+      kind: "rescore",
+      judges: [],
+      results,
+      inputObservation: unvouched,
+      createdAt: "t1",
+    });
+    expect(legacy[0]?.judgments).toBeUndefined();
+    expect(currentScoringPin(legacy)?.judgmentReceiptSetDigest).toBeUndefined();
+  });
+
+  // Order is not content: the vector is stored and digested in one canonical (case, judge) order, so two
+  // passes that adopted the same judgments cannot pin different digests over a map-iteration accident.
+  it("orders the vector canonically, so the set digest is independent of the order the stage returned rows in", () => {
+    const receiptFor = (caseId: string, judgeId: string): JudgmentReceipt => ({
+      ref: { scoringPassId: "pass-1", case: { caseId }, judgeId },
+      scoreDigest: `sha256:${caseId}-${judgeId}`,
+      evidenceEmitter: `judge:${judgeId}#pass-1`,
+    });
+    const forward = [receiptFor("c1", "a"), receiptFor("c1", "b"), receiptFor("c2", "a")];
+    const shuffled = [forward[2], forward[0], forward[1]].filter((r): r is JudgmentReceipt => r !== undefined);
+    const of = (judgments: JudgmentReceipt[]) =>
+      appendScoringRevision(undefined, {
+        kind: "rescore",
+        judges: [],
+        results,
+        judgments,
+        inputObservation: unvouched,
+        createdAt: "t1",
+      })[0];
+    expect(of(shuffled)?.judgments).toEqual(forward);
+    expect(of(shuffled)?.judgmentReceiptSetDigest).toBe(of(forward)?.judgmentReceiptSetDigest);
   });
 
   it("carries the pass that wrote the revision — the marker clears in the same write", () => {

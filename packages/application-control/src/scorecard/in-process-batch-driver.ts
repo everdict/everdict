@@ -52,6 +52,7 @@ import { runSuite } from "../run-suite.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter, FailureFinalization, PendingChildSettle } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
+import { type PublicationOutcome, drainPublication, planPublication } from "./publication.js";
 import type { ResilientCaseRunner } from "./resilient-case-runner.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
@@ -59,8 +60,8 @@ import {
   batchSettledEvent,
   exportStepMessage,
   initialPassId,
-  offloadAnalysis,
   offloadResults,
+  stageAnalysis,
 } from "./scorecard-observability.js";
 
 // The correlation id a case is DISPATCHED with — the key its frames, logs, live trajectory and replay are
@@ -992,12 +993,17 @@ export class InProcessBatchDriver {
       // pre-reconciliation in-memory snapshot, so the payload a customer's platform received and the payload
       // this record persisted could legitimately disagree wherever the ledger substituted a committed
       // child's copy. The Temporal finalize already exported post-reconciliation; the two paths now agree.
-      const exported =
-        streamExported ??
-        (this.deps.exportResults && !exportStream
-          ? await this.deps.exportResults(tenant, exportCtx, scorecard.results).catch(() => undefined)
-          : undefined);
+      //
+      // …AND THE BATCHED ONE NO LONGER RUNS HERE (arch-review 52, Wave 4). It ran BEFORE the terminal CAS
+      // below, so a driver that lost the settle to a cancel had already shipped the batch's cases to someone
+      // else's platform — an effect no CAS result can recall. It is now owed by the publication plan and
+      // performed by the drain after the settle commits. The STREAMING export keeps firing where it did, and
+      // the note below `plannedExport` says why that is a different question.
+      const exported = streamExported;
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
+      // Only the batched fallback is deferred: a streaming batch already exported case by case, each fire
+      // fenced by that CASE's own commit.
+      const plannedExport = this.deps.exportResults !== undefined && !exportStream;
       // …AND THE RECEIPT SET IS EXACTLY THE PLAN'S (arch-review 41 P1). resultsFromLedger holds every
       // COUNTED case to a receipt; this holds the receipt set to the PLAN — a planned (caseId, trial) pair
       // no receipt answers, or a receipt the plan never asked for, refuses the success settle (recovery
@@ -1030,7 +1036,22 @@ export class InProcessBatchDriver {
         scorecard.results,
         opts.verdictPolicy,
       );
-      const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
+      // STAGED, NOT PUBLISHED (arch-review 52, Wave 4) — the content-addressed pass key only. The mutable
+      // current-analysis alias is promoted by the drain after the settle commits, so a driver that loses the
+      // terminal CAS cannot leave a cancelled batch's analysis surface describing a successful run.
+      const passId = initialPassId(initialBundle);
+      const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+      const publication = planPublication({
+        scorecardId: id,
+        bundle: initialBundle,
+        staged: analysis,
+        passId,
+        exports: plannedExport,
+        results: scorecard.results,
+        ...(exportCtx.sinkOverride !== undefined ? { sink: exportCtx.sinkOverride } : {}),
+        ...(exportCtx.judgeModels !== undefined ? { judgeModels: exportCtx.judgeModels } : {}),
+        now: this.now(),
+      });
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = modelBindingLabel(harnessSpec?.kind === "command" ? harnessSpec.model : undefined);
       const models = scorecardModels(scorecard, declared);
@@ -1050,7 +1071,9 @@ export class InProcessBatchDriver {
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
         ...(exported ? { export: exported } : {}),
-        ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
+        // The FROZEN artifact's ref, not the alias's — the alias does not exist until the drain promotes it
+        // (arch-review 52, Wave 4), and the immutable object is the honest answer either way.
+        ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
         steps: [...steps],
         ...(hasChildren && seedChildBacked
           ? { runIds: [...seedRunIds, ...caseToChild.values()] }
@@ -1102,7 +1125,14 @@ export class InProcessBatchDriver {
             createdAt: this.now(),
             ...(settled.createdBy !== undefined ? { createdBy: settled.createdBy } : {}),
           });
-          const settlement = batch.succeed({ ...extras, ...(decision ? { decision } : {}), scoring }, this.now());
+          // …and the outward effects this settlement owes, persisted by the very write that decides it won
+          // (arch-review 52, Wave 4). Only the SUCCESS settle carries a plan: an aborted batch's partials
+          // publish nothing outward — it is not the batch's answer, so it does not own the current-analysis
+          // alias and has no cases to ship as a completed evaluation.
+          const settlement = batch.succeed(
+            { ...extras, ...(decision ? { decision } : {}), scoring, ...(publication ? { publication } : {}) },
+            this.now(),
+          );
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
           // Under the aggregate's terminal fence AND this driver's own epoch (mig 0166): a replica that was
           // declared dead and came back must not settle a batch another replica now owns. The comment below
@@ -1123,6 +1153,24 @@ export class InProcessBatchDriver {
           // counted its settlement would report a case outcome the ledger never recorded.
           if (written !== undefined) {
             if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+            // …AND ONLY NOW IS ANYTHING PUBLISHED (arch-review 52, Wave 4). Inline, holding the exact results
+            // the settle counted; a crash before this line leaves the plan owed for the reconciler. Never a
+            // reason for the batch to fail — an unpublished plan is a plan still owed, not a failed run.
+            const drained = await drainPublication(
+              this.deps,
+              { ...written, ...(publication ? { publication } : {}) },
+              scorecard.results,
+              this.now,
+            ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }));
+            if (drained.kind === "owed")
+              pushStep("export", "info", `Publication still owed — ${drained.reason} (the reconciler will retry)`);
+            else if (drained.kind === "published" && drained.export)
+              pushStep(
+                "export",
+                drained.export.status === "failed" ? "failed" : "ok",
+                exportStepMessage(drained.export),
+              );
+            await flushSteps();
             // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
             this.deps.onOrchestrationEvent?.(
               batchSettledEvent(

@@ -216,6 +216,33 @@ export interface AnalysisOffload {
   revisionKey?: string;
 }
 
+// ── STAGING, WITHOUT PUBLISHING (arch-review 52, Wave 4) ────────────────────────────────────────────
+//
+// The same bytes as `offloadAnalysis`, minus the one write that is VISIBLE OUTWARD: the mutable current-key
+// alias. A settle stages its bundle under the content-addressed pass key BEFORE its terminal CAS — which is
+// safe, because a loser's object is an orphan nobody references — and the alias promotion is carried across
+// the commit by the publication plan instead (see `PublicationPlan` in `@everdict/contracts`).
+//
+// Best-effort, exactly like `offloadAnalysis`: a failed stage yields an absent key, the revision entry
+// honestly carries no artifact, and nothing is planned for promotion.
+export async function stageAnalysis(
+  deps: Pick<ScorecardServiceDeps, "artifacts">,
+  id: string,
+  bundle: AnalysisBundle,
+  passId: string,
+): Promise<AnalysisOffload> {
+  if (!deps.artifacts) return {};
+  const out: AnalysisOffload = {};
+  try {
+    const key = analysisPassKey(id, passId);
+    out.revisionRef = await deps.artifacts.put(key, Buffer.from(JSON.stringify(bundle)), "application/json");
+    out.revisionKey = key;
+  } catch {
+    // best-effort — the revision entry simply carries no artifact
+  }
+  return out;
+}
+
 // Offload the analysis bundle to object storage. Best-effort per key: no store or a failure yields an absent
 // ref and never affects the scorecard (same discipline as offloadResults). When `revision` is given, the
 // bundle ALSO freezes under its per-revision key — each put is independent, so a revision-key failure still

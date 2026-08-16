@@ -1,11 +1,13 @@
 import {
   BadRequestError,
   type CaseCommitReceipt,
+  type CaseKey,
   type CaseResult,
   ConflictError,
   type Dataset,
   EXPERIMENT_ADHOC_REF,
   type EvalCase,
+  type JudgmentReceipt,
   NotFoundError,
   type RunRecord,
   SCORING_PASS_LEASE_MS,
@@ -15,6 +17,7 @@ import {
   type ScorecardRecord,
   type ScoringPass,
   TRACE_EVAL_REF,
+  caseKeyOf,
   scoringPassReclaimable,
 } from "@everdict/contracts";
 import {
@@ -26,6 +29,7 @@ import {
   caseObservationDigest,
   contentDigest,
   inputObservationOf,
+  judgeEvidenceEmitter,
   judgeGradeable,
   nextScoringRevision,
   promoteStagedJudgments,
@@ -51,8 +55,9 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { JudgmentClaim, StagedJudgment } from "../ports/scoring-stage-store.js";
 import { ExecutionPlan } from "./execution-plan.js";
+import { drainPublication, planPublication } from "./publication.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
-import { type AnalysisOffload, analysisBundle, offloadAnalysis } from "./scorecard-observability.js";
+import { type AnalysisOffload, analysisBundle, initialPassId, stageAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
 
 // How many disagreeing units a revision records by name. A pass disagreeing on thousands has a systemic
@@ -78,14 +83,17 @@ function parityUnits(parity: ScoringStageParity): {
   };
 }
 
-// ONE READ of a pass's stage, answering both questions asked of it at settle: how it COMPARED to the plane
-// (the durable evidence the contract step is gated on) and what it CONTAINS (the rows a promotion merges).
-// They are bundled because they must describe the same read — a second `staged()` call could observe a
-// different stage, and the revision would then be certified by a report about rows its bytes did not come
-// from.
+// ONE READ of a pass's stage, answering every question asked of it at settle: how it COMPARED to the plane
+// (the durable evidence the contract step is gated on), what it CONTAINS (the rows a promotion merges), and
+// WHICH INVOCATION authored each judgment the pass adopted (the receipts the revision pins). They are
+// bundled because they must describe the same read — a second `staged()` call could observe a different
+// stage, and the revision would then be certified by a report about rows its bytes did not come from.
 interface StageObservation {
   parity: ScoringStageParity;
   staged: StagedJudgment[];
+  // ABSENT = the read failed, so no vector could be minted. Never `[]` in that case: an empty vector is the
+  // claim "this pass adopted no judgment", which is a measurement, not an unreadable stage.
+  judgments?: JudgmentReceipt[];
 }
 
 // One judge family's rows, as a STORAGE-PATH-INDEPENDENT value (arch-review 16 P1-6). Parsing normalizes the
@@ -659,7 +667,9 @@ export class ScorecardScoreService {
     // A pass declared dead will never write again, so its stage is garbage from this moment on — and unlike
     // the settle path there is no revision to record an observation on, because there is no revision. Nothing
     // is lost by collecting it (the score bytes are shadow; the claims only ever arbitrated between this
-    // pass's own invocations). Best-effort, like the notice itself.
+    // pass's own invocations, and a pass with no revision has no judgment-receipt vector to orphan — that is
+    // the condition that makes THIS clear safe and the settle's clear order-dependent). Best-effort, like the
+    // notice itself.
     if (marked !== undefined) void this.deps.scoringStage?.clear(id, passId).catch(() => undefined);
     return { marked: marked !== undefined };
   }
@@ -800,24 +810,48 @@ export class ScorecardScoreService {
     // The pass's revision number comes from the MARKER (sealed at pass start — the same number the guarded
     // settle below enforces via the ledger length); a marker-less legacy pass derives it from the ledger.
     const targetRevision = fresh.scoringPass?.targetRevision ?? nextScoringRevision(fresh.scoring);
-    const analysis: AnalysisOffload =
+    const bundle =
       resolution.status === "unresolvable"
-        ? {}
-        : await offloadAnalysis(
-            this.deps,
-            record.id,
-            analysisBundle(
-              {
-                scorecardId: record.id,
-                dataset: `${fresh.dataset.id}@${fresh.dataset.version}`,
-                harness: `${fresh.harness.id}@${fresh.harness.version}`,
-              },
-              summary,
-              plane,
-              resolution.policy,
-            ),
-            pass?.passId ?? fresh.scoringPass?.passId,
+        ? undefined
+        : analysisBundle(
+            {
+              scorecardId: record.id,
+              dataset: `${fresh.dataset.id}@${fresh.dataset.version}`,
+              harness: `${fresh.harness.id}@${fresh.harness.version}`,
+            },
+            summary,
+            plane,
+            resolution.policy,
           );
+    // STAGED, NOT PUBLISHED (arch-review 52, Wave 4 — converted in wave 5). This was `offloadAnalysis`, which
+    // also wrote the MUTABLE current-analysis alias, and it ran BEFORE the guarded settle below. Every fence
+    // in this method held; the effect simply sat on the wrong side of one — a pass that LOST the settle (the
+    // late-waking stale takeover this file is built around, refused a few lines down with a ConflictError)
+    // had by then already overwritten `analyses/<id>.json` with a bundle describing a revision it never got
+    // to append. No CAS result takes that back.
+    //
+    // The content-addressed pass key is safe to write early — a loser's object is an orphan nobody
+    // references — so what moves across the commit is exactly the one outward effect, carried by the
+    // publication plan. A marker-less legacy pass has no pass id to key by and falls back to the bundle's own
+    // digest (`initialPassId`), which is the same answer for the same reason: a key only these bytes can own.
+    const passKey = pass?.passId ?? fresh.scoringPass?.passId ?? (bundle ? initialPassId(bundle) : undefined);
+    const analysis: AnalysisOffload =
+      bundle !== undefined && passKey !== undefined ? await stageAnalysis(this.deps, record.id, bundle, passKey) : {};
+    // What this settlement OWES outward: the alias promotion, and nothing else — the re-score path wires no
+    // trace-sink exporter (a re-score never re-exports; the batch's own settle owns that), so `exports` is
+    // false rather than a debt nobody can pay.
+    const publication =
+      bundle !== undefined && passKey !== undefined
+        ? planPublication({
+            scorecardId: record.id,
+            bundle,
+            staged: analysis,
+            passId: passKey,
+            exports: false,
+            results: plane,
+            now: this.now(),
+          })
+        : undefined;
     // The stage observation was taken BEFORE anything derived from the plane, so it can ride the REVISION
     // (arch-review 16 P1-6). It used to be a fire-and-forget callback after the settle: a control plane dying
     // in between left the pass with no observation at all, indistinguishable from an agreeing one — and the
@@ -863,6 +897,11 @@ export class ScorecardScoreService {
       // gate reads afterwards. An unreadable ledger is recorded as an incomplete observation, never as
       // agreement — the same rule stageParity settled on.
       inputObservation: inputObservationOf(plane, await this.receiptLedgerReading(record.id)),
+      // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 52 wave 5) — from the SAME stage read the parity
+      // observation above came from. The claims live only in the stage rows, and those rows are cleared at
+      // the bottom of this method: after that write, this vector is the only thing in the system that can
+      // say which invocation of a re-attempted (case, judge) the record's verdict came from.
+      ...(observation?.judgments !== undefined ? { judgments: observation.judgments } : {}),
       ...(pass?.passId !== undefined ? { passId: pass.passId } : {}),
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
@@ -895,7 +934,12 @@ export class ScorecardScoreService {
             ],
           }
         : {}),
-      ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
+      // The record's download ref is the FROZEN artifact's, not the alias's: the alias does not exist yet
+      // (the publisher promotes it after this write commits), and the immutable object is the honest answer
+      // to "where is this pass's analysis" either way.
+      ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+      // …and the outward effect this settlement owes, persisted by the very write that decides it won.
+      ...(publication ? { publication } : {}),
       ...(fresh.manifest ? { manifest: { ...fresh.manifest, judges: mergedManifestJudges } } : {}),
       ...(fresh.orchestration ? { orchestration: { ...fresh.orchestration, judges: mergedPins } } : {}),
       // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
@@ -930,12 +974,30 @@ export class ScorecardScoreService {
         "another scoring pass settled this group first — this pass's aggregate is refused (its revision would have overwritten the ledger).",
       );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    // …AND ONLY NOW IS ANYTHING PUBLISHED (arch-review 52, Wave 4). The winner drains its own plan inline,
+    // holding the exact plane the settle certified, so the alias tracks the revision promptly. A crash
+    // between the commit above and this line leaves the plan owed and the reconciler converges it — the
+    // effect is no longer this call's to lose. Never a reason for a settled re-score to fail: an undrained
+    // plan stays owed with its reason recorded on the record by the drain itself.
+    //
+    // AWAITED, and swallowed rather than unawaited — the same call the drivers make, and for the reason the
+    // stage clear below is awaited: an unawaited effect makes the order unobservable, so nothing can assert
+    // that publication follows the commit, and a process exiting right after the settle drops the promotion
+    // for no reason.
+    await drainPublication(this.deps, { ...settled, ...(publication ? { publication } : {}) }, plane, this.now).catch(
+      () => undefined,
+    );
     // The same observation as a process METRIC — an operator watching a fleet wants a series, not a walk over
     // revisions. It is now a projection of the durable record rather than the only place the fact exists.
     if (parity !== undefined) this.deps.scoringStageParity?.(parity);
     // …and only NOW is the stage's work finished, so its rows can go (arch-review 16 P1-6). Order matters and
-    // is the whole point: the observation is durable first, the evidence is dropped second. Clearing earlier
-    // would destroy what the promotion decision reads; never clearing leaves a row per
+    // is the whole point: the observation is durable first, the evidence is dropped second. It is now TWO
+    // things that depend on that order (arch-review 52 wave 5) — the parity observation the promotion reads,
+    // and the judgment-receipt vector, which is the ONLY durable statement of which invocation authored each
+    // verdict; the claims exist nowhere else once these rows are gone. This clear therefore sits below the
+    // guarded settle deliberately, and below its refusal too: the `ConflictError` above returns before it, so
+    // a pass that LOST the settle leaves the stage intact for the pass that won. Clearing earlier would
+    // destroy what the promotion decision reads and orphan the record's provenance; never clearing leaves a row per
     // (scorecard × pass × case × judge) forever, on a table whose score bytes nothing reads yet.
     // Best-effort: a settled revision is not undone by a failed cleanup, and the next pass's strip is
     // pass-scoped anyway, so a leftover row is dead weight rather than a hazard.
@@ -994,13 +1056,19 @@ export class ScorecardScoreService {
       // `judgeId` is a free-form string, so "a b"+"c" and "a"+"b c" collided; the stage store already fixed
       // the same habit, and parity is the certification input for the stage promotion, not mere telemetry.
       const unit = (caseKey: string, judgeId: string) => JSON.stringify([caseKey, judgeId]);
-      const produced = new Map<string, CaseResult["scores"]>();
+      // Each produced unit carries the rows AND the (case, trial) IDENTITY they belong to. The identity comes
+      // off the plane's own row, never decoded back out of the string key (wave 1's rule: identity may be
+      // strengthened crossing a boundary, never narrowed — and `childKey` collapses "no trial axis" to trial
+      // 0, so a decode would invent one). Carried together so a receipt cannot be minted for a unit whose
+      // identity is unknown: there is no second lookup to miss.
+      const produced = new Map<string, { case: CaseKey; scores: CaseResult["scores"] }>();
       for (const r of settled) {
         if (!judgeGradeable(r)) continue;
         const caseKey = childKey(r.caseId, r.trial);
         for (const j of judges) {
           const delta = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
-          if (delta.length > 0) produced.set(unit(caseKey, j.id), delta);
+          if (delta.length > 0)
+            produced.set(unit(caseKey, j.id), { case: caseKeyOf(r.caseId, r.trial), scores: delta });
         }
       }
       const staged = await stage.staged(scorecardId, passId);
@@ -1012,6 +1080,7 @@ export class ScorecardScoreService {
       const missingFromStage = [...produced.keys()].filter((k) => !stagedKeys.has(k));
       const mismatched: string[] = [];
       const orphaned: string[] = [];
+      const judgments: JudgmentReceipt[] = [];
       let matched = 0;
       for (const entry of staged) {
         const key = unit(entry.caseKey, entry.judgeId);
@@ -1020,6 +1089,28 @@ export class ScorecardScoreService {
           orphaned.push(key);
           continue;
         }
+        // WHOSE JUDGMENT THIS IS (arch-review 52 wave 5) — minted from THIS read, because the stage rows are
+        // cleared a few statements after the settle and this is the last moment the claim exists anywhere.
+        //
+        // `scoreDigest` is the ADOPTED bytes — the plane's row, which is what the revision certifies — never
+        // the staged copy. The two normally agree (the carrier write obeys the same arbitration), and where
+        // they do not, that disagreement is `stageParity.mismatched`'s statement to make; a receipt that
+        // silently digested the staged copy would attribute bytes the record does not carry.
+        judgments.push({
+          ref: {
+            scoringPassId: passId,
+            case: live.case,
+            judgeId: entry.judgeId,
+            ...(entry.claim !== undefined ? { claim: entry.claim } : {}),
+          },
+          scoreDigest: canonicalScores(live.scores),
+          // The emitter is MINTED, not spelled — the same call the seal itself made, so the receipt and the
+          // evidence plane it points at cannot drift into two grammars.
+          evidenceEmitter: judgeEvidenceEmitter(entry.judgeId, {
+            passId,
+            ...(entry.claim !== undefined ? { claim: entry.claim } : {}),
+          }),
+        });
         // Equality over the delta rows, CANONICALLY (arch-review 16 P1-6). `JSON.stringify` compared two
         // objects that had travelled different storage paths: the plane's rows come back through
         // `ScoreSchema.parse` (declaration key order, defaults such as `status: "measured"` applied), the
@@ -1030,7 +1121,7 @@ export class ScorecardScoreService {
         //
         // Both sides are normalized through the same schema and digested canonically (sorted keys), and the
         // family is sorted by metric so a verdict/criterion ordering difference is not a content difference.
-        if (canonicalScores(live) === canonicalScores(entry.scores)) matched += 1;
+        if (canonicalScores(live.scores) === canonicalScores(entry.scores)) matched += 1;
         else mismatched.push(key);
       }
       return {
@@ -1052,6 +1143,8 @@ export class ScorecardScoreService {
         },
         // The rows the promotion merges, from THIS read — never a second one (see the call site).
         staged,
+        // …and the provenance the revision pins, from that same read.
+        judgments,
       };
     } catch (err) {
       // A parity report that cannot run tells us nothing — and SAYING that is the point (arch-review 13 P1).
@@ -1071,7 +1164,9 @@ export class ScorecardScoreService {
           orphaned: [],
         },
         // An unread stage has no rows to promote — and an incomplete observation refuses the promotion
-        // outright, so this empty list is never the thing a plane gets built from.
+        // outright, so this empty list is never the thing a plane gets built from. `judgments` stays ABSENT
+        // rather than empty for the opposite reason: `[]` would tell a later reader this pass adopted no
+        // judgment, when the truth is that nobody could look.
         staged: [],
       };
     }

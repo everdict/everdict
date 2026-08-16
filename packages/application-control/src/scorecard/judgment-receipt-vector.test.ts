@@ -1,9 +1,19 @@
-import type { CaseResult, Dataset, JudgeSpec, Score, ScorecardRecord, ScoringPass } from "@everdict/contracts";
+import type {
+  CaseResult,
+  Dataset,
+  JudgeSpec,
+  RunRecord,
+  Score,
+  ScorecardRecord,
+  ScoringPass,
+} from "@everdict/contracts";
+import { judgmentReceiptSetDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import { type JudgmentClaim, type ScoringStageStore, claimSupersedes } from "../ports/scoring-stage-store.js";
 import type { StagedJudgment } from "../ports/scoring-stage-store.js";
@@ -207,65 +217,112 @@ function flappingJudgeRunner(): JudgeRunner {
   };
 }
 
-function harness(): {
+function harness(opts: { refuseSettle?: boolean } = {}): {
   svc: ScorecardScoreService;
   updates: Array<Partial<ScorecardRecord>>;
   accepted: Array<{ key: string; claim?: JudgmentClaim }>;
+  stage: ScoringStageStore;
 } {
-  // Embed mode (no `runIds`) — the embedded scorecard IS the carrier, so the whole race is visible in one
-  // record without a child-run store standing in the way of the thing under test.
-  let record: ScorecardRecord = {
-    id: "sc-1",
+  // A runIds-backed group with ONE child carrier — the only shape that reaches this code path in production
+  // (`score()`: "an embed group has no per-case store, so it takes the in-process pass", and the in-process
+  // pass holds no claims because it has no per-case retry seam). Judging an embed group case-by-case would
+  // stage judgments the record never carries, and a receipt minted from that would certify a verdict nobody
+  // adopted — the exact thing this vector exists to make impossible.
+  const child: RunRecord = {
+    id: "child-c1",
     tenant: "acme",
-    dataset: { id: "d", version: "1.0.0" },
     harness: { id: "h", version: "1" },
+    caseId: "c1",
     status: "succeeded",
-    scorecard: { suiteId: "d", harness: "h@1", results: [caseResult([inherited])] },
-    scoringPass: livePass,
+    result: caseResult([inherited]),
     createdAt: "2026-08-15T00:00:00.000Z",
     updatedAt: "2026-08-15T00:00:00.000Z",
   };
+  const runStore: RunStore = {
+    async create() {
+      throw new Error("unused");
+    },
+    async update(_id, patch) {
+      if (patch.result) child.result = patch.result;
+      return child;
+    },
+    async get() {
+      return undefined;
+    },
+    async list() {
+      return [child];
+    },
+    async deleteByScorecard() {
+      return 0;
+    },
+    async countActiveByEnvelope() {
+      return 0;
+    },
+    async inFlightByTenant() {
+      return {};
+    },
+    async liveSessions() {
+      return [];
+    },
+  };
+  let patched: Partial<ScorecardRecord> = {};
+  // The record as a reader gets it: the persisted row with the plane HYDRATED from the child carrier, which
+  // is what makes the write-back visible to the settle.
+  const hydrated = (): ScorecardRecord =>
+    ({
+      id: "sc-1",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      runIds: [child.id],
+      scoringPass: livePass,
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+      ...patched,
+      scorecard: { suiteId: "d", harness: "h@1", results: child.result ? [child.result] : [] },
+    }) as ScorecardRecord;
   const updates: Array<Partial<ScorecardRecord>> = [];
   const { stage, accepted } = arbitratingStage();
   const store: ScorecardStore = {
     ...unusedStore,
     async get() {
-      return record;
+      return hydrated();
     },
-    async update(_id, patch) {
+    async update(_id, patch, _events, guard) {
+      // The GUARDED settle — the one write that carries `expectScoringCount`. `refuseSettle` makes it miss,
+      // which is what a concurrent pass settling first looks like from in here.
+      if (opts.refuseSettle === true && guard?.expectScoringCount !== undefined) return undefined;
       updates.push(patch);
-      record = { ...record, ...patch } as ScorecardRecord;
-      return record;
+      patched = { ...patched, ...patch };
+      return hydrated();
     },
   };
   const svc = new ScorecardScoreService(
-    { store, datasets: unusedDatasets, scoringStage: stage },
+    { store, datasets: unusedDatasets, scoringStage: stage, runStore },
     {
       newId: () => "pass-1",
       now: () => "2026-08-15T00:00:00.000Z",
       scoring: new ScoringService({ judges: judgeRegistry, judgeRunner: flappingJudgeRunner() }),
-      getRecord: async () => record,
+      getRecord: async () => hydrated(),
       pinJudges: async (_tenant, judgeRefs) => judgeRefs,
     },
   );
-  return { svc, updates, accepted };
+  return { svc, updates, accepted, stage };
 }
 
-// The receipt shape wave 5 delivers, read off the settled revision. Declared locally (not imported) because
-// it does not exist yet — that absence IS the counterexample, and the read is written against the store's own
-// public record so the assertion survives the field arriving under `ScoringRevision`.
-interface JudgmentReceiptEntry {
-  caseKey: string;
-  judgeId: string;
-  claim: JudgmentClaim;
+// The settled revision, as a reader finds it: the last appended entry of the last scoring write.
+function settledRevision(updates: Array<Partial<ScorecardRecord>>) {
+  return updates
+    .filter((u) => u.scoring !== undefined)
+    .at(-1)
+    ?.scoring?.at(-1);
 }
 
-describe.skip("the settled ScoringRevision and the claim its judgments came from", () => {
-  // [WAVE-5 COUNTEREXAMPLE #11] RED as of 02a3e15e: `AssertionError: expected undefined to deeply equal
-  // [ { caseKey: 'c1#0', judgeId: 'a', claim: { generation: 2, attempt: 1 } } ]` — `ScoringRevision` has no
-  // judgments vector at all, and the stage rows that hold the winning claim are cleared in the settle, so
-  // after the pass nothing in the record names which invocation's verdict it certifies. Un-skip when wave 5
-  // lands.
+describe("the settled ScoringRevision and the claim its judgments came from", () => {
+  // [WAVE-5 COUNTEREXAMPLE #11] Was RED as of 02a3e15e: `ScoringRevision` had no judgments vector at all, and
+  // the stage rows that hold the winning claim are cleared in the settle, so after the pass nothing in the
+  // record named which invocation's verdict it certifies.
   it("pins which claim's evidence was adopted for each (case, judge) the pass judged", async () => {
     const { svc, updates, accepted } = harness();
     const judges = [{ id: "a", version: "1.0.0" }];
@@ -285,13 +342,46 @@ describe.skip("the settled ScoringRevision and the claim its judgments came from
 
     // Then the appended revision names the winning claim per (case, judge). Without it, the record certifies
     // a verdict whose author is unrecoverable the moment the stage is collected — which the settle does.
-    const revision = updates
-      .filter((u) => u.scoring !== undefined)
-      .at(-1)
-      ?.scoring?.at(-1);
-    const judgments = (revision as Record<string, unknown> | undefined)?.judgments as
-      | JudgmentReceiptEntry[]
-      | undefined;
-    expect(judgments).toEqual([{ caseKey: "c1#0", judgeId: "a", claim: { generation: 2, attempt: 1 } }]);
+    const revision = settledRevision(updates);
+    expect(revision?.judgments).toEqual([
+      {
+        ref: {
+          scoringPassId: "pass-1",
+          // The plane's own (case, trial) identity — this fixture's result has NO trial axis, so the receipt
+          // must not invent trial 0 out of the `c1#0` map key.
+          case: { caseId: "c1" },
+          judgeId: "a",
+          claim: { generation: 2, attempt: 1 },
+        },
+        scoreDigest: expect.any(String),
+        // …and it points at generation 2's OWN evidence plane, which is the whole reason the claim is worth
+        // recording: generation 1 sealed `judge:a#pass-1.1.1` and lost, and both planes outlive the pass.
+        evidenceEmitter: "judge:a#pass-1.2.1",
+      },
+    ]);
+    // The set digest describes the vector it is stored beside — not a set computed some other way.
+    expect(revision?.judgmentReceiptSetDigest).toBe(judgmentReceiptSetDigest(revision?.judgments ?? []));
+  });
+
+  // The vector's whole value is that it outlives the stage — so the write that publishes it must commit
+  // BEFORE the rows that produced it are collected. A settle that LOSES its guard publishes nothing, and
+  // therefore must collect nothing: the winning pass's own settle still has to find the claims there.
+  it("keeps a pass's stage rows when its guarded settle is refused, so the vector is never cleared unpublished", async () => {
+    const { svc, updates, stage } = harness({ refuseSettle: true });
+    const judges = [{ id: "a", version: "1.0.0" }];
+    await svc.scoreCase("sc-1", "c1#0", judges, undefined, "pass-1", { generation: 1, attempt: 1 });
+
+    // When the settle loses the race it declares the refusal instead of appending a revision
+    await expect(svc.finalizeScore("sc-1", judges, undefined, "pass-1")).rejects.toThrow(
+      /another scoring pass settled this group first/,
+    );
+
+    // Then nothing was published…
+    expect(settledRevision(updates)).toBeUndefined();
+    // …and nothing was collected: the claims are still readable, which is exactly what a clear that ran
+    // ahead of the commit would have destroyed.
+    expect(await stage.staged("sc-1", "pass-1")).toEqual([
+      expect.objectContaining({ caseKey: "c1#0", judgeId: "a", claim: { generation: 1, attempt: 1 } }),
+    ]);
   });
 });

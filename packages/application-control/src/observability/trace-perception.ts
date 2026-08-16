@@ -24,7 +24,9 @@ export function withTracePerception(
       if (sealed.created) void perceive(input, deps).catch(() => undefined);
       return sealed;
     },
-    get: (tenant, runId) => store.get(tenant, runId),
+    // Options forwarded, never re-spelled: dropping `attemptId` here would silently turn an exact-identity
+    // read back into the clock-resolved one, which is the very substitution that read exists to refuse.
+    get: (tenant, runId, opts) => store.get(tenant, runId, opts),
     list: (tenant, opts) => store.list(tenant, opts),
     ingestedSince: (tenant, sinceIso) => store.ingestedSince(tenant, sinceIso),
     deleteOlderThan: (cutoffIso) => store.deleteOlderThan(cutoffIso),

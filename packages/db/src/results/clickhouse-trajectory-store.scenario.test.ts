@@ -1,4 +1,3 @@
-import type { SealedTrajectory } from "@everdict/application-control";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ClickHouseTrajectoryStore } from "./clickhouse-trajectory-store.js";
 
@@ -114,11 +113,13 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
   // canonical identity, a reader must be able to ASK for it. Expressed against the store's public surface
   // through the shape wave 7 delivers, because the current signature has no way to say it.
   describe("concurrent duplicate seals with a skewed clock", () => {
-    // [WAVE-7 COUNTEREXAMPLE #14] RED as of 02a3e15e: `AssertionError: expected 'exec-EARLY#g1' to be
-    // 'exec-LATE#g2'` — `get` resolves every column with `argMin(col, sealed_at)` regardless of which attempt
-    // the caller asked for, and it accepts no attempt argument at all, so the backdated duplicate wins and the
-    // receipt-selected identity is unreachable. Un-skip when wave 7 lands.
-    it.skip("serves the attempt the receipt selected, not the row whose clock happened to be smallest", async () => {
+    // [WAVE-7 COUNTEREXAMPLE #14 — CLOSED] RED as of 02a3e15e: `AssertionError: expected 'exec-EARLY#g1' to
+    // be 'exec-LATE#g2'` — `get` resolved every column with `argMin(col, sealed_at)` regardless of which
+    // attempt the caller asked for, and it accepted no attempt argument at all, so the backdated duplicate
+    // won and the receipt-selected identity was unreachable. GREEN since wave 7: the port carries an
+    // exact-identity read and the ClickHouse tie-break ranks the ASKED attempt above the clock. This is now
+    // the regression, not a pending counterexample.
+    it("serves the attempt the receipt selected, not the row whose clock happened to be smallest", async () => {
       // Given one (run, emitter) with two physically duplicate rows: the SECOND writer's clock is BEHIND the
       // first's, which is what replica skew looks like on the wire.
       await exec(`DROP TABLE IF EXISTS ${TABLE}`);
@@ -152,17 +153,50 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
         `${row("exec-EARLY#g1", "2026-08-15T00:00:00.000Z", "from the abandoned attempt")}\n`,
       );
 
-      // When a reader asks BY THE IDENTITY THE PG RECEIPT COMMITTED — the future read wave 7 introduces.
-      interface AttemptScopedReader {
-        get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined>;
-      }
-      const reader = ch as unknown as AttemptScopedReader;
-      const read = await reader.get("acme", "run-skew-1", { attemptId: "exec-LATE#g2" });
+      // When a reader asks BY THE IDENTITY THE PG RECEIPT COMMITTED
+      const read = await ch.get("acme", "run-skew-1", { attemptId: "exec-LATE#g2" });
 
       // Then it gets that attempt's bytes. A reader that asked for one execution's evidence and was handed
       // another's has no way to notice: both rows are well-formed evidence of the same run id.
       expect(read?.segments[0]?.attemptId).toBe("exec-LATE#g2");
       expect(read?.events[0]).toMatchObject({ text: "from the committed attempt" });
+
+      // …and the clock-resolved read still answers the OTHER question, unchanged — a caller with no identity
+      // to ask by (browse, retention) keeps first-write-wins, now documented as the best-effort it is.
+      const byClock = await ch.get("acme", "run-skew-1");
+      expect(byClock?.segments[0]?.attemptId).toBe("exec-EARLY#g1");
+
+      // An attempt NOTHING declares is refused rather than substituted: the run has evidence, but none of it
+      // is this execution's, and serving the nearest row is exactly the join defect that was fixed.
+      expect(await ch.get("acme", "run-skew-1", { attemptId: "exec-NEVER#g9" })).toBeUndefined();
+    });
+
+    it("keeps an undeclared plane beside the asked-for one — absent identity is not disagreement", async () => {
+      // Given a run whose execution plane names the committed attempt and whose judge plane names none (the
+      // shape every pre-0176 row and every non-declaring producer has).
+      await exec(`DROP TABLE IF EXISTS ${TABLE}`);
+      const ch = store();
+      await ch.ensureSchema();
+      await ch.seal({
+        runId: "run-mixed-1",
+        tenant: "acme",
+        source: "run",
+        events: [{ t: 0, kind: "llm_call", model: "m" }],
+        attemptId: "exec-9#g1",
+      });
+      await ch.seal({
+        runId: "run-mixed-1",
+        tenant: "acme",
+        source: "run",
+        emitter: "judge:rubric",
+        events: [{ t: 0, kind: "message", role: "assistant", text: "verdict" }],
+      });
+
+      // When the receipt's identity is asked for, both planes travel: dropping the undeclared one would decay
+      // the record in the name of protecting it.
+      const read = await ch.get("acme", "run-mixed-1", { attemptId: "exec-9#g1" });
+      expect(read?.segments.map((s) => s.emitter)).toEqual(["run", "judge:rubric"]);
+      expect(read?.meta.eventCount).toBe(2);
     });
   });
 });

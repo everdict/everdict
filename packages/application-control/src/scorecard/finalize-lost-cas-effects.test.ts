@@ -17,6 +17,7 @@ import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
+import { ScorecardScoreService } from "./scorecard-score-service.js";
 import { WorkflowBatchDriver } from "./workflow-batch-driver.js";
 
 // ── A FINALIZER THAT LOST THE SETTLE MUST NOT HAVE PUBLISHED ─────────────────────────────────────────
@@ -246,13 +247,13 @@ function harness(): { driver: WorkflowBatchDriver; putKeys: string[]; exports: s
   return { driver, putKeys, exports };
 }
 
-describe.skip("a Temporal finalize that loses the terminal CAS", () => {
-  // [WAVE-4 COUNTEREXAMPLE #12] RED as of 02a3e15e: `AssertionError: expected [ 'analyses/sc-1.json', …(1) ]
-  // to not include 'analyses/sc-1.json'` (and, with that line removed, `expected [ 'sc-1' ] to deeply equal
-  // []` — BOTH effects fire) — `offloadAnalysis` and `exportResults` run at workflow-batch-driver.ts:743-760,
-  // BEFORE the `settleScorecard` fence at :776, so a finalizer that loses the settle has already overwritten
-  // the mutable current-analysis artifact and shipped the batch's cases to the tenant's platform. Un-skip when
-  // wave 4 lands.
+describe("a Temporal finalize that loses the terminal CAS", () => {
+  // [WAVE-4 COUNTEREXAMPLE #12] GREEN since the publication outbox landed. It was RED as of 02a3e15e:
+  // `AssertionError: expected [ 'analyses/sc-1.json', …(1) ] to not include 'analyses/sc-1.json'` (and, with
+  // that line removed, `expected [ 'sc-1' ] to deeply equal []` — BOTH effects fired), because
+  // `offloadAnalysis` and `exportResults` ran BEFORE the `settleScorecard` fence. The finalize now STAGES the
+  // bundle under its content-addressed pass key, plans the two outward effects onto the terminal patch, and
+  // drains them only once that write has matched a row.
   it("leaves the mutable analysis artifact and the tenant's trace sink untouched", async () => {
     // Given a finalizer whose read saw an OPEN batch and whose terminal write will be refused, because a
     // cancel committed in between — the at-least-once shape this driver is built around.
@@ -265,5 +266,134 @@ describe.skip("a Temporal finalize that loses the terminal CAS", () => {
     expect(putKeys).not.toContain(ANALYSIS_CURRENT_KEY);
     // …and an export cannot be taken back: the traces live in the tenant's platform from the moment it runs.
     expect(exports).toEqual([]);
+  });
+});
+
+// ── …AND NEITHER MAY A RE-SCORE THAT LOST THE LEDGER CAS (arch-review 52, wave 5) ────────────────────
+//
+// The driver's finalize was converted first; `ScorecardScoreService.aggregate` is the same statement order
+// one plane up, and it was the last pre-CAS mutable-alias write in the codebase. Its guarded settle refuses a
+// pass whose ledger moved underneath it — a stale takeover's original waking late, which this service treats
+// as the ordinary shape and answers with a `ConflictError`. `offloadAnalysis` ran before that refusal, so the
+// losing pass had already replaced `analyses/<id>.json` with a bundle describing a revision it never
+// appended: the record's ledger names the winner's judgment while the artifact behind `analysisRef`
+// describes the loser's.
+function rescoreHarness(opts: { refuseSettle: boolean }): {
+  svc: ScorecardScoreService;
+  putKeys: string[];
+  objects: Map<string, Buffer>;
+} {
+  const putKeys: string[] = [];
+  // A REAL artifact store — the alias promotion is a read-then-put of the staged object, so a store whose
+  // `get` answers nothing would report the promotion as owed and make the winning half of this vacuous.
+  const objects = new Map<string, Buffer>();
+  const artifacts: ArtifactStore = {
+    async put(key, body) {
+      putKeys.push(key);
+      objects.set(key, Buffer.from(body));
+      return `https://artifacts.invalid/${key}`;
+    },
+    async get(key) {
+      return objects.get(key);
+    },
+    async publicUrlFor() {
+      return undefined;
+    },
+  };
+  let patched: Partial<ScorecardRecord> = {};
+  const scored: ScorecardRecord = {
+    id: SCORECARD_ID,
+    tenant: "acme",
+    dataset: { id: "d", version: "1.0.0" },
+    harness: { id: "h", version: "1" },
+    status: "succeeded",
+    runIds: [CHILD_ID],
+    scorecard: { suiteId: "d", harness: "h@1", results: [caseResult] },
+    scoringPass: {
+      passId: "pass-1",
+      epoch: 1,
+      leaseUntil: "2026-08-15T00:05:00.000Z",
+      heartbeatAt: "2026-08-15T00:00:00.000Z",
+      targetRevision: 1,
+      baseRevision: 0,
+      judges: [],
+      startedAt: "2026-08-15T00:00:00.000Z",
+      status: "running",
+    },
+    createdAt: "2026-08-15T00:00:00.000Z",
+    updatedAt: "2026-08-15T00:00:00.000Z",
+  } as unknown as ScorecardRecord;
+  const current = (): ScorecardRecord => ({ ...scored, ...patched }) as ScorecardRecord;
+  const store: ScorecardStore = {
+    async create() {
+      throw new Error("unused");
+    },
+    // The GUARDED settle is the one write carrying `expectScoringCount`; refusing it is what a concurrent
+    // pass settling first looks like from in here.
+    async update(_id, patch, _events, guard?: ScorecardUpdateGuard) {
+      if (opts.refuseSettle && guard?.expectScoringCount !== undefined) return undefined;
+      patched = { ...patched, ...patch };
+      return current();
+    },
+    async get() {
+      return current();
+    },
+    async list() {
+      return [];
+    },
+    async delete() {
+      return false;
+    },
+  };
+  const runStore = {
+    async list() {
+      return [child];
+    },
+    async update() {
+      return child;
+    },
+  } as unknown as RunStore;
+  const svc = new ScorecardScoreService(
+    { store, datasets: unusedDatasets, artifacts, runStore },
+    {
+      newId: () => "id-1",
+      now: () => "2026-08-15T00:00:02.000Z",
+      scoring: new ScoringService({}),
+      getRecord: async () => current(),
+      pinJudges: async (_tenant, refs) => refs,
+    },
+  );
+  return { svc, putKeys, objects };
+}
+
+describe("a re-score settle that loses the ledger CAS", () => {
+  it("stages its analysis bundle under the pass key and leaves the mutable alias to the pass that wins", async () => {
+    const { svc, putKeys } = rescoreHarness({ refuseSettle: true });
+
+    await expect(svc.finalizeScore(SCORECARD_ID, [], undefined, "pass-1")).rejects.toThrow(
+      /another scoring pass settled this group first/,
+    );
+
+    // The immutable, content-addressed object IS written before the CAS — that is safe by construction: a
+    // loser's object is an orphan nobody references, and asserting it here keeps the next line honest rather
+    // than vacuously true because nothing was written at all.
+    expect(putKeys.some((k) => k.startsWith(`analyses/${SCORECARD_ID}/passes/`))).toBe(true);
+    // …and the MUTABLE alias — what `analysisRef` resolves to and the analysis surface re-reads — is not.
+    expect(putKeys).not.toContain(ANALYSIS_CURRENT_KEY);
+  });
+
+  it("promotes the alias once its settle has committed, from the very object its revision points at", async () => {
+    const { svc, putKeys, objects } = rescoreHarness({ refuseSettle: false });
+
+    await svc.finalizeScore(SCORECARD_ID, [], undefined, "pass-1");
+
+    // The winner drains its own plan inline, so the alias exists and is BYTE-IDENTICAL to the staged object
+    // the appended revision names — copied, never re-serialized.
+    expect(putKeys).toContain(ANALYSIS_CURRENT_KEY);
+    const staged = putKeys.find((k) => k.startsWith(`analyses/${SCORECARD_ID}/passes/`));
+    expect(staged).toBeDefined();
+    expect(objects.get(ANALYSIS_CURRENT_KEY)).toEqual(objects.get(staged ?? ""));
+    // …and it is promoted AFTER the settle, never before it.
+    expect(putKeys.indexOf(ANALYSIS_CURRENT_KEY)).toBeGreaterThan(putKeys.indexOf(staged ?? ""));
   });
 });

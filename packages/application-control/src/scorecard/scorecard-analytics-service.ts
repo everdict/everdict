@@ -410,6 +410,16 @@ export class ScorecardAnalyticsService {
     }
     const ref = record.analysisRef;
     if (!ref) throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
+    // THE CURRENT ANALYSIS IS THE CURRENT REVISION'S, NOT THE ALIAS'S (arch-review 52, Wave 4). The mutable
+    // `analyses/<id>.json` key used to be read first and was therefore the authority — which is precisely why
+    // a finalizer that overwrote it before losing its settle could make a cancelled batch's analysis surface
+    // describe a successful run. Since Wave 4 that key is a CACHE the publisher promotes AFTER the settle
+    // commits; the authority is the ledger's own immutable, pass-scoped artifact, so the read follows the
+    // latest scoring revision's `analysisKey` first and falls back to the alias for revisions written before
+    // artifacts were pass-keyed.
+    const current = record.scoring?.at(-1)?.analysisKey;
+    const fromRevision = current !== undefined ? await this.readAnalysisArtifact(id, undefined, current) : undefined;
+    if (fromRevision !== undefined) return fromRevision;
     const fromStore = await this.readAnalysisArtifact(id);
     if (fromStore !== undefined) return fromStore;
     if (!/^https?:\/\//i.test(ref))

@@ -24,6 +24,11 @@ import { bodyOf, formatOf } from "./trajectory-body.js";
 // - MergeTree has no unique key, so first-write-wins is enforced at READ (argMin/earliest row per
 //   (run_id, emitter)) over a check-then-insert seal: a concurrent duplicate leaves a physically duplicate
 //   row that every read resolves to the FIRST seal; retention removes duplicates with their run.
+//   That clock is BEST-EFFORT and says so — the stamp is each writer's own, and skew between replicas is
+//   ordinary. A caller holding the identity a Postgres receipt made canonical asks by it instead
+//   (`get(tenant, runId, { attemptId })`), and the store answers from THAT attempt's row; deciding
+//   canonicality is Postgres's job, and this store's job is to hold the evidence and hand back the piece it
+//   was asked for.
 //
 // The multi-plane rung needs no new table here — a segment IS a row, keyed by (run_id, emitter). The row
 // that sealed first is the trajectory's header; the rest are its other planes.
@@ -38,48 +43,92 @@ import { bodyOf, formatOf } from "./trajectory-body.js";
 // The database itself is created too. An operator who sets `EVERDICT_CLICKHOUSE_DATABASE` has NAMED the
 // database; requiring them to also have created it by hand is a second, undocumented step whose omission
 // looks exactly like the bug above.
-const schemaSql = (table: string): string => `CREATE TABLE IF NOT EXISTS ${table} (
-  run_id String,
-  tenant String,
-  source String,
-  emitter String DEFAULT '',
-  event_count UInt32,
-  body String,
-  t0 String DEFAULT '',
-  sealed_at String,
-  owner String DEFAULT '',
-  body_format String DEFAULT '',
-  kind String DEFAULT '',
-  label String DEFAULT '',
-  attempt_id String DEFAULT '',
-  INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4
-) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
+// ── ONE DESCRIPTOR, BOTH STATEMENTS (arch-review 52, wave 7) ─────────────────────────────────────────
+//
+// The CREATE and the additive ALTERs were two hand-kept lists, so a fresh install and an upgraded one ran
+// DIFFERENT schemas: `attempt_id` shipped in the CREATE and in every read query but was left out of the ALTER
+// set, and each deployment that already held evidence failed every `get` with UNKNOWN_IDENTIFIER — after a
+// boot that reported success. The drift was fixed by hand once; this removes the way to make it.
+//
+// A column is declared HERE, once. `schemaSql` builds the CREATE from the list and `ensureSchema` ALTERs the
+// same list, so a column cannot exist in one statement and be missing from the other. Every column is
+// ALTERed, including the base ones — `ADD COLUMN IF NOT EXISTS` is a no-op on a table that already has it,
+// and a handful of no-op DDL statements at boot is cheaper than a rule nobody can check.
+interface ColumnSpec {
+  name: string;
+  // The ClickHouse type, spelled as ClickHouse spells it (String · UInt32 · Nullable(…)). This descriptor IS
+  // the DDL rather than a mapping onto it, so a type nobody anticipated needs no new vocabulary here.
+  type: string;
+  // The DEFAULT expression, when the column has one. Every column added after the first release needs one:
+  // ClickHouse fills it for the rows that predate the column, and what that value MEANS to a reader is
+  // documented beside the column rather than inferred at each read.
+  default?: string;
+}
 
-// Additive DDL for installs created before the multi-plane rung (idempotent, like the CREATE above).
-const ADD_EMITTER_SQL = (table: string): string =>
-  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS emitter String DEFAULT ''`;
-const ADD_T0_SQL = (table: string): string => `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS t0 String DEFAULT ''`;
-// Whose evidence a trajectory is (mig 0116's rung-2 twin). '' = the workspace's. No backfill here: unlike
-// Postgres this store has no run ledger beside it to read an owner from, and it is opt-in + new.
-const ADD_OWNER_SQL = (table: string): string =>
-  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS owner String DEFAULT ''`;
-// What the body holds (N6's rung-2 twin of mig 0118). '' reads as 'events' — which is what every row written
-// before spans became the record actually is. No backfill: sealed evidence is not rewritten.
-const ADD_BODY_FORMAT_SQL = (table: string): string =>
-  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS body_format String DEFAULT ''`;
-// What a piece of evidence IS, and what to call it on a browse row (mig 0124's rung-2 twin). '' = evidence
-// that arrived with no run to name it. No backfill, for the same reason the owner column has none: this store
-// has no run ledger beside it to read from.
-const ADD_KIND_SQL = (table: string): string => `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS kind String DEFAULT ''`;
-// WHICH physical attempt sealed it (mig 0176's rung-2 twin). '' = the producer did not say — never
-// agreement with whatever attempt a reader has in hand. No backfill: sealed evidence is not rewritten.
-const ADD_ATTEMPT_SQL = (table: string): string =>
-  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS attempt_id String DEFAULT ''`;
-const ADD_LABEL_SQL = (table: string): string =>
-  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS label String DEFAULT ''`;
+const TRAJECTORY_COLUMNS: readonly ColumnSpec[] = [
+  { name: "run_id", type: "String" },
+  { name: "tenant", type: "String" },
+  { name: "source", type: "String" },
+  // The plane this row is (the multi-plane rung). '' = a row from before planes existed; it reads as its
+  // arrival channel.
+  { name: "emitter", type: "String", default: "''" },
+  { name: "event_count", type: "UInt32" },
+  { name: "body", type: "String" },
+  { name: "t0", type: "String", default: "''" },
+  { name: "sealed_at", type: "String" },
+  // Whose evidence a trajectory is (mig 0116's rung-2 twin). '' = the workspace's. No backfill here: unlike
+  // Postgres this store has no run ledger beside it to read an owner from, and it is opt-in + new.
+  { name: "owner", type: "String", default: "''" },
+  // What the body holds (N6's rung-2 twin of mig 0118). '' reads as 'events' — which is what every row
+  // written before spans became the record actually is. No backfill: sealed evidence is not rewritten.
+  { name: "body_format", type: "String", default: "''" },
+  // What a piece of evidence IS, and what to call it on a browse row (mig 0124's rung-2 twin). '' = evidence
+  // that arrived with no run to name it. No backfill, for the same reason the owner column has none: this
+  // store has no run ledger beside it to read from.
+  { name: "kind", type: "String", default: "''" },
+  { name: "label", type: "String", default: "''" },
+  // WHICH physical attempt sealed it (mig 0176's rung-2 twin). '' = the producer did not say — never
+  // agreement with whatever attempt a reader has in hand. No backfill: sealed evidence is not rewritten.
+  { name: "attempt_id", type: "String", default: "''" },
+];
+
+// Skipping indexes: a data-skipping index is part of the CREATE and has no ADD COLUMN twin, so it is listed
+// beside the columns rather than inside them (`ALTER … ADD INDEX` on an existing table only affects new
+// parts, which is why upgrading one is a deliberate act and not boot DDL).
+const TRAJECTORY_INDEXES: readonly string[] = ["INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4"];
+const TRAJECTORY_ORDER_BY = "(tenant, sealed_at, run_id)";
+
+const columnDdl = (column: ColumnSpec): string =>
+  `${column.name} ${column.type}${column.default !== undefined ? ` DEFAULT ${column.default}` : ""}`;
+
+const schemaSql = (table: string): string =>
+  `CREATE TABLE IF NOT EXISTS ${table} (\n  ${[...TRAJECTORY_COLUMNS.map(columnDdl), ...TRAJECTORY_INDEXES].join(
+    ",\n  ",
+  )}\n) ENGINE = MergeTree ORDER BY ${TRAJECTORY_ORDER_BY}`;
+
+// Additive DDL for installs created before a column existed — idempotent, like the CREATE above, and derived
+// from the same descriptor so the two can never disagree.
+const alterSql = (table: string, column: ColumnSpec): string =>
+  `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${columnDdl(column)}`;
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
+
+// One emitter's plane as the per-emitter aggregate returns it. The *_first aliases are not decoration: a
+// ClickHouse alias shadows its column EVERYWHERE in the SELECT, so `argMin(tenant, …) AS tenant` would make
+// every later reference resolve to the aggregate itself.
+interface SegmentRow {
+  emitter: string;
+  tenant_first: string;
+  source_first: string;
+  event_count_first: number | string;
+  body_first: string;
+  body_format_first: string;
+  t0_first: string;
+  sealed_at_first: string;
+  owner_first: string;
+  attempt_id_first: string;
+}
 
 interface RunRow {
   run_id: string;
@@ -142,16 +191,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     const table = this.table();
     await this.command(`CREATE DATABASE IF NOT EXISTS ${this.database()}`, {});
     await this.command(schemaSql(table), {});
-    for (const alter of [
-      ADD_EMITTER_SQL,
-      ADD_T0_SQL,
-      ADD_OWNER_SQL,
-      ADD_BODY_FORMAT_SQL,
-      ADD_KIND_SQL,
-      ADD_LABEL_SQL,
-      ADD_ATTEMPT_SQL,
-    ])
-      await this.command(alter(table), {});
+    for (const column of TRAJECTORY_COLUMNS) await this.command(alterSql(table, column), {});
   }
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -206,21 +246,13 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
   }
 
-  async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
-    // Earliest row per emitter wins (see the header) — the read-side half of first-write-wins.
-    const rows = await this.select<{
-      emitter: string;
-      tenant_first: string;
-      source_first: string;
-      event_count_first: number | string;
-      body_first: string;
-      body_format_first: string;
-      t0_first: string;
-      sealed_at_first: string;
-      owner_first: string;
-      attempt_id_first: string;
-    }>(
-      `SELECT emitter,
+  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
+    const rows =
+      opts === undefined
+        ? // Earliest row per emitter wins (see the header) — the read-side half of first-write-wins, and
+          // BEST-EFFORT by construction: the winner is decided by a clock each writer stamped for itself.
+          await this.select<SegmentRow>(
+            `SELECT emitter,
               argMin(tenant, sealed_at) AS tenant_first,
               argMin(source, sealed_at) AS source_first,
               argMin(event_count, sealed_at) AS event_count_first,
@@ -234,8 +266,42 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
        WHERE run_id = {runId:String}
        GROUP BY emitter
        ORDER BY sealed_at_first ASC, emitter ASC`,
-      { runId },
-    );
+            { runId },
+          )
+        : // ── THE EXACT-IDENTITY READ (arch-review 52, wave 7) ─────────────────────────────────────
+          //
+          // The caller holds the attempt a Postgres receipt made canonical and asks for THAT execution's
+          // evidence. The clock cannot answer it: this engine has no unique key, the seal is check-then-
+          // insert, and a duplicate carrying a backdated `sealed_at` — ordinary replica skew, validated by
+          // nothing — wins `argMin(col, sealed_at)` and serves the abandoned attempt's bytes under the run
+          // the receipt named.
+          //
+          // So the tie-break is the IDENTITY first and the clock only within it (`attempt_rank` is
+          // `segmentDeclaresAttempt`, stated in SQL because here the duplicates are rows and they collapse
+          // before any caller could filter them):
+          //   0 — the plane declares the attempt asked for            → this is the evidence
+          //   1 — the plane declares none ('' — the producer did not say, which is not disagreement)
+          //   2 — the plane declares a DIFFERENT attempt              → another execution's bytes
+          // and rank 2 is DROPPED by the HAVING rather than served, so an emitter whose only rows belong to
+          // other attempts contributes nothing and a run with no agreeing plane reads undefined.
+          await this.select<SegmentRow>(
+            `SELECT emitter,
+              argMin(tenant, (attempt_rank, sealed_at)) AS tenant_first,
+              argMin(source, (attempt_rank, sealed_at)) AS source_first,
+              argMin(event_count, (attempt_rank, sealed_at)) AS event_count_first,
+              argMin(body, (attempt_rank, sealed_at)) AS body_first,
+              argMin(body_format, (attempt_rank, sealed_at)) AS body_format_first,
+              argMin(t0, (attempt_rank, sealed_at)) AS t0_first,
+              argMin(owner, (attempt_rank, sealed_at)) AS owner_first,
+              argMin(attempt_id, (attempt_rank, sealed_at)) AS attempt_id_first,
+              argMin(sealed_at, (attempt_rank, sealed_at)) AS sealed_at_first
+       FROM (SELECT *, if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2)) AS attempt_rank
+             FROM ${this.table()} WHERE run_id = {runId:String})
+       GROUP BY emitter
+       HAVING min(attempt_rank) < 2
+       ORDER BY sealed_at_first ASC, emitter ASC`,
+            { runId, attemptId: opts.attemptId },
+          );
     const header = rows[0];
     if (!header || header.tenant_first !== tenant) return undefined;
     const segments: TrajectorySegment[] = rows.map((row) => ({

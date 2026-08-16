@@ -1,4 +1,12 @@
-import type { CaseCommitReceipt, CaseResult, GateScoringPin, Score, ScoringRevision } from "@everdict/contracts";
+import type {
+  CaseCommitReceipt,
+  CaseResult,
+  GateScoringPin,
+  JudgmentReceipt,
+  Score,
+  ScoringRevision,
+} from "@everdict/contracts";
+import { encodeCaseKey } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import { caseObservationDigest } from "./case-result-digest.js";
 import { childKey } from "./scoring-plan.js";
@@ -137,6 +145,26 @@ export function inputObservationOf(
   };
 }
 
+// ── WHOSE VERDICT THIS IS (arch-review 52 wave 5) ────────────────────────────────────────────────────
+//
+// The receipt vector's canonical ORDER — (case, judge), which is a total order over the vector because the
+// stage holds exactly one row per (scorecard, pass, case, judge). Ordering is not content, so it is imposed
+// here rather than inherited from whatever order the stage returned its rows in; the vector is stored in
+// this order too, so what is read back is what was digested.
+function orderedReceipts(receipts: readonly JudgmentReceipt[]): JudgmentReceipt[] {
+  return [...receipts].sort((a, b) => {
+    const byCase = encodeCaseKey(a.ref.case).localeCompare(encodeCaseKey(b.ref.case));
+    return byCase !== 0 ? byCase : a.ref.judgeId.localeCompare(b.ref.judgeId);
+  });
+}
+
+// The vector as ONE value — what a decision surface pins instead of carrying every receipt. Born with the
+// vector inside `appendScoringRevision` for the same reason `scorePlaneDigest` is born with the plane: a
+// digest a caller may compute separately is a digest that can describe a different set than the one stored.
+export function judgmentReceiptSetDigest(receipts: readonly JudgmentReceipt[]): string {
+  return contentDigest(orderedReceipts(receipts));
+}
+
 export interface ScoringPassInput {
   kind: ScoringRevision["kind"];
   judges: ScoringRevision["judges"];
@@ -157,6 +185,13 @@ export interface ScoringPassInput {
   // compiler asks every append site the question, and a site with nothing to say answers `completed: false`
   // with its reason instead of answering nothing (`inputObservationOf` builds both shapes).
   inputObservation: NonNullable<ScoringRevision["inputObservation"]>;
+  // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 52 wave 5) — one receipt per (case, judge) this
+  // pass adopted, minted from the same stage read the parity observation is taken from. Undefined and `[]`
+  // are DIFFERENT statements and both are kept: undefined = the vector could not be minted (no stage wired,
+  // a pass with no identity), `[]` = this pass adopted nothing. Collapsing them would make "unrecorded" and
+  // "none" the same evidence, which is the failure `inputObservation.completed` exists to prevent one field
+  // over.
+  judgments?: readonly JudgmentReceipt[];
   // The pass that produced it — the marker clears in the same write, so this is the only place the id survives.
   passId?: string;
   createdAt: string;
@@ -195,6 +230,14 @@ export function appendScoringRevision(
       // that would otherwise catch it, which is exactly how this field went missing on its first attempt.
       ...(input.stageParity !== undefined ? { stageParity: input.stageParity } : {}),
       ...(input.stagePromotion !== undefined ? { stagePromotion: input.stagePromotion } : {}),
+      // The vector and its digest are born together, in the canonical order they are digested under — so a
+      // revision can never carry a set digest describing a set it does not hold.
+      ...(input.judgments !== undefined
+        ? {
+            judgments: orderedReceipts(input.judgments),
+            judgmentReceiptSetDigest: judgmentReceiptSetDigest(input.judgments),
+          }
+        : {}),
       inputObservation: input.inputObservation,
       ...(input.passId !== undefined ? { passId: input.passId } : {}),
       createdAt: input.createdAt,
@@ -224,6 +267,11 @@ export function currentScoringPin(scoring: ScoringRevision[] | undefined): GateS
           },
         }
       : {}),
+    // …and the PROVENANCE half (arch-review 52 wave 5): which invocations authored the judgments this
+    // decision is about. A narrowing like the rest of this projection — the settle minted it, this only
+    // carries it forward, so a disputed decision can be traced to the exact judge invocations it shipped on
+    // rather than to a plane digest two invocations would share.
+    ...(last.judgmentReceiptSetDigest !== undefined ? { judgmentReceiptSetDigest: last.judgmentReceiptSetDigest } : {}),
   };
 }
 

@@ -1,7 +1,23 @@
-import { InMemoryCancellationStore, InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
+import {
+  CancellationCoordinator,
+  type CancellationStore,
+  InMemoryCancellationStore,
+  InMemoryCaseReceiptStore,
+  ScorecardService,
+} from "@everdict/application-control";
 import type { CaseResult, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
+
+// The sweep moved off the service and onto the CancellationCoordinator (arch-review 52, Wave 3): one
+// reconciler over one ledger, dispatching each owed row to the teardown that owns its KIND. These
+// assertions are unchanged — only who is asked to run the pass.
+const sweep = (service: ScorecardService, cancellations: CancellationStore): CancellationCoordinator =>
+  new CancellationCoordinator({
+    cancellations,
+    now: () => new Date().toISOString(),
+    teardowns: { scorecard: service.cancellationTeardown() },
+  });
 
 // ── A CANCEL THAT CANNOT SEE THE CHILDREN REFUSES, IT DOES NOT PRETEND (arch-review 46) ──────────────
 //
@@ -161,7 +177,7 @@ describe("ScorecardService cancellation operations — a crashed teardown still 
     expect((await store.get("sc-1"))?.status).toBe("cancelled"); // the decision landed…
     expect((await runs.get("child-1"))?.status).toBe("running"); // …and the teardown did not
     const owed = await operations.listIncomplete(10);
-    expect(owed.map((op) => op.scorecardId)).toEqual(["sc-1"]);
+    expect(owed.map((op) => op.target)).toEqual([{ kind: "scorecard", id: "sc-1" }]);
     expect(owed[0]?.lastError).toMatch(/child list unavailable/);
     expect(state.fail).toBe(true);
   });
@@ -174,7 +190,7 @@ describe("ScorecardService cancellation operations — a crashed teardown still 
     await expect(service.cancel({ tenant: "acme", id: "sc-1" })).rejects.toThrow(/child list unavailable/);
 
     state.fail = false; // the store recovers; no caller is left to notice
-    expect(await service.reconcileCancellations()).toBe(1);
+    expect(await sweep(service, operations).reconcile()).toBe(1);
 
     expect((await runs.get("child-1"))?.status).toBe("failed");
     expect((await runs.get("child-1"))?.error?.code).toBe("CANCELLED");
@@ -187,7 +203,7 @@ describe("ScorecardService cancellation operations — a crashed teardown still 
     await runs.create(childOf("child-1", "sc-1"));
     await expect(service.cancel({ tenant: "acme", id: "sc-1" })).rejects.toThrow(/child list unavailable/);
 
-    expect(await service.reconcileCancellations()).toBe(0); // the store is still down — nothing closed
+    expect(await sweep(service, operations).reconcile()).toBe(0); // the store is still down — nothing closed
     const owed = await operations.listIncomplete(10);
     expect(owed).toHaveLength(1);
     expect(owed[0]?.lastError).toMatch(/child list unavailable/);
@@ -207,7 +223,7 @@ describe("ScorecardService cancellation operations — a crashed teardown still 
       listed += 1;
       return realList(...args);
     };
-    expect(await service.reconcileCancellations()).toBe(0);
+    expect(await sweep(service, operations).reconcile()).toBe(0);
     expect(listed).toBe(0); // the sweep did not touch the batch at all
   });
 
@@ -218,9 +234,9 @@ describe("ScorecardService cancellation operations — a crashed teardown still 
     const { store, runs, service } = makeService({ cancellations: operations });
     await store.create(runningRecord("sc-live"));
     await runs.create(childOf("child-live", "sc-live"));
-    await operations.request("sc-live", "2026-08-15T00:00:00.000Z");
+    await operations.request({ kind: "scorecard", id: "sc-live" }, "2026-08-15T00:00:00.000Z");
 
-    expect(await service.reconcileCancellations()).toBe(1);
+    expect(await sweep(service, operations).reconcile()).toBe(1);
     expect((await runs.get("child-live"))?.status).toBe("running"); // untouched
     expect((await store.get("sc-live"))?.status).toBe("running");
     expect(await operations.listIncomplete(10)).toEqual([]);

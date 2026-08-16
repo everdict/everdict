@@ -62,6 +62,10 @@ export type ScorecardOutcomeExtras = Partial<
     | "runIds"
     | "scorecard"
     | "analysisRef"
+    // The settlement's OWED OUTWARD EFFECTS (arch-review 52, Wave 4). Named here for the same reason `world`
+    // is: the plan has to ride the terminal transition itself — a publication decided by one write and
+    // persisted by another is the very gap it exists to close.
+    | "publication"
     | "scoring"
     | "scoringPass"
     | "manifest"

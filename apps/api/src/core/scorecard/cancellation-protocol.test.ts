@@ -18,7 +18,9 @@ function world(extraDeps: Record<string, unknown> = {}) {
   const receipts = new InMemoryCaseReceiptStore();
   store.attachReceipts((id) => receipts.countFor(id));
   const cancellations = new InMemoryCancellationStore();
-  store.attachCancellations((id) => void cancellations.request(id, new Date().toISOString()).catch(() => {}));
+  store.attachCancellations(
+    (id) => void cancellations.request({ kind: "scorecard", id }, new Date().toISOString()).catch(() => {}),
+  );
   const runs = new InMemoryRunStore();
   runs.attachScorecards(store);
   const service = new ScorecardService({
@@ -72,7 +74,7 @@ describe("the abort settle owns its teardown (decision + operation, one write)",
     store.attachReceipts((id) => receipts.countFor(id));
     const cancellations = new InMemoryCancellationStore();
     const settleTimeRequest = cancellations.request.bind(cancellations);
-    store.attachCancellations((id) => void settleTimeRequest(id, "2026-08-15T00:00:01.000Z"));
+    store.attachCancellations((id) => void settleTimeRequest({ kind: "scorecard", id }, "2026-08-15T00:00:01.000Z"));
     // EVERY API-level write fails — request, fail AND complete all upsert, so leaving any of them alive
     // lets the post-hoc lane fabricate the row this test exists to prove rode the settle instead.
     cancellations.request = async () => {
@@ -101,7 +103,7 @@ describe("the abort settle owns its teardown (decision + operation, one write)",
     await store.create(record("sc-tx"));
     await service.cancel({ tenant: "acme", id: "sc-tx" });
     expect((await store.get("sc-tx"))?.status).toBe("cancelled");
-    const operation = await cancellations.get("sc-tx");
+    const operation = await cancellations.get({ kind: "scorecard", id: "sc-tx" });
     expect(operation?.state).toBe("requested"); // owed by the settle itself — the crash window is gone
   });
 
@@ -116,7 +118,7 @@ describe("the abort settle owns its teardown (decision + operation, one write)",
       { expectNonTerminal: true, requestCancellation: true },
     );
     expect(settled?.status).toBe("superseded");
-    expect((await cancellations.get("sc-sup"))?.state).toBe("requested");
+    expect((await cancellations.get({ kind: "scorecard", id: "sc-sup" }))?.state).toBe("requested");
   });
 
   it("a settle the fence refused owes nothing — no operation row for a write that did not happen", async () => {
@@ -127,7 +129,7 @@ describe("the abort settle owns its teardown (decision + operation, one write)",
       requestCancellation: true,
     });
     expect(settled).toBeUndefined();
-    expect(await cancellations.get("sc-done")).toBeUndefined();
+    expect(await cancellations.get({ kind: "scorecard", id: "sc-done" })).toBeUndefined();
   });
 });
 
@@ -144,7 +146,7 @@ describe("COMPLETED proves the postcondition, not the attempt", () => {
       /not converged|cluster unreachable/,
     );
     expect((await store.get("sc-kill"))?.status).toBe("cancelled"); // the decision is durable…
-    expect((await cancellations.get("sc-kill"))?.state).toBe("requested"); // …and the teardown stays owed
+    expect((await cancellations.get({ kind: "scorecard", id: "sc-kill" }))?.state).toBe("requested"); // …and the teardown stays owed
   });
 
   it("a child still live after the teardown loop keeps the operation owed — commands issued is not converged", async () => {
@@ -156,7 +158,7 @@ describe("COMPLETED proves the postcondition, not the attempt", () => {
     await store.create(record("sc-stuck"));
     await runs.create(child("child-stuck", "sc-stuck"));
     await expect(service.cancel({ tenant: "acme", id: "sc-stuck" })).rejects.toThrow(/not converged/);
-    expect((await cancellations.get("sc-stuck"))?.state).toBe("requested");
+    expect((await cancellations.get({ kind: "scorecard", id: "sc-stuck" }))?.state).toBe("requested");
   });
 
   it("a clean teardown completes the operation — the ordinary case still ends", async () => {
@@ -165,7 +167,7 @@ describe("COMPLETED proves the postcondition, not the attempt", () => {
     await runs.create(child("child-clean", "sc-clean"));
     await service.cancel({ tenant: "acme", id: "sc-clean" });
     expect((await runs.get("child-clean"))?.status).toBe("failed");
-    expect((await cancellations.get("sc-clean"))?.state).toBe("completed");
+    expect((await cancellations.get({ kind: "scorecard", id: "sc-clean" }))?.state).toBe("completed");
   });
 });
 
@@ -175,7 +177,7 @@ describe("delete refuses while the teardown is owed", () => {
   it("an incomplete cancellation refuses the delete — erasing the rows would orphan the live work", async () => {
     const { store, cancellations, service } = world();
     await store.create(record("sc-del", "cancelled"));
-    await cancellations.request("sc-del", "2026-08-15T00:00:02.000Z");
+    await cancellations.request({ kind: "scorecard", id: "sc-del" }, "2026-08-15T00:00:02.000Z");
     await expect(service.delete({ principal: admin, id: "sc-del" })).rejects.toThrow(/teardown has not finished/);
     expect(await store.get("sc-del")).toBeDefined();
   });
@@ -183,8 +185,8 @@ describe("delete refuses while the teardown is owed", () => {
   it("a completed cancellation deletes normally", async () => {
     const { store, cancellations, service } = world();
     await store.create(record("sc-del-ok", "cancelled"));
-    await cancellations.request("sc-del-ok", "2026-08-15T00:00:02.000Z");
-    await cancellations.complete("sc-del-ok", "2026-08-15T00:00:03.000Z");
+    await cancellations.request({ kind: "scorecard", id: "sc-del-ok" }, "2026-08-15T00:00:02.000Z");
+    await cancellations.complete({ kind: "scorecard", id: "sc-del-ok" }, "2026-08-15T00:00:03.000Z");
     await service.delete({ principal: admin, id: "sc-del-ok" });
     expect(await store.get("sc-del-ok")).toBeUndefined();
   });
@@ -199,7 +201,7 @@ describe("the legacy gap sweep hands unowned teardowns to the reconciler", () =>
     await store.create(record("sc-quiet", "cancelled")); // aborted, but nothing live — nothing owed
     const requested = await service.sweepAbortedTeardownGaps();
     expect(requested).toBe(1);
-    expect((await cancellations.get("sc-gap"))?.state).toBe("requested");
-    expect(await cancellations.get("sc-quiet")).toBeUndefined();
+    expect((await cancellations.get({ kind: "scorecard", id: "sc-gap" }))?.state).toBe("requested");
+    expect(await cancellations.get({ kind: "scorecard", id: "sc-quiet" })).toBeUndefined();
   });
 });

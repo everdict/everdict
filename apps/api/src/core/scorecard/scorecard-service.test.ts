@@ -4892,6 +4892,7 @@ describe("ScorecardService.cancel — user stop", () => {
       datasets: new InMemoryDatasetRegistry(),
       killCase: async (_tenant, runtime, caseId) => {
         killed.push({ runtime, caseId });
+        return { status: "stopped" as const };
       },
     });
 
@@ -5277,7 +5278,9 @@ describe("ScorecardService.cancelCausedBy — the causal tree is the kill switch
       datasets: new InMemoryDatasetRegistry(),
     });
     const cancelled = await service.cancelCausedBy("acme", "run-agent");
-    expect(cancelled).toBe(2); // the live and the queued one — one cancel revokes the tree
+    // The walk REPORTS its failures now (arch-review 52, Wave 3): the run teardown that awaits it keeps the
+    // parent's cancellation owed when a descendant could not be revoked, instead of losing it to a void catch.
+    expect(cancelled).toEqual({ cancelled: 2, failures: [] }); // the live and the queued one — one cancel revokes the tree
     expect((await store.get("caused-live"))?.status).toBe("cancelled");
     expect((await store.get("caused-queued"))?.status).toBe("cancelled");
     expect((await store.get("caused-done"))?.status).toBe("succeeded"); // terminal stays

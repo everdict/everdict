@@ -64,10 +64,14 @@ export async function settleRun(
     // routed back to the ordinary settlement — so the caller that offers a stamp still owes the two-step
     // where the seam is absent (`RunService.finalize` owns that fallback, and the swallow that goes with it).
     stamp?: AttemptStamp;
+    // THE CANCEL'S OWED TEARDOWN, committed with the decision (arch-review 52, Wave 3) — the run-scale twin
+    // of `settleScorecard`'s option above. See `RunUpdateGuard.requestCancellation`.
+    requestCancellation?: true;
   },
 ): Promise<RunRecord | undefined> {
   const guard: RunUpdateGuard = {
     expectNonTerminal: true,
+    ...(opts?.requestCancellation === true ? { requestCancellation: true as const } : {}),
     ...(opts?.expectOwnerReplica !== undefined ? { expectOwnerReplica: opts.expectOwnerReplica } : {}),
     ...(opts?.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
     ...(opts?.parentDriver !== undefined ? { parentDriver: opts.parentDriver } : {}),

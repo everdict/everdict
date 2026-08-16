@@ -17,6 +17,15 @@ See skill `ci`.
   (contracts build + `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
+- **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`
+  (job name **`trust fast (real Postgres)`**) runs the Postgres-only trust subset — `apps/api/src/trust` minus
+  the Temporal durability files — on every push and PR, through `scripts/trust/trust-suite.mjs` so that a
+  scenario which SKIPPED still fails the check. The local gate deliberately boots no database, so this is the
+  one required check you cannot pre-run with `ci:local`; reproduce it against any throwaway Postgres with
+  `EVERDICT_TRUST_DATABASE_URL=… node scripts/trust/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'`.
+  A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing.
+  The full suite — Temporal, MinIO, Windows — stays nightly (`trust-nightly.yml`, non-blocking); see
+  `docs/trust-certification.md`.
 - A failure you did not cause (someone else's WIP / earlier commit) still blocks your push:
   surface it to the maintainer instead of silently absorbing or bypassing it.
 - After pushing, confirm the run went green:

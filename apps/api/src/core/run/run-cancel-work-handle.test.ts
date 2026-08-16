@@ -57,8 +57,8 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     const attempts = new InMemoryExecutionAttemptStore(() => now);
     const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
     await attempts.recordWork(attemptId, WORK);
-    const killWork = vi.fn(async () => {});
-    const killCase = vi.fn(async () => {});
+    const killWork = vi.fn(async () => ({ status: "stopped" as const }));
+    const killCase = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
@@ -85,8 +85,8 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     await store.create(runningRun());
     const attempts = new InMemoryExecutionAttemptStore(() => now);
     await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
-    const killWork = vi.fn(async () => {});
-    const killCase = vi.fn(async () => {});
+    const killWork = vi.fn(async () => ({ status: "stopped" as const }));
+    const killCase = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
@@ -114,15 +114,15 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
       dispatcher: unusedDispatcher,
       store,
       attempts,
-      killWork: async () => {
-        throw new Error("nomad unreachable");
-      },
+      // The honest answer a cluster that cannot be reached gives (arch-review 52, Wave 3) — read as "not
+      // converged", where the rejection this replaced was the only signal that ever surfaced.
+      killWork: async () => ({ status: "failed" as const, reason: "nomad unreachable" }),
       now: () => now,
     });
 
     // The decision has committed and the work has not stopped — that is a 5xx the caller retries, never a
     // cancel that reports done over live compute.
-    await expect(service.cancel({ tenant: "acme", id: "r1" })).rejects.toThrow(/could not be stopped/);
+    await expect(service.cancel({ tenant: "acme", id: "r1" })).rejects.toThrow(/has not converged/);
     expect((await store.get("r1"))?.error?.code).toBe("CANCELLED"); // …and the decision stays committed
   });
 });

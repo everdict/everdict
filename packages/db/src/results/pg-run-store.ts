@@ -348,6 +348,18 @@ export class PgRunStore implements RunStore {
       fenceSql += ` AND EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $${scorecardIdx} AND s.scoring_pass->>'passId' = $${passIdx} AND s.scoring_pass->>'status' = 'running')`;
       vals.push(fence.scorecardId, fence.passId);
     }
+    // The cancel settle owns its teardown in the SAME statement (arch-review 52, Wave 3) — the run-scale
+    // twin of `PgScorecardStore`'s. The operation row is inserted only when the settle matched a row
+    // (WHERE EXISTS on the updating CTE), so a settle that lost the terminal race owes nothing. Requested-at
+    // is the database's own clock; a re-request re-opens a completed row (idempotent-by-key, see the port).
+    const cancelSql =
+      guard?.requestCancellation === true
+        ? `, cancel_op AS (INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state)
+                SELECT $${i}, 'run', 'requested'
+                WHERE EXISTS (SELECT 1 FROM upd)
+                ON CONFLICT (scorecard_id) DO UPDATE
+                  SET state = 'requested', target_kind = 'run', last_error = NULL, completed_at = NULL, certificate = NULL)`
+        : "";
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
@@ -356,9 +368,17 @@ export class PgRunStore implements RunStore {
         `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
-                WHERE EXISTS (SELECT 1 FROM upd))
+                WHERE EXISTS (SELECT 1 FROM upd))${cancelSql}
          SELECT * FROM upd`,
         [...vals, ...ev.params],
+      );
+      return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
+    }
+    if (cancelSql !== "") {
+      const res = await client.query<RunRow>(
+        `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i}${fenceSql} RETURNING *)${cancelSql}
+         SELECT * FROM upd`,
+        vals,
       );
       return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
     }

@@ -134,6 +134,18 @@ export interface RunUpdateGuard {
   // Evaluated inside the write statement, like the scoring fence next to it, because the alternative is a
   // read-then-write whose window is exactly the takeover it exists to catch.
   parentDriver?: { scorecardId: string; epoch: number };
+  // ── THE DECISION AND ITS OWED TEARDOWN, IN ONE WRITE (arch-review 52, Wave 3) ─────────────────────
+  //
+  // Not a fence — an INSTRUCTION, and the only one in this vocabulary: the write that commits a run's
+  // CANCELLED decision also inserts the cancellation operation that says its teardown is owed. The batch
+  // lane has carried this on its own settle since arch-review 51; the standalone lane committed the
+  // decision and then ran the teardown with nothing behind it, so a process that died in between left a
+  // run that is terminal in the ledger and still burning on the cluster, with nobody looking.
+  //
+  // It rides the settle rather than being a second call for the reason every pair in this file rides its
+  // statement: two commits have a window, and the window is exactly the crash this row exists to survive.
+  // Applied ONLY when the settle matched a row — a refused settle decided nothing and owes nothing.
+  requestCancellation?: true;
 }
 
 // ── THE LEDGER WRITE THAT RIDES A TERMINAL SETTLEMENT (arch-review 45) ───────────────────────────────

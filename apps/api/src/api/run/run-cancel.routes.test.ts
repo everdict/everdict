@@ -40,7 +40,7 @@ async function build(opts: { viewer?: string; roles?: string[] } = {}) {
   });
   await store.create(seed("live-1", "running"));
   await store.create(seed("done-1", "succeeded"));
-  const killCase = vi.fn(async () => {});
+  const killCase = vi.fn(async () => ({ status: "stopped" as const }));
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store, killCase, now: () => now }),
     requireAuth: true,

@@ -1,10 +1,18 @@
-import type { EnvelopeStore, GithubAppService, TrajectoryStore } from "@everdict/application-control";
+import type { CaseReceiptStore, EnvelopeStore, GithubAppService, TrajectoryStore } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
-import type { ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
+import type { CancellationStore, ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
-import type { CaseJob, GradeContext, JudgeSpec, RegistryAuth, RuntimeWorkRef, TraceEvent } from "@everdict/contracts";
+import type {
+  CaseJob,
+  GradeContext,
+  JudgeSpec,
+  KillOutcome,
+  RegistryAuth,
+  RuntimeWorkRef,
+  TraceEvent,
+} from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
@@ -78,8 +86,9 @@ export function buildRun(deps: {
   scorecardStore: ScorecardStore;
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
+  caseReceipts: CaseReceiptStore; // the canonical-outcome ledger the trajectory read asks (Wave 7)
   // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
-  onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
+  onAgentRunCancelled?: (tenant: string, runId: string) => Promise<{ cancelled: number; failures: string[] }>;
   meteredDispatcher: CoreDispatcher;
   // 저지의 하네스 위임 경로가 쓰는 공유 디스패처 — dispatch 만 쓰므로 인터페이스에 의존한다(backends 규칙).
   dispatcher: CoreDispatcher;
@@ -115,10 +124,14 @@ export function buildRun(deps: {
   // The standalone cancel's teardown arms (RunService.cancel) — the same three the batch lane uses, keyed on
   // the run's own job identity: force-kill a dispatched managed job, drop a queued scheduler entry, revoke a
   // self-hosted lease.
-  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<void>;
+  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<KillOutcome>;
   // …and the EXACT one (arch-review 52, Wave 2): stop the object the dispatch actually created, from the
   // handle the attempt ledger persisted. `killCase` above is the fallback for runs that recorded none.
-  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<void>;
+  killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
+  // The cancel TEARDOWN's durable owner (mig 0184/0186) — the run lane joins the ledger the batch lane has
+  // owned since arch-review 47, so a crash between the CANCELLED commit and a successful kill leaves an
+  // operation the coordinator sweeps rather than a terminal row over live compute.
+  cancellations?: CancellationStore;
   cancelQueued: (predicate: (job: CaseJob) => boolean) => number;
   cancelLeased: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
 }) {
@@ -164,6 +177,8 @@ export function buildRun(deps: {
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
     ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — every settled trace seals in the owned store
+    // …and the receipt ledger the trajectory read asks for its canonical attempt (arch-review 52, Wave 7).
+    caseReceipts: deps.caseReceipts,
     // A child run's verdict is derived under its PARENT's stamped/composed policy (RunService.withVerdicts).
     scorecardPolicy: async (tenant, scorecardId) => {
       const record = await deps.scorecardStore.get(scorecardId);
@@ -213,6 +228,7 @@ export function buildRun(deps: {
     killWork: deps.killWork,
     cancelQueued: deps.cancelQueued,
     cancelLeased: deps.cancelLeased,
+    ...(deps.cancellations ? { cancellations: deps.cancellations } : {}),
     // Grader factory (@everdict/graders) for executeCase's control-plane collection-mode scoring — the application
     // layer never imports the grader impls, so the composition root supplies it (re-architecture P2 S3).
     makeGraders,

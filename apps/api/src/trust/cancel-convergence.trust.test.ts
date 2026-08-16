@@ -1,4 +1,4 @@
-import { ScorecardService } from "@everdict/application-control";
+import { CancellationCoordinator, ScorecardService } from "@everdict/application-control";
 import type { CaseJob } from "@everdict/contracts";
 import { PgCancellationStore, PgCaseReceiptStore, PgRunStore, PgScorecardStore } from "@everdict/db";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
@@ -78,6 +78,15 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
     // teardown failure is expressed: a rejection here is the transient the reconciler exists for.
     let revocationFails = true;
     const revoked: number[] = [];
+    // The sweep is the CancellationCoordinator's (arch-review 52, Wave 3): one reconciler over one ledger,
+    // each owed row handed to the teardown that owns its kind. Built per pass, exactly as a booting replica
+    // builds it — this scenario's whole point is that the owner need not be the process that decided.
+    const sweep = (): CancellationCoordinator =>
+      new CancellationCoordinator({
+        cancellations,
+        now: () => new Date().toISOString(),
+        teardowns: { scorecard: service.cancellationTeardown() },
+      });
     const service = new ScorecardService({
       dispatcher: {
         async dispatch(_job: CaseJob) {
@@ -90,9 +99,10 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
       caseReceipts: new PgCaseReceiptStore(pg.client),
       datasets,
       cancellations,
-      // Wired in its production shape: the kill is best-effort (swallowed by the teardown), so it is here
-      // to make the teardown real, not to be asserted on.
-      killCase: async () => undefined,
+      // Wired in its production shape. The seam ANSWERS now (arch-review 52, Wave 3) and `absent` is a
+      // converged answer — there is no managed job behind this batch's self-hosted lease lane, which is the
+      // honest reading and the one that lets the teardown converge on the revocation alone.
+      killCase: async () => ({ status: "absent" as const }),
       cancelLeased: async () => {
         if (revocationFails) throw new Error("runner lease revocation is unreachable");
         revoked.push(1);
@@ -124,7 +134,9 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
     expect((await store.get(record.id))?.status, "the DECISION survives a teardown that could not run").toBe(
       "cancelled",
     );
-    const owed = (await cancellations.listIncomplete(50)).filter((op) => op.scorecardId === record.id);
+    const owed = (await cancellations.listIncomplete(50)).filter(
+      (op) => op.target.kind === "scorecard" && op.target.id === record.id,
+    );
     expect(owed, "the teardown is recorded as still owed").toHaveLength(1);
     expect(owed[0]?.state).toBe("requested");
     expect(owed[0]?.lastError).toContain("runner lease revocation is unreachable");
@@ -135,7 +147,7 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
 
     // ② THE OWNER SHOWS UP. Same idempotent steps, run by whoever swept next — no caller involved.
     revocationFails = false;
-    expect(await service.reconcileCancellations(50)).toBe(1);
+    expect(await sweep().reconcile(50)).toBe(1);
     expect(revoked.length, "the reconciler re-ran the revocation the failed teardown owed").toBeGreaterThan(0);
     const settled = await runStore.list(tenant, { scorecardId: record.id });
     expect(settled.length).toBeGreaterThan(0);
@@ -143,19 +155,31 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
       expect(child.status, `child ${child.id} reached a terminal state`).toBe("failed");
       expect(child.error?.code).toBe("CANCELLED");
     }
-    // …and the row is closed, in Postgres, where the next replica reads it.
-    const { rows } = await pg.client.query<{ state: string; last_error: string | null; completed_at: Date | null }>(
-      "SELECT state, last_error, completed_at FROM everdict_cancellation_operations WHERE scorecard_id = $1",
+    // …and the row is closed, in Postgres, where the next replica reads it — WITH the certificate that
+    // closed it (mig 0186). `completed` used to mean "the teardown function returned"; it means "these
+    // postconditions were read back" now, and the row is where an operator finds which ones.
+    const { rows } = await pg.client.query<{
+      state: string;
+      target_kind: string;
+      last_error: string | null;
+      completed_at: Date | null;
+      certificate: { childrenTerminal?: number; kills?: { stopped: number; absent: number } } | null;
+    }>(
+      "SELECT state, target_kind, last_error, completed_at, certificate FROM everdict_cancellation_operations WHERE scorecard_id = $1",
       [record.id],
     );
     expect(rows[0]?.state).toBe("completed");
+    expect(rows[0]?.target_kind).toBe("scorecard");
     expect(rows[0]?.last_error, "the reason described the attempt that failed, not this one").toBeNull();
     expect(rows[0]?.completed_at).not.toBeNull();
+    expect(rows[0]?.certificate?.childrenTerminal, "the population the zero-live-children check ran over").toBe(
+      settled.length,
+    );
 
     // ③ A COMPLETED OPERATION IS OVER. A sweep that kept finding it would tear the same batch down on every
     // pass for as long as the row exists.
     const revocationsBefore = revoked.length;
-    expect(await service.reconcileCancellations(50)).toBe(0);
+    expect(await sweep().reconcile(50)).toBe(0);
     expect(revoked.length, "the second pass is a genuine no-op, not a cheaper repeat").toBe(revocationsBefore);
   }, 90_000);
 });

@@ -10,6 +10,7 @@ import {
   type ComputeSpec,
   type Driver,
   InternalError,
+  type KillOutcome,
   NotFoundError,
   OOM_KILLED,
   type RuntimeWorkRef,
@@ -17,6 +18,7 @@ import {
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
+  worstKillOutcome,
 } from "@everdict/contracts";
 import type {
   CasePlacement,
@@ -1221,14 +1223,23 @@ export class NomadBackend
   // namespace; a stop that crosses a trust zone is the same violation as a read that does, and it was silent
   // because kill returns void. A handle knows which namespace its work is in, so nothing has to be searched
   // for. Deregister WITHOUT purge (the purge saga: purging a job a client still tracks panics its alloc
-  // watcher). Best-effort/idempotent, never throws.
-  async killWork(work: RuntimeWorkRef): Promise<void> {
+  // watcher). Idempotent and never throws — but it ANSWERS (arch-review 52, Wave 3): a 404 is `absent` (the
+  // job already ended, or this shard never placed it), a 2xx is `stopped`, and anything else is `failed`
+  // with the cluster's own words. The old `catch {}` reported all three as success.
+  async killWork(work: RuntimeWorkRef): Promise<KillOutcome> {
     try {
       const nsq =
         work.namespace && work.namespace !== "default" ? `?namespace=${encodeURIComponent(work.namespace)}` : "";
-      await this.http.request("DELETE", `/v1/job/${encodeURIComponent(work.externalJobId)}${nsq}`);
-    } catch {
-      // best-effort
+      const res = await this.http.request("DELETE", `/v1/job/${encodeURIComponent(work.externalJobId)}${nsq}`);
+      if (res.status === 404) return { status: "absent" };
+      if (res.status >= 300)
+        return { status: "failed", reason: `nomad deregister ${work.externalJobId}: HTTP ${res.status}` };
+      return { status: "stopped" };
+    } catch (err) {
+      return {
+        status: "failed",
+        reason: `nomad deregister ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 
@@ -1238,19 +1249,35 @@ export class NomadBackend
   // ⚠️ FALLBACK ONLY (arch-review 52, Wave 2 counterexample #5). `namespace=*` makes this cross every trust
   // zone and the case prefix makes it cross every run — a caller holding a `RuntimeWorkRef` must call
   // `killWork`. This remains for the callers that hold none (legacy attempt rows, lanes that mint no handle).
-  async kill(caseId: string): Promise<void> {
+  async kill(caseId: string): Promise<KillOutcome> {
     try {
       const prefix = `everdict-${caseId}-`;
       const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return;
+      // A LISTING THAT FAILED IS `unknown`, NEVER `absent` (arch-review 52, Wave 3). This is the sweep's whole
+      // vulnerability: it decides what to stop from a query, so a query that did not answer means the sweep
+      // stopped nothing AND learned nothing. Reporting that as "there was nothing to stop" is how a live job
+      // gets certified as freed.
+      if (res.status >= 300)
+        return { status: "unknown", reason: `nomad job listing for ${caseId}: HTTP ${res.status}` };
       const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; Status?: string }>;
+      const outcomes: KillOutcome[] = [];
       for (const j of jobs) {
         if (!j.ID?.startsWith(prefix) || j.Status === "dead") continue;
         const nsq = j.Namespace && j.Namespace !== "default" ? `?namespace=${encodeURIComponent(j.Namespace)}` : "";
-        await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
+        const del = await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
+        outcomes.push(
+          del.status === 404
+            ? { status: "absent" }
+            : del.status >= 300
+              ? { status: "failed", reason: `nomad deregister ${j.ID}: HTTP ${del.status}` }
+              : { status: "stopped" },
+        );
       }
-    } catch {
-      // best-effort
+      // Nothing live matched — a sweep that RAN and found no work is convergence, which is exactly the
+      // distinction the failed listing above cannot make.
+      return worstKillOutcome(outcomes);
+    } catch (err) {
+      return { status: "failed", reason: `nomad kill ${caseId}: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 

@@ -94,6 +94,10 @@ export class InMemoryScorecardStore implements ScorecardStore {
           : Date.now() - Date.parse(live.startedAt) >= SCORING_PASS_STALE_MS);
       if (!reclaimable) return undefined;
     }
+    // The publication's fence (mig 0187) — the drain writes its receipt only while the plan it read is still
+    // the pending one, so two publishers produce exactly one receipt.
+    if (guard?.expectPublicationState !== undefined && cur.publication?.state !== guard.expectPublicationState)
+      return undefined;
     if (guard?.expectScoringPassEpoch !== undefined) {
       const persisted = cur.scoringPass?.epoch ?? null;
       if (persisted !== guard.expectScoringPassEpoch) return undefined;
@@ -155,6 +159,8 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.productId || c.origin?.productId === filter.productId)
       .filter((c) => !filter?.seriesKey || c.origin?.seriesKey === filter.seriesKey)
       .filter((c) => !filter?.causedByRunId || c.origin?.causedByRunId === filter.causedByRunId)
+      // The publication reconciler's sweep (mig 0187) — settlements whose outward effects are still owed.
+      .filter((c) => filter?.publicationPending !== true || c.publication?.state === "pending")
       // kind filter (P1): "scorecard" also matches every pre-field record (kind unset = scorecard).
       .filter(
         (c) => !filter?.kind || (filter.kind === "experiment" ? c.kind === "experiment" : c.kind !== "experiment"),

@@ -225,8 +225,9 @@ export interface Persistence {
   // The PHYSICAL execution ledger (mig 0182): one unconditional row per physical execution, with a state.
   // Phase-1 dual-write — stamped beside the commit points, read by nothing (arch-review 42).
   executionAttemptStore: ExecutionAttemptStore;
-  // The cancel teardown's durable owner (mig 0184): a batch whose CANCELLED decision committed but whose
-  // live work may still be running. Swept by ScorecardService.reconcileCancellations (arch-review 47 §5.2).
+  // The cancel teardown's durable owner (mig 0184, generalized by 0186): a scorecard OR a standalone run
+  // whose CANCELLED decision committed but whose live work may still be running. Swept by the
+  // CancellationCoordinator (arch-review 47 §5.2, arch-review 52 Wave 3).
   cancellationStore: CancellationStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
@@ -384,7 +385,12 @@ export async function makePersistence(): Promise<Persistence> {
     // The settle→operation pair (arch-review 51 P0) — Pg does this inside the settle statement; in memory
     // the pairing is the attach, applied right after a matched abort settle.
     inMemoryScorecards.attachCancellations(
-      (id) => void inMemoryCancellations.request(id, new Date().toISOString()).catch(() => {}),
+      (id) => void inMemoryCancellations.request({ kind: "scorecard", id }, new Date().toISOString()).catch(() => {}),
+    );
+    // …and the same pair for the STANDALONE run lane (arch-review 52, Wave 3): one protocol, two kinds of
+    // target, so a dev/test deployment exercises the run cancel's durable row exactly as production does.
+    inMemoryRuns.attachCancellations(
+      (id) => void inMemoryCancellations.request({ kind: "run", id }, new Date().toISOString()).catch(() => {}),
     );
     return {
       store: inMemoryRuns,

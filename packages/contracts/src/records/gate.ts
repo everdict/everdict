@@ -139,6 +139,13 @@ export const GateScoringPinSchema = z.object({
       diverged: z.number().int().nonnegative().optional(),
     })
     .optional(),
+  // …AND WHICH INVOCATIONS AUTHORED IT (arch-review 52 wave 5). The plane digest pins the verdicts and the
+  // observation pins their inputs; this pins their PROVENANCE — the digest of the revision's judgment-receipt
+  // vector, each receipt naming the (pass, case, judge, claim) whose evidence was adopted. A decision that
+  // is later disputed can then say which invocation of a flapping judge it shipped on, which no other field
+  // here can: two invocations that agree leave identical plane digests. Absent = the revision carries no
+  // vector (predates it, or ran with no scoring stage to arbitrate) — unrecorded, never "no judgments".
+  judgmentReceiptSetDigest: z.string().optional(),
 });
 export type GateScoringPin = z.infer<typeof GateScoringPinSchema>;
 

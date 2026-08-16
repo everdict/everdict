@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
+import { CaseKeySchema } from "../execution/case-key.js";
 import { GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
 import { GateDecisionSchema } from "./gate.js";
@@ -256,6 +257,67 @@ export function scoringPassReclaimable(
 // GateDecision.baselineScoring/candidateScoring). `judges` is the pass's SELECTED set only — a re-score
 // replaces the selected judges' rows and keeps every other score (replace-selected / keep-others); the
 // record's manifest/orchestration judge views are refreshed to the merged EFFECTIVE set at the same write.
+// WHICH INVOCATION of "judge this case with this judge" a judgment came from — the authority token the
+// scoring stage arbitrates on, ordered lexicographically so a later generation beats any attempt of an
+// earlier one. Spelled HERE, at the dependency root, because it is now stated in two places that must not
+// drift: the ephemeral stage row that arbitrates (the `ScoringStageStore` port) and the durable judgment
+// receipt below that records who won.
+//
+// It is a PAIR because one number cannot span the mutation it governs: `attempt` is the orchestrator's
+// activity retry counter, monotonic only WITHIN one execution, while a pass spans many rounds and each round
+// restarts it at 1. `generation` is the pass's logical ROUND ordinal, which makes the pair monotonic across
+// the whole pass.
+export const JudgmentClaimSchema = z.object({
+  generation: z.number().int().nonnegative(),
+  attempt: z.number().int().positive(),
+});
+export type JudgmentClaim = z.infer<typeof JudgmentClaimSchema>;
+
+// ── WHICH INVOCATION'S VERDICT A REVISION CERTIFIES (arch-review 52 wave 5) ──────────────────────────
+//
+// The scoring stage arbitrates per (case, judge) on a `JudgmentClaim`: a later claim wins the right to
+// write, the carrier write OBEYS that answer, and a superseded invocation's judgment lands nowhere. That
+// arbitration is authoritative, production-critical — and entirely EPHEMERAL. The stage holds one row per
+// (scorecard × pass × case × judge) and is cleared at settle, which is the only affordable lifetime it has.
+//
+// So a settled `ScoringRevision` could say what the plane HELD (`scorePlaneDigest`) and what the judges READ
+// (`inputObservation`), and could not say which invocation AUTHORED either — although two invocations of one
+// (case, judge) are routine: a replan round's second generation, an activity retry whose predecessor's
+// provider call was still running. The plane digest cannot answer it, because the winner's bytes ARE the
+// plane: it is byte-identical whichever invocation won. Minutes after the settle the rows that knew were
+// gone, by design.
+//
+// This is the defect the receipt ledger already closed one level down for EXECUTION — the latest row is not
+// the committed attempt (arch-review 39/40) — left open one level up for JUDGMENT. One receipt per ADOPTED
+// judgment, minted at settle from the same stage read the parity observation is taken from, so the record
+// and the report can never describe two different reads.
+export const JudgmentReceiptSchema = z.object({
+  // WHAT was judged, by WHOM, under WHICH invocation — the coordinate, complete enough to re-find the
+  // evidence plane the invocation sealed.
+  ref: z.object({
+    scoringPassId: z.string(),
+    // The (case, trial) unit as the plane itself carries it — never re-derived from a string key, which
+    // would strengthen a single-run case into trial 0 (`CaseKey`: absent ≠ 0).
+    case: CaseKeySchema,
+    judgeId: z.string(),
+    // ABSENT = this path has no per-invocation ordinal to state, and the pass id IS the invocation: the
+    // in-process pass judges the whole plane in ONE call with no per-case retry seam, and a takeover mints a
+    // new pass id. Deliberately not defaulted to (0, 1): `judgeEvidenceEmitter` names a claimless invocation
+    // `judge:<id>#<pass>` and a claimed one `judge:<id>#<pass>.<gen>.<attempt>`, so inventing an ordinal here
+    // would make the receipt disagree with the emitter it also carries about whether one ever existed.
+    claim: JudgmentClaimSchema.optional(),
+  }),
+  // The adopted judgment's own bytes, canonically digested (schema-normalized, metric-ordered) — what the
+  // revision certifies for this (case, judge), so a later reader can tell a re-judgment from a re-wording.
+  scoreDigest: z.string(),
+  // WHERE THAT INVOCATION'S EVIDENCE LIVES (`judgeEvidenceEmitter`, arch-review 51 Track C). The judge's own
+  // execution seals as a plane on the judged case's trajectory keyed by (runId, emitter), and the emitter is
+  // minted from exactly this (judgeId, passId, claim) — so this field is the join that makes the losing
+  // invocation's evidence distinguishable from the winning one's instead of merely co-resident.
+  evidenceEmitter: z.string(),
+});
+export type JudgmentReceipt = z.infer<typeof JudgmentReceiptSchema>;
+
 export const ScoringRevisionSchema = z.object({
   revision: z.number().int().positive(), // 1-based, strictly increasing per record
   kind: z.enum(["initial", "rescore"]),
@@ -382,6 +444,20 @@ export const ScoringRevisionSchema = z.object({
       refusal: z.string().optional(),
     })
     .optional(),
+  // WHICH INVOCATION AUTHORED EACH JUDGMENT THIS REVISION CERTIFIES (arch-review 52 wave 5) — one receipt
+  // per (case, judge) the pass adopted, read off the stage in the same read the parity observation is taken
+  // from, and written in the same guarded update that appends this revision. The stage rows are collected
+  // immediately afterwards, so this is the last moment the answer exists at all.
+  //
+  // ABSENT ≠ "this pass adopted nothing". Absent means the vector could not be minted — a revision from
+  // before this existed, no stage wired, or a pass carrying no identity — and reads as UNRECORDED, exactly
+  // like `stageParity`'s absence. An EMPTY array is the opposite fact and a real measurement: this pass
+  // settled having adopted no judgment at all (a zero-work re-score).
+  judgments: z.array(JudgmentReceiptSchema).optional(),
+  // The vector as ONE value, so a decision surface can pin the provenance of a whole judgment without
+  // carrying (and re-canonicalizing) every receipt. Born with the vector — never derivable separately, for
+  // the same reason `scorePlaneDigest` is born with the plane.
+  judgmentReceiptSetDigest: z.string().optional(),
   createdAt: z.string(),
   createdBy: z.string().optional(),
 });
@@ -553,6 +629,64 @@ export const ScorecardExportSchema = z.object({
 });
 export type ScorecardExport = z.infer<typeof ScorecardExportSchema>;
 
+// ── PREPARED BYTES MAY PRECEDE COMMIT. PUBLICATION MAY NOT (arch-review 52, Wave 4) ─────────────────
+//
+// A settlement's outward effects — the MUTABLE current-analysis alias (`analyses/<id>.json`) and the export
+// to the tenant's observability platform — used to run BEFORE the terminal compare-and-swap that decides
+// whether this attempt is the batch's answer at all. A read-check is not a write fence: a cancel or a
+// supersede committing in between makes the finalizer lose the CAS, and by then the tenant's MLflow already
+// holds the loser's traces and the alias already points at the loser's bundle. An export cannot be recalled,
+// and an object store has no compare-and-set to notice the overwrite.
+//
+// Staging stays where it was, because staging is safe: the per-pass artifact is content-addressed
+// (`analyses/<id>/passes/<passId>.json`), so a loser's bytes are an orphan nobody references. What moves
+// after the commit is everything that is VISIBLE OUTWARD, and this plan is how the settlement carries it
+// across: written in the SAME store update as the terminal patch, drained by a publisher that runs only
+// once that update has matched a row.
+//
+// Fail-open by contract, like the effects it replaced: a plan that cannot be drained leaves `state:"pending"`
+// and a reason, and never fails the scorecard (`docs/architecture/trace-sink.md`).
+export const PublicationPlanSchema = z.object({
+  // "pending" = the settlement committed and its outward effects are owed. "published" = they ran, and the
+  // receipt is on the record (`export`, and the alias object itself).
+  state: z.enum(["pending", "published"]),
+  plannedAt: z.string(), // the settle's clock — what the sweep orders owed plans by
+  publishedAt: z.string().optional(),
+  // Why the last drain did not finish. Diagnostics, never control: `state` alone decides whether the sweep
+  // retries (the same posture as a cancellation operation's `lastError`).
+  lastError: z.string().optional(),
+  // The MUTABLE aliases this settlement owes. `from` is the immutable object staged before the CAS, `key`
+  // the alias to promote it onto, `digest` the bundle the settle actually counted — the publisher refuses to
+  // promote bytes whose digest is not the planned one, so a later pass's object can never be promoted under
+  // this settlement's authority.
+  artifacts: z.array(z.object({ key: z.string(), from: z.string(), digest: z.string() })).optional(),
+  // The outward exports this settlement owes. At most one today (the batched finalize export); an array
+  // because the plan describes the settlement's owed effects, not one call site's.
+  exports: z
+    .array(
+      z.object({
+        // Identifies the SETTLEMENT whose export this is (`<scorecardId>:<passId>`), so a receipt on the
+        // record can be told apart from one an earlier or later settlement wrote.
+        idempotencyKey: z.string(),
+        // The results the settle counted, digested — the payload the export is of. A drain that finds the
+        // record's results no longer digest to this is looking at a re-scored plane, not at this settlement.
+        payloadDigest: z.string(),
+        // The batch's per-batch sink override (`orchestration.traceSink`), carried so the drain does not
+        // have to re-derive the routing the settle decided.
+        sink: z.string().optional(),
+        // Judge id → declared model, the export's per-judge attribution. Collected at plan time because it
+        // is a registry read the drain would otherwise repeat against a registry that has since moved.
+        judgeModels: z.record(z.string()).optional(),
+        // The pull-ingest attach hint (source kind + caseId → external trace id). Without it a pull-ingest
+        // export DUPLICATES the tenant's traces instead of attaching scores to the originals, so it is part
+        // of what the settlement owes rather than something the drain could re-derive.
+        attach: z.object({ sourceKind: z.string(), externalIdByCase: z.record(z.string()) }).optional(),
+      }),
+    )
+    .optional(),
+});
+export type PublicationPlan = z.infer<typeof PublicationPlanSchema>;
+
 // Reserved sentinel id used for a scorecard's `dataset` (and `harness`) when it scores observability traces DIRECTLY —
 // the "evaluate existing traces" path (pick traces from a workspace trace source + run judges, no dataset, no harness
 // run). It keeps the NOT-NULL dataset/harness columns populated WITHOUT a real registry entry, so no schema migration
@@ -686,6 +820,11 @@ export const ScorecardRecordSchema = z.object({
   // absent when no ArtifactStore is configured or the offload failed.
   analysisRef: z.string().optional(),
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
+  // THE SETTLEMENT'S OWED OUTWARD EFFECTS (mig 0187 — see PublicationPlanSchema). Written in the same store
+  // update as the terminal patch, so a settlement that did not commit carries no plan and a publisher has
+  // nothing to drain for it. Rides the LIST projection: the reconciler finds owed plans by listing, and a
+  // column it cannot see is a column it cannot converge.
+  publication: PublicationPlanSchema.optional(),
   // WHICH verdict policy produced this batch's verdicts (id + version + content digest). Verdicts are derived
   // on read, so this stamp is what keeps a historical verdict stable when the policy evolves: readers resolve
   // the STAMPED policy (resolvePolicyResolution), never silently the newest one — a stamp that cannot be

@@ -22,7 +22,7 @@ import {
   settleOrphanSessionRuns,
   whenLeader,
 } from "@everdict/application-control";
-import { ApprovalService } from "@everdict/application-control";
+import { ApprovalService, CancellationCoordinator } from "@everdict/application-control";
 import {
   EventConsumerRunner,
   mattermostConsumer,
@@ -701,11 +701,16 @@ async function main(): Promise<void> {
   const caseFsRequests = new CaseFsRequestHub();
   // Cascade cancel (§5.5 O8) — late-bound: the scorecard service is built after the run service, so the
   // hook resolves through this holder (fires only at runtime, long after boot completes).
-  const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<number> } = {};
+  const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<{ cancelled: number; failures: string[] }> } =
+    {};
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     envelopes: envelopeStore,
     trajectories: trajectoryStore,
-    onAgentRunCancelled: async (tenant, runId) => cascadeCancel.fn?.(tenant, runId),
+    caseReceipts: caseReceiptStore,
+    // AWAITED inside the run's own teardown (arch-review 52, Wave 3) — a subtree that could not be revoked
+    // keeps the parent run's cancellation operation owed instead of being lost to a void catch.
+    onAgentRunCancelled: async (tenant, runId) =>
+      (await cascadeCancel.fn?.(tenant, runId)) ?? { cancelled: 0, failures: [] },
     store,
     scorecardStore,
     meteredDispatcher,
@@ -746,6 +751,10 @@ async function main(): Promise<void> {
     killCase,
     // …and the exact-handle stop the attempt ledger makes reachable after a restart (arch-review 52, Wave 2).
     killWork,
+    // The cancel TEARDOWN's durable owner, for the RUN lane too (mig 0186, arch-review 52 Wave 3): the
+    // CANCELLED decision and the row saying its teardown is owed commit in one statement, so a crash before
+    // the kill confirms leaves an operation the coordinator below sweeps.
+    cancellations: cancellationStore,
     cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     ...(recordingStore ? { recordingStore } : {}),
@@ -828,11 +837,22 @@ async function main(): Promise<void> {
   // Leader-gated, like the other sweeps that act on rows this process does not own — the teardown kills jobs
   // and settles children, and N replicas racing to do it repeats work for no gain. Boot pass first, so a
   // restart converges immediately instead of at the first tick.
+  const cancellationCoordinator = new CancellationCoordinator({
+    cancellations: cancellationStore,
+    now: () => new Date().toISOString(),
+    // ONE sweep, both kinds (arch-review 52, Wave 3). Each service hands the coordinator the idempotent
+    // teardown for its own kind of target; the coordinator owns the ledger and knows nothing about batches
+    // or runs. A kind with no teardown registered is LEFT OWED, never closed.
+    teardowns: {
+      scorecard: scorecardService.cancellationTeardown(),
+      run: service.cancellationTeardown(),
+    },
+  });
   const reconcileCancellations = whenLeader(
     leader,
     () =>
-      void scorecardService
-        .reconcileCancellations()
+      void cancellationCoordinator
+        .reconcile()
         .then((closed) => {
           if (closed > 0) console.log(`▶ cancellation reconciler: converged ${closed} orphaned teardown(s)`);
         })
@@ -840,6 +860,25 @@ async function main(): Promise<void> {
   );
   setInterval(reconcileCancellations, 60_000).unref();
   reconcileCancellations();
+  // The PUBLICATION outbox's reconciler (mig 0187, arch-review 52 Wave 4). A settlement's outward effects —
+  // the mutable current-analysis alias and the trace-sink export — are owed by a plan written in the terminal
+  // transaction and drained by the winner inline. A crash between the two leaves the plan durable and nobody
+  // running it: the same gap the cancellation reconciler above closes for a teardown, so it is closed the same
+  // way. Leader-gated for the same reason — the drain writes to the tenant's platform, and N replicas racing
+  // to do it repeats an export for no gain. Boot pass first, so a restart converges immediately.
+  const publications = scorecardService.publicationCoordinator();
+  const reconcilePublications = whenLeader(
+    leader,
+    () =>
+      void publications
+        .reconcile()
+        .then((published) => {
+          if (published > 0) console.log(`▶ publication reconciler: published ${published} owed settlement(s)`);
+        })
+        .catch(() => {}),
+  );
+  setInterval(reconcilePublications, 60_000).unref();
+  reconcilePublications();
   // One-shot legacy gap sweep (arch-review 51 P0): aborts decided before the settle owned its teardown row
   // (or in the best-effort era's crash window) have live children and no operation — hand them to the
   // reconciler once per boot. Leader-gated for the same reason the reconciler is.

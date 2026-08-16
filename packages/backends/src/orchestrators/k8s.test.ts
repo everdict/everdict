@@ -129,9 +129,11 @@ function mockApi(
     },
     async deleteJob(name) {
       deleted.push(name);
+      return { status: "stopped" as const };
     },
     async deleteJobsByLabel(selector) {
       deleted.push(`label:${selector}`);
+      return { status: "stopped" as const };
     },
     async jobsByLabel(selector) {
       return opts.labeledJobs?.filter((j) => j.selector === selector) ?? [];

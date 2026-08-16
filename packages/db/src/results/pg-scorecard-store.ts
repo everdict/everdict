@@ -36,6 +36,7 @@ interface ScorecardRow {
   decision: unknown;
   scoring: unknown; // append-only scoring-identity ledger — one entry per scoring pass (mig 0144)
   sink_export: unknown;
+  publication: unknown; // the settlement's owed outward effects (mig 0187) — the publication outbox's plan
   error: unknown;
   steps: unknown;
   run_ids: unknown;
@@ -92,6 +93,11 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
       ? { scoring: row.scoring as ScorecardRecord["scoring"] }
       : {}),
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
+    // Lightweight, and it RIDES THE LIST deliberately (mig 0187): the publication reconciler finds owed
+    // settlements by listing, and a column the list omits is a column the sweep cannot converge.
+    ...(row.publication !== null && row.publication !== undefined
+      ? { publication: row.publication as ScorecardRecord["publication"] }
+      : {}),
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
     runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // detail-only lightweight reference (get only, like steps)
@@ -112,9 +118,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)";
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -157,6 +163,10 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.verdictSummary ? JSON.stringify(r.verdictSummary) : null,
     r.scoringPass ? JSON.stringify(r.scoringPass) : null,
     r.world ? JSON.stringify(r.world) : null,
+    // A newly created batch owes nothing outward yet; it rides the insert for the reason every other
+    // update-era field does — a store that knows the column and drops the value turns a caller's stamp
+    // into nothing.
+    r.publication ? JSON.stringify(r.publication) : null,
   ];
 }
 
@@ -262,6 +272,12 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.decision !== undefined) {
       sets.push(`decision = $${i++}`);
       vals.push(JSON.stringify(patch.decision));
+    }
+    if (patch.publication !== undefined) {
+      // settle (the plan) and drain (the receipt) — mig 0187. A lane that dropped this would commit a
+      // settlement whose outward effects nobody is owed, which is the pre-Wave-4 behavior with extra steps.
+      sets.push(`publication = $${i++}`);
+      vals.push(JSON.stringify(patch.publication));
     }
     if (patch.gates !== undefined) {
       // append-path (gate decide/override) — the service writes the whole array back (small artifacts).
@@ -392,6 +408,13 @@ export class PgScorecardStore implements ScorecardStore {
         guardSql += ` AND owner_replica = $${i}`;
         vals.push(guard.expectOwnerReplica);
       }
+    }
+    // THE PUBLICATION'S FENCE (mig 0187): the drain writes its receipt only while the plan it read is still
+    // the pending one, so two publishers produce exactly one receipt.
+    if (guard?.expectPublicationState !== undefined) {
+      i++;
+      guardSql += ` AND publication->>'state' = $${i}`;
+      vals.push(guard.expectPublicationState);
     }
     if (guard?.expectScoringPassId !== undefined) {
       if (guard.expectScoringPassId === null) {
@@ -538,6 +561,11 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`origin->>'causedByRunId' = $${i++}`);
       vals.push(filter.causedByRunId);
     }
+    if (filter?.publicationPending === true) {
+      // the publication reconciler's sweep (mig 0187) — matches the partial index exactly, so it reads the
+      // owed settlements rather than the whole table.
+      conds.push("publication->>'state' = 'pending'");
+    }
     if (filter?.kind) {
       // "scorecard" = every pre-mig-0093 row too (NULL) — experiments are the positively-marked minority.
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
@@ -546,7 +574,9 @@ export class PgScorecardStore implements ScorecardStore {
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
       // batches a live replica is still driving. It is one text column, not a heavy one.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, owner_epoch, created_at, updated_at
+      // …and `publication` rides it for the same kind of reason (mig 0187): the publication reconciler finds
+      // owed settlements through list(), so a column omitted here is a settlement nobody converges.
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, owner_replica, owner_epoch, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

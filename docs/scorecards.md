@@ -180,6 +180,17 @@ merely detectable (compare plane digests). `GET /scorecards/:id/analysis?revisio
 whose freeze failed (or predates this) honestly carries no ref and reads 404 — the current bundle is never
 served as history.
 
+**Publication outbox — prepared bytes may precede commit, publication may not** (mig 0187): a settlement's
+outward effects are the MUTABLE alias write (`analyses/<id>.json`) and the trace-sink export, and both used to
+run BEFORE the terminal compare-and-swap. A read-check is not a write fence — a cancel or supersede committing
+in between made the finalizer lose the CAS after the traces were already in the tenant's platform and the alias
+already pointed at the loser's bundle. Content-addressed STAGING stays before the CAS (a loser's pass object is
+an orphan nobody references); the two outward effects are now carried across the commit by
+`ScorecardRecord.publication` — a `{state, artifacts[], exports[]}` plan written in the SAME store update as the
+terminal patch. The winner drains it inline, a leader-gated reconciler converges whatever a crash left owed, and
+the drain's write is fenced on the plan still being `pending`, so a committed settlement publishes exactly once.
+A drain that cannot finish leaves the plan owed with a reason and never fails the scorecard.
+
 ## Two manifests: the evaluation DEFINITION and the evaluation WORLD
 The batch manifest above pins **what we evaluated**. Nothing pinned **where it ran**, so a result carried no
 record of the OS it landed on, the driver that provisioned its compute, or the image that compute came out
@@ -366,8 +377,11 @@ pivot/measure (`passRate|mean|count|latest`) over the lightweight list shape, `v
 `viz: line` → time-bucketed series. Incomplete batches (queued/running/superseded/cancelled) are excluded
 unless `includeIncomplete`. `GET /scorecards/:id/analysis` returns the self-contained analysis artifact
 (`analysisRef`: summary + per-case verdicts/scores) as one JSON document — 404 when the record has no artifact.
-It reads the object by KEY (`analyses/<id>.json`) through the `ArtifactStore`, falling back to fetching the ref
-only for an artifact this deployment's store doesn't hold: the stored ref is a PRESIGNED url on the
+It reads the object by KEY through the `ArtifactStore` — the CURRENT scoring revision's own immutable
+`analysisKey` first, since the publication outbox made `analyses/<id>.json` a cache the publisher promotes
+after the settle commits rather than the authority; that alias is the fallback for revisions written before
+artifacts were pass-keyed. Then it falls back to fetching the ref, only for an artifact this deployment's store
+doesn't hold: the stored ref is a PRESIGNED url on the
 server-internal endpoint, so it expires within the hour and no browser outside the cluster can resolve it. That
 is also why the web's "download analysis" link points at this route (through its BFF) instead of `analysisRef`.
 Both power the analysis agent (`docs/architecture/analysis-studio.md`).

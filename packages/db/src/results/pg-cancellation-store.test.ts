@@ -17,30 +17,32 @@ function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unkno
 }
 
 describe("PgCancellationStore", () => {
-  it("request upserts on the scorecard id and does NOT rewrite the operation's age", async () => {
+  it("request upserts on the target id and does NOT rewrite the operation's age", async () => {
     // A batch has exactly one cancellation, so a second request is the SAME operation being attempted again —
     // and the reconciler orders by age, so a re-request must not send it to the back of the queue.
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     const store = new PgCancellationStore(client);
 
-    await store.request("sc-1", "2026-08-15T00:00:00.000Z");
+    await store.request({ kind: "scorecard", id: "sc-1" }, "2026-08-15T00:00:00.000Z");
 
     expect(calls[0]?.text).toContain("ON CONFLICT (scorecard_id) DO UPDATE");
     expect(calls[0]?.text).toContain("state = 'requested'");
     expect(calls[0]?.text).not.toContain("requested_at = ");
     expect(calls[0]?.text).toContain("last_error = NULL"); // the previous attempt's reason, not this one's
-    expect(calls[0]?.params).toEqual(["sc-1", "2026-08-15T00:00:00.000Z"]);
+    // …and the CERTIFICATE too (mig 0186): it described the completion that just got re-opened.
+    expect(calls[0]?.text).toContain("certificate = NULL");
+    expect(calls[0]?.params).toEqual(["sc-1", "scorecard", "2026-08-15T00:00:00.000Z"]);
   });
 
   it("fail records the reason and leaves the operation owed", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     const store = new PgCancellationStore(client);
 
-    await store.fail("sc-1", "child list unavailable", "2026-08-15T00:01:00.000Z");
+    await store.fail({ kind: "run", id: "r-1" }, "nomad unreachable", "2026-08-15T00:01:00.000Z");
 
     expect(calls[0]?.text).toContain("state = 'requested'"); // still owed — `fail` is not a terminal state
     expect(calls[0]?.text).toContain("completed_at = NULL");
-    expect(calls[0]?.params).toEqual(["sc-1", "child list unavailable", "2026-08-15T00:01:00.000Z"]);
+    expect(calls[0]?.params).toEqual(["r-1", "run", "nomad unreachable", "2026-08-15T00:01:00.000Z"]);
   });
 
   it("listIncomplete asks for everything not completed, oldest first", async () => {
@@ -50,10 +52,23 @@ describe("PgCancellationStore", () => {
       rows: [
         {
           scorecard_id: "sc-1",
+          target_kind: "scorecard",
           state: "requested",
           last_error: "child list unavailable",
           requested_at: "2026-08-15T00:00:00.000Z",
           completed_at: null,
+          certificate: null,
+        },
+        // The sweep reads EVERY kind — the coordinator dispatches each row to the teardown that owns it, so
+        // a run's owed operation must come back from the same query rather than needing a second sweep.
+        {
+          scorecard_id: "r-1",
+          target_kind: "run",
+          state: "requested",
+          last_error: null,
+          requested_at: "2026-08-15T00:00:01.000Z",
+          completed_at: null,
+          certificate: null,
         },
       ],
     }));
@@ -66,10 +81,15 @@ describe("PgCancellationStore", () => {
     expect(calls[0]?.params).toEqual([25]);
     expect(owed).toEqual([
       {
-        scorecardId: "sc-1",
+        target: { kind: "scorecard", id: "sc-1" },
         state: "requested",
         lastError: "child list unavailable",
         requestedAt: "2026-08-15T00:00:00.000Z",
+      },
+      {
+        target: { kind: "run", id: "r-1" },
+        state: "requested",
+        requestedAt: "2026-08-15T00:00:01.000Z",
       },
     ]);
   });

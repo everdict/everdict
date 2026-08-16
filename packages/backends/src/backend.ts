@@ -3,6 +3,7 @@ import {
   type CaseResult,
   type Driver,
   InternalError,
+  type KillOutcome,
   type RuntimeSample,
   type RuntimeWorkRef,
   type TraceEvent,
@@ -110,12 +111,15 @@ export interface Recoverable {
   // path is `WorkAddressable`. This stays for the callers that hold none (legacy attempt rows written before
   // the handle was persisted, and the lanes that never mint one).
   adopt(caseId: string): Promise<AdoptOutcome>;
-  // Force-stop every live orchestrator job of a case (superseded batch reclaim). Best-effort, never throws.
+  // Force-stop every live orchestrator job of a case (superseded batch reclaim). Never throws — it ANSWERS
+  // instead (arch-review 52, Wave 3): `stopped`/`absent` are convergence, `unknown`/`failed` say the compute
+  // is probably still burning and the caller's cancellation is still owed. It used to return `Promise<void>`,
+  // which made "the delete request returned" and "the job stopped" the same observation.
   //
   // ⚠️ SAME AMBIGUITY, with a destructive blast radius: "every live job of this case" includes the ones other
   // runs — and, before the K8s case label became injective, other CASES — placed. Use `WorkAddressable.
   // killWork` wherever a handle exists; this is the no-handle fallback and nothing else.
-  kill(caseId: string): Promise<void>;
+  kill(caseId: string): Promise<KillOutcome>;
 }
 
 // WorkAddressable — CONTROL ADDRESSED BY THE EXACT WORK, not by what the work was about (arch-review 52,
@@ -126,9 +130,11 @@ export interface Recoverable {
 // Backends whose work outlives the dispatch call implement it (Nomad/K8s), the same set that implements
 // `Recoverable`. In-process and pull backends do not: they have no external object to hand out a name for.
 export interface WorkAddressable {
-  // Best-effort and idempotent, like every stop on this layer: work that is already gone is a no-op, and a
-  // handle from another cluster simply matches nothing there. Never throws.
-  killWork(work: RuntimeWorkRef): Promise<void>;
+  // Idempotent, like every stop on this layer: work that is already gone is `absent`, and a handle from
+  // another cluster simply matches nothing there — also `absent`. Never throws; the ambiguity is in the
+  // ANSWER (arch-review 52, Wave 3), because a caller that cannot tell "stopped" from "could not reach the
+  // cluster" has no honest way to decide whether its cancellation converged.
+  killWork(work: RuntimeWorkRef): Promise<KillOutcome>;
 }
 
 // Observable — live-progress introspection into a case's running sandbox (logs + one-shot exec). The sandbox is

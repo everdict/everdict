@@ -3,6 +3,7 @@ import type {
   CaseResult,
   Grader,
   JudgeRunConfig,
+  KillOutcome,
   ModelBinding,
   RegistryAuth,
   RuntimeWorkRef,
@@ -147,11 +148,14 @@ export interface ScorecardServiceDeps {
   adoptCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
-  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
+  //
+  // It ANSWERS rather than resolving (arch-review 52, Wave 3): `stopped`/`absent` converge, `unknown`/
+  // `failed` mean the compute is probably still burning and the batch's cancellation is still owed.
+  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<KillOutcome>;
   // …and the EXACT version of it (arch-review 52, Wave 2): stop the one orchestrator object a child's attempt
   // placed, addressed by the handle the backend reported and the attempt ledger persisted. Preferred wherever
   // a handle exists — `killCase` selects on the case alone, which is also every other run's job of that case.
-  killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<void>;
+  killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).
@@ -162,7 +166,7 @@ export interface ScorecardServiceDeps {
   cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
   // The cancel TEARDOWN's durable owner (mig 0184, arch-review 47 §5.2). The CANCELLED decision commits
   // first and the teardown follows; this ledger records that the teardown is owed, so a crash between them
-  // leaves an operation `reconcileCancellations` picks up instead of stranded children and held leases.
+  // leaves an operation the CancellationCoordinator's sweep picks up instead of stranded children and leases.
   // Absent = the convergent-retry behavior it was built on (the caller's retry is the only owner).
   cancellations?: CancellationStore;
   // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation /

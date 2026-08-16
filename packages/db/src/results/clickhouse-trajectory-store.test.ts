@@ -111,6 +111,29 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
     expect(await store.get("rival", "r1")).toBeUndefined(); // tenant check after the point read
   });
 
+  it("an identity read ranks the ASKED attempt above the clock, and drops the planes that name another", async () => {
+    // The clock read cannot answer "which attempt's evidence is this": `sealed_at` is the writer's own stamp,
+    // so a backdated duplicate wins argMin and serves the abandoned attempt's bytes. The identity read orders
+    // by (rank, clock) instead and refuses rank 2 — a plane belonging to a different execution.
+    const { calls, fetchImpl } = fakeClickHouse((sql) =>
+      sql.includes("GROUP BY emitter") ? segmentLine({ attempt_id_first: "exec-LATE#g2" }) : "",
+    );
+    const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl);
+
+    const read = await store.get("acme", "r1", { attemptId: "exec-LATE#g2" });
+    expect(read?.segments[0]?.attemptId).toBe("exec-LATE#g2");
+    const sql = calls[0]?.sql ?? "";
+    expect(sql).toMatch(/if\(attempt_id = \{attemptId:String\}, 0, if\(attempt_id = '', 1, 2\)\) AS attempt_rank/);
+    expect(sql).toMatch(/argMin\(body, \(attempt_rank, sealed_at\)\) AS body_first/); // identity first, clock within it
+    expect(sql).toMatch(/HAVING min\(attempt_rank\) < 2/); // another attempt's plane is dropped, never served
+    expect(calls[0]?.params.get("param_attemptId")).toBe("exec-LATE#g2"); // bound, never concatenated
+
+    // …and the clock-resolved read stays exactly what it was for callers holding no identity to ask by.
+    await store.get("acme", "r1");
+    expect(calls[1]?.sql).toMatch(/argMin\(body, sealed_at\) AS body_first/);
+    expect(calls[1]?.sql).not.toMatch(/attempt_rank/);
+  });
+
   it("list dedups per (run, emitter), pages by keyset cursor; meter and retention ride the same dedup", async () => {
     const { calls, fetchImpl } = fakeClickHouse((sql) => {
       if (sql.includes("argMin(tenant_first"))
@@ -163,20 +186,30 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
     expect(calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).length).toBeGreaterThan(0);
   });
 
-  it("ALTERs every column the CREATE declares beyond the base row — a table from an older install must serve today's reads", async () => {
+  it("ALTERs every column the CREATE declares, VERBATIM — a table from an older install must serve today's reads", async () => {
     // attempt_id shipped in the CREATE and in the read queries but was left out of the ALTER list: fresh
     // installs worked while every pre-existing deployment failed each `get` with UNKNOWN_IDENTIFIER (Code 47)
-    // — after a boot that reported success. Pin the invariant structurally: the CREATE's additive columns
-    // (String DEFAULT '') and the ALTER set must agree, so the next column cannot repeat this.
+    // — after a boot that reported success. Both statements now come from ONE descriptor, and this reads the
+    // wire to prove it: every column line of the emitted CREATE — whatever its type, with or without a
+    // DEFAULT — must appear as its own ADD COLUMN, spelled identically. A String-only check would have let a
+    // `UInt32` or a `Nullable(...)` column repeat the drift under a different type.
     const { calls, fetchImpl } = fakeClickHouse(() => "");
     await new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl).ensureSchema();
     const create = calls.find(({ sql }) => sql.startsWith("CREATE TABLE"))?.sql ?? "";
-    const declared = [...create.matchAll(/^\s*(\w+) String DEFAULT ''/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
-    expect(declared).toContain("attempt_id");
+    // Column lines only: INDEX/CONSTRAINT clauses have no ADD COLUMN twin and are excluded by the leading
+    // keyword, not by a hand-kept list.
+    const declared = [...create.matchAll(/^ {2}(?!INDEX|CONSTRAINT|PROJECTION)(\w+ .+?),?$/gm)].flatMap((m) =>
+      m[1] ? [m[1]] : [],
+    );
+    expect(declared).toContain("attempt_id String DEFAULT ''");
+    expect(declared).toContain("event_count UInt32"); // a non-String, non-defaulted column is covered too
+    // A floor, not a census: what is under test is that CREATE and ALTER agree, and pinning the exact count
+    // would make every new column a failing test in the commit that adds it.
+    expect(declared.length).toBeGreaterThanOrEqual(13);
     const alters = calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).map(({ sql }) => sql);
     for (const column of declared)
       expect(
-        alters.some((sql) => sql.includes(`ADD COLUMN IF NOT EXISTS ${column} String`)),
+        alters.some((sql) => sql.endsWith(`ADD COLUMN IF NOT EXISTS ${column}`)),
         `column "${column}" is created for fresh installs but never ALTERed onto existing tables`,
       ).toBe(true);
   });

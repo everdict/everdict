@@ -19,7 +19,15 @@ import {
   isTopologyInspectable,
   isWorkAddressable,
 } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeSpec, RuntimeWorkRef, TraceEvent } from "@everdict/contracts";
+import type {
+  CaseResult,
+  KillOutcome,
+  RegistryAuth,
+  RuntimeSpec,
+  RuntimeWorkRef,
+  TraceEvent,
+} from "@everdict/contracts";
+import { worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -37,8 +45,9 @@ export function buildRuntimeAccess(deps: {
 }) {
   const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend } = deps;
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
-  // comma shard list) to a live backend and use its optional adopt/kill. Best-effort by design — a miss falls
-  // back to re-dispatch (adopt) or leaves the job to finish unobserved (kill).
+  // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
+  // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
+  // silence as success — see `killWork`/`killCase`.
   const eachRuntimeBackend = async (
     tenant: string,
     runtimeList: string | undefined,
@@ -228,12 +237,34 @@ export function buildRuntimeAccess(deps: {
   // which cluster's object it is only as far as the recorded lane goes; on a cluster that never placed it, an
   // exact id simply matches nothing, which is the difference from the case-id kill below (that one MATCHES on
   // every cluster, and stops whatever it finds there).
-  const killWork = async (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef): Promise<void> => {
+  //
+  // ── AND IT ANSWERS (arch-review 52, Wave 3) ──────────────────────────────────────────────────────
+  // This used to be `.catch(() => {})` over a `Promise<void>`, which meant the ONE caller written to treat a
+  // failed teardown as its own failure could never see one: `RunService.stopRun` wraps the kill in an
+  // `UpstreamError` precisely so the cancellation stays owed, and the arm it awaited resolved cleanly while
+  // the cluster job kept running. The seam aggregates the lane's per-backend answers and returns the WORST
+  // one; the caller decides what to do about it. Nothing here swallows.
+  const killWork = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ): Promise<KillOutcome> => {
+    const outcomes: KillOutcome[] = [];
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isWorkAddressable(backend)) return false;
-      await backend.killWork(work).catch(() => {});
+      // A backend that THREW is still a failure, not a silence — `killWork` is contractually total, so this
+      // only fires on a broken implementation, and turning it into `failed` is what keeps that honest.
+      outcomes.push(
+        await backend.killWork(work).catch(
+          (err: unknown): KillOutcome => ({
+            status: "failed",
+            reason: `killWork ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+          }),
+        ),
+      );
       return false;
     });
+    return worstKillOutcome(outcomes);
   };
 
   // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
@@ -241,12 +272,21 @@ export function buildRuntimeAccess(deps: {
   //
   // ⚠️ THE NO-HANDLE FALLBACK (arch-review 52, Wave 2). `kill(caseId)` reaches every run's job of the case —
   // and on Nomad, every namespace's. Callers route here only when the attempt ledger recorded no handle.
-  const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<void> => {
+  const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<KillOutcome> => {
+    const outcomes: KillOutcome[] = [];
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isRecoverable(backend)) return false;
-      await backend.kill(caseId).catch(() => {});
+      outcomes.push(
+        await backend.kill(caseId).catch(
+          (err: unknown): KillOutcome => ({
+            status: "failed",
+            reason: `kill ${caseId}: ${err instanceof Error ? err.message : String(err)}`,
+          }),
+        ),
+      );
       return false; // every runtime of the shard list gets the kill (the case may live on any of them)
     });
+    return worstKillOutcome(outcomes);
   };
   return {
     eachRuntimeBackend,

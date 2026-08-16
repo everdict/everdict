@@ -59,10 +59,11 @@ import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
+import { type PublicationOutcome, drainPublication, planPublication } from "./publication.js";
 import type { RecoveryPlanner } from "./recovery-planner.js";
 import type { ResilientCaseRunner } from "./resilient-case-runner.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
-import { analysisBundle, batchSettledEvent, initialPassId, offloadAnalysis } from "./scorecard-observability.js";
+import { analysisBundle, batchSettledEvent, initialPassId, stageAnalysis } from "./scorecard-observability.js";
 import { embedHarnessSpec } from "./scorecard-plan.js";
 
 // ── THE WORKFLOW-OWNED DRIVER ────────────────────────────────────────────────────────────────────────
@@ -793,24 +794,33 @@ export class WorkflowBatchDriver {
     );
     // …under a key only THESE bytes can own (review 39 P0-6): a Temporal activity is at-least-once, so two
     // finalizers can freeze a bundle before the ledger decides which one settles.
-    const analysis = await offloadAnalysis(this.deps, id, initialBundle, initialPassId(initialBundle));
-    // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
-    const exported = this.deps.exportResults
-      ? await this.deps
-          .exportResults(
-            ctx.tenant,
-            {
-              scorecardId: id,
-              dataset: `${rec.dataset.id}@${rec.dataset.version}`,
-              harness: scorecard.harness,
-              // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
-              judgeModels: await this.scoring.collectJudgeModelMap(ctx.tenant, ctx.judges).catch(() => ({})),
-              ...(ctx.traceSink ? { sinkOverride: ctx.traceSink } : {}),
-            },
-            results,
-          )
-          .catch(() => undefined)
+    //
+    // STAGED, NOT PUBLISHED (arch-review 52, Wave 4). This used to be `offloadAnalysis`, which also wrote the
+    // MUTABLE current-analysis alias, and it was immediately followed by the trace-sink export — both of them
+    // BEFORE the terminal CAS below. A finalizer that lost the settle (the ordinary at-least-once shape this
+    // whole file is built around) had by then overwritten the alias a cancelled batch's analysis surface reads
+    // and created traces in the tenant's platform that no CAS result can recall. The content-addressed pass
+    // key is safe to write early — a loser's object is an orphan nobody references — so what moves across the
+    // commit is exactly the two OUTWARD effects, carried by the publication plan.
+    const passId = initialPassId(initialBundle);
+    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+    // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
+    // Collected here rather than in the drain: it is a registry read, and the settlement should export under
+    // the attribution it decided rather than under a registry that has since moved.
+    const judgeModelMap = this.deps.exportResults
+      ? await this.scoring.collectJudgeModelMap(ctx.tenant, ctx.judges).catch(() => ({}))
       : undefined;
+    const publication = planPublication({
+      scorecardId: id,
+      bundle: initialBundle,
+      staged: analysis,
+      passId,
+      exports: this.deps.exportResults !== undefined,
+      results,
+      ...(ctx.traceSink ? { sink: ctx.traceSink } : {}),
+      ...(judgeModelMap ? { judgeModels: judgeModelMap } : {}),
+      now: this.now(),
+    });
     const declared = modelBindingLabel(ctx.harnessSpec?.kind === "command" ? ctx.harnessSpec.model : undefined);
     const judgeModels = await this.scoring.collectJudgeModels(ctx.tenant, ctx.judges, ctx.judge);
     const runIds = [...latest.values()].map((c) => c.id);
@@ -854,8 +864,12 @@ export class WorkflowBatchDriver {
         ...(worldCohortOf(results) ? { world: worldCohortOf(results) } : {}),
         models: scorecardModels(scorecard, declared),
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
-        ...(exported ? { export: exported } : {}),
-        ...(analysis.ref ? { analysisRef: analysis.ref } : {}),
+        // The record's download ref is the FROZEN artifact's, not the alias's: the alias does not exist yet
+        // (the publisher promotes it after this write commits), and the immutable object is the honest
+        // answer to "where is this batch's analysis" in either case.
+        ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+        // …and the outward effects this settlement owes, persisted by the very write that decides it won.
+        ...(publication ? { publication } : {}),
         steps: final?.steps ?? [],
         scoring,
         ...(runIds.length > 0 ? { runIds } : { scorecard }),
@@ -888,6 +902,22 @@ export class WorkflowBatchDriver {
       return; // the winner publishes, counts and notifies; this attempt does none of the three
     }
     if (stampedCompletion.length > 0) void this.deps.events?.pushPersisted?.(stampedCompletion);
+    // …AND ONLY NOW IS ANYTHING PUBLISHED (arch-review 52, Wave 4). The winner drains its own plan inline,
+    // holding the exact results the settle counted, which is what keeps the export prompt. A crash between
+    // the commit above and this line leaves the plan owed and the reconciler converges it — the effects are
+    // no longer this call's to lose. Never a reason for the batch to fail: an unpublished plan stays owed.
+    const drained = await drainPublication(
+      this.deps,
+      { ...finalized, ...(publication ? { publication } : {}) },
+      results,
+      this.now,
+    ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }));
+    if (drained.kind === "owed")
+      await this.appendBatchStep(id, {
+        phase: "export",
+        status: "info",
+        message: `Publication still owed — ${drained.reason} (the reconciler will retry)`,
+      });
     // Operator time series (catalog M0) — the Temporal driver settles through the SAME derivation as the
     // in-process loop (batchSettledEvent), so the two paths cannot drift.
     this.deps.onOrchestrationEvent?.(

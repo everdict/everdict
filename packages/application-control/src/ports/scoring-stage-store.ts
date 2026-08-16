@@ -1,15 +1,16 @@
-import type { Score } from "@everdict/contracts";
+import type { JudgmentClaim, Score } from "@everdict/contracts";
 
 // WHICH INVOCATION of "judge this case with this judge" a judgment came from — the authority token the
 // stage arbitrates on. Ordered lexicographically: a later generation beats any attempt of an earlier one.
-export interface JudgmentClaim {
-  // The pass's LOGICAL ROUND ordinal (arch-review 16 P0-1). It was the workflow's continue-as-new count,
-  // which was right while rotation was the only thing that produced a new activity execution — the replan
-  // loop made every ROUND produce one, and Temporal's `attempt` restarts at 1 in each. The ordinal advances
-  // on every new mutation opportunity; rotation merely carries it.
-  generation: number;
-  attempt: number; // Temporal's activity retry counter — within one execution
-}
+//
+// The TYPE lives at the dependency root (`JudgmentClaimSchema`, arch-review 52 wave 5): the claim stopped
+// being purely ephemeral when the settled revision started recording which one it adopted, and a value
+// stated in a durable record and in the arbiter that decides it must have exactly one spelling. `generation`
+// is the pass's LOGICAL ROUND ordinal (arch-review 16 P0-1) — it was the workflow's continue-as-new count,
+// which was right only while rotation was the sole producer of a new activity execution; the replan loop
+// made every ROUND produce one, and Temporal's `attempt` restarts at 1 in each. The ORDERING below stays
+// here, with the store that applies it.
+export type { JudgmentClaim } from "@everdict/contracts";
 
 // Is `next` at least as current as `prior`? Written ONCE, so the two store impls and any future promotion
 // cannot each invent their own ordering — the mistake that put an attempt-scoped number in charge of a

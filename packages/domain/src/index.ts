@@ -97,6 +97,7 @@ export {
   currentScoringPin,
   inputObservationOf,
   inputObservationSetDigest,
+  judgmentReceiptSetDigest,
   nextScoringRevision,
   observationSetDigest,
   type ReceiptLedgerReading,

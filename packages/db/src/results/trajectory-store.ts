@@ -8,6 +8,7 @@ import {
   defaultEmitter,
   executionSegment,
   sealBody,
+  trajectoryForAttempt,
 } from "@everdict/application-control";
 import { spansToEvents } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
@@ -101,17 +102,20 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     return { ...this.metaOf(input.runId), created: true };
   }
 
-  async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
+  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
     const row = this.rows.get(runId);
     if (!row || row.tenant !== tenant) return undefined;
     const segments = row.segments.map((s) => ({ ...s }));
     const execution = executionSegment(segments);
-    return {
+    const sealed: SealedTrajectory = {
       meta: this.metaOf(runId),
       events: execution?.events ?? [],
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
       segments,
     };
+    // One plane per emitter here (the Map is keyed that way), so the exact-identity read is the shared rule
+    // applied to the resolved trajectory — see trajectoryForAttempt.
+    return opts === undefined ? sealed : trajectoryForAttempt(sealed, opts.attemptId);
   }
 
   async list(
@@ -195,9 +199,9 @@ interface PrimaryRow {
   sealed_at: string | Date;
   owner: string | null; // mig 0116 — whose evidence this is; NULL = the workspace's
   body_format?: string | null; // mig 0118 — what the body holds; NULL = an event body sealed before N6
-  kind?: string | null;
-  attempt_id?: string | null; // mig 0176 — WHICH physical attempt sealed it; NULL = the producer did not say // mig 0124 — what it is (RUN_KINDS); NULL = arrived with no run to name it
+  kind?: string | null; // mig 0124 — what it is (RUN_KINDS); NULL = arrived with no run to name it
   label?: string | null; // mig 0124 — the human handle (conversation title · case id · harness)
+  attempt_id?: string | null; // mig 0176 — WHICH physical attempt sealed it; NULL = the producer did not say
 }
 
 // Postgres-backed trajectory store (mig 0098 + 0104) — the header row carries the FIRST emitter's body;
@@ -290,7 +294,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
     return { ...metaOf(refreshed ?? primary), created };
   }
 
-  async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
+  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
     const res = await this.client.query<PrimaryRow & { body: unknown }>(
       `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, body_format, t0, sealed_at, owner, kind, label, attempt_id
        FROM everdict_trajectories WHERE run_id = $1`,
@@ -335,12 +339,16 @@ export class PgTrajectoryStore implements TrajectoryStore {
       })),
     ];
     const execution = executionSegment(segments);
-    return {
+    const sealed: SealedTrajectory = {
       meta: metaOf(row),
       events: execution?.events ?? [],
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
       segments,
     };
+    // The header row is UNIQUE on run_id and each segment on (run_id, emitter), so Postgres cannot hold two
+    // rows for one plane and the identity read is a filter, not a tie-break — the same rule ClickHouse has to
+    // state in SQL because there the duplicates are rows.
+    return opts === undefined ? sealed : trajectoryForAttempt(sealed, opts.attemptId);
   }
 
   async list(

@@ -49,7 +49,7 @@ function queuedRun(overrides: Partial<ReturnType<typeof Run.newQueued>> = {}) {
 // The teardown arms, recording what they were asked to stop.
 function teardownSpies() {
   return {
-    killCase: vi.fn(async () => {}),
+    killCase: vi.fn(async () => ({ status: "stopped" as const })),
     cancelQueued: vi.fn((_predicate: (job: CaseJob) => boolean) => 1),
     cancelLeased: vi.fn(async (_predicate: (job: CaseJob) => boolean) => 1),
   };
@@ -149,9 +149,9 @@ describe("RunService.cancel — the standalone run's user stop", () => {
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
-      killCase: async () => {
-        throw new Error("nomad unreachable");
-      },
+      // The seam ANSWERS now (arch-review 52, Wave 3) — this is the shape a cluster that could not be
+      // reached reports, and it must be read as "not converged" exactly as a rejection was.
+      killCase: async () => ({ status: "failed" as const, reason: "nomad unreachable" }),
       now: () => now,
     });
 
@@ -201,12 +201,16 @@ describe("RunService.cancel — the standalone run's user stop", () => {
       dispatcher: unusedDispatcher,
       store,
       now: () => now,
-      onAgentRunCancelled: async (_tenant, runId) => cascaded.push(runId),
+      onAgentRunCancelled: async (_tenant, runId) => {
+        cascaded.push(runId);
+        return { cancelled: 1, failures: [] };
+      },
     });
     const stopped = await owned.cancel({ tenant: "acme", id: "turn-alice", viewer: "alice" });
     expect(stopped.status).toBe("failed");
     expect(stopped.error?.code).toBe("CANCELLED");
-    await new Promise((r) => setTimeout(r, 0)); // the cascade is fired downstream of the commit
+    // AWAITED inside the teardown now (arch-review 52, Wave 3) — the cascade used to be fired into the void
+    // beside the commit, so a crash in between orphaned the whole subtree with nothing recording it owed.
     expect(cascaded).toEqual(["turn-alice"]); // stopping an agent run revokes the tree it caused
   });
 });
