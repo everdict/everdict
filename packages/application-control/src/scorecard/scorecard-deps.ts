@@ -1,4 +1,5 @@
 import type {
+  AdoptionDecision,
   CaseJob,
   CaseResult,
   Grader,
@@ -154,7 +155,7 @@ export interface ScorecardServiceDeps {
     tenant: string,
     runtime: string | undefined,
     work: RuntimeWorkRef,
-  ) => Promise<{ result?: CaseResult; established: boolean }>;
+  ) => Promise<AdoptionDecision>;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //

@@ -1,3 +1,4 @@
+import type { CaseResult } from "./eval-case.js";
 // ── A READ THAT FAILED IS NOT AN EMPTY SET (arch-review 53, Wave A.5) ────────────────────────────────
 //
 // The system kept converting "I could not find out" into "there is nothing", by one idiom in several
@@ -47,3 +48,19 @@ export async function readOrUnknown<T>(read: () => Promise<T>, what: string): Pr
 export function readEstablished<T>(result: ReadResult<T>): boolean {
   return result.kind !== "unknown";
 }
+
+// ── WHAT A RECOVERY DECIDED, ACROSS EVERY LANE IT ASKED (arch-review 54, Phase 2) ────────────────────
+//
+// The control-plane-side answer, folded from the per-backend `AdoptOutcome`s (@everdict/backends) of every runtime a record
+// could have been placed on. It is a union for the same reason `AdoptOutcome` is one, restated at the layer
+// that has to
+// ACT: the seam above this used to return `{ result?: CaseResult; established: boolean }` and its caller read
+// only `result`, so `unknown` — an adoption nobody could establish — became "nothing to adopt" and the record
+// was re-dispatched while its original job was possibly still running.
+//
+// `unknown` is not an error and not an absence. It is a decision NOT to decide, and the only correct response
+// is to leave the record for the next sweep.
+export type AdoptionDecision =
+  | { kind: "adopted"; result: CaseResult }
+  | { kind: "absent" }
+  | { kind: "unknown"; reason: string };

@@ -432,7 +432,13 @@ export function buildDispatch(deps: {
     for (const target of targets) {
       const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
       if (!spec) continue;
-      const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
+      // A SECRET READ THAT FAILED IS NOT AN EMPTY SECRET SET (arch-review 54, Phase 2). Falling back to `{}`
+      // built a backend with no cluster credential, which then failed to authenticate and reported "no
+      // sample" — a secret-store blip rendered as a quiet gap in the runtime lane, indistinguishable from a
+      // case that simply had nothing to report. Skipping the lane says the same thing honestly and costs the
+      // same sample.
+      const secretEnv = await runtimeSecretsFor(tenant).catch(() => undefined);
+      if (!secretEnv) continue;
       const backend = runtimeBuildBackend(spec, { secretEnv, tenant });
       if (!isWorkControllable(backend)) continue;
       const sample = await backend.sampleWork(work).catch(() => undefined);

@@ -57,6 +57,23 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/legacy-case-addressing-guard.test.ts"],
   },
   {
+    // Phase 2's rung: with the union in place, collapse the third case back into the second and the caller
+    // silently re-dispatches a job that may still be running.
+    name: "Phase 2 — an unestablished adoption becomes an absence",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: '    if (unresolved !== undefined) return { kind: "unknown", reason: unresolved };',
+    to: '    if (false && unresolved !== undefined) return { kind: "unknown", reason: "" };',
+    suite: ["--root", "apps/api", "src/composition/adoption-unknown-recovery.counterexample.test.ts"],
+  },
+  {
+    // …and the adapter half: a cluster that could not be asked reported as "the job is gone".
+    name: "Phase 2 — a failed cluster listing reads as absence again",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      if (found.kind === "unknown") return { status: "unknown" };',
+    to: "      // MUTATED: a failed read is an absence",
+    suite: ["--root", "packages/backends", "src/orchestrators/adoption-unknown.counterexample.test.ts"],
+  },
+  {
     name: "Wave B — the exact placement read resolves by case id",
     file: "packages/backends/src/orchestrators/k8s.ts",
     from: '        placementOf(api, work.externalJobId, work.namespace ?? this.opts.namespace ?? "default"),',

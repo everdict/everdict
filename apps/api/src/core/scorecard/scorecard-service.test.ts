@@ -3518,8 +3518,8 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       adoptWork: async (_tenant, _runtime, work) => {
         adoptedFor.push(work.runId);
         return work.externalJobId.includes("c2")
-          ? { result: passResult("c2"), established: true }
-          : { established: true };
+          ? { kind: "adopted" as const, result: passResult("c2") }
+          : { kind: "absent" as const };
       },
     });
     await store.create({
@@ -3583,7 +3583,9 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       attempts,
       newId: () => `adr-${n++}`,
       adoptWork: async (_tenant, _runtime, work) =>
-        work.externalJobId.includes("c2") ? { result: passResult("c2"), established: true } : { established: true },
+        work.externalJobId.includes("c2")
+          ? { kind: "adopted" as const, result: passResult("c2") }
+          : { kind: "absent" as const },
     });
     await store.create({
       id: "sc-adopt-receipt",

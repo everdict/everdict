@@ -8,6 +8,7 @@ import {
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
+  type AdoptionDecision,
   type Backend,
   type LogStream,
   isScreenAttachable,
@@ -19,12 +20,13 @@ import {
 import type {
   CaseResult,
   KillOutcome,
+  ReadResult,
   RegistryAuth,
   RuntimeSpec,
   RuntimeWorkRef,
   TraceEvent,
 } from "@everdict/contracts";
-import { worstKillOutcome } from "@everdict/contracts";
+import { readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -92,25 +94,39 @@ export function buildRuntimeAccess(deps: {
   // newest job of this case", and two runs of one case are two jobs — so it could hand run A the verdict run
   // B's job produced. It is GONE (arch-review 53, legacy removal): a row with no handle has no managed work
   // this system can name, and recovery re-dispatches rather than adopting a job it cannot identify.
+  // A UNION, NOT A VALUE BESIDE A FLAG (arch-review 54, Phase 2). This used to answer
+  // `{ result?: CaseResult; established: boolean }`, and `established` was set to false on `unknown` under a
+  // comment saying the caller must not re-dispatch on it. No caller ever read the flag. `resumeRun` took
+  // `outcome.result`, found it undefined, and re-dispatched — which is what the flag existed to prevent, for
+  // a whole review cycle, with the reason written directly above the line.
+  //
+  // A companion boolean can be half-consumed and a discriminated union cannot: there is no way to reach the
+  // result without saying which case you are in. The lanes are also genuinely three, not two — "we took a
+  // finished job's verdict", "the cluster says there is nothing to take", and "nobody could tell us" — and
+  // the third is the one whose cost is two live attempts of one execution.
   const adoptWorkFn = async (
     tenant: string,
     runtimeList: string | undefined,
     work: RuntimeWorkRef,
-  ): Promise<{ result?: CaseResult; established: boolean }> => {
+  ): Promise<AdoptionDecision> => {
     let harvested: CaseResult | undefined;
-    let established = true;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+    let unresolved: string | undefined;
+    const { unresolved: lanes } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isWorkControllable(backend)) return false;
       const outcome = await backend.adoptWork(work);
       if (outcome.status === "adopted") {
         harvested = outcome.result;
         return true;
       }
-      // `unknown` leaves liveness unestablished — the caller must not re-dispatch on it (double-spend).
-      if (outcome.status === "unknown") established = false;
+      if (outcome.status === "unknown") unresolved = "a runtime could not say whether this work is still live";
       return false;
     });
-    return { ...(harvested !== undefined ? { result: harvested } : {}), established };
+    if (harvested !== undefined) return { kind: "adopted", result: harvested };
+    // A lane we could not even resolve is the same fact as a cluster that would not answer: nothing about
+    // this work's liveness was established, so nothing may be decided from it.
+    if (unresolved !== undefined) return { kind: "unknown", reason: unresolved };
+    if (lanes.length > 0) return { kind: "unknown", reason: `runtime unresolved — ${lanes.join("; ")}` };
+    return { kind: "absent" };
   };
 
   // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
@@ -396,11 +412,7 @@ export async function runStartupRecovery(deps: {
   // The exact-work adopt and the ledger read that feeds it (arch-review 53, Wave B). Optional so a
   // composition that wires no attempt ledger keeps today's behavior — with the case-id resolution and its
   // documented blast radius, which is what the pre-handle rows have anyway.
-  adoptWorkFn?: (
-    tenant: string,
-    runtimeList: string | undefined,
-    work: RuntimeWorkRef,
-  ) => Promise<{ result?: CaseResult; established: boolean }>;
+  adoptWorkFn?: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
   workHandlesFor?: (executionId: string) => Promise<RuntimeWorkRef[]>;
 }): Promise<void> {
   const { scorecardStore, store, scorecardService, service, adoptWorkFn, workHandlesFor, owner, replicas } = deps;
@@ -430,16 +442,39 @@ export async function runStartupRecovery(deps: {
         // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
         // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
         // that mints none) falls back to "the newest job of this case", which can be another run's.
-        const handles = workHandlesFor ? await workHandlesFor(`evd-run-${r.id}`).catch(() => []) : [];
+        //
+        // …AND AN UNREADABLE LEDGER IS NOT AN EMPTY ONE (arch-review 54, Phase 2). `.catch(() => [])` here
+        // turned "the attempt ledger is down" into "this run placed no compute", which routed straight to the
+        // re-dispatch below. The read answers three ways now, and only a genuine `absent` may be acted on.
+        const handlesRead = workHandlesFor
+          ? await readOrUnknown(() => workHandlesFor(`evd-run-${r.id}`), "the run's runtime work handles")
+          : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
+        if (handlesRead.kind === "unknown") {
+          console.warn(
+            `[recovery] run ${r.id} left for the next sweep: ${handlesRead.reason} — re-dispatching without knowing where its compute is may double-spend a live job`,
+          );
+          return; // the claim is released by the sweep; deciding on an unread ledger is the defect, not the delay
+        }
+        const handles = handlesRead.kind === "read" ? handlesRead.value : [];
         let adopted: CaseResult | undefined;
         if (handles.length > 0 && adoptWorkFn) {
           for (const work of handles) {
-            const outcome = await adoptWorkFn(r.tenant, r.runtime, work).catch(
-              (): { result?: CaseResult; established: boolean } => ({ established: false }),
+            const decision = await adoptWorkFn(r.tenant, r.runtime, work).catch(
+              (err: unknown): AdoptionDecision => ({
+                kind: "unknown",
+                reason: err instanceof Error ? err.message : String(err),
+              }),
             );
-            if (outcome.result !== undefined) {
-              adopted = outcome.result;
+            // Exhaustive: the third case is the one the previous shape allowed a caller to skip.
+            if (decision.kind === "adopted") {
+              adopted = decision.result;
               break;
+            }
+            if (decision.kind === "unknown") {
+              console.warn(
+                `[recovery] run ${r.id} left for the next sweep: ${decision.reason} — its job may still be running`,
+              );
+              return;
             }
           }
         }

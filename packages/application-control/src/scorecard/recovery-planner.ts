@@ -1,4 +1,5 @@
-import type { CaseResult, Dataset } from "@everdict/contracts";
+import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef } from "@everdict/contracts";
+import { UpstreamError, readOrUnknown } from "@everdict/contracts";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
@@ -86,22 +87,59 @@ export class RecoveryPlanner {
           // has no managed work this system can name — it falls to re-dispatch, which is what the case-id
           // resolution was there to avoid and what it could not do safely: it harvested "the newest job of
           // this case", i.e. possibly another run's, and adoption ATTRIBUTES what it harvests.
-          const handles = this.deps.attempts
-            ? await this.deps.attempts
-                .list(c.id)
-                .then((rows) => rows.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])))
-                .catch(() => [])
-            : [];
+          //
+          // …AND THE LEDGER READ IS THREE-VALUED TOO (arch-review 54, Phase 2). `.catch(() => [])` turned an
+          // unreadable attempt ledger into "this case placed no compute", which routes to re-dispatch — the
+          // same collapse the standalone-run path had, one lane over. A batch resuming on an unreadable
+          // ledger would re-run every case whose job is still live.
+          const handlesRead = this.deps.attempts
+            ? await readOrUnknown(
+                () =>
+                  this.deps.attempts
+                    ? this.deps.attempts
+                        .list(c.id)
+                        .then((rows) => rows.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])))
+                    : Promise.resolve([]),
+                `the attempt handles of case ${c.id}`,
+              )
+            : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
+          if (handlesRead.kind === "unknown")
+            // The plan CANNOT BE MADE, so none is returned. Skipping the case would be worse than useless:
+            // a case that is not seeded is re-dispatched, which is exactly the double-spend this read
+            // protects against. The caller already treats a throw here as "not faithfully resumable" and
+            // leaves the batch for the next sweep, which is the honest outcome.
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { scorecardId: id, caseId: c.caseId },
+              `cannot plan this batch's resume: ${handlesRead.reason}. Re-dispatching a case whose compute may still be live would double-spend it.`,
+            );
+          const handles = handlesRead.kind === "read" ? handlesRead.value : [];
           let adoptable: CaseResult | undefined;
+          let unestablished: string | undefined;
           for (const work of handles) {
-            const outcome = await this.deps.adoptWork
-              ?.call(this.deps, tenant, c.runtime ?? input.runtime, work)
-              .catch(() => undefined);
-            if (outcome?.result !== undefined) {
-              adoptable = outcome.result;
+            const decision = await this.deps.adoptWork?.call(this.deps, tenant, c.runtime ?? input.runtime, work).catch(
+              (err: unknown): AdoptionDecision => ({
+                kind: "unknown",
+                reason: err instanceof Error ? err.message : String(err),
+              }),
+            );
+            // Exhaustive: `unknown` means this case's job may still be running, so it is neither adopted nor
+            // re-dispatched — it waits.
+            if (decision?.kind === "adopted") {
+              adoptable = decision.result;
+              break;
+            }
+            if (decision?.kind === "unknown") {
+              unestablished = decision.reason;
               break;
             }
           }
+          if (unestablished !== undefined)
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { scorecardId: id, caseId: c.caseId },
+              `cannot plan this batch's resume: ${unestablished}. This case's job may still be running, and a case left unseeded is re-dispatched.`,
+            );
           // A REJECTED TRANSITION IS NOT REJECTED EVIDENCE (arch-review 28 P0). The CAS below correctly
           // refuses to overwrite a child that settled on its own between the list above and this write —
           // and the seed was pushed regardless, so the resumed batch could aggregate the harvested result

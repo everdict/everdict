@@ -13,6 +13,7 @@ import {
   type KillOutcome,
   NotFoundError,
   OOM_KILLED,
+  type ReadResult,
   type RuntimeWorkRef,
   type TraceEvent,
   UpstreamError,
@@ -1024,7 +1025,10 @@ export class NomadBackend
       // Does exactly this job exist? A read that FAILED is `unknown` — re-dispatching on an unestablished
       // liveness double-spends — while a successful read that finds nothing is `absent` and safe.
       const found = await this.findJob(work.externalJobId, ns);
-      if (found === undefined) return { status: "absent" };
+      // Exhaustive, and the `unknown` arm is the one this rung exists for: a cluster that could not answer
+      // has told us nothing about whether the job is running, and re-dispatching on that double-spends.
+      if (found.kind === "unknown") return { status: "unknown" };
+      if (found.kind === "absent") return { status: "absent" };
       const allocId = await this.waitForAlloc(work.externalJobId, ns);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
@@ -1234,21 +1238,35 @@ export class NomadBackend
   async stopWorkload(name: string, namespace?: string): Promise<void> {
     try {
       const job = await this.findJob(name, namespace);
-      if (!job?.ID) return; // already gone
-      const nsq = job.Namespace && job.Namespace !== "default" ? `?namespace=${encodeURIComponent(job.Namespace)}` : "";
-      await this.http.request("DELETE", `/v1/job/${encodeURIComponent(job.ID)}${nsq}`);
+      if (job.kind !== "read" || !job.value.ID) return; // absent (already gone) or unreadable — the caller re-inspects
+      const nsq =
+        job.value.Namespace && job.value.Namespace !== "default"
+          ? `?namespace=${encodeURIComponent(job.value.Namespace)}`
+          : "";
+      await this.http.request("DELETE", `/v1/job/${encodeURIComponent(job.value.ID)}${nsq}`);
     } catch {
       // best-effort — the caller re-inspects
     }
   }
 
-  // Exact-id job lookup across namespaces (optionally pinned to one namespace). undefined = not found.
-  private async findJob(name: string, namespace?: string): Promise<{ ID?: string; Namespace?: string } | undefined> {
+  // Exact-id job lookup across namespaces (optionally pinned to one namespace).
+  //
+  // THREE-VALUED (arch-review 54, Phase 2). It used to answer `undefined` for both "the cluster refused to
+  // answer" and "the cluster answered and this job is not there", and `adoptWork` read that single value as
+  // `absent` — two lines below a comment stating that a failed read is `unknown`. So a Nomad 500 (leader
+  // election, rate limit, expired token) meant "this job is gone", and boot recovery re-dispatched a job that
+  // was still running: two attempts of one execution, both billing, both writing evidence.
+  //
+  // K8s already distinguished them. Two implementations of one contract disagreeing about what a failure MEANS
+  // is precisely what the shared conformance suite has to assert — and it did not, because it asked whether
+  // the method existed rather than what it answers when the cluster errors.
+  private async findJob(name: string, namespace?: string): Promise<ReadResult<{ ID?: string; Namespace?: string }>> {
     const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(name)}&namespace=*`);
-    if (res.status >= 300) return undefined;
-    return (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string }>).find(
+    if (res.status >= 300) return { kind: "unknown", reason: `the Nomad job listing returned ${res.status}` };
+    const found = (JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string }>).find(
       (j) => j.ID === name && (!namespace || (j.Namespace ?? "default") === namespace),
     );
+    return found === undefined ? { kind: "absent" } : { kind: "read", value: found };
   }
 
   // Change a single-task job's resource ask (CPU MHz / memory MiB) by read-modify-resubmit — Nomad has no in-place
@@ -1261,12 +1279,17 @@ export class NomadBackend
   ): Promise<{ detail: string }> {
     if (resources.cpu === undefined && resources.memoryMb === undefined)
       throw new BadRequestError("BAD_REQUEST", { name }, "resize needs cpu and/or memoryMb.");
-    let stub: { ID?: string; Namespace?: string } | undefined;
+    let read: ReadResult<{ ID?: string; Namespace?: string }>;
     try {
-      stub = await this.findJob(name, namespace);
+      read = await this.findJob(name, namespace);
     } catch (e) {
       throw new UpstreamError("UPSTREAM_ERROR", { name }, `job lookup failed: ${e instanceof Error ? e.message : e}`);
     }
+    // A listing the cluster refused is not a missing workload: answering 404 there tells an operator the
+    // job is gone when nobody knows that.
+    if (read.kind === "unknown")
+      throw new UpstreamError("UPSTREAM_ERROR", { name }, `job lookup failed: ${read.reason}`);
+    const stub = read.kind === "read" ? read.value : undefined;
     if (!stub?.ID) throw new NotFoundError("NOT_FOUND", { name }, "workload not found on the cluster.");
     const ns = stub.Namespace && stub.Namespace !== "default" ? stub.Namespace : undefined;
     const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";

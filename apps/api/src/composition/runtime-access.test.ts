@@ -28,7 +28,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
       store,
       scorecardService: { resume: async () => false },
       service: { resume: async () => ({ kind: "unresumable" }) }, // no caseSpec to re-dispatch
-      adoptWorkFn: async () => ({ established: true }), // no backend job survived to adopt
+      adoptWorkFn: async () => ({ kind: "absent" as const }), // the cluster confirmed no job survived to adopt
       owner: "cp-test",
       replicas: soloReplicas, // single process — every in-flight record is an orphan
     });
@@ -56,7 +56,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
           return { kind: "resumed" };
         },
       },
-      adoptWorkFn: async () => ({ established: true }),
+      adoptWorkFn: async () => ({ kind: "absent" as const }),
       owner: "cp-test",
       replicas: soloReplicas,
     });
@@ -90,7 +90,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
           return { kind: "already_settled", record: runRec("finished-mid-adopt", { status: "succeeded" }) };
         },
       },
-      adoptWorkFn: async () => ({ established: true }),
+      adoptWorkFn: async () => ({ kind: "absent" as const }),
       owner: "cp-test",
       replicas: soloReplicas,
     });

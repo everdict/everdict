@@ -19,7 +19,8 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type { CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
+import type {
+  AdoptionDecision, CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -45,7 +46,7 @@ export interface ScorecardRuntimeAccess {
     tenant: string,
     runtimeList: string | undefined,
     work: RuntimeWorkRef,
-  ) => Promise<{ result?: CaseResult; established: boolean }>;
+  ) => Promise<AdoptionDecision>;
   killUnhandled: (tenant: string, runtimeList: string | undefined) => Promise<KillOutcome>;
   // The exact-handle stop (arch-review 52, Wave 2) — `killUnhandled` answers for rows that recorded none.
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;

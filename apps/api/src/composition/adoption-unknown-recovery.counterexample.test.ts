@@ -1,5 +1,6 @@
 import type { ReplicaRegistry } from "@everdict/application-control";
-import type { CaseResult, RuntimeWorkRef } from "@everdict/contracts";
+import type { AdoptionDecision } from "@everdict/backends";
+import type { RuntimeWorkRef } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { runStartupRecovery } from "./runtime-access.js";
@@ -59,7 +60,7 @@ const aliveReplicas = (ids: string[]): ReplicaRegistry => ({
 const HANDLE: RuntimeWorkRef = { tenant: "acme", runId: "evd-run-orphan", externalJobId: "everdict-c1-aaaa" };
 
 // Boot recovery with one orphaned run whose compute we hold a handle for, and a cluster that cannot answer.
-async function recoverWith(adoption: { result?: CaseResult; established: boolean }): Promise<{ resumed: string[] }> {
+async function recoverWith(adoption: AdoptionDecision): Promise<{ resumed: string[] }> {
   const runs = new InMemoryRunStore();
   const scorecards = new InMemoryScorecardStore();
   await runs.create(runRec("orphan"));
@@ -85,9 +86,9 @@ async function recoverWith(adoption: { result?: CaseResult; established: boolean
 }
 
 // RED as of efe3657e, observed: `expected [ 'orphan' ] to deeply equal []`.
-describe.skip("[R54 PHASE-2 COUNTEREXAMPLE #5] an adoption that could not be established never re-dispatches", () => {
+describe("[R54 PHASE-2 COUNTEREXAMPLE #5 — CLOSED] an adoption that could not be established never re-dispatches", () => {
   it("leaves the run for the next sweep instead of resuming it", async () => {
-    const { resumed } = await recoverWith({ established: false });
+    const { resumed } = await recoverWith({ kind: "unknown", reason: "the cluster could not be asked" });
     expect(
       resumed,
       "adoption answered `unknown` and recovery re-dispatched anyway — the original job may still be running",
@@ -97,7 +98,7 @@ describe.skip("[R54 PHASE-2 COUNTEREXAMPLE #5] an adoption that could not be est
   it("still re-dispatches when the cluster confirmed the job is gone", async () => {
     // The other half: `absent` IS establishable, and re-dispatch is the correct answer to it. A fix that
     // parks on every non-adoption would strand every genuinely dead run.
-    const { resumed } = await recoverWith({ established: true });
+    const { resumed } = await recoverWith({ kind: "absent" });
     expect(resumed).toEqual(["orphan"]);
   });
 });

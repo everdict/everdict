@@ -35,18 +35,26 @@ const SWALLOW = /\.catch\s*\(\s*\(\s*\)\s*=>\s*(\[\s*\]|undefined|\(\{\s*\}\)|\{
 
 // GETTING ON THE ALLOWLIST means the caller genuinely does not decide on the answer — it is diagnostics, or a
 // path whose fallback is provably safe and stated. It never means "this one is fine".
+//
+// ONE ENTRY WAS DELETED RATHER THAN REWORDED (arch-review 54, Phase 2) — the adoption lane, admitted with:
+//
+//     "An unresolvable lane there falls back to RE-DISPATCH, which spends compute but cannot produce a wrong
+//      verdict, and `AdoptOutcome.unknown` already carries the doubt for the case that matters."
+//
+// Both halves were false. A second physical attempt of one execution bills twice, calls the provider twice,
+// writes competing evidence, and re-fires any external side effect the harness has; and the doubt `unknown`
+// carried was discarded by the caller, which is the thing the entry asserted could not happen. An allowlist
+// entry is a place the TYPE failed to say it — so the fix was the union (`AdoptionDecision`), not the exemption.
+//
+// The two that remain are reads whose callers genuinely decide nothing, and each says why.
 const ALLOWED = new Map<string, number>([
-  // ADOPTION's lane scan. An unresolvable lane there falls back to RE-DISPATCH, which spends compute but
-  // cannot produce a wrong verdict, and `AdoptOutcome.unknown` already carries the doubt for the case that
-  // matters (a live job we could not confirm). The kill paths in the same file do NOT swallow — they turn
-  // each unresolved lane into an explicit `KillOutcome.unknown`.
-  ["apps/api/src/composition/runtime-access.ts", 1],
-  // THE LIVE-METRICS SAMPLER. `sampleCaseRuntime` reads a case's current cpu/memory for a progress panel; an
-  // unresolvable lane means no sample, and no reader acts on the absence of one. Nothing here decides.
+  // THE LIVE-METRICS SAMPLER. `sampleCaseRuntime` reads a case's current cpu/memory for a progress panel. An
+  // unresolvable runtime means no sample, and no reader acts on the absence of one — the recording's runtime
+  // lane is simply shorter. Nothing downstream branches on it.
   ["apps/api/src/composition/dispatch.ts", 1],
   // THE CAPACITY-HINT READ. `runtimeEnvelopeFor` answers a runtime's declared maxConcurrent/memory budget so
-  // the scheduler can shape its queue; an unreadable registry drops it to the built-in defaults, which is a
-  // degradation in throughput and never a claim about what ran, stopped, or was judged.
+  // the scheduler can shape its queue; an unreadable registry drops it to the built-in defaults. That is a
+  // throughput degradation, never a claim about what ran, stopped, or was judged.
   ["apps/api/src/composition/services.ts", 1],
 ]);
 
@@ -75,6 +83,11 @@ describe("the unknown-collapse scanner — a failed authority read never becomes
       const lines = readFileSync(file, "utf8").split("\n");
       let found = 0;
       for (const [index, line] of lines.entries()) {
+        // A COMMENT IS NOT A CALL. Quoting the removed idiom to explain why it was removed is exactly what
+        // the case law asks for, and flagging it taught the opposite: the only entry this scanner's
+        // allowlist ever held was a comment describing the very defect the guard exists to prevent
+        // (arch-review 54, Phase 2). Prose cannot swallow a read.
+        if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
         if (!WATCHED_READS.some((re) => re.test(line))) continue;
         if (!SWALLOW.test(line)) continue;
         found++;

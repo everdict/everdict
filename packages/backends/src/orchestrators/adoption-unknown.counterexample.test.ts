@@ -37,7 +37,7 @@ const nomadWith = (status: number, text = ""): NomadHttp => ({
 const WORK = { tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" };
 
 // RED as of efe3657e, observed: `expected 'absent' to be 'unknown'`.
-describe.skip("[R54 PHASE-2 COUNTEREXAMPLE #7] a cluster that could not be asked answers `unknown`, never `absent`", () => {
+describe("[R54 PHASE-2 COUNTEREXAMPLE #7 — CLOSED] a cluster that could not be asked answers `unknown`, never `absent`", () => {
   it("Nomad: a 500 from the job listing is not evidence the job is gone", async () => {
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http: nomadWith(500, "leader lost") });
     const outcome = await backend.adoptWork(WORK);
