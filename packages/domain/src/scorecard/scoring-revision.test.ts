@@ -106,11 +106,15 @@ describe("appendScoringRevision / currentScoringPin — the append-only ledger",
       judges: [],
       results,
       inputObservation: unvouched,
+      judgmentsUnrecorded: "no judges ran in this fixture",
       createdAt: "t1",
     });
     expect(currentScoringPin(ledger)).toEqual({
       revision: 1,
       scorePlaneDigest: ledger[0]?.scorePlaneDigest,
+      // …and WHO judged it, stated rather than omitted (arch-review 53, Wave D) — this pass recorded no
+      // vector and says why, which is what makes "unrecorded" different from "nobody looked".
+      judgmentProvenance: { kind: "unrecorded", reason: "no judges ran in this fixture" },
       // …and WHAT that judgment read, projected off the revision itself (arch-review 46)
       inputObservation: { completed: false, setDigest: unvouched.setDigest },
     });

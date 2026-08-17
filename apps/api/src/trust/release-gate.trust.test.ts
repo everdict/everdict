@@ -94,6 +94,7 @@ describeTrust(
             revision: 1,
             judges: [],
             scorePlaneDigest: "sha256:plane",
+            judgmentProvenance: { kind: "recorded" as const, digest: "sha256:judgments" },
             inputObservation: { completed: true, cases: results.length },
             createdAt: new Date().toISOString(),
           },

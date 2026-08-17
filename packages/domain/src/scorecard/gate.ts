@@ -80,6 +80,27 @@ function inputTrustReasons(
             ? `the ${side}'s pinned judgment predates input observation — nothing states what its judges read; refused unless the policy records allowUnverifiedInput`
             : `the ${side}'s pinned judgment states no receipt vouches for what its judges read — refused unless the policy records allowUnverifiedInput`,
       });
+    // ── AND WHO JUDGED IT (arch-review 53, Wave D) ────────────────────────────────────────────────
+    //
+    // The input half above answers "is what the judges READ still vouched for". This answers the other half:
+    // "does anything say WHICH invocation produced the verdicts". They are independent — a comparison can be
+    // fully receipt-vouched on input and completely anonymous on authorship, which is exactly the shape the
+    // durable batch lane produces when a case activity retries and a second invocation of one (case, judge)
+    // commits over the first's sealed evidence plane.
+    //
+    // A pin with NO provenance statement at all is a pre-Wave-D revision. It is treated as unrecorded rather
+    // than waved through: history is not retro-vouched by its age, the same call the input half already makes.
+    // Asked only of a side that HAS a pin. A missing pin is the pre-ledger record, and the input half above
+    // already refuses it as `legacy_unverified` — a second reason for the same absence is noise, not rigour.
+    const provenance = pin?.judgmentProvenance;
+    if (pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)
+      reasons.push({
+        kind: "judgment_unrecorded",
+        detail:
+          provenance?.kind === "unrecorded"
+            ? `the ${side}'s pinned judgment records no author — ${provenance.reason}; refused unless the policy records allowUnrecordedJudgments`
+            : `the ${side}'s pinned judgment predates judgment provenance — nothing states which invocation produced its verdicts; refused unless the policy records allowUnrecordedJudgments`,
+      });
   }
   return reasons;
 }

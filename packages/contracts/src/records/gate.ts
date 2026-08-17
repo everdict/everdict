@@ -48,6 +48,10 @@ export const GatePolicySchema = z.object({
   // COMPLETED divergence (arch-review 47 P0-3: recorded doubt must be enforced doubt, and an implicit pass
   // over unvouched input was exactly the gap).
   allowUnverifiedInput: z.boolean().optional(),
+  // The EXPLICIT waiver for a pinned judgment with no recorded author (judgment_unrecorded — pre-Wave-D
+  // revisions, a pass whose stage could not be read). Recorded on the decision like every other
+  // acknowledgement; a caller gating over history says so rather than the gate assuming it.
+  allowUnrecordedJudgments: z.boolean().optional(),
   // Share of the compared scores that may be non-measurements (dead graders / skipped judges). Enforced
   // INDEPENDENTLY of the comparability mode: unmeasured scores do not make a comparison `partial`, they
   // hollow it out from the inside, so a caller that sets this means it under either mode.
@@ -102,6 +106,12 @@ export const GateReasonSchema = z.object({
     // that PREDATES input observation entirely rides as legacy and is visible on the pin, not a reason.
     "input_diverged",
     "input_unverified",
+    // The pinned judgment's AUTHOR is not recorded (arch-review 53, Wave D). The execution input may be
+    // fully receipt-vouched and the score plane digested, and still nothing says WHICH invocation of which
+    // judge produced the verdicts — which matters because the durable batch lane retries a case activity up
+    // to ten times, so two invocations of one (case, judge) is ordinary. Refused by default and waivable
+    // only by the recorded allowUnrecordedJudgments policy, exactly like `input_unverified`.
+    "judgment_unrecorded",
   ]),
   detail: z.string(),
   caseId: z.string().optional(),
@@ -146,6 +156,15 @@ export const GateScoringPinSchema = z.object({
   // here can: two invocations that agree leave identical plane digests. Absent = the revision carries no
   // vector (predates it, or ran with no scoring stage to arbitrate) — unrecorded, never "no judgments".
   judgmentReceiptSetDigest: z.string().optional(),
+  // The pinned side's judgment provenance (arch-review 53, Wave D) — projected from the revision so a gate
+  // can refuse a comparison whose judgment AUTHOR is unknown, exactly as it already refuses one whose
+  // execution INPUT is unvouched.
+  judgmentProvenance: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("recorded"), digest: z.string() }),
+      z.object({ kind: z.literal("unrecorded"), reason: z.string() }),
+    ])
+    .optional(),
 });
 export type GateScoringPin = z.infer<typeof GateScoringPinSchema>;
 

@@ -458,6 +458,22 @@ export const ScoringRevisionSchema = z.object({
   // carrying (and re-canonicalizing) every receipt. Born with the vector — never derivable separately, for
   // the same reason `scorePlaneDigest` is born with the plane.
   judgmentReceiptSetDigest: z.string().optional(),
+  // ── PROVENANCE IS STATED, NEVER OMITTED (arch-review 53, Wave D) ─────────────────────────────────
+  //
+  // `judgments` being absent said two different things at once: "this pass could not mint a vector" and
+  // "nothing has been read here yet". Wave 5 gave the detached re-score a vector and left every INITIAL
+  // revision expressing its provenance by absence — while the durable batch lane retries a case activity up
+  // to ten times, so a second invocation of the same (case, judge) is ordinary rather than exotic. A reader
+  // could not tell a pass that recorded nothing from a pass that had nothing to record.
+  //
+  // Every revision born after this wave carries one of the two, and an `unrecorded` one names its reason. A
+  // revision with NEITHER is pre-Wave-D history — the gate treats that as unrecorded, and says so.
+  judgmentProvenance: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("recorded"), digest: z.string() }),
+      z.object({ kind: z.literal("unrecorded"), reason: z.string() }),
+    ])
+    .optional(),
   createdAt: z.string(),
   createdBy: z.string().optional(),
 });

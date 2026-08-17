@@ -1,7 +1,12 @@
 import type { CaseResult, GateScoringPin } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type GateInput, applyInputTrust, evaluateGate } from "./gate.js";
-import { appendScoringRevision, currentScoringPin } from "./scoring-revision.js";
+import {
+  appendScoringRevision,
+  currentScoringPin,
+  initialScoringPassId,
+  judgmentReceiptsFromPlane,
+} from "./scoring-revision.js";
 
 // ── EVERY JUDGING IS A PASS, NOT JUST THE DETACHED ONE (arch-review 53, Wave D) ──────────────────────
 //
@@ -36,17 +41,33 @@ const results: CaseResult[] = [
   },
 ];
 
+// The initial pass AS THE DRIVERS BUILD IT — the receipts derived from the plane the settle adopted, under
+// the batch's own pass id. A fixture that skipped that derivation would be asserting against a shape no
+// production path produces, which is how Wave 5's first attempt at this certified a gap instead of closing it.
 const initialPass = () =>
   appendScoringRevision(undefined, {
     kind: "initial",
     judges: [{ id: "a", version: "1" }],
     results,
+    judgments: judgmentReceiptsFromPlane(results, initialScoringPassId("sc-1")),
+    inputObservation: { completed: true, cases: results.length, diverged: 0, vouched: results.length },
+    createdAt: "2026-08-17T00:00:00.000Z",
+  } as never);
+
+// …and the same pass with nothing to record — the lane that HAS no vector says so, which is the other half
+// of "provenance is stated, never omitted".
+const unrecordedPass = () =>
+  appendScoringRevision(undefined, {
+    kind: "initial",
+    judges: [{ id: "a", version: "1" }],
+    results,
+    judgmentsUnrecorded: "the stage could not be read at settle",
     inputObservation: { completed: true, cases: results.length, diverged: 0, vouched: results.length },
     createdAt: "2026-08-17T00:00:00.000Z",
   } as never);
 
 // RED as of 186f9fd9: `expected undefined to be defined` — only the re-score path passes `judgments`.
-describe.skip("[R53 WAVE-D COUNTEREXAMPLE #18] an initial revision states which invocations it adopted", () => {
+describe("[R53 WAVE-D COUNTEREXAMPLE #18 — CLOSED] an initial revision states which invocations it adopted", () => {
   it("carries a judgment receipt vector, like the re-score revision does", () => {
     const revisions = initialPass();
     const born = revisions[0];
@@ -66,18 +87,21 @@ describe.skip("[R53 WAVE-D COUNTEREXAMPLE #18] an initial revision states which 
 
 // RED as of 186f9fd9: `expected 'unrecorded' to be …` — provenance is expressed by ABSENCE, so a consumer
 // cannot tell "this pass recorded nothing" from "this field has not been read yet".
-describe.skip("[R53 WAVE-D COUNTEREXAMPLE #19] provenance is stated, never omitted", () => {
+describe("[R53 WAVE-D COUNTEREXAMPLE #19 — CLOSED] provenance is stated, never omitted", () => {
   it("a revision says recorded or unrecorded, and an unrecorded one says why", () => {
-    const born = initialPass()[0] as { judgmentProvenance?: { kind: string; reason?: string } } | undefined;
+    const recorded = initialPass()[0] as { judgmentProvenance?: { kind: string; reason?: string } } | undefined;
+    expect(recorded?.judgmentProvenance?.kind, "provenance is absent rather than stated").toBe("recorded");
 
-    expect(born?.judgmentProvenance?.kind, "provenance is absent rather than stated").toBeTypeOf("string");
-    if (born?.judgmentProvenance?.kind === "unrecorded")
-      expect(born.judgmentProvenance.reason, "an unrecorded provenance must name its reason").toBeTypeOf("string");
+    const unrecorded = unrecordedPass()[0] as { judgmentProvenance?: { kind: string; reason?: string } } | undefined;
+    expect(unrecorded?.judgmentProvenance?.kind).toBe("unrecorded");
+    expect(unrecorded?.judgmentProvenance?.reason, "an unrecorded provenance must name its reason").toContain(
+      "stage could not be read",
+    );
   });
 });
 
 // RED as of 186f9fd9: `expected 'pass' to be 'not_comparable'` — the gate reads inputObservation only.
-describe.skip("[R53 WAVE-D COUNTEREXAMPLE #20] a gate refuses a comparison whose judgment author is unknown", () => {
+describe("[R53 WAVE-D COUNTEREXAMPLE #20 — CLOSED] a gate refuses a comparison whose judgment author is unknown", () => {
   it("treats unrecorded judgment provenance the way it already treats unverified input", () => {
     const pin = (over: Partial<GateScoringPin> = {}): GateScoringPin =>
       ({
@@ -123,7 +147,7 @@ describe.skip("[R53 WAVE-D COUNTEREXAMPLE #20] a gate refuses a comparison whose
 });
 
 // RED as of 186f9fd9: the pin projects only what the revision holds, and the revision holds nothing.
-describe.skip("[R53 WAVE-D COUNTEREXAMPLE #21] the pin carries the provenance the gate needs", () => {
+describe("[R53 WAVE-D COUNTEREXAMPLE #21 — CLOSED] the pin carries the provenance the gate needs", () => {
   it("projects the initial revision's judgment digest onto the pin", () => {
     const pinned = currentScoringPin(initialPass());
     expect(

@@ -2,13 +2,15 @@ import type {
   CaseCommitReceipt,
   CaseResult,
   GateScoringPin,
+  JudgmentClaim,
   JudgmentReceipt,
   Score,
   ScoringRevision,
 } from "@everdict/contracts";
-import { encodeCaseKey } from "@everdict/contracts";
+import { ScoreSchema, encodeCaseKey } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import { caseObservationDigest } from "./case-result-digest.js";
+import { judgeEvidenceEmitter } from "./judge-execution-spans.js";
 import { childKey } from "./scoring-plan.js";
 
 // Scoring identity (docs/architecture/experiment-identity: the JUDGMENT axis) — the pure decisions behind
@@ -192,6 +194,11 @@ export interface ScoringPassInput {
   // "none" the same evidence, which is the failure `inputObservation.completed` exists to prevent one field
   // over.
   judgments?: readonly JudgmentReceipt[];
+  // WHY this pass recorded no vector, when it did not (arch-review 53, Wave D). Required whenever
+  // `judgments` is absent: a revision states its provenance either way, so `recorded` and "nobody has looked
+  // yet" stop being the same absence. `appendScoringRevision` refuses to invent one — a caller with nothing
+  // to say says what it has nothing to say ABOUT.
+  judgmentsUnrecorded?: string;
   // The pass that produced it — the marker clears in the same write, so this is the only place the id survives.
   passId?: string;
   createdAt: string;
@@ -236,8 +243,19 @@ export function appendScoringRevision(
         ? {
             judgments: orderedReceipts(input.judgments),
             judgmentReceiptSetDigest: judgmentReceiptSetDigest(input.judgments),
+            // …and the STATEMENT of provenance, born with the vector (arch-review 53, Wave D). A reader asks
+            // this one field instead of inferring from an absence that used to mean two things.
+            judgmentProvenance: {
+              kind: "recorded" as const,
+              digest: judgmentReceiptSetDigest(input.judgments),
+            },
           }
-        : {}),
+        : {
+            judgmentProvenance: {
+              kind: "unrecorded" as const,
+              reason: input.judgmentsUnrecorded ?? "this pass stated no judgment provenance",
+            },
+          }),
       inputObservation: input.inputObservation,
       ...(input.passId !== undefined ? { passId: input.passId } : {}),
       createdAt: input.createdAt,
@@ -272,6 +290,10 @@ export function currentScoringPin(scoring: ScoringRevision[] | undefined): GateS
     // carries it forward, so a disputed decision can be traced to the exact judge invocations it shipped on
     // rather than to a plane digest two invocations would share.
     ...(last.judgmentReceiptSetDigest !== undefined ? { judgmentReceiptSetDigest: last.judgmentReceiptSetDigest } : {}),
+    // …and the provenance STATEMENT, so the gate reads one field rather than inferring from the digest's
+    // absence (arch-review 53, Wave D). A pre-Wave-D revision carries neither, and the gate calls that
+    // unrecorded — which is what it is.
+    ...(last.judgmentProvenance !== undefined ? { judgmentProvenance: last.judgmentProvenance } : {}),
   };
 }
 
@@ -303,4 +325,75 @@ export function scoringPinInputDiverged(pin: GateScoringPin | undefined): number
   const observed = pin?.inputObservation;
   if (observed === undefined || !observed.completed) return undefined;
   return observed.diverged !== undefined && observed.diverged > 0 ? observed.diverged : undefined;
+}
+
+// ── THE INITIAL PASS'S RECEIPTS, FROM THE PLANE IT ADOPTED (arch-review 53, Wave D) ──────────────────
+//
+// The detached re-score mints its receipts from the STAGE, which is where its competing invocations are
+// visible. An initial pass has no stage: it judges each case as it lands and the adopted judgment IS the row
+// on the plane. That is not a reason to record nothing — the invocation identity still exists (the pass id,
+// and on the durable lane the retry's claim), and the plane still says which judge produced which bytes.
+//
+// So the initial receipts are derived from the plane: one per (case, judge) that actually scored, carrying
+// the same `(scoringPassId, CaseKey, judgeId, claim?)` coordinate, the same canonical digest of the ADOPTED
+// bytes, and the same minted emitter. A judge that produced no row for a case gets no receipt, because
+// nothing was adopted for it — the vector says what was, not what was selected.
+//
+// `claimFor` answers the per-case invocation ordinal where a lane has one (the durable driver's retry) and
+// `undefined` where it does not (the in-process loop judges once per pass). Never defaulted to (0, 1) —
+// `judgeEvidenceEmitter` names a claimless invocation differently, and inventing an ordinal would make the
+// receipt disagree with the emitter it carries.
+export function judgmentReceiptsFromPlane(
+  results: readonly CaseResult[],
+  passId: string,
+  claimFor?: (result: CaseResult) => JudgmentClaim | undefined,
+): JudgmentReceipt[] {
+  const receipts: JudgmentReceipt[] = [];
+  for (const result of results) {
+    const byJudge = new Map<string, Score[]>();
+    for (const score of result.scores ?? []) {
+      // `judge:<id>` is the metric family a judge writes; a grader's rows are not judgments and carry no
+      // invocation identity to record.
+      const judgeId = score.metric.startsWith("judge:") ? score.metric.slice("judge:".length) : undefined;
+      if (judgeId === undefined) continue;
+      const rows = byJudge.get(judgeId) ?? [];
+      rows.push(score);
+      byJudge.set(judgeId, rows);
+    }
+    if (byJudge.size === 0) continue;
+    const claim = claimFor?.(result);
+    for (const [judgeId, scores] of [...byJudge.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      receipts.push({
+        ref: {
+          scoringPassId: passId,
+          case: { caseId: result.caseId, ...(result.trial !== undefined ? { trial: result.trial } : {}) },
+          judgeId,
+          ...(claim !== undefined ? { claim } : {}),
+        },
+        scoreDigest: canonicalJudgmentScores(scores),
+        evidenceEmitter: judgeEvidenceEmitter(judgeId, { passId, ...(claim !== undefined ? { claim } : {}) }),
+      });
+    }
+  }
+  return receipts;
+}
+
+// The same storage-path-independent digest the re-score path uses (arch-review 16 P1-6): parse to apply the
+// schema's defaults, sort by metric to drop an ordering that is not content, then digest canonically. Shared
+// so an initial receipt and a re-score receipt over identical bytes produce identical digests — which is the
+// whole point of being able to compare two revisions' vectors.
+function canonicalJudgmentScores(scores: readonly Score[]): string {
+  const parsed = scores.map((s) => ScoreSchema.parse(s)).sort((a, b) => a.metric.localeCompare(b.metric));
+  return contentDigest(parsed);
+}
+
+// ── THE INITIAL PASS HAS A NAME (arch-review 53, Wave D) ────────────────────────────────────────────
+//
+// A batch's first judging ran anonymously: `applyJudges` took its pass scope as an OPTIONAL argument and the
+// two batch drivers passed none, so every initial evidence plane sealed as a bare `judge:<id>` and the
+// revision that adopted it recorded no author. Deterministic per batch, because there is exactly one initial
+// pass per scorecard by construction — a second judging of the same plane is a re-score, which mints its own
+// id through the stage.
+export function initialScoringPassId(scorecardId: string): string {
+  return `initial:${scorecardId}`;
 }

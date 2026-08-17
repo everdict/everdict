@@ -72,6 +72,17 @@ export function attemptIdOf(executionId: string, generation: number): string {
   return `${executionId}#g${generation}`;
 }
 
+// The generation back out of an attempt id — the read side of the spelling above (arch-review 53, Wave D).
+// `undefined` for anything that does not carry one, which includes the unisolated attempt: it has a ledger
+// row and no recording fence, so it HAS no generation, and a caller must state that absence rather than
+// substitute a number. Right-anchored, because an execution id may itself contain `#`.
+export function generationOfAttempt(attemptId: string | undefined): number | undefined {
+  if (attemptId === undefined) return undefined;
+  const match = /#g(\d+)$/.exec(attemptId);
+  const parsed = match?.[1] !== undefined ? Number.parseInt(match[1], 10) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 // What a commit attempt learns. `already_committed` carries the receipt that won, because the caller's next
 // question is always "then whose is it" — and answering it from a second read would be racing again.
 export type CaseCommitOutcome =

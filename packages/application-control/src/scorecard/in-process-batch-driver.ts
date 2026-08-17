@@ -34,7 +34,9 @@ import {
   appendScoringRevision,
   caseReason,
   childKey,
+  initialScoringPassId,
   inputObservationOf,
+  judgmentReceiptsFromPlane,
   verdictSummaryOf,
   worldCohortOf,
 } from "@everdict/domain";
@@ -702,6 +704,12 @@ export class InProcessBatchDriver {
         // …and each judge's own evidence plane seals only while this loop still holds the batch. Asked after
         // the judge call, because the judge call is where a takeover has time to happen (arch-review 34 P1).
         () => this.shared.holdsBatch(id, epoch),
+        // EVERY JUDGING IS A PASS (arch-review 53, Wave D). The initial batch judges under a pass id of its
+        // own, so its evidence planes are named `judge:<id>#<pass>` instead of the bare `judge:<id>` an
+        // anonymous invocation left behind — and so the revision below can state which invocation it
+        // adopted. No claim: this loop judges each case in ONE call with no per-case retry seam, and
+        // inventing an ordinal would make the receipt disagree with the emitter it carries.
+        { passId: initialScoringPassId(id) },
       );
       // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
       // (live visibility + whatever went out survives even if the batch dies midway). If not wired,
@@ -1117,6 +1125,10 @@ export class InProcessBatchDriver {
             // WHAT THE JUDGES READ (arch-review 46) — the receipts the rebuild READ, the same frozen set the
             // terminal write conditions on. A run with no ledger says so rather than staying silent, because
             // silence here is the shape a later gate would have read as agreement.
+            // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D) — derived from the plane
+            // this settle adopted, under the same pass id the judging ran with. An initial pass has no
+            // stage to mint from; the adopted rows ARE what it certifies.
+            judgments: judgmentReceiptsFromPlane(scorecard.results, initialScoringPassId(id)),
             inputObservation: inputObservationOf(
               scorecard.results,
               accounted.receipts

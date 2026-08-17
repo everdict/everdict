@@ -17,6 +17,7 @@ import {
   caseKeyOf,
   encodeCaseKey,
 } from "@everdict/contracts";
+import { generationOfAttempt } from "@everdict/contracts";
 import {
   type CircuitBreaker,
   type HarnessSecretMaps,
@@ -36,7 +37,9 @@ import {
   applyGradingPlan,
   caseReason,
   childKey,
+  initialScoringPassId,
   inputObservationOf,
+  judgmentReceiptsFromPlane,
   selectSubsetCases,
   verdictSummaryOf,
   worldCohortOf,
@@ -623,6 +626,16 @@ export class WorkflowBatchDriver {
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       // The child run id rides along so the judge's own execution seals as a judge:<id> plane on it (the case's
       // execution plane sealed just above, so the judge plane joins an already-named trajectory).
+      // The per-invocation ordinal this lane can state, or nothing (arch-review 53, Wave D). An unisolated
+      // attempt has a ledger row and NO recording generation, and inventing one here is exactly the
+      // fabrication `identity-sentinel-guard` refuses — the receipt says "no ordinal" by carrying no claim,
+      // which is also what `judgeEvidenceEmitter` names differently.
+      const judgeClaimOf = (
+        attemptId: string | undefined,
+      ): { claim: { generation: number; attempt: number } } | undefined => {
+        const generation = generationOfAttempt(attemptId);
+        return generation === undefined ? undefined : { claim: { generation, attempt: 1 } };
+      };
       if (ctx.judges.length > 0) {
         await this.scoring
           .applyJudges(
@@ -641,6 +654,20 @@ export class WorkflowBatchDriver {
             // P0). The probe was added to the in-process loop and not to this one, so the very race the fix
             // is named after stayed open on the driver an operator running Temporal actually uses.
             () => this.shared.holdsBatch(id, ctx.driverEpoch),
+            // EVERY JUDGING IS A PASS, AND THIS LANE'S INVOCATIONS ARE PLURAL (arch-review 53, Wave D). The
+            // case activity carries `retry: { maximumAttempts: 10 }` and a one-minute heartbeat timeout, so
+            // a worker death re-runs the case and judges it again — the first invocation may already have
+            // sealed its evidence plane. The claim is what tells the two apart: its generation is the
+            // PHYSICAL attempt's (a re-run opens a new ledger row, so the number moves with the re-run) and
+            // its attempt is this driver's own retry index.
+            {
+              passId: initialScoringPassId(id),
+              // The generation comes from the physical attempt this case actually ran as — a re-run of the
+              // activity opens a new ledger row, so the number moves with the re-run. Absent (an unisolated
+              // attempt that could not claim a recording fence) means this lane has no ordinal to state, and
+              // the receipt says so by carrying no claim rather than by inventing one.
+              ...(judgeClaimOf(winnerAttemptId) ?? {}),
+            },
           )
           .catch(() => {});
       }
@@ -853,6 +880,11 @@ export class WorkflowBatchDriver {
       // WHAT THE JUDGES READ (arch-review 46), against the receipts this finalize already holds — the same
       // `committed` list the divergence check above ran on, so the revision states the input the settle
       // conditioned on rather than a second read of a ledger that can move between them.
+      // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D). The per-case claims are not
+      // reachable from here (the activity that judged has returned), so the vector is derived from the plane
+      // under this batch's pass id — the coordinate a reader needs to find the evidence, with the ordinal
+      // left to the emitter the seal itself minted.
+      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id)),
       inputObservation: inputObservationOf(results, { kind: "read", receipts: committed }),
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),

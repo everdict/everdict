@@ -23,7 +23,9 @@ import {
   ScorecardBatch,
   type ScorecardTransition,
   appendScoringRevision,
+  initialScoringPassId,
   inputObservationOf,
+  judgmentReceiptsFromPlane,
   nextScoringRevision,
   scorecardModels,
   summarizeScorecard,
@@ -428,6 +430,10 @@ export class ScorecardIngestService {
       // bytes. That is a real and permanent gap, and the revision states it — an ingested judgment must never
       // be confusable with one whose inputs the ledger stands behind. The plane's own set digest still rides
       // along, so two ingests of the same traces are still comparable to each other.
+      // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D) — derived from the plane this
+      // ingest adopted, under its own pass id. Ingest judges once, in this process, with no retry seam, so
+      // the receipts carry no claim.
+      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id)),
       inputObservation: inputObservationOf(results, {
         kind: "unavailable",
         reason:
