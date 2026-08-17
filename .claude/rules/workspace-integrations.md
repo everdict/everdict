@@ -1,5 +1,5 @@
 ---
-paths: "apps/api/src/integrations/github-app-service.ts,apps/api/src/integrations/mattermost-service.ts,apps/api/src/integrations/mattermost-command-service.ts,apps/api/src/integrations/ci-link-service.ts,apps/api/src/integrations/trace-sink-service.ts,apps/api/src/oauth/github-app.ts"
+paths: "packages/application-control/src/{github-app,mattermost,ci-link,trace-sink}/**,apps/api/src/infrastructure/oauth/**,apps/api/src/api/workspace/**"
 ---
 # Workspace-scoped integrations rules (push)
 

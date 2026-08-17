@@ -1,5 +1,5 @@
 ---
-paths: "packages/suite/**"
+paths: "packages/{domain,application-execution,application-control}/**"
 ---
 # Suite rules (push)
 

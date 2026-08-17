@@ -1,3 +1,6 @@
+---
+paths: "packages/{contracts,domain,application-control,db,storage,registry}/**,apps/api/**"
+---
 # Platform-event rules (push) — facts from transitions
 
 SSOT: `docs/architecture/event-plumbing.md` (E0 grammar + same-tx outbox · E1 cursor consumers · E2 coverage).

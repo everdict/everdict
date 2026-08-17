@@ -54,6 +54,12 @@ run("pnpm cone", "pnpm", ["cone"]);
 run("pnpm web-imports", "pnpm", ["web-imports"]);
 run("pnpm migrations", "pnpm", ["migrations"]);
 run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
+// ── CAN THE CONVENTIONS STILL FIRE? ───────────────────────────────────────────────────────────────
+// `.claude/rules/*` are injected by path glob. A rule pointed at code that MOVED is not a weak rule, it is
+// an absent one — and absent silently. Two were found dead this way (`suite.md` at the folded
+// `packages/suite`, `workspace-integrations.md` at six files the api-layer refactor relocated), both holding
+// invariants later reviews found broken.
+run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 // ── DOES THE SUITE ACTUALLY CATCH THIS? (arch-review 53, Wave F) ──────────────────────────────────
 // Neutralize each protocol one at a time and require the suite that claims to enforce it to go RED. A green
 // suite proves the tests pass; this proves they would fail if the protocol were removed — which is the

@@ -7,9 +7,12 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - Owns **short rules that conflict with ecosystem defaults** — things the model would
   otherwise "do the standard TS way" and get wrong for Everdict.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
-- Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `job-runner`,
+- Current rules: `protocol`, `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `job-runner`,
   `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `mcp`, `auth`, `db`, `registry`,
-  `web`, `datasets`, `suite`, `workspace-integrations`, `testing`, `infra-deploy`, `ci`.
+  `web`, `datasets`, `suite`, `events`, `workspace-integrations`, `testing`, `infra-deploy`, `ci`.
+- **`protocol.md` is the cross-cutting one** — the five laws for the seam between a decision and an effect.
+  It is pushed across the kernel + control plane because that seam is where this repo's defects recur, and
+  they recur as *correct nouns consumed as annotations*, which no layering rule can see.
 
 ## PULL layer — `.claude/skills/*/`
 - Model-driven: matched via frontmatter `description`, or invoked explicitly as `/name`.
@@ -19,6 +22,9 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
   a `references/` folder for detail.
 
 ## Skills (pull)
+- `protocol/`       — **effects and authority**: the five laws, the design checklist to run BEFORE writing an
+  effect path, the case law (every recurring defect with file, line, and the wrong reasoning verbatim), and
+  the verification protocol (mutation-first, non-vacuous fixtures, when a scanner is legitimate).
 - `foundation/`     — module deps, the spine (4 concerns + Backend placement), error model, conventions.
 - `backends/`       — distributed execution: Backend vs Driver, `CaseJob`; the SaaS operational layer
   (capacity-aware + tenant-fair `Scheduler`, trust-zone isolation, secrets, budgets, autoscaling).
@@ -37,8 +43,8 @@ We split "how to build Everdict" knowledge by **how the knowledge fails**:
 - `infra-deploy/`   — Docker/K8s/Helm, IaC, secrets, GitOps (planned — `deploy/` is dev compose so far).
 - `docs-update`     — `/docs-update` command: audit drift between code and skill references (planned).
 
-(Exist today: `foundation`, `backends`, `topology`, `api-layer`, `web`, `evaluation`, `self-hosted-runner`,
-`desktop`, `core-contracts`, `drivers`, `harnesses`, `graders`, `testing`. Stubs: `infra-deploy` (waiting on real
-deploy infra), `docs-update`.)
+(Exist today: `protocol`, `foundation`, `backends`, `topology`, `api-layer`, `web`, `evaluation`,
+`self-hosted-runner`, `desktop`, `core-contracts`, `drivers`, `harnesses`, `graders`, `testing`, `ci`,
+`agent-runtime`, `evaluation`. Stubs: `infra-deploy` (waiting on real deploy infra), `docs-update`.)
 
 Language: all skill/rule bodies are **English** (see CLAUDE.md language policy).

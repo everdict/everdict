@@ -1,0 +1,197 @@
+# Case law — how each law was paid for
+
+Every entry is a real defect that shipped, passed review, and was found by a later one. They are recorded
+with the *reasoning that was written down at the time*, because that reasoning is persuasive — it is what the
+next session will think too. The line numbers are as of `66afa78a` (2026-08-17) and drift; the shapes do not.
+
+Read the entry that matches your temptation, not the whole file.
+
+---
+
+## L1 — Authority before effect
+
+### 1.1 The pre-effect hook that no-ops
+`packages/application-control/src/scorecard/case-outcome-committer.ts:600`,
+`packages/application-control/src/run/run-service.ts:1288`
+
+```ts
+async stampWork(work: RuntimeWorkRef): Promise<void> {
+  const attempts = this.deps.attempts;
+  if (!attempts || work.attemptId === undefined) return;   // ← resolves; nothing persisted
+  await attempts.recordWork(work.attemptId, work);
+}
+```
+Called from `onReserved`, which the backend awaits before creating the cluster object. With no attempt id the
+hook **succeeds**, so the backend submits and the external job exists with nothing naming it. The wrong
+reasoning, written above it: *"an attempt that opened no ledger row has no handle to stamp either"* — true,
+and it is exactly the case that must refuse the dispatch rather than proceed silently.
+
+**Shape:** the store returns a proof (`PersistedWorkIntent`) and `submit(job, intent)` requires it. There is
+then no state in which the effect runs without the proof, and no hook to forget.
+
+### 1.2 The ledger fault that degrades into no identity
+`packages/application-control/src/execution/open-physical-attempt.ts:68`
+```ts
+const opened = await attempts.open(input).catch(() => undefined);
+if (!opened) return { unisolated: true };                   // ← no attemptId, dispatch continues
+```
+The comment above it is CORRECT and still insufficient: a ledger outage must not fall back to the recording
+store's self-mint (that re-activates a two-authority generation split). The error was concluding that
+*therefore* the execution proceeds unnamed. Two different lanes were being decided at once.
+
+**Shape:** split the lanes. A refused *recording claim* → `unisolated`, keep running (the fence is lost, the
+row exists). A failed *ledger open* on a **managed** lane → refuse the dispatch. Diagnostic/in-process lanes
+may still degrade.
+
+### 1.3 The writer that cannot fail
+`packages/db/src/results/pg-execution-attempt-store.ts:165` — `UPDATE … WHERE attempt_id = $1` with no
+`RETURNING` and no affected-row check; the in-memory twin returns silently when the row is absent. Updating a
+row that does not exist reads as success at every call site.
+
+**Shape:** `Promise<void>` is banned for a write a decision rests on. Return the row (`… RETURNING`) or the
+count, and throw on zero.
+
+### 1.4 Lifecycle before durability
+`packages/backends/src/orchestrators/k8s.ts:1559` fires `onStarted()` (run → `running`) *before*
+`onReserved` (:1575) and `applyJob` (:1587). A reservation failure then leaves a run marked running with no
+cluster object anywhere. Order is contract: `queued → reserving → submitted → running`, and `running` means
+the cluster started something.
+
+### 1.5 Both shapes alive (arch-review 53 Wave B → legacy removal)
+Wave B added exact `killWork`/`adoptWork` and kept the case-id `kill`/`adopt` "as a fallback for pre-handle
+rows, forbidden on decision paths by a scan". That asked every future caller to know which of two functions
+was safe, and the call site never showed it. The deletion — not the scan — is what closed it.
+
+**Rule:** a migration that leaves both shapes alive has not migrated. Delete the escape hatch in the same
+change.
+
+---
+
+## L2 — Unknown is unignorable
+
+### 2.1 The companion boolean nobody read
+`apps/api/src/composition/runtime-access.ts:99-113` returns `{ result?: CaseResult; established: boolean }`;
+`established` is set to `false` on `unknown` with a comment saying *"the caller must not re-dispatch on it
+(double-spend)"*. The caller at `:437-444` reads only `outcome.result`. The flag was never consumed — for a
+full review cycle, while its own comment explained why it mattered.
+
+**Shape:** `AdoptionDecision = {kind:"adopted",result} | {kind:"absent"} | {kind:"unknown",reason}` with an
+exhaustive switch. A union cannot be half-read.
+
+### 2.2 The swallow the scanner allowed
+`apps/api/src/composition/runtime-access.ts:433` — `workHandlesFor(...).catch(() => [])`, i.e. an unreadable
+attempt ledger becomes "this run placed no compute", which sends recovery to re-dispatch.
+
+Worse, the `unknown-collapse-guard` scanner written to stop exactly this **allowlisted it**, with:
+> *"ADOPTION's lane scan. An unresolvable lane there falls back to RE-DISPATCH, which spends compute but
+> cannot produce a wrong verdict"*
+
+That is false twice: a second physical attempt writes competing evidence, and a harness with external side
+effects fires them again. The line was also invisible to the scanner anyway — `WATCHED_READS` matches
+`attempts.list`, not `workHandlesFor`.
+
+**Rule:** an allowlist entry is a place the type failed to say it. "It only costs compute" is not a reason.
+
+### 2.3 The adapter that turns 5xx into "nothing there"
+`packages/backends/src/orchestrators/nomad.ts:1238` — `findJob` returns `undefined` when
+`res.status >= 300`; `adoptWork` (:1017) maps `undefined` → `{status:"absent"}`. The comment two lines above
+says *"A read that FAILED is `unknown`"*. **The comment and the code disagree.** K8s (:1111) gets it right:
+`jobsByLabel` → `undefined` → `unknown`, and only a successful listing that omits the name is `absent`.
+
+The conformance suite did not catch the asymmetry because it asserted the *method exists*, not what it answers
+when the cluster errors.
+
+---
+
+## L3 — Provenance is born at the source
+
+### 3.1 Identity re-derived from a metric string
+`packages/domain/src/scorecard/scoring-revision.ts:357`
+```ts
+const judgeId = score.metric.startsWith("judge:") ? score.metric.slice("judge:".length) : undefined;
+```
+A namespaced judge writes `judge:<id>:<criterion>` (`packages/graders/src/judge.ts:212`), so judge `a` becomes
+three phantom judges — `a`, `a:helpfulness`, `a:safety` — each minting a receipt whose `evidenceEmitter` names
+a plane that does not exist. Receipts exist to join to evidence; the join key was wrong.
+
+**The correct predicate already existed** in the same repo, `packages/application-control/src/trace-sink/trace-sink-service.ts:43-49`:
+```ts
+function judgeIdOf(metric: string): string | undefined { /* first segment after "judge:" */ }
+```
+**Rule:** a predicate written twice has already diverged. Grep for the concept before writing the helper; a
+receipt is minted by the invocation, not reconstructed from its output.
+
+### 3.2 Presence mistaken for coverage
+`scoring-revision.ts:242-258` — `input.judgments !== undefined` decides `kind:"recorded"`. `[]` is not
+`undefined`, so an EMPTY receipt vector is recorded provenance, and `packages/domain/src/scorecard/gate.ts:96`
+only asks `kind !== "recorded"`. A batch with selected judges and 100 judged cases can carry zero receipts and
+pass the gate as vouched.
+
+**Shape:** provenance states `expectedUnits`, `recordedUnits`, `complete`; the gate requires equality.
+
+---
+
+## L4 — A settlement owns immutable bytes
+
+### 4.1 The payload re-read at drain time
+`packages/application-control/src/scorecard/publication.ts:250-255` refuses permanently when
+`contentDigest(results) !== effect.payloadDigest`, and the coordinator re-hydrates the record's *current*
+results (`:296-298`, *"Re-read rather than remembered, because the process that planned this is gone"*).
+A perfectly legitimate re-score therefore makes the earlier settlement's owed export **permanently
+unverifiable** — the operation survives, the bytes it must ship do not.
+
+Note the asymmetry: the *artifact* effect in the same function already does it right (`:229-240` reads an
+immutable staged object and verifies its digest). Only the export half re-reads live state.
+
+### 4.2 The alias with no revision guard
+`publication.ts:240` — `artifacts.put(effect.key, …)` unguarded. Two independent operations completing out of
+order move `analyses/<id>.json` backwards. `current` is a monotonic projection, not an ordinary effect.
+
+### 4.3 The idempotency key that dies at a seam
+`publication.ts:266` passes `idempotencyKey` under the comment *"THE KEY TRAVELS TO THE SINK"*. It does not:
+`apps/api/src/composition/scorecard.ts:368` forwards the ctx to `TraceSinkService.exportScorecard`, whose
+`ExportContext` (`trace-sink-service.ts:33-39`) does not declare the field — structural typing drops it
+silently, and `TraceSinkContext` in `@everdict/contracts` never had it. Adapters mint fresh UUIDs per call.
+
+**Rule:** an at-least-once effect's idempotency key belongs in the PUBLIC contract, typed to the adapter. A
+dropped key with a comment claiming otherwise is worse than no key.
+
+---
+
+## L5 — Completion is verified zero
+
+### 5.1 Two protocols for one teardown
+`packages/application-control/src/cancellation/cancellation-coordinator.ts:127` — the reconciler calls
+`teardown()` directly and on failure calls `cancellations.fail(target, msg, now())` **without the `state`
+argument**, so it never records `verifying`, never increments `verificationAttempts`, never abandons. The
+caller-facing `runDurableTeardown` in the same file does all three. The process that is alive and the process
+that restarted converge differently.
+
+**Shape:** one `advanceCancellationOperation(operation, teardown, verifier)` used by the request path, the run
+reconciler and the scorecard reconciler.
+
+### 5.2 The read-back that only one lane does
+`activeManagedWork` is probed only in `run-service.ts:1593-1605` (standalone runs). The scorecard teardown
+certificate records child rows and kill responses; its own comment admits no field claims the orchestrator job
+was re-probed. Terminal children are not an exited container.
+
+### 5.3 Escalation shaped as terminal
+`packages/db/src/results/pg-cancellation-store.ts:122` — `listIncomplete` excludes `unverifiable` alongside
+`completed`. Closing a row we could not verify removes it from the only loop that would ever retry it. The
+debt is real; only the *retry frequency* should change, plus an operator signal.
+
+---
+
+## Cross-cutting: how these survived a green CI
+
+Every one of the above shipped with a green gate, and the gate is not weak — it runs the five commands, the
+cone check, `protocol-mutations`, empty-env boot, gitleaks, and a required real-Postgres trust subset.
+
+They survived because the questions were **local**: does the method exist, does the callback fire before the
+effect, does the type have three cases. Not: does the zero-row write fail, does the caller branch on the third
+case, does the adapter use the key, does the reconciler share the wrapper.
+
+Three suites were additionally **vacuous** (see `verification.md`): counterexample #9 asserted a function was
+not called after that function was deleted; counterexample #18 fed the production receipt builder a score whose
+metric it ignores, so it asserted properties of `[]`; two scanner drafts were green over the very defect they
+were written for. `protocol-mutations` caught the first. Nothing caught the second — the review did.

@@ -35,6 +35,9 @@ jobs:
       # Artifact-frame guard — the design system the agent's sandboxed dashboards compose from must stay in
       # step across contracts (the brief + the gate), the web frame (tokens + stylesheet) and the theme.
       - run: pnpm artifact-frame
+      # Convention-harness guard — every .claude rule must still match live paths (a rule pointed at moved
+      # code never fires, and it fails silently) and every skill must stay selectable.
+      - run: pnpm convention-harness
       # Neutralize each protocol one at a time and require its suite to go red (arch-review 53, Wave F).
       - run: pnpm protocol-mutations
       # Plugin-manifest guard — this repo is a marketplace for two clients, and only Claude Code expands

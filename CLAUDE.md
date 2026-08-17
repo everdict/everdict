@@ -82,6 +82,27 @@ Everdict's *whole product* is pluggable adapters (many Backends / Drivers / Harn
 `@everdict/contracts` contracts MUST be interfaces. This is the one idiom we intentionally invert —
 everywhere else (null discipline, error model, naming, layering) we keep the strict default.
 
+## 🔒 The protocol laws — read `.claude/rules/protocol.md` + skill `protocol` BEFORE designing an effect path
+Everdict sells a *defensible verdict*, so the seam between a decision and an effect is the product. Fifty-three
+architecture reviews found the same defect class there, and never because a concept was missing: the right
+noun existed and was then consumed as an **annotation** — optional, swallowed, re-derived, or advisory exactly
+where the next effect begins. The five laws, in full with case law, in skill `protocol`:
+1. **Authority before effect** — no external effect until a store RETURNED proof the identity is durable. An
+   optional pre-effect hook is a request; a required proof parameter is a protocol. Writes a decision rests on
+   never return `Promise<void>`.
+2. **Unknown is unignorable** — a failed read is a third value (`ReadResult`), consumed by exhaustive match.
+   Never `.catch(() => [])`, never `{value?, ok: boolean}`. An allowlisted scanner entry is a design admission.
+3. **Provenance is born at the source** — never re-derive identity from rendered output (metric name → judge,
+   latest row → winner, timestamp → attempt). A predicate written twice has already diverged.
+4. **A settlement owns immutable bytes** — decisions reference frozen payloads by key+digest; `current` is a
+   monotonic projection; an at-least-once effect's idempotency key lives in the PUBLIC contract.
+5. **Completion is verified zero** — accepted ≠ gone. One verifier shared by the request path and the
+   reconciler; "cannot find out" is an escalation field, never a terminal state.
+
+**Definition of done for a protocol change**: counterexample seen RED *for the stated reason* → the change →
+`pnpm protocol-mutations` red under neutralization → **the escape hatch deleted in the same change**. A test
+that stays green after its subject is deleted is a lost test (rule `testing`, vacuous-pass rules).
+
 ## Critical rules (the non-default ones — see `.claude/rules/`)
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
 - Errors: throw an `AppError` subclass (`@everdict/contracts`); HTTP status derives from the subtype.

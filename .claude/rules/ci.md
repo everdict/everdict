@@ -13,9 +13,15 @@ See skill `ci`.
   gate invalidates the stamp — re-run `pnpm ci:local` (turbo cache makes it fast). Never work
   around the hook (no stamp forging, no pushing from outside the tool).
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm protocol-mutations`**, `node scripts/live/empty-env-boot.mjs`,
-  the self-contained web job (contracts build + `pnpm -F @everdict/web lint`/`build`), and a full-history
-  gitleaks scan.
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm protocol-mutations`**,
+  `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
+  `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
+- **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
+  `paths:` glob and that glob still matches live code, every referenced rule exists, every skill keeps the
+  `description` the model matches on. A rule pointed at moved code is not a weak rule but an ABSENT one, and
+  it fails silently — two were found dead this way (`suite.md`, `workspace-integrations.md`), both holding
+  invariants a later review then found broken. Moving or renaming a package re-points its rule in the SAME
+  change.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A
