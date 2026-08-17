@@ -146,23 +146,34 @@ export interface ScorecardServiceDeps {
   breaker?: CircuitBreaker;
   // Boot-recovery adoption: harvest an already-dispatched case's result from the runtime's still-alive job
   // instead of re-dispatching (double compute). runtime = the child's recorded runtime (may be a comma list).
-  adoptCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
+  // Harvest the finished result of EXACTLY this work instead of re-dispatching (arch-review 53, legacy
+  // removal). The case-id form it replaces resolved "the newest job of this case" — with two runs of one case
+  // live, a resume could adopt another run's job and attribute its verdict here, which is a decision, not an
+  // observation. A child with no recorded handle has nothing this system can name, and is re-dispatched.
+  adoptWork?: (
+    tenant: string,
+    runtime: string | undefined,
+    work: RuntimeWorkRef,
+  ) => Promise<{ result?: CaseResult; established: boolean }>;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //
   // It ANSWERS rather than resolving (arch-review 52, Wave 3): `stopped`/`absent` converge, `unknown`/
   // `failed` mean the compute is probably still burning and the batch's cancellation is still owed.
-  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<KillOutcome>;
+  // What a teardown answers for a child whose attempt ledger recorded NO handle (arch-review 53, legacy
+  // removal) — `absent` on a self-hosted lane, `unknown` on a managed one. It replaces the case-id kill,
+  // which stopped every run's job of that case.
+  killUnhandled?: (tenant: string, runtime: string | undefined) => Promise<KillOutcome>;
   // …and the EXACT version of it (arch-review 52, Wave 2): stop the one orchestrator object a child's attempt
   // placed, addressed by the handle the backend reported and the attempt ledger persisted. Preferred wherever
-  // a handle exists — `killCase` selects on the case alone, which is also every other run's job of that case.
+  // a handle exists — the case-id kill it replaced selected on the case alone, i.e. every other run's job too.
   killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).
   cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
   // Cancel matching self-hosted lease jobs (user stop / supersede) — rejects the parked/leased dispatch and tells the
-  // runner (via its heartbeat) to abort the in-flight run, freeing the runtime mid-case. killCase covers managed
+  // runner (via its heartbeat) to abort the in-flight run, freeing the runtime mid-case. killWork covers managed
   // Nomad/K8s backends; self:* lanes are lease queues, so this is their force-kill path (RunnerHub.requestCancel).
   cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
   // The cancel TEARDOWN's durable owner (mig 0184, arch-review 47 §5.2). The CANCELLED decision commits
@@ -309,7 +320,7 @@ export type ScorecardBatchDeps = Pick<
   | "usage"
   | "envelopes"
   | "temporalBatches"
-  | "adoptCase"
+  | "adoptWork"
   | "cancelQueued"
   | "queueDepth"
   | "queuePressure"

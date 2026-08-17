@@ -175,7 +175,7 @@ export interface RunServiceDeps {
   // still DECIDE a cancel (the terminal commit is the decision) — it just cannot force-free the compute,
   // which is exactly what the unit tests run as.
   // Force-stop the EXACT external work this run placed (arch-review 52, Wave 2) — the handle the backend
-  // reported at dispatch and the attempt ledger persisted. Preferred over `killCase` wherever a handle
+  // reported at dispatch and the attempt ledger persisted. The only managed stop there is wherever a handle
   // exists, because "every job of this case" is also every OTHER run's job of that case.
   //
   // It ANSWERS rather than resolving (arch-review 52, Wave 3): `stopped`/`absent` are convergence,
@@ -184,7 +184,12 @@ export interface RunServiceDeps {
   // Force-kill an already-dispatched managed backend job (the run is `running`). ⚠️ CASE-ID ADDRESSED —
   // the fallback for a run whose attempts recorded no handle (legacy rows, a lane that mints none, a stamp
   // that lost the race with a crash). See `stopRun`.
-  killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<KillOutcome>;
+  // What a teardown answers when the attempt ledger recorded NO handle (arch-review 53, legacy removal).
+  // The case-id kill it replaces reached every run's job of the case — an over-broad stop is not a safer
+  // answer than no answer, it is a wrong action taken confidently. A self-hosted lane answers `absent` (its
+  // teardown is the lease revocation, which ran); a managed lane answers `unknown`, and the cancellation
+  // stays owed for the reconciler.
+  killUnhandled?: (tenant: string, runtime: string | undefined) => Promise<KillOutcome>;
   // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────
   //
   // A stop that answered `stopped` means the orchestrator ACCEPTED a delete — a K8s Job in `Terminating`
@@ -1556,8 +1561,8 @@ export class RunService {
     } else if (works.length > 0 && this.deps.killWork) {
       for (const work of works)
         await attempted(this.deps.killWork(rec.tenant, rec.runtime, work), `kill ${work.externalJobId}`);
-    } else if (this.deps.killCase) {
-      await attempted(this.deps.killCase(rec.tenant, rec.runtime, rec.caseId), `kill ${rec.caseId}`);
+    } else if (this.deps.killUnhandled) {
+      await attempted(this.deps.killUnhandled(rec.tenant, rec.runtime), `stop ${rec.id} (no handle)`);
     }
     // THE CAUSAL TREE IS PART OF THIS TEARDOWN (arch-review 52, Wave 3). Stopping an agent run revokes every
     // batch it caused, and that cascade used to be fired into the void beside the terminal write — so a

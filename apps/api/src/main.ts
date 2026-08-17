@@ -671,7 +671,6 @@ async function main(): Promise<void> {
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
   const {
-    adoptCaseFn,
     adoptWorkFn,
     readCaseLogsFn,
     readCaseEventsFn,
@@ -682,8 +681,8 @@ async function main(): Promise<void> {
     inspectCasePlacementFn,
     inspectTopologyFn,
     topologyServiceLogsFn,
-    killCase,
     killWork,
+    killUnhandled,
     probeWork,
   } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
@@ -751,7 +750,11 @@ async function main(): Promise<void> {
     // User stop (POST /runs/:id/cancel) — the run-scale twin of the batch teardown: kill the dispatched
     // managed job, drop the queued scheduler entry, revoke the self-hosted lease (the runner aborts the
     // in-flight case on its next heartbeat).
-    killCase,
+    //
+    // A row with NO handle no longer widens to the case id (arch-review 53, legacy removal): a self-hosted
+    // lane answers `absent` (the lease revocation is its whole teardown) and a managed lane answers
+    // `unknown`, keeping the cancellation owed rather than certifying a quiet nobody observed.
+    killUnhandled,
     // …and the exact-handle stop the attempt ledger makes reachable after a restart (arch-review 52, Wave 2).
     killWork,
     // The cancel TEARDOWN's durable owner, for the RUN lane too (mig 0186, arch-review 52 Wave 3): the
@@ -818,9 +821,9 @@ async function main(): Promise<void> {
     platformEventService,
     traceSinkService,
     preflightPlacement,
-    killCase,
+    killUnhandled,
     killWork,
-    adoptCaseFn,
+    adoptWorkFn,
   });
   cascadeCancel.fn = (tenant, runId) => scorecardService.cancelCausedBy(tenant, runId);
 
@@ -829,10 +832,9 @@ async function main(): Promise<void> {
     store,
     scorecardService,
     service,
-    adoptCaseFn,
-    // Boot recovery adopts by the HANDLE the attempt ledger holds, falling back to the case-id resolution
-    // only for rows that carry none (arch-review 53, Wave B). Adoption decides what a receipt vouches for,
-    // so "the newest job of this case" is not an acceptable resolution for it.
+    // Boot recovery adopts by the HANDLE the attempt ledger holds. There is no case-id fallback any more
+    // (arch-review 53, legacy removal): adoption decides what a receipt vouches for, and "the newest job of
+    // this case" could be another run's. A row with no handle is re-dispatched or tombstoned instead.
     adoptWorkFn,
     workHandlesFor: async (executionId: string) =>
       (await executionAttemptStore.list(executionId)).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])),

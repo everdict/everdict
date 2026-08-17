@@ -10,12 +10,8 @@ import type { ScorecardService } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
-  isCaseInspectable,
-  isObservable,
-  isRecoverable,
   isScreenAttachable,
   isScreenCapturable,
-  isShellable,
   isTopologyInspectable,
   isWorkAddressable,
   isWorkControllable,
@@ -48,7 +44,7 @@ export function buildRuntimeAccess(deps: {
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
   // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
-  // silence as success — see `killWork`/`killCase`.
+  // silence as success — see `killWork`/`killUnhandled`.
   const eachRuntimeBackend = async (
     tenant: string,
     runtimeList: string | undefined,
@@ -89,39 +85,13 @@ export function buildRuntimeAccess(deps: {
   const unknownFor = (reasons: string[], what: string): KillOutcome[] =>
     reasons.map((reason) => ({ status: "unknown" as const, reason: `${what}: runtime unresolved — ${reason}` }));
 
-  // Adopt a still-alive backend job's finished result by caseId — shared by scorecard resume and
-  // standalone-run boot recovery (P4 single-run durability): zero re-run when the job outlived the CP restart.
-  const adoptCaseFn = async (
-    tenant: string,
-    runtimeList: string | undefined, // may be a comma shard list — eachRuntimeBackend splits it
-    caseId: string,
-  ): Promise<CaseResult | undefined> => {
-    let adopted: CaseResult | undefined;
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isRecoverable(backend)) return false;
-      const outcome = await backend.adopt(caseId); // total (never throws) — no redundant .catch here
-      if (outcome.status === "adopted") {
-        adopted = outcome.result;
-        return true; // harvested a finished job — stop scanning lanes
-      }
-      if (outcome.status === "unknown") {
-        // The job may still be live but we couldn't confirm — surface that re-dispatch might double-spend compute.
-        console.warn(
-          `▶ adopt: inconclusive for case ${caseId} (tenant ${tenant}) — re-dispatch may double-spend a live job`,
-        );
-      }
-      return false; // absent or unknown → try the next runtime lane, then fall back to re-dispatch
-    });
-    return adopted;
-  };
-
   // ── ADOPTION, ADDRESSED BY THE HANDLE (arch-review 53, Wave B) ────────────────────────────────────
   //
   // Adoption is not an observability read: it HARVESTS a finished job and hands the result back as this
-  // execution's own, which decides what a receipt vouches for. `adoptCaseFn` resolves "the newest job of this
-  // case", and two runs of one case are two jobs — so the case-id form could hand run A the verdict run B's
-  // job produced. Boot recovery uses THIS whenever the attempt ledger holds a handle; `adoptCaseFn` remains
-  // for the pre-handle rows.
+  // execution's own, which decides what a receipt vouches for. The case-id form it replaces resolved "the
+  // newest job of this case", and two runs of one case are two jobs — so it could hand run A the verdict run
+  // B's job produced. It is GONE (arch-review 53, legacy removal): a row with no handle has no managed work
+  // this system can name, and recovery re-dispatches rather than adopting a job it cannot identify.
   const adoptWorkFn = async (
     tenant: string,
     runtimeList: string | undefined,
@@ -150,19 +120,16 @@ export function buildRuntimeAccess(deps: {
     runtimeList: string | undefined,
     caseId: string,
     stream?: LogStream,
-    // The exact object to read, when the caller holds one (arch-review 53, Wave B). Without it the read
-    // resolves "the newest job of this case", which is another run's job whenever two runs of one case are
-    // live — a panel showing a stranger's output. With it, the tail belongs to the run that asked.
+    // REQUIRED (arch-review 53, legacy removal). There is no case-id fallback any more: it resolved "the
+    // newest job of this case", which is another run's whenever two runs of one case are live. A caller
+    // holding no handle has no live view to ask for, and `undefined` is the honest answer.
     work?: RuntimeWorkRef,
   ): Promise<string | undefined> => {
+    if (!work) return undefined; // no handle, no live view — see the parameter note
     let text: string | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (work && isWorkControllable(backend)) {
-        text = await backend.logsForWork(work, stream).catch(() => undefined);
-        return text !== undefined;
-      }
-      if (!isObservable(backend)) return false;
-      text = await backend.logs(caseId, stream).catch(() => undefined);
+      if (!isWorkControllable(backend)) return false;
+      text = await backend.logsForWork(work, stream).catch(() => undefined);
       return text !== undefined;
     });
     return text;
@@ -176,25 +143,28 @@ export function buildRuntimeAccess(deps: {
     caseId: string,
     work?: RuntimeWorkRef,
   ): Promise<TraceEvent[] | undefined> => {
+    if (!work) return undefined;
     let events: TraceEvent[] | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (work && isWorkControllable(backend)) {
-        events = await backend.eventsForWork(work).catch(() => undefined);
-        return events !== undefined;
-      }
-      if (!isObservable(backend)) return false;
-      events = await backend.caseEvents(caseId).catch(() => undefined);
+      if (!isWorkControllable(backend)) return false;
+      events = await backend.eventsForWork(work).catch(() => undefined);
       return events !== undefined;
     });
     return events;
   };
 
   // Open an interactive shell stream on a case's live sandbox (observability ⑥) — same lane resolution as logs.
-  const openTerminalStreamFn = async (tenant: string, runtimeList: string | undefined, caseId: string) => {
+  const openTerminalStreamFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+    work?: RuntimeWorkRef,
+  ) => {
+    if (!work) return undefined;
     let handle: import("@everdict/backends").ExecStreamHandle | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isShellable(backend)) return false;
-      handle = await backend.execStream(caseId).catch(() => undefined);
+      if (!isWorkControllable(backend) || backend.execStreamInWork === undefined) return false;
+      handle = await backend.execStreamInWork(work).catch(() => undefined);
       return handle !== undefined;
     });
     return handle;
@@ -242,14 +212,11 @@ export function buildRuntimeAccess(deps: {
     // never named (arch-review 53, Wave B). With a handle it lands in the sandbox it was issued for.
     work?: RuntimeWorkRef,
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
+    if (!work) return undefined;
     let out: { stdout: string; stderr: string; exitCode: number } | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (work && isWorkControllable(backend)) {
-        out = await backend.execInWork(work, command).catch(() => undefined);
-        return out !== undefined;
-      }
-      if (!isObservable(backend)) return false;
-      out = await backend.exec(caseId, command).catch(() => undefined);
+      if (!isWorkControllable(backend)) return false;
+      out = await backend.execInWork(work, command).catch(() => undefined);
       return out !== undefined;
     });
     return out;
@@ -263,14 +230,11 @@ export function buildRuntimeAccess(deps: {
     caseId: string,
     work?: RuntimeWorkRef,
   ): Promise<CasePlacement | undefined> => {
+    if (!work) return undefined;
     let placement: CasePlacement | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (work && isWorkControllable(backend)) {
-        placement = await backend.inspectWork(work).catch(() => undefined);
-        return placement !== undefined;
-      }
-      if (!isCaseInspectable(backend)) return false;
-      placement = await backend.inspectCase(caseId).catch(() => undefined);
+      if (!isWorkControllable(backend)) return false;
+      placement = await backend.inspectWork(work).catch(() => undefined);
       return placement !== undefined;
     });
     return placement;
@@ -373,36 +337,31 @@ export function buildRuntimeAccess(deps: {
     return unresolved.length > 0 ? "unknown" : "unknown"; // nobody could be asked either way
   };
 
-  // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
-  // (the case may live on any of them), so this never stops early (each fn returns false). Best-effort.
+  // ── A MANAGED LANE WITH NO HANDLE IS `unknown` (arch-review 53, legacy removal) ────────────────────
   //
-  // ⚠️ THE NO-HANDLE FALLBACK (arch-review 52, Wave 2). `kill(caseId)` reaches every run's job of the case —
-  // and on Nomad, every namespace's. Callers route here only when the attempt ledger recorded no handle.
-  const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<KillOutcome> => {
-    const outcomes: KillOutcome[] = [];
-    const { unresolved } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isRecoverable(backend)) {
-        outcomes.push({
-          status: "unknown",
-          reason: `kill ${caseId}: this runtime has no stop capability`,
-        });
-        return false;
-      }
-      outcomes.push(
-        await backend.kill(caseId).catch(
-          (err: unknown): KillOutcome => ({
-            status: "failed",
-            reason: `kill ${caseId}: ${err instanceof Error ? err.message : String(err)}`,
-          }),
-        ),
-      );
-      return false; // every runtime of the shard list gets the kill (the case may live on any of them)
-    });
-    return worstKillOutcome([...outcomes, ...unknownFor(unresolved, `kill ${caseId}`)]);
+  // `killCase(caseId)` is GONE. It reached every run's job of the case — and on Nomad, every namespace's —
+  // and it existed only so a teardown holding no handle had SOMETHING to call. That is the wrong trade: an
+  // over-broad stop is not a safer answer than no answer, it is a wrong action taken confidently, and the
+  // constitution already says what an unestablished postcondition is.
+  //
+  // So a teardown with no handle answers by LANE KIND. A self-hosted lane (`self:*`) places no orchestrator
+  // object at all — its abort arm is the lease revocation, which ran — so `absent` is the truth there. A
+  // managed lane that named no work is a pre-Wave-A row (or a dispatch that died before reserving): whether
+  // anything is running is unestablished, and `unknown` keeps the cancellation owed for an operator rather
+  // than certifying a quiet that nobody observed.
+  const killUnhandled = async (tenant: string, runtimeList: string | undefined): Promise<KillOutcome> => {
+    const managed = (runtimeList ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t !== "" && !t.startsWith("self:"));
+    if (managed.length === 0) return { status: "absent" }; // lease queues only — nothing was ever placed
+    return {
+      status: "unknown",
+      reason: `no runtime work handle was recorded for this execution on ${managed.join(", ")} — whether managed compute is still running cannot be established`,
+    };
   };
   return {
     eachRuntimeBackend,
-    adoptCaseFn,
     adoptWorkFn,
     readCaseLogsFn,
     readCaseEventsFn,
@@ -414,7 +373,7 @@ export function buildRuntimeAccess(deps: {
     inspectTopologyFn,
     topologyServiceLogsFn,
     killWork,
-    killCase,
+    killUnhandled,
     probeWork,
   };
 }
@@ -434,7 +393,6 @@ export async function runStartupRecovery(deps: {
   // lets the tombstone-on-unresumable regression test drive this function without standing up a full service.
   scorecardService: Pick<ScorecardService, "resume">;
   service: Pick<RunService, "resume">;
-  adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
   // The exact-work adopt and the ledger read that feeds it (arch-review 53, Wave B). Optional so a
   // composition that wires no attempt ledger keeps today's behavior — with the case-id resolution and its
   // documented blast radius, which is what the pre-handle rows have anyway.
@@ -445,17 +403,7 @@ export async function runStartupRecovery(deps: {
   ) => Promise<{ result?: CaseResult; established: boolean }>;
   workHandlesFor?: (executionId: string) => Promise<RuntimeWorkRef[]>;
 }): Promise<void> {
-  const {
-    scorecardStore,
-    store,
-    scorecardService,
-    service,
-    adoptCaseFn,
-    adoptWorkFn,
-    workHandlesFor,
-    owner,
-    replicas,
-  } = deps;
+  const { scorecardStore, store, scorecardService, service, adoptWorkFn, workHandlesFor, owner, replicas } = deps;
   const recovered = await recoverInterrupted({
     scorecards: scorecardStore,
     runs: store,
@@ -494,9 +442,11 @@ export async function runStartupRecovery(deps: {
               break;
             }
           }
-        } else {
-          adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
         }
+        // No handle = nothing this system can name, so nothing to adopt. `service.resume` then re-dispatches
+        // (safe for the dispatch that died before reserving, which is the only way a post-Wave-A row gets
+        // here) or tombstones under its own fence. What it no longer does is harvest "the newest job of this
+        // case", which could be another run's.
         // A resume that THREW told us nothing, and the claim is binding — so it falls to the tombstone, which
         // is now fenced: if the run settled in the meantime the write simply loses and history keeps the real
         // outcome. That is the difference between guessing safely and guessing.

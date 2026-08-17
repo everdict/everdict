@@ -184,75 +184,35 @@ function mockApi(
 }
 
 describe("buildK8sJob / k8sJobName", () => {
-  it("puts the image, pull policy, job payload (EVERDICT_CASE_JOB), and namespace", () => {
-    const m = buildK8sJob(
-      JOB,
-      { image: "reg/everdict-job-runner:1" },
-      "everdict-c1",
-      "everdict-acme",
-    ) as unknown as JobManifest;
-    expect(m.metadata.namespace).toBe("everdict-acme");
-    expect(m.spec.template.spec.containers[0]?.image).toBe("reg/everdict-job-runner:1");
-    expect(m.spec.template.spec.containers[0]?.imagePullPolicy).toBe("IfNotPresent");
-    expect(m.spec.template.spec.runtimeClassName).toBeUndefined();
-    const decoded = JSON.parse(Buffer.from(envOf(m, "EVERDICT_CASE_JOB") ?? "", "base64").toString("utf8"));
-    expect(decoded.harness.id).toBe("aider");
-    // The case label is the kill(caseId) selector — a superseded batch force-stops its live jobs by it.
-    expect((m.metadata as { labels?: Record<string, string> }).labels?.["everdict.dev/case"]).toBe("c1");
-  });
-
-  it("kill deletes jobs by the everdict.dev/case label selector (best-effort, all namespaces)", async () => {
-    const { api, deleted } = mockApi();
-    const backend = new K8sBackend({ image: "i", api });
-    await backend.kill("Case_1");
-    // Slugged the same way as the job label — and a LOSSY id (the underscore was replaced) carries a
-    // discriminator, so two ids that slug to one value stay separately addressable (arch-review 52, Wave 2).
-    expect(deleted).toEqual([`label:everdict.dev/case=${caseLabelValue("Case_1")}`]);
-    expect(deleted[0]).toMatch(/^label:everdict\.dev\/case=case-1-[0-9a-f]{8}$/);
-  });
-
-  it("adopt finds the NEWEST case-labeled job, waits for it, harvests the sentinel, and cleans up", async () => {
-    const { api, deleted } = mockApi({
-      labeledJobs: [
-        {
-          selector: "everdict.dev/case=c1",
-          name: "everdict-c1-old",
-          namespace: "ns",
-          creationTimestamp: "2026-07-08T01:00:00Z",
-        },
-        {
-          selector: "everdict.dev/case=c1",
-          name: "everdict-c1-new",
-          namespace: "ns",
-          creationTimestamp: "2026-07-08T02:00:00Z",
-        },
-      ],
-    });
-    const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
-    const adopted = await backend.adopt("c1");
-    expect(adopted.status).toBe("adopted");
-    if (adopted.status === "adopted") expect(adopted.result.caseId).toBe("c1"); // harvested without applying a new Job
-    expect(deleted).toContain("everdict-c1-new"); // the adopted job gets the same cleanup as a dispatch
-    expect(deleted).not.toContain("everdict-c1-old");
-  });
-
-  it("adopt distinguishes absent (no labeled job) from unknown (label query failed / job harvest failed)", async () => {
-    // No labeled job → the query succeeded and found nothing → definitively absent (safe to re-dispatch).
+  it("adoptWork distinguishes absent (this object is gone) from unknown (the cluster could not be asked)", async () => {
+    // The run-label query succeeded and this exact job is not among the answers → definitively absent, and
+    // re-dispatching is safe. Addressed by the handle, so "gone" is a statement about ONE object rather than
+    // about every job that happens to carry the case's name (arch-review 53, legacy removal).
     const none = new K8sBackend({ image: "i", api: mockApi().api, pollIntervalMs: 1 });
-    expect((await none.adopt("ghost")).status).toBe("absent");
+    expect(
+      (await none.adoptWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-ghost-aaaa" })).status,
+    ).toBe("absent");
 
-    // The label query itself failed (jobsByLabel → undefined) → we can't tell if a job is live → unknown.
+    // The query itself failed (jobsByLabel → undefined) → whether the object is live is UNESTABLISHED, and
+    // re-dispatching on that may double-spend. Never "absent".
     const brokenApi = { ...mockApi().api, jobsByLabel: async () => undefined };
     const broken = new K8sBackend({ image: "i", api: brokenApi, pollIntervalMs: 1 });
-    expect((await broken.adopt("c1")).status).toBe("unknown");
+    expect(
+      (await broken.adoptWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" })).status,
+    ).toBe("unknown");
 
-    // A labeled job exists but it failed to complete → harvest throws → unknown, never "absent".
+    // The object exists and the harvest threw → unknown, never "absent": the job is real, and what it
+    // produced is what we failed to read.
     const failing = mockApi({
       failed: true,
-      labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }],
+      labeledJobs: [
+        { selector: `everdict.dev/run=${caseLabelValue("evd-run-1")}`, name: "everdict-c1-aaaa", namespace: "ns" },
+      ],
     });
     const backend = new K8sBackend({ image: "i", api: failing.api, pollIntervalMs: 1 });
-    expect((await backend.adopt("c1")).status).toBe("unknown");
+    expect(
+      (await backend.adoptWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" })).status,
+    ).toBe("unknown");
   });
 
   it("with evalCase.image, override with the per-case container image (SWE-bench prebuilt)", () => {
@@ -700,18 +660,41 @@ describe("K8sBackend.exec — one-shot exec into a live case pod", () => {
       ],
     });
     const backend = new K8sBackend({ image: "img", api });
-    const out = await backend.exec("c1", "ls /work");
+    const out = await backend.execInWork(
+      { tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" },
+      "ls /work",
+    );
     expect(out).toEqual({ stdout: "ran: ls /work", stderr: "", exitCode: 0 });
   });
 
-  it("returns undefined when the case has no live job", async () => {
-    const { api } = mockApi({ labeledJobs: [] });
+  it("returns undefined when the named container is not there to exec into", async () => {
+    // Addressed by the handle, so "not there" is the CLUSTER refusing this exact object rather than a label
+    // query coming back empty (arch-review 53, legacy removal — the case-id form asked "any job of this
+    // case?", which is a different question and could answer about another run's container).
+    const base = mockApi({ labeledJobs: [] }).api;
+    const api = {
+      ...base,
+      exec: async () => {
+        throw new Error('Error from server (NotFound): jobs.batch "everdict-gone-aaaa" not found');
+      },
+    };
     const backend = new K8sBackend({ image: "img", api });
-    expect(await backend.exec("gone", "ls")).toBeUndefined();
+    expect(
+      await backend.execInWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-gone-aaaa" }, "ls"),
+    ).toBeUndefined();
   });
 });
 
-describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
+describe("K8sBackend.inspectWork (the exact object's placement view)", () => {
+  // The handle names the object under test — the fixture's own job, in its own namespace. The case-id form
+  // this replaces took neither, which is exactly how it could describe another run's job.
+  const WORK = {
+    tenant: "acme",
+    runId: "evd-run-1",
+    externalJobId: "everdict-c1-x",
+    namespace: "everdict-t1",
+  } as const;
+
   const caseJob = [
     {
       selector: "everdict.dev/case=c1",
@@ -721,9 +704,19 @@ describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
     },
   ];
 
-  it("no job for the case → undefined (pre-dispatch / GC'd)", async () => {
-    const backend = new K8sBackend({ image: "img", api: mockApi({ labeledJobs: [] }).api });
-    expect(await backend.inspectCase("c1")).toBeUndefined();
+  it("an object the cluster cannot be asked about → undefined", async () => {
+    // The exact read differs from the case-id one it replaces (arch-review 53, legacy removal): asked about
+    // ONE named object, "no pods yet" is `queued` (below), not absence. Undefined is reserved for a cluster
+    // that could not answer at all — which is what a caller must not mistake for "nothing is running".
+    const base = mockApi({ labeledJobs: [] }).api;
+    const api = {
+      ...base,
+      podsForJob: async () => {
+        throw new Error("connection refused");
+      },
+    };
+    const backend = new K8sBackend({ image: "img", api });
+    expect(await backend.inspectWork(WORK)).toBeUndefined();
   });
 
   it("a Pending pod with a FailedScheduling event → phase 'blocked' carrying the scheduler's own verdict", async () => {
@@ -738,7 +731,7 @@ describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
         },
       ],
     });
-    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    const placement = await new K8sBackend({ image: "img", api }).inspectWork(WORK);
     expect(placement?.phase).toBe("blocked");
     expect(placement?.blockedReason).toContain("Insufficient memory");
     expect(placement?.namespace).toBe("everdict-t1");
@@ -753,7 +746,7 @@ describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
         { reason: "Started", message: "Started container agent", at: "2026-01-02T00:00:03Z" },
       ],
     });
-    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    const placement = await new K8sBackend({ image: "img", api }).inspectWork(WORK);
     expect(placement?.phase).toBe("running");
     expect(placement?.unit).toBe("everdict-c1-x-abc");
     expect(placement?.node).toBe("worker-3");
@@ -766,7 +759,7 @@ describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
       jobPods: [{ name: "everdict-c1-x-abc", phase: "Failed", node: "worker-1", reason: "OOMKilled", restarts: 2 }],
       podEvents: [],
     });
-    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    const placement = await new K8sBackend({ image: "img", api }).inspectWork(WORK);
     expect(placement?.phase).toBe("dead");
     expect(placement?.oom).toBe(true);
     expect(placement?.restarts).toBe(2);
@@ -774,7 +767,7 @@ describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
 
   it("a job with no pod yet → phase 'queued'", async () => {
     const { api } = mockApi({ labeledJobs: caseJob, jobPods: [] });
-    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    const placement = await new K8sBackend({ image: "img", api }).inspectWork(WORK);
     expect(placement?.phase).toBe("queued");
     expect(placement?.job).toBe("everdict-c1-x");
   });
@@ -1071,17 +1064,23 @@ describe("K8sBackend.sampleCase (replay runtime plane producer)", () => {
       podTop: { cpuMillicores: 250, memoryMb: 64 },
     });
     const backend = new K8sBackend({ image: "i", api });
-    expect(await backend.sampleCase("c1")).toEqual({ cpuPct: 25, memBytes: 64 * 1024 * 1024 });
+    expect(await backend.sampleWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" })).toEqual(
+      { cpuPct: 25, memBytes: 64 * 1024 * 1024 },
+    );
   });
 
   it("reads as no sample when there is no job or the metrics API is absent — never throws", async () => {
     const noJob = new K8sBackend({ image: "i", api: mockApi().api });
-    expect(await noJob.sampleCase("c1")).toBeUndefined();
+    expect(
+      await noJob.sampleWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" }),
+    ).toBeUndefined();
 
     const noMetrics = new K8sBackend({
       image: "i",
       api: mockApi({ labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }] }).api,
     });
-    expect(await noMetrics.sampleCase("c1")).toBeUndefined();
+    expect(
+      await noMetrics.sampleWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" }),
+    ).toBeUndefined();
   });
 });

@@ -33,18 +33,14 @@ import {
   type AdoptOutcome,
   type Backend,
   type BackendCapacity,
-  type CaseInspectable,
   type CaseRuntimeSample,
-  type CaseSampleable,
   type DispatchOptions,
   type Inspectable,
   type LogStream,
   type ManagedWorkControl,
-  type Observable,
   type ProbeResult,
   type Probeable,
   type Reclaimable,
-  type Recoverable,
   type WorkAddressable,
   dispatchAborted,
 } from "../backend.js";
@@ -1013,16 +1009,6 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
   return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
-// Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
-// Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
-// The newest Job carrying a case label — the LEGACY resolution, named so its one remaining property is
-// visible at every call site: it answers about whichever job of that case the cluster created last, which is
-// not necessarily the one the caller means (arch-review 53, Wave B).
-async function newestJobForCase(api: K8sApi, caseId: string): Promise<{ name: string; namespace: string } | undefined> {
-  const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-  return (jobs ?? []).sort((a, b) => (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""))[0];
-}
-
 // The placement projection for ONE named Job. Shared by the exact read and its legacy twin so the two cannot
 // describe the same object differently — the only thing that differs between them is which object.
 async function placementOf(api: K8sApi, name: string, namespace: string): Promise<CasePlacement | undefined> {
@@ -1062,19 +1048,7 @@ async function placementOf(api: K8sApi, name: string, namespace: string): Promis
   };
 }
 
-export class K8sBackend
-  implements
-    Backend,
-    Recoverable,
-    WorkAddressable,
-    ManagedWorkControl,
-    Observable,
-    Probeable,
-    Inspectable,
-    CaseInspectable,
-    CaseSampleable,
-    Reclaimable
-{
+export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl, Probeable, Inspectable, Reclaimable {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
   private readonly staticApi?: K8sApi;
@@ -1116,128 +1090,9 @@ export class K8sBackend
     };
   }
 
-  // Adopt an already-dispatched case job (boot recovery): the control plane died after applying the Job — find
-  // the NEWEST job carrying the case label, wait for it like a normal dispatch, and harvest the sentinel from
-  // its pod logs. undefined on any miss (no job / failed / logs unreadable) — the caller re-dispatches.
-  async adopt(caseId: string): Promise<AdoptOutcome> {
-    try {
-      return await this.withApi(async (api): Promise<AdoptOutcome> => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-        // jobsByLabel returns undefined when the label query itself failed — we can't tell if a job is live → unknown.
-        if (jobs === undefined) return { status: "unknown" };
-        const newest = jobs.sort((a, b) => (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""))[0];
-        if (!newest) return { status: "absent" }; // query succeeded, no job → safe to re-dispatch
-        await this.waitForJob(api, newest.name, newest.namespace);
-        const result = parseResult(await api.podLogs(newest.name, newest.namespace));
-        await api.deleteJob(newest.name, newest.namespace).catch(() => {}); // same cleanup as a normal dispatch
-        return { status: "adopted", result };
-      });
-    } catch {
-      // A job existed but harvesting threw (wait/logs/parse), or the api couldn't be built — ambiguous, not "absent".
-      return { status: "unknown" };
-    }
-  }
-
-  // One-shot exec inside the case's live pod (web terminal / live-screen capture): kubectl exec job/<name> -- sh -c <command>.
-  // undefined = no live pod. Best-effort, never throws.
-  async exec(
-    caseId: string,
-    command: string,
-  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
-    try {
-      return await this.withApi(async (api) => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-        const newest = (jobs ?? []).sort((a, b) =>
-          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-        )[0];
-        if (!newest) return undefined;
-        return await api.exec(newest.name, newest.namespace, command);
-      });
-    } catch {
-      return undefined;
-    }
-  }
-
   // (Interactive execStream — observability ⑥ — is Nomad-only for now: K8s reaches the pod through kubectl with a
   // per-dispatch materialized kubeconfig, so a long-lived interactive stream needs the temp file kept open for the
   // stream's lifetime — a follow-up. One-shot exec above already works. The WS route degrades gracefully.)
-
-  // One resource sample of the case's live pod (CaseSampleable — the replay runtime plane's producer ③):
-  // `kubectl top pod` via the metrics API. cpuPct reads millicores as percent-of-one-core (1000m = 100%), the
-  // same "share of one CPU" a container's stats read. undefined = no live job / no metrics-server — a cluster
-  // without metrics simply produces no runtime lane, never an error. Best-effort.
-  async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
-    try {
-      return await this.withApi(async (api) => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-        const newest = (jobs ?? []).sort((a, b) =>
-          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-        )[0];
-        if (!newest) return undefined;
-        const top = await api.podTop(newest.name, newest.namespace);
-        if (!top || (top.cpuMillicores === undefined && top.memoryMb === undefined)) return undefined;
-        return {
-          ...(top.cpuMillicores !== undefined ? { cpuPct: top.cpuMillicores / 10 } : {}),
-          ...(top.memoryMb !== undefined ? { memBytes: top.memoryMb * 1024 * 1024 } : {}),
-        };
-      });
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
-  }
-
-  // The case's newest job pod's current raw output — the shared fetch behind logs() and caseEvents(). A pending
-  // pod reads as undefined and the caller polls again.
-  private async rawCaseLogs(caseId: string): Promise<string | undefined> {
-    return await this.withApi(async (api) => {
-      const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-      const newest = (jobs ?? []).sort((a, b) =>
-        (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-      )[0];
-      if (!newest) return undefined;
-      return await api.podLogs(newest.name, newest.namespace);
-    });
-  }
-
-  // Current output of the case's newest job pod — live-progress tail. Sentinel payloads stripped (machine result +
-  // live-event lines). Best-effort, never throws. The stream parameter is accepted but ignored: a K8s pod log
-  // interleaves stdout and stderr in one stream (kubelet doesn't separate them), so both selections read the same
-  // combined text.
-  async logs(caseId: string, _stream?: LogStream): Promise<string | undefined> {
-    try {
-      const text = await this.rawCaseLogs(caseId);
-      return text === undefined ? undefined : stripSentinel(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  // The live trajectory of the case's running job (live-observability ⑨): the EVENT_SENTINEL lines the in-job
-  // agent printed, decoded to TraceEvents. Snapshot semantics like logs(). Best-effort, never throws.
-  async caseEvents(caseId: string): Promise<TraceEvent[] | undefined> {
-    try {
-      const text = await this.rawCaseLogs(caseId);
-      return text === undefined ? undefined : extractLiveEvents(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  // Case-scoped placement introspection (CaseInspectable): where the case's newest Job stands inside the cluster.
-  // An unschedulable pod (Pending + a FailedScheduling event) reads as phase "blocked" with the scheduler's own
-  // verdict ("0/3 nodes are available: insufficient memory") — the capacity answer that previously collapsed into
-  // a bare dispatch timeout. undefined = no job for the case. Best-effort, never throws (observability read).
-  async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
-    try {
-      return await this.withApi(async (api): Promise<CasePlacement | undefined> => {
-        const newest = await newestJobForCase(api, caseId);
-        if (!newest) return undefined;
-        return placementOf(api, newest.name, newest.namespace);
-      });
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
-  }
 
   // ── THE EXACT-WORK CONTROL SURFACE (ManagedWorkControl — arch-review 53, Wave B) ──────────────────
   //
@@ -1363,21 +1218,6 @@ export class K8sBackend
         status: "failed",
         reason: `k8s killWork ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
       };
-    }
-  }
-
-  // Force-stop every live job of a case (superseded batch reclaim) — by the everdict.dev/case label. Best-effort.
-  //
-  // ⚠️ FALLBACK ONLY (arch-review 52, Wave 2 counterexample #3). The selector says nothing about WHICH run
-  // placed the job, so this stops every concurrent execution of the case — including another run's, whose
-  // batch then reads an infra failure it never caused. A caller holding a `RuntimeWorkRef` must call
-  // `killWork`; this remains for the ones that hold none (attempt rows written before the handle was
-  // persisted, and lanes that mint no handle).
-  async kill(caseId: string): Promise<KillOutcome> {
-    try {
-      return await this.withApi((api) => api.deleteJobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`));
-    } catch (err) {
-      return { status: "failed", reason: `k8s kill ${caseId}: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 

@@ -1010,7 +1010,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // just tear the work down: (1) cooperative abort so runSuite stops firing the remaining cases (already-fired ones
   // drain into their child runs), (2) cancel a Temporal-owned workflow, (3) drop still-queued scheduler entries and
   // self-hosted lease jobs (they'd otherwise dispatch/run only to be discarded), (4) force-kill the already-fired
-  // managed backend jobs (killCase) — so a reclaimed 601-case batch stops burning cluster compute instead of running
+  // managed backend jobs (killWork) — so a reclaimed 601-case batch stops burning cluster compute instead of running
   // to the end. self-hosted lease jobs are force-freed by (3)'s cancelLeased (which aborts the run on the runner).
   private async stopInFlight(rec: ScorecardRecord): Promise<CancellationCertificate> {
     this.inFlight.get(rec.id)?.abort();
@@ -1052,11 +1052,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // ── THE EXACT WORK EACH CHILD PLACED (arch-review 52, Wave 2) ────────────────────────────────────
     //
     // One read of the batch's attempt ledger, keyed back to the children by `childRunId`. What it buys is
-    // the difference between stopping THIS batch's jobs and stopping every job of every case name this
-    // batch happens to contain: `killCase(caseId)` selects on the case alone, so a re-evaluation of `c1`
-    // running beside this batch — or another tenant's `c1` on a shared Nomad cluster, which the old kill
-    // swept across all namespaces — was cancelled by this batch's stop. Best-effort read: a ledger that
-    // will not list leaves every child on the fallback, which is where they all were before.
+    // the difference between stopping THIS batch's jobs and stopping every job of every case name this batch
+    // happens to contain: the case-id kill selected on the case alone, so a re-evaluation of `c1` running
+    // beside this batch — or another tenant's `c1` on a shared Nomad cluster, which that kill swept across
+    // all namespaces — was cancelled by this batch's stop. It no longer exists.
     const worksByChild = await this.workHandlesByChild(rec.id);
     for (const c of children) {
       if (c.status !== "running" && c.status !== "queued") continue;
@@ -1065,10 +1064,13 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         // AWAITED — fire-and-forget made `completed` mean "commands were issued", never "the work stopped".
         for (const work of works)
           await attempted(this.deps.killWork(rec.tenant, c.runtime ?? rec.runtime, work), `kill ${work.externalJobId}`);
-      } else if (c.status === "running" && this.deps.killCase)
-        // No handle for this child — a legacy attempt row, or a lane that mints none. The over-broad kill is
-        // the only thing left that can reach the compute, and leaving it running is worse than its blast radius.
-        await attempted(this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId), `kill ${c.caseId}`);
+      } else if (c.status === "running" && this.deps.killUnhandled)
+        // No handle for this child — a legacy attempt row, or a lane that mints none. The over-broad case-id
+        // kill that used to stand here is GONE (arch-review 53, legacy removal): it stopped every run's job
+        // of that case, and on Nomad every tenant's, which is a wrong action taken confidently rather than a
+        // safer one. A self-hosted lane answers `absent`; a managed lane answers `unknown` and the batch's
+        // cancellation stays owed, which is what an operator needs to see.
+        await attempted(this.deps.killUnhandled(rec.tenant, c.runtime ?? rec.runtime), `stop ${c.id} (no handle)`);
       // Settle the child's LEDGER row here, not just its compute: the drain path (dispatch rejection → the
       // batch loop's catch) is in-process and best-effort — after a control-plane restart, under a Temporal
       // worker, or when a kill misses, nobody else ever flips the record, and a forever-"running" child both

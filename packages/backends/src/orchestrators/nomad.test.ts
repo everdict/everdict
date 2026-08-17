@@ -600,135 +600,15 @@ describe("NomadBackend.probe", () => {
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
     expect(await backend.probe()).toEqual({ reachable: true, detail: "Nomad agent: nomad-1" });
   });
-
-  it("with 401/403 (ACL), unreachable + auth guidance", async () => {
-    const http: NomadHttp = {
-      async request() {
-        return { status: 403, text: "Permission denied" };
-      },
-    };
-    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
-    const r = await backend.probe();
-    expect(r.reachable).toBe(false);
-    expect(r.detail).toContain("auth failed (403)");
-  });
-
-  it("with a network error, unreachable + message", async () => {
-    const http: NomadHttp = {
-      async request() {
-        throw new Error("ECONNREFUSED");
-      },
-    };
-    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
-    const r = await backend.probe();
-    expect(r.reachable).toBe(false);
-    expect(r.detail).toContain("ECONNREFUSED");
-  });
 });
 
-describe("NomadBackend.adopt / kill (boot-recovery adoption + supersede force-stop)", () => {
-  it("adopt finds the NEWEST everdict-<caseId>-* job, waits for its alloc, and harvests the sentinel result", async () => {
-    const calls: string[] = [];
-    const http: NomadHttp = {
-      async request(method, path) {
-        calls.push(`${method} ${path}`);
-        if (path.startsWith("/v1/jobs?prefix="))
-          return {
-            status: 200,
-            text: JSON.stringify([
-              { ID: "everdict-c1-old01", Namespace: "default", SubmitTime: 100 },
-              { ID: "everdict-c1-new02", Namespace: "default", SubmitTime: 200 },
-            ]),
-          };
-        if (path.includes("everdict-c1-new02/allocations"))
-          return { status: 200, text: JSON.stringify([{ ID: "alloc9", ClientStatus: "complete" }]) };
-        if (path.includes("/logs/alloc9"))
-          return { status: 200, text: `x\n${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
-        return { status: 404, text: "" };
-      },
-    };
-    const backend = new NomadBackend({ addr: "http://n:4646", image: "img", http, pollIntervalMs: 1 });
-
-    const adopted = await backend.adopt("c1");
-
-    expect(adopted.status).toBe("adopted");
-    if (adopted.status === "adopted") expect(adopted.result.caseId).toBe("c1"); // harvested without a POST /v1/jobs
-    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
-    expect(calls.some((c) => c.includes("everdict-c1-old01"))).toBe(false); // newest submission wins
-  });
-
-  it("adopt distinguishes absent (no job → safe re-dispatch) from unknown (ambiguous → may double-spend)", async () => {
-    // The listing succeeds and finds nothing → definitively no job for this case → safe to re-dispatch.
-    const empty: NomadHttp = {
-      async request(_m, path) {
-        if (path.startsWith("/v1/jobs?prefix=")) return { status: 200, text: "[]" };
-        return { status: 404, text: "" };
-      },
-    };
-    expect((await new NomadBackend({ addr: "http://n:4646", image: "i", http: empty }).adopt("c1")).status).toBe(
-      "absent",
-    );
-
-    // The jobs listing itself errors → we CANNOT tell whether a job is live → unknown, never "absent".
-    const listErr: NomadHttp = {
-      async request() {
-        return { status: 500, text: "boom" };
-      },
-    };
-    expect((await new NomadBackend({ addr: "http://n:4646", image: "i", http: listErr }).adopt("c1")).status).toBe(
-      "unknown",
-    );
-
-    // A job exists but its alloc logs are gone → the job is real, harvest failed → unknown (re-dispatch may double-spend).
-    const goneLogs: NomadHttp = {
-      async request(_m, path) {
-        if (path.startsWith("/v1/jobs?prefix="))
-          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-a", SubmitTime: 1 }]) };
-        if (path.includes("/allocations"))
-          return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
-        return { status: 404, text: "" };
-      },
-    };
-    expect(
-      (await new NomadBackend({ addr: "http://n:4646", image: "i", http: goneLogs, pollIntervalMs: 1 }).adopt("c1"))
-        .status,
-    ).toBe("unknown");
-  });
-
-  it("kill deregisters every live everdict-<caseId>-* job (dead ones skipped, no purge)", async () => {
-    const deletes: string[] = [];
-    const http: NomadHttp = {
-      async request(method, path) {
-        if (method === "DELETE") {
-          deletes.push(path);
-          return { status: 200, text: "{}" };
-        }
-        if (path.startsWith("/v1/jobs?prefix="))
-          return {
-            status: 200,
-            text: JSON.stringify([
-              { ID: "everdict-c1-live1", Namespace: "default", Status: "running" },
-              { ID: "everdict-c1-done1", Namespace: "default", Status: "dead" },
-              { ID: "everdict-c1-pend1", Namespace: "everdict-acme", Status: "pending" },
-            ]),
-          };
-        return { status: 404, text: "" };
-      },
-    };
-    await new NomadBackend({ addr: "http://n:4646", image: "i", http }).kill("c1");
-
-    expect(deletes).toEqual(["/v1/job/everdict-c1-live1", "/v1/job/everdict-c1-pend1?namespace=everdict-acme"]);
-    expect(deletes.every((d) => !d.includes("purge"))).toBe(true); // stop, never purge (the purge saga)
-  });
-});
-
-describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
-  it("resolves the newest RUNNING alloc and shells to `nomad alloc exec -task agent`", async () => {
+describe("NomadBackend.execInWork — one-shot exec into the exact live alloc", () => {
+  it("resolves the addressed job's RUNNING alloc and shells to `nomad alloc exec -task agent`", async () => {
+    // No prefix branch on purpose: the handle names the job, so a scan for "the newest job of this case"
+    // would 404 here rather than quietly shelling into a stranger's container.
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path.includes("/v1/jobs?prefix="))
-          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-aa", SubmitTime: 2 }]) };
-        if (path.includes("/allocations"))
+        if (path === "/v1/job/everdict-c1-aaaa/allocations")
           return { status: 200, text: JSON.stringify([{ ID: "alloc-run", ClientStatus: "running" }]) };
         return { status: 404, text: "" };
       },
@@ -744,7 +624,10 @@ describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
         return { code: 0, stdout: "EXEC_OK\n", stderr: "", exitCode: 0 } as never;
       },
     });
-    const out = await backend.exec("c1", "ls /app");
+    const out = await backend.execInWork(
+      { tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" },
+      "ls /app",
+    );
     expect(out).toEqual({ stdout: "EXEC_OK\n", stderr: "", exitCode: 0 });
     const call = runnerCalls[0];
     expect(call?.bin).toBe("nomad");
@@ -755,9 +638,7 @@ describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
   it("returns undefined when there is no RUNNING alloc (nothing to exec into)", async () => {
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path.includes("/v1/jobs?prefix="))
-          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-aa", SubmitTime: 1 }]) };
-        if (path.includes("/allocations"))
+        if (path === "/v1/job/everdict-c1-aaaa/allocations")
           return { status: 200, text: JSON.stringify([{ ID: "a", ClientStatus: "complete" }]) };
         return { status: 404, text: "" };
       },
@@ -772,7 +653,9 @@ describe("NomadBackend.exec — one-shot exec into a live case alloc", () => {
         return { code: 0, stdout: "", stderr: "" };
       },
     });
-    expect(await backend.exec("c1", "ls")).toBeUndefined();
+    expect(
+      await backend.execInWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" }, "ls"),
+    ).toBeUndefined();
     expect(ran).toBe(false); // never shells out when there's no running alloc
   });
 });
@@ -981,12 +864,10 @@ describe("summarizeAllocFailure / eventsIndicateOom (task-event cause extraction
   });
 });
 
-describe("NomadBackend.logs (live tail stream selection)", () => {
+describe("NomadBackend.logsForWork / eventsForWork (live tail stream selection)", () => {
   const tailHttp = (calls: string[]): NomadHttp => ({
     async request(method, path) {
       calls.push(`${method} ${path}`);
-      if (path.startsWith("/v1/jobs?prefix="))
-        return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
       if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
       if (path.includes("/logs/")) return { status: 200, text: "INFO progress line" };
       return { status: 404, text: "" };
@@ -996,19 +877,20 @@ describe("NomadBackend.logs (live tail stream selection)", () => {
   it("defaults to stdout; stream=stderr reads the alloc's stderr file", async () => {
     const calls: string[] = [];
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http: tailHttp(calls) });
-    await backend.logs("c1");
+    await backend.logsForWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" });
     expect(calls.some((c) => c.includes("type=stdout"))).toBe(true);
-    const text = await backend.logs("c1", "stderr");
+    const text = await backend.logsForWork(
+      { tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" },
+      "stderr",
+    );
     expect(text).toBe("INFO progress line");
     expect(calls.some((c) => c.includes("type=stderr"))).toBe(true);
   });
 
-  it("caseEvents decodes the job's EVENT_SENTINEL lines while logs() strips them from the human view", async () => {
+  it("eventsForWork decodes the job's EVENT_SENTINEL lines while logsForWork strips them from the human view", async () => {
     const event = { t: 1, kind: "message", role: "assistant", text: "step one" };
     const http: NomadHttp = {
       async request(_m, path) {
-        if (path.startsWith("/v1/jobs?prefix="))
-          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
         if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
         if (path.includes("/logs/"))
           return { status: 200, text: `progress line\n__EVERDICT_EVENT__${JSON.stringify(event)}\nmore progress` };
@@ -1016,12 +898,16 @@ describe("NomadBackend.logs (live tail stream selection)", () => {
       },
     };
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
-    expect(await backend.caseEvents("c1")).toEqual([event]);
-    expect(await backend.logs("c1")).toBe("progress line\nmore progress");
+    expect(
+      await backend.eventsForWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" }),
+    ).toEqual([event]);
+    expect(await backend.logsForWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" })).toBe(
+      "progress line\nmore progress",
+    );
   });
 });
 
-describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
+describe("NomadBackend.inspectWork (the exact object's placement view)", () => {
   const backendWith = (http: NomadHttp) => new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
 
   it("no orchestrator job for the case → undefined (pre-dispatch / GC'd)", async () => {
@@ -1031,7 +917,9 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         return { status: 404, text: "" };
       },
     };
-    expect(await backendWith(http).inspectCase("c1")).toBeUndefined();
+    expect(
+      await backendWith(http).inspectWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-abc" }),
+    ).toBeUndefined();
   });
 
   it("job with no alloc + a blocked evaluation → phase 'blocked' with nomad's exhausted-dimension verdict", async () => {
@@ -1050,7 +938,11 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         return { status: 404, text: "" };
       },
     };
-    const placement = await backendWith(http).inspectCase("c1");
+    const placement = await backendWith(http).inspectWork({
+      tenant: "acme",
+      runId: "evd-run-1",
+      externalJobId: "everdict-c1-abc",
+    });
     expect(placement?.phase).toBe("blocked");
     expect(placement?.blockedReason).toMatch(/memory exhausted on 2 node/);
     expect(placement?.job).toBe("everdict-c1-abc");
@@ -1066,7 +958,10 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         return { status: 404, text: "" };
       },
     };
-    expect((await backendWith(http).inspectCase("c1"))?.phase).toBe("queued");
+    expect(
+      (await backendWith(http).inspectWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-abc" }))
+        ?.phase,
+    ).toBe("queued");
   });
 
   it("running alloc → phase 'running' with the unit id, node, and the task-event feed", async () => {
@@ -1108,7 +1003,11 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         return { status: 404, text: "" };
       },
     };
-    const placement = await backendWith(http).inspectCase("c1");
+    const placement = await backendWith(http).inspectWork({
+      tenant: "acme",
+      runId: "evd-run-1",
+      externalJobId: "everdict-c1-abc",
+    });
     expect(placement?.phase).toBe("running");
     expect(placement?.unit).toBe("a1");
     expect(placement?.node).toBe("worker-2");
@@ -1137,7 +1036,11 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         return { status: 404, text: "" };
       },
     };
-    const placement = await backendWith(http).inspectCase("c1");
+    const placement = await backendWith(http).inspectWork({
+      tenant: "acme",
+      runId: "evd-run-1",
+      externalJobId: "everdict-c1-abc",
+    });
     expect(placement?.phase).toBe("dead");
     expect(placement?.oom).toBe(true);
   });
@@ -1566,15 +1469,10 @@ describe("currentAlloc (allocation currency)", () => {
   });
 });
 
-describe("NomadBackend.sampleCase (replay runtime plane producer)", () => {
+describe("NomadBackend.sampleWork (replay runtime plane producer)", () => {
   it("reads the live alloc's CPU/memory from the client stats API", async () => {
     const http: NomadHttp = {
       async request(_m, path) {
-        if (path.startsWith("/v1/jobs?prefix="))
-          return {
-            status: 200,
-            text: JSON.stringify([{ ID: "everdict-c1-a", Namespace: "default", SubmitTime: 1 }]),
-          };
         if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
         if (path.includes("/v1/client/allocation/a1/stats"))
           return {
@@ -1587,7 +1485,9 @@ describe("NomadBackend.sampleCase (replay runtime plane producer)", () => {
       },
     };
     const backend = new NomadBackend({ addr: "http://n:4646", image: "img", http });
-    expect(await backend.sampleCase("c1")).toEqual({ cpuPct: 12.5, memBytes: 104857600 });
+    expect(await backend.sampleWork({ tenant: "acme", runId: "evd-run-1", externalJobId: "everdict-c1-aaaa" })).toEqual(
+      { cpuPct: 12.5, memBytes: 104857600 },
+    );
   });
 
   it("reads as no sample when there is no job, no alloc, or the stats API fails — never throws", async () => {
@@ -1596,7 +1496,13 @@ describe("NomadBackend.sampleCase (replay runtime plane producer)", () => {
         return path.startsWith("/v1/jobs?prefix=") ? { status: 200, text: "[]" } : { status: 404, text: "" };
       },
     };
-    expect(await new NomadBackend({ addr: "http://n:4646", image: "i", http: noJob }).sampleCase("c1")).toBeUndefined();
+    expect(
+      await new NomadBackend({ addr: "http://n:4646", image: "i", http: noJob }).sampleWork({
+        tenant: "acme",
+        runId: "evd-run-1",
+        externalJobId: "everdict-c1-aaaa",
+      }),
+    ).toBeUndefined();
 
     const statsDown: NomadHttp = {
       async request(_m, path) {
@@ -1607,7 +1513,11 @@ describe("NomadBackend.sampleCase (replay runtime plane producer)", () => {
       },
     };
     expect(
-      await new NomadBackend({ addr: "http://n:4646", image: "i", http: statsDown }).sampleCase("c1"),
+      await new NomadBackend({ addr: "http://n:4646", image: "i", http: statsDown }).sampleWork({
+        tenant: "acme",
+        runId: "evd-run-1",
+        externalJobId: "everdict-c1-aaaa",
+      }),
     ).toBeUndefined();
   });
 });

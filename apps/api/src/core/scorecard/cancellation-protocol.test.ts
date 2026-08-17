@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 //  · the teardown is OWED by the same write that decides the abort (the operation row rides the settle —
 //    a crash after the CANCELLED commit can no longer leave a decided abort nobody owns);
 //  · COMPLETED means the postcondition was read back (no child still live), not "commands were issued"
-//    (killCase was fire-and-forget; the operation completed over work that had not stopped);
+//    (the stop was fire-and-forget; the operation completed over work that had not stopped);
 //  · a batch whose teardown is still owed cannot be DELETED (the reconciler would close the operation as
 //    unactionable while the live work it was owed for keeps burning).
 
@@ -136,7 +136,9 @@ describe("the abort settle owns its teardown (decision + operation, one write)",
 describe("COMPLETED proves the postcondition, not the attempt", () => {
   it("a kill that fails keeps the operation owed — the cancel surfaces the failure instead of completing over live compute", async () => {
     const { store, runs, cancellations, service } = world({
-      killCase: async () => {
+      // The no-handle answer, which is where a child with no recorded work now lands (arch-review 53,
+      // legacy removal). A throw from it is the same shape a failed stop was: the teardown did not converge.
+      killUnhandled: async () => {
         throw new Error("cluster unreachable");
       },
     });

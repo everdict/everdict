@@ -53,18 +53,24 @@ const runningRun = (over: Partial<RunRecord> = {}): RunRecord => ({
   ...over,
 });
 
-// RED as of 186f9fd9: `expected "spy" to not be called` — workHandles() swallows the ledger error, returns [],
-// and the `works.length > 0` branch falls through to the case-id kill.
-describe("[R53 WAVE-A.5 COUNTEREXAMPLE #9 — CLOSED] an unreadable attempt ledger does not widen the blast radius", () => {
-  it("refuses to fall back to the case-id kill when the handle ledger could not be read", async () => {
+// RED as of 186f9fd9: `expected "spy" to not be called` — workHandles() swallowed the ledger error, returned
+// [], and the `works.length > 0` branch fell through to the case-id kill.
+//
+// RE-STATED after the legacy removal (arch-review 53): the case-id kill is deleted, so "did it widen?" is no
+// longer the question a suite can ask — the widening is unreachable and an assertion about it certifies
+// nothing. The invariant that remains is the one that mattered all along: an unreadable ledger must not let
+// the teardown CONVERGE. `killUnhandled` exists for a lane that genuinely placed no handle, and it must not
+// be reached on an UNESTABLISHED one — those are different facts, and only the second keeps the operation owed.
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #9 — CLOSED] an unreadable attempt ledger does not let a teardown converge", () => {
+  it("refuses to answer for the lane when the handle ledger could not be read", async () => {
     const store = new InMemoryRunStore();
     await store.create(runningRun());
-    const killCase = vi.fn(async () => ({ status: "stopped" as const }));
+    const killUnhandled = vi.fn(async () => ({ status: "absent" as const }));
     const killWork = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
-      killCase,
+      killUnhandled,
       killWork,
       // The ledger is down — not empty. Whether this run placed managed work is UNKNOWN.
       attempts: {
@@ -77,11 +83,17 @@ describe("[R53 WAVE-A.5 COUNTEREXAMPLE #9 — CLOSED] an unreadable attempt ledg
       now: () => now,
     } as never);
 
-    // The teardown must not converge on a guess. Either it refuses (leaving the operation owed) or it reports
-    // an unconverged outcome — what it must NEVER do is stop every job that shares this case id.
-    await service.cancel({ tenant: "acme", id: "r1" }).catch(() => undefined);
+    // The cancel must not report a converged teardown over a ledger it could not read.
+    const settled = await service
+      .cancel({ tenant: "acme", id: "r1" })
+      .then(() => "converged" as const)
+      .catch(() => "owed" as const);
 
-    expect(killCase, "cancel widened to the case id on an unreadable ledger").not.toHaveBeenCalled();
+    expect(settled, "the teardown converged over an unreadable ledger").toBe("owed");
+    // …and neither stop arm was taken: the exact one has no handle, and the no-handle one answers about a
+    // lane that PLACED nothing — which is not what an unestablished ledger says.
+    expect(killWork).not.toHaveBeenCalled();
+    expect(killUnhandled, "answered for the lane on an unestablished ledger").not.toHaveBeenCalled();
   });
 });
 

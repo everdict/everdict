@@ -40,22 +40,22 @@ async function build(opts: { viewer?: string; roles?: string[] } = {}) {
   });
   await store.create(seed("live-1", "running"));
   await store.create(seed("done-1", "succeeded"));
-  const killCase = vi.fn(async () => ({ status: "stopped" as const }));
+  const killUnhandled = vi.fn(async () => ({ status: "stopped" as const }));
   const app = buildServer({
-    service: new RunService({ dispatcher: unusedDispatcher, store, killCase, now: () => now }),
+    service: new RunService({ dispatcher: unusedDispatcher, store, killUnhandled, now: () => now }),
     requireAuth: true,
     authenticator: asMember(opts.viewer ?? "alice", opts.roles),
   });
-  return { app, killCase };
+  return { app, killUnhandled };
 }
 
 describe("POST /runs/:id/cancel", () => {
   it("stops a running run: 200 with the cancelled record, and the compute is freed", async () => {
-    const { app, killCase } = await build();
+    const { app, killUnhandled } = await build();
     const res = await app.inject({ method: "POST", url: "/runs/live-1/cancel", headers: bearer });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ id: "live-1", status: "failed", error: { code: "CANCELLED" } });
-    expect(killCase).toHaveBeenCalledWith("acme", "nomad-1", "c1");
+    expect(killUnhandled).toHaveBeenCalledWith("acme", "nomad-1");
     await app.close();
   });
 

@@ -49,7 +49,7 @@ function queuedRun(overrides: Partial<ReturnType<typeof Run.newQueued>> = {}) {
 // The teardown arms, recording what they were asked to stop.
 function teardownSpies() {
   return {
-    killCase: vi.fn(async () => ({ status: "stopped" as const })),
+    killUnhandled: vi.fn(async () => ({ status: "stopped" as const })),
     cancelQueued: vi.fn((_predicate: (job: CaseJob) => boolean) => 1),
     cancelLeased: vi.fn(async (_predicate: (job: CaseJob) => boolean) => 1),
   };
@@ -78,7 +78,7 @@ describe("RunService.cancel — the standalone run's user stop", () => {
     expect(emitted[0]?.subject).toEqual({ type: "run", id: "r1" });
 
     // …and every teardown arm fired against THIS run's job identity
-    expect(spies.killCase).toHaveBeenCalledWith("acme", "nomad-1", "c1");
+    expect(spies.killUnhandled).toHaveBeenCalledWith("acme", "nomad-1");
     expect(spies.cancelQueued).toHaveBeenCalledTimes(1);
     expect(spies.cancelLeased).toHaveBeenCalledTimes(1);
     const thisRunsJob = { evalCase: CASE, harness: { id: "s", version: "0" }, runId: "evd-run-r1" } as CaseJob;
@@ -100,7 +100,7 @@ describe("RunService.cancel — the standalone run's user stop", () => {
     expect(spies.cancelQueued).toHaveBeenCalledTimes(1); // dropped from the scheduler queue
     // A run read as queued may have been dispatched a millisecond later; the kill of a case with no job is a
     // no-op at the backend, and skipping it on the strength of a stale read is not.
-    expect(spies.killCase).toHaveBeenCalledTimes(1);
+    expect(spies.killUnhandled).toHaveBeenCalledTimes(1);
   });
 
   it("aborts the dispatch this replica is awaiting, and the losing driver never overwrites the cancel", async () => {
@@ -139,7 +139,7 @@ describe("RunService.cancel — the standalone run's user stop", () => {
 
     // Then it succeeds and the teardown ran a second time — what a retry owes is the teardown, not the decision
     expect(again.error?.code).toBe("CANCELLED");
-    expect(spies.killCase).toHaveBeenCalledTimes(2);
+    expect(spies.killUnhandled).toHaveBeenCalledTimes(2);
     expect(spies.cancelLeased).toHaveBeenCalledTimes(2);
   });
 
@@ -151,7 +151,7 @@ describe("RunService.cancel — the standalone run's user stop", () => {
       store,
       // The seam ANSWERS now (arch-review 52, Wave 3) — this is the shape a cluster that could not be
       // reached reports, and it must be read as "not converged" exactly as a rejection was.
-      killCase: async () => ({ status: "failed" as const, reason: "nomad unreachable" }),
+      killUnhandled: async () => ({ status: "failed" as const, reason: "nomad unreachable" }),
       now: () => now,
     });
 

@@ -8,23 +8,23 @@ import {
   type RuntimeWorkRef,
   type TraceEvent,
 } from "@everdict/contracts";
-// Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
+// Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / ManagedWorkControl.
 // inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
 // same package's DTO surface.
 import type { CasePlacement, InspectRuntimeResult, TopologyStatus } from "@everdict/contracts/wire";
 
-// Which job output stream a log read targets (Observable.logs). Harnesses often log progress to stderr
+// Which job output stream a log read targets (ManagedWorkControl.logsForWork). Harnesses often log to stderr
 // while stdout carries only the final result block — the live tail needs both to be reachable.
 export type LogStream = "stdout" | "stderr";
 
-// Result of a one-shot in-container exec (Observable.exec) — the sandbox command's stdout/stderr/exit.
+// Result of a one-shot in-container exec (ManagedWorkControl.execInWork) — stdout/stderr/exit.
 export interface ExecInContainer {
   stdout: string;
   stderr: string;
   exitCode: number;
 }
 
-// A live interactive shell stream inside a case container (Shellable.execStream) — the WS terminal route drives it.
+// A live interactive shell stream inside a case container (ManagedWorkControl.execStreamInWork).
 // Lifecycle = the WS connection: exactly one consumer, torn down by close(), so there is no unsubscribe (that, and a
 // full Node-stream/backpressure model, are deliberate non-goals here). write() is best-effort fire-and-forget.
 export interface ExecStreamHandle {
@@ -82,14 +82,14 @@ export function dispatchAborted(job: CaseJob): InternalError {
 // backends and routes jobs; isolation is provided by each backend's runtime (Nomad task driver / K8s runtimeClass /
 // Windows VM). Anything beyond dispatch+capacity is an OPTIONAL capability (see the capability interfaces below) —
 // expressed as a separate interface + a narrowing guard, NOT as optional methods on this one, so a caller narrows
-// with `isObservable(backend)` (compiler-checked) instead of feature-detecting `backend.logs` (undefined at runtime).
+// with `isWorkControllable(backend)` (compiler-checked) instead of feature-detecting `backend.logsForWork`.
 export interface Backend extends Dispatcher {
   capacity(): Promise<BackendCapacity>; // for capacity-aware placement — free concurrent slots
 }
 
 // --- Capability interfaces: a backend MAY additionally implement any of these. Narrow to them with the guards below. ---
 
-// The result of Recoverable.adopt — deliberately three-valued so the caller never conflates "no job to adopt"
+// The result of ManagedWorkControl.adoptWork — three-valued so the caller never conflates "no job to adopt"
 // (safe to re-dispatch) with "couldn't determine" (re-dispatching may double-spend a job that is actually still
 // live). The old `CaseResult | undefined` collapsed both into undefined and quietly risked double compute.
 export type AdoptOutcome =
@@ -97,38 +97,13 @@ export type AdoptOutcome =
   | { status: "absent" } // the listing succeeded and there is definitively no job for this case → safe to re-dispatch
   | { status: "unknown" }; // an API/parse failure left it ambiguous → re-dispatch MAY double-spend a live job
 
-// Recoverable — reclaim a case's orchestrator job without re-running it. Backends whose jobs outlive the control
-// plane (Nomad/K8s) implement this; in-process/pull backends do not.
-export interface Recoverable {
-  // Adopt an already-dispatched case job (boot recovery): find the orchestrator job this backend previously
-  // submitted for the case, wait for it, and harvest its result — instead of re-dispatching and double-spending
-  // compute. Best-effort and TOTAL — never throws; the ambiguity is encoded in AdoptOutcome, not swallowed to a
-  // bare undefined, so the caller decides re-dispatch policy per `absent` (safe) vs `unknown` (may double-spend).
-  //
-  // ⚠️ CASE-ID ADDRESSED, therefore AMBIGUOUS (arch-review 52, Wave 2). It picks the NEWEST job carrying the
-  // case id — which, with two runs of one case live at once, is somebody else's execution, and adopting it
-  // attributes their verdict to this run. A caller that HOLDS a work handle must not come here; the exact
-  // path is `WorkAddressable`. This stays for the callers that hold none (legacy attempt rows written before
-  // the handle was persisted, and the lanes that never mint one).
-  adopt(caseId: string): Promise<AdoptOutcome>;
-  // Force-stop every live orchestrator job of a case (superseded batch reclaim). Never throws — it ANSWERS
-  // instead (arch-review 52, Wave 3): `stopped`/`absent` are convergence, `unknown`/`failed` say the compute
-  // is probably still burning and the caller's cancellation is still owed. It used to return `Promise<void>`,
-  // which made "the delete request returned" and "the job stopped" the same observation.
-  //
-  // ⚠️ SAME AMBIGUITY, with a destructive blast radius: "every live job of this case" includes the ones other
-  // runs — and, before the K8s case label became injective, other CASES — placed. Use `WorkAddressable.
-  // killWork` wherever a handle exists; this is the no-handle fallback and nothing else.
-  kill(caseId: string): Promise<KillOutcome>;
-}
-
 // WorkAddressable — CONTROL ADDRESSED BY THE EXACT WORK, not by what the work was about (arch-review 52,
 // Wave 2). The backend minted the handle when it created the external object (`DispatchOptions.onWork`); the
 // caller persisted it; this is the other end. `killWork` stops the object that handle names, in the namespace
 // it names, and nothing else — no prefix scan, no cross-namespace sweep, no label that another run shares.
 //
 // Backends whose work outlives the dispatch call implement it (Nomad/K8s), the same set that implements
-// `Recoverable`. In-process and pull backends do not: they have no external object to hand out a name for.
+// `ManagedWorkControl`. In-process and pull backends do not: they have no external object to name.
 export interface WorkAddressable {
   // Idempotent, like every stop on this layer: work that is already gone is `absent`, and a handle from
   // another cluster simply matches nothing there — also `absent`. Never throws; the ambiguity is in the
@@ -154,9 +129,11 @@ export interface WorkAddressable {
 // adopt puts the decision plane at the mercy of creation timestamps.
 //
 // A backend that can name its work (`reserve`) can be asked about exactly that work. The case-id twins on
-// `Recoverable`/`Observable`/`CaseInspectable`/`CaseSampleable` survive as the LEGACY compatibility surface —
-// pre-handle rows, and the debug/display reads a human drives — and are forbidden on recovery, cancellation
-// and decision paths (`unknown-collapse-guard`'s sibling scan enforces the ban).
+// The case-id twins are GONE (arch-review 53, legacy removal). They survived one wave as a compatibility
+// surface for pre-handle ledger rows, forbidden on decision paths by a scanner; that arrangement asked every
+// future caller to know which of two functions was the safe one, and the answer was never visible at the call
+// site. A caller that holds no handle now gets `unknown` — the postcondition is unestablished, which is the
+// honest answer and the one the constitution already requires everywhere else.
 export interface ManagedWorkControl {
   // Harvest the finished result of exactly this work, for boot recovery. `absent` means the object is not
   // there (safe to re-dispatch); `unknown` means the cluster could not be asked (re-dispatching may
@@ -171,41 +148,18 @@ export interface ManagedWorkControl {
     work: RuntimeWorkRef,
     command: string,
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
+  // An INTERACTIVE shell stream inside exactly this work's container (the WS terminal). Optional on the
+  // capability because it needs a real streaming exec: Nomad has `nomad alloc exec -i`, K8s does not.
+  execStreamInWork?(work: RuntimeWorkRef): Promise<ExecStreamHandle | undefined>;
   // Placement view of exactly this work — phase, unit, node, events.
   inspectWork(work: RuntimeWorkRef): Promise<CasePlacement | undefined>;
   // Live resource usage of exactly this work.
   sampleWork(work: RuntimeWorkRef): Promise<CaseRuntimeSample | undefined>;
 }
 
-// Observable — live-progress introspection into a case's running sandbox (logs + one-shot exec). The sandbox is
-// already untrusted+isolated, so the control plane gates WHO may call these (run creator / workspace admin).
-export interface Observable {
-  // Current output of the case's newest orchestrator job (live-progress observability). Raw text with the result
-  // sentinel and live-event lines stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll
-  // and diff for a tail. stream selects stdout (default) or stderr — agents/harnesses often log progress to stderr
-  // while stdout carries only the final result block. K8s merges both streams in the pod log, so it accepts and
-  // ignores the parameter.
-  logs(caseId: string, stream?: LogStream): Promise<string | undefined>;
-  // The live-event lines of that same job stdout, decoded (live-observability ⑨): the TraceEvents the in-job agent
-  // printed as EVENT_SENTINEL lines while the case runs — the managed lane's live trajectory. Snapshot semantics
-  // like logs() (each read returns everything printed so far). undefined = no job / logs unreadable; [] = a job
-  // that hasn't printed any events yet. Best-effort, never throws.
-  caseEvents(caseId: string): Promise<TraceEvent[] | undefined>;
-  // Run a one-shot command INSIDE the case's live sandbox container (web terminal / live-screen capture). The
-  // command is passed to `sh -c`. undefined = no live container to exec into. Best-effort.
-  exec(caseId: string, command: string): Promise<ExecInContainer | undefined>;
-}
-
-// Shellable — an INTERACTIVE shell stream inside the case's live container (observability ⑥ — PTY over WS). Split
-// from Observable because it needs a real streaming exec: Nomad (`nomad alloc exec -i`) has it, K8s does not — the
-// type now says so instead of a runtime `undefined`. The control plane pipes a WebSocket to the returned handle.
-export interface Shellable {
-  execStream(caseId: string): Promise<ExecStreamHandle | undefined>; // undefined = no live container. Best-effort.
-}
-
 // ScreenCapturable — a live screen frame for a run's per-case browser (topology backends only). Deliberately keyed
 // by the CP-minted runId (not caseId) because the browser is a per-RUN resource the control plane rediscovers by
-// that id; isolating it here keeps the run-vs-case key mismatch off the core Backend/Observable contracts.
+// that id; isolating it here keeps the run-vs-case key mismatch off the core Backend contract.
 export interface ScreenCapturable {
   // base64 PNG (no data: prefix), or undefined when there's no running browser.
   captureScreen(runId: string): Promise<string | undefined>;
@@ -234,25 +188,13 @@ export interface Inspectable {
   inspect(): Promise<InspectRuntimeResult>;
 }
 
-// CaseInspectable — case-scoped placement introspection: where does THIS case's orchestrator job stand inside the
-// cluster (placed or not, on which node, and why not). The case-scoped sibling of the runtime-scoped Inspectable —
-// it answers "is my case blocked on capacity / stuck pulling an image / OOM-looping" while the case is still alive,
-// instead of that verdict surfacing only inside a thrown error after the dispatch has already failed. undefined =
-// no orchestrator job for the case (pre-dispatch / GC'd). Best-effort and MUST NOT throw (observability read).
-export interface CaseInspectable {
-  inspectCase(caseId: string): Promise<CasePlacement | undefined>;
-}
-
-// CaseSampleable — a point-in-time resource sample of THIS case's live sandbox, read from the orchestrator's
+// (superseded by ManagedWorkControl.sampleWork) — a point-in-time resource sample, read from the orchestrator's
 // stats API. The producer half of the replay runtime plane (docs/architecture/replay.md ③): the control-plane
 // sampler polls it while the case runs and streams the samples onto the recording's `runtime` lane, so a replay
 // can answer "did it OOM / thrash" alongside the agent trace. The sample is UNstamped — `t` belongs to the
 // caller (the sample instant is when the poll fired). undefined = no live alloc (pre-dispatch / settled / GC'd).
 // Best-effort and MUST NOT throw (observability read).
 export type CaseRuntimeSample = Omit<RuntimeSample, "t">;
-export interface CaseSampleable {
-  sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined>;
-}
 
 // TopologyInspectable — service-topology health introspection: the live roster of a service harness's deployed
 // stack (per-service state/restarts/OOM) + one service's log tail. Keyed by the HARNESS (the topology is a warm
@@ -314,11 +256,6 @@ export interface Reclaimable {
 
 // --- Narrowing guards: express capability at the type level. Prefer these over `if (backend.method)` feature detection. ---
 
-export function isRecoverable(backend: Backend): backend is Backend & Recoverable {
-  const b = backend as Partial<Recoverable>;
-  return typeof b.adopt === "function" && typeof b.kill === "function";
-}
-
 export function isWorkAddressable(backend: Backend): backend is Backend & WorkAddressable {
   return typeof (backend as Partial<WorkAddressable>).killWork === "function";
 }
@@ -336,15 +273,6 @@ export function isPoolReporting(backend: Backend): backend is Backend & PoolRepo
 
 export function isCaseCapacityAware(backend: Backend): backend is Backend & CaseCapacityAware {
   return typeof (backend as Partial<CaseCapacityAware>).capacityFor === "function";
-}
-
-export function isObservable(backend: Backend): backend is Backend & Observable {
-  const b = backend as Partial<Observable>;
-  return typeof b.logs === "function" && typeof b.exec === "function" && typeof b.caseEvents === "function";
-}
-
-export function isShellable(backend: Backend): backend is Backend & Shellable {
-  return typeof (backend as Partial<Shellable>).execStream === "function";
 }
 
 // Sessionable — this placement target can also hold a compute OPEN instead of running one program to completion.
@@ -376,14 +304,6 @@ export function isProbeable(backend: Backend): backend is Backend & Probeable {
 
 export function isInspectable(backend: Backend): backend is Backend & Inspectable {
   return typeof (backend as Partial<Inspectable>).inspect === "function";
-}
-
-export function isCaseInspectable(backend: Backend): backend is Backend & CaseInspectable {
-  return typeof (backend as Partial<CaseInspectable>).inspectCase === "function";
-}
-
-export function isCaseSampleable(backend: Backend): backend is Backend & CaseSampleable {
-  return typeof (backend as Partial<CaseSampleable>).sampleCase === "function";
 }
 
 export function isTopologyInspectable(backend: Backend): backend is Backend & TopologyInspectable {

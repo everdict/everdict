@@ -41,9 +41,13 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Per-runtime kill of an already-dispatched case (supersede / speculation loser) — from buildRuntimeAccess.
 export interface ScorecardRuntimeAccess {
-  adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
-  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<KillOutcome>;
-  // The exact-handle stop (arch-review 52, Wave 2) — `killCase` is the no-handle fallback beside it.
+  adoptWorkFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ) => Promise<{ result?: CaseResult; established: boolean }>;
+  killUnhandled: (tenant: string, runtimeList: string | undefined) => Promise<KillOutcome>;
+  // The exact-handle stop (arch-review 52, Wave 2) — `killUnhandled` answers for rows that recorded none.
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
 }
 
@@ -106,9 +110,9 @@ export function buildScorecard(deps: {
   platformEventService: PlatformEventService;
   traceSinkService: TraceSinkService;
   preflightPlacement: PlacementPreflight;
-  killCase: ScorecardRuntimeAccess["killCase"];
+  killUnhandled: ScorecardRuntimeAccess["killUnhandled"];
   killWork: ScorecardRuntimeAccess["killWork"];
-  adoptCaseFn: ScorecardRuntimeAccess["adoptCaseFn"];
+  adoptWorkFn: ScorecardRuntimeAccess["adoptWorkFn"];
 }): ScorecardService {
   const {
     scorecardStore,
@@ -144,9 +148,9 @@ export function buildScorecard(deps: {
     platformEventService,
     traceSinkService,
     preflightPlacement,
-    killCase,
+    killUnhandled,
     killWork,
-    adoptCaseFn,
+    adoptWorkFn,
   } = deps;
 
   // Batch-on-Temporal (opt-in): the durable workflow drives batches through the internal routes.
@@ -247,10 +251,10 @@ export function buildScorecard(deps: {
     // Queued-entry reclaim (supersede / speculation loser) — in-flight jobs stay Backend.kill's concern.
     cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
     // Self-hosted lease reclaim (supersede / user cancel) — rejects the parked/leased dispatch and tells the runner
-    // to abort the in-flight run (freeing the runtime mid-case); the managed force-kill is killCase below.
+    // to abort the in-flight run (freeing the runtime mid-case); the managed force-kill is killWork below.
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
-    adoptCase: adoptCaseFn,
-    killCase,
+    adoptWork: adoptWorkFn,
+    killUnhandled,
     killWork,
     ...(temporalDriver
       ? {

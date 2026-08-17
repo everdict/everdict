@@ -7,7 +7,7 @@ import { buildRuntimeAccess } from "./runtime-access.js";
 
 // ── A KILL THAT CANNOT BE CONFIRMED IS NOT A KILL (arch-review 52, Wave 3) ──────────────────────────
 //
-// `killCase` in the composition root swallows the backend's rejection (`backend.kill(caseId).catch(() => {})`)
+// `killUnhandled` in the composition root swallows the backend's rejection (`backend.kill(caseId).catch(() => {})`)
 // and answers `Promise<void>` either way. So the one caller that treats a failed teardown as its own failure —
 // RunService.stopRun, which wraps the kill in an UpstreamError precisely so the caller retries — can never see
 // one: the arm it awaits resolves cleanly while the cluster job keeps running. Cancellation then certifies a
@@ -56,13 +56,16 @@ const registryOf = (spec: RuntimeSpec): RuntimeRegistry =>
   }) as unknown as RuntimeRegistry;
 
 // [WAVE-3 COUNTEREXAMPLE #7] RED as of 02a3e15e: `AssertionError: expected { settled: 'resolved', value: undefined }
-// to not deeply equal { settled: 'resolved', value: undefined }` — runtime-access.ts killCase did
+// to not deeply equal { settled: 'resolved', value: undefined }` — runtime-access.ts killUnhandled did
 // `backend.kill(caseId).catch(() => {})`, so an unreachable cluster was reported to the caller as a completed
 // teardown. UN-SKIPPED (wave 3): the seam answers with a `KillOutcome`, and this backend's rejection becomes
 // `failed` rather than silence.
 describe("the runtime-access seam never reports a teardown it could not confirm", () => {
   it("surfaces a backend kill that failed instead of resolving as if the compute were freed", async () => {
-    // Given a run placed on a runtime whose cluster API is down
+    // Given a run on a MANAGED runtime whose attempt ledger recorded no handle. The case-id kill that used
+    // to stand here — and used to swallow its own failure — is gone entirely (arch-review 53, legacy
+    // removal), so the shape this counterexample pins moved with it: what must never happen is the seam
+    // answering "done" about compute nobody established anything about.
     const killed: string[] = [];
     const access = buildRuntimeAccess({
       runtimeRegistry: registryOf(nomadSpec),
@@ -70,14 +73,16 @@ describe("the runtime-access seam never reports a teardown it could not confirm"
       runtimeBuildBackend: () => unreachableBackend(killed),
     });
 
-    // When the cancellation's kill arm runs
-    const outcome = await access.killCase("acme", "rt-a", "c1").then(
+    // When the cancellation's no-handle arm runs
+    const outcome = await access.killUnhandled("acme", "rt-a").then(
       (value: unknown) => ({ settled: "resolved" as const, value }),
       (error: unknown) => ({ settled: "rejected" as const, error }),
     );
 
-    // …the backend was genuinely asked (the assertion below is about the ANSWER, not about a skipped call)
-    expect(killed).toEqual(["c1"]);
+    // …and it asks NO backend, because there is no object to name. That is the point: the answer is about
+    // what can be established, not about a call that was made.
+    expect(killed).toEqual([]);
+    expect(outcome).toEqual({ settled: "resolved", value: expect.objectContaining({ status: "unknown" }) });
     // Then the seam did not answer "done". Rejecting is one honest answer and an outcome the caller can read
     // ("unknown") is the other; silently resolving with nothing is the one answer that makes a live job look
     // like a freed one.

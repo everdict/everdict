@@ -34,20 +34,15 @@ import {
   type AdoptOutcome,
   type Backend,
   type BackendCapacity,
-  type CaseInspectable,
   type CaseRuntimeSample,
-  type CaseSampleable,
   type DispatchOptions,
   type ExecStreamHandle,
   type Inspectable,
   type LogStream,
   type ManagedWorkControl,
-  type Observable,
   type ProbeResult,
   type Probeable,
   type Reclaimable,
-  type Recoverable,
-  type Shellable,
   type WorkAddressable,
   dispatchAborted,
 } from "../backend.js";
@@ -595,15 +590,10 @@ export class NomadBackend
     // alloc exec — has one owner, and so a session shows up in this backend's own `capacity()` probe (its jobs
     // carry the same `everdict-` prefix the probe counts) instead of being invisible to the Scheduler.
     Driver,
-    Recoverable,
     WorkAddressable,
     ManagedWorkControl,
-    Observable,
-    Shellable,
     Probeable,
     Inspectable,
-    CaseInspectable,
-    CaseSampleable,
     Reclaimable
 {
   // The Driver contract's identity (the session mode) — "which compute is this". Backend placement is named
@@ -923,48 +913,6 @@ export class NomadBackend
     }
   }
 
-  // Adopt an already-dispatched case job (boot recovery): the control plane died after submitting
-  // everdict-<caseId>-<suffix> — instead of re-dispatching (double compute), find the NEWEST such job, wait for
-  // its alloc like a normal dispatch, and harvest the result from its logs. undefined on any miss (no job, logs
-  // gone, no sentinel) — the caller re-dispatches as before. Best-effort by design.
-  async adopt(caseId: string): Promise<AdoptOutcome> {
-    const prefix = `everdict-${caseId}-`;
-    // Step 1: list the case's jobs. If this fails, we CANNOT tell whether a job is live → "unknown", never "absent".
-    let listText: string;
-    try {
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return { status: "unknown" };
-      listText = res.text;
-    } catch {
-      return { status: "unknown" };
-    }
-    let newest: { ID?: string; Namespace?: string; SubmitTime?: number } | undefined;
-    try {
-      const jobs = JSON.parse(listText) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
-    } catch {
-      return { status: "unknown" };
-    }
-    // Step 2: the listing succeeded and there is no job → definitively nothing to adopt (safe to re-dispatch).
-    if (!newest?.ID) return { status: "absent" };
-    // Step 3: a job exists — harvest it. Any failure from here is ambiguous (the job is real), so it's "unknown".
-    try {
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const allocId = await this.waitForAlloc(newest.ID, ns);
-      const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
-      const logs = await this.http.request(
-        "GET",
-        `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
-      );
-      if (logs.status >= 300) return { status: "unknown" };
-      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId, ns) };
-    } catch {
-      return { status: "unknown" };
-    }
-  }
-
   // Decode the job-runner's stdout sentinel; when it is ABSENT, explain WHY from the alloc's task events instead of
   // the mushy generic. A bare crash (OOM SIGKILL) bypasses the in-process result guard entirely — the sentinel is
   // simply missing — so an OOM here becomes the fatal-infra OOM_KILLED verdict (never an "agent failure"), and any
@@ -1001,29 +949,6 @@ export class NomadBackend
     }
   }
 
-  // One-shot exec inside the case's live alloc (web terminal / live-screen capture). Shells to `nomad alloc
-  // exec -task agent <alloc> sh -c <command>` (WS exec is CLI-only), addr/token via env. undefined = no live alloc.
-  async exec(
-    caseId: string,
-    command: string,
-  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
-    try {
-      const newest = await this.newestJobForCase(caseId);
-      if (!newest?.ID) return undefined;
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
-      if (allocsRes.status >= 300) return undefined;
-      const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string; ClientStatus?: string }>).find(
-        (a) => a.ClientStatus === "running",
-      );
-      if (!alloc) return undefined; // no RUNNING alloc — nothing to exec into
-      return await this.execInAlloc(alloc.ID, ns, command);
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
-  }
-
   // `nomad alloc exec` into ONE named alloc — the shared tail of exec() and execInWork(), so a command can
   // never land in a different container than the one its caller addressed.
   private async execInAlloc(
@@ -1041,19 +966,17 @@ export class NomadBackend
 
   // Open an interactive shell inside the case's live alloc (observability ⑥) — `nomad alloc exec -i -task agent
   // <alloc> /bin/sh`. Returns a stream handle the WS terminal route pipes to. undefined = no running alloc.
-  async execStream(caseId: string): Promise<ExecStreamHandle | undefined> {
+  // Interactive shell into exactly this work's live alloc (arch-review 53, Wave B/legacy removal). The
+  // case-id twin is gone: it resolved "the newest job of this case", so a terminal opened for one run could
+  // land in another run's container — a WRITE into a world nobody asked about, which is the worst form the
+  // case-id defect took.
+  async execStreamInWork(work: RuntimeWorkRef): Promise<ExecStreamHandle | undefined> {
     try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
-      if (!newest?.ID) return undefined;
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      const nsq = work.namespace ? `?namespace=${encodeURIComponent(work.namespace)}` : "";
+      const allocsRes = await this.http.request(
+        "GET",
+        `/v1/job/${encodeURIComponent(work.externalJobId)}/allocations${nsq}`,
+      );
       if (allocsRes.status >= 300) return undefined;
       const alloc = (JSON.parse(allocsRes.text) as Array<{ ID: string; ClientStatus?: string }>).find(
         (a) => a.ClientStatus === "running",
@@ -1061,7 +984,16 @@ export class NomadBackend
       if (!alloc) return undefined;
       const env: Record<string, string> = { ...process.env, NOMAD_ADDR: this.opts.addr };
       if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
-      const args = ["alloc", "exec", "-i", "-task", "agent", ...(ns ? ["-namespace", ns] : []), alloc.ID, "/bin/sh"];
+      const args = [
+        "alloc",
+        "exec",
+        "-i",
+        "-task",
+        "agent",
+        ...(work.namespace ? ["-namespace", work.namespace] : []),
+        alloc.ID,
+        "/bin/sh",
+      ];
       return streamHandleFor(spawn("nomad", args, { stdio: ["pipe", "pipe", "pipe"], env }));
     } catch {
       return undefined;
@@ -1119,7 +1051,10 @@ export class NomadBackend
     command: string,
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
     try {
-      const allocId = await this.currentAllocIdOf(work.externalJobId, work.namespace);
+      // A RUNNING alloc, not merely the current one: `currentAlloc` answers "which alloc is this job's now",
+      // which includes a finished one, and there is nothing to exec into inside a container that has exited.
+      // The same predicate the case-id exec used before it was deleted (arch-review 53, legacy removal).
+      const allocId = await this.runningAllocIdOf(work.externalJobId, work.namespace);
       if (!allocId) return undefined;
       return await this.execInAlloc(allocId, work.namespace, command);
     } catch {
@@ -1145,7 +1080,18 @@ export class NomadBackend
     }
   }
 
-  // The live alloc of ONE named job — shared by the exec/sample twins, so "which container" is decided once.
+  // The RUNNING alloc of ONE named job — what an exec or a terminal needs, as opposed to "the current alloc"
+  // below, which a resource sample legitimately wants even as the container winds down.
+  private async runningAllocIdOf(jobId: string, ns: string | undefined): Promise<string | undefined> {
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${nsq}`);
+    if (res.status >= 300) return undefined;
+    return (JSON.parse(res.text) as Array<{ ID: string; ClientStatus?: string }>).find(
+      (a) => a.ClientStatus === "running",
+    )?.ID;
+  }
+
+  // The current alloc of ONE named job — shared by the sample twin, so "which container" is decided once.
   private async currentAllocIdOf(jobId: string, ns: string | undefined): Promise<string | undefined> {
     const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
     const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${nsq}`);
@@ -1154,29 +1100,6 @@ export class NomadBackend
       JSON.parse(res.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
     );
     return alloc?.ID;
-  }
-
-  private async rawCaseLogs(caseId: string, stream: LogStream): Promise<string | undefined> {
-    const newest = await this.newestJobForCase(caseId);
-    if (!newest?.ID) return undefined;
-    const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-    return this.rawJobLogs(newest.ID, ns, stream);
-  }
-
-  // ── THE LEGACY RESOLUTION, NAMED (arch-review 53, Wave B) ──────────────────────────────────────────
-  //
-  // "The newest job whose id starts with `everdict-<caseId>-`, in ANY namespace". Two runs of one case are
-  // two such jobs, so this answers about whichever the cluster submitted last — which is why every control
-  // path that DECIDES anything now takes a `RuntimeWorkRef` instead. Kept for the pre-handle rows and the
-  // human-driven debug reads.
-  private async newestJobForCase(
-    caseId: string,
-  ): Promise<{ ID?: string; Namespace?: string; SubmitTime?: number } | undefined> {
-    const prefix = `everdict-${caseId}-`;
-    const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-    if (res.status >= 300) return undefined;
-    const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-    return jobs.filter((j) => j.ID?.startsWith(prefix)).sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
   }
 
   // The current output of ONE named job. The shared tail of both the exact read and the legacy one, so the
@@ -1199,46 +1122,6 @@ export class NomadBackend
     return logs.text;
   }
 
-  // Current output of the case's newest job — live-progress tail. Sentinel payloads stripped (the machine result
-  // and live-event lines are not progress). stream=stderr reads the alloc's stderr file — harnesses often log
-  // progress there while stdout carries only the result block (stripSentinel is a no-op on stderr, harmless).
-  async logs(caseId: string, stream: LogStream = "stdout"): Promise<string | undefined> {
-    try {
-      const text = await this.rawCaseLogs(caseId, stream);
-      return text === undefined ? undefined : stripSentinel(text);
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
-  }
-
-  // The live trajectory of the case's running job (live-observability ⑨): the EVENT_SENTINEL lines the in-job
-  // agent printed to stdout, decoded to TraceEvents. Snapshot semantics like logs(). Best-effort, never throws.
-  async caseEvents(caseId: string): Promise<TraceEvent[] | undefined> {
-    try {
-      const text = await this.rawCaseLogs(caseId, "stdout");
-      return text === undefined ? undefined : extractLiveEvents(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  // One resource sample of the case's live alloc (CaseSampleable — the replay runtime plane's producer ③): the
-  // client stats API's CPU percent + resident memory for the case's current alloc. The caller stamps `t` and
-  // streams the sample onto the recording's `runtime` lane. undefined = no live alloc / stats unreadable
-  // (a client whose stats API is unreachable must read as "no sample", never fail a run). Best-effort.
-  async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
-    try {
-      const newest = await this.newestJobForCase(caseId);
-      if (!newest?.ID) return undefined;
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const allocId = await this.currentAllocIdOf(newest.ID, ns);
-      if (!allocId) return undefined;
-      return await this.sampleAlloc(allocId, ns);
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
-  }
-
   // The client stats read for ONE named alloc — shared by sampleCase() and sampleWork().
   private async sampleAlloc(allocId: string, ns: string | undefined): Promise<CaseRuntimeSample | undefined> {
     const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
@@ -1253,21 +1136,6 @@ export class NomadBackend
     const memBytes = usage?.MemoryStats?.RSS ?? usage?.MemoryStats?.Usage;
     if (cpuPct === undefined && memBytes === undefined) return undefined;
     return { ...(cpuPct !== undefined ? { cpuPct } : {}), ...(memBytes !== undefined ? { memBytes } : {}) };
-  }
-
-  // Case-scoped placement introspection (CaseInspectable): where the case's newest job stands INSIDE the cluster —
-  // placed or not, on which node, and why not. Unplaced + blocked evaluation = phase "blocked" with the exhausted-
-  // dimension verdict (the same read the dispatch wait loop uses to fail, HERE exposed while the case is alive).
-  // undefined = no job for the case (pre-dispatch / GC'd). Best-effort, never throws (observability read).
-  async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
-    try {
-      const newest = await this.newestJobForCase(caseId);
-      if (!newest?.ID) return undefined;
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      return await this.placementOfJob(newest.ID, ns);
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
   }
 
   // The placement projection for ONE named job — shared by inspectCase() and inspectWork(), so a panel can
@@ -1343,44 +1211,6 @@ export class NomadBackend
         status: "failed",
         reason: `nomad deregister ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
       };
-    }
-  }
-
-  // Force-stop every live job of a case (superseded batch reclaim) — deregister WITHOUT purge (the purge saga:
-  // purging a job a client still tracks panics its alloc watcher). Best-effort, never throws.
-  //
-  // ⚠️ FALLBACK ONLY (arch-review 52, Wave 2 counterexample #5). `namespace=*` makes this cross every trust
-  // zone and the case prefix makes it cross every run — a caller holding a `RuntimeWorkRef` must call
-  // `killWork`. This remains for the callers that hold none (legacy attempt rows, lanes that mint no handle).
-  async kill(caseId: string): Promise<KillOutcome> {
-    try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      // A LISTING THAT FAILED IS `unknown`, NEVER `absent` (arch-review 52, Wave 3). This is the sweep's whole
-      // vulnerability: it decides what to stop from a query, so a query that did not answer means the sweep
-      // stopped nothing AND learned nothing. Reporting that as "there was nothing to stop" is how a live job
-      // gets certified as freed.
-      if (res.status >= 300)
-        return { status: "unknown", reason: `nomad job listing for ${caseId}: HTTP ${res.status}` };
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; Status?: string }>;
-      const outcomes: KillOutcome[] = [];
-      for (const j of jobs) {
-        if (!j.ID?.startsWith(prefix) || j.Status === "dead") continue;
-        const nsq = j.Namespace && j.Namespace !== "default" ? `?namespace=${encodeURIComponent(j.Namespace)}` : "";
-        const del = await this.http.request("DELETE", `/v1/job/${encodeURIComponent(j.ID)}${nsq}`);
-        outcomes.push(
-          del.status === 404
-            ? { status: "absent" }
-            : del.status >= 300
-              ? { status: "failed", reason: `nomad deregister ${j.ID}: HTTP ${del.status}` }
-              : { status: "stopped" },
-        );
-      }
-      // Nothing live matched — a sweep that RAN and found no work is convergence, which is exactly the
-      // distinction the failed listing above cannot make.
-      return worstKillOutcome(outcomes);
-    } catch (err) {
-      return { status: "failed", reason: `nomad kill ${caseId}: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 

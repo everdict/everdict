@@ -68,7 +68,7 @@ describe("[R53 WAVE-A.5 COUNTEREXAMPLE #26 — CLOSED] the case-id fallback repo
       },
     } as never);
 
-    const outcome: KillOutcome = await access.killCase("acme", "nomad-1", "c1");
+    const outcome: KillOutcome = await access.killUnhandled("acme", "nomad-1");
 
     expect(outcome.status).toBe("unknown");
   });

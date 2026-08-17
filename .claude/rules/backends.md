@@ -69,6 +69,17 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   called INSTEAD of `killWork`, never beside it. K8s label values a selector selects on must be INJECTIVE —
   `caseSlug` truncates at 50 chars, so `caseLabelValue`/`runLabelValue` append a digest whenever slugging lost
   information, and every job carries `everdict.dev/run` beside `everdict.dev/case`.
+- **THE CASE-ID CONTROL SURFACE IS DELETED** (arch-review 53, legacy removal). `Recoverable` · `Observable` ·
+  `Shellable` · `CaseInspectable` · `CaseSampleable` and their methods (`adopt`/`kill`/`logs`/`caseEvents`/
+  `exec`/`execStream`/`inspectCase`/`sampleCase`) are GONE. They resolved "the newest job of this case", which
+  is another run's whenever two runs of one case are live: a stop reached strangers' compute, a log tail showed
+  a stranger's output, an exec ran INSIDE a stranger's sandbox, and an adopt attributed a stranger's verdict —
+  the last being a decision, not an observation. The whole surface is `ManagedWorkControl` now (`adoptWork` ·
+  `logsForWork` · `eventsForWork` · `execInWork` · `execStreamInWork?` · `inspectWork` · `sampleWork`, plus
+  `WorkAddressable.killWork`), all-or-none per backend. **A caller holding no handle gets `unknown`, never a
+  broader stop** — a self-hosted lane answers `absent` (its teardown is the lease revocation), a managed lane
+  answers `unknown` and the cancellation stays owed. `legacy-case-addressing-guard` is the ratchet: it refuses
+  a re-declared case-id method AND a re-added capability interface.
 - **A stop ANSWERS — `KillOutcome`, never `void`** (arch-review 52 Wave 3). `kill`/`killWork` return
   `{status: "stopped"|"absent"|"unknown"|"failed", reason?}` and still never throw: `stopped`/`absent` are
   convergence (`killConverged`), `unknown`/`failed` mean the compute is probably still burning. "The delete

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // ── A CANCEL STOPS THE WORK IT WAS ISSUED FOR (arch-review 52, Wave 2) ───────────────────────────────
 //
-// `killCase(caseId)` selects on the case alone, so cancelling one run stopped every concurrent execution of
+// `killUnhandled(caseId)` selects on the case alone, so cancelling one run stopped every concurrent execution of
 // that case — another run's, another tenant's. The dispatch now reports the exact object it created
 // (`DispatchOptions.onWork`), the attempt ledger persists it, and the teardown addresses THAT. These pin the
 // two halves that make the fallback safe to keep: the handle is preferred when one exists, and it is the
@@ -58,13 +58,13 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
     await attempts.recordWork(attemptId, WORK);
     const killWork = vi.fn(async () => ({ status: "stopped" as const }));
-    const killCase = vi.fn(async () => ({ status: "stopped" as const }));
+    const killUnhandled = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
       attempts,
       killWork,
-      killCase,
+      killUnhandled,
       now: () => now,
     });
 
@@ -76,32 +76,35 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     expect(killWork).toHaveBeenCalledWith("acme", "nomad-1", WORK);
     // …and the case-id kill — which would have reached every OTHER run of case c1 — never fires. A teardown
     // that does both is a teardown with the old blast radius plus an extra call.
-    expect(killCase).not.toHaveBeenCalled();
+    expect(killUnhandled).not.toHaveBeenCalled();
   });
 
-  it("falls back to the case-id kill when no attempt recorded a handle (legacy rows / handle-less lanes)", async () => {
+  it("answers by LANE when no attempt recorded a handle — never by widening to the case id", async () => {
     // Given a running run whose attempt ledger holds a row with no work handle on it
     const store = new InMemoryRunStore();
     await store.create(runningRun());
     const attempts = new InMemoryExecutionAttemptStore(() => now);
     await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
     const killWork = vi.fn(async () => ({ status: "stopped" as const }));
-    const killCase = vi.fn(async () => ({ status: "stopped" as const }));
+    const killUnhandled = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store,
       attempts,
       killWork,
-      killCase,
+      killUnhandled,
       now: () => now,
     });
 
     await service.cancel({ tenant: "acme", id: "r1" });
 
-    // Then the over-broad kill is used, because it is the only thing that can still reach the compute —
-    // leaving a cancelled run's job burning is worse than a kill that is wider than this run.
+    // Then no exact stop is possible, and the over-broad case-id kill that used to stand here is GONE
+    // (arch-review 53, legacy removal): it stopped every run's job of that case, and on Nomad every
+    // tenant's. What runs instead answers about the LANE — `absent` for a lease queue that placed no
+    // orchestrator object, `unknown` for a managed lane whose work this system cannot name — and it takes no
+    // case id at all, because there is no longer an action to point one at.
     expect(killWork).not.toHaveBeenCalled();
-    expect(killCase).toHaveBeenCalledWith("acme", "nomad-1", "c1");
+    expect(killUnhandled).toHaveBeenCalledWith("acme", "nomad-1");
   });
 
   it("a failed exact kill keeps the cancellation owed — the run is terminal, the compute is not", async () => {

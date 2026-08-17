@@ -47,7 +47,7 @@ function newRunId(): string {
 // Cancellation error — thrown when runCtx.signal aborts mid-run (a user stopped the scorecard). The self-hosted
 // runner discards this result (the control plane already settled the batch); the point of throwing is to end the
 // run so the finally disposes the compute — which force-kills the container (docker rm -f) / process and frees the
-// runtime mid-case. Managed backends never pass a signal (they kill the whole alloc via killCase instead).
+// runtime mid-case. Managed backends never pass a signal (they kill the whole alloc via killWork instead).
 function cancelledRun(runId: string): UpstreamError {
   return new UpstreamError("CANCELLED", { runId }, "Run cancelled — the batch was stopped.");
 }

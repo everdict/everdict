@@ -102,7 +102,7 @@ describeTrust("TRUST-177 — a cancel whose teardown failed is owed, and a recon
       // Wired in its production shape. The seam ANSWERS now (arch-review 52, Wave 3) and `absent` is a
       // converged answer — there is no managed job behind this batch's self-hosted lease lane, which is the
       // honest reading and the one that lets the teardown converge on the revocation alone.
-      killCase: async () => ({ status: "absent" as const }),
+      killUnhandled: async () => ({ status: "absent" as const }),
       cancelLeased: async () => {
         if (revocationFails) throw new Error("runner lease revocation is unreachable");
         revoked.push(1);

@@ -56,7 +56,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
-import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
+import {
+  InMemoryCaseReceiptStore,
+  InMemoryExecutionAttemptStore,
+  ScorecardService,
+} from "@everdict/application-control";
 
 const dispatcher: Dispatcher = {
   async dispatch() {
@@ -3496,6 +3500,8 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const { store, runs, datasets } = build(dispatcher);
     await datasets.register("acme", threeCaseDataset);
     const adoptedFor: string[] = [];
+    // The attempt row a real dispatch opens, carrying the handle it reserved before creating anything.
+    const attempts = new InMemoryExecutionAttemptStore(() => "2026-07-08T00:00:01.000Z");
     let n = 0;
     const service = new ScorecardService({
       dispatcher,
@@ -3503,11 +3509,17 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       datasets,
       runStore: runs,
       caseReceipts: new InMemoryCaseReceiptStore(),
+      // The ledger that says WHERE each child's compute was placed. Adoption reads it (arch-review 53,
+      // legacy removal): a child with no recorded handle has no managed work this system can name and is
+      // re-dispatched, where the deleted case-id form would have harvested "the newest job of this case".
+      attempts,
       newId: () => `ad-${n++}`,
-      // The runtime still runs the job the dead control plane submitted — harvest it.
-      adoptCase: async (_tenant, _runtime, caseId) => {
-        adoptedFor.push(caseId);
-        return caseId === "c2" ? passResult("c2") : undefined;
+      // The runtime still runs the job the dead control plane submitted — harvest it, by its handle.
+      adoptWork: async (_tenant, _runtime, work) => {
+        adoptedFor.push(work.runId);
+        return work.externalJobId.includes("c2")
+          ? { result: passResult("c2"), established: true }
+          : { established: true };
       },
     });
     await store.create({
@@ -3534,10 +3546,17 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       updatedAt: "2026-07-08T00:00:01.000Z",
     });
 
+    const opened = await attempts.open({ executionId: "child-c2", tenant: "acme", caseId: "c2" });
+    await attempts.recordWork(opened.attemptId, {
+      tenant: "acme",
+      runId: "child-c2",
+      externalJobId: "everdict-c2-aaaa",
+    });
+
     expect(await service.resume("sc-adopt")).toBe(true);
     const rec = await waitTerminal(store, "sc-adopt");
 
-    expect(adoptedFor).toContain("c2");
+    expect(adoptedFor).toContain("child-c2");
     expect(dispatched.sort()).toEqual(["c1", "c3"]); // c2 was ADOPTED — never re-dispatched
     expect(rec.status).toBe("succeeded");
     const child = await runs.get("child-c2");
@@ -3552,6 +3571,8 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const { store, runs, datasets } = build(dispatcher);
     await datasets.register("acme", threeCaseDataset);
     const receipts = new InMemoryCaseReceiptStore();
+    // The handle ledger the adoption reads (arch-review 53, legacy removal).
+    const attempts = new InMemoryExecutionAttemptStore(() => "2026-07-08T00:00:01.000Z");
     let n = 0;
     const service = new ScorecardService({
       dispatcher,
@@ -3559,8 +3580,10 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       datasets,
       runStore: runs,
       caseReceipts: receipts,
+      attempts,
       newId: () => `adr-${n++}`,
-      adoptCase: async (_tenant, _runtime, caseId) => (caseId === "c2" ? passResult("c2") : undefined),
+      adoptWork: async (_tenant, _runtime, work) =>
+        work.externalJobId.includes("c2") ? { result: passResult("c2"), established: true } : { established: true },
     });
     await store.create({
       id: "sc-adopt-receipt",
@@ -3585,6 +3608,13 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       executionId: "evd-sc-adopt-receipt-c2",
       createdAt: "2026-07-08T00:00:01.000Z",
       updatedAt: "2026-07-08T00:00:01.000Z",
+    });
+
+    const opened = await attempts.open({ executionId: "child-adopted", tenant: "acme", caseId: "c2" });
+    await attempts.recordWork(opened.attemptId, {
+      tenant: "acme",
+      runId: "child-adopted",
+      externalJobId: "everdict-c2-aaaa",
     });
 
     expect(await service.resume("sc-adopt-receipt")).toBe(true);
@@ -4834,7 +4864,7 @@ describe("ScorecardService — first terminal write wins (rich domain guards)", 
   });
 });
 
-// User stop — cancel a running batch and free its runtime (cooperative abort + cancelQueued + cancelLeased + killCase).
+// User stop — cancel a running batch and free its runtime (cooperative abort + cancelQueued + cancelLeased + killUnhandled).
 describe("ScorecardService.cancel — user stop", () => {
   it("marks a running batch cancelled and requests both reclaim paths (queued scheduler + self-hosted lease), keyed by batch id", async () => {
     const store = new InMemoryScorecardStore();
@@ -4892,22 +4922,26 @@ describe("ScorecardService.cancel — user stop", () => {
       createdAt: "t",
       updatedAt: "t",
     });
-    const killed: Array<{ runtime?: string; caseId: string }> = [];
+    const killed: Array<{ runtime?: string }> = [];
     const service = new ScorecardService({
       dispatcher,
       store,
       runStore,
       caseReceipts: new InMemoryCaseReceiptStore(),
       datasets: new InMemoryDatasetRegistry(),
-      killCase: async (_tenant, runtime, caseId) => {
-        killed.push({ runtime, caseId });
+      // The no-handle answer takes no case id (arch-review 53, legacy removal): it says what a LANE can
+      // establish, not what to stop, because "stop every job of this case" is the action that was removed.
+      killUnhandled: async (_tenant, runtime) => {
+        killed.push({ runtime });
         return { status: "stopped" as const };
       },
     });
 
     await service.cancel({ tenant: "acme", id: "sc-k" });
 
-    expect(killed).toEqual([{ runtime: "nomad-1", caseId: "c1" }]); // finished c2 is left alone
+    // ONE call, for the one still-running child — and it names the LANE, not the case: the case-id stop
+    // that would have reached every run of `c1` no longer exists (arch-review 53, legacy removal).
+    expect(killed).toEqual([{ runtime: "nomad-1" }]); // finished c2 is left alone
   });
 
   it("a missing or cross-workspace scorecard is a NotFound (no existence leak)", async () => {
@@ -4926,7 +4960,7 @@ describe("ScorecardService.cancel — user stop", () => {
   });
 
   it("cancel settles queued AND running child runs as failed{CANCELLED} — the ledger flip does not depend on an in-process drain", async () => {
-    // No killCase and no live track loop wired — models a cancel after a control-plane restart (or a
+    // No killUnhandled and no live track loop wired — models a cancel after a control-plane restart (or a
     // Temporal-owned batch), where nobody is left to drain a dispatch rejection into the child record.
     const store = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();

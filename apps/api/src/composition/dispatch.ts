@@ -19,8 +19,9 @@ import {
   type Dispatcher as CoreDispatcher,
   type Scheduler,
   buildRuntimeBackend,
-  isCaseSampleable,
+  isWorkControllable,
 } from "@everdict/backends";
+import type { RuntimeWorkRef } from "@everdict/contracts";
 import { BadRequestError, type CaseJob, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { TrustZonePolicy } from "@everdict/domain";
@@ -422,7 +423,7 @@ export function buildDispatch(deps: {
   const sampleCaseRuntime = async (
     tenant: string,
     targetList: string,
-    caseId: string,
+    work: RuntimeWorkRef,
   ): Promise<CaseRuntimeSample | undefined> => {
     const targets = targetList
       .split(",")
@@ -433,8 +434,8 @@ export function buildDispatch(deps: {
       if (!spec) continue;
       const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
       const backend = runtimeBuildBackend(spec, { secretEnv, tenant });
-      if (!isCaseSampleable(backend)) continue;
-      const sample = await backend.sampleCase(caseId).catch(() => undefined);
+      if (!isWorkControllable(backend)) continue;
+      const sample = await backend.sampleWork(work).catch(() => undefined);
       if (sample) return sample;
     }
     return undefined;

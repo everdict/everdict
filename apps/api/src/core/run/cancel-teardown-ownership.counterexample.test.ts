@@ -76,7 +76,7 @@ describe("a standalone run's cancellation owes its teardown to a ledger, not to 
       dispatcher: unusedDispatcher,
       store,
       now: () => now,
-      killCase: async () => ({ status: "stopped" as const }),
+      killUnhandled: async () => ({ status: "stopped" as const }),
       cancellations,
     });
 
@@ -104,9 +104,9 @@ describe("a standalone run's cancellation owes its teardown to a ledger, not to 
       dispatcher: unusedDispatcher,
       store,
       now: () => now,
-      killCase: async (_tenant: string, _runtime: string | undefined, caseId: string) => {
+      killUnhandled: async (_tenant: string, _runtime: string | undefined) => {
         if (!clusterReachable) return { status: "failed" as const, reason: "nomad unreachable" };
-        killed.push(caseId);
+        killed.push("unhandled"); // the lane, not a case — there is no case-id stop any more
         return { status: "stopped" as const };
       },
       // Wave 3 wires the standalone lane to the ledger the batch lane already owns.
@@ -136,7 +136,7 @@ describe("a standalone run's cancellation owes its teardown to a ledger, not to 
 
     // Then the compute was actually freed, and the operation is closed — the reconciler never picks it up
     // again — with the certificate saying what the completion read back.
-    expect(killed).toEqual(["c1"]);
+    expect(killed).toEqual(["unhandled"]);
     expect(await cancellations.get(RUN_TARGET)).toMatchObject({
       state: "completed",
       certificate: { kills: { stopped: 1, absent: 0 } },
@@ -155,8 +155,8 @@ describe("a standalone run's cancellation owes its teardown to a ledger, not to 
       dispatcher: unusedDispatcher,
       store,
       now: () => now,
-      killCase: async (_tenant: string, _runtime: string | undefined, caseId: string) => {
-        killed.push(caseId);
+      killUnhandled: async (_tenant: string, _runtime: string | undefined) => {
+        killed.push("unhandled"); // the lane, not a case — there is no case-id stop any more
         return { status: "stopped" as const };
       },
       cancellations,

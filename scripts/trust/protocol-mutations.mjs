@@ -32,6 +32,13 @@ const MUTATIONS = [
     build: "@everdict/application-control",
   },
   {
+    name: "legacy removal — a case-id control method comes back",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "  async killWork(work: RuntimeWorkRef): Promise<KillOutcome> {",
+    to: '  async kill(caseId: string): Promise<KillOutcome> {\n    void caseId;\n    return { status: "absent" };\n  }\n\n  async killWork(work: RuntimeWorkRef): Promise<KillOutcome> {',
+    suite: ["--root", "packages/backends", "src/orchestrators/legacy-case-addressing-guard.test.ts"],
+  },
+  {
     name: "Wave B — the exact placement read resolves by case id",
     file: "packages/backends/src/orchestrators/k8s.ts",
     from: '        placementOf(api, work.externalJobId, work.namespace ?? this.opts.namespace ?? "default"),',

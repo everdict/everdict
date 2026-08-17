@@ -129,9 +129,9 @@ export function buildRun(deps: {
   // The standalone cancel's teardown arms (RunService.cancel) — the same three the batch lane uses, keyed on
   // the run's own job identity: force-kill a dispatched managed job, drop a queued scheduler entry, revoke a
   // self-hosted lease.
-  killCase: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<KillOutcome>;
+  killUnhandled: (tenant: string, runtimeList: string | undefined) => Promise<KillOutcome>;
   // …and the EXACT one (arch-review 52, Wave 2): stop the object the dispatch actually created, from the
-  // handle the attempt ledger persisted. `killCase` above is the fallback for runs that recorded none.
+  // handle the attempt ledger persisted. `killUnhandled` above answers for runs that recorded none.
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
   // The postcondition read behind a VERIFIED cancellation (arch-review 53, Wave E). `killWork` answers what
   // the delete returned; this answers whether the object went away.
@@ -238,7 +238,7 @@ export function buildRun(deps: {
     dispatcher: meteredDispatcher,
     store,
     // User stop (POST /runs/:id/cancel): the terminal commit is the decision, these free the compute.
-    killCase: deps.killCase,
+    killUnhandled: deps.killUnhandled,
     killWork: deps.killWork,
     // …and the readback that decides whether the stop actually freed it (arch-review 53, Wave E).
     ...(deps.probeWork ? { probeWork: deps.probeWork } : {}),

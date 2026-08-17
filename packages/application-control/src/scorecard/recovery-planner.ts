@@ -16,7 +16,7 @@ import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 // It DECIDES nothing about authority: the fence a recovery holds is the driver's, so the parent token and
 // the "do I still hold this batch" probe are handed in per call rather than re-derived here.
 
-type RecoveryPlannerDeps = Pick<ScorecardBatchDeps, "runStore" | "caseReceipts" | "adoptCase">;
+type RecoveryPlannerDeps = Pick<ScorecardBatchDeps, "runStore" | "caseReceipts" | "adoptWork" | "attempts">;
 
 export class RecoveryPlanner {
   private readonly now: () => string;
@@ -82,9 +82,26 @@ export class RecoveryPlanner {
           // Mid-flight when the process died. ADOPT first: the orchestrator job the old process submitted may
           // still be running (or already finished) — harvest its result instead of re-dispatching and paying
           // for the same execution twice. Only when nothing is adoptable does the case fall to re-dispatch.
-          const adoptable = this.deps.adoptCase
-            ? await this.deps.adoptCase(tenant, c.runtime ?? input.runtime, c.caseId).catch(() => undefined)
-            : undefined;
+          // BY THE HANDLE the attempt ledger recorded (arch-review 53, legacy removal). A child with none
+          // has no managed work this system can name — it falls to re-dispatch, which is what the case-id
+          // resolution was there to avoid and what it could not do safely: it harvested "the newest job of
+          // this case", i.e. possibly another run's, and adoption ATTRIBUTES what it harvests.
+          const handles = this.deps.attempts
+            ? await this.deps.attempts
+                .list(c.id)
+                .then((rows) => rows.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])))
+                .catch(() => [])
+            : [];
+          let adoptable: CaseResult | undefined;
+          for (const work of handles) {
+            const outcome = await this.deps.adoptWork
+              ?.call(this.deps, tenant, c.runtime ?? input.runtime, work)
+              .catch(() => undefined);
+            if (outcome?.result !== undefined) {
+              adoptable = outcome.result;
+              break;
+            }
+          }
           // A REJECTED TRANSITION IS NOT REJECTED EVIDENCE (arch-review 28 P0). The CAS below correctly
           // refuses to overwrite a child that settled on its own between the list above and this write —
           // and the seed was pushed regardless, so the resumed batch could aggregate the harvested result

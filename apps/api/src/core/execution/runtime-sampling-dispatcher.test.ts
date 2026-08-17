@@ -29,8 +29,19 @@ const jobFor = (target?: string, runId?: string): CaseJob => ({
   ...(runId ? { runId } : {}),
 });
 
+// A managed dispatch RESERVES before it creates anything (Wave A), and the sampler now keys on that handle
+// rather than on the case id — a sample resolved by case id could report another run's cpu and memory into
+// this recording's runtime lane (arch-review 53, legacy removal). An inner that never reserves is a lane with
+// no addressable work, and the loop correctly stays silent for it.
 const slowInner = (ms: number): Dispatcher => ({
-  dispatch: () => new Promise((resolve) => setTimeout(() => resolve(RESULT), ms)),
+  dispatch: async (job, opts) => {
+    await opts?.onReserved?.({
+      tenant: job.tenant ?? "default",
+      runId: job.runId ?? "",
+      externalJobId: `everdict-${job.evalCase.id}-aaaa`,
+    });
+    return new Promise((resolve) => setTimeout(() => resolve(RESULT), ms));
+  },
 });
 
 describe("RuntimeSamplingDispatcher (replay runtime plane producer)", () => {
