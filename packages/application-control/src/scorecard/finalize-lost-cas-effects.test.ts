@@ -13,6 +13,7 @@ import { ScoringService } from "../execution/scoring-service.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
+import { InMemoryPublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
@@ -284,6 +285,8 @@ function rescoreHarness(opts: { refuseSettle: boolean }): {
   objects: Map<string, Buffer>;
 } {
   const putKeys: string[] = [];
+  // The publication ledger this world's settle inserts into and its drain claims from (arch-review 53, Wave C).
+  const publications = new InMemoryPublicationOperationStore();
   // A REAL artifact store — the alias promotion is a read-then-put of the staged object, so a store whose
   // `get` answers nothing would report the promotion as owed and make the winning half of this vacuous.
   const objects = new Map<string, Buffer>();
@@ -333,6 +336,10 @@ function rescoreHarness(opts: { refuseSettle: boolean }): {
     async update(_id, patch, _events, guard?: ScorecardUpdateGuard) {
       if (opts.refuseSettle && guard?.expectScoringCount !== undefined) return undefined;
       patched = { ...patched, ...patch };
+      // The settlement's owed publication is inserted BY THIS WRITE in both real stores (arch-review 53,
+      // Wave C — the Pg CTE and the in-memory attach pair). A fake that dropped it would make every drain
+      // below a no-op and the test vacuous.
+      if (guard?.publishOperation !== undefined) void publications.open(guard.publishOperation);
       return current();
     },
     async get() {
@@ -354,7 +361,16 @@ function rescoreHarness(opts: { refuseSettle: boolean }): {
     },
   } as unknown as RunStore;
   const svc = new ScorecardScoreService(
-    { store, datasets: unusedDatasets, artifacts, runStore },
+    {
+      store,
+      datasets: unusedDatasets,
+      artifacts,
+      runStore,
+      // The publication ledger the re-score's settle inserts its operation into (arch-review 53, Wave C) —
+      // without it the drain has nothing to claim and the alias promotion this test is about never runs.
+      publicationOperations: publications,
+      publisherId: "test-publisher",
+    },
     {
       newId: () => "id-1",
       now: () => "2026-08-15T00:00:02.000Z",

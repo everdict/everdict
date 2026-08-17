@@ -59,7 +59,7 @@ import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
-import { type PublicationOutcome, drainPublication, planPublication } from "./publication.js";
+import { type PublicationOutcome, drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { RecoveryPlanner } from "./recovery-planner.js";
 import type { ResilientCaseRunner } from "./resilient-case-runner.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
@@ -817,8 +817,10 @@ export class WorkflowBatchDriver {
     const judgeModelMap = this.deps.exportResults
       ? await this.scoring.collectJudgeModelMap(ctx.tenant, ctx.judges).catch(() => ({}))
       : undefined;
-    const publication = planPublication({
+    const publication = planPublicationOperation({
       scorecardId: id,
+      // The revision this settle appends (arch-review 53, Wave C) — the initial batch's is 1.
+      scoringRevision: 1,
       bundle: initialBundle,
       staged: analysis,
       passId,
@@ -875,8 +877,6 @@ export class WorkflowBatchDriver {
         // (the publisher promotes it after this write commits), and the immutable object is the honest
         // answer to "where is this batch's analysis" in either case.
         ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
-        // …and the outward effects this settlement owes, persisted by the very write that decides it won.
-        ...(publication ? { publication } : {}),
         steps: final?.steps ?? [],
         scoring,
         ...(runIds.length > 0 ? { runIds } : { scorecard }),
@@ -898,7 +898,13 @@ export class WorkflowBatchDriver {
       id,
       settlement.patch,
       stampedCompletion.map((f) => f.record),
-      { over: "open", epoch: ctx.driverEpoch, expectReceiptCount: decision.receiptCount },
+      {
+        over: "open",
+        epoch: ctx.driverEpoch,
+        expectReceiptCount: decision.receiptCount,
+        // …and the outward effects this settlement owes, inserted by the very write that decides it won.
+        ...(publication ? { publishOperation: publication } : {}),
+      },
     );
     // EVERY EFFECT OF A SETTLEMENT HANGS OFF THE SETTLEMENT THAT COMMITTED (arch-review 31 P2). The facts
     // below the fold already did; the operator time series did not, so a CAS loser could leave a world where
@@ -913,12 +919,17 @@ export class WorkflowBatchDriver {
     // holding the exact results the settle counted, which is what keeps the export prompt. A crash between
     // the commit above and this line leaves the plan owed and the reconciler converges it — the effects are
     // no longer this call's to lose. Never a reason for the batch to fail: an unpublished plan stays owed.
-    const drained = await drainPublication(
-      this.deps,
-      { ...finalized, ...(publication ? { publication } : {}) },
-      results,
-      this.now,
-    ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }));
+    const operations = this.deps.publicationOperations;
+    const drained = publication
+      ? await drainPublicationOperation(
+          { ...this.deps, ...(operations ? { operations } : {}) },
+          finalized,
+          publication,
+          results,
+          this.deps.publisherId ?? "publisher",
+          this.now,
+        ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }))
+      : ({ kind: "skipped" } as PublicationOutcome);
     if (drained.kind === "owed")
       await this.appendBatchStep(id, {
         phase: "export",

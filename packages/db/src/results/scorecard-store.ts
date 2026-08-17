@@ -1,5 +1,5 @@
 import { SCORING_PASS_STALE_MS } from "@everdict/contracts";
-import type { ScorecardRecord } from "@everdict/contracts";
+import type { PublicationOperation, ScorecardRecord } from "@everdict/contracts";
 import { ScorecardBatch } from "@everdict/domain";
 
 import type {
@@ -27,6 +27,14 @@ export class InMemoryScorecardStore implements ScorecardStore {
   private requestCancellationOf?: (scorecardId: string) => void;
   attachCancellations(request: (scorecardId: string) => void): void {
     this.requestCancellationOf = request;
+  }
+
+  // The publication pair (arch-review 53, Wave C): Postgres inserts the operation row in the settle's own
+  // statement; in memory the stores are separate objects, so the pairing is explicit — the same attach idiom
+  // the receipts fence and the cancellation row use. Applied right after a matched write.
+  private openPublicationOf?: (operation: PublicationOperation) => void;
+  attachPublications(open: (operation: PublicationOperation) => void): void {
+    this.openPublicationOf = open;
   }
 
   // E0 outbox pair: in-memory has no transaction to share, so "same tx" degrades to "append right after the
@@ -121,6 +129,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
     }
     this.cards.set(id, next);
     if (guard?.requestCancellation === true) this.requestCancellationOf?.(id);
+    if (guard?.publishOperation !== undefined) this.openPublicationOf?.(guard.publishOperation);
     await this.appendEvents(events);
     return next;
   }

@@ -2150,7 +2150,16 @@ describe("ScorecardService — trace sink export", () => {
     const done = await waitTerminal(store, "sc-export");
     // Then: the scored results go to export and the outcome remains in the record.
     // judgeModels is the per-judge export attribution map — empty here because the batch selected no judges.
-    expect(calls[0]?.ctx).toEqual({ scorecardId: "sc-export", dataset: "d@1.0.0", harness: "h@1", judgeModels: {} });
+    // `idempotencyKey` rides along since arch-review 53 Wave C: the export is at-least-once against a crash
+    // between the sink call and the receipt, and the key is what lets the receiving platform collapse the
+    // duplicates instead of leaving them as the tenant's problem.
+    expect(calls[0]?.ctx).toEqual({
+      scorecardId: "sc-export",
+      dataset: "d@1.0.0",
+      harness: "h@1",
+      judgeModels: {},
+      idempotencyKey: expect.stringContaining("sc-export:"),
+    });
     expect(calls[0]?.caseIds).toEqual(["c1"]);
     expect(done.status).toBe("succeeded");
     expect(done.export?.status).toBe("succeeded");

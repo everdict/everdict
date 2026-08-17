@@ -1,8 +1,9 @@
 import type { CaseResult, PublicationPlan, ScorecardExport, ScorecardRecord } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
+import { InMemoryPublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
-import { drainPublication, planPublication } from "./publication.js";
+import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { AnalysisBundle } from "./scorecard-observability.js";
 
 // ── OPERATION CARDINALITY EQUALS DECISION CARDINALITY (arch-review 53, Wave C) ───────────────────────
@@ -94,148 +95,168 @@ const exportOnly = () => ({ key: `analyses/${SCORECARD_ID}/x.json` });
 const now = () => "2026-08-17T01:00:00.000Z";
 
 // RED as of 186f9fd9: `expected undefined to be defined` — the second plan replaced the first in the single
-// `publication` field, and the first settlement's owed export is gone from the record entirely.
-describe.skip("[R53 WAVE-C COUNTEREXAMPLE #14] a re-score does not erase the previous settlement's debt", () => {
+// `publication` field, and the first settlement's owed export was gone from the record entirely.
+describe("[R53 WAVE-C COUNTEREXAMPLE #14 — CLOSED] a re-score does not erase the previous settlement's debt", () => {
   it("keeps one owed operation per settlement", async () => {
-    const p1 = planPublication({
+    const operations = new InMemoryPublicationOperationStore();
+    const initial = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("initial"),
-      staged: stagedOf("initial") as never,
+      staged: exportOnly() as never,
       passId: "initial-abc",
+      scoringRevision: 1,
       exports: true,
       results: results("initial"),
       now: now(),
     });
-    const p2 = planPublication({
+    const rescore = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("rescore"),
-      staged: stagedOf("rescore") as never,
+      staged: exportOnly() as never,
       passId: "rescore-def",
+      scoringRevision: 2,
       exports: true,
       results: results("rescore"),
       now: now(),
     });
-    expect(p1).toBeDefined();
-    expect(p2).toBeDefined();
-
-    const { store, current } = fakeStore(record(p1, "initial"));
+    if (!initial || !rescore) throw new Error("both settlements owe an export");
+    await operations.open(initial);
     // The re-score settles while the initial publication is still owed — the ordinary case, because the
     // inline drain happens after the commit and a re-score can land in that window.
-    await store.update(SCORECARD_ID, { publication: p2 }, undefined, undefined);
+    await operations.open(rescore);
 
-    // Both debts must still be findable. Today the row holds one field, so the initial pass's export — the
-    // one an operator would be asked about when the traces never appeared — is unrecoverable.
-    const held = current() as ScorecardRecord & { publications?: unknown[] };
-    const owedForInitialPass = held.publications?.find((op) => (op as { passId?: string }).passId === "initial-abc");
+    const owed = await operations.listForScorecard(SCORECARD_ID);
+    expect(owed.map((o) => o.settlement.passId)).toEqual(["initial-abc", "rescore-def"]);
     expect(
-      owedForInitialPass,
+      owed.find((o) => o.settlement.passId === "initial-abc"),
       "the initial settlement's publication debt was overwritten by the re-score",
     ).toBeDefined();
   });
 });
 
-// RED as of 186f9fd9: `expected 'rescore-def' to be …` — publisher A's receipt lands on the row and the
-// re-score's plan is gone, because the CAS only asked whether SOMETHING was pending.
-describe.skip("[R53 WAVE-C COUNTEREXAMPLE #15] a publisher completes the plan it read, not whatever is pending", () => {
-  it("a stale publisher cannot write its receipt over a newer settlement's plan", async () => {
-    const p1 = planPublication({
+// RED as of 186f9fd9: `expected 'published' to be 'pending'` — publisher A's receipt landed on the row and the
+// re-score's plan was gone, because the CAS only asked whether SOMETHING was pending.
+describe("[R53 WAVE-C COUNTEREXAMPLE #15 — CLOSED] a publisher completes the plan it read, not whatever is pending", () => {
+  it("a stale publisher cannot write its receipt over a newer settlement's operation", async () => {
+    const operations = new InMemoryPublicationOperationStore();
+    const initial = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("initial"),
       staged: exportOnly() as never,
       passId: "initial-abc",
+      scoringRevision: 1,
       exports: true,
       results: results("initial"),
       now: now(),
-    }) as PublicationPlan;
-    const p2 = planPublication({
+    });
+    const rescore = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("initial"),
       staged: exportOnly() as never,
       passId: "rescore-def",
+      scoringRevision: 2,
       exports: true,
-      // Same results, so the payload-digest guard does not mask the race this test is about.
       results: results("initial"),
       now: now(),
-    }) as PublicationPlan;
+    });
+    if (!initial || !rescore) throw new Error("both settlements owe an export");
+    await operations.open(initial);
+    await operations.open(rescore);
 
-    const held = record(p1, "initial");
-    const { store, current } = fakeStore(held);
+    const { store } = fakeStore(record(undefined, "initial"));
     const exportResults = vi.fn(
       async (): Promise<ScorecardExport> =>
-        ({ status: "succeeded", sink: "mlflow", exportedAt: "2026-08-17T01:00:00.000Z" }) as ScorecardExport,
+        ({ status: "succeeded", sink: "mlflow", exportedAt: now() }) as ScorecardExport,
     );
 
-    // Publisher A read the record while P1 was pending…
-    const asRead = current();
-    // …the re-score settled in between…
-    await store.update(SCORECARD_ID, { publication: p2 }, undefined, undefined);
-    // …and A now drains the plan it is holding.
-    await drainPublication({ store, exportResults }, asRead, results("initial"), now);
+    // Publisher A drains the operation it holds — the INITIAL one.
+    await drainPublicationOperation(
+      { store, exportResults, operations },
+      record(undefined, "initial"),
+      initial,
+      results("initial"),
+      "publisher-a",
+      now,
+    );
 
-    // The row must still owe the re-score's publication. A must have learned it lost.
-    expect(
-      (current().publication as PublicationPlan & { passId?: string })?.state,
-      "a stale publisher marked a newer settlement published",
-    ).toBe("pending");
+    // …and the re-score's debt is untouched. A completes what it claimed, and nothing else.
+    const after = await operations.listForScorecard(SCORECARD_ID);
+    expect(after.find((o) => o.id === initial.id)?.state).toBe("published");
+    expect(after.find((o) => o.id === rescore.id)?.state, "a stale publisher marked a newer settlement published").toBe(
+      "pending",
+    );
   });
 });
 
-// RED as of 186f9fd9: `expected "spy" to be called once, but got 2` — both drains export before either CAS.
-describe.skip("[R53 WAVE-C COUNTEREXAMPLE #16] two concurrent drains produce one external effect", () => {
+// RED as of 186f9fd9: `expected "spy" to be called 1 times, but got 2` — both drains exported before either CAS.
+describe("[R53 WAVE-C COUNTEREXAMPLE #16 — CLOSED] two concurrent drains produce one external effect", () => {
   it("the inline drain and the sweep do not both call the sink", async () => {
-    const plan = planPublication({
+    const operations = new InMemoryPublicationOperationStore();
+    const operation = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("initial"),
       staged: exportOnly() as never,
       passId: "initial-abc",
+      scoringRevision: 1,
       exports: true,
       results: results("initial"),
       now: now(),
-    }) as PublicationPlan;
+    });
+    if (!operation) throw new Error("this settlement owes an export");
+    await operations.open(operation);
 
-    const { store } = fakeStore(record(plan, "initial"));
+    const { store } = fakeStore(record(undefined, "initial"));
     const exportResults = vi.fn(
       async (): Promise<ScorecardExport> =>
-        ({ status: "succeeded", sink: "mlflow", exportedAt: "2026-08-17T01:00:00.000Z" }) as ScorecardExport,
+        ({ status: "succeeded", sink: "mlflow", exportedAt: now() }) as ScorecardExport,
     );
-    const held = await store.get(SCORECARD_ID);
-    if (!held) throw new Error("unreachable");
+    const held = record(undefined, "initial");
 
-    // Both publishers read the same pending plan — the winner's inline drain and the reconciler's sweep,
-    // which is the pair Wave 4 documents as expected to overlap.
+    // Both publishers go for the same operation — the winner's inline drain and the reconciler's sweep, the
+    // pair Wave 4 documents as expected to overlap. The CLAIM is taken before any effect runs, so the loser
+    // never reaches the sink at all.
     await Promise.all([
-      drainPublication({ store, exportResults }, held, results("initial"), now),
-      drainPublication({ store, exportResults }, held, results("initial"), now),
+      drainPublicationOperation({ store, exportResults, operations }, held, operation, results("initial"), "a", now),
+      drainPublicationOperation({ store, exportResults, operations }, held, operation, results("initial"), "b", now),
     ]);
 
     expect(exportResults, "both publishers created traces in the tenant's platform").toHaveBeenCalledTimes(1);
   });
 });
 
-// RED as of 186f9fd9: the exporter is never handed the key, so the sink cannot dedupe the at-least-once call.
-describe.skip("[R53 WAVE-C COUNTEREXAMPLE #17] the idempotency key reaches the sink", () => {
+// RED as of 186f9fd9: the exporter was never handed the key, so the sink could not dedupe the at-least-once call.
+describe("[R53 WAVE-C COUNTEREXAMPLE #17 — CLOSED] the idempotency key reaches the sink", () => {
   it("passes the planned idempotency key to the exporter", async () => {
-    const plan = planPublication({
+    const operations = new InMemoryPublicationOperationStore();
+    const operation = planPublicationOperation({
       scorecardId: SCORECARD_ID,
       bundle: bundle("initial"),
       staged: exportOnly() as never,
       passId: "initial-abc",
+      scoringRevision: 1,
       exports: true,
       results: results("initial"),
       now: now(),
-    }) as PublicationPlan;
-    expect(plan.exports?.[0]?.idempotencyKey).toBe(`${SCORECARD_ID}:initial-abc`);
+    });
+    if (!operation) throw new Error("this settlement owes an export");
+    expect(operation.effects.find((e) => e.kind === "export")?.idempotencyKey).toBe(`${SCORECARD_ID}:initial-abc`);
+    await operations.open(operation);
 
-    const { store } = fakeStore(record(plan, "initial"));
+    const { store } = fakeStore(record(undefined, "initial"));
     const seen: unknown[] = [];
     const exportResults = vi.fn(async (_tenant: string, ctx: unknown): Promise<ScorecardExport> => {
       seen.push(ctx);
-      return { status: "succeeded", sink: "mlflow", exportedAt: "2026-08-17T01:00:00.000Z" } as ScorecardExport;
+      return { status: "succeeded", sink: "mlflow", exportedAt: now() } as ScorecardExport;
     });
-    const held = await store.get(SCORECARD_ID);
-    if (!held) throw new Error("unreachable");
 
-    await drainPublication({ store, exportResults }, held, results("initial"), now);
+    await drainPublicationOperation(
+      { store, exportResults, operations },
+      record(undefined, "initial"),
+      operation,
+      results("initial"),
+      "publisher",
+      now,
+    );
 
     expect(
       (seen[0] as { idempotencyKey?: string } | undefined)?.idempotencyKey,

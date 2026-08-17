@@ -653,9 +653,14 @@ export {
   type PublicationOutcome,
   type PublicationPlanInput,
   PublicationCoordinator,
-  drainPublication,
-  planPublication,
+  drainPublicationOperation,
+  planPublicationOperation,
 } from "./scorecard/publication.js";
+export {
+  InMemoryPublicationOperationStore,
+  type PublicationOperationStore,
+  publicationOperationId,
+} from "./ports/publication-operation-store.js";
 export type { ScorecardServiceDeps } from "./scorecard/scorecard-deps.js";
 export { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
 export { ScorecardService } from "./scorecard/scorecard-service.js";

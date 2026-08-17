@@ -45,3 +45,4 @@ export * from "./workspace-file.js";
 export * from "./workspace-pulse.js";
 export * from "./workspace-invite.js";
 export * from "./workspace-settings.js";
+export * from "./publication-operation.js";

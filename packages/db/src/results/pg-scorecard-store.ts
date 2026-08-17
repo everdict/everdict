@@ -467,6 +467,29 @@ export class PgScorecardStore implements ScorecardStore {
                 ON CONFLICT (scorecard_id) DO UPDATE
                   SET state = 'requested', last_error = NULL, completed_at = NULL)`
         : "";
+    // …and the settlement's owed PUBLICATION, by the same rule (arch-review 53, Wave C): inserted only when
+    // the settle matched a row, and idempotent on the operation id so two replicas settling one pass owe one
+    // debt. Insert-only — a re-score adds its own row rather than overwriting the previous settlement's.
+    const publishSql =
+      guard?.publishOperation !== undefined
+        ? (() => {
+            const op = guard.publishOperation;
+            const base = vals.length;
+            vals.push(
+              op.id,
+              op.settlement.scorecardId,
+              op.settlement.scoringRevision,
+              op.settlement.passId,
+              JSON.stringify(op.effects),
+              op.plannedAt,
+            );
+            return `, pub_op AS (INSERT INTO everdict_publication_operations
+                  (id, scorecard_id, scoring_revision, pass_id, state, effects, planned_at)
+                SELECT $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, 'pending', $${base + 5}::jsonb, $${base + 6}::timestamptz
+                WHERE EXISTS (SELECT 1 FROM upd)
+                ON CONFLICT (id) DO NOTHING)`;
+          })()
+        : "";
     if (events && events.length > 0) {
       // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
       // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
@@ -475,15 +498,15 @@ export class PgScorecardStore implements ScorecardStore {
         `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
-                WHERE EXISTS (SELECT 1 FROM upd))${cancelSql}
+                WHERE EXISTS (SELECT 1 FROM upd))${cancelSql}${publishSql}
          SELECT * FROM upd`,
         [...vals, ...ev.params],
       );
       return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
     }
-    if (cancelSql !== "") {
+    if (cancelSql !== "" || publishSql !== "") {
       const res = await this.client.query<ScorecardRow>(
-        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *)${cancelSql}
+        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${idIdx}${guardSql} RETURNING *)${cancelSql}${publishSql}
          SELECT * FROM upd`,
         vals,
       );

@@ -192,6 +192,7 @@ async function main(): Promise<void> {
     caseReceiptStore,
     executionAttemptStore,
     cancellationStore,
+    publicationOperationStore,
     scorecardStore,
     scoringStageStore,
     keyStore,
@@ -767,6 +768,8 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    publicationOperations: publicationOperationStore,
+    publisherId: REPLICA_ID,
     scoringStageStore,
     // Submit refuses a dataset whose graders declare ground_truth without a recorded approval (mig 0165).
     ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
@@ -878,7 +881,7 @@ async function main(): Promise<void> {
     leader,
     () =>
       void publications
-        .reconcile()
+        ?.reconcile()
         .then((published) => {
           if (published > 0) console.log(`▶ publication reconciler: published ${published} owed settlement(s)`);
         })

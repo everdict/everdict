@@ -34,6 +34,7 @@ import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
+import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RunStore } from "../ports/run-store.js";
@@ -169,6 +170,14 @@ export interface ScorecardServiceDeps {
   // leaves an operation the CancellationCoordinator's sweep picks up instead of stranded children and leases.
   // Absent = the convergent-retry behavior it was built on (the caller's retry is the only owner).
   cancellations?: CancellationStore;
+  // The PUBLICATION's durable owner (mig 0188, arch-review 53 Wave C). One row per settlement — the initial
+  // settle's and every re-score's — so a re-score can never erase the previous settlement's export debt, and
+  // a publisher claims by operation id rather than by "whatever is pending on this batch". Absent = this
+  // deployment keeps the singleton-plan behavior mig 0187 shipped.
+  publicationOperations?: PublicationOperationStore;
+  // Who this process is, for the publication claim's lease. The same replica identity the batch driver's
+  // ownership uses; a claim needs a name so an expired lease can be told from a live one.
+  publisherId?: string;
   // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation /
   // batch settle. One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
   onOrchestrationEvent?: (event: OrchestrationEvent) => void;
@@ -313,6 +322,8 @@ export type ScorecardBatchDeps = Pick<
   | "caseReceipts"
   | "attempts"
   | "artifacts"
+  | "publicationOperations"
+  | "publisherId"
   | "exportResults"
   | "exportStreamFor"
   // forwarded to executeCase / collectDeferredTrace (the in-flight case pipeline)
@@ -337,6 +348,8 @@ export type ScorecardIngestDeps = Pick<
   | "spanMappingFor"
   | "exportResults"
   | "trajectories"
+  | "publicationOperations"
+  | "publisherId"
   | "artifacts"
   | "newId"
   | "now"
@@ -369,5 +382,7 @@ export type ScorecardScoringDeps = Pick<
   | "resolveModelBinding"
   | "rubrics"
   | "harnesses"
+  | "publicationOperations"
+  | "publisherId"
   | "artifacts"
 >;

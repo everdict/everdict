@@ -55,7 +55,7 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { JudgmentClaim, StagedJudgment } from "../ports/scoring-stage-store.js";
 import { ExecutionPlan } from "./execution-plan.js";
-import { drainPublication, planPublication } from "./publication.js";
+import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, initialPassId, stageAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
@@ -842,11 +842,15 @@ export class ScorecardScoreService {
     // false rather than a debt nobody can pay.
     const publication =
       bundle !== undefined && passKey !== undefined
-        ? planPublication({
+        ? planPublicationOperation({
             scorecardId: record.id,
             bundle,
             staged: analysis,
             passId: passKey,
+            // THE REVISION THIS RE-SCORE APPENDS (arch-review 53, Wave C). Every re-score owes its own
+            // operation, keyed by the revision it is about to write — which is what stops it from erasing
+            // the previous settlement's debt, and stops a stale publisher from completing this one.
+            scoringRevision: (fresh.scoring?.length ?? 0) + 1,
             exports: false,
             results: plane,
             now: this.now(),
@@ -939,7 +943,6 @@ export class ScorecardScoreService {
       // to "where is this pass's analysis" either way.
       ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
       // …and the outward effect this settlement owes, persisted by the very write that decides it won.
-      ...(publication ? { publication } : {}),
       ...(fresh.manifest ? { manifest: { ...fresh.manifest, judges: mergedManifestJudges } } : {}),
       ...(fresh.orchestration ? { orchestration: { ...fresh.orchestration, judges: mergedPins } } : {}),
       // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
@@ -961,6 +964,8 @@ export class ScorecardScoreService {
       stamped.map((f) => f.record),
       {
         expectScoringCount: fresh.scoring?.length ?? 0,
+        // The debt is inserted by the write that decides this re-score won (arch-review 53, Wave C).
+        ...(publication ? { publishOperation: publication } : {}),
         // …and the settle belongs to the pass that OWNS the marker. Guarded by the pass IDENTITY: an epoch
         // restarts at 1 after every settle, so a stale pass could hold a number a later pass also holds —
         // and for an EMBED group there is no child-run fence to catch it, the settle guard is the only one.
@@ -984,9 +989,16 @@ export class ScorecardScoreService {
     // stage clear below is awaited: an unawaited effect makes the order unobservable, so nothing can assert
     // that publication follows the commit, and a process exiting right after the settle drops the promotion
     // for no reason.
-    await drainPublication(this.deps, { ...settled, ...(publication ? { publication } : {}) }, plane, this.now).catch(
-      () => undefined,
-    );
+    const operations = this.deps.publicationOperations;
+    if (publication)
+      await drainPublicationOperation(
+        { ...this.deps, ...(operations ? { operations } : {}) },
+        settled,
+        publication,
+        plane,
+        this.deps.publisherId ?? "publisher",
+        this.now,
+      ).catch(() => undefined);
     // The same observation as a process METRIC — an operator watching a fleet wants a series, not a walk over
     // revisions. It is now a projection of the durable record rather than the only place the fact exists.
     if (parity !== undefined) this.deps.scoringStageParity?.(parity);

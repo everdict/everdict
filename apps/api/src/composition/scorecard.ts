@@ -2,6 +2,7 @@ import type {
   ConstitutionApprovalStore,
   EnvelopeStore,
   GithubAppService,
+  PublicationOperationStore,
   ScoringStageStore,
   TrajectoryStore,
 } from "@everdict/application-control";
@@ -72,6 +73,8 @@ export function buildScorecard(deps: {
   caseReceipts?: CaseReceiptStore; // where a case's canonical outcome is decided (mig 0175)
   attempts?: ExecutionAttemptStore; // every physical execution behind those receipts (mig 0182)
   cancellations?: CancellationStore; // the cancel teardown's durable owner (mig 0184)
+  publicationOperations?: PublicationOperationStore; // the publication's durable owner (mig 0188)
+  publisherId?: string; // this process, for the publication claim's lease
   // Told when a case opens a new attempt, so this process's recorder stamps the generation the store fences
   // on (mig 0173). Without it a re-driven case's producers keep sending the previous number and every one of
   // their appends is refused — the fence turning into a silent recording outage.
@@ -115,6 +118,8 @@ export function buildScorecard(deps: {
     caseReceipts,
     attempts,
     cancellations,
+    publicationOperations,
+    publisherId,
     meteredDispatcher,
     scheduler,
     runnerHub,
@@ -316,6 +321,8 @@ export function buildScorecard(deps: {
     ...(caseReceipts ? { caseReceipts } : {}),
     ...(attempts ? { attempts } : {}),
     ...(cancellations ? { cancellations } : {}),
+    ...(publicationOperations ? { publicationOperations } : {}),
+    ...(publisherId !== undefined ? { publisherId } : {}),
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,

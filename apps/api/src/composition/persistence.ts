@@ -7,6 +7,7 @@ import type {
   ExecutionAttemptStore,
   HandoffCheckpointStore,
   LeaderElector,
+  PublicationOperationStore,
   ReplicaRegistry,
   ScoringStageStore,
   VerificationDecisionStore,
@@ -15,6 +16,8 @@ import {
   InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
+  InMemoryPublicationOperationStore,
+  NamingTrajectoryStore,
   soleLeader,
   soloReplicas,
 } from "@everdict/application-control";
@@ -131,6 +134,7 @@ import {
   PgProductVersionStore,
   PgProjectStore,
   PgProjectUpdateStore,
+  PgPublicationOperationStore,
   PgRecordingStore,
   PgReleaseStore,
   PgReplicaRegistry,
@@ -229,6 +233,8 @@ export interface Persistence {
   // whose CANCELLED decision committed but whose live work may still be running. Swept by the
   // CancellationCoordinator (arch-review 47 §5.2, arch-review 52 Wave 3).
   cancellationStore: CancellationStore;
+  // The publication's durable owner (mig 0188, arch-review 53 Wave C) — one row per settlement.
+  publicationOperationStore: PublicationOperationStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
@@ -325,6 +331,13 @@ function resolveSecretCipher(): SecretCipher {
 // DATABASE_URL → Postgres (migrations applied at startup), else in-memory.
 // The secret store is always active (on by default). The at-rest encryption KEK is EVERDICT_SECRETS_KEY (base64 32B); if unset, an ephemeral key is
 // auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
+// Every sealed trajectory is named at seal, whichever rung holds it (in-memory · Postgres · ClickHouse) —
+// the decorator derives the line that tells one row from its siblings from the body it was handed, so no
+// seal path has to remember to. Wrapped HERE, once, for the same reason RevisionedWorkspaceFs is.
+function named(store: TrajectoryStore): TrajectoryStore {
+  return new NamingTrajectoryStore(store);
+}
+
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   // The trajectory store's ops-scale rung (native-observability N-O1 rung 2): EVERDICT_CLICKHOUSE_URL swaps
@@ -382,8 +395,12 @@ export async function makePersistence(): Promise<Persistence> {
     const inMemoryReceipts = new InMemoryCaseReceiptStore();
     inMemoryScorecards.attachReceipts((id) => inMemoryReceipts.countFor(id));
     const inMemoryCancellations = new InMemoryCancellationStore();
+    // …and the publication ledger's in-memory twin, paired to the scorecard store the same way (the operation
+    // row is inserted by the settle's own write — see `attachPublications`).
+    const inMemoryPublications = new InMemoryPublicationOperationStore();
     // The settle→operation pair (arch-review 51 P0) — Pg does this inside the settle statement; in memory
     // the pairing is the attach, applied right after a matched abort settle.
+    inMemoryScorecards.attachPublications((operation) => void inMemoryPublications.open(operation).catch(() => {}));
     inMemoryScorecards.attachCancellations(
       (id) => void inMemoryCancellations.request({ kind: "scorecard", id }, new Date().toISOString()).catch(() => {}),
     );
@@ -399,6 +416,7 @@ export async function makePersistence(): Promise<Persistence> {
       caseReceiptStore: inMemoryReceipts,
       executionAttemptStore: new InMemoryExecutionAttemptStore(),
       cancellationStore: inMemoryCancellations,
+      publicationOperationStore: inMemoryPublications,
       scorecardStore: inMemoryScorecards,
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
@@ -424,7 +442,7 @@ export async function makePersistence(): Promise<Persistence> {
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
-      trajectoryStore: clickhouseTrajectories ?? new InMemoryTrajectoryStore(),
+      trajectoryStore: named(clickhouseTrajectories ?? new InMemoryTrajectoryStore()),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -470,6 +488,7 @@ export async function makePersistence(): Promise<Persistence> {
     caseReceiptStore: new PgCaseReceiptStore(client),
     executionAttemptStore: new PgExecutionAttemptStore(client),
     cancellationStore: new PgCancellationStore(client),
+    publicationOperationStore: new PgPublicationOperationStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,
@@ -495,7 +514,7 @@ export async function makePersistence(): Promise<Persistence> {
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
-    trajectoryStore: clickhouseTrajectories ?? new PgTrajectoryStore(client),
+    trajectoryStore: named(clickhouseTrajectories ?? new PgTrajectoryStore(client)),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

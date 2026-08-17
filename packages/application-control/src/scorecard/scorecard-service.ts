@@ -1184,12 +1184,18 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // the plan durable and nobody running it, which is the cancellation teardown's gap one aggregate over, and
   // closed the same way: a leader-gated sweep the composition root ticks. The hydrating `get` is the read the
   // drain needs — a settled batch keeps its results on the child rows, and those results are the payload.
-  publicationCoordinator(): PublicationCoordinator {
+  publicationCoordinator(): PublicationCoordinator | undefined {
+    const operations = this.deps.publicationOperations;
+    // No ledger, no sweep: a deployment that wires none keeps the inline-only behavior, and a coordinator
+    // over a store that does not exist would sweep nothing while claiming to own the debts.
+    if (!operations) return undefined;
     return new PublicationCoordinator({
       store: this.deps.store,
+      operations,
       ...(this.deps.artifacts ? { artifacts: this.deps.artifacts } : {}),
       ...(this.deps.exportResults ? { exportResults: this.deps.exportResults } : {}),
       getRecord: (id) => this.get(id),
+      publisherId: this.deps.publisherId ?? "publisher",
       now: () => this.now(),
     });
   }

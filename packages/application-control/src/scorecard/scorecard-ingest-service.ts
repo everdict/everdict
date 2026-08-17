@@ -18,6 +18,7 @@ import {
   snapshotFromEvidence,
   toScores,
 } from "@everdict/contracts";
+import type { PublicationOperation } from "@everdict/contracts";
 import {
   ScorecardBatch,
   type ScorecardTransition,
@@ -32,7 +33,7 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { settleScorecard } from "../ports/settle.js";
 import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
-import { drainPublication, planPublication } from "./publication.js";
+import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
 import { analysisBundle, initialPassId, offloadResults, stageAnalysis } from "./scorecard-observability.js";
 import type {
@@ -393,8 +394,10 @@ export class ScorecardIngestService {
     // wrote the MUTABLE current-analysis alias, which an ingest that lost the settle would have overwritten.
     const passId = initialPassId(initialBundle);
     const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
-    const publication = planPublication({
+    const publication = planPublicationOperation({
       scorecardId: id,
+      // The revision this ingest settle appends (arch-review 53, Wave C).
+      scoringRevision: 1,
       bundle: initialBundle,
       staged: analysis,
       passId,
@@ -433,30 +436,41 @@ export class ScorecardIngestService {
       createdAt: this.now(),
       ...(submittedBy !== undefined ? { createdBy: submittedBy } : {}),
     });
-    await this.settleIngest(id, (batch) =>
-      batch.succeed(
-        {
-          scorecard,
-          summary,
-          // The stamped-policy verdict aggregate (arch-review 7 §4). An ingest batch has no manifest, so its
-          // domain stamp (judgedUnder) is the default ladder — the aggregate derives under the SAME policy.
-          verdictSummary: verdictSummaryOf(results, undefined),
-          models,
-          ...(judgeModels.length > 0 ? { judgeModels } : {}),
-          // The FROZEN artifact's ref — the alias does not exist until the drain promotes it.
-          ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
-          // …and the outward effects this settlement owes, persisted by the write that decides it won.
-          ...(publication ? { publication } : {}),
-          scoring,
-        },
-        this.now(),
-      ),
+    await this.settleIngest(
+      id,
+      (batch) =>
+        batch.succeed(
+          {
+            scorecard,
+            summary,
+            // The stamped-policy verdict aggregate (arch-review 7 §4). An ingest batch has no manifest, so its
+            // domain stamp (judgedUnder) is the default ladder — the aggregate derives under the SAME policy.
+            verdictSummary: verdictSummaryOf(results, undefined),
+            models,
+            ...(judgeModels.length > 0 ? { judgeModels } : {}),
+            // The FROZEN artifact's ref — the alias does not exist until the drain promotes it.
+            ...(analysis.revisionRef ? { analysisRef: analysis.revisionRef } : {}),
+            // …and the outward effects this settlement owes, persisted by the write that decides it won.
+            scoring,
+          },
+          this.now(),
+        ),
+      publication,
     );
     // …AND ONLY NOW IS ANYTHING PUBLISHED. `settleIngest` swallows a refused settle by design, so the drain
-    // re-reads: a record whose plan is not `pending` (because this settle lost, or because another publisher
-    // got there first) publishes nothing. A crash before this line leaves the plan owed for the reconciler.
+    // claims by OPERATION ID: an operation that was never inserted (because this settle lost) cannot be
+    // claimed, and one another publisher holds is skipped. A crash before this line leaves it owed.
     const settled = await this.deps.store.get(id);
-    if (settled) await drainPublication(this.deps, settled, results, this.now).catch(() => undefined /* stays owed */);
+    const operations = this.deps.publicationOperations;
+    if (settled && publication)
+      await drainPublicationOperation(
+        { ...this.deps, ...(operations ? { operations } : {}) },
+        settled,
+        publication,
+        results,
+        this.deps.publisherId ?? "publisher",
+        this.now,
+      ).catch(() => undefined /* stays owed */);
   }
 
   // Materialize-on-import (native-observability N-O1 / master plan W4): an imported trace is sealed as OUR
@@ -509,7 +523,11 @@ export class ScorecardIngestService {
 
   // Terminal writes go through the domain guard: read the current record and skip when it is already settled
   // (first terminal write wins — same idiom as RunService.finalize).
-  private async settleIngest(id: string, outcome: (batch: ScorecardBatch) => ScorecardTransition): Promise<void> {
+  private async settleIngest(
+    id: string,
+    outcome: (batch: ScorecardBatch) => ScorecardTransition,
+    publishOperation?: PublicationOperation,
+  ): Promise<void> {
     const current = await this.deps.store.get(id);
     if (!current) return;
     const batch = ScorecardBatch.from(current);
@@ -518,7 +536,11 @@ export class ScorecardIngestService {
     // onComplete/notification path ever ran here) — widening that coverage is an E2 decision, not a default.
     // Under the aggregate's terminal fence: `isTerminal()` above answers for this process, and an ingest
     // settling a batch a user cancelled meanwhile would overwrite their decision (arch-review 30 P0).
-    await settleScorecard(this.deps.store, id, outcome(batch).patch, undefined, { over: "open" });
+    await settleScorecard(this.deps.store, id, outcome(batch).patch, undefined, {
+      over: "open",
+      // The settlement's owed publication rides the write that decides it (arch-review 53, Wave C).
+      ...(publishOperation !== undefined ? { publishOperation } : {}),
+    });
   }
 }
 

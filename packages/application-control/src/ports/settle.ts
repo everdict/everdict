@@ -40,6 +40,8 @@ export async function settleScorecard(
     ...(opts.epoch !== undefined ? { expectOwnerEpoch: opts.epoch } : {}),
     ...(opts.expectReceiptCount !== undefined ? { expectReceiptCount: opts.expectReceiptCount } : {}),
     ...(opts.requestCancellation === true ? { requestCancellation: true as const } : {}),
+    // The settlement's owed publication rides the same write (arch-review 53, Wave C) — see the guard.
+    ...(opts.publishOperation !== undefined ? { publishOperation: opts.publishOperation } : {}),
   });
 }
 

@@ -52,7 +52,7 @@ import { runSuite } from "../run-suite.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter, FailureFinalization, PendingChildSettle } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
-import { type PublicationOutcome, drainPublication, planPublication } from "./publication.js";
+import { type PublicationOutcome, drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ResilientCaseRunner } from "./resilient-case-runner.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import {
@@ -1042,8 +1042,12 @@ export class InProcessBatchDriver {
       // terminal CAS cannot leave a cancelled batch's analysis surface describing a successful run.
       const passId = initialPassId(initialBundle);
       const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
-      const publication = planPublication({
+      const publication = planPublicationOperation({
         scorecardId: id,
+        // WHICH settlement owes this — the revision this settle is about to append (arch-review 53, Wave C).
+        // The initial settle appends revision 1; a re-score appends the next. Without it two settlements
+        // would compute one operation id and the second's debt would be silently deduplicated away.
+        scoringRevision: 1,
         bundle: initialBundle,
         staged: analysis,
         passId,
@@ -1130,10 +1134,7 @@ export class InProcessBatchDriver {
           // (arch-review 52, Wave 4). Only the SUCCESS settle carries a plan: an aborted batch's partials
           // publish nothing outward — it is not the batch's answer, so it does not own the current-analysis
           // alias and has no cases to ship as a completed evaluation.
-          const settlement = batch.succeed(
-            { ...extras, ...(decision ? { decision } : {}), scoring, ...(publication ? { publication } : {}) },
-            this.now(),
-          );
+          const settlement = batch.succeed({ ...extras, ...(decision ? { decision } : {}), scoring }, this.now());
           const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
           // Under the aggregate's terminal fence AND this driver's own epoch (mig 0166): a replica that was
           // declared dead and came back must not settle a batch another replica now owns. The comment below
@@ -1148,6 +1149,8 @@ export class InProcessBatchDriver {
               over: "open",
               ...epochOpt,
               ...(decision ? { expectReceiptCount: decision.receiptCount } : {}),
+              // The debt is inserted by the write that decides this settlement won (arch-review 53, Wave C).
+              ...(publication ? { publishOperation: publication } : {}),
             },
           );
           // …and the metric hangs off the same commit as the facts (arch-review 31 P2) — a loser that still
@@ -1157,12 +1160,20 @@ export class InProcessBatchDriver {
             // …AND ONLY NOW IS ANYTHING PUBLISHED (arch-review 52, Wave 4). Inline, holding the exact results
             // the settle counted; a crash before this line leaves the plan owed for the reconciler. Never a
             // reason for the batch to fail — an unpublished plan is a plan still owed, not a failed run.
-            const drained = await drainPublication(
-              this.deps,
-              { ...written, ...(publication ? { publication } : {}) },
-              scorecard.results,
-              this.now,
-            ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }));
+            const operations = this.deps.publicationOperations;
+            const drained = publication
+              ? await drainPublicationOperation(
+                  // No ledger wired = single publisher by construction; the drain performs the effects
+                  // inline without a claim (arch-review 53, Wave C). Skipping instead would silently drop
+                  // every export a storeless install owes.
+                  { ...this.deps, ...(operations ? { operations } : {}) },
+                  written,
+                  publication,
+                  scorecard.results,
+                  this.deps.publisherId ?? "publisher",
+                  this.now,
+                ).catch((): PublicationOutcome => ({ kind: "owed", reason: "publication drain threw" }))
+              : ({ kind: "skipped" } as PublicationOutcome);
             if (drained.kind === "owed")
               pushStep("export", "info", `Publication still owed — ${drained.reason} (the reconciler will retry)`);
             else if (drained.kind === "published" && drained.export)

@@ -1,4 +1,4 @@
-import type { ScorecardRecord, ScorecardStatus } from "@everdict/contracts";
+import type { PublicationOperation, ScorecardRecord, ScorecardStatus } from "@everdict/contracts";
 import type { OutboxEvent } from "./run-store.js";
 
 // list filter — narrows dataset/harness/status in the store (SQL) so leaderboard/trend don't scan the whole workspace.
@@ -68,6 +68,9 @@ export interface SettleOptions {
   // The abort settle also OWNS its teardown, durably (arch-review 51 P0). See
   // ScorecardUpdateGuard.requestCancellation.
   requestCancellation?: true;
+  // …and a SUCCESS settle owns its publication, by the same rule (arch-review 53, Wave C). See
+  // ScorecardUpdateGuard.publishOperation.
+  publishOperation?: PublicationOperation;
 }
 
 export interface ScorecardUpdateGuard {
@@ -159,6 +162,12 @@ export interface ScorecardUpdateGuard {
   // matched a row, exactly like the outbox events. The in-memory store applies it through the attached
   // cancellation pair (no transaction to share — the documented dev-store degradation, same as E0).
   requestCancellation?: true;
+  // THE SETTLEMENT'S OWED PUBLICATION, WRITTEN WITH THE SETTLE (arch-review 53, Wave C). The operation row
+  // is inserted in this update's own statement, so a settle that lost its CAS leaves no debt behind and a
+  // publisher has nothing to drain for it. Insert-only and idempotent on the operation id — a new settlement
+  // ADDS a row, which is the whole difference from the singleton field it replaces (a re-score used to
+  // overwrite the previous settlement's debt, and a stale publisher used to complete a newer one's).
+  publishOperation?: PublicationOperation;
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

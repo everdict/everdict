@@ -1,6 +1,14 @@
-import type { CaseResult, PublicationPlan, ScorecardExport, ScorecardRecord } from "@everdict/contracts";
+import type {
+  CaseResult,
+  PublicationOperation,
+  PublicationPlan,
+  ScorecardExport,
+  ScorecardRecord,
+} from "@everdict/contracts";
+import { publicationOperationId } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { AnalysisBundle, AnalysisOffload } from "./scorecard-observability.js";
 import { analysisArtifactKey } from "./scorecard-observability.js";
@@ -50,7 +58,36 @@ export interface PublicationPlanInput {
 // `undefined` when the settlement owes NOTHING outward — no artifact store to promote an alias into, no sink
 // wired, or a stage that failed. A plan is a debt, and recording a debt of zero would put every batch of a
 // storeless install on the reconciler's sweep forever to publish nothing.
-export function planPublication(input: PublicationPlanInput): PublicationPlan | undefined {
+// ── ONE SETTLEMENT'S OWED EFFECTS, AS AN OPERATION (arch-review 53, Wave C) ────────────────────────
+//
+// The same computation `planPublication` made, producing a row with an IDENTITY instead of a value for one
+// mutable field. `scoringRevision` is which ledger entry this settle appended; together with the pass id it
+// names the decision, and `publicationOperationId` turns that into the id a publisher claims by.
+export function planPublicationOperation(
+  input: PublicationPlanInput & { scoringRevision: number },
+): PublicationOperation | undefined {
+  const plan = planPublication(input);
+  if (!plan) return undefined;
+  const settlement = {
+    scorecardId: input.scorecardId,
+    scoringRevision: input.scoringRevision,
+    passId: input.passId,
+  };
+  return {
+    id: publicationOperationId(settlement),
+    settlement,
+    state: "pending",
+    effects: [
+      ...(plan.artifacts ?? []).map((a) => ({ kind: "artifact" as const, ...a })),
+      ...(plan.exports ?? []).map((e) => ({ kind: "export" as const, ...e })),
+    ],
+    plannedAt: input.now,
+  };
+}
+
+// The effect computation itself, kept INTERNAL: `planPublicationOperation` is the only producer, because a
+// plan with no operation id is a debt nobody can claim (arch-review 53, Wave C).
+function planPublication(input: PublicationPlanInput): PublicationPlan | undefined {
   const artifacts =
     input.staged.revisionKey !== undefined
       ? [
@@ -94,6 +131,9 @@ export interface PublicationDeps {
       harness: string;
       sinkOverride?: string;
       judgeModels?: Record<string, string>;
+      // The key the sink may dedupe on (arch-review 53, Wave C) — an at-least-once export whose receiver
+      // cannot collapse duplicates is a duplicate problem handed to the tenant.
+      idempotencyKey?: string;
     },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
@@ -115,56 +155,102 @@ export type PublicationOutcome =
 // plane the settlement never published (a re-score landed in between) — it promotes nothing and exports
 // nothing, and leaves the plan owed with that stated, because silently exporting the newer bytes under the
 // older settlement's receipt is the very substitution this seam exists to prevent.
-export async function drainPublication(
+// ── PERFORM ONE OPERATION'S EFFECTS, UNDER A CLAIM ON THAT OPERATION ──────────────────────────────
+//
+// The publisher claims BY ID and completes BY ID (arch-review 53, Wave C). The fence it replaces asked only
+// whether something was pending on the scorecard, which a publisher holding a superseded plan passed against
+// a NEWER settlement's plan — marking the re-score's publication published while it never happened. And the
+// claim is taken BEFORE the effects run, so two publishers no longer both export and then race for one
+// receipt: the loser never calls the sink at all.
+export async function drainPublicationOperation(
+  deps: PublicationDeps & { operations?: PublicationOperationStore },
+  record: ScorecardRecord,
+  // The operation itself, not just its id: the no-ledger path below needs the effects, and every caller
+  // holds the object anyway (the settle planned it; the sweep listed it).
+  operation: PublicationOperation,
+  results: CaseResult[],
+  owner: string,
+  now: () => string,
+  leaseSeconds = 120,
+): Promise<PublicationOutcome> {
+  // NO LEDGER WIRED = no reconciler either, so there is exactly one publisher by construction (the inline
+  // winner in a single process). Performing the effects without a claim is that deployment's honest shape;
+  // refusing to publish because the fence is absent would silently drop every export a storeless install
+  // owes, which is a worse answer than the one Wave 4 already gave.
+  if (!deps.operations) {
+    const direct = await performEffects(deps, record, operation, results);
+    if (direct.kind !== "published") return { kind: "owed", reason: direct.reason };
+    if (direct.export !== undefined)
+      await deps.store.update(record.id, { export: direct.export, updatedAt: now() }).catch(() => undefined);
+    return direct;
+  }
+  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());
+  if (!claimed) return { kind: "skipped" }; // published already, or another publisher holds a live lease
+  const outcome = await performEffects(deps, record, claimed, results);
+  if (outcome.kind === "published") {
+    const wrote = await deps.operations.complete(operation.id, owner, now());
+    if (!wrote) return { kind: "skipped" }; // the lease expired and the sweep finished it — not ours to claim
+    // THE RECEIPT ON THE RECORD, after the operation's own completion. It is a projection for readers (the
+    // scorecard detail's export panel), not the fence — the fence is the claim above, which is why this write
+    // takes no guard: only one publisher can reach this line for one operation.
+    if (outcome.export !== undefined)
+      await deps.store.update(record.id, { export: outcome.export, updatedAt: now() }).catch(() => undefined);
+    return outcome;
+  }
+  await deps.operations.release(operation.id, owner, outcome.reason, outcome.owed, now());
+  return { kind: "owed", reason: outcome.reason };
+}
+
+// The effects themselves, shared by the operation drain and the legacy plan drain below.
+async function performEffects(
   deps: PublicationDeps,
   record: ScorecardRecord,
+  operation: PublicationOperation,
   results: CaseResult[],
-  now: () => string,
-): Promise<PublicationOutcome> {
-  const plan = record.publication;
-  if (!plan || plan.state !== "pending") return { kind: "skipped" };
-
+): Promise<{ kind: "published"; export?: ScorecardExport } | { kind: "failed"; reason: string; owed: boolean }> {
+  // The reason a drain reports is the FIRST PERMANENT one when there is one, else the last transient one: a
+  // permanent failure decides whether this operation can ever converge, so a later "no exporter wired here"
+  // must not overwrite "these are not the bytes this settlement staged".
   let owed: string | undefined;
-
-  // (a) THE MUTABLE ALIAS, promoted from the immutable object the settle staged. Read-then-put rather than
-  // re-serializing the bundle: the alias must be byte-identical to the artifact the winning revision points
-  // at, and the only way to guarantee that is to copy the object the revision names.
-  for (const artifact of plan.artifacts ?? []) {
-    if (!deps.artifacts) {
-      owed = "no artifact store is wired here — the alias cannot be promoted";
-      continue;
-    }
-    try {
-      const bytes = await deps.artifacts.get(artifact.from);
-      if (!bytes) {
-        owed = `the staged analysis artifact '${artifact.from}' is not in the store`;
-        continue;
-      }
-      const staged = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-      if (contentDigest(staged) !== artifact.digest) {
-        // Not retried into success by the sweep either — the object under that key is not the settlement's,
-        // and promoting it would put another pass's bundle behind this batch's current-analysis alias.
-        owed = `the staged analysis artifact '${artifact.from}' does not digest to the planned bundle`;
-        continue;
-      }
-      await deps.artifacts.put(artifact.key, Buffer.from(bytes), "application/json");
-    } catch (err) {
-      owed = `analysis alias promotion failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
-
-  // (b) THE EXPORT. An export failure has never failed a scorecard and does not start now: the OUTCOME is
-  // recorded on the record (`status: "failed"` with a reason) and the plan closes, because the export ran —
-  // it is the sink that refused. Only a throw (a contract violation, or an unreachable dependency) leaves
-  // the plan owed for the sweep to retry.
+  let permanent = false;
+  const fail = (reason: string, isPermanent = false): void => {
+    if (permanent && !isPermanent) return;
+    if (isPermanent && !permanent) permanent = true;
+    owed = reason;
+  };
   let exported: ScorecardExport | undefined;
-  for (const wanted of plan.exports ?? []) {
-    if (!deps.exportResults) {
-      owed = "no trace-sink exporter is wired here";
+  for (const effect of operation.effects) {
+    if (effect.kind === "artifact") {
+      if (!deps.artifacts) {
+        fail("no artifact store is wired here — the alias cannot be promoted");
+        continue;
+      }
+      try {
+        const bytes = await deps.artifacts.get(effect.from);
+        if (!bytes) {
+          // PERMANENT: the immutable object this settlement staged is gone, and no retry brings it back.
+          fail(`the staged analysis artifact '${effect.from}' is not in the store`, true);
+          continue;
+        }
+        const staged = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+        if (contentDigest(staged) !== effect.digest) {
+          fail(`the staged analysis artifact '${effect.from}' does not digest to the planned bundle`, true);
+          continue;
+        }
+        await deps.artifacts.put(effect.key, Buffer.from(bytes), "application/json");
+      } catch (err) {
+        fail(`analysis alias promotion failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       continue;
     }
-    if (contentDigest(results) !== wanted.payloadDigest) {
-      owed = "the record's results are no longer the ones this settlement counted — not exported";
+    if (!deps.exportResults) {
+      fail("no trace-sink exporter is wired here");
+      continue;
+    }
+    if (contentDigest(results) !== effect.payloadDigest) {
+      // PERMANENT: the plane this settlement counted has been replaced. Exporting the newer bytes under the
+      // older settlement's receipt is the substitution this seam exists to prevent, and no sweep fixes it.
+      fail("the record's results are no longer the ones this settlement counted — not exported", true);
       continue;
     }
     try {
@@ -174,44 +260,29 @@ export async function drainPublication(
           scorecardId: record.id,
           dataset: `${record.dataset.id}@${record.dataset.version}`,
           harness: `${record.harness.id}@${record.harness.version}`,
-          ...(wanted.sink !== undefined ? { sinkOverride: wanted.sink } : {}),
-          ...(wanted.judgeModels !== undefined ? { judgeModels: wanted.judgeModels } : {}),
+          // THE KEY TRAVELS TO THE SINK (arch-review 53, Wave C). The export is at-least-once against a crash
+          // between the call and the receipt; minting a key and not passing it left the receiving platform no
+          // way to collapse the duplicates.
+          idempotencyKey: effect.idempotencyKey,
+          ...(effect.sink !== undefined ? { sinkOverride: effect.sink } : {}),
+          ...(effect.judgeModels !== undefined ? { judgeModels: effect.judgeModels } : {}),
         },
         results,
-        wanted.attach,
+        effect.attach,
       );
     } catch (err) {
-      owed = `trace-sink export failed: ${err instanceof Error ? err.message : String(err)}`;
+      fail(`trace-sink export failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
-  if (owed !== undefined) {
-    // Still owed. The reason is recorded for an operator and never read as control — `state` alone decides
-    // whether the next sweep retries, exactly as it does for a cancellation operation.
-    await deps.store
-      .update(record.id, { publication: { ...plan, lastError: owed }, updatedAt: now() }, undefined, {
-        expectPublicationState: "pending",
-      })
-      .catch(() => undefined);
-    return { kind: "owed", reason: owed };
-  }
-
-  // THE RECEIPT, under the plan's own fence. Two publishers may both have performed the effects (the alias
-  // promotion is idempotent by content; the export is the at-least-once half documented above) — exactly one
-  // of them writes the receipt, and the loser learns it did not publish.
-  const settled = await deps.store.update(
-    record.id,
-    {
-      publication: { ...plan, state: "published", publishedAt: now() },
-      ...(exported ? { export: exported } : {}),
-      updatedAt: now(),
-    },
-    undefined,
-    { expectPublicationState: "pending" },
-  );
-  if (settled === undefined) return { kind: "skipped" };
+  if (owed !== undefined) return { kind: "failed", reason: owed, owed: !permanent };
   return { kind: "published", ...(exported ? { export: exported } : {}) };
 }
+
+// The legacy singleton drain (`drainPublication`, mig 0187) is GONE (arch-review 53, Wave C). Its four call
+// sites moved to `drainPublicationOperation`, and keeping a second drain that fences on
+// `expectPublicationState` would keep alive exactly the CAS this wave replaced — one that a publisher holding
+// a superseded plan passes against a newer settlement's. Rows the old field still carries were migrated into
+// the operations table by mig 0188's backfill.
 
 // ── THE OWNER OF A PLAN WHOSE PROCESS DIED ──────────────────────────────────────────────────────────
 //
@@ -221,27 +292,36 @@ export async function drainPublication(
 export class PublicationCoordinator {
   constructor(
     private readonly deps: PublicationDeps & {
+      operations: PublicationOperationStore;
       // The HYDRATING read: a settled batch stores its results on the child runs, and the export payload is
       // those results. Re-read rather than remembered, because the process that planned this is gone.
       getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
+      publisherId: string;
       now: () => string;
     },
   ) {}
 
-  // Drain one batch's plan — the winner's inline call and the sweep's per-row call are the same code path.
-  async publish(id: string): Promise<PublicationOutcome> {
-    const record = await this.deps.getRecord(id);
+  // Drain ONE operation — the winner's inline call and the sweep's per-row call are the same code path.
+  async publish(operation: PublicationOperation): Promise<PublicationOutcome> {
+    const record = await this.deps.getRecord(operation.settlement.scorecardId);
     if (!record) return { kind: "skipped" };
-    return drainPublication(this.deps, record, record.scorecard?.results ?? [], this.deps.now);
+    return drainPublicationOperation(
+      this.deps,
+      record,
+      operation,
+      record.scorecard?.results ?? [],
+      this.deps.publisherId,
+      this.deps.now,
+    );
   }
 
-  // Every plan still owed. Returns how many it PUBLISHED — a row it could not drain stays owed with its
-  // reason, and the next sweep tries again.
+  // Every operation still owed — `pending`, plus `claimed` rows whose publisher's lease expired. Returns how
+  // many it PUBLISHED; a row it could not drain stays owed with its reason, and the next sweep tries again.
   async reconcile(limit = 50): Promise<number> {
-    const owed = await this.deps.store.list(undefined, { publicationPending: true });
+    const owed = await this.deps.operations.listOwed(limit, this.deps.now());
     let published = 0;
-    for (const row of owed.slice(0, limit)) {
-      const outcome = await this.publish(row.id).catch((err: unknown) => ({
+    for (const operation of owed) {
+      const outcome = await this.publish(operation).catch((err: unknown) => ({
         kind: "owed" as const,
         reason: err instanceof Error ? err.message : String(err),
       }));
