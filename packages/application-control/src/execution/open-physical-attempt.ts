@@ -1,4 +1,4 @@
-import { attemptIdOf } from "@everdict/contracts";
+import { InternalError, UpstreamError, attemptIdOf } from "@everdict/contracts";
 import type { ExecutionAttemptStore, OpenAttemptInput } from "../ports/execution-attempt-store.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 
@@ -48,11 +48,34 @@ export function jobAttemptId(
 // the attempt is now RECORDED as having run unisolated instead of leaving no trace at all.
 //
 // With no ledger wired, the recording store self-mints exactly as before and no row is written.
+// ── AND WHICH LANE IS ASKING (arch-review 54, Phase 1) ──────────────────────────────────────────────
+//
+// The degrade below is right for one lane and catastrophic for the other, and until now it could not tell
+// them apart.
+//
+// A lane that runs the harness INSIDE this process (the CLI, a diagnostic run) loses only its recording fence
+// when the ledger is unreachable: the execution still happens where we can see it, and refusing to run would
+// trade a missing audit row for a missing result. That degrade stays.
+//
+// A MANAGED lane is about to ask an orchestrator to create a job that outlives this process. Its whole
+// relationship with that job is the identity it writes down first — every stop, adoption, log tail and
+// cancellation reaches for the handle stored on the attempt row. Handing that lane `{ unisolated: true }` with
+// no `attemptId` does not degrade the audit trail; it authorises untracked compute, because the next thing the
+// caller does is dispatch. `managed: true` says "I am going to place external work", and the answer to a
+// ledger outage there is a refusal (rule `protocol` L1).
 export async function openPhysicalAttempt(
-  deps: { attempts?: ExecutionAttemptStore; recordings?: RecordingStore },
+  deps: { attempts?: ExecutionAttemptStore; recordings?: RecordingStore; managed?: boolean },
   input: OpenAttemptInput,
 ): Promise<PhysicalAttempt> {
-  const { attempts, recordings } = deps;
+  const { attempts, recordings, managed } = deps;
+  // A managed dispatch with NO ledger wired at all is a composition error, not a runtime degrade: nothing in
+  // that deployment can ever address the work it is about to create.
+  if (managed === true && !attempts)
+    throw new InternalError(
+      "NOT_CONFIGURED",
+      { executionId: input.executionId },
+      "a managed dispatch needs an execution-attempt ledger — there is nowhere to record where the work will be placed.",
+    );
   if (!attempts) {
     if (!recordings) return { unisolated: false };
     const generation = await recordings.open(input.executionId).catch(() => undefined);
@@ -65,7 +88,18 @@ export async function openPhysicalAttempt(
   // recording store mint MAX(empty)+1 = g1 again, and B's evidence/receipt/trajectory would then NAME A's
   // ledger identity. So the outage degrades this attempt to UNFENCED — no generation, no row, the same
   // fail-closed lane a refused recording claim takes — never to a coordinate another authority owns.
-  const opened = await attempts.open(input).catch(() => undefined);
+  const opened = await attempts.open(input).catch((err: unknown) => {
+    // The managed lane's outage is not survivable: see the note above `openPhysicalAttempt`.
+    if (managed === true)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { executionId: input.executionId },
+        `the execution-attempt ledger could not open an attempt, so this dispatch has no durable identity to place work under: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    return undefined;
+  });
   if (!opened) return { unisolated: true };
   if (!recordings) return { attemptId: opened.attemptId, generation: opened.generation, unisolated: false };
   const claimed = await recordings.open(input.executionId, opened.generation).catch(() => undefined);

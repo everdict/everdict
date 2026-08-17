@@ -19,9 +19,27 @@ const MUTATIONS = [
   {
     name: "Wave A — the reservation moves back behind the effect",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "    if (job.runId !== undefined) await options?.onReserved?.(work);",
+    from: "    if (job.runId !== undefined) await requireReservation(job, work, options?.onReserved);",
     to: "    // MUTATED: identity after effect",
     suite: ["--root", "packages/backends", "src/orchestrators/dispatch-intent.counterexample.test.ts"],
+  },
+  {
+    // The rung Wave A's own mutation cannot reach: with the ordering intact, accept a hook that resolved
+    // without persisting anything. That is the state the whole phase exists to make unrepresentable — a
+    // resolved callback standing in for a written row.
+    name: "Phase 1 — a reservation that proved nothing is accepted",
+    file: "packages/backends/src/backend.ts",
+    from: '  if (!intent || typeof intent.attemptId !== "string" || intent.attemptId === "")',
+    to: "  if (false)",
+    suite: ["--root", "packages/backends", "src/orchestrators/managed-conformance.test.ts"],
+  },
+  {
+    // …and the other half of the same protocol: a tracked run placed with nobody recording where.
+    name: "Phase 1 — a tracked run is placed with no reservation hook at all",
+    file: "packages/backends/src/backend.ts",
+    from: "  if (!onReserved)",
+    to: "  if (false && !onReserved)",
+    suite: ["--root", "packages/backends", "src/orchestrators/managed-conformance.test.ts"],
   },
   {
     name: "Wave A.5 — an unreadable ledger widens the teardown again",

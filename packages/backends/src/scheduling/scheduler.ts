@@ -6,6 +6,7 @@ import {
   InternalError,
   NotFoundError,
   RateLimitError,
+  type PersistedWorkIntent,
   type RuntimeWorkRef,
 } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
@@ -71,8 +72,8 @@ interface QueueEntry {
   onWaiting?: (reason: string) => void; // "cannot start now + why" (blocked placement / no online runner) — forwarded to the backend
   onAttempt?: (attempt: AttemptRef) => void; // "the attempt that is actually executing" (self-hosted re-lease) — forwarded to the backend
   // "the external object this dispatch is ABOUT to create" — forwarded to the backend, which awaits it before
-  // it creates anything (arch-review 53, Wave A).
-  onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
+  // it creates anything (arch-review 53, Wave A) and requires the store's proof back (arch-review 54, Phase 1).
+  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
 }
 
 export interface SchedulerOptions {

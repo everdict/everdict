@@ -1,4 +1,4 @@
-import type { AttemptRef, CaseJob, CaseResult, RuntimeWorkRef } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef } from "@everdict/contracts";
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
@@ -50,7 +50,18 @@ export interface DispatchOptions {
   // A backend that creates no addressable external object (in-process, self-hosted lease) never fires it, and
   // a job with no `runId` does not either — a handle that cannot say which run it belongs to is the case-id
   // ambiguity again, wearing a new type.
-  onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
+  //
+  // IT RETURNS THE STORE'S PROOF (arch-review 54, Phase 1), and the backend requires that proof before it
+  // submits. Ordering alone was not enough: the hook could resolve having written nothing — no ledger wired,
+  // no attempt id on the handle, an UPDATE that matched no row — and a resolved hook is indistinguishable
+  // from a persisted reservation. `PersistedWorkIntent` exists only if a row was actually written, so
+  // "the reservation is durable" stops being something the backend assumes and becomes something it holds.
+  //
+  // Still optional on the TYPE because ledger-less lanes (the CLI, in-process dev) legitimately have no
+  // reservation to make. A managed backend asked to place work for a job that carries a `runId` REFUSES when
+  // it is absent, which is where the requirement is enforced — see `ManagedWorkControl` and the placement
+  // conformance suite.
+  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

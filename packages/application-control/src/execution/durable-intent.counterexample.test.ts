@@ -61,7 +61,9 @@ const brokenLedger = (): ExecutionAttemptStore =>
       throw new Error("connection terminated unexpectedly");
     },
     transition: async () => false,
-    recordWork: async () => {},
+    reserveWork: async () => {
+      throw new Error("no row");
+    },
     markUnisolated: async () => {},
     list: async () => [],
     listForScorecard: async () => [],
@@ -69,7 +71,7 @@ const brokenLedger = (): ExecutionAttemptStore =>
 
 // RED as of efe3657e, observed: `promise resolved "{ unisolated: true }" instead of rejecting`.
 // (The second case PASSES today and must keep passing — it is the degrade this change must not break.)
-describe.skip("[R54 PHASE-1 COUNTEREXAMPLE #1] a managed execution whose ledger open failed is not dispatched", () => {
+describe("[R54 PHASE-1 COUNTEREXAMPLE #1 — CLOSED] a managed execution whose ledger open failed is not dispatched", () => {
   it("refuses instead of returning an unnamed attempt the caller will run anyway", async () => {
     // The managed lane asks for a durable identity. A ledger it cannot reach is not a degraded identity, it
     // is none — and the caller's next step creates a cluster object.
@@ -91,16 +93,13 @@ describe.skip("[R54 PHASE-1 COUNTEREXAMPLE #1] a managed execution whose ledger 
 // RED as of efe3657e, observed:
 //   promise resolved "undefined" instead of rejecting   (the no-op write reports success)
 //   TypeError: attempts.reserveWork is not a function   (there is no proof to require)
-describe.skip("[R54 PHASE-1 COUNTEREXAMPLE #2] a write a decision rests on returns proof, never void", () => {
+describe("[R54 PHASE-1 COUNTEREXAMPLE #2 — CLOSED] a write a decision rests on returns proof, never void", () => {
   it("refuses to record a handle against an attempt row that does not exist", async () => {
     const attempts = new InMemoryExecutionAttemptStore();
     // No `open` — so this attempt id names nothing. Today the write is a silent no-op and its caller,
     // `onReserved`, reports success to the backend.
     await expect(
-      (attempts as unknown as { recordWork(id: string, w: RuntimeWorkRef): Promise<unknown> }).recordWork(
-        "evd-run-1#g1",
-        WORK({ attemptId: "evd-run-1#g1" }),
-      ),
+      attempts.reserveWork("evd-run-1#g1", WORK({ attemptId: "evd-run-1#g1" })),
       "recording a handle against a missing attempt row succeeded",
     ).rejects.toThrow();
   });
@@ -108,9 +107,7 @@ describe.skip("[R54 PHASE-1 COUNTEREXAMPLE #2] a write a decision rests on retur
   it("returns the persisted intent when the row is there, so the caller has something to require", async () => {
     const attempts = new InMemoryExecutionAttemptStore();
     const opened = await attempts.open(INPUT);
-    const persisted = await (
-      attempts as unknown as { reserveWork(id: string, w: RuntimeWorkRef): Promise<{ work: RuntimeWorkRef }> }
-    ).reserveWork(opened.attemptId, WORK({ attemptId: opened.attemptId }));
+    const persisted = await attempts.reserveWork(opened.attemptId, WORK({ attemptId: opened.attemptId }));
     // The proof object is the whole point: `submit` will take it as a parameter, so there is no state in
     // which the effect runs without it and no hook to forget.
     expect(persisted.work.externalJobId).toBe("everdict-c1-aaaa");

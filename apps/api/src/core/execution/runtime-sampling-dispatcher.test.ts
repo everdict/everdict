@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@everdict/backends";
-import type { CaseJob, CaseResult, TrackEntry } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RuntimeWorkRef, TrackEntry } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { RuntimeSamplingDispatcher } from "./runtime-sampling-dispatcher.js";
 
@@ -33,6 +33,13 @@ const jobFor = (target?: string, runId?: string): CaseJob => ({
 // rather than on the case id — a sample resolved by case id could report another run's cpu and memory into
 // this recording's runtime lane (arch-review 53, legacy removal). An inner that never reserves is a lane with
 // no addressable work, and the loop correctly stays silent for it.
+// The reservation a wired control plane makes: the store's proof, built from the handle the backend reports.
+const reservation = async (work: RuntimeWorkRef) => ({
+  attemptId: work.attemptId ?? `${work.runId}#g1`,
+  work,
+  persistedAt: "2026-08-18T00:00:00.000Z",
+});
+
 const slowInner = (ms: number): Dispatcher => ({
   dispatch: async (job, opts) => {
     await opts?.onReserved?.({
@@ -54,7 +61,10 @@ describe("RuntimeSamplingDispatcher (replay runtime plane producer)", () => {
       now: () => 5000,
     });
 
-    const result = await dispatcher.dispatch(jobFor("rt-1", "evd-run-r1"));
+    // A tracked run always arrives with a reservation hook — the composition wires it, and a managed
+    // backend refuses to place work without one (arch-review 54, Phase 1). The sampler observes that hook
+    // rather than owning it, so the fixture must carry it or it is testing a lane production never has.
+    const result = await dispatcher.dispatch(jobFor("rt-1", "evd-run-r1"), { onReserved: reservation });
     expect(result).toEqual(RESULT);
     expect(recorded.length).toBeGreaterThanOrEqual(2);
     expect(recorded[0]?.runId).toBe("evd-run-r1");

@@ -131,31 +131,52 @@ describe("PgExecutionAttemptStore", () => {
     expect(calls[1]?.text).toContain("WHERE scorecard_id = $1 ORDER BY execution_id, generation");
   });
 
-  // ── WHERE THE COMPUTE IS (arch-review 52, Wave 2) ──────────────────────────────────────────────────
-  it("recordWork stamps the handle unconditionally — a terminal row must still be able to take it", async () => {
-    const { client, calls } = fakeClient(() => ({ rows: [] }));
+  // ── WHERE THE COMPUTE WILL BE (arch-review 52 Wave 2; the proof is arch-review 54 Phase 1) ─────────
+  const WORK = {
+    tenant: "acme",
+    runtimeId: "nomad-1",
+    runId: "evd-run-r1",
+    externalJobId: "everdict-c1-evd-run-r1-aaaaa",
+    namespace: "everdict-acme",
+  };
+
+  it("reserveWork stamps the handle unconditionally — a terminal row must still be able to take it", async () => {
+    const { client, calls } = fakeClient(() => ({
+      rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }],
+    }));
     const store = new PgExecutionAttemptStore(client);
 
-    await store.recordWork("evd-run-r1#g1", {
-      tenant: "acme",
-      runtimeId: "nomad-1",
-      runId: "evd-run-r1",
-      externalJobId: "everdict-c1-evd-run-r1-aaaaa",
-      namespace: "everdict-acme",
-    });
+    const intent = await store.reserveWork("evd-run-r1#g1", WORK);
 
     // No state guard in the WHERE clause: a fast case can commit before this hook lands, and refusing the
-    // write then would leave the ledger with no handle for work that ran — which is exactly when a teardown
-    // falls back to the over-broad case-id kill this column exists to retire.
+    // write then would leave the ledger with no handle for work that ran.
     const text = calls[0]?.text ?? "";
     expect(text).toContain("UPDATE everdict_execution_attempts");
     expect(text).toContain("runtime_work = $2::jsonb");
     expect(text).not.toContain("state");
+    // …and it RETURNS, because the caller is the reservation hook a backend awaits before it creates a
+    // cluster object. An UPDATE whose result nobody reads cannot tell "wrote the row" from "matched none".
+    expect(text).toContain("RETURNING");
     expect(calls[0]?.params?.[0]).toBe("evd-run-r1#g1");
     expect(JSON.parse(String(calls[0]?.params?.[1]))).toMatchObject({
       externalJobId: "everdict-c1-evd-run-r1-aaaaa",
       namespace: "everdict-acme",
       runId: "evd-run-r1",
     });
+    // The proof is read back from the write, not echoed from the argument.
+    expect(intent).toMatchObject({ attemptId: "evd-run-r1#g1", persistedAt: "2026-08-18T00:00:00.000Z" });
+    expect(intent.work.externalJobId).toBe("everdict-c1-evd-run-r1-aaaaa");
+  });
+
+  it("reserveWork REFUSES when the update matched no row — an attempt id that names nothing", async () => {
+    // The interleaving this closes: a managed dispatch whose ledger row was never opened (or was swept)
+    // reserved against a phantom id, the write silently matched nothing, the hook resolved, and the backend
+    // created a Job that no teardown, recovery or cancellation could ever name.
+    const { client } = fakeClient(() => ({ rows: [] }));
+    const store = new PgExecutionAttemptStore(client);
+    await expect(
+      store.reserveWork("evd-run-r1#g9", WORK),
+      "an UPDATE that matched no row reported success to the caller that was about to create cluster work",
+    ).rejects.toThrow(/does not exist/);
   });
 });

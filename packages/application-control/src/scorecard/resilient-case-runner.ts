@@ -1,4 +1,4 @@
-import type { AttemptRef, CaseJob, CaseResult, RuntimeWorkRef } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef } from "@everdict/contracts";
 import { type CircuitBreaker, type HarnessSecretMaps, resolveHarnessSecrets } from "@everdict/domain";
 import { executeCase } from "../execution/execute-case.js";
 import { type PhysicalAttempt, jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";
@@ -125,7 +125,7 @@ export class ResilientCaseRunner {
       // just applied/submitted (arch-review 52, Wave 2). Forwarded verbatim: the handle carries the attempt
       // id off the dispatched job, so the caller stamps it without re-deriving which attempt this dispatch
       // was — which matters here, where spillover and speculation dispatch several.
-      onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
+      onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
       onStep: (message: string, caseId: string) => void;
       // Opens a fresh recording attempt for a NEW physical execution (spill / OOM boost / speculation
       // duplicate) and returns the job stamped with it — see SpilloverOpts.reattempt.

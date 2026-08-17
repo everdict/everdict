@@ -26,6 +26,12 @@ export const ErrorCode = {
   // auth
   UNAUTHENTICATED: "Authentication is required.",
   FORBIDDEN: "You do not have permission.",
+  // configuration — this deployment is wired such that the operation cannot be performed SAFELY, as opposed
+  // to having failed (arch-review 54, Phase 1). A managed dispatch with no attempt ledger to record its
+  // placement on is the case that named it: nothing is broken, and proceeding would create compute that no
+  // teardown, recovery or cancellation could ever address. Refusing is the correct outcome, and it needs a
+  // code an operator can act on — "wire the ledger", not "retry".
+  NOT_CONFIGURED: "This deployment is not configured to perform that safely.",
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCode;

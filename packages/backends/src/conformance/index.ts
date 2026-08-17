@@ -1,4 +1,4 @@
-import { type KillOutcome, type RuntimeWorkRef, killConverged } from "@everdict/contracts";
+import { type KillOutcome, type PersistedWorkIntent, type RuntimeWorkRef, killConverged } from "@everdict/contracts";
 // ── ONE SUITE, EVERY IMPLEMENTATION (arch-review 53, Wave F) ────────────────────────────────────────
 //
 // Every protocol this program introduced is a claim about ALL implementations of a port, and until now each
@@ -39,7 +39,14 @@ export function describeManagedDispatch(name: string, world: () => ManagedDispat
 
     it("reports the handle BEFORE the external object exists", async () => {
       const { backend, job, effects } = world();
-      await backend.dispatch(job, { onReserved: () => void effects.push("reserved") }).catch(() => undefined);
+      await backend
+        .dispatch(job, {
+          onReserved: async (work) => {
+            effects.push("reserved");
+            return persisted(work);
+          },
+        })
+        .catch(() => undefined);
       expect(
         effects[0],
         "the handle is reported after the effect — a crash in between leaves work nothing can address",
@@ -60,7 +67,40 @@ export function describeManagedDispatch(name: string, world: () => ManagedDispat
         "the cluster was asked for work whose handle nobody could record — an unaddressable job is not a successful dispatch",
       ).toEqual([]);
     });
+
+    // ── The rung ordering alone could not reach (arch-review 54, Phase 1) ────────────────────────────
+    //
+    // The two above prove the SEQUENCE. They pass just as happily when the hook writes nothing, because a
+    // hook that resolves and a hook that persisted are the same observation from the backend's side. These
+    // two make the store's answer the thing that licenses the effect.
+    it("refuses to create work for a tracked run when no reservation hook is wired", async () => {
+      const { backend, job, effects } = world();
+      await backend.dispatch(job).catch(() => undefined);
+      expect(
+        effects,
+        "a job that names a run was placed with nobody recording where — the handle exists only in a dead process's memory",
+      ).toEqual([]);
+    });
+
+    it("refuses to create work when the reservation hook returns no proof", async () => {
+      const { backend, job, effects } = world();
+      await backend.dispatch(job, { onReserved: (async () => undefined) as never }).catch(() => undefined);
+      expect(
+        effects,
+        "the hook resolved without persisting anything and the dispatch proceeded — 'it returned' is not 'it was written down'",
+      ).toEqual([]);
+    });
   });
+}
+
+// The proof a conformance world hands back when it is playing the part of a working ledger. Built from the
+// handle the backend just reported, because that is what a real reservation returns: the row as persisted.
+function persisted(work: RuntimeWorkRef): PersistedWorkIntent {
+  return {
+    attemptId: work.attemptId ?? `${work.runId}#g1`,
+    work,
+    persistedAt: "2026-08-18T00:00:00.000Z",
+  };
 }
 
 // ── RuntimeWorkControlConformance — exact addressing is the default (Wave B) ────────────────────────

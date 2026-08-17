@@ -1,4 +1,4 @@
-import type { CaseJob } from "@everdict/contracts";
+import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type K8sApi, K8sBackend } from "./k8s.js";
 import { NomadBackend, type NomadHttp } from "./nomad.js";
@@ -96,7 +96,14 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #2 — CLOSED] the K8s handle exists before
     } as unknown as K8sApi;
 
     const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
-    await backend.dispatch(JOB, { onReserved: () => void order.push("work") }).catch(() => undefined);
+    await backend
+      .dispatch(JOB, {
+        onReserved: async (w: RuntimeWorkRef) => {
+          order.push("work");
+          return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
+        },
+      })
+      .catch(() => undefined);
 
     // RED as of 186f9fd9: order is ["apply"] — the handle is never reported, because the frame that held it
     // died with the process. The exact Job name the cluster is now running is unrecoverable.
@@ -125,7 +132,14 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #3 — CLOSED] the Nomad handle exists befo
       http,
       pollIntervalMs: 1,
     });
-    await backend.dispatch(JOB, { onReserved: () => void order.push("work") }).catch(() => undefined);
+    await backend
+      .dispatch(JOB, {
+        onReserved: async (w: RuntimeWorkRef) => {
+          order.push("work");
+          return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
+        },
+      })
+      .catch(() => undefined);
 
     // RED as of 186f9fd9: ["submit"] only. Nomad may well have accepted the job before the socket died —
     // an ambiguous submit failure is precisely the case where the handle matters most, and it is precisely

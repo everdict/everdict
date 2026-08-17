@@ -412,7 +412,12 @@ describe("K8sBackend.dispatch", () => {
 
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
-      { onReserved: (w: RuntimeWorkRef) => void works.push(w) },
+      {
+        onReserved: async (w: RuntimeWorkRef) => {
+          works.push(w);
+          return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
+        },
+      },
     );
 
     // The handle names the object the cluster is about to be asked for — the same name the manifest carries,
@@ -434,7 +439,12 @@ describe("K8sBackend.dispatch", () => {
     const { api } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     const works: unknown[] = [];
-    await backend.dispatch(JOB, { onReserved: (w: RuntimeWorkRef) => void works.push(w) }); // JOB has no runId
+    await backend.dispatch(JOB, {
+      onReserved: async (w: RuntimeWorkRef) => {
+        works.push(w);
+        return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
+      },
+    }); // JOB has no runId
     expect(works).toEqual([]);
   });
 

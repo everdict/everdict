@@ -3,6 +3,8 @@ import {
   type CaseResult,
   type DomainFact,
   type ExecutionAttemptState,
+  InternalError,
+  type PersistedWorkIntent,
   type RunRecord,
   type RuntimeWorkRef,
   type VerdictPolicy,
@@ -587,19 +589,35 @@ export class CaseOutcomeCommitter {
     await attempts.transition(attemptId, to, patch).catch(() => {});
   }
 
-  // WHERE this attempt's compute is, recorded while it exists (arch-review 52, Wave 2). The handle names its
-  // own attempt — the dispatched job carries `attemptId`, and the backend copies it onto the handle — so this
-  // needs no map: an attempt that opened no ledger row has no handle to stamp either.
+  // WHERE this attempt's compute WILL BE, written before it exists (arch-review 52 Wave 2; the proof is
+  // arch-review 54 Phase 1). The handle names its own attempt — the dispatched job carries `attemptId`, and
+  // the backend copies it onto the handle — so this needs no map.
   //
-  // NOT swallowed (arch-review 53, Wave A). It is called from `onReserved`, BEFORE the cluster is asked for
-  // anything, so a rejection here costs a dispatch that has not happened — and buys the guarantee that no
-  // external object exists whose name the ledger does not hold. The old ordering had no such choice available:
-  // the stamp ran after the apply, so failing it would have failed a dispatch that had already placed compute,
-  // which is why it was swallowed and why a crash mid-dispatch produced unaddressable jobs.
-  async stampWork(work: RuntimeWorkRef): Promise<void> {
+  // NOT swallowed (arch-review 53, Wave A). It is called from the reservation hook, BEFORE the cluster is
+  // asked for anything, so a rejection here costs a dispatch that has not happened — and buys the guarantee
+  // that no external object exists whose name the ledger does not hold. The old ordering had no such choice:
+  // the stamp ran after the apply, so failing it would have failed a dispatch that had already placed compute.
+  //
+  // AND IT RETURNS THE PROOF. The two early returns it used to take — no ledger wired, no attempt id on the
+  // handle — resolved successfully, which told the backend the reservation had been recorded when nothing had
+  // been. Both are now refusals, because both describe a dispatch that cannot be addressed afterwards: a
+  // managed lane reaching this point without a ledger row is the composition error `openPhysicalAttempt`
+  // already refuses, and this is the second place it would otherwise slip through.
+  async reserveWork(work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     const attempts = this.deps.attempts;
-    if (!attempts || work.attemptId === undefined) return;
-    await attempts.recordWork(work.attemptId, work);
+    if (!attempts)
+      throw new InternalError(
+        "NOT_CONFIGURED",
+        { runId: work.runId },
+        "no execution-attempt ledger is wired, so there is nowhere to record where this work will be placed.",
+      );
+    if (work.attemptId === undefined)
+      throw new InternalError(
+        "NOT_CONFIGURED",
+        { runId: work.runId, externalJobId: work.externalJobId },
+        "the reserved work names no attempt, so nothing durable would point at the job about to be created.",
+      );
+    return await attempts.reserveWork(work.attemptId, work);
   }
 
   // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on

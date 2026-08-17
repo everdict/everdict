@@ -4,6 +4,7 @@ import {
   type Driver,
   InternalError,
   type KillOutcome,
+  type PersistedWorkIntent,
   type RuntimeSample,
   type RuntimeWorkRef,
   type TraceEvent,
@@ -265,6 +266,39 @@ export function isWorkAddressable(backend: Backend): backend is Backend & WorkAd
 // caller back to guessing which reads are exact.
 export function isWorkControllable(backend: Backend): backend is Backend & ManagedWorkControl {
   return typeof (backend as Partial<ManagedWorkControl>).adoptWork === "function";
+}
+
+// ── THE RESERVATION A MANAGED DISPATCH MUST HOLD (arch-review 54, Phase 1) ──────────────────────────
+//
+// One place, shared by every backend that creates addressable external work, because "did the caller record
+// this?" is the same question on K8s and Nomad and the two must not answer it differently — the last time a
+// rung was implemented twice, one adapter reported a cluster error as absence for a whole review cycle.
+//
+// The rule it enforces: a job that names a run is TRACKED work, and tracked work is not created until the
+// store says the handle is durable. An absent hook is not "this deployment does not track placements" — the
+// deployment that does not track them dispatches jobs with no `runId`, which never reach this line. A hook
+// that resolves without proof is the same hole with a callback in front of it.
+export async function requireReservation(
+  job: CaseJob,
+  work: RuntimeWorkRef,
+  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>,
+): Promise<PersistedWorkIntent> {
+  if (!onReserved)
+    throw new InternalError(
+      "NOT_CONFIGURED",
+      { runId: job.runId, externalJobId: work.externalJobId },
+      "a managed dispatch for a tracked run needs a reservation hook — nothing would record where this work is placed, so no teardown, recovery or cancellation could name it.",
+    );
+  const intent = await onReserved(work);
+  // A hook that answered with nothing is a hook that wrote nothing. Refusing here is what makes the returned
+  // value a protocol rather than a courtesy: there is no path from "reservation unproven" to "job created".
+  if (!intent || typeof intent.attemptId !== "string" || intent.attemptId === "")
+    throw new InternalError(
+      "NOT_CONFIGURED",
+      { runId: job.runId, externalJobId: work.externalJobId },
+      "the reservation hook returned no persisted intent — the placement was never recorded, so this dispatch would create work nothing can address.",
+    );
+  return intent;
 }
 
 export function isPoolReporting(backend: Backend): backend is Backend & PoolReporting {

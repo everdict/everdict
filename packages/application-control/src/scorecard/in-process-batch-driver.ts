@@ -491,7 +491,7 @@ export class InProcessBatchDriver {
           // carries the dispatched job's attemptId), which is what makes it correct under spillover and
           // speculation: those dispatch several attempts, and each reports its own.
           // Awaited: the ledger holds the handle before the cluster holds the job (arch-review 53, Wave A).
-          onReserved: (work) => this.commit.stampWork(work),
+          onReserved: (work) => this.commit.reserveWork(work),
           onStarted: (startedJob) => {
             const started = startedJob.runId !== undefined ? jobAttemptId(startedJob, startedJob.runId) : undefined;
             void this.commit.stampAttempt(started ?? openedAttemptId, "executing", {

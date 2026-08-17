@@ -1,5 +1,5 @@
 import type { CaseRuntimeSample, DispatchOptions, Dispatcher } from "@everdict/backends";
-import type { CaseJob, CaseResult, RuntimeWorkRef, TrackEntry } from "@everdict/contracts";
+import type { CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef, TrackEntry } from "@everdict/contracts";
 
 // The replay RUNTIME plane's producer loop (docs/architecture/replay.md ③ / D5b): while a managed dispatch is in
 // flight, poll the orchestrator's per-case resource stats (CaseSampleable behind `sample`) and stream each sample
@@ -36,14 +36,28 @@ export class RuntimeSamplingDispatcher implements Dispatcher {
     // external object exists (Wave A). Until it arrives there is nothing exact to sample, so the loop simply
     // does not fire; a sample of the wrong job is worse than a missing one.
     let work: RuntimeWorkRef | undefined;
+    // Observing the reservation must not ABSORB it, and must not IMPERSONATE it either (arch-review 54,
+    // Phase 1). This wrapper wants the handle so it can sample the right container; the proof belongs to the
+    // backend, which refuses to create the job without it.
+    //
+    // So the hook is installed only when there is an inner one to forward to, and its answer is returned
+    // verbatim. Wrapping an ABSENT inner hook would be worse than useless: it would turn "nobody is recording
+    // this placement" — which `requireReservation` refuses at the effect boundary, where the decision belongs
+    // — into "a hook exists and it threw", moving one protocol's enforcement into a diagnostics decorator.
+    const inner = dispatchOpts?.onReserved;
     const opts: DispatchOptions = {
       ...dispatchOpts,
-      onReserved: async (reserved) => {
-        work = reserved;
-        await dispatchOpts?.onReserved?.(reserved);
-      },
+      ...(inner
+        ? {
+            onReserved: async (reserved): Promise<PersistedWorkIntent> => {
+              work = reserved;
+              return await inner(reserved);
+            },
+          }
+        : {}),
     };
-    let inFlight = false; // 겹침 가드 — 느린 stats API가 밀리면 샘플을 건너뛰지, 쌓지 않는다
+    // Overlap guard — when a slow stats API falls behind, skip the sample rather than queue them up.
+    let inFlight = false;
     const timer = setInterval(() => {
       if (inFlight || work === undefined) return;
       inFlight = true;

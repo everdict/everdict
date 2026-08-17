@@ -113,9 +113,14 @@ export class RuntimeDispatcher implements Dispatcher {
     // its own cluster, but not the name the tenant chose for it — this layer is where that name lives, so the
     // handle picks it up on the way back out. A teardown then knows which lane to try first instead of
     // offering an exact id to every shard in the recorded list.
+    //
+    // The PROOF travels back out unchanged (arch-review 54, Phase 1): this layer decorates the handle on the
+    // way in and must not swallow the store's answer on the way out, or the backend loses the one value that
+    // licenses it to create the job.
+    const inner = opts?.onReserved;
     const opted =
-      opts?.onReserved && target !== undefined
-        ? { ...opts, onReserved: (work: RuntimeWorkRef) => opts.onReserved?.({ ...work, runtimeId: target }) }
+      inner && target !== undefined
+        ? { ...opts, onReserved: (work: RuntimeWorkRef) => inner({ ...work, runtimeId: target }) }
         : opts;
 
     // Pool target ("any runner", no runner id, N runners drain):

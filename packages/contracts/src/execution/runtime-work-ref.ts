@@ -43,3 +43,35 @@ export const RuntimeWorkRefSchema = z.object({
   namespace: z.string().optional(),
 });
 export type RuntimeWorkRef = z.infer<typeof RuntimeWorkRefSchema>;
+
+// ── THE PROOF THAT THE HANDLE IS DURABLE (arch-review 54, Phase 1) ───────────────────────────────────
+//
+// A `RuntimeWorkRef` is a NAME. Computing one costs nothing and proves nothing — it is a string the backend
+// derived from the job. Wave A made the backend report that name BEFORE creating the external object, which
+// fixed the order and left the question the order exists to answer: was it written down?
+//
+// It was not, and could not be told apart from having been. The reporting hook returned early when the
+// dispatching lane held no attempt id (`if (!attempts || work.attemptId === undefined) return;`), the ledger
+// write was `Promise<void>` over an UPDATE with no affected-row check, and both of those RESOLVE. So the
+// backend's `await options.onReserved(work)` succeeded in exactly the situation where nothing had been
+// recorded, and it went on to create a cluster object that no teardown, recovery or cancellation could ever
+// name.
+//
+// `PersistedWorkIntent` is the store's ANSWER: it exists only if a row was actually updated, it carries the
+// attempt it was written against, and the reserving hook returns it. A backend that has one may submit; a
+// backend that does not must not, because "the caller could not record where this work will be" and "the
+// caller must not get this work" are the same sentence (rule `protocol` L1).
+//
+// It is deliberately not a boolean. A boolean beside an optional value is the shape this codebase has now
+// watched a caller half-consume twice — the value gets read and the flag does not.
+export const PersistedWorkIntentSchema = z.object({
+  // The ledger row the handle was written onto. Present by construction: a reservation with no attempt has
+  // nothing to prove, which is precisely the state that must refuse rather than resolve.
+  attemptId: z.string().min(1),
+  // The handle as PERSISTED — read back from the write rather than echoed from the argument, so a store that
+  // normalises or rejects part of it cannot leave the caller believing something else was stored.
+  work: RuntimeWorkRefSchema,
+  // When the row was written. The audit answer to "did this exist before the cluster object did".
+  persistedAt: z.string().min(1),
+});
+export type PersistedWorkIntent = z.infer<typeof PersistedWorkIntentSchema>;

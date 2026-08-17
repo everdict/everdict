@@ -4,7 +4,10 @@ import {
   ExecutionAttemptRecordSchema,
   type ExecutionAttemptState,
   InternalError,
+  NotFoundError,
+  type PersistedWorkIntent,
   type RuntimeWorkRef,
+  RuntimeWorkRefSchema,
   TERMINAL_ATTEMPT_STATES,
   attemptIdOf,
 } from "@everdict/contracts";
@@ -157,16 +160,35 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
   }
 
   // UNCONDITIONAL on the attempt's state, unlike `transition` (arch-review 52, Wave 2): the row can reach a
-  // terminal state before this stamp lands (a fast case commits while the hook is still in flight), and
-  // refusing the write then would leave the ledger holding no handle for work that ran — which is precisely
-  // when a teardown falls back to the case-id kill this column exists to retire. COALESCE-free, last write
-  // wins: a second handle for one attempt means the backend re-created the external object, and the newer one
-  // is the live one.
-  async recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void> {
-    await this.client.query(
-      "UPDATE everdict_execution_attempts SET runtime_work = $2::jsonb, updated_at = now() WHERE attempt_id = $1",
+  // terminal state before this reservation lands (a fast case commits while the hook is still in flight), and
+  // refusing the write then would leave the ledger holding no handle for work that ran. COALESCE-free, last
+  // write wins: a second handle for one attempt means the backend re-created the external object, and the
+  // newer one is the live one.
+  //
+  // `RETURNING` is the whole point (arch-review 54, Phase 1). This was an UPDATE whose result nobody looked
+  // at, so updating an attempt id that names NO ROW was indistinguishable from updating one that does — and
+  // its caller, the reservation hook the backend awaits before creating a cluster object, read that silence
+  // as success. Zero rows means this dispatch has no durable identity, which is the one answer that must stop
+  // it. The returned row is the proof the backend is handed.
+  async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
+    const { rows } = await this.client.query<{ runtime_work: unknown; updated_at: string }>(
+      "UPDATE everdict_execution_attempts SET runtime_work = $2::jsonb, updated_at = now() WHERE attempt_id = $1 RETURNING runtime_work, updated_at",
       [attemptId, JSON.stringify(work)],
     );
+    const row = rows[0];
+    if (!row)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { attemptId },
+        "cannot reserve runtime work against an attempt row that does not exist — the dispatch has no durable identity to place work under.",
+      );
+    // Read back from the write rather than echoing the argument: what the ledger holds is what a teardown
+    // will address, and a caller told otherwise would stop something that was never recorded.
+    return {
+      attemptId,
+      work: RuntimeWorkRefSchema.parse(row.runtime_work),
+      persistedAt: typeof row.updated_at === "string" ? row.updated_at : new Date(row.updated_at).toISOString(),
+    };
   }
 
   // Unconditional on purpose: the fence this records could not be raised at ANY point in the attempt's life,

@@ -18,6 +18,8 @@ import {
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
+  InternalError,
+  type PersistedWorkIntent,
   type RuntimeWorkRef,
   type TraceEvent,
   type TraceSource,
@@ -1128,7 +1130,7 @@ export class RunService {
         // memory. Persist it on the attempt row so a teardown that outlives this process — a cancel after a
         // restart, a supersede from another replica — can stop THAT job instead of every job of this case.
         // Awaited — a run whose handle cannot be recorded must not place compute (arch-review 53, Wave A).
-        onReserved: (work) => this.stampWork(id, work),
+        onReserved: (work) => this.reserveWork(id, work),
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;
@@ -1283,11 +1285,20 @@ export class RunService {
   // backend creates anything (arch-review 53, Wave A). NOT swallowed: the asymmetry that justified swallowing
   // it disappeared with the reordering. A rejection now aborts a dispatch that has placed no compute, instead
   // of leaving compute nobody can address.
-  private async stampWork(id: string, work: RuntimeWorkRef): Promise<void> {
+  // …and it RETURNS THE PROOF (arch-review 54, Phase 1). The early return covered two situations that look
+  // alike from here and are not: a lane with no ledger (which must not be placing managed work at all) and a
+  // run whose attempt row was never opened. Both resolved, and a resolved reservation is what licenses the
+  // cluster object. Both are refusals now.
+  private async reserveWork(id: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     const attempts = this.deps.attempts;
     const attemptId = this.attemptRow.get(`evd-run-${id}`);
-    if (!attempts || attemptId === undefined) return;
-    await attempts.recordWork(attemptId, { ...work, attemptId });
+    if (!attempts || attemptId === undefined)
+      throw new InternalError(
+        "NOT_CONFIGURED",
+        { run: id, externalJobId: work.externalJobId },
+        "this run has no attempt row to record its placement on — the work about to be created could not be addressed afterwards.",
+      );
+    return await attempts.reserveWork(attemptId, { ...work, attemptId });
   }
 
   private async stampAttempt(

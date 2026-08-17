@@ -338,7 +338,12 @@ describe("NomadBackend.dispatch", () => {
 
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
-      { onReserved: (w: RuntimeWorkRef) => void works.push(w) },
+      {
+        onReserved: async (w: RuntimeWorkRef) => {
+          works.push(w);
+          return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
+        },
+      },
     );
 
     // The handle names the job that is about to be submitted, in the namespace it goes to — everything a stop

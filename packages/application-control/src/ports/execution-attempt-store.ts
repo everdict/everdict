@@ -1,6 +1,8 @@
 import {
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
+  NotFoundError,
+  type PersistedWorkIntent,
   type RuntimeWorkRef,
   attemptIdOf,
   isTerminalAttemptState,
@@ -86,19 +88,26 @@ export interface ExecutionAttemptStore {
       error?: { code: string; message: string };
     },
   ): Promise<boolean>;
-  // WHERE this attempt's compute is, as the placement backend named it (arch-review 52, Wave 2). Stamped when
-  // the backend reports the handle (`DispatchOptions.onWork`), which is the only moment it exists in memory.
+  // WHERE this attempt's compute WILL BE, written before the backend creates it (arch-review 52 Wave 2 for the
+  // column; arch-review 54 Phase 1 for the proof). Called from the reservation hook, which the backend awaits
+  // before it submits anything.
   //
   // Its own verb rather than a `transition` patch for the same reason `markUnisolated` is one: it says nothing
   // about where the attempt stands in its life. It lands while the attempt is `created` or `executing`, and —
   // unlike a transition — it must still land on a TERMINAL row, because the row can go terminal before the
-  // stamp does and a teardown holding no handle then reaches for the case id instead.
+  // reservation does.
   //
-  // BEST-EFFORT, and this one is honest about the consequence rather than harmless: a stamp that fails leaves
-  // the handle unpersisted, and the teardown falls back to the case-id kill — the over-broad path this whole
-  // wave exists to retire. It is still best-effort because the alternative is failing a dispatch that already
-  // succeeded, which would make the audit plane able to kill live work.
-  recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void>;
+  // RETURNS THE PROOF, and THROWS when there is none. It used to be `Promise<void>` over an UPDATE with no
+  // affected-row check, defended by this reasoning:
+  //
+  //     "It is still best-effort because the alternative is failing a dispatch that already succeeded, which
+  //      would make the audit plane able to kill live work."
+  //
+  // That was true while the stamp ran AFTER the apply. Wave A moved it before, and the justification did not
+  // move with it: today a refused reservation costs a dispatch that has placed nothing, and buys the
+  // guarantee that no external object exists whose name the ledger does not hold. Zero rows updated is the
+  // case that matters — it means this attempt id names nothing — and it is a throw, not a silent success.
+  reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent>;
   // The attempt ran with no fence raised — the recording coordinate it minted could not be claimed. Its own
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
@@ -168,10 +177,19 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     return true;
   }
 
-  async recordWork(attemptId: string, work: RuntimeWorkRef): Promise<void> {
+  async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     const current = this.attempts.get(attemptId);
-    if (!current) return;
-    this.attempts.set(attemptId, { ...current, runtimeWork: work, updatedAt: this.now() });
+    // The zero-row case, stated. A silent return here is what let a reservation hook resolve over an attempt
+    // row that does not exist, which licensed the cluster object that followed it.
+    if (!current)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { attemptId },
+        "cannot reserve runtime work against an attempt row that does not exist — the dispatch has no durable identity to place work under.",
+      );
+    const persistedAt = this.now();
+    this.attempts.set(attemptId, { ...current, runtimeWork: work, updatedAt: persistedAt });
+    return { attemptId, work, persistedAt };
   }
 
   async markUnisolated(attemptId: string): Promise<void> {

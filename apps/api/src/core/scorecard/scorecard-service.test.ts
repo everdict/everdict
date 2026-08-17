@@ -3547,7 +3547,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     });
 
     const opened = await attempts.open({ executionId: "child-c2", tenant: "acme", caseId: "c2" });
-    await attempts.recordWork(opened.attemptId, {
+    await attempts.reserveWork(opened.attemptId, {
       tenant: "acme",
       runId: "child-c2",
       externalJobId: "everdict-c2-aaaa",
@@ -3611,7 +3611,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     });
 
     const opened = await attempts.open({ executionId: "child-adopted", tenant: "acme", caseId: "c2" });
-    await attempts.recordWork(opened.attemptId, {
+    await attempts.reserveWork(opened.attemptId, {
       tenant: "acme",
       runId: "child-adopted",
       externalJobId: "everdict-c2-aaaa",

@@ -45,6 +45,7 @@ import {
   type Reclaimable,
   type WorkAddressable,
   dispatchAborted,
+  requireReservation,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
@@ -828,21 +829,30 @@ export class NomadBackend
 
   async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
-    options?.onStarted?.(); // past the Scheduler's wait queue — we're submitting the alloc now → flip the run to running
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)
-    // THE INTENT IS DURABLE BEFORE THE JOB EXISTS (arch-review 53, Wave A). Awaited, and a rejection aborts
-    // the dispatch before the submit — an ambiguous submit (Nomad accepted it, the response never arrived) is
-    // precisely the case where the handle matters most, and the old post-submit hook guaranteed there was none.
+    // THE INTENT IS DURABLE BEFORE THE JOB EXISTS (arch-review 53, Wave A) — AND WE HOLD THE PROOF
+    // (arch-review 54, Phase 1). Awaited, and a rejection aborts the dispatch before the submit: an ambiguous
+    // submit (Nomad accepted it, the response never arrived) is precisely the case where the handle matters
+    // most, and the old post-submit hook guaranteed there was none. A hook that RESOLVED having written
+    // nothing was the same hole one layer in, so the store's answer is required rather than assumed.
     if (job.runId !== undefined)
-      await options?.onReserved?.({
-        tenant: job.tenant ?? "default",
-        runId: job.runId,
-        externalJobId: jobId,
-        ...(ns !== undefined ? { namespace: ns } : {}),
-        ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
-      });
+      await requireReservation(
+        job,
+        {
+          tenant: job.tenant ?? "default",
+          runId: job.runId,
+          externalJobId: jobId,
+          ...(ns !== undefined ? { namespace: ns } : {}),
+          ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+        },
+        options?.onReserved,
+      );
+    // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire above, before the
+    // reservation and before the submit, so a reservation failure left a record marked `running` with no
+    // cluster object anywhere and nothing to reconcile it against. `running` means the orchestrator was asked.
+    options?.onStarted?.();
     // The infra-plane record of THIS dispatch (submission, blocked verdicts, placement) — appended to the
     // result's trace so the sealed trajectory keeps the orchestrator's account after the job is GC'd.
     const t0 = Date.now();

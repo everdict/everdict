@@ -43,6 +43,7 @@ import {
   type Reclaimable,
   type WorkAddressable,
   dispatchAborted,
+  requireReservation,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
@@ -1556,7 +1557,6 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
 
   async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we applied the Job
-    options?.onStarted?.(); // past the Scheduler's wait queue — we're applying the Job now → flip the run to running
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
     // The name is decided here, from the resolution this dispatch already has — `reserve()` is the same
     // computation exposed for a caller that wants the coordinate without the dispatch.
@@ -1568,11 +1568,20 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       namespace: ns,
       ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
     };
-    // THE INTENT IS DURABLE BEFORE THE OBJECT EXISTS (arch-review 53, Wave A). Awaited, and its rejection
-    // takes the dispatch down BEFORE `applyJob` — a caller that cannot record where this work will be must
-    // not get the work. The old ordering reported the handle after the apply, so a control plane that died
-    // in between left a running Job addressable only by its case id, which is other runs' jobs too.
-    if (job.runId !== undefined) await options?.onReserved?.(work);
+    // THE INTENT IS DURABLE BEFORE THE OBJECT EXISTS (arch-review 53, Wave A) — AND WE HOLD THE PROOF
+    // (arch-review 54, Phase 1). Awaited, and its rejection takes the dispatch down BEFORE `applyJob`: a
+    // caller that cannot record where this work will be must not get the work. The old ordering reported the
+    // handle after the apply, so a control plane that died in between left a running Job addressable only by
+    // its case id, which is other runs' jobs too.
+    //
+    // Ordering alone left the second half open. The hook could RESOLVE having written nothing (no ledger, no
+    // attempt id, an UPDATE matching no row) and this line could not tell that apart from a durable
+    // reservation. So a job that names a run requires the store's answer, and a missing hook is refused here
+    // rather than treated as "this deployment does not track placements".
+    if (job.runId !== undefined) await requireReservation(job, work, options?.onReserved);
+    // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire before both the
+    // reservation and the apply, so a reservation failure left a record marked `running` with no Job anywhere.
+    options?.onStarted?.();
     // With kubeconfig auth, the temp kubeconfig lives only for the one job (removed after completion/failure). cleanup after deleteJob.
     return this.withApi(async (api) => {
       await api.ensureNamespace(ns);
