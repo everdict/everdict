@@ -19,8 +19,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type {
-  AdoptionDecision, CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
+import type { AdoptionDecision, CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -42,11 +41,7 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Per-runtime kill of an already-dispatched case (supersede / speculation loser) — from buildRuntimeAccess.
 export interface ScorecardRuntimeAccess {
-  adoptWorkFn: (
-    tenant: string,
-    runtimeList: string | undefined,
-    work: RuntimeWorkRef,
-  ) => Promise<AdoptionDecision>;
+  adoptWorkFn: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
   killUnhandled: (tenant: string, runtimeList: string | undefined) => Promise<KillOutcome>;
   // The exact-handle stop (arch-review 52, Wave 2) — `killUnhandled` answers for rows that recorded none.
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;

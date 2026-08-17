@@ -39,6 +39,21 @@ export interface TraceSinkContext {
   // model). A judge absent from the map (harness judge, unresolvable spec) exports under the batch identity —
   // the map states only what was actually declared, never an invented model.
   judgeModels?: Record<string, string>;
+  // ── THE KEY THE SINK MAY DEDUPE ON (arch-review 54, Phase 4) ────────────────────────────────────
+  //
+  // The export is at-least-once by construction: the publication operation is claimed, the sink is called,
+  // and a crash before the receipt lands leaves the operation owed, so the sweep calls the sink again. Wave C
+  // minted an idempotency key for exactly this and passed it — into a context type that did not declare it.
+  //
+  // The property was never dropped (excess-property checking applies to object literals, not to a variable
+  // passed into a narrower parameter type), so it reached the adapter and sat there UNREADABLE: nothing
+  // declared it, so nothing read it, and every adapter minted fresh ids per call. A retried export therefore
+  // became a second trace on the tenant's platform with no way to collapse the two. "Present but unconsumed"
+  // and "dropped" look identical from outside, and the sending side's comment claimed neither had happened.
+  //
+  // Declared here, on the contract BOTH ends share, so an adapter can derive deterministic external ids from
+  // it. Optional only for the callers that are not at-least-once (a live per-case stream re-exports nothing).
+  idempotencyKey?: string;
 }
 
 export interface TraceSinkCaseResult {

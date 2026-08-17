@@ -7,6 +7,7 @@ import {
   type TraceSinkScore,
   UpstreamError,
 } from "@everdict/contracts";
+import { seededIds } from "./idempotent-ids.js";
 
 // LangSmith sink — one run per case (POST /runs, a client-generated uuid + outputs in one shot), scores via POST /feedback.
 // Real-API notes: auth is the x-api-key header (not Authorization), paths are bare (/runs·/feedback — same as the SDK),
@@ -93,12 +94,16 @@ export class LangsmithTraceSink implements TraceSink {
   }
 
   async export(ctx: TraceSinkContext, cases: TraceSinkCase[]): Promise<TraceSinkResult> {
+    // A retried export reuses THIS export's ids so the platform can collapse it (arch-review 54, Phase 4).
+    // Without a key there is nothing to be idempotent against — a live per-case stream is not retried — and
+    // the adapter's own generator is used.
+    const newId = ctx.idempotencyKey ? seededIds(ctx.idempotencyKey) : this.newId;
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const out: TraceSinkCaseResult[] = [];
     for (const c of cases) {
       try {
-        const runId = c.externalId ?? this.newId();
+        const runId = c.externalId ?? newId();
         if (!c.externalId) {
           const res = await f(`${base}/runs`, {
             method: "POST",

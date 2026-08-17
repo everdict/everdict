@@ -106,9 +106,41 @@ const MUTATIONS = [
   {
     name: "Wave D — the gate stops asking who judged",
     file: "packages/domain/src/scorecard/gate.ts",
-    from: '    if (pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)',
-    to: '    if (false && pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)',
+    from: "    if (pin !== undefined && !vouched && policy.allowUnrecordedJudgments !== true)",
+    to: "    if (false && pin !== undefined && !vouched && policy.allowUnrecordedJudgments !== true)",
     suite: ["--root", "packages/domain", "src/scorecard/judgment-provenance.counterexample.test.ts"],
+  },
+  {
+    // Phase 4: read the record's live plane again instead of the bytes the settlement froze.
+    name: "Phase 4 — the export re-reads the record instead of its frozen payload",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "      payload = frozen as CaseResult[];",
+    to: "      // MUTATED: ship whatever the record holds now",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/publication-frozen-payload.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the projection half: let a late drain move `current` backwards.
+    name: "Phase 4 — an older settlement can overwrite the newer one's projection",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "  if (!deps.operations) return false; // single-publisher deployment: no second settlement can race this one",
+    to: "  return false;",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/publication-frozen-payload.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the sink half: mint fresh ids per attempt, so a retried export duplicates on the platform.
+    name: "Phase 4 — a retried export cannot be deduped by the sink",
+    file: "packages/trace/src/sinks/langfuse-sink.ts",
+    from: "    const newId = ctx.idempotencyKey ? seededIds(ctx.idempotencyKey) : this.newId;",
+    to: "    const newId = this.newId;",
+    suite: ["--root", "packages/trace", "src/sinks/idempotent-export.test.ts"],
   },
   {
     name: "Wave E — every teardown failure records as merely requested",

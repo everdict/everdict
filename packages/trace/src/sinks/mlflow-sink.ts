@@ -7,6 +7,7 @@ import {
   type TraceSinkScore,
   UpstreamError,
 } from "@everdict/contracts";
+import { seededIds } from "./idempotent-ids.js";
 
 // MLflow 3.x sink — scores via assessments REST (≥3.2), trace creation via StartTraceV3 (trace_info) + OTLP span upload.
 // Real-API notes: fields are snake_case, the score field name is `assessment_name` (not name), source_type/source_id are required,
@@ -253,6 +254,10 @@ export class MlflowTraceSink implements TraceSink {
   }
 
   async export(ctx: TraceSinkContext, cases: TraceSinkCase[]): Promise<TraceSinkResult> {
+    // A retried export reuses THIS export's ids so the platform can collapse it (arch-review 54, Phase 4).
+    // Without a key there is nothing to be idempotent against — a live per-case stream is not retried — and
+    // the adapter's own generator is used.
+    const newId = ctx.idempotencyKey ? seededIds(ctx.idempotencyKey) : this.newId;
     const f = this.opts.fetchImpl ?? fetch;
     const out: TraceSinkCaseResult[] = [];
     for (const c of cases) {
@@ -270,7 +275,7 @@ export class MlflowTraceSink implements TraceSink {
             });
             continue;
           }
-          const hex = this.newId().replace(/-/g, "").slice(0, 32).padEnd(32, "0");
+          const hex = newId().replace(/-/g, "").slice(0, 32).padEnd(32, "0");
           traceId = `tr-${hex}`;
           const res = await f(`${this.base}/api/3.0/mlflow/traces`, {
             method: "POST",
@@ -289,7 +294,7 @@ export class MlflowTraceSink implements TraceSink {
             const spanRes = await f(`${this.base}/v1/traces`, {
               method: "POST",
               headers: { ...this.headers(), "x-mlflow-experiment-id": project },
-              body: JSON.stringify(mlflowOtlpSpans(ctx, c, hex, this.nowIso(), this.newId)),
+              body: JSON.stringify(mlflowOtlpSpans(ctx, c, hex, this.nowIso(), newId)),
             });
             if (spanRes.ok) {
               rootSpanId = mlflowRootSpanId(hex); // spans are live — assessments may scope to the root span

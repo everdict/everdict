@@ -37,6 +37,10 @@ interface ExportContext {
   harness: string;
   sinkOverride?: string;
   judgeModels?: Record<string, string>; // judge id → declared model label (ScoringService.collectJudgeModelMap)
+  // Forwarded to the sink so a retried export collapses rather than duplicating (arch-review 54, Phase 4).
+  // Re-declared here rather than inherited because this type is the service's own input shape — the point of
+  // Phase 4 is that every hop the key crosses DECLARES it, since the one that did not is where it went blind.
+  idempotencyKey?: string;
 }
 
 export class TraceSinkService {

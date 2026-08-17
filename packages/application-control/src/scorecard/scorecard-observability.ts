@@ -181,6 +181,12 @@ export const analysisArtifactKey = (id: string): string => `${ANALYSIS_KEY_PREFI
 // through their own key forever.
 export const analysisPassKey = (id: string, passId: string): string =>
   `${ANALYSIS_KEY_PREFIX}${id}/passes/${passId}.json`;
+// …and the EXPORT PAYLOAD of that same pass (arch-review 54, Phase 4). Its own key rather than a field of
+// the analysis bundle: the two are read by different consumers at different times (a human opening the
+// analysis; a reconciler shipping to a sink days later), and one object serving both would make the export's
+// bytes depend on the analysis bundle's shape.
+export const exportPayloadKey = (id: string, passId: string): string =>
+  `${ANALYSIS_KEY_PREFIX}${id}/passes/${passId}.export.json`;
 // The INITIAL revision's writer. A batch settles once, so revision 1 has no competing pass to disambiguate
 // — but it still deserves a frozen artifact, and giving it a stable synthetic id keeps every revision in one
 // key family instead of splitting history across two schemes.
@@ -214,6 +220,10 @@ export interface AnalysisOffload {
   // revision number now that artifacts are pass-scoped — so the ledger entry has to remember where its own
   // bundle lives, or a historical read has nothing but an expired URL to go on.
   revisionKey?: string;
+  // The EXPORT PAYLOAD this settlement froze (arch-review 54, Phase 4) — the results as counted, under a
+  // pass-scoped immutable key. The publication operation carries the key so its drain reads what the
+  // settlement published rather than whatever the record holds by the time the sweep gets to it.
+  payloadKey?: string;
 }
 
 // ── STAGING, WITHOUT PUBLISHING (arch-review 52, Wave 4) ────────────────────────────────────────────
@@ -230,6 +240,9 @@ export async function stageAnalysis(
   id: string,
   bundle: AnalysisBundle,
   passId: string,
+  // The results this settlement counted, frozen beside the bundle (arch-review 54, Phase 4). Absent = a
+  // caller that owes no export, which stages nothing extra.
+  results?: readonly CaseResult[],
 ): Promise<AnalysisOffload> {
   if (!deps.artifacts) return {};
   const out: AnalysisOffload = {};
@@ -240,6 +253,17 @@ export async function stageAnalysis(
   } catch {
     // best-effort — the revision entry simply carries no artifact
   }
+  // Staged SEPARATELY on purpose: an export whose payload could not be frozen must fall back to the
+  // re-read-and-compare path rather than lose its analysis artifact too, and vice versa. Each failure costs
+  // only what it is.
+  if (results !== undefined)
+    try {
+      const key = exportPayloadKey(id, passId);
+      await deps.artifacts.put(key, Buffer.from(JSON.stringify(results)), "application/json");
+      out.payloadKey = key;
+    } catch {
+      // best-effort — the plan then carries a digest and no key, which is the pre-Phase-4 behaviour
+    }
   return out;
 }
 

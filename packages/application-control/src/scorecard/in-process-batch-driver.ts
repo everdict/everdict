@@ -1049,7 +1049,7 @@ export class InProcessBatchDriver {
       // current-analysis alias is promoted by the drain after the settle commits, so a driver that loses the
       // terminal CAS cannot leave a cancelled batch's analysis surface describing a successful run.
       const passId = initialPassId(initialBundle);
-      const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+      const analysis = await stageAnalysis(this.deps, id, initialBundle, passId, scorecard.results);
       const publication = planPublicationOperation({
         scorecardId: id,
         // WHICH settlement owes this — the revision this settle is about to append (arch-review 53, Wave C).

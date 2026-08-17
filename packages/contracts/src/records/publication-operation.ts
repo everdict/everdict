@@ -53,6 +53,19 @@ export const PublicationEffectSchema = z.discriminatedUnion("kind", [
     // What the settlement counted. A drain whose results do not digest to this is looking at a plane the
     // settlement never published — it publishes nothing and says so.
     payloadDigest: z.string().min(1),
+    // …AND WHERE THOSE BYTES ARE (arch-review 54, Phase 4). The digest alone made the operation refusable but
+    // not performable: the drain re-read the record's CURRENT results, so an ordinary re-score between the
+    // settle and the drain moved the plane, the digests disagreed, and the older settlement's owed export was
+    // closed PERMANENTLY unverifiable. The operation survived; the bytes it owed did not.
+    //
+    // Refusing to ship the new bytes under the old receipt was right. Concluding the old export can therefore
+    // never happen was not — nobody had frozen what it owed. Staged as an immutable object at settle time, so
+    // the drain reads what the settlement counted instead of whatever the record says now. The artifact effect
+    // above has worked this way since Wave C; only the export half reached for live state.
+    //
+    // Optional for the operations mig 0188 backfilled from the pre-Phase-4 field: they carry a digest and no
+    // key, and the drain treats them exactly as before (re-read, compare, refuse on mismatch).
+    payloadKey: z.string().min(1).optional(),
     sink: z.string().optional(),
     judgeModels: z.record(z.string(), z.string()).optional(),
     attach: z.object({ sourceKind: z.string(), externalIdByCase: z.record(z.string(), z.string()) }).optional(),

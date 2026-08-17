@@ -89,7 +89,29 @@ function fakeStore(initial: ScorecardRecord): { store: ScorecardStore; current: 
   return { store, current: () => held };
 }
 
-const exportOnly = () => ({ key: `analyses/${SCORECARD_ID}/x.json` });
+// A settle that FROZE its export payload, which is what every settle does now: the operation carries the key
+// of the immutable object, so its drain reads what the settlement counted rather than the record's current
+// plane. `exportOnly` keeps the alias out of the way — this file is about the export half.
+const payloadKeyFor = (marker: string) => `analyses/${SCORECARD_ID}/passes/pass-${marker}.export.json`;
+const exportOnly = (marker: string) => ({
+  key: `analyses/${SCORECARD_ID}/x.json`,
+  payloadKey: payloadKeyFor(marker),
+});
+
+// The artifact store those staged payloads live in.
+function stagedArtifacts(markers: string[]) {
+  const objects = new Map<string, Uint8Array>();
+  for (const marker of markers)
+    objects.set(payloadKeyFor(marker), new TextEncoder().encode(JSON.stringify(results(marker))));
+  return {
+    async get(key: string) {
+      return objects.get(key);
+    },
+    async put() {
+      return undefined;
+    },
+  };
+}
 const now = () => "2026-08-18T01:00:00.000Z";
 
 const EXPORT_OK: ScorecardExport = {
@@ -102,7 +124,7 @@ const planFor = (marker: string, revision: number, passId: string) =>
   planPublicationOperation({
     scorecardId: SCORECARD_ID,
     bundle: bundle(marker),
-    staged: exportOnly() as never,
+    staged: exportOnly(marker) as never,
     passId,
     scoringRevision: revision,
     exports: true,
@@ -112,7 +134,7 @@ const planFor = (marker: string, revision: number, passId: string) =>
 
 // RED as of efe3657e, observed: `expected 'owed' to be 'published'` — and the operation is closed permanently,
 // so no sweep ever retries it.
-describe.skip("[R54 PHASE-4 COUNTEREXAMPLE #12] a re-score does not make the previous settlement's export impossible", () => {
+describe("[R54 PHASE-4 COUNTEREXAMPLE #12 — CLOSED] a re-score does not make the previous settlement's export impossible", () => {
   it("exports the bytes THAT settlement counted, not the record's current ones", async () => {
     const operations = new InMemoryPublicationOperationStore();
     const first = planFor("revision-1", 1, "pass-1");
@@ -127,6 +149,7 @@ describe.skip("[R54 PHASE-4 COUNTEREXAMPLE #12] a re-score does not make the pre
       {
         store,
         operations,
+        artifacts: stagedArtifacts(["revision-1"]),
         exportResults: async (_tenant: string, _ctx: unknown, payload: CaseResult[]): Promise<ScorecardExport> => {
           exported.push(payload);
           return EXPORT_OK;
@@ -149,7 +172,7 @@ describe.skip("[R54 PHASE-4 COUNTEREXAMPLE #12] a re-score does not make the pre
 });
 
 // RED as of efe3657e, observed: `expected 1 to be 2` — the older operation's receipt overwrote the newer one.
-describe.skip("[R54 PHASE-4 COUNTEREXAMPLE #13] a late operation cannot move `current` backwards", () => {
+describe("[R54 PHASE-4 COUNTEREXAMPLE #13 — CLOSED] a late operation cannot move `current` backwards", () => {
   it("keeps the newest settlement's export receipt when an older drain lands after it", async () => {
     const operations = new InMemoryPublicationOperationStore();
     const older = planFor("revision-1", 1, "pass-1");
@@ -163,6 +186,7 @@ describe.skip("[R54 PHASE-4 COUNTEREXAMPLE #13] a late operation cannot move `cu
       ({
         store,
         operations,
+        artifacts: stagedArtifacts(["revision-1", "revision-2"]),
         exportResults: async (): Promise<ScorecardExport> =>
           ({ ...EXPORT_OK, scoringRevision: revision }) as unknown as ScorecardExport,
       }) as never;

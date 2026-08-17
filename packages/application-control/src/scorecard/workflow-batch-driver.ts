@@ -837,7 +837,7 @@ export class WorkflowBatchDriver {
     // key is safe to write early — a loser's object is an orphan nobody references — so what moves across the
     // commit is exactly the two OUTWARD effects, carried by the publication plan.
     const passId = initialPassId(initialBundle);
-    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId, results);
     // Judge attribution (judge id → declared model) — best-effort, never a reason for the export to fail.
     // Collected here rather than in the drain: it is a registry read, and the settlement should export under
     // the attribution it decided rather than under a registry that has since moved.

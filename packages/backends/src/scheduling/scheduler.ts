@@ -5,8 +5,8 @@ import {
   type CaseResult,
   InternalError,
   NotFoundError,
-  RateLimitError,
   type PersistedWorkIntent,
+  RateLimitError,
   type RuntimeWorkRef,
 } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";

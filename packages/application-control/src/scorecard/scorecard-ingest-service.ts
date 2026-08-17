@@ -395,7 +395,7 @@ export class ScorecardIngestService {
     // …and STAGED rather than published, for the same reason the export is deferred: `offloadAnalysis` also
     // wrote the MUTABLE current-analysis alias, which an ingest that lost the settle would have overwritten.
     const passId = initialPassId(initialBundle);
-    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId);
+    const analysis = await stageAnalysis(this.deps, id, initialBundle, passId, results);
     const publication = planPublicationOperation({
       scorecardId: id,
       // The revision this ingest settle appends (arch-review 53, Wave C).

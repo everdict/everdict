@@ -7,6 +7,7 @@ import {
   type TraceSinkScore,
   UpstreamError,
 } from "@everdict/contracts";
+import { seededIds } from "./idempotent-ids.js";
 
 // Arize Phoenix sink — spans go via JSON-only REST (POST /v1/projects/{p}/spans, ≥10.12), scores via trace annotations.
 // Real-API notes: /v1/traces is protobuf-only (doesn't accept OTLP/JSON — the JSON adapter uses projects/{p}/spans),
@@ -129,6 +130,10 @@ export class PhoenixTraceSink implements TraceSink {
   }
 
   async export(ctx: TraceSinkContext, cases: TraceSinkCase[]): Promise<TraceSinkResult> {
+    // A retried export reuses THIS export's ids so the platform can collapse it (arch-review 54, Phase 4).
+    // Without a key there is nothing to be idempotent against — a live per-case stream is not retried — and
+    // the adapter's own generator is used.
+    const newId = ctx.idempotencyKey ? seededIds(ctx.idempotencyKey) : this.newId;
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const web = (this.opts.webUrl ?? this.opts.endpoint).replace(/\/$/, "");
@@ -141,11 +146,11 @@ export class PhoenixTraceSink implements TraceSink {
             out.push({ caseId: c.caseId, error: "Phoenix span creation requires the project setting." });
             continue;
           }
-          traceId = hex32(this.newId);
+          traceId = hex32(newId);
           const res = await f(`${base}/v1/projects/${encodeURIComponent(this.opts.project)}/spans`, {
             method: "POST",
             headers: this.headers(),
-            body: JSON.stringify({ data: phoenixSpans(ctx, c, traceId, this.nowIso(), this.newId) }),
+            body: JSON.stringify({ data: phoenixSpans(ctx, c, traceId, this.nowIso(), newId) }),
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");

@@ -103,6 +103,10 @@ function planPublication(input: PublicationPlanInput): PublicationPlan | undefin
         {
           idempotencyKey: `${input.scorecardId}:${input.passId}`,
           payloadDigest: contentDigest(input.results),
+          // The frozen bytes this settlement owes (arch-review 54, Phase 4), when staging produced them.
+          // Absent = the pre-Phase-4 path: compare the record's current results against the digest and refuse
+          // on mismatch, which is honest but cannot converge after a legitimate re-score.
+          ...(input.staged.payloadKey !== undefined ? { payloadKey: input.staged.payloadKey } : {}),
           ...(input.sink !== undefined ? { sink: input.sink } : {}),
           ...(input.judgeModels !== undefined ? { judgeModels: input.judgeModels } : {}),
           ...(input.attach !== undefined ? { attach: input.attach } : {}),
@@ -191,9 +195,13 @@ export async function drainPublicationOperation(
     const wrote = await deps.operations.complete(operation.id, owner, now());
     if (!wrote) return { kind: "skipped" }; // the lease expired and the sweep finished it — not ours to claim
     // THE RECEIPT ON THE RECORD, after the operation's own completion. It is a projection for readers (the
-    // scorecard detail's export panel), not the fence — the fence is the claim above, which is why this write
-    // takes no guard: only one publisher can reach this line for one operation.
-    if (outcome.export !== undefined)
+    // scorecard detail's export panel), not the fence — the fence is the claim above.
+    //
+    // …and it is MONOTONIC for the same reason the alias is (arch-review 54, Phase 4). "Only one publisher
+    // can reach this line for one operation" was true and beside the point: two settlements are two
+    // operations, and an older one draining late would replace a newer settlement's export receipt with its
+    // own. Whoever is behind writes nothing.
+    if (outcome.export !== undefined && !(await aliasIsAhead(deps, operation)))
       await deps.store.update(record.id, { export: outcome.export, updatedAt: now() }).catch(() => undefined);
     return outcome;
   }
@@ -202,8 +210,28 @@ export async function drainPublicationOperation(
 }
 
 // The effects themselves, shared by the operation drain and the legacy plan drain below.
+// Has a LATER settlement already published this scorecard's alias? (arch-review 54, Phase 4.)
+//
+// Skipping is not a failure: `current` is a monotonic projection of the revision ledger, so an operation that
+// finds a newer one already there has nothing to do — the world is where it wanted it, or ahead. Reporting
+// that as owed would put the sweep in a loop it can never leave.
+//
+// Unreadable = do not promote. A projection moved on a guess is exactly the backwards write this exists to
+// prevent, and the operation stays owed so a later sweep can decide with a readable ledger.
+async function aliasIsAhead(
+  deps: PublicationDeps & { operations?: PublicationOperationStore },
+  operation: PublicationOperation,
+): Promise<boolean> {
+  if (!deps.operations) return false; // single-publisher deployment: no second settlement can race this one
+  const siblings = await deps.operations.listForScorecard(operation.settlement.scorecardId).catch(() => undefined);
+  if (siblings === undefined) return true;
+  return siblings.some(
+    (o) => o.state === "published" && o.settlement.scoringRevision > operation.settlement.scoringRevision,
+  );
+}
+
 async function performEffects(
-  deps: PublicationDeps,
+  deps: PublicationDeps & { operations?: PublicationOperationStore },
   record: ScorecardRecord,
   operation: PublicationOperation,
   results: CaseResult[],
@@ -237,6 +265,22 @@ async function performEffects(
           fail(`the staged analysis artifact '${effect.from}' does not digest to the planned bundle`, true);
           continue;
         }
+        // ── `current` MOVES FORWARD ONLY (arch-review 54, Phase 4) ─────────────────────────────────
+        //
+        // This promotion used to be an unguarded put, under a comment that is true PER OPERATION and false
+        // ACROSS them: "only one publisher can reach this line for one operation". Two settlements are two
+        // operations, claimed independently, drained whenever their retries land — so a revision-1 sweep
+        // finishing after revision 2 published moved `analyses/<id>.json` BACKWARDS, and the analysis a
+        // human opens described a pass the ledger had already superseded.
+        //
+        // The alias is a monotonic projection of the ledger, so the guard is the revision it carries. Losing
+        // the race is not a failure: a newer settlement is already there, which is the state this operation
+        // wanted the world to be in or better.
+        // The projection's current position comes from the LEDGER, not from the object: the operations table
+        // already records which settlement published, and asking it costs no new artifact shape, no sidecar
+        // object and no second race. A published operation for a HIGHER revision means the alias is already
+        // ahead of this one.
+        if (await aliasIsAhead(deps, operation)) continue;
         await deps.artifacts.put(effect.key, Buffer.from(bytes), "application/json");
       } catch (err) {
         fail(`analysis alias promotion failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -247,9 +291,45 @@ async function performEffects(
       fail("no trace-sink exporter is wired here");
       continue;
     }
-    if (contentDigest(results) !== effect.payloadDigest) {
-      // PERMANENT: the plane this settlement counted has been replaced. Exporting the newer bytes under the
-      // older settlement's receipt is the substitution this seam exists to prevent, and no sweep fixes it.
+    // ── THE BYTES THIS SETTLEMENT OWES (arch-review 54, Phase 4) ─────────────────────────────────
+    //
+    // Read from the frozen object the settle staged, NOT from the record. Re-reading the record made an
+    // ordinary re-score fatal: the plane moved, the digests disagreed, and the earlier settlement's owed
+    // export closed PERMANENTLY unverifiable — a batch that ran, was judged and was recorded as pending
+    // export simply never reached the tenant's platform. Refusing to ship the NEW bytes under the OLD
+    // receipt was right; concluding the old export could never happen was a consequence of nobody having
+    // frozen what it owed.
+    let payload = results;
+    if (effect.payloadKey !== undefined) {
+      if (!deps.artifacts) {
+        fail("no artifact store is wired here — the settlement's frozen export payload cannot be read");
+        continue;
+      }
+      let frozen: unknown;
+      try {
+        const bytes = await deps.artifacts.get(effect.payloadKey);
+        if (!bytes) {
+          // PERMANENT: the immutable object is gone and no retry brings it back.
+          fail(`the staged export payload '${effect.payloadKey}' is not in the store`, true);
+          continue;
+        }
+        frozen = JSON.parse(new TextDecoder().decode(bytes));
+      } catch (err) {
+        fail(`the staged export payload could not be read: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      // The digest still guards it — a staged object that does not digest to what was planned is not this
+      // settlement's payload, whatever its key says.
+      if (contentDigest(frozen) !== effect.payloadDigest) {
+        fail(`the staged export payload '${effect.payloadKey}' does not digest to the planned payload`, true);
+        continue;
+      }
+      payload = frozen as CaseResult[];
+    } else if (contentDigest(results) !== effect.payloadDigest) {
+      // PRE-PHASE-4 operations (mig 0188's backfill, and any settle whose payload staging failed) carry a
+      // digest and no key. They keep the old behaviour exactly: compare the record's current results and
+      // refuse on mismatch. Honest, and unable to converge after a re-score — which is why new operations
+      // freeze their bytes.
       fail("the record's results are no longer the ones this settlement counted — not exported", true);
       continue;
     }
@@ -267,7 +347,7 @@ async function performEffects(
           ...(effect.sink !== undefined ? { sinkOverride: effect.sink } : {}),
           ...(effect.judgeModels !== undefined ? { judgeModels: effect.judgeModels } : {}),
         },
-        results,
+        payload,
         effect.attach,
       );
     } catch (err) {

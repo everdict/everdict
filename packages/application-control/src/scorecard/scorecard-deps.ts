@@ -151,11 +151,7 @@ export interface ScorecardServiceDeps {
   // removal). The case-id form it replaces resolved "the newest job of this case" — with two runs of one case
   // live, a resume could adopt another run's job and attribute its verdict here, which is a decision, not an
   // observation. A child with no recorded handle has nothing this system can name, and is re-dispatched.
-  adoptWork?: (
-    tenant: string,
-    runtime: string | undefined,
-    work: RuntimeWorkRef,
-  ) => Promise<AdoptionDecision>;
+  adoptWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //
