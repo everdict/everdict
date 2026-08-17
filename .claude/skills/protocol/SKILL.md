@@ -23,7 +23,11 @@ designing; it is the list of exactly how, with file and line.
 5. **Completion is verified zero** — accepted ≠ gone; terminal means read back.
 
 ## Design checklist — run this BEFORE writing the code
-Answer in the PR/commit body, not in your head. Any "no" is a design change, not a TODO.
+**When it is owed in writing**: a change that ADDS an effect path, MOVES one, or changes what a decision reads.
+Editing inside a path whose answers are unchanged owes only the answers that moved. This is deliberately not
+"every commit" — a ceremony that gets skipped teaches that the rules are optional, which is the failure mode
+this whole skill exists to end. Answer in the commit body, not in your head; any "no" is a design change, not
+a TODO.
 
 1. **What effect does this path cause outside our process?** (cluster object, sink call, spend, published
    bytes, revoked lease.) If none, laws 1/4/5 do not apply — say so and move on.

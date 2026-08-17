@@ -147,14 +147,22 @@ immutable staged object and verifies its digest). Only the export half re-reads 
 `publication.ts:240` — `artifacts.put(effect.key, …)` unguarded. Two independent operations completing out of
 order move `analyses/<id>.json` backwards. `current` is a monotonic projection, not an ordinary effect.
 
-### 4.3 The idempotency key that dies at a seam
-`publication.ts:266` passes `idempotencyKey` under the comment *"THE KEY TRAVELS TO THE SINK"*. It does not:
-`apps/api/src/composition/scorecard.ts:368` forwards the ctx to `TraceSinkService.exportScorecard`, whose
-`ExportContext` (`trace-sink-service.ts:33-39`) does not declare the field — structural typing drops it
-silently, and `TraceSinkContext` in `@everdict/contracts` never had it. Adapters mint fresh UUIDs per call.
+### 4.3 The idempotency key that arrives unreadable
+`publication.ts:266` passes `idempotencyKey` under the comment *"THE KEY TRAVELS TO THE SINK"*. It travels
+further than the comment can prove and stops short of mattering. `apps/api/src/composition/scorecard.ts:368`
+forwards the ctx object to `TraceSinkService.exportScorecard`, whose `ExportContext`
+(`trace-sink-service.ts:33-39`) does not declare the field, and `TraceSinkContext` in `@everdict/contracts`
+never had it either.
 
-**Rule:** an at-least-once effect's idempotency key belongs in the PUBLIC contract, typed to the adapter. A
-dropped key with a comment claiming otherwise is worse than no key.
+The property is **not** dropped — excess-property checking applies to object literals, not to a variable
+passed into a narrower parameter type, so at runtime `sinkImpl.export(ctx, …)` receives an object that still
+carries the key. It is simply invisible to every adapter, none of which declares or reads it; they mint fresh
+UUIDs per call. The distinction matters when fixing it: nothing needs to be re-plumbed, the CONTRACT needs to
+admit the field.
+
+**Rule:** an at-least-once effect's idempotency key belongs in the PUBLIC contract, typed to the adapter,
+which derives deterministic external ids from it. "Unconsumed" and "dropped" look identical from outside — and
+the sending side's comment claims neither happened.
 
 ---
 

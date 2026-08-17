@@ -65,8 +65,8 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   a running job nothing could address, and `reserve(job)` — pure, no external effect — is what makes the other
   order possible. A caller that cannot record where the work will be must not get the work. `killWork` addresses the
   exact external id in the WORK'S OWN namespace: never a prefix scan, never `namespace=*`, never a selector another
-  run shares. `kill(caseId)` survives only as the no-handle fallback (legacy rows, lanes that mint none) and is
-  called INSTEAD of `killWork`, never beside it. K8s label values a selector selects on must be INJECTIVE —
+  run shares. There is NO no-handle fallback any more — see the next bullet: a caller holding no handle answers
+  `unknown`, and the cancellation stays owed. K8s label values a selector selects on must be INJECTIVE —
   `caseSlug` truncates at 50 chars, so `caseLabelValue`/`runLabelValue` append a digest whenever slugging lost
   information, and every job carries `everdict.dev/run` beside `everdict.dev/case`.
 - **THE CASE-ID CONTROL SURFACE IS DELETED** (arch-review 53, legacy removal). `Recoverable` · `Observable` ·

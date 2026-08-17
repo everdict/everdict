@@ -45,6 +45,20 @@ Two structural scanners were first written in a form that passed against the cod
 > Revert the production line the guard targets, watch the guard go RED, restore. A guard nobody saw fail is a
 > comment with a test runner attached.
 
+## A type-level counterexample cannot be planted and skipped
+
+`describe.skip` suppresses the RUNTIME, not `tsc`. A counterexample whose claim is about a CONTRACT — "this
+field must exist on the public type" — breaks `pnpm typecheck` the moment it is written, so it cannot sit in
+the tree waiting for its phase. Its change and its proof land in the same commit.
+
+Worse, the runtime half of such a test is usually **vacuous in the other direction**. Excess-property checking
+applies to object literals only, so an undeclared field passed through a narrower parameter type is still on
+the object at runtime: asserting `ctx.idempotencyKey === "…"` after the hop PASSES today, over the very gap it
+was written for. The honest assertion is the type one, and it belongs in the phase that fixes it.
+
+> Before planting a counterexample, ask which layer the claim lives in. Runtime claim → plant it skipped with
+> its observed red text. Type claim → schedule it; do not weaken it into a runtime claim that passes.
+
 ## What a good fixture asserts
 
 For any derived collection (receipts, outcomes, handles, effects):

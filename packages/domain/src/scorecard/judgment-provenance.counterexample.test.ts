@@ -31,13 +31,22 @@ import {
 // omission — and an unrecorded provenance is not comparable unless a waiver says so, exactly as an
 // unverified input already is.
 
+// THE METRIC IS THE PRODUCTION ONE, and that is the whole difference between this fixture and the one it
+// replaces (arch-review 54, and rule `testing`'s vacuous-pass rules). The first version of this file scored
+// `{ graderId: "judge:a", metric: "quality" }`. `judgmentReceiptsFromPlane` only reads metrics in the
+// `judge:` family, so it returned `[]` — and every assertion below was `toBeDefined()`, which `[]` satisfies.
+// The counterexample therefore certified the very gap it was written to close: an EMPTY receipt vector
+// counting as recorded provenance.
+//
+// A registered judge's rows are rewritten by the runner (`judge-runner.ts`: `metric.replace(/^judge/,
+// "judge:<id>")`), so its overall verdict lands as `judge:<id>`. Cardinality is asserted, never definedness.
 const results: CaseResult[] = [
   {
     caseId: "c1",
     harness: "h@1",
     trace: [],
     snapshot: { kind: "prompt", output: "done" },
-    scores: [{ graderId: "judge:a", metric: "quality", value: 1, pass: true }],
+    scores: [{ graderId: "a", metric: "judge:a", value: 1, pass: true }],
   },
 ];
 
@@ -73,11 +82,12 @@ describe("[R53 WAVE-D COUNTEREXAMPLE #18 — CLOSED] an initial revision states 
     const born = revisions[0];
 
     expect(born?.judges.length).toBe(1);
-    // A revision that judged something and recorded no author is the shape this wave removes.
+    // CARDINALITY, not definedness: one judged case × one judge = one receipt. `toBeDefined()` here is what
+    // let an empty vector pass as provenance for a whole review cycle.
     expect(
       (born as { judgments?: unknown[] } | undefined)?.judgments,
       "the initial revision judged one case and recorded no invocation for it",
-    ).toBeDefined();
+    ).toHaveLength(1);
     expect(
       (born as { judgmentReceiptSetDigest?: string } | undefined)?.judgmentReceiptSetDigest,
       "no digest, so no pin can carry the provenance either",
