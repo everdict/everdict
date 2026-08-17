@@ -8,7 +8,6 @@ import {
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
-  type AdoptionDecision,
   type Backend,
   type LogStream,
   isScreenAttachable,
@@ -18,6 +17,7 @@ import {
   isWorkControllable,
 } from "@everdict/backends";
 import type {
+  AdoptionDecision,
   CaseResult,
   KillOutcome,
   ReadResult,

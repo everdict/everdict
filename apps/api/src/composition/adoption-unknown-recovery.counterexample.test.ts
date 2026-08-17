@@ -1,6 +1,6 @@
 import type { ReplicaRegistry } from "@everdict/application-control";
-import type { AdoptionDecision } from "@everdict/backends";
-import type { RuntimeWorkRef } from "@everdict/contracts";
+
+import type { AdoptionDecision, RuntimeWorkRef } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { runStartupRecovery } from "./runtime-access.js";
