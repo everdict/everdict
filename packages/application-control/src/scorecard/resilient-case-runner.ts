@@ -125,7 +125,7 @@ export class ResilientCaseRunner {
       // just applied/submitted (arch-review 52, Wave 2). Forwarded verbatim: the handle carries the attempt
       // id off the dispatched job, so the caller stamps it without re-deriving which attempt this dispatch
       // was — which matters here, where spillover and speculation dispatch several.
-      onWork?: (work: RuntimeWorkRef) => void;
+      onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
       onStep: (message: string, caseId: string) => void;
       // Opens a fresh recording attempt for a NEW physical execution (spill / OOM boost / speculation
       // duplicate) and returns the job stamped with it — see SpilloverOpts.reattempt.
@@ -165,7 +165,7 @@ export class ResilientCaseRunner {
             // rebuilt it), so the caller's executing-stamp names the attempt that actually started.
             ...(cfg.onStarted ? { onStarted: () => cfg.onStarted?.(jj) } : {}),
             onAttempt: (attempt) => attemptByJob.set(jj, attempt),
-            ...(cfg.onWork ? { onWork: cfg.onWork } : {}),
+            ...(cfg.onReserved ? { onReserved: cfg.onReserved } : {}),
           }),
         j,
         {

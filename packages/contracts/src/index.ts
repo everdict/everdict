@@ -24,6 +24,7 @@ export * from "./execution/recording.js";
 export * from "./execution/case-job.js";
 export * from "./execution/attempt-ref.js";
 export * from "./execution/runtime-work-ref.js";
+export * from "./execution/dispatch-intent.js";
 export * from "./execution/kill-outcome.js";
 export * from "./infra/trust-zone.js";
 export * from "./infra/capability.js";

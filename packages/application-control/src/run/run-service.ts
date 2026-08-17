@@ -1072,7 +1072,8 @@ export class RunService {
         // The backend just created the external object and this is the only moment its exact name is in
         // memory. Persist it on the attempt row so a teardown that outlives this process — a cancel after a
         // restart, a supersede from another replica — can stop THAT job instead of every job of this case.
-        onWork: (work) => void this.stampWork(id, work),
+        // Awaited — a run whose handle cannot be recorded must not place compute (arch-review 53, Wave A).
+        onReserved: (work) => this.stampWork(id, work),
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;
@@ -1223,15 +1224,15 @@ export class RunService {
   //
   // The coordinate is the ATTEMPT's, not the recording fence's (see `attemptRow`) — an attempt that ran
   // unisolated has a row and no generation, and it is exactly the execution whose ending matters most.
-  // Stamp the placement handle onto the attempt row this dispatch opened. Swallowed like the other
-  // diagnostics-plane writes, and with the same asymmetry the port documents: the cost of a lost stamp is a
-  // teardown that falls back to the case-id kill, not a wrong outcome — while failing a dispatch that already
-  // placed compute because an audit row would not take would be the audit plane deciding executions.
+  // Stamp the placement handle onto the attempt row this dispatch opened — from `onReserved`, before the
+  // backend creates anything (arch-review 53, Wave A). NOT swallowed: the asymmetry that justified swallowing
+  // it disappeared with the reordering. A rejection now aborts a dispatch that has placed no compute, instead
+  // of leaving compute nobody can address.
   private async stampWork(id: string, work: RuntimeWorkRef): Promise<void> {
     const attempts = this.deps.attempts;
     const attemptId = this.attemptRow.get(`evd-run-${id}`);
     if (!attempts || attemptId === undefined) return;
-    await attempts.recordWork(attemptId, { ...work, attemptId }).catch(() => {});
+    await attempts.recordWork(attemptId, { ...work, attemptId });
   }
 
   private async stampAttempt(

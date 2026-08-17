@@ -34,19 +34,23 @@ export interface DispatchOptions {
   //
   // Managed backends never fire it — their dispatch is the attempt. Best-effort; a throw must not break dispatch.
   onAttempt?: (attempt: AttemptRef) => void;
-  // Fired the moment a placement backend CREATES external work — the K8s Job is applied, the Nomad job is
-  // submitted — carrying the exact handle to it (arch-review 52, Wave 2).
+  // Fired BEFORE a placement backend creates external work, carrying the exact handle it is about to create
+  // (arch-review 53, Wave A — it replaces Wave 2's `onWork`, which fired after).
   //
-  // Dispatch is `(job) → result`: the caller learns the work exists only by it finishing, so the only thing it
-  // could ever address the live compute by was the case id it sent in. That is not an execution (two runs of
-  // one case are two jobs), and every control path built on it — stop, adopt, tail — reached strangers' work.
-  // This hook is the reply the shape was missing, without splitting dispatch into start/wait: the caller
-  // persists the handle (the physical-attempt ledger row) and teardown addresses THAT.
+  // The ordering is the whole contract. Wave 2's hook reported the handle once the K8s Job was applied and
+  // the Nomad job submitted, which meant a control plane that died in that window left a running job nothing
+  // could address: teardown fell back to the case-id kill (reaching other runs' work) and recovery could not
+  // adopt at all. Both backends can NAME the object without creating it — `reserve()` is pure — so the
+  // decision is made, handed here to be made durable, and only then executed.
+  //
+  // AWAITED, and a rejection ABORTS THE DISPATCH before any external object exists. That is the inversion:
+  // under the old contract a handle that failed to persist still produced compute, so an unaddressable job
+  // was a SUCCESSFUL dispatch. A caller that cannot record where the work will be must not have the work.
   //
   // A backend that creates no addressable external object (in-process, self-hosted lease) never fires it, and
   // a job with no `runId` does not either — a handle that cannot say which run it belongs to is the case-id
-  // ambiguity again, wearing a new type. Best-effort; a throw must not break dispatch.
-  onWork?: (work: RuntimeWorkRef) => void;
+  // ambiguity again, wearing a new type.
+  onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

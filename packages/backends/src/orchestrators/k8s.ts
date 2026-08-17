@@ -1593,13 +1593,45 @@ export class K8sBackend
     return { ns: zone.namespace ?? this.opts.namespace ?? "default", runtimeClassName, secretEnv };
   }
 
+  // ── NAME THE WORK WITHOUT CREATING IT (arch-review 53, Wave A) ─────────────────────────────────────
+  //
+  // Pure: it computes the Job name and resolves the namespace, and touches no cluster. That it CAN be pure is
+  // the fact the whole protocol rests on — a K8s Job's name is ours to choose, so the control plane can make
+  // the name durable before asking the cluster for anything, and a crash mid-dispatch then leaves an intent
+  // that names exactly one object rather than a case id that names a group.
+  async reserve(job: CaseJob): Promise<RuntimeWorkRef> {
+    const { ns } = await this.resolve(job);
+    // Unique per dispatch — two concurrent batches over the same dataset would otherwise collide on the same
+    // Job name (409 AlreadyExists → dispatch error). The capacity probe matches the label, not the name.
+    const name = k8sJobName(job, dispatchSuffix());
+    return {
+      tenant: job.tenant ?? "default",
+      runId: job.runId ?? "",
+      externalJobId: name,
+      namespace: ns,
+      ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+    };
+  }
+
   async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we applied the Job
     options?.onStarted?.(); // past the Scheduler's wait queue — we're applying the Job now → flip the run to running
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
-    // Unique per dispatch — two concurrent batches over the same dataset would otherwise collide on the same Job
-    // name (409 AlreadyExists → dispatch error). The capacity probe matches the label, not the name.
+    // The name is decided here, from the resolution this dispatch already has — `reserve()` is the same
+    // computation exposed for a caller that wants the coordinate without the dispatch.
     const name = k8sJobName(job, dispatchSuffix());
+    const work: RuntimeWorkRef = {
+      tenant: job.tenant ?? "default",
+      runId: job.runId ?? "",
+      externalJobId: name,
+      namespace: ns,
+      ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+    };
+    // THE INTENT IS DURABLE BEFORE THE OBJECT EXISTS (arch-review 53, Wave A). Awaited, and its rejection
+    // takes the dispatch down BEFORE `applyJob` — a caller that cannot record where this work will be must
+    // not get the work. The old ordering reported the handle after the apply, so a control plane that died
+    // in between left a running Job addressable only by its case id, which is other runs' jobs too.
+    if (job.runId !== undefined) await options?.onReserved?.(work);
     // With kubeconfig auth, the temp kubeconfig lives only for the one job (removed after completion/failure). cleanup after deleteJob.
     return this.withApi(async (api) => {
       await api.ensureNamespace(ns);
@@ -1612,23 +1644,6 @@ export class K8sBackend
         : manifest;
       const t0 = Date.now();
       await api.applyJob(payload, ns);
-      // The external work now EXISTS, and this is the only moment its exact name is in anyone's hands
-      // (arch-review 52, Wave 2). Report it before waiting: the wait is where the process may die, and a
-      // teardown that starts after that has nothing but the case id — which addresses other runs' jobs too.
-      // Best-effort by contract; a consumer that throws must not take the dispatch down with it.
-      if (job.runId !== undefined) {
-        try {
-          options?.onWork?.({
-            tenant: job.tenant ?? "default",
-            runId: job.runId,
-            externalJobId: name,
-            namespace: ns,
-            ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
-          });
-        } catch (e) {
-          console.warn(`[k8s] onWork hook threw for job ${name}: ${String(e)}`);
-        }
-      }
       try {
         await this.waitForJob(api, name, ns, options?.signal);
         const result = parseResult(await api.podLogs(name, ns));

@@ -70,7 +70,9 @@ interface QueueEntry {
   onStarted?: () => void; // fires when the entry leaves the wait queue and is dispatched — forwarded to the backend
   onWaiting?: (reason: string) => void; // "cannot start now + why" (blocked placement / no online runner) — forwarded to the backend
   onAttempt?: (attempt: AttemptRef) => void; // "the attempt that is actually executing" (self-hosted re-lease) — forwarded to the backend
-  onWork?: (work: RuntimeWorkRef) => void; // "the external object this dispatch created" — forwarded to the backend
+  // "the external object this dispatch is ABOUT to create" — forwarded to the backend, which awaits it before
+  // it creates anything (arch-review 53, Wave A).
+  onReserved?: (work: RuntimeWorkRef) => Promise<void> | void;
 }
 
 export interface SchedulerOptions {
@@ -271,7 +273,7 @@ export class Scheduler {
         ...(opts?.onStarted ? { onStarted: opts.onStarted } : {}),
         ...(opts?.onWaiting ? { onWaiting: opts.onWaiting } : {}),
         ...(opts?.onAttempt ? { onAttempt: opts.onAttempt } : {}),
-        ...(opts?.onWork ? { onWork: opts.onWork } : {}),
+        ...(opts?.onReserved ? { onReserved: opts.onReserved } : {}),
       };
       if (opts?.signal) {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
@@ -623,7 +625,7 @@ export class Scheduler {
     // hook). A managed backend fires onStarted at its dispatch entry (= now, post-admission); the self-hosted backend
     // forwards it to the lease hub so it fires only when a runner actually takes the job.
     const dispatchOpts =
-      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt || entry.onWork
+      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt || entry.onReserved
         ? {
             ...(entry.signal ? { signal: entry.signal } : {}),
             ...(entry.onStarted ? { onStarted: entry.onStarted } : {}),
@@ -633,9 +635,9 @@ export class Scheduler {
             // …and onAttempt, for the same reason: this whitelist is the ONE place a hook can silently die,
             // and dropping this one would leave the caller sealing the attempt a requeue abandoned.
             ...(entry.onAttempt ? { onAttempt: entry.onAttempt } : {}),
-            // …and onWork. Dropping this one costs the caller the only handle to the compute it just started:
+            // …and onReserved. Dropping this one costs the caller the only handle to the compute it is about to start:
             // the teardown then falls back to the case id, which is another run's job too (arch-review 52).
-            ...(entry.onWork ? { onWork: entry.onWork } : {}),
+            ...(entry.onReserved ? { onReserved: entry.onReserved } : {}),
           }
         : undefined;
     this.registry

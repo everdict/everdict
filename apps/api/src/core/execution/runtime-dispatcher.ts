@@ -114,8 +114,8 @@ export class RuntimeDispatcher implements Dispatcher {
     // handle picks it up on the way back out. A teardown then knows which lane to try first instead of
     // offering an exact id to every shard in the recorded list.
     const opted =
-      opts?.onWork && target !== undefined
-        ? { ...opts, onWork: (work: RuntimeWorkRef) => opts.onWork?.({ ...work, runtimeId: target }) }
+      opts?.onReserved && target !== undefined
+        ? { ...opts, onReserved: (work: RuntimeWorkRef) => opts.onReserved?.({ ...work, runtimeId: target }) }
         : opts;
 
     // Pool target ("any runner", no runner id, N runners drain):

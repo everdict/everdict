@@ -445,18 +445,19 @@ describe("K8sBackend.dispatch", () => {
   });
 
   // ── THE HANDLE THE DISPATCH HANDS BACK (arch-review 52, Wave 2) ───────────────────────────────────
-  it("reports the exact Job it applied — name, namespace, run and tenant — before it starts waiting", async () => {
+  it("reports the exact Job it is ABOUT to apply — name, namespace, run and tenant — before it creates it", async () => {
     const { api, applied } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1, trustZones: perTenantTrustZones() });
     const works: RuntimeWorkRef[] = [];
 
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
-      { onWork: (w) => works.push(w) },
+      { onReserved: (w: RuntimeWorkRef) => void works.push(w) },
     );
 
-    // The handle names the object that now exists on the cluster — the same name the manifest carries, in the
-    // namespace the zone put it in. Everything a teardown needs after this process is gone.
+    // The handle names the object the cluster is about to be asked for — the same name the manifest carries,
+    // in the namespace the zone put it in. Everything a teardown needs after this process is gone, held
+    // BEFORE the object exists (arch-review 53, Wave A).
     expect(works).toHaveLength(1);
     expect(works[0]).toEqual({
       tenant: "acme",
@@ -473,22 +474,27 @@ describe("K8sBackend.dispatch", () => {
     const { api } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     const works: unknown[] = [];
-    await backend.dispatch(JOB, { onWork: (w) => works.push(w) }); // JOB has no runId
+    await backend.dispatch(JOB, { onReserved: (w: RuntimeWorkRef) => void works.push(w) }); // JOB has no runId
     expect(works).toEqual([]);
   });
 
-  it("a throwing onWork consumer does not fail the dispatch — the hook is best-effort by contract", async () => {
-    const { api } = mockApi();
+  it("a rejecting onReserved consumer FAILS the dispatch, and no Job is applied", async () => {
+    // The inversion Wave A is (arch-review 53): under the old post-apply hook a handle that could not be
+    // persisted still produced compute, so an unaddressable Job was a successful dispatch. A caller that
+    // cannot record where the work will be must not get the work.
+    const { api, applied } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
-    const result = await backend.dispatch(
-      { ...JOB, runId: "evd-run-r1" },
-      {
-        onWork: () => {
-          throw new Error("ledger down");
+    await expect(
+      backend.dispatch(
+        { ...JOB, runId: "evd-run-r1" },
+        {
+          onReserved: () => {
+            throw new Error("ledger down");
+          },
         },
-      },
-    );
-    expect(result.caseId).toBe("c1"); // the compute ran and its result came back regardless
+      ),
+    ).rejects.toThrow(/ledger down/);
+    expect(applied, "the cluster was asked for a Job whose handle nobody could record").toHaveLength(0);
   });
 
   it("trustZones: applies the tenant zone per job (namespace + runtimeClassName=gvisor)", async () => {

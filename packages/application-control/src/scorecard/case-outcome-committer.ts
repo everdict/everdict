@@ -591,13 +591,15 @@ export class CaseOutcomeCommitter {
   // own attempt — the dispatched job carries `attemptId`, and the backend copies it onto the handle — so this
   // needs no map: an attempt that opened no ledger row has no handle to stamp either.
   //
-  // Swallowed like the other diagnostics-plane writes, with the consequence the port spells out: a lost stamp
-  // costs the batch's teardown its exact handle for THIS case and drops it to the case-id kill, which is
-  // over-broad but never wrong about the case. Failing a dispatch that already placed compute would be worse.
+  // NOT swallowed (arch-review 53, Wave A). It is called from `onReserved`, BEFORE the cluster is asked for
+  // anything, so a rejection here costs a dispatch that has not happened — and buys the guarantee that no
+  // external object exists whose name the ledger does not hold. The old ordering had no such choice available:
+  // the stamp ran after the apply, so failing it would have failed a dispatch that had already placed compute,
+  // which is why it was swallowed and why a crash mid-dispatch produced unaddressable jobs.
   async stampWork(work: RuntimeWorkRef): Promise<void> {
     const attempts = this.deps.attempts;
     if (!attempts || work.attemptId === undefined) return;
-    await attempts.recordWork(work.attemptId, work).catch(() => {});
+    await attempts.recordWork(work.attemptId, work);
   }
 
   // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on

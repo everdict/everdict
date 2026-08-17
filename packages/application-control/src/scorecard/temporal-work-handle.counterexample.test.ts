@@ -25,25 +25,25 @@ const driverSource = (name: string): string =>
 
 // RED as of 186f9fd9: `expected false to be true` — workflow-batch-driver.ts contains onWaiting/onStarted/
 // onStep and no onWork.
-describe.skip("[R53 WAVE-A COUNTEREXAMPLE #12] the durable driver persists the handle to its compute", () => {
+describe("[R53 WAVE-A COUNTEREXAMPLE #12 — CLOSED] the durable driver persists the handle to its compute", () => {
   it("the Temporal batch lane reports the runtime work it placed, exactly as the in-process lane does", () => {
     const workflow = driverSource("workflow-batch-driver.ts");
     const inProcess = driverSource("in-process-batch-driver.ts");
 
     // The in-process lane is the reference: it forwards the handle and stamps the ledger with it.
-    expect(inProcess.includes("onWork")).toBe(true);
+    expect(inProcess.includes("onReserved")).toBe(true);
 
     // The durable lane must do at least as much. A batch that survives a restart is precisely the batch whose
     // handle has to survive it too.
     expect(
-      workflow.includes("onWork") || workflow.includes("reserveWork") || workflow.includes("DispatchIntent"),
+      workflow.includes("onReserved"),
       "workflow-batch-driver dispatches managed work and records no handle for it",
     ).toBe(true);
   });
 });
 
 // RED as of 186f9fd9: `expected true to be false` — both stamp sites swallow the ledger write.
-describe.skip("[R53 WAVE-A COUNTEREXAMPLE #13] a lost handle is not a successful dispatch", () => {
+describe("[R53 WAVE-A COUNTEREXAMPLE #13 — CLOSED] a lost handle is not a successful dispatch", () => {
   it("recording the work an execution placed is not best-effort", () => {
     const committer = driverSource("case-outcome-committer.ts");
 

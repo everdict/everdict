@@ -338,11 +338,11 @@ describe("NomadBackend.dispatch", () => {
 
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
-      { onWork: (w) => works.push(w) },
+      { onReserved: (w: RuntimeWorkRef) => void works.push(w) },
     );
 
-    // The handle names the job that now exists, in the namespace it was submitted to — everything a stop
-    // needs without listing anything, which is what keeps it inside one trust zone.
+    // The handle names the job that is about to be submitted, in the namespace it goes to — everything a stop
+    // needs without listing anything, which is what keeps it inside one trust zone, held before the job exists.
     expect(works).toHaveLength(1);
     expect(works[0]?.tenant).toBe("acme");
     expect(works[0]?.runId).toBe("evd-run-r1");

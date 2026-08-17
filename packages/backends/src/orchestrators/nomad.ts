@@ -817,12 +817,40 @@ export class NomadBackend
     };
   }
 
+  // ── NAME THE WORK WITHOUT CREATING IT (arch-review 53, Wave A) ─────────────────────────────────────
+  //
+  // Pure: the Nomad job id is ours to choose and the namespace comes from the trust zone, so the exact
+  // coordinate is decidable with no call to the cluster. See `DispatchIntent` (@everdict/contracts) for why
+  // the decision has to precede the effect rather than report it.
+  async reserve(job: CaseJob): Promise<RuntimeWorkRef> {
+    const opts = await this.effectiveOpts(job);
+    const jobId = nomadJobId(job, dispatchSuffix());
+    return {
+      tenant: job.tenant ?? "default",
+      runId: job.runId ?? "",
+      externalJobId: jobId,
+      ...(opts.namespace !== undefined ? { namespace: opts.namespace } : {}),
+      ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+    };
+  }
+
   async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     options?.onStarted?.(); // past the Scheduler's wait queue — we're submitting the alloc now → flip the run to running
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)
+    // THE INTENT IS DURABLE BEFORE THE JOB EXISTS (arch-review 53, Wave A). Awaited, and a rejection aborts
+    // the dispatch before the submit — an ambiguous submit (Nomad accepted it, the response never arrived) is
+    // precisely the case where the handle matters most, and the old post-submit hook guaranteed there was none.
+    if (job.runId !== undefined)
+      await options?.onReserved?.({
+        tenant: job.tenant ?? "default",
+        runId: job.runId,
+        externalJobId: jobId,
+        ...(ns !== undefined ? { namespace: ns } : {}),
+        ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+      });
     // The infra-plane record of THIS dispatch (submission, blocked verdicts, placement) — appended to the
     // result's trace so the sealed trajectory keeps the orchestrator's account after the job is GC'd.
     const t0 = Date.now();
@@ -845,23 +873,6 @@ export class NomadBackend
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
-    // The job now EXISTS on the cluster, and this is the only moment its exact id and namespace are in
-    // anyone's hands (arch-review 52, Wave 2). Report it before the wait: the wait is where the control plane
-    // may die, and a teardown that starts after that has only the case id — which addresses every tenant's and
-    // every run's job of that case. Best-effort by contract; a throwing consumer must not fail the dispatch.
-    if (job.runId !== undefined) {
-      try {
-        options?.onWork?.({
-          tenant: job.tenant ?? "default",
-          runId: job.runId,
-          externalJobId: jobId,
-          ...(ns !== undefined ? { namespace: ns } : {}),
-          ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
-        });
-      } catch (e) {
-        console.warn(`[nomad] onWork hook threw for job ${jobId}: ${String(e)}`);
-      }
-    }
     try {
       const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting, mark);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";

@@ -501,6 +501,13 @@ export class WorkflowBatchDriver {
                   ?.catch?.(() => {});
               }
             },
+            // WHERE THIS CASE'S COMPUTE WILL BE, recorded before it exists (arch-review 53, Wave A). The
+            // durable lane is precisely the lane whose handle has to outlive the process, and it was the one
+            // lane that never reported it: this driver forwarded onWaiting/onStarted/onStep and nothing else,
+            // so every managed case a Temporal batch dispatched was addressable only by its case id after a
+            // restart. Awaited by contract — a handle that cannot be recorded aborts the dispatch instead of
+            // producing compute nobody can name.
+            onReserved: (work) => this.commit.stampWork(work),
             // COMPUTE ACTUALLY STARTED — the child flips queued→running, and the attempt ledger records that
             // this execution reached the machine rather than only having been intended (arch-review 42).
             // Keyed to the STARTED job's own coordinates (arch-review 51 residue): a spill/OOM reattempt

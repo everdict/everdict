@@ -488,7 +488,8 @@ export class InProcessBatchDriver {
           // it, so a cancel that outlives this process stops THAT job. The handle names its own attempt (it
           // carries the dispatched job's attemptId), which is what makes it correct under spillover and
           // speculation: those dispatch several attempts, and each reports its own.
-          onWork: (work) => void this.commit.stampWork(work),
+          // Awaited: the ledger holds the handle before the cluster holds the job (arch-review 53, Wave A).
+          onReserved: (work) => this.commit.stampWork(work),
           onStarted: (startedJob) => {
             const started = startedJob.runId !== undefined ? jobAttemptId(startedJob, startedJob.runId) : undefined;
             void this.commit.stampAttempt(started ?? openedAttemptId, "executing", {

@@ -44,7 +44,7 @@ const JOB: CaseJob = {
 const methodOf = (backend: object, name: string): unknown => (backend as Record<string, unknown>)[name];
 
 // RED as of 186f9fd9: `expected 'undefined' to be 'function'` (both).
-describe.skip("[R53 WAVE-A COUNTEREXAMPLE #1] a managed backend can name its work without creating it", () => {
+describe("[R53 WAVE-A COUNTEREXAMPLE #1 — CLOSED] a managed backend can name its work without creating it", () => {
   it("K8sBackend exposes reserve() — the name is decided before the cluster is touched", () => {
     const backend = new K8sBackend({ image: "i", api: {} as K8sApi });
     expect(typeof methodOf(backend, "reserve")).toBe("function");
@@ -61,7 +61,7 @@ describe.skip("[R53 WAVE-A COUNTEREXAMPLE #1] a managed backend can name its wor
 });
 
 // RED as of 186f9fd9: `expected 'apply' to be 'work'`.
-describe.skip("[R53 WAVE-A COUNTEREXAMPLE #2] the K8s handle exists before the Job does", () => {
+describe("[R53 WAVE-A COUNTEREXAMPLE #2 — CLOSED] the K8s handle exists before the Job does", () => {
   it("reports the exact work handle BEFORE applyJob, so a crash mid-dispatch still leaves it addressable", async () => {
     const order: string[] = [];
     const api: K8sApi = {
@@ -96,7 +96,7 @@ describe.skip("[R53 WAVE-A COUNTEREXAMPLE #2] the K8s handle exists before the J
     } as unknown as K8sApi;
 
     const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
-    await backend.dispatch(JOB, { onWork: () => order.push("work") }).catch(() => undefined);
+    await backend.dispatch(JOB, { onReserved: () => void order.push("work") }).catch(() => undefined);
 
     // RED as of 186f9fd9: order is ["apply"] — the handle is never reported, because the frame that held it
     // died with the process. The exact Job name the cluster is now running is unrecoverable.
@@ -106,7 +106,7 @@ describe.skip("[R53 WAVE-A COUNTEREXAMPLE #2] the K8s handle exists before the J
 });
 
 // RED as of 186f9fd9: `expected 'submit' to be 'work'`.
-describe.skip("[R53 WAVE-A COUNTEREXAMPLE #3] the Nomad handle exists before the job does", () => {
+describe("[R53 WAVE-A COUNTEREXAMPLE #3 — CLOSED] the Nomad handle exists before the job does", () => {
   it("reports the exact work handle BEFORE the submit returns, for the same reason", async () => {
     const order: string[] = [];
     const http: NomadHttp = {
@@ -125,7 +125,7 @@ describe.skip("[R53 WAVE-A COUNTEREXAMPLE #3] the Nomad handle exists before the
       http,
       pollIntervalMs: 1,
     });
-    await backend.dispatch(JOB, { onWork: () => order.push("work") }).catch(() => undefined);
+    await backend.dispatch(JOB, { onReserved: () => void order.push("work") }).catch(() => undefined);
 
     // RED as of 186f9fd9: ["submit"] only. Nomad may well have accepted the job before the socket died —
     // an ambiguous submit failure is precisely the case where the handle matters most, and it is precisely
