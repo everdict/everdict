@@ -57,10 +57,13 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   RuntimeWorkRef)`, arch-review 52 Wave 2). A case id names a GROUP of executions — two runs of one case are two
   live jobs — so `Recoverable.kill(caseId)` stops other runs' (and, on Nomad's `namespace=*` sweep, other TENANTS')
   compute — and it did so silently, because kill returned void. Every backend that creates external work
-  therefore REPORTS the exact handle at the moment it creates it (`DispatchOptions.onWork`, best-effort, right after the K8s apply /
-  Nomad submit; never fired for a job with no `runId`), and the control plane PERSISTS it on the physical-attempt
-  ledger row (`ExecutionAttemptStore.recordWork`, `runtime_work` jsonb, mig 0185) so it outlives the dispatching
-  process — a teardown after a restart has nothing else to address live compute with. `killWork` addresses the
+  therefore REPORTS the exact handle BEFORE it creates it (`DispatchOptions.onReserved`, **awaited**, and a
+  rejection ABORTS the dispatch — arch-review 53 Wave A replaced Wave 2's post-effect `onWork`; never fired for
+  a job with no `runId`), and the control plane PERSISTS it on the physical-attempt ledger row
+  (`ExecutionAttemptStore.recordWork`, `runtime_work` jsonb, mig 0185) so it outlives the dispatching process.
+  The ordering is the contract: a handle reported AFTER the apply meant a control plane dying in between left
+  a running job nothing could address, and `reserve(job)` — pure, no external effect — is what makes the other
+  order possible. A caller that cannot record where the work will be must not get the work. `killWork` addresses the
   exact external id in the WORK'S OWN namespace: never a prefix scan, never `namespace=*`, never a selector another
   run shares. `kill(caseId)` survives only as the no-handle fallback (legacy rows, lanes that mint none) and is
   called INSTEAD of `killWork`, never beside it. K8s label values a selector selects on must be INJECTIVE —

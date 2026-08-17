@@ -523,9 +523,6 @@ export {
   trajectoryMetricValue,
   type TrajectoryMetrics,
 } from "./trace/trajectory-metrics.js";
-// The one-line excerpt that names a trace's WORK — shared by the owned ledger's seal and the platform adapters'
-// list, so a browse row is never identified by its producer alone (see evidence-preview.ts).
-export { previewFromEvents } from "./trace/evidence-preview.js";
 export { clampFidelity, FIDELITY_ORDER } from "./recording/fidelity.js";
 
 // capability — the Capability Store's reach/visibility kernel (new; the four-tier private|workspace|subset|public authority)

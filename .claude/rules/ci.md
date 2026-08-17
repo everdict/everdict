@@ -13,8 +13,16 @@ See skill `ci`.
   gate invalidates the stamp — re-run `pnpm ci:local` (turbo cache makes it fast). Never work
   around the hook (no stamp forging, no pushing from outside the tool).
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, `node scripts/live/empty-env-boot.mjs`, the self-contained web job
-  (contracts build + `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm protocol-mutations`**, `node scripts/live/empty-env-boot.mjs`,
+  the self-contained web job (contracts build + `pnpm -F @everdict/web lint`/`build`), and a full-history
+  gitleaks scan.
+- **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
+  it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
+  to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A
+  green suite proves the tests pass; this proves they would fail without the protocol — a distinction this
+  repo has paid for twice (a scanner draft green over the defect it was written for, a judgment fixture that
+  certified a gap). A new protocol adds its mutation there; a mutation whose target line is gone FAILS rather
+  than silently testing nothing.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
 - **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`

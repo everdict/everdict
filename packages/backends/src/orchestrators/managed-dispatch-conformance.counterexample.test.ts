@@ -1,4 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  describeManagedDispatch,
+  describeRuntimeWorkControl,
+  describeUnknownPropagation,
+} from "../conformance/index.js";
 
 // ── ONE SUITE, EVERY IMPLEMENTATION (arch-review 53, Wave F) ─────────────────────────────────────────
 //
@@ -22,23 +29,37 @@ import { describe, expect, it } from "vitest";
 // The invariant this pins: the suites exist and are exported, so an adapter cannot opt out of a protocol by
 // simply not having a test for it.
 
-// Resolved at runtime, not by the module graph: the module does not exist yet, and a static import of a
-// missing path is a compile error rather than the failing assertion this file is for.
-const CONFORMANCE_MODULE = "../conformance/index.js";
-const suites = async (): Promise<Record<string, unknown>> =>
-  (await import(/* @vite-ignore */ CONFORMANCE_MODULE).catch(() => ({}))) as Record<string, unknown>;
+// Statically imported now that the module exists — the counterexample was written against its absence, and a
+// dynamic specifier would keep asserting that absence is survivable.
+const placementSuites: Record<string, unknown> = {
+  describeManagedDispatch,
+  describeRuntimeWorkControl,
+  describeUnknownPropagation,
+};
 
 // RED as of 186f9fd9: the conformance module does not exist; every adapter is certified by its own file only.
-describe.skip("[R53 WAVE-F COUNTEREXAMPLE #29] the protocol conformance suites exist", () => {
-  it("exports one suite per protocol this program defines", async () => {
-    const mod = await suites();
-    for (const name of [
-      "describeManagedDispatch",
-      "describeRuntimeWorkControl",
-      "describeUnknownPropagation",
-      "describePublicationOperation",
-      "describeCancellationVerification",
-    ])
-      expect(typeof mod[name], `${name} is not exported — this protocol has no shared certification`).toBe("function");
+describe("[R53 WAVE-F COUNTEREXAMPLE #29 — CLOSED] the protocol conformance suites exist", () => {
+  it("exports one suite per protocol this program defines", () => {
+    for (const name of ["describeManagedDispatch", "describeRuntimeWorkControl", "describeUnknownPropagation"])
+      expect(typeof placementSuites[name], `${name} is not exported — this protocol has no shared certification`).toBe(
+        "function",
+      );
+
+    // …and the control-plane half, asserted at its source because this package cannot import it (backends
+    // DEPENDS on application-control, so the edge only runs the other way).
+    const controlPlane = readFileSync(
+      fileURLToPath(new URL("../../../application-control/src/conformance/index.ts", import.meta.url)),
+      "utf8",
+    );
+    for (const name of ["describePublicationOperation", "describeCancellationVerification"])
+      expect(controlPlane.includes(`export function ${name}`), `${name} has no shared certification`).toBe(true);
+  });
+
+  it("the managed backends actually RUN the placement suites", () => {
+    // A suite nobody calls certifies nothing. This asserts the call sites exist, which is the half a
+    // "does it export the function" check cannot see.
+    const runner = readFileSync(fileURLToPath(new URL("./managed-conformance.test.ts", import.meta.url)), "utf8");
+    for (const call of ['describeManagedDispatch("K8sBackend"', 'describeManagedDispatch("NomadBackend"'])
+      expect(runner.includes(call), `${call} — a managed backend is not running the dispatch suite`).toBe(true);
   });
 });

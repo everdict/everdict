@@ -1,6 +1,6 @@
 import { InMemoryCaseReceiptStore, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { CaseJob, EvalCase, RunRecord } from "@everdict/contracts";
+import type { EvalCase, RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore } from "@everdict/db";
 import { Run } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -135,7 +135,3 @@ describe("[R53 WAVE-A.5 COUNTEREXAMPLE #11 — CLOSED] the authority ports answe
     expect(typeof read, "CaseReceiptStore has no three-valued read").toBe("function");
   });
 });
-
-// The self-hosted lane's stop arms take a predicate over CaseJob — kept here so the counterexample above
-// cannot be satisfied by removing them.
-export const _predicateShape = (job: CaseJob): boolean => job.runId === "r1";

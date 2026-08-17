@@ -264,6 +264,3 @@ describe("[R53 WAVE-C COUNTEREXAMPLE #17 — CLOSED] the idempotency key reaches
     ).toBe(`${SCORECARD_ID}:initial-abc`);
   });
 });
-
-// Kept so a refactor that drops the digest guard cannot make the counterexamples above vacuous.
-export const _payloadDigestOf = (r: CaseResult[]): string => contentDigest(r);

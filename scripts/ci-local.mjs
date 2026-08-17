@@ -54,6 +54,12 @@ run("pnpm cone", "pnpm", ["cone"]);
 run("pnpm web-imports", "pnpm", ["web-imports"]);
 run("pnpm migrations", "pnpm", ["migrations"]);
 run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
+// ── DOES THE SUITE ACTUALLY CATCH THIS? (arch-review 53, Wave F) ──────────────────────────────────
+// Neutralize each protocol one at a time and require the suite that claims to enforce it to go RED. A green
+// suite proves the tests pass; this proves they would fail if the protocol were removed — which is the
+// difference this program has twice paid for learning (a scanner draft that was green over the defect it was
+// written for, and a judgment fixture that certified a gap).
+run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);

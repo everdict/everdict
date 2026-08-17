@@ -16,6 +16,7 @@
     "web-imports": "node scripts/check-web-imports.mjs",
     "migrations": "node scripts/check-migrations.mjs",
     "artifact-frame": "node scripts/check-artifact-frame.mjs",
+    "protocol-mutations": "node scripts/trust/protocol-mutations.mjs",
     "plugin-manifests": "node scripts/check-plugin-manifests.mjs",
     "docs-check": "node scripts/check-docs.mjs",
     "ci:local": "node scripts/ci-local.mjs",

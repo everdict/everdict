@@ -8,7 +8,7 @@ import {
   newSpanId,
   traceIdForRun,
 } from "@everdict/contracts";
-import { eventsToSpans, previewFromEvents } from "@everdict/domain";
+import { eventsToSpans } from "@everdict/domain";
 
 // The OWNED trajectory record (execution-model §6 / P5, native-observability rung 1): what happened, kept by
 // US — the copy every judgment stands on ("never judge what you don't retain"). Rung 1 collapses live-append
@@ -41,13 +41,6 @@ export interface TrajectoryMeta {
   // arrived with no run to name it; `source` still says how it got here.
   kind?: string;
   label?: string;
-  // The one-line excerpt naming what this trace was asked to do — the user's message, the first tool call,
-  // the root span. `label` names the PRODUCER often enough to be useless on its own (every agent turn's
-  // label is the agent id, so a page of conversations reads `default <uuid>` twenty times over); this is
-  // what tells two rows apart. Derived from the body at seal by the naming decorator when the caller does
-  // not supply one, so OTLP arrivals and imports — which have no run record to name them — get it too.
-  // Absent = evidence whose body carried no phrase a reader would recognize it by.
-  preview?: string;
 }
 
 // One EMITTER's contribution to a run's trajectory (the multi-plane rung): the agent's own record, the
@@ -147,10 +140,9 @@ export async function sealExecutionPlanes(
     t0?: string;
     // What ran — the root span's name. Defaults to the run itself when the caller has nothing better.
     agentName?: string;
-    // What this evidence IS and what to call it on a browse row (see TrajectoryMeta.kind/label/preview).
+    // What this evidence IS and what to call it on a browse row (see TrajectoryMeta.kind/label).
     kind?: string;
     label?: string;
-    preview?: string;
     // WHICH physical attempt is sealing (see SealInput.attemptId). Carried onto BOTH planes, because a run's
     // agent evidence and its placement account come from the same execution and a reader comparing them
     // against a receipt must be able to see that.
@@ -162,15 +154,11 @@ export async function sealExecutionPlanes(
   const infra: TraceEvent[] = [];
   for (const event of input.events) (event.kind === "infra" ? infra : agent).push(event);
   // Identity travels with the evidence on every plane: the infra segment can win the race to create the
-  // trajectory, and a row that arrives first must not be the unnamed one. The preview is derived from the
-  // AGENT plane and carried onto the infra one for exactly that reason — placement marks say where a run
-  // ran, never what it was asked to do, so a row named by the infra segment alone would be nameless.
-  const preview = input.preview ?? previewFromEvents(agent);
+  // trajectory, and a row that arrives first must not be the unnamed one.
   const identity = {
     ...(input.owner !== undefined ? { owner: input.owner } : {}),
     ...(input.kind !== undefined ? { kind: input.kind } : {}),
     ...(input.label !== undefined ? { label: input.label } : {}),
-    ...(preview !== undefined ? { preview } : {}),
     ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
   };
   const traceId = traceIdForRun(input.runId);
@@ -398,9 +386,6 @@ export interface SealInput {
   // names it and later planes join something already named.
   kind?: string;
   label?: string;
-  // The work-naming excerpt (see TrajectoryMeta.preview). Callers rarely set it: the naming decorator derives
-  // one from the body when it is absent, which is the single choke point every seal path passes through.
-  preview?: string;
   // ── WHOSE EVIDENCE THIS IS (review 39 P1) ────────────────────────────────────────────────────────
   //
   // The store keeps the first seal per (run, emitter) — evidence is never rewritten — and a re-drive reuses

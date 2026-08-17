@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+// ── DOES THE SUITE ACTUALLY CATCH THIS? (arch-review 53, Wave F) ────────────────────────────────────
+//
+// A green suite proves the tests pass. It does not prove they would FAIL if the protocol were removed — and
+// this program has twice shipped a guard that was green over the very defect it was written for (review 30's
+// scanner draft, and Wave 5's judgment fixture that judged an embed group no carrier ever adopted). The
+// difference between a test and a certification is whether anyone tried to break it.
+//
+// This applies one MUTATION at a time to a production file, runs the suite that is supposed to notice, and
+// requires it to go RED. A mutation that leaves the suite green is reported as a hole: either the protocol is
+// unenforced or the test is asserting something else.
+//
+// Every mutation is reverted in a `finally`, and the script refuses to start on a dirty worktree for those
+// files — an interrupted run must never leave a neutered guard behind.
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+
+const MUTATIONS = [
+  {
+    name: "Wave A — the reservation moves back behind the effect",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "    if (job.runId !== undefined) await options?.onReserved?.(work);",
+    to: "    // MUTATED: identity after effect",
+    suite: ["--root", "packages/backends", "src/orchestrators/dispatch-intent.counterexample.test.ts"],
+  },
+  {
+    name: "Wave A.5 — an unreadable ledger widens the teardown again",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: '    if (worksRead.kind === "unknown") {',
+    to: '    if (false && worksRead.kind === "unknown") {',
+    suite: ["--root", "apps/api", "src/core/run/unknown-propagation.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
+  {
+    name: "Wave B — the exact placement read resolves by case id",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: '        placementOf(api, work.externalJobId, work.namespace ?? this.opts.namespace ?? "default"),',
+    to: '        placementOf(api, (await newestJobForCase(api, "c1"))?.name ?? "", "everdict-acme"),',
+    suite: ["--root", "packages/backends", "src/orchestrators/exact-work-control.counterexample.test.ts"],
+  },
+  {
+    name: "Wave C — the publication claim moves back below the effects",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",
+    to: "  const outcomeFirst = await performEffects(deps, record, operation, results);\n  void outcomeFirst;\n  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",
+    suite: ["--root", "packages/application-control", "src/scorecard/publication-operation.counterexample.test.ts"],
+  },
+  {
+    name: "Wave D — the gate stops asking who judged",
+    file: "packages/domain/src/scorecard/gate.ts",
+    from: '    if (pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)',
+    to: '    if (false && pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)',
+    suite: ["--root", "packages/domain", "src/scorecard/judgment-provenance.counterexample.test.ts"],
+  },
+  {
+    name: "Wave E — every teardown failure records as merely requested",
+    file: "packages/application-control/src/cancellation/cancellation-coordinator.ts",
+    from: '    const reached: "requested" | "verifying" = detail?.unverifiable !== undefined ? "verifying" : "requested";',
+    to: '    const reached: "requested" | "verifying" = "requested";',
+    suite: ["--root", "packages/application-control", "src/cancellation/verified-completion.counterexample.test.ts"],
+  },
+];
+
+const files = [...new Set(MUTATIONS.map((m) => m.file))];
+const dirty = execFileSync("git", ["status", "--porcelain", "--", ...files], { encoding: "utf8" }).trim();
+if (dirty !== "") {
+  console.error(`✖ protocol mutations: the files under mutation have uncommitted changes:\n${dirty}`);
+  console.error("  Commit or stash them first — a mutation run must be able to restore the exact original.");
+  process.exit(2);
+}
+
+let holes = 0;
+for (const mutation of MUTATIONS) {
+  const original = readFileSync(mutation.file, "utf8");
+  if (!original.includes(mutation.from)) {
+    console.error(`✖ ${mutation.name}: the line to mutate is gone from ${mutation.file}`);
+    console.error("  A mutation that matches nothing tests nothing — update it to the code as it is now.");
+    holes += 1;
+    continue;
+  }
+  try {
+    writeFileSync(mutation.file, original.replace(mutation.from, mutation.to));
+    if (mutation.build) spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
+    const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], { stdio: "ignore" });
+    if (run.status === 0) {
+      console.error(`✖ HOLE — ${mutation.name}: the suite stayed GREEN with the protocol removed.`);
+      holes += 1;
+    } else {
+      console.log(`✓ ${mutation.name} — the suite went red, as it must`);
+    }
+  } finally {
+    writeFileSync(mutation.file, original);
+    if (mutation.build) spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
+  }
+}
+
+if (holes > 0) {
+  console.error(`\n✖ ${holes} protocol(s) are not actually enforced by the suite that claims to enforce them.`);
+  process.exit(1);
+}
+console.log(`\n✓ every protocol mutation was caught (${MUTATIONS.length} checked)`);

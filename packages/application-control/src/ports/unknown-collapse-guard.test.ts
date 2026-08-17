@@ -93,9 +93,7 @@ describe("the unknown-collapse scanner — a failed authority read never becomes
     // sites in the tree — the same self-check the fence scanners carry, for the same reason.
     const all = files.map((f) => readFileSync(f, "utf8")).join("\n");
     for (const re of WATCHED_READS)
-      expect(re.test(all), `${re} matches nothing — the scanner is scanning a read that no longer exists`).toBe(
-        true,
-      );
+      expect(re.test(all), `${re} matches nothing — the scanner is scanning a read that no longer exists`).toBe(true);
   });
 
   it("the allowlisted file still exists", () => {

@@ -1279,43 +1279,43 @@ export class NomadBackend
     const alloc = currentAlloc(
       JSON.parse(allocsRes.text) as Array<NomadAllocStub & { CreateIndex?: number; DesiredStatus?: string }>,
     );
-      const base = { job: jobId, ...(ns ? { namespace: ns } : {}) };
-      if (!alloc?.ID) {
-        // No alloc: either the scheduler simply hasn't placed it yet (queued) or it CANNOT place it (blocked) —
-        // the blocked-evaluation read tells them apart, with the exhausted dimensions as the reason.
-        const blocked = await this.blockedPlacement(jobId, nsq);
-        return {
-          ...base,
-          phase: blocked ? "blocked" : "queued",
-          ...(blocked ? { blockedReason: blocked } : {}),
-          events: [],
-        };
-      }
-      // One detail fetch feeds BOTH the event feed and the resource ask: the per-job allocations LIST omits
-      // AllocatedResources even with ?resources=true (live-verified on Nomad 2.0.3 — only the global
-      // /v1/allocations honors that flag), while the alloc DETAIL always carries it.
-      const detail = await this.allocDetail(alloc.ID);
-      const events = detail.events;
-      const status = alloc.ClientStatus ?? "pending";
-      const phase =
-        status === "running"
-          ? ("running" as const)
-          : status === "complete" || status === "failed" || status === "lost"
-            ? ("dead" as const)
-            : ("starting" as const);
-      const restarts = events.filter((e) => e.Type === "Restarting").length;
-      const age = nomadAllocAgeSeconds(alloc.CreateTime, Date.now());
+    const base = { job: jobId, ...(ns ? { namespace: ns } : {}) };
+    if (!alloc?.ID) {
+      // No alloc: either the scheduler simply hasn't placed it yet (queued) or it CANNOT place it (blocked) —
+      // the blocked-evaluation read tells them apart, with the exhausted dimensions as the reason.
+      const blocked = await this.blockedPlacement(jobId, nsq);
       return {
         ...base,
-        phase,
-        unit: alloc.ID,
-        ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
-        ...(eventsIndicateOom(events) ? { oom: true } : {}),
-        ...(restarts > 0 ? { restarts } : {}),
-        ...nomadAllocResources(detail.stub ?? alloc),
-        ...(age !== undefined ? { ageSeconds: age } : {}),
-        events: nomadEventsToPlacement(events),
+        phase: blocked ? "blocked" : "queued",
+        ...(blocked ? { blockedReason: blocked } : {}),
+        events: [],
       };
+    }
+    // One detail fetch feeds BOTH the event feed and the resource ask: the per-job allocations LIST omits
+    // AllocatedResources even with ?resources=true (live-verified on Nomad 2.0.3 — only the global
+    // /v1/allocations honors that flag), while the alloc DETAIL always carries it.
+    const detail = await this.allocDetail(alloc.ID);
+    const events = detail.events;
+    const status = alloc.ClientStatus ?? "pending";
+    const phase =
+      status === "running"
+        ? ("running" as const)
+        : status === "complete" || status === "failed" || status === "lost"
+          ? ("dead" as const)
+          : ("starting" as const);
+    const restarts = events.filter((e) => e.Type === "Restarting").length;
+    const age = nomadAllocAgeSeconds(alloc.CreateTime, Date.now());
+    return {
+      ...base,
+      phase,
+      unit: alloc.ID,
+      ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
+      ...(eventsIndicateOom(events) ? { oom: true } : {}),
+      ...(restarts > 0 ? { restarts } : {}),
+      ...nomadAllocResources(detail.stub ?? alloc),
+      ...(age !== undefined ? { ageSeconds: age } : {}),
+      events: nomadEventsToPlacement(events),
+    };
   }
 
   // Stop the work a HANDLE names, and nothing else (WorkAddressable — arch-review 52, Wave 2).

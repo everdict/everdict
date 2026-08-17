@@ -28,7 +28,7 @@ env:
 
 jobs:
   trust:
-    name: trust certification (real Postgres + MinIO)
+    name: trust certification (real Postgres + MinIO + ClickHouse)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -57,6 +57,20 @@ jobs:
 
       # MinIO for the workspace-filesystem scenario. Started with `docker run` rather than as a service
       # container because MinIO needs a server subcommand, which the `services:` block cannot express.
+      # ClickHouse as a plain container for the same reason MinIO is: `services:` cannot express the health
+      # gate this image needs, and the scenario must fail on an unreachable store rather than skip past it.
+      - name: Start ClickHouse
+        run: |
+          docker run -d --name clickhouse -p 8123:8123 \
+            -e CLICKHOUSE_USER=default -e CLICKHOUSE_PASSWORD= \
+            -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+            clickhouse/clickhouse-server:24.8
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8123/ping >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8123/ping >/dev/null || { echo "clickhouse did not come up"; docker logs clickhouse; exit 1; }
+
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
@@ -107,6 +121,22 @@ jobs:
       # The pre-existing live scenario test for the workspace filesystem — CI can satisfy its env, so it runs
       # here. (Its twin, packages/graders model-judge.scenario, needs a paid model endpoint and stays off; see
       # docs/trust-certification.md for how an operator enables it.)
+      # ── THE EVIDENCE STORE'S OWN RUNG (arch-review 53, Wave F) ───────────────────────────────────
+      #
+      # `clickhouse-trajectory-store.scenario` certifies the two things no fake can: that a table created
+      # before `attempt_id` existed serves today's exact-identity read after the additive ALTERs, and that two
+      # duplicate seals with a skewed clock resolve to the attempt the receipt named rather than to whichever
+      # row was stamped earliest. It skips silently without `EVERDICT_E2E_CLICKHOUSE_URL`, and nothing was
+      # setting it — so the scenario that certifies the store's upgrade path had never run in CI.
+      - name: ClickHouse trajectory scenario (live ClickHouse)
+        env:
+          EVERDICT_E2E_CLICKHOUSE_URL: http://127.0.0.1:8123
+        run: pnpm --filter @everdict/db exec vitest run src/results/clickhouse-trajectory-store.scenario.test.ts
+
+      - name: ClickHouse logs on failure
+        if: failure()
+        run: docker logs clickhouse || true
+
       - name: Workspace filesystem scenario (live MinIO)
         env:
           EVERDICT_E2E_S3_ENDPOINT: http://127.0.0.1:9000
