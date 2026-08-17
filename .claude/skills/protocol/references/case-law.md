@@ -190,6 +190,53 @@ debt is real; only the *retry frequency* should change, plus an operator signal.
 
 ---
 
+---
+
+## What review 54 actually cost to fix — the lessons the phases added
+
+Recorded because each one changed how the NEXT change should be made, not just what the code says.
+
+### A protocol only exists where it is REQUIRED, not where it is offered
+Phase 1's shape is the template: the store returns `PersistedWorkIntent`, the reservation hook returns it, and
+`requireReservation` refuses to submit without it. The version before it had the right ORDER and no proof, and
+those are indistinguishable from inside the backend — a hook that resolved having written nothing looked
+exactly like a durable reservation. When a rung cannot be observed from where the decision is made, move the
+value, not the comment.
+
+### A comment can outlive the ordering it describes
+`recordWork` defended its swallow with "the alternative is failing a dispatch that already succeeded". That
+was true while the stamp ran AFTER the apply. Wave A moved it before; the justification did not move with it,
+and it read as current for a whole review. **When you reorder a path, re-read every comment that justified the
+old order** — they are now claims about a program that no longer exists.
+
+### Fixing one lane exposes the same defect in its twin
+Every phase found a second instance the review had not named: the batch planner had the standalone run's
+`.catch(() => [])`; the scorecard teardown had the run's missing re-probe; `InMemoryCancellationStore.request`
+had erased the counter its Pg twin preserved. **After fixing a collapse, grep for the same idiom in the sibling
+lane before closing the phase.**
+
+### A store's two implementations diverging is a protocol defect, not a test gap
+The in-memory cancellation store forgot `verificationAttempts` on re-request; Postgres kept it. Nothing failed,
+because no test exercised the budget through a re-request — the value simply never counted past one. Rule `db`
+already says the impls must be interchangeable; that is a PROTOCOL requirement when a decision reads the value.
+
+### The mutation runner earns its keep by refusing
+Twice in this program a phase rewrote a line an older mutation targeted, and the runner failed with "the line
+to mutate is gone" rather than passing. That is the whole design: a mutation that matches nothing tests
+nothing. Re-anchor it in the same change that moved the line.
+
+### A counterexample can be RIGHT about the defect and WRONG about the shape
+#17 asserted `state === "unverifiable"` after a spent budget, following the review's framing. The phase then
+concluded that a terminal state there is itself the defect — it removes a live-compute debt from the only loop
+that would retry it — so the assertion moved to the invariant (still owed, alert raised, backed off). Changing
+a counterexample's assertion is legitimate exactly when the DESIGN moved; say so in the test, or the next
+reader cannot tell it from weakening.
+
+### ⚠️ A NUL byte makes a file invisible to grep
+A heredoc turned a template literal's space into `\x00` in `scoring-revision.ts`; `file` reported `data` and
+every `grep` silently found nothing, so edits appeared to vanish. Second occurrence in this tree. If a change
+you just made cannot be found, check `grep -c $'\x00' <file>` before re-editing.
+
 ## Cross-cutting: how these survived a green CI
 
 Every one of the above shipped with a green gate, and the gate is not weak — it runs the five commands, the
