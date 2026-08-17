@@ -90,9 +90,11 @@ describe("PgCancellationStore", () => {
 
     const owed = await store.listIncomplete(25);
 
-    // `unverifiable` joins `completed` as terminal (arch-review 53, Wave E) — a readback the cluster will
-    // not answer is closed WITH its reason, never swept forever.
-    expect(calls[0]?.text).toContain("state NOT IN ('completed', 'unverifiable')");
+    // COMPLETED is the only terminal state (arch-review 54, Phase 5). Wave E also excluded `unverifiable`,
+    // which took an operation whose compute may still be running out of the only loop that would ever retry
+    // it; the alert is a field on an owed row now, and a backed-off row is skipped by TIME, not closed.
+    expect(calls[0]?.text).toContain("state <> 'completed'");
+    expect(calls[0]?.text).toContain("next_attempt_at IS NULL OR next_attempt_at <= now()");
     expect(calls[0]?.text).toContain("ORDER BY requested_at");
     expect(calls[0]?.params).toEqual([25]);
     expect(owed).toEqual([

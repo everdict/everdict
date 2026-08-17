@@ -16,13 +16,15 @@ interface CancellationRow {
   completed_at: string | Date | null;
   certificate: unknown;
   verification_attempts?: number | null;
+  escalated_at?: string | Date | null;
+  next_attempt_at?: string | Date | null;
 }
 
 // The row's `state` is a column this adapter writes and nothing else does, so the only way it can hold a
 // string outside the vocabulary is a hand-edited database. The reconciler treats anything that is not
 // terminal as owed (the WHERE clause below), which is the fail-safe direction: an unrecognizable state gets
-// one more idempotent teardown rather than a silently abandoned operation. The two TERMINAL states are read
-// exactly (arch-review 53, Wave E) — `unverifiable` is a decision this system made and must not be re-swept.
+// one more idempotent teardown rather than a silently abandoned operation. `completed` is the ONE terminal
+// state (arch-review 54, Phase 5); `unverifiable` is read only because rows written before mig 0190 carry it.
 //
 // `target_kind` is read the other way round — an UNRECOGNIZED kind stays unrecognized (it is passed through
 // as-is and the coordinator finds no teardown for it, leaving the row owed). Coercing it to "scorecard"
@@ -34,7 +36,7 @@ function toOperation(row: CancellationRow): CancellationOperation {
       row.state === "completed"
         ? "completed"
         : row.state === "unverifiable"
-          ? "unverifiable"
+          ? "unverifiable" // pre-0190 rows; 0190 re-opened them as `verifying`, so this is history only
           : row.state === "verifying"
             ? "verifying"
             : "requested",
@@ -45,6 +47,20 @@ function toOperation(row: CancellationRow): CancellationOperation {
       ? { certificate: row.certificate as CancellationCertificate }
       : {}),
     ...(row.verification_attempts ? { verificationAttempts: row.verification_attempts } : {}),
+    // The ALERT, read back beside the debt (arch-review 54, Phase 5).
+    ...(row.escalated_at !== null && row.escalated_at !== undefined
+      ? {
+          escalation: {
+            kind: "unverifiable" as const,
+            attempts: row.verification_attempts ?? 0,
+            alertedAt: new Date(row.escalated_at).toISOString(),
+            requiresOperator: true as const,
+          },
+        }
+      : {}),
+    ...(row.next_attempt_at !== null && row.next_attempt_at !== undefined
+      ? { nextAttemptAt: new Date(row.next_attempt_at).toISOString() }
+      : {}),
   };
 }
 
@@ -103,23 +119,40 @@ export class PgCancellationStore implements CancellationStore {
     );
   }
 
-  // Terminal, with the reason (arch-review 53, Wave E) — see the port.
-  async abandon(target: CancellationTarget, reason: string, now: string): Promise<void> {
+  // OWED, with the alert raised (arch-review 54, Phase 5) — see the port. It stays `verifying`: the stops ran
+  // and the world did not come back quiet, which is the truth whether or not anyone has been told.
+  async escalate(
+    target: CancellationTarget,
+    reason: string,
+    now: string,
+    nextAttemptAt: string,
+    attempts: number,
+  ): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, last_error, requested_at, completed_at)
-       VALUES ($1, $2, 'unverifiable', $3, $4, $4)
+      `INSERT INTO everdict_cancellation_operations
+         (scorecard_id, target_kind, state, last_error, requested_at, escalated_at, next_attempt_at, verification_attempts)
+       VALUES ($1, $2, 'verifying', $3, $4, $4, $5, $6)
        ON CONFLICT (scorecard_id) DO UPDATE
-         SET state = 'unverifiable', target_kind = $2, last_error = $3, completed_at = $4`,
-      [target.id, target.kind, reason, now],
+         SET state = 'verifying', target_kind = $2, last_error = $3,
+             escalated_at = COALESCE(everdict_cancellation_operations.escalated_at, $4),
+             next_attempt_at = $5,
+             verification_attempts = $6,
+             completed_at = NULL`,
+      [target.id, target.kind, reason, now, nextAttemptAt, attempts],
     );
   }
 
   async listIncomplete(limit: number): Promise<CancellationOperation[]> {
     const { rows } = await this.client.query<CancellationRow>(
       `SELECT * FROM everdict_cancellation_operations
-        -- Everything still OWED. 'unverifiable' joins 'completed' as terminal (arch-review 53, Wave E): a
-        -- readback the cluster will not answer is closed WITH its reason, not swept forever.
-        WHERE state NOT IN ('completed', 'unverifiable')
+        -- Everything still OWED, and only 'completed' is terminal (arch-review 54, Phase 5). 'unverifiable'
+        -- used to be excluded here, which took the one loop that could ever retry it away from an operation
+        -- whose compute may still be running. It is an escalation now, recorded on an owed row.
+        --
+        -- A row with a future next_attempt_at is being backed off, not ignored: the escalation slows the
+        -- retries so an unreachable cluster is not re-swept every cycle.
+        WHERE state <> 'completed'
+          AND (next_attempt_at IS NULL OR next_attempt_at <= now())
         ORDER BY requested_at
         LIMIT $1`,
       [limit],

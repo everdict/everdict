@@ -14,10 +14,13 @@
 //   verifying     — the stops were issued and the postcondition read is in progress or came back non-zero.
 //                   Still owed; the sweep retries.
 //   completed     — a readback SAW zero live work. The certificate carries what it counted.
-//   unverifiable  — the readback could not be taken within this operation's budget (an orchestrator that
-//                   stays unreachable). Terminal WITH its reason, because an operation that can never
-//                   converge must not sit owed forever pretending it might — and an operator needs the
-//                   distinction between "we saw zero" and "we never got to look".
+//   completed     — and it is the ONLY terminal one (arch-review 54, Phase 5). `unverifiable` used to be a
+//                   second terminal state for "the readback budget is spent and the cluster is still
+//                   unreachable", which took the row out of the sweep — the only loop that would ever retry
+//                   it — while the compute it describes may still be running. That distinction is real and
+//                   it is an ESCALATION, not a completion: see `CancellationOperation.escalation`. The value
+//                   survives in this union only because rows written before mig 0190 carry it; nothing
+//                   produces it now, and 0190 returned those rows to the sweep as `verifying`.
 export type CancellationOperationState = "requested" | "verifying" | "completed" | "unverifiable";
 export const CANCELLATION_OPERATION_STATES: readonly CancellationOperationState[] = [
   "requested",
@@ -97,6 +100,20 @@ export interface CancellationOperation {
   // reconciler that restarted would otherwise begin the budget again. Absent = never verified (the stops
   // themselves have not run to a readback yet).
   verificationAttempts?: number;
+  // ── THE ALERT, BESIDE THE DEBT (arch-review 54, Phase 5) ─────────────────────────────────────────
+  //
+  // Wave E closed a budget-spent operation as `unverifiable` and took it out of the sweep, reasoning that a
+  // row nobody can converge must not sit owed forever pretending it might. The distinction it wanted is real
+  // — "we saw zero" and "we never got to look" are different facts — but the conclusion removed the row from
+  // the only loop that would ever retry it. The compute may still be running and billing; a cluster comes
+  // back and a closed operation does not.
+  //
+  // So the DEBT and the ALERT are separate. The operation stays owed and keeps being retried, more slowly;
+  // this says a human should look, and since when.
+  escalation?: { kind: "unverifiable"; attempts: number; alertedAt: string; requiresOperator: true };
+  // When the reconciler should next try. Absent = as soon as it comes round; set on escalation so an
+  // unreachable cluster is retried at a slower cadence instead of every sweep.
+  nextAttemptAt?: string;
 }
 
 // ── WHO OWNS A CANCEL'S TEARDOWN AFTER THE PROCESS DIES (arch-review 47 §5.2) ───────────────────────
@@ -135,10 +152,19 @@ export interface CancellationStore {
   // not run, `verifying` = they ran and the postcondition read did not come back zero. Both are owed; the
   // distinction is what an operator reads to know whether compute was ever asked to stop.
   fail(target: CancellationTarget, error: string, now: string, state?: "requested" | "verifying"): Promise<void>;
-  // Close an operation that can never converge — the readback budget is spent and the cluster is still
-  // unreachable. Terminal WITH its reason, because a row that sits owed forever is indistinguishable from one
-  // nobody is working on, and an operator needs "we never got to look" told apart from "we saw zero".
-  abandon(target: CancellationTarget, reason: string, now: string): Promise<void>;
+  // Raise the ALERT on an operation whose postcondition could not be established within its budget — and
+  // LEAVE IT OWED (arch-review 54, Phase 5). It replaces `abandon`, which closed the row: escalation says a
+  // human should look, not that the system has stopped trying. `nextAttemptAt` slows the retries so an
+  // unreachable cluster is not swept every cycle.
+  escalate(
+    target: CancellationTarget,
+    reason: string,
+    now: string,
+    nextAttemptAt: string,
+    // The attempt count this escalation is FOR. Passed rather than re-read: the caller has just made the
+    // attempt that spent the budget, and a store recomputing from the row would record the previous number.
+    attempts: number,
+  ): Promise<void>;
   // What the reconciler sweeps: operations whose teardown is not known to have finished, oldest first. ALL
   // kinds — the coordinator dispatches each row to the teardown that knows how to converge it, and leaves
   // owed any kind it has no teardown for (a replica that cannot converge a row must not close it).
@@ -162,6 +188,11 @@ export class InMemoryCancellationStore implements CancellationStore {
   async request(target: CancellationTarget, now: string): Promise<void> {
     const prior = this.operations.get(InMemoryCancellationStore.keyOf(target));
     this.operations.set(InMemoryCancellationStore.keyOf(target), {
+      // A RE-REQUEST IS THE SAME OPERATION (arch-review 54, Phase 5). This rebuilt the row from scratch, so
+      // every attempt erased `verificationAttempts` — and the teardown wrapper re-requests before each
+      // attempt, which meant the budget counted to one forever and could never be spent. The counter is on
+      // the row precisely because the retries are spread across processes; forgetting it here defeated that.
+      ...prior,
       target,
       state: "requested",
       // The first request's timestamp is the age the reconciler orders by — a re-request is the same
@@ -198,22 +229,34 @@ export class InMemoryCancellationStore implements CancellationStore {
     });
   }
 
-  async abandon(target: CancellationTarget, reason: string, now: string): Promise<void> {
+  async escalate(
+    target: CancellationTarget,
+    reason: string,
+    now: string,
+    nextAttemptAt: string,
+    attempts: number,
+  ): Promise<void> {
     const prior = this.operations.get(InMemoryCancellationStore.keyOf(target));
     this.operations.set(InMemoryCancellationStore.keyOf(target), {
+      ...prior,
       target,
-      state: "unverifiable",
+      // STILL OWED — `verifying` is what it is: the stops ran and the world did not come back quiet.
+      state: "verifying",
       lastError: reason,
       requestedAt: prior?.requestedAt ?? now,
-      completedAt: now,
+      verificationAttempts: attempts,
+      escalation: { kind: "unverifiable", attempts, alertedAt: now, requiresOperator: true },
+      nextAttemptAt,
     });
   }
 
   async listIncomplete(limit: number): Promise<CancellationOperation[]> {
     return (
       [...this.operations.values()]
-        // Terminal = completed OR unverifiable (arch-review 53, Wave E) — see the Pg twin.
-        .filter((op) => op.state !== "completed" && op.state !== "unverifiable")
+        // TERMINAL = completed, and only completed (arch-review 54, Phase 5) — see the Pg twin. An operation
+        // we could not verify is escalated, not closed: it stays here so a cluster that comes back is met by
+        // a reconciler that is still trying.
+        .filter((op) => op.state !== "completed")
         .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
         .slice(0, limit)
     );

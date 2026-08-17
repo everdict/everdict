@@ -143,6 +143,20 @@ const MUTATIONS = [
     suite: ["--root", "packages/trace", "src/sinks/idempotent-export.test.ts"],
   },
   {
+    name: "Phase 5 — the reconciler converges on its own protocol again",
+    file: "packages/application-control/src/cancellation/cancellation-coordinator.ts",
+    from: "        await runDurableTeardown(",
+    to: "        await (async () => teardown(operation.target.id))(); await (async () => {})(",
+    suite: ["--root", "packages/application-control", "src/cancellation/reconciler-protocol.counterexample.test.ts"],
+  },
+  {
+    name: "Phase 5 — a spent budget closes the operation instead of escalating it",
+    file: "packages/application-control/src/ports/cancellation-store.ts",
+    from: '      state: "verifying",\n      lastError: reason,',
+    to: '      state: "completed",\n      lastError: reason,',
+    suite: ["--root", "packages/application-control", "src/cancellation/reconciler-protocol.counterexample.test.ts"],
+  },
+  {
     name: "Wave E — every teardown failure records as merely requested",
     file: "packages/application-control/src/cancellation/cancellation-coordinator.ts",
     from: '    const reached: "requested" | "verifying" = detail?.unverifiable !== undefined ? "verifying" : "requested";',

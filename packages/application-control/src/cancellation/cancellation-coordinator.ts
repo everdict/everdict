@@ -77,8 +77,17 @@ export async function runDurableTeardown(
     const prior = await operations.get(target).catch(() => undefined);
     const attempts = (prior?.verificationAttempts ?? 0) + (reached === "verifying" ? 1 : 0);
     if (deps.verificationBudget !== undefined && reached === "verifying" && attempts >= deps.verificationBudget) {
+      // ESCALATE, DO NOT CLOSE (arch-review 54, Phase 5). This used to `abandon`, which took the row out of
+      // the sweep — the only loop that would ever retry it — while the compute it describes may still be
+      // running and billing. The alert is raised and the debt stays owed, retried on a slower cadence.
       await operations
-        .abandon(target, `the postcondition could not be established in ${attempts} attempts: ${message}`, deps.now())
+        .escalate(
+          target,
+          `the postcondition could not be established in ${attempts} attempts: ${message}`,
+          deps.now(),
+          backoffFrom(deps.now(), attempts),
+          attempts,
+        )
         .catch(() => undefined);
       throw err;
     }
@@ -95,6 +104,15 @@ export async function runDurableTeardown(
 // idempotent ones a caller's retry runs (a fenced child settle that loses is a normal race result, a kill of
 // a job that is already gone is `absent`, a queue drop that matches nothing removes nothing), so a
 // reconciliation that overlaps a caller's own retry costs work, never correctness.
+// How long an escalated operation waits before the sweep tries again. Exponential from the attempt count and
+// capped, so an orchestrator that stays down is retried hourly rather than every cycle — and a cluster that
+// comes back is still met by a reconciler that never stopped trying.
+const ESCALATED_RETRY_CAP_MS = 60 * 60 * 1000;
+function backoffFrom(now: string, attempts: number): string {
+  const delay = Math.min(ESCALATED_RETRY_CAP_MS, 60_000 * 2 ** Math.max(0, attempts - 1));
+  return new Date(Date.parse(now) + delay).toISOString();
+}
+
 export class CancellationCoordinator {
   constructor(
     private readonly deps: {
@@ -104,33 +122,48 @@ export class CancellationCoordinator {
       // the same lie the whole ledger exists to prevent, one level up.
       teardowns: Partial<Record<CancellationTargetKind, CancellationTeardown>>;
       now: () => string;
+      // The same budget the caller path uses — passed through to the shared wrapper so an operation's
+      // attempts add up across processes rather than restarting with each replica.
+      verificationBudget?: number;
     },
   ) {}
 
   // Re-run every teardown that is still owed. Called on a timer by the composition root (leader-gated — it
   // acts on rows this process does not own). Returns how many operations it CLOSED.
   async reconcile(limit = 50): Promise<number> {
-    const { cancellations, teardowns, now } = this.deps;
+    const { cancellations, teardowns, now, verificationBudget } = this.deps;
     const owed = await cancellations.listIncomplete(limit);
     let closed = 0;
     for (const operation of owed) {
       const teardown = teardowns[operation.target.kind];
       if (!teardown) continue; // not ours to converge — another replica's coordinator owns this kind
-      let result: CancellationTeardownResult;
+      // ── ONE WRAPPER, BOTH PATHS (arch-review 54, Phase 5) ────────────────────────────────────────
+      //
+      // This called the teardown DIRECTLY and recorded a bare `fail(...)` — no `state`, so every failure read
+      // as `requested`. The caller-facing path recorded `verifying`, counted the attempt against the budget
+      // and eventually escalated. Same cluster, same stuck teardown, two different stories, and which one an
+      // operator read depended on whether the process that requested the cancel was still alive.
+      //
+      // The counter lives on the ROW precisely because "the retries are spread across processes", and the
+      // sweep is the process that spreading refers to. So the sweep goes through the same wrapper.
       try {
-        result = await teardown(operation.target.id);
-      } catch (err) {
-        // Stays owed, with the reason recorded. The next sweep tries again — this is the whole point of the
-        // row, so a failure here is not escalated into the sweep's own failure (one stuck target must not
-        // stop the reconciler from converging the others).
-        await cancellations
-          .fail(operation.target, err instanceof Error ? err.message : String(err), now())
-          .catch(() => undefined);
+        await runDurableTeardown(
+          { cancellations, now, ...(verificationBudget !== undefined ? { verificationBudget } : {}) },
+          operation.target,
+          async () => {
+            const result = await teardown(operation.target.id);
+            // `unactionable` is not a convergence and not a failure — the target is gone or was never
+            // aborted, so there is nothing to certify. The wrapper completes it either way; what differs is
+            // whether a certificate is attached.
+            if (result.kind === "converged") return result.certificate;
+            return undefined as unknown as CancellationCertificate;
+          },
+        );
+      } catch {
+        // Stays owed, with the reason recorded by the wrapper. One stuck target must not stop the reconciler
+        // from converging the others.
         continue;
       }
-      await cancellations
-        .complete(operation.target, now(), result.kind === "converged" ? result.certificate : undefined)
-        .catch(() => undefined);
       closed += 1;
     }
     return closed;

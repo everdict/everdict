@@ -42,7 +42,7 @@ const unquiet = () => {
 };
 
 // RED as of efe3657e, observed: `expected 'requested' to be 'verifying'`.
-describe.skip("[R54 PHASE-5 COUNTEREXAMPLE #16] the reconciler converges through the same wrapper as the caller", () => {
+describe("[R54 PHASE-5 COUNTEREXAMPLE #16 — CLOSED] the reconciler converges through the same wrapper as the caller", () => {
   it("records `verifying` — not a bare failure — when the postcondition read came back non-zero", async () => {
     const cancellations = new InMemoryCancellationStore();
     await cancellations.request(TARGET, NOW);
@@ -78,13 +78,21 @@ describe.skip("[R54 PHASE-5 COUNTEREXAMPLE #16] the reconciler converges through
 
     const operation = await cancellations.get(TARGET);
     expect(operation?.verificationAttempts, "the sweep's attempts did not count").toBe(2);
-    // …and having spent the budget, it escalates rather than sweeping forever in silence.
-    expect(operation?.state).toBe("unverifiable");
+    // …and having spent the budget it ESCALATES — which is not the same as closing. The row stays owed
+    // (`verifying`: the stops ran and the world did not come back quiet) and gains the alert. Planting this
+    // counterexample, it asserted `state === "unverifiable"`, following Wave E's shape; the phase that closed
+    // it concluded that a terminal state there removes a live-compute debt from the only loop that would ever
+    // retry it, so the debt and the alert are separate fields now.
+    expect(operation?.state).toBe("verifying");
+    expect(operation?.escalation?.kind).toBe("unverifiable");
+    expect(operation?.escalation?.attempts).toBe(2);
+    // Backed off rather than re-swept every cycle.
+    expect(operation?.nextAttemptAt).toBeTruthy();
   });
 });
 
 // RED as of efe3657e, observed: `expected [] to have a length of 1`.
-describe.skip("[R54 PHASE-5 COUNTEREXAMPLE #17] an unverifiable cancellation is escalated debt, not a closed one", () => {
+describe("[R54 PHASE-5 COUNTEREXAMPLE #17 — CLOSED] an unverifiable cancellation is escalated debt, not a closed one", () => {
   it("stays in the sweep, with the escalation recorded beside it", async () => {
     const cancellations: CancellationStore = new InMemoryCancellationStore();
     await cancellations.request(TARGET, NOW);

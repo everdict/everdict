@@ -34,11 +34,11 @@ function ledger(): {
   store: CancellationStore;
   completed: CancellationCertificate[];
   failed: Array<{ state: string; error: string }>;
-  abandoned: string[];
+  escalated: string[];
 } {
   const completed: CancellationCertificate[] = [];
   const failed: Array<{ state: string; error: string }> = [];
-  const abandoned: string[] = [];
+  const escalated: string[] = [];
   let attempts = 0;
   const store = {
     async request() {},
@@ -49,8 +49,8 @@ function ledger(): {
       if (state === "verifying") attempts += 1;
       failed.push({ state, error });
     },
-    async abandon(_t: CancellationTarget, reason: string) {
-      abandoned.push(reason);
+    async escalate(_t: CancellationTarget, reason: string) {
+      escalated.push(reason);
     },
     async get() {
       return { target: TARGET, state: "verifying" as const, requestedAt: NOW, verificationAttempts: attempts };
@@ -59,7 +59,7 @@ function ledger(): {
       return [];
     },
   } as unknown as CancellationStore;
-  return { store, completed, failed, abandoned };
+  return { store, completed, failed, escalated };
 }
 
 // RED as of 186f9fd9: the operation completed on the strength of the teardown returning — no probe was made,
@@ -112,14 +112,14 @@ describe("[R53 WAVE-E COUNTEREXAMPLE #24 — CLOSED] an unverifiable readback ke
       CANCELLATION_OPERATION_STATES,
       "no verifying state — a readback that cannot be taken has nowhere to live",
     ).toContain("verifying");
-    expect(
-      CANCELLATION_OPERATION_STATES,
-      "no unverifiable end — an unreachable orchestrator would leave an operation that can never close",
-    ).toContain("unverifiable");
+    // `unverifiable` remains in the vocabulary for rows written before mig 0190 — it is no longer PRODUCED
+    // (arch-review 54, Phase 5): a debt whose compute may still be running does not belong outside the sweep,
+    // so the alert became a field on an owed row. See the escalation case below.
+    expect(CANCELLATION_OPERATION_STATES).toContain("unverifiable");
   });
 
-  it("closes the operation unverifiable once the readback budget is spent", async () => {
-    const { store, abandoned } = ledger();
+  it("escalates — and keeps the operation owed — once the readback budget is spent", async () => {
+    const { store, escalated } = ledger();
     const failing = async (): Promise<CancellationCertificate> => {
       throw Object.assign(new Error("cluster unreachable"), { data: { activeManagedWork: 0, unverifiable: 1 } });
     };
@@ -128,14 +128,15 @@ describe("[R53 WAVE-E COUNTEREXAMPLE #24 — CLOSED] an unverifiable readback ke
     await runDurableTeardown({ cancellations: store, now: () => NOW, verificationBudget: 2 }, TARGET, failing).catch(
       () => undefined,
     );
-    expect(abandoned).toEqual([]);
+    expect(escalated).toEqual([]);
     await runDurableTeardown({ cancellations: store, now: () => NOW, verificationBudget: 2 }, TARGET, failing).catch(
       () => undefined,
     );
 
-    // …and it closes WITH its reason, because an operation nobody can converge must not sit owed forever
-    // pretending it might.
-    expect(abandoned[0], "an unreachable orchestrator leaves an operation that can never close").toContain(
+    // …and it raises the alert WITH its reason, while the row stays owed. Wave E closed it here, which took
+    // an operation whose compute may still be running out of the only loop that would ever retry it
+    // (arch-review 54, Phase 5).
+    expect(escalated[0], "an unreachable orchestrator left the operation with no alert raised").toContain(
       "could not be established",
     );
   });
