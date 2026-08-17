@@ -14,6 +14,7 @@ import {
   type JudgeRunConfig,
   type KillOutcome,
   NotFoundError,
+  type ReadResult,
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
@@ -26,6 +27,8 @@ import {
   attemptIdOf,
   isPulledCommandTrace,
   killConverged,
+  readOk,
+  readOrUnknown,
   worstKillOutcome,
 } from "@everdict/contracts";
 // Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
@@ -1477,7 +1480,8 @@ export class RunService {
     // reintroduce the blast radius the handles exist to remove. Runs with no handle are the legacy ones
     // (attempts opened before this column existed) and the lanes that mint none (self-hosted leases, which
     // arm (3) above already revoked).
-    const works = await this.workHandles(executionId);
+    const worksRead = await this.workHandles(executionId);
+    const works = worksRead.kind === "read" ? worksRead.value : [];
     // ── A STOP THAT COULD NOT BE CONFIRMED IS NOT A STOP (arch-review 52, Wave 3) ────────────────────
     //
     // Both arms used to be `.catch(failure)` over a `Promise<void>`, and the seam underneath swallowed the
@@ -1496,7 +1500,13 @@ export class RunService {
         ),
       );
     };
-    if (works.length > 0 && this.deps.killWork) {
+    if (worksRead.kind === "unknown") {
+      // UNKNOWN NEVER WIDENS SCOPE (arch-review 53, Wave A.5). Whether this run placed managed work is
+      // unestablished, so neither arm is available: the exact kill has no handle to use, and the case-id
+      // fallback would stop compute belonging to runs this cancel says nothing about. The operation stays
+      // owed with the reason recorded, and the reconciler converges it once the ledger answers.
+      outcomes.push({ status: "unknown", reason: worksRead.reason });
+    } else if (works.length > 0 && this.deps.killWork) {
       for (const work of works)
         await attempted(this.deps.killWork(rec.tenant, rec.runtime, work), `kill ${work.externalJobId}`);
     } else if (this.deps.killCase) {
@@ -1557,12 +1567,20 @@ export class RunService {
     };
   }
 
-  // The exact work this execution placed, oldest attempt first. Best-effort READ: a ledger that cannot be
-  // listed must not stop a cancel from tearing down by the fallback — an unreadable ledger is the same
-  // situation as an empty one, and both mean "address it the old way".
-  private async workHandles(executionId: string): Promise<RuntimeWorkRef[]> {
-    const attempts = await this.deps.attempts?.list(executionId).catch(() => []);
-    return (attempts ?? []).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : []));
+  // The exact work this execution placed, oldest attempt first.
+  //
+  // THREE-VALUED (arch-review 53, Wave A.5). The previous version caught the ledger error and answered `[]`,
+  // with the reasoning written down beside it: "an unreadable ledger is the same situation as an empty one,
+  // and both mean address it the old way". They are not the same situation. An empty ledger means this
+  // execution placed no managed work; an unreadable one means nobody knows what it placed — and "address it
+  // the old way" is the case-id kill, which stops every concurrent run of the same case. So a database blip
+  // during a cancel widened one run's teardown into everyone's.
+  private async workHandles(executionId: string): Promise<ReadResult<RuntimeWorkRef[]>> {
+    const attempts = this.deps.attempts;
+    if (!attempts) return readOk([]); // no ledger wired at all — this deployment records no handles, established
+    const read = await readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
+    if (read.kind !== "read") return read;
+    return readOk(read.value.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])));
   }
 
   // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route
@@ -1588,11 +1606,26 @@ export class RunService {
     // store is evidence. Without the identity the store falls back to its own clock, which is the writer's
     // and therefore not an authority on which execution answered the case. A missing receipt (never
     // committed, legacy row, no store wired) reads exactly as before.
-    const canonicalAttemptId =
+    // WHICH attempt this child's verdict rests on, from the receipt ledger that decided it.
+    //
+    // A ledger that cannot be READ is not a ledger with no receipt (arch-review 53, Wave A.5). The previous
+    // version caught the error into `[]`, which produced `undefined` here and sent the read down the
+    // clock-resolved path — the exact substitution Wave 7's identity read exists to refuse, reached by a
+    // database blip instead of by a decision. The read is refused instead: a caller asking for a child's
+    // evidence gets nothing rather than possibly-another-attempt's bytes.
+    const receipts =
       record.parentScorecardId !== undefined && this.deps.caseReceipts !== undefined
-        ? (await this.deps.caseReceipts.list(record.parentScorecardId).catch(() => []))?.find(
-            (receipt) => receipt.childRunId === record.id,
-          )?.attemptId
+        ? await this.deps.caseReceipts.read(record.parentScorecardId)
+        : readOk([]);
+    if (receipts.kind === "unknown")
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: runId, reason: receipts.reason },
+        `Cannot establish which attempt's evidence run ${runId} rests on: ${receipts.reason}`,
+      );
+    const canonicalAttemptId =
+      receipts.kind === "read"
+        ? receipts.value.find((receipt) => receipt.childRunId === record.id)?.attemptId
         : undefined;
     const sealed = await this.deps.trajectories?.get(
       tenant,

@@ -1,4 +1,4 @@
-import type { CaseCommitOutcome, CaseCommitReceipt } from "@everdict/contracts";
+import { type CaseCommitOutcome, type CaseCommitReceipt, type ReadResult, readOrUnknown } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
 import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
 import type { RunStore } from "./run-store.js";
@@ -54,6 +54,12 @@ export interface CaseReceiptStore {
   ): Promise<CaseSettleOutcome>;
   // Every receipt of one batch — the parent's aggregation input, and the parity check against the ledger.
   list(scorecardId: string): Promise<CaseCommitReceipt[]>;
+  // The same listing, three-valued (arch-review 53, Wave A.5). `list` throws on a ledger fault and every
+  // decision-grade caller was wrapping it in `.catch(() => [])`, which turns "the ledger is down" into "this
+  // batch committed nothing" — and the evidence read downstream then serves whichever plane sealed first
+  // instead of the attempt the receipt named. Callers that DECIDE on the answer use this one; a list endpoint
+  // that should 500 keeps using `list`.
+  read(scorecardId: string): Promise<ReadResult<CaseCommitReceipt[]>>;
 }
 
 // In-process store for dev/test — the same posture as the InMemory run/scorecard stores. The Map key is the
@@ -109,6 +115,10 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
       ),
     );
     return task;
+  }
+
+  async read(scorecardId: string): Promise<ReadResult<CaseCommitReceipt[]>> {
+    return readOrUnknown(() => this.list(scorecardId), `receipt ledger for ${scorecardId}`);
   }
 
   async list(scorecardId: string): Promise<CaseCommitReceipt[]> {

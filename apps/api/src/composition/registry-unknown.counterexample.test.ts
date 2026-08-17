@@ -33,7 +33,7 @@ const spec = (id: string): RuntimeSpec =>
 
 // RED as of 186f9fd9: `expected 'absent' to be 'unknown'` — the registry threw, no backend was built, and the
 // empty fold certified that the work is gone.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #25] a kill that reached no cluster is not a converged kill", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #25 — CLOSED] a kill that reached no cluster is not a converged kill", () => {
   it("reports unknown when the runtime registry could not be read", async () => {
     const access = buildRuntimeAccess({
       runtimeRegistry: {
@@ -54,7 +54,7 @@ describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #25] a kill that reached no cluster 
 });
 
 // RED as of 186f9fd9: same fold, reached through the case-id arm — the legacy lane certifies just as falsely.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #26] the case-id fallback reports unknown for the same reason", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #26 — CLOSED] the case-id fallback reports unknown for the same reason", () => {
   it("does not certify absence when no lane could be resolved", async () => {
     const access = buildRuntimeAccess({
       runtimeRegistry: {
@@ -75,7 +75,7 @@ describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #26] the case-id fallback reports un
 });
 
 // RED as of 186f9fd9: a backend that cannot answer is skipped, and the skip is invisible in the fold.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #27] a lane that answered nothing is counted as unknown", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #27 — CLOSED] a lane that answered nothing is counted as unknown", () => {
   it("a resolvable runtime whose backend is not work-addressable does not silently converge", async () => {
     const built = vi.fn(() => ({ id: "nomad-1", async dispatch() {}, async capacity() {} }) as never);
     const access = buildRuntimeAccess({

@@ -4,7 +4,14 @@ import type {
   ExecutionAttemptStore,
   RunStore,
 } from "@everdict/application-control";
-import { type CaseCommitOutcome, type CaseCommitReceipt, InternalError, type RunRecord } from "@everdict/contracts";
+import {
+  type CaseCommitOutcome,
+  type CaseCommitReceipt,
+  InternalError,
+  type ReadResult,
+  type RunRecord,
+  readOrUnknown,
+} from "@everdict/contracts";
 import { type SqlClient, withTransaction } from "../client.js";
 import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
 import { PgRunStore } from "./pg-run-store.js";
@@ -166,6 +173,12 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
       if (err instanceof UnsettledSignal) return { kind: "unsettled" };
       throw err; // a store fault is reported as one — never converted into an outcome
     }
+  }
+
+  // Three-valued read (arch-review 53, Wave A.5) — see the port. A Postgres fault answers `unknown`, never
+  // an empty ledger, so a decision-grade caller can refuse instead of substituting.
+  async read(scorecardId: string): Promise<ReadResult<CaseCommitReceipt[]>> {
+    return readOrUnknown(() => this.list(scorecardId), `receipt ledger for ${scorecardId}`);
   }
 
   async list(scorecardId: string): Promise<CaseCommitReceipt[]> {

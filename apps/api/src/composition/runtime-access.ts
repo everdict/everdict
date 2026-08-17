@@ -52,19 +52,41 @@ export function buildRuntimeAccess(deps: {
     tenant: string,
     runtimeList: string | undefined,
     fn: (backend: Backend) => Promise<boolean>, // return true to stop iterating (handled)
-  ): Promise<void> => {
+  ): Promise<{ unresolved: string[] }> => {
     const targets = (runtimeList ?? "")
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t !== "" && !t.startsWith("self:")); // self-hosted lanes are lease queues — nothing to adopt/kill
+    // ── A LANE THAT COULD NOT BE RESOLVED IS NOT AN EMPTY LANE (arch-review 53, Wave A.5) ────────────
+    //
+    // `runtimeRegistry.get(...).catch(() => undefined)` used to collapse two situations into one skip: the
+    // tenant deregistered this runtime (a real absence) and the registry could not be read (a failover, a
+    // network partition). The kill paths below fold their per-backend answers with `worstKillOutcome`, whose
+    // identity is `absent` — so a teardown that reached NO cluster, asked NOTHING and learned NOTHING
+    // returned a CONVERGED answer and the cancellation operation completed on it. The strong
+    // `KillOutcome.unknown` value existed the whole time and no code path could produce it here.
+    //
+    // Reported rather than swallowed. Adoption still treats an unresolvable lane as silence (it falls back to
+    // re-dispatch, which is safe), and the kill paths turn each entry into an explicit `unknown`.
+    const unresolved: string[] = [];
     for (const target of targets) {
-      const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
+      const spec = await runtimeRegistry.get(tenant, target).catch((err: unknown) => {
+        unresolved.push(`${target}: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      });
       if (!spec) continue;
       const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
       const backend = runtimeBuildBackend(spec, { secretEnv });
-      if (await fn(backend)) return;
+      if (await fn(backend)) return { unresolved };
     }
+    return { unresolved };
   };
+
+  // The per-lane answers a kill fan-out could not obtain. An unresolvable lane and a backend that cannot be
+  // ASKED about the work are the same fact — "the postcondition is unestablished" — and `absent` is reserved
+  // for having asked and been told there is nothing there.
+  const unknownFor = (reasons: string[], what: string): KillOutcome[] =>
+    reasons.map((reason) => ({ status: "unknown" as const, reason: `${what}: runtime unresolved — ${reason}` }));
 
   // Adopt a still-alive backend job's finished result by caseId — shared by scorecard resume and
   // standalone-run boot recovery (P4 single-run durability): zero re-run when the job outlived the CP restart.
@@ -250,8 +272,15 @@ export function buildRuntimeAccess(deps: {
     work: RuntimeWorkRef,
   ): Promise<KillOutcome> => {
     const outcomes: KillOutcome[] = [];
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isWorkAddressable(backend)) return false;
+    const { unresolved } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isWorkAddressable(backend)) {
+        // Resolvable and unaskable. Nothing was confirmed about this work, so nothing may be certified.
+        outcomes.push({
+          status: "unknown",
+          reason: `killWork ${work.externalJobId}: this runtime cannot be addressed by work handle`,
+        });
+        return false;
+      }
       // A backend that THREW is still a failure, not a silence — `killWork` is contractually total, so this
       // only fires on a broken implementation, and turning it into `failed` is what keeps that honest.
       outcomes.push(
@@ -264,7 +293,7 @@ export function buildRuntimeAccess(deps: {
       );
       return false;
     });
-    return worstKillOutcome(outcomes);
+    return worstKillOutcome([...outcomes, ...unknownFor(unresolved, `killWork ${work.externalJobId}`)]);
   };
 
   // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
@@ -274,8 +303,14 @@ export function buildRuntimeAccess(deps: {
   // and on Nomad, every namespace's. Callers route here only when the attempt ledger recorded no handle.
   const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<KillOutcome> => {
     const outcomes: KillOutcome[] = [];
-    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
-      if (!isRecoverable(backend)) return false;
+    const { unresolved } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isRecoverable(backend)) {
+        outcomes.push({
+          status: "unknown",
+          reason: `kill ${caseId}: this runtime has no stop capability`,
+        });
+        return false;
+      }
       outcomes.push(
         await backend.kill(caseId).catch(
           (err: unknown): KillOutcome => ({
@@ -286,7 +321,7 @@ export function buildRuntimeAccess(deps: {
       );
       return false; // every runtime of the shard list gets the kill (the case may live on any of them)
     });
-    return worstKillOutcome(outcomes);
+    return worstKillOutcome([...outcomes, ...unknownFor(unresolved, `kill ${caseId}`)]);
   };
   return {
     eachRuntimeBackend,

@@ -55,7 +55,7 @@ const runningRun = (over: Partial<RunRecord> = {}): RunRecord => ({
 
 // RED as of 186f9fd9: `expected "spy" to not be called` — workHandles() swallows the ledger error, returns [],
 // and the `works.length > 0` branch falls through to the case-id kill.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #9] an unreadable attempt ledger does not widen the blast radius", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #9 — CLOSED] an unreadable attempt ledger does not widen the blast radius", () => {
   it("refuses to fall back to the case-id kill when the handle ledger could not be read", async () => {
     const store = new InMemoryRunStore();
     await store.create(runningRun());
@@ -86,7 +86,7 @@ describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #9] an unreadable attempt ledger doe
 });
 
 // RED as of 186f9fd9: the exact read is skipped and the clock-resolved read is served instead.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #10] an unreadable receipt ledger does not downgrade the evidence read", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #10 — CLOSED] an unreadable receipt ledger does not downgrade the evidence read", () => {
   it("refuses the clock-resolved trajectory when the canonical attempt could not be determined", async () => {
     const store = new InMemoryRunStore();
     await store.create(runningRun({ id: "child-1", status: "succeeded", parentScorecardId: "sc-1" }));
@@ -128,7 +128,7 @@ describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #10] an unreadable receipt ledger do
 });
 
 // RED as of 186f9fd9: `InMemoryCaseReceiptStore` has no three-valued read; the port answers with a bare array.
-describe.skip("[R53 WAVE-A.5 COUNTEREXAMPLE #11] the authority ports answer in three values", () => {
+describe("[R53 WAVE-A.5 COUNTEREXAMPLE #11 — CLOSED] the authority ports answer in three values", () => {
   it("a receipt ledger read reports read | absent | unknown rather than an array that means both", async () => {
     const store = new InMemoryCaseReceiptStore();
     const read = (store as unknown as Record<string, unknown>).read;
