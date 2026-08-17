@@ -1,8 +1,30 @@
-// The closed vocabulary of a cancellation operation. Two states and no more: the decision is already recorded
-// on the target itself (a scorecard's status `cancelled`/`superseded`, a run's `failed{CANCELLED}`), so this
-// row only ever answers "has the teardown finished". A `failed` state would be a lie — a teardown that threw
-// is still owed, which is exactly what `requested` means.
-export type CancellationOperationState = "requested" | "completed";
+// ── THE CLOSED VOCABULARY OF A CANCELLATION OPERATION ───────────────────────────────────────────────
+//
+// The decision is already recorded on the target itself (a scorecard's status `cancelled`/`superseded`, a
+// run's `failed{CANCELLED}`), so this row only ever answers "has the teardown finished". A `failed` state
+// would be a lie — a teardown that threw is still owed, which is exactly what `requested` means.
+//
+// `verifying` and `unverifiable` are Wave E's (arch-review 53). Completion used to mean "the stop commands
+// returned": `kills` counted converged RESPONSES, and `stopped` means the orchestrator accepted a delete,
+// not that the object is gone — a K8s Job in `Terminating` answers `stopped` while its container runs to its
+// grace period, and a Nomad deregister is asynchronous by design. So an operation could complete with
+// compute still burning, which is the one claim this whole protocol exists to be able to make honestly.
+//
+//   requested     — the teardown is owed and has not run to a readback.
+//   verifying     — the stops were issued and the postcondition read is in progress or came back non-zero.
+//                   Still owed; the sweep retries.
+//   completed     — a readback SAW zero live work. The certificate carries what it counted.
+//   unverifiable  — the readback could not be taken within this operation's budget (an orchestrator that
+//                   stays unreachable). Terminal WITH its reason, because an operation that can never
+//                   converge must not sit owed forever pretending it might — and an operator needs the
+//                   distinction between "we saw zero" and "we never got to look".
+export type CancellationOperationState = "requested" | "verifying" | "completed" | "unverifiable";
+export const CANCELLATION_OPERATION_STATES: readonly CancellationOperationState[] = [
+  "requested",
+  "verifying",
+  "completed",
+  "unverifiable",
+];
 
 // ── WHAT WAS CANCELLED (arch-review 52, Wave 3) ─────────────────────────────────────────────────────
 //
@@ -37,6 +59,23 @@ export interface CancellationCertificate {
   // Every stop this teardown issued, by the answer it got. `unknown`/`failed` are absent by construction —
   // either would have kept the operation owed — so a certificate showing only stopped/absent is the claim.
   kills?: { stopped: number; absent: number };
+  // ── WHAT THE READBACK SAW (arch-review 53, Wave E) ─────────────────────────────────────────────
+  //
+  // The fields above are an account of the CALLS this teardown made. These are an account of the WORLD it
+  // left behind, taken after those calls returned — which is the difference between "the stop commands
+  // converged" and "the compute is freed". An operation completes only when every one of them is zero.
+  //
+  // Absent (rather than 0) means this deployment cannot take that particular reading — no probe wired, no
+  // scheduler to ask. Absence is not a zero: the certificate says what it SAW, and a reader must not infer
+  // quiet from a measurement nobody took.
+  activeManagedWork?: number;
+  activeRunnerLeases?: number;
+  queuedDispatchIntents?: number;
+  activeWorkflows?: number;
+  liveChildren?: number;
+  // How many readings came back UNKNOWN — the cluster could not be asked. Non-zero keeps the operation owed;
+  // it is the reason `completed` and `unverifiable` are different states rather than one optimistic one.
+  unverifiable?: number;
   // Runner leases newly signalled to abort by this teardown. NOT a liveness reading: the hub's revocation
   // count reports rows it flagged this call, so a converged re-run reports 0 for "already flagged" exactly
   // as it would for "none existed". Recorded as evidence of the arm having run, never as proof of quiet.
@@ -53,6 +92,11 @@ export interface CancellationOperation {
   completedAt?: string;
   // Present only on a completed row — what the completion read back (see above).
   certificate?: CancellationCertificate;
+  // How many times the POSTCONDITION READ has come back non-zero for this operation (arch-review 53, Wave E).
+  // Counted on the row rather than in a process, because the retries are spread across replicas and a
+  // reconciler that restarted would otherwise begin the budget again. Absent = never verified (the stops
+  // themselves have not run to a readback yet).
+  verificationAttempts?: number;
 }
 
 // ── WHO OWNS A CANCEL'S TEARDOWN AFTER THE PROCESS DIES (arch-review 47 §5.2) ───────────────────────
@@ -87,7 +131,14 @@ export interface CancellationStore {
   complete(target: CancellationTarget, now: string, certificate?: CancellationCertificate): Promise<void>;
   // The teardown threw. Records WHY and leaves the row `requested` — the operation is still owed, and the
   // error is diagnostics for an operator, never an input to whether the reconciler retries.
-  fail(target: CancellationTarget, error: string, now: string): Promise<void>;
+  // `state` says WHERE the teardown got to (arch-review 53, Wave E): `requested` = the stops themselves did
+  // not run, `verifying` = they ran and the postcondition read did not come back zero. Both are owed; the
+  // distinction is what an operator reads to know whether compute was ever asked to stop.
+  fail(target: CancellationTarget, error: string, now: string, state?: "requested" | "verifying"): Promise<void>;
+  // Close an operation that can never converge — the readback budget is spent and the cluster is still
+  // unreachable. Terminal WITH its reason, because a row that sits owed forever is indistinguishable from one
+  // nobody is working on, and an operator needs "we never got to look" told apart from "we saw zero".
+  abandon(target: CancellationTarget, reason: string, now: string): Promise<void>;
   // What the reconciler sweeps: operations whose teardown is not known to have finished, oldest first. ALL
   // kinds — the coordinator dispatches each row to the teardown that knows how to converge it, and leaves
   // owed any kind it has no teardown for (a replica that cannot converge a row must not close it).
@@ -130,21 +181,42 @@ export class InMemoryCancellationStore implements CancellationStore {
     });
   }
 
-  async fail(target: CancellationTarget, error: string, now: string): Promise<void> {
+  async fail(
+    target: CancellationTarget,
+    error: string,
+    now: string,
+    state: "requested" | "verifying" = "requested",
+  ): Promise<void> {
+    const prior = this.operations.get(InMemoryCancellationStore.keyOf(target));
+    const attempts = (prior?.verificationAttempts ?? 0) + (state === "verifying" ? 1 : 0);
+    this.operations.set(InMemoryCancellationStore.keyOf(target), {
+      target,
+      state,
+      lastError: error,
+      requestedAt: prior?.requestedAt ?? now,
+      ...(attempts > 0 ? { verificationAttempts: attempts } : {}),
+    });
+  }
+
+  async abandon(target: CancellationTarget, reason: string, now: string): Promise<void> {
     const prior = this.operations.get(InMemoryCancellationStore.keyOf(target));
     this.operations.set(InMemoryCancellationStore.keyOf(target), {
       target,
-      state: "requested",
-      lastError: error,
+      state: "unverifiable",
+      lastError: reason,
       requestedAt: prior?.requestedAt ?? now,
+      completedAt: now,
     });
   }
 
   async listIncomplete(limit: number): Promise<CancellationOperation[]> {
-    return [...this.operations.values()]
-      .filter((op) => op.state !== "completed")
-      .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
-      .slice(0, limit);
+    return (
+      [...this.operations.values()]
+        // Terminal = completed OR unverifiable (arch-review 53, Wave E) — see the Pg twin.
+        .filter((op) => op.state !== "completed" && op.state !== "unverifiable")
+        .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
+        .slice(0, limit)
+    );
   }
 
   async get(target: CancellationTarget): Promise<CancellationOperation | undefined> {

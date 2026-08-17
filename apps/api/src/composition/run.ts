@@ -133,6 +133,13 @@ export function buildRun(deps: {
   // …and the EXACT one (arch-review 52, Wave 2): stop the object the dispatch actually created, from the
   // handle the attempt ledger persisted. `killCase` above is the fallback for runs that recorded none.
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
+  // The postcondition read behind a VERIFIED cancellation (arch-review 53, Wave E). `killWork` answers what
+  // the delete returned; this answers whether the object went away.
+  probeWork?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ) => Promise<"absent" | "live" | "unknown">;
   // The cancel TEARDOWN's durable owner (mig 0184/0186) — the run lane joins the ledger the batch lane has
   // owned since arch-review 47, so a crash between the CANCELLED commit and a successful kill leaves an
   // operation the coordinator sweeps rather than a terminal row over live compute.
@@ -233,6 +240,8 @@ export function buildRun(deps: {
     // User stop (POST /runs/:id/cancel): the terminal commit is the decision, these free the compute.
     killCase: deps.killCase,
     killWork: deps.killWork,
+    // …and the readback that decides whether the stop actually freed it (arch-review 53, Wave E).
+    ...(deps.probeWork ? { probeWork: deps.probeWork } : {}),
     cancelQueued: deps.cancelQueued,
     cancelLeased: deps.cancelLeased,
     ...(deps.cancellations ? { cancellations: deps.cancellations } : {}),

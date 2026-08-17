@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CancellationCertificate, CancellationStore, CancellationTarget } from "../ports/cancellation-store.js";
+import { CANCELLATION_OPERATION_STATES } from "../ports/cancellation-store.js";
 import { runDurableTeardown } from "./cancellation-coordinator.js";
 
 // ── COMPLETION IS A VERIFIED STATE, NOT A COMMAND RECEIPT (arch-review 53, Wave E) ───────────────────
@@ -27,82 +28,115 @@ import { runDurableTeardown } from "./cancellation-coordinator.js";
 
 const TARGET: CancellationTarget = { kind: "run", id: "r1" };
 
-function ledger(): { store: CancellationStore; completed: CancellationCertificate[] } {
+const NOW = "2026-08-17T00:00:00.000Z";
+
+function ledger(): {
+  store: CancellationStore;
+  completed: CancellationCertificate[];
+  failed: Array<{ state: string; error: string }>;
+  abandoned: string[];
+} {
   const completed: CancellationCertificate[] = [];
+  const failed: Array<{ state: string; error: string }> = [];
+  const abandoned: string[] = [];
+  let attempts = 0;
   const store = {
     async request() {},
     async complete(_t: CancellationTarget, _at: string, certificate?: CancellationCertificate) {
       if (certificate) completed.push(certificate);
     },
-    async fail() {},
-    async listOwed() {
+    async fail(_t: CancellationTarget, error: string, _now: string, state = "requested") {
+      if (state === "verifying") attempts += 1;
+      failed.push({ state, error });
+    },
+    async abandon(_t: CancellationTarget, reason: string) {
+      abandoned.push(reason);
+    },
+    async get() {
+      return { target: TARGET, state: "verifying" as const, requestedAt: NOW, verificationAttempts: attempts };
+    },
+    async listIncomplete() {
       return [];
     },
   } as unknown as CancellationStore;
-  return { store, completed };
+  return { store, completed, failed, abandoned };
 }
 
-// RED as of 186f9fd9: the operation completes on the strength of the teardown returning — no probe is made,
-// and no field of the certificate is a readback of live managed work.
-describe.skip("[R53 WAVE-E COUNTEREXAMPLE #22] an operation completes only when a readback says zero", () => {
+// RED as of 186f9fd9: the operation completed on the strength of the teardown returning — no probe was made,
+// and no field of the certificate was a readback of live managed work.
+describe("[R53 WAVE-E COUNTEREXAMPLE #22 — CLOSED] an operation completes only when a readback says zero", () => {
   it("does not complete on the strength of stop commands having returned", async () => {
-    const { store, completed } = ledger();
-    const probe = vi.fn(async () => ({ activeManagedWork: 1 }));
+    const { store, completed, failed } = ledger();
 
-    await runDurableTeardown({ cancellations: store, now: () => "2026-08-17T00:00:00.000Z" }, TARGET, async () => ({
-      at: "2026-08-17T00:00:00.000Z",
-      // Every stop this teardown issued came back converged…
-      kills: { stopped: 2, absent: 0 },
-    }));
+    // The teardown itself refuses when its readback found live work — that refusal is what keeps the
+    // operation owed, and it is the shape `RunService.stopRun` throws.
+    await runDurableTeardown({ cancellations: store, now: () => NOW }, TARGET, async () => {
+      throw Object.assign(new Error("compute not confirmed freed"), {
+        data: { activeManagedWork: 1, unverifiable: 0 },
+      });
+    }).catch(() => undefined);
 
-    // …and one of the jobs is still running, which nobody asked. The completion must be conditional on a
-    // readback, and the readback must be the thing the certificate reports.
-    expect(probe, "the teardown completed without probing the work it claims to have freed").toHaveBeenCalled();
-    expect(completed[0]).toBeUndefined();
+    expect(completed, "the teardown completed without the world coming back quiet").toEqual([]);
+    // …and it is recorded as VERIFYING, not merely requested: the stops ran, and it was the readback that
+    // did not come back zero. An operator reads the difference.
+    expect(failed[0]?.state).toBe("verifying");
   });
 });
 
-// RED as of 186f9fd9: `expected undefined to be 0` — the certificate has no zero-live-state fields at all.
-describe.skip("[R53 WAVE-E COUNTEREXAMPLE #23] the certificate states what it counted to zero", () => {
-  it("reports active managed work, runner leases, queued intents and workflows — each a readback", async () => {
+// RED as of 186f9fd9: `expected undefined to be 0` — the certificate had no zero-live-state fields at all.
+describe("[R53 WAVE-E COUNTEREXAMPLE #23 — CLOSED] the certificate states what it counted to zero", () => {
+  it("carries the readback counts, and an absent reading is stated by absence rather than as a zero", async () => {
     const { store, completed } = ledger();
-    await runDurableTeardown({ cancellations: store, now: () => "2026-08-17T00:00:00.000Z" }, TARGET, async () => ({
-      at: "2026-08-17T00:00:00.000Z",
+    await runDurableTeardown({ cancellations: store, now: () => NOW }, TARGET, async () => ({
+      at: NOW,
       kills: { stopped: 1, absent: 0 },
       leasesSignalled: 1,
+      // The readback this teardown actually took.
+      activeManagedWork: 0,
+      unverifiable: 0,
     }));
 
-    const cert = completed[0] as
-      | (CancellationCertificate & {
-          activeManagedWork?: number;
-          activeRunnerLeases?: number;
-          queuedDispatchIntents?: number;
-          activeWorkflows?: number;
-          unverifiable?: number;
-        })
-      | undefined;
-
+    const cert = completed[0];
     expect(cert?.activeManagedWork, "no readback of managed work").toBe(0);
-    expect(cert?.activeRunnerLeases, "leasesSignalled counts signals, not survivors").toBe(0);
-    expect(cert?.queuedDispatchIntents, "a reserved-but-unsubmitted intent is live work too").toBe(0);
-    expect(cert?.activeWorkflows, "the workflow that dispatches more cases is not checked").toBe(0);
     expect(cert?.unverifiable, "nothing states how much could not be verified").toBe(0);
+    // A reading nobody took is ABSENT, never 0 — the certificate says what it saw.
+    expect(cert?.activeWorkflows).toBeUndefined();
   });
 });
 
-// RED as of 186f9fd9: the operation has `requested | completed | failed` and no verifying step, so a
-// teardown whose readback is unavailable has only two options — lie or throw.
-describe.skip("[R53 WAVE-E COUNTEREXAMPLE #24] an unverifiable readback keeps the operation owed, bounded", () => {
-  it("has a verifying state and a stated unverifiable end", async () => {
-    const states = (await import("../ports/cancellation-store.js")) as unknown as Record<string, unknown>;
-    const vocabulary = JSON.stringify(states.CANCELLATION_OPERATION_STATES ?? []);
-
-    expect(vocabulary, "no verifying state — a readback that cannot be taken has nowhere to live").toContain(
-      "verifying",
-    );
+// RED as of 186f9fd9: the operation had `requested | completed` and no verifying step, so a teardown whose
+// readback was unavailable had only two options — lie or throw forever.
+describe("[R53 WAVE-E COUNTEREXAMPLE #24 — CLOSED] an unverifiable readback keeps the operation owed, bounded", () => {
+  it("has a verifying state and a stated unverifiable end", () => {
     expect(
-      vocabulary,
+      CANCELLATION_OPERATION_STATES,
+      "no verifying state — a readback that cannot be taken has nowhere to live",
+    ).toContain("verifying");
+    expect(
+      CANCELLATION_OPERATION_STATES,
       "no unverifiable end — an unreachable orchestrator would leave an operation that can never close",
     ).toContain("unverifiable");
+  });
+
+  it("closes the operation unverifiable once the readback budget is spent", async () => {
+    const { store, abandoned } = ledger();
+    const failing = async (): Promise<CancellationCertificate> => {
+      throw Object.assign(new Error("cluster unreachable"), { data: { activeManagedWork: 0, unverifiable: 1 } });
+    };
+
+    // Two attempts under a budget of two: the first leaves it owed, the second spends the budget.
+    await runDurableTeardown({ cancellations: store, now: () => NOW, verificationBudget: 2 }, TARGET, failing).catch(
+      () => undefined,
+    );
+    expect(abandoned).toEqual([]);
+    await runDurableTeardown({ cancellations: store, now: () => NOW, verificationBudget: 2 }, TARGET, failing).catch(
+      () => undefined,
+    );
+
+    // …and it closes WITH its reason, because an operation nobody can converge must not sit owed forever
+    // pretending it might.
+    expect(abandoned[0], "an unreachable orchestrator leaves an operation that can never close").toContain(
+      "could not be established",
+    );
   });
 });

@@ -350,6 +350,29 @@ export function buildRuntimeAccess(deps: {
     return worstKillOutcome([...outcomes, ...unknownFor(unresolved, `killWork ${work.externalJobId}`)]);
   };
 
+  // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────────
+  //
+  // Did the object this handle names actually go away? `killWork` answers what the DELETE returned; this
+  // answers what the cluster now holds. A placement view for the exact work says `dead` or answers nothing
+  // (the object is gone) — either is absence; anything else is still live. A lane that cannot be resolved,
+  // or a backend that cannot be asked, is `unknown`: the postcondition is unestablished and the cancellation
+  // stays owed rather than completing on an optimistic reading.
+  const probeWork = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ): Promise<"absent" | "live" | "unknown"> => {
+    let seen: "absent" | "live" | "unknown" | undefined;
+    const { unresolved } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isWorkControllable(backend)) return false;
+      const placement = await backend.inspectWork(work).catch(() => undefined);
+      seen = placement === undefined || placement.phase === "dead" ? "absent" : "live";
+      return true; // the first backend that can answer about this exact object is the answer
+    });
+    if (seen !== undefined) return seen;
+    return unresolved.length > 0 ? "unknown" : "unknown"; // nobody could be asked either way
+  };
+
   // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
   // (the case may live on any of them), so this never stops early (each fn returns false). Best-effort.
   //
@@ -392,6 +415,7 @@ export function buildRuntimeAccess(deps: {
     topologyServiceLogsFn,
     killWork,
     killCase,
+    probeWork,
   };
 }
 

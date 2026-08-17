@@ -15,12 +15,14 @@ interface CancellationRow {
   requested_at: string | Date;
   completed_at: string | Date | null;
   certificate: unknown;
+  verification_attempts?: number | null;
 }
 
 // The row's `state` is a column this adapter writes and nothing else does, so the only way it can hold a
 // string outside the vocabulary is a hand-edited database. The reconciler treats anything that is not
-// "completed" as owed (the WHERE clause below), which is the fail-safe direction: an unrecognizable state
-// gets one more idempotent teardown rather than a silently abandoned operation.
+// terminal as owed (the WHERE clause below), which is the fail-safe direction: an unrecognizable state gets
+// one more idempotent teardown rather than a silently abandoned operation. The two TERMINAL states are read
+// exactly (arch-review 53, Wave E) — `unverifiable` is a decision this system made and must not be re-swept.
 //
 // `target_kind` is read the other way round — an UNRECOGNIZED kind stays unrecognized (it is passed through
 // as-is and the coordinator finds no teardown for it, leaving the row owed). Coercing it to "scorecard"
@@ -28,13 +30,21 @@ interface CancellationRow {
 function toOperation(row: CancellationRow): CancellationOperation {
   return {
     target: { kind: row.target_kind as CancellationTargetKind, id: row.scorecard_id },
-    state: row.state === "completed" ? "completed" : "requested",
+    state:
+      row.state === "completed"
+        ? "completed"
+        : row.state === "unverifiable"
+          ? "unverifiable"
+          : row.state === "verifying"
+            ? "verifying"
+            : "requested",
     ...(row.last_error !== null ? { lastError: row.last_error } : {}),
     requestedAt: new Date(row.requested_at).toISOString(),
     ...(row.completed_at !== null ? { completedAt: new Date(row.completed_at).toISOString() } : {}),
     ...(row.certificate !== null && row.certificate !== undefined
       ? { certificate: row.certificate as CancellationCertificate }
       : {}),
+    ...(row.verification_attempts ? { verificationAttempts: row.verification_attempts } : {}),
   };
 }
 
@@ -70,20 +80,46 @@ export class PgCancellationStore implements CancellationStore {
     );
   }
 
-  async fail(target: CancellationTarget, error: string, now: string): Promise<void> {
+  async fail(
+    target: CancellationTarget,
+    error: string,
+    now: string,
+    state: "requested" | "verifying" = "requested",
+  ): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, last_error, requested_at)
-       VALUES ($1, $2, 'requested', $3, $4)
+       VALUES ($1, $2, $5, $3, $4)
        ON CONFLICT (scorecard_id) DO UPDATE
-         SET state = 'requested', target_kind = $2, last_error = $3, completed_at = NULL, certificate = NULL`,
-      [target.id, target.kind, error, now],
+         SET state = $5,
+             target_kind = $2,
+             last_error = $3,
+             completed_at = NULL,
+             certificate = NULL,
+             -- The budget is counted on the ROW (arch-review 53, Wave E): retries are spread across
+             -- replicas, and a reconciler that restarted would otherwise begin counting again.
+             verification_attempts = everdict_cancellation_operations.verification_attempts
+               + CASE WHEN $5 = 'verifying' THEN 1 ELSE 0 END`,
+      [target.id, target.kind, error, now, state],
+    );
+  }
+
+  // Terminal, with the reason (arch-review 53, Wave E) — see the port.
+  async abandon(target: CancellationTarget, reason: string, now: string): Promise<void> {
+    await this.client.query(
+      `INSERT INTO everdict_cancellation_operations (scorecard_id, target_kind, state, last_error, requested_at, completed_at)
+       VALUES ($1, $2, 'unverifiable', $3, $4, $4)
+       ON CONFLICT (scorecard_id) DO UPDATE
+         SET state = 'unverifiable', target_kind = $2, last_error = $3, completed_at = $4`,
+      [target.id, target.kind, reason, now],
     );
   }
 
   async listIncomplete(limit: number): Promise<CancellationOperation[]> {
     const { rows } = await this.client.query<CancellationRow>(
       `SELECT * FROM everdict_cancellation_operations
-        WHERE state <> 'completed'
+        -- Everything still OWED. 'unverifiable' joins 'completed' as terminal (arch-review 53, Wave E): a
+        -- readback the cluster will not answer is closed WITH its reason, not swept forever.
+        WHERE state NOT IN ('completed', 'unverifiable')
         ORDER BY requested_at
         LIMIT $1`,
       [limit],

@@ -684,6 +684,7 @@ async function main(): Promise<void> {
     topologyServiceLogsFn,
     killCase,
     killWork,
+    probeWork,
   } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
   // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness

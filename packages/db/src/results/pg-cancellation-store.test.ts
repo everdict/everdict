@@ -40,9 +40,23 @@ describe("PgCancellationStore", () => {
 
     await store.fail({ kind: "run", id: "r-1" }, "nomad unreachable", "2026-08-15T00:01:00.000Z");
 
-    expect(calls[0]?.text).toContain("state = 'requested'"); // still owed — `fail` is not a terminal state
+    // The state is a PARAMETER now (arch-review 53, Wave E): `requested` = the stops did not run,
+    // `verifying` = they ran and the postcondition read did not come back zero. Both are owed; the row says
+    // which, and an operator reads the difference.
     expect(calls[0]?.text).toContain("completed_at = NULL");
-    expect(calls[0]?.params).toEqual(["r-1", "run", "nomad unreachable", "2026-08-15T00:01:00.000Z"]);
+    expect(calls[0]?.params).toEqual(["r-1", "run", "nomad unreachable", "2026-08-15T00:01:00.000Z", "requested"]);
+  });
+
+  it("fail(verifying) records the readback attempt on the row, so the budget survives a replica restart", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const store = new PgCancellationStore(client);
+
+    await store.fail({ kind: "run", id: "r-1" }, "1 job still live", "2026-08-15T00:02:00.000Z", "verifying");
+
+    expect(calls[0]?.params?.[4]).toBe("verifying");
+    // Counted in SQL, on the row — the retries are spread across replicas, and a reconciler that restarted
+    // would otherwise begin the budget again.
+    expect(calls[0]?.text).toContain("verification_attempts");
   });
 
   it("listIncomplete asks for everything not completed, oldest first", async () => {
@@ -76,7 +90,9 @@ describe("PgCancellationStore", () => {
 
     const owed = await store.listIncomplete(25);
 
-    expect(calls[0]?.text).toContain("state <> 'completed'");
+    // `unverifiable` joins `completed` as terminal (arch-review 53, Wave E) — a readback the cluster will
+    // not answer is closed WITH its reason, never swept forever.
+    expect(calls[0]?.text).toContain("state NOT IN ('completed', 'unverifiable')");
     expect(calls[0]?.text).toContain("ORDER BY requested_at");
     expect(calls[0]?.params).toEqual([25]);
     expect(owed).toEqual([

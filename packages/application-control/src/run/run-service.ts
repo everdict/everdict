@@ -185,6 +185,22 @@ export interface RunServiceDeps {
   // the fallback for a run whose attempts recorded no handle (legacy rows, a lane that mints none, a stamp
   // that lost the race with a crash). See `stopRun`.
   killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<KillOutcome>;
+  // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────
+  //
+  // A stop that answered `stopped` means the orchestrator ACCEPTED a delete — a K8s Job in `Terminating`
+  // answers that while its container runs to its grace period, and a Nomad deregister is asynchronous by
+  // design. So "the commands converged" is not "the compute is freed", and completing a cancellation on the
+  // former is the one claim this protocol exists to make honestly. This asks the cluster whether the object
+  // the handle names is actually gone.
+  //
+  // `unknown` is a first-class answer: a cluster that cannot be asked leaves the postcondition unestablished,
+  // and the operation stays owed rather than completing on an optimistic reading. Absent dep = this
+  // deployment takes no readback, and the certificate says so by carrying no count.
+  probeWork?: (
+    tenant: string,
+    runtime: string | undefined,
+    work: RuntimeWorkRef,
+  ) => Promise<"absent" | "live" | "unknown">;
   // Drop a still-queued scheduler entry — it would otherwise dispatch only to be discarded.
   cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
   // Revoke a self-hosted lease: the runner aborts the in-flight case on its next heartbeat. AWAITED by the
@@ -1563,6 +1579,26 @@ export class RunService {
         }. The cancellation stays owed and the reconciler retries.`,
       );
     }
+    // ── AND NOW THE READBACK (arch-review 53, Wave E) ─────────────────────────────────────────────
+    //
+    // Everything above is an account of the CALLS this teardown made. This is the world it left behind: each
+    // handle asked whether its object is actually gone. A `live` reading means the stop was accepted and the
+    // compute has not stopped yet; an `unknown` one means nobody could ask. Either keeps the operation owed
+    // — the caller's throw below is what leaves it that way, and the reconciler converges it.
+    let activeManagedWork = 0;
+    let unverifiable = 0;
+    if (this.deps.probeWork && works.length > 0)
+      for (const work of works) {
+        const seen = await this.deps.probeWork(rec.tenant, rec.runtime, work).catch((): "unknown" => "unknown");
+        if (seen === "live") activeManagedWork += 1;
+        else if (seen === "unknown") unverifiable += 1;
+      }
+    if (activeManagedWork > 0 || unverifiable > 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: rec.id, activeManagedWork, unverifiable },
+        `Run ${rec.id} is cancelled and its compute is not confirmed freed: ${activeManagedWork} job(s) still live, ${unverifiable} unreadable. The cancellation stays owed and the reconciler retries.`,
+      );
     return {
       at: this.now(),
       kills: {
@@ -1570,6 +1606,9 @@ export class RunService {
         absent: outcomes.filter((o) => o.status === "absent").length,
       },
       leasesSignalled,
+      // The zeroes this completion is standing on — stated only where a reading was actually taken, because
+      // an absent probe is not a quiet cluster.
+      ...(this.deps.probeWork && works.length > 0 ? { activeManagedWork: 0, unverifiable: 0 } : {}),
       ...(cascade ? { cascadeCancelled: cascade.cancelled } : {}),
     };
   }

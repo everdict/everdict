@@ -27,7 +27,16 @@ export type CancellationTeardown = (targetId: string) => Promise<CancellationTea
 // the standalone run cannot drift into two protocols. A store-less deployment gets exactly today's behavior:
 // the teardown runs, a failure throws, the caller's retry converges.
 export async function runDurableTeardown(
-  deps: { cancellations?: CancellationStore; now: () => string },
+  deps: {
+    cancellations?: CancellationStore;
+    now: () => string;
+    // How many readback attempts an operation gets before it is closed `unverifiable` (arch-review 53,
+    // Wave E). Unbounded owed-ness is a new incident class, not a stronger guarantee: an orchestrator that
+    // stays unreachable would otherwise leave a row nobody can ever close and an operator with no signal
+    // distinguishing it from one still being worked. Absent = unbounded, which is the pre-Wave-E behavior
+    // and the right default for a caller-driven retry (the caller stops asking).
+    verificationBudget?: number;
+  },
   target: CancellationTarget,
   teardown: () => Promise<CancellationCertificate>,
 ): Promise<void> {
@@ -53,7 +62,27 @@ export async function runDurableTeardown(
   } catch (err) {
     // The 5xx keeps its meaning — the caller is still told the teardown did not finish. What changes is
     // that the caller is no longer the only one who can finish it.
-    await operations.fail(target, err instanceof Error ? err.message : String(err), deps.now()).catch(() => undefined);
+    //
+    // …and WHERE it got to (arch-review 53, Wave E). A throw carrying `activeManagedWork`/`unverifiable`
+    // came from the POSTCONDITION READ: the stops were issued and the world did not come back quiet, which
+    // is a different situation for an operator than "the stops themselves failed". The row says which.
+    // The postcondition read is the one that throws with these fields (see `RunService.stopRun`); anything
+    // else came from the stops themselves. Read structurally rather than by error class, so a teardown that
+    // grows a new failure shape does not silently become "verifying".
+    const detail = (err as { data?: { unverifiable?: number } } | undefined)?.data;
+    const reached: "requested" | "verifying" = detail?.unverifiable !== undefined ? "verifying" : "requested";
+    const message = err instanceof Error ? err.message : String(err);
+    // The budget is spent when this operation has already failed verification this many times — read from
+    // the row rather than counted in memory, because the retries are spread across processes.
+    const prior = await operations.get(target).catch(() => undefined);
+    const attempts = (prior?.verificationAttempts ?? 0) + (reached === "verifying" ? 1 : 0);
+    if (deps.verificationBudget !== undefined && reached === "verifying" && attempts >= deps.verificationBudget) {
+      await operations
+        .abandon(target, `the postcondition could not be established in ${attempts} attempts: ${message}`, deps.now())
+        .catch(() => undefined);
+      throw err;
+    }
+    await operations.fail(target, message, deps.now(), reached).catch(() => undefined);
     throw err;
   }
   await operations.complete(target, deps.now(), certificate).catch(() => undefined);
