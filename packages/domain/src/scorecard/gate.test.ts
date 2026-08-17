@@ -601,7 +601,13 @@ describe("applyInputTrust — the pins' input observation is a judgment conditio
       // Judgment provenance is RECORDED on these fixtures (arch-review 53, Wave D): this block is about the
       // input half of trust, and a pin that also said nothing about its author would be refused for the
       // other reason — testing one condition through a fixture that trips a second one certifies neither.
-      judgmentProvenance: { kind: "recorded", digest: "sha256:judgments" },
+      judgmentProvenance: {
+        kind: "recorded" as const,
+        digest: "sha256:judgments",
+        expectedUnits: 1,
+        recordedUnits: 1,
+        complete: true,
+      },
       ...(inputObservation ? { inputObservation } : {}),
     }) as GateScoringPin;
 
@@ -675,7 +681,13 @@ describe("refuseGateForInputTrust — the pre-arithmetic refusal", () => {
     ({
       revision: 1,
       scorePlaneDigest: "sha256:x",
-      judgmentProvenance: { kind: "recorded", digest: "sha256:judgments" },
+      judgmentProvenance: {
+        kind: "recorded" as const,
+        digest: "sha256:judgments",
+        expectedUnits: 1,
+        recordedUnits: 1,
+        complete: true,
+      },
       ...(inputObservation ? { inputObservation } : {}),
     }) as GateScoringPin;
 

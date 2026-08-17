@@ -88,6 +88,22 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/publication-operation.counterexample.test.ts"],
   },
   {
+    // Phase 3, the identity half: read the whole suffix again and one judge becomes one per criterion.
+    name: "Phase 3 — a criterion metric is read as its own judge",
+    file: "packages/domain/src/scorecard/judge-execution-spans.ts",
+    from: '  const colon = rest.indexOf(":");',
+    to: "  const colon = -1;",
+    suite: ["--root", "packages/domain", "src/scorecard/judgment-coverage.counterexample.test.ts"],
+  },
+  {
+    // …and the coverage half: let presence stand in for authorship again.
+    name: "Phase 3 — an empty receipt vector counts as complete provenance",
+    file: "packages/domain/src/scorecard/scoring-revision.ts",
+    from: "              complete: input.judgments.length >= expectedJudgmentUnits(input),",
+    to: "              complete: true,",
+    suite: ["--root", "packages/domain", "src/scorecard/judgment-coverage.counterexample.test.ts"],
+  },
+  {
     name: "Wave D — the gate stops asking who judged",
     file: "packages/domain/src/scorecard/gate.ts",
     from: '    if (pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)',

@@ -92,14 +92,23 @@ function inputTrustReasons(
     // than waved through: history is not retro-vouched by its age, the same call the input half already makes.
     // Asked only of a side that HAS a pin. A missing pin is the pre-ledger record, and the input half above
     // already refuses it as `legacy_unverified` — a second reason for the same absence is noise, not rigour.
+    //
+    // …AND `recorded` IS NOT ENOUGH BY ITSELF (arch-review 54, Phase 3). The statement now carries how many
+    // judgments the pass owed against how many it holds, because asking only for the KIND accepted a vector
+    // that covered nothing: `[]` was `recorded`, with the digest of the empty set. A partial vector is the
+    // same defect at a smaller scale — it names some invocations and stays silent about the rest, and a gate
+    // cannot tell which verdicts the silence covers.
     const provenance = pin?.judgmentProvenance;
-    if (pin !== undefined && provenance?.kind !== "recorded" && policy.allowUnrecordedJudgments !== true)
+    const vouched = provenance?.kind === "recorded" && provenance.complete;
+    if (pin !== undefined && !vouched && policy.allowUnrecordedJudgments !== true)
       reasons.push({
         kind: "judgment_unrecorded",
         detail:
-          provenance?.kind === "unrecorded"
-            ? `the ${side}'s pinned judgment records no author — ${provenance.reason}; refused unless the policy records allowUnrecordedJudgments`
-            : `the ${side}'s pinned judgment predates judgment provenance — nothing states which invocation produced its verdicts; refused unless the policy records allowUnrecordedJudgments`,
+          provenance?.kind === "recorded"
+            ? `the ${side}'s pinned judgment records ${provenance.recordedUnits} of ${provenance.expectedUnits} judgment(s) — the rest name no invocation; refused unless the policy records allowUnrecordedJudgments`
+            : provenance?.kind === "unrecorded"
+              ? `the ${side}'s pinned judgment records no author — ${provenance.reason}; refused unless the policy records allowUnrecordedJudgments`
+              : `the ${side}'s pinned judgment predates judgment provenance — nothing states which invocation produced its verdicts; refused unless the policy records allowUnrecordedJudgments`,
       });
   }
   return reasons;

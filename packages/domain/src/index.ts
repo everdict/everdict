@@ -129,6 +129,7 @@ export {
   executionEvidenceTrace,
   type JudgeEvidenceScope,
   judgeEvidenceEmitter,
+  judgeFamilyOf,
   judgeExecutionSpans,
 } from "./scorecard/judge-execution-spans.js";
 export { type EvidenceStatus, evidenceStatus } from "./scorecard/evidence-status.js";

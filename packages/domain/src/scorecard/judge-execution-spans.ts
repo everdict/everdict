@@ -52,6 +52,27 @@ export interface JudgeEvidenceScope {
   claim?: { generation: number; attempt: number };
 }
 
+// ── WHICH JUDGE A METRIC BELONGS TO — ONE OWNER (arch-review 54, Phase 3) ────────────────────────────
+//
+// The inverse of the naming above, and it lives here for the same reason the minter does: a judge's metric
+// grammar is one thing, and reading it in two places is how the two readings diverged. `judge:<id>` is the
+// overall verdict; `judge:<id>:<criterion>` is one criterion of that SAME judge (the runner rewrites a
+// JudgeGrader's rows with `metric.replace(/^judge/, "judge:<id>")`). So the family is the FIRST segment,
+// exactly — `JudgeIdSchema` forbids ':' in a judge id and the selection surface refuses one at submit, so
+// nothing after the first colon can be part of an id.
+//
+// It was written twice. `trace-sink-service` took the first segment and got it right; the receipt builder
+// sliced the whole suffix and minted a phantom judge per criterion, each pointing at an evidence plane that
+// never existed. Anything that is not in the family (a grader's row, the inline judge's bare `judge`) is not
+// judge-attributable and answers undefined.
+export function judgeFamilyOf(metric: string): string | undefined {
+  if (!metric.startsWith("judge:")) return undefined;
+  const rest = metric.slice("judge:".length);
+  const colon = rest.indexOf(":");
+  const id = colon === -1 ? rest : rest.slice(0, colon);
+  return id === "" ? undefined : id;
+}
+
 export function judgeEvidenceEmitter(judgeId: string, scope?: JudgeEvidenceScope): string {
   if (scope === undefined) return `judge:${judgeId}`;
   const { passId, claim } = scope;

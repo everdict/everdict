@@ -1,6 +1,7 @@
 import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardExport, TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/contracts";
 import { measuredScores, renderScoreDetail } from "@everdict/contracts";
+import { judgeFamilyOf } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
@@ -36,16 +37,6 @@ interface ExportContext {
   harness: string;
   sinkOverride?: string;
   judgeModels?: Record<string, string>; // judge id → declared model label (ScoringService.collectJudgeModelMap)
-}
-
-// "judge:<id>" / "judge:<id>:<criterion>" → the judge id. Anything else (grader metrics, the inline judge's
-// bare "judge") is not judge-attributable and takes the batch identity.
-function judgeIdOf(metric: string): string | undefined {
-  if (!metric.startsWith("judge:")) return undefined;
-  const rest = metric.slice("judge:".length);
-  const colon = rest.indexOf(":");
-  const id = colon === -1 ? rest : rest.slice(0, colon);
-  return id === "" ? undefined : id;
 }
 
 export class TraceSinkService {
@@ -122,7 +113,7 @@ export class TraceSinkService {
           // declared model when the attribution map states one; everything else — grader metrics, the inline
           // judge's bare "judge", a harness judge with no stated model — carries the batch identity. The map
           // only ever states declared models, so nothing here invents one.
-          const judgeId = judgeIdOf(sc.metric);
+          const judgeId = judgeFamilyOf(sc.metric);
           const source =
             (judgeId !== undefined ? ctx.judgeModels?.[judgeId] : undefined) ?? `everdict:${ctx.scorecardId}`;
           return {

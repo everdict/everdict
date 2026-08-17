@@ -159,9 +159,18 @@ export const GateScoringPinSchema = z.object({
   // The pinned side's judgment provenance (arch-review 53, Wave D) — projected from the revision so a gate
   // can refuse a comparison whose judgment AUTHOR is unknown, exactly as it already refuses one whose
   // execution INPUT is unvouched.
+  // Carries the COVERAGE the revision states (arch-review 54, Phase 3), not just the kind: a pin that
+  // projected only `recorded` would let the gate accept a vector covering nothing, which is the defect that
+  // made the field's first version decorative.
   judgmentProvenance: z
     .discriminatedUnion("kind", [
-      z.object({ kind: z.literal("recorded"), digest: z.string() }),
+      z.object({
+        kind: z.literal("recorded"),
+        digest: z.string(),
+        expectedUnits: z.number().int().nonnegative(),
+        recordedUnits: z.number().int().nonnegative(),
+        complete: z.boolean(),
+      }),
       z.object({ kind: z.literal("unrecorded"), reason: z.string() }),
     ])
     .optional(),

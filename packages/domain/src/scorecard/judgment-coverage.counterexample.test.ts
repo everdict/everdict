@@ -51,7 +51,7 @@ const multiCriteria: CaseResult[] = [
 // RED as of efe3657e, observed:
 //   expected [ 'a', 'a:helpfulness', 'a:safety' ] to deeply equal [ 'a' ]
 //   expected [ 'judge:a#initial:sc-1', …(2) ] to deeply equal [ 'judge:a#initial:sc-1' ]
-describe.skip("[R54 PHASE-3 COUNTEREXAMPLE #9] one invoked judge is one receipt, however many criteria it scored", () => {
+describe("[R54 PHASE-3 COUNTEREXAMPLE #9 — CLOSED] one invoked judge is one receipt, however many criteria it scored", () => {
   it("does not mint a phantom judge per criterion metric", () => {
     const receipts = judgmentReceiptsFromPlane(multiCriteria, passId);
     expect(
@@ -71,8 +71,8 @@ describe.skip("[R54 PHASE-3 COUNTEREXAMPLE #9] one invoked judge is one receipt,
 // RED as of efe3657e, observed:
 //   expected 'recorded' not to be 'recorded'   (an empty vector is accepted as authorship)
 //   expected undefined to be 1                 (provenance states no coverage at all)
-describe.skip("[R54 PHASE-3 COUNTEREXAMPLE #10] provenance states coverage, not merely presence", () => {
-  it("a pass that judged cases and recorded no receipt is not `recorded`", () => {
+describe("[R54 PHASE-3 COUNTEREXAMPLE #10 — CLOSED] provenance states coverage, not merely presence", () => {
+  it("a pass that judged cases and recorded no receipt is not COMPLETE provenance", () => {
     // A selected judge, a judged case, and a vector the derivation could not fill — the situation the
     // metric-string derivation produces on any plane it fails to recognise.
     const revisions = appendScoringRevision(undefined, {
@@ -83,11 +83,20 @@ describe.skip("[R54 PHASE-3 COUNTEREXAMPLE #10] provenance states coverage, not 
       inputObservation: { completed: true, cases: 1, diverged: 0, vouched: 1 },
       createdAt: "2026-08-18T00:00:00.000Z",
     } as never);
-    const provenance = (revisions[0] as { judgmentProvenance?: { kind: string } } | undefined)?.judgmentProvenance;
+    const provenance = (
+      revisions[0] as
+        | { judgmentProvenance?: { kind: string; expectedUnits?: number; recordedUnits?: number; complete?: boolean } }
+        | undefined
+    )?.judgmentProvenance;
+    // `kind` stays "recorded" ON PURPOSE — this pass DID state something, and "we hold 0 of 1" is a different
+    // fact from "the stage could not be read", which an operator needs to tell apart. What must not be true
+    // is that a decision may rely on it, and that is `complete`.
     expect(
-      provenance?.kind,
-      "a judged pass with an empty receipt vector was recorded as having stated its authorship",
-    ).not.toBe("recorded");
+      provenance?.complete,
+      "a judged pass with an empty receipt vector was accepted as having stated its authorship",
+    ).toBe(false);
+    expect(provenance?.expectedUnits).toBe(1);
+    expect(provenance?.recordedUnits).toBe(0);
   });
 
   it("a recorded provenance says how many judgments it expected and how many it holds", () => {

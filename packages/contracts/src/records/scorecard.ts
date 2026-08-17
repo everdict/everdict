@@ -468,9 +468,26 @@ export const ScoringRevisionSchema = z.object({
   //
   // Every revision born after this wave carries one of the two, and an `unrecorded` one names its reason. A
   // revision with NEITHER is pre-Wave-D history — the gate treats that as unrecorded, and says so.
+  // ── PRESENCE IS NOT COVERAGE (arch-review 54, Phase 3) ─────────────────────────────────────────────
+  //
+  // Wave D added this field so a reader could ask one question instead of inferring from an absence. It then
+  // decided `recorded` from `input.judgments !== undefined`, and `[]` is not `undefined`. So a pass that
+  // selected a judge, judged a hundred cases and recorded not one receipt carried `kind: "recorded"` with the
+  // digest of the empty set — and the gate, which asks only `kind !== "recorded"`, let it through as vouched.
+  //
+  // A statement of authorship has to say how much it covers, or it is a statement about its own existence.
+  // `expectedUnits` is the (case × selected judge) count the pass OWED; `recordedUnits` is what the vector
+  // holds; `complete` is the equality a decision may rely on. They are required on `recorded` rather than
+  // optional, because an optional count is the same field that went missing the first time.
   judgmentProvenance: z
     .discriminatedUnion("kind", [
-      z.object({ kind: z.literal("recorded"), digest: z.string() }),
+      z.object({
+        kind: z.literal("recorded"),
+        digest: z.string(),
+        expectedUnits: z.number().int().nonnegative(),
+        recordedUnits: z.number().int().nonnegative(),
+        complete: z.boolean(),
+      }),
       z.object({ kind: z.literal("unrecorded"), reason: z.string() }),
     ])
     .optional(),

@@ -10,7 +10,7 @@ import type {
 import { ScoreSchema, encodeCaseKey } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import { caseObservationDigest } from "./case-result-digest.js";
-import { judgeEvidenceEmitter } from "./judge-execution-spans.js";
+import { judgeEvidenceEmitter, judgeFamilyOf } from "./judge-execution-spans.js";
 import { childKey } from "./scoring-plan.js";
 
 // Scoring identity (docs/architecture/experiment-identity: the JUDGMENT axis) — the pure decisions behind
@@ -167,6 +167,27 @@ export function judgmentReceiptSetDigest(receipts: readonly JudgmentReceipt[]): 
   return contentDigest(orderedReceipts(receipts));
 }
 
+// HOW MANY JUDGMENTS THIS PASS OWED A RECEIPT FOR (arch-review 54, Phase 3).
+//
+// Counted from the plane the pass is certifying, not from the selection: a judge that was selected but
+// produced no row for a case (the case was ungradeable, the judge could not be resolved) authored no
+// judgment there, and demanding a receipt for it would make every legitimately-skipped case look like
+// missing provenance. What IS owed is a receipt for every (case, judge family) the plane actually carries —
+// the same pairs `judgmentReceiptsFromPlane` derives, so a complete vector is exactly a covering one.
+//
+// The point of computing it separately is that `recordedUnits` then has something to be compared TO. A count
+// that came from the vector itself would agree with the vector by construction, which is the shape of an
+// assertion that cannot fail.
+function expectedJudgmentUnits(input: Pick<ScoringPassInput, "results">): number {
+  const pairs = new Set<string>();
+  for (const result of input.results)
+    for (const score of result.scores ?? []) {
+      const judgeId = judgeFamilyOf(score.metric);
+      if (judgeId !== undefined) pairs.add(JSON.stringify([childKey(result.caseId, result.trial), judgeId]));
+    }
+  return pairs.size;
+}
+
 export interface ScoringPassInput {
   kind: ScoringRevision["kind"];
   judges: ScoringRevision["judges"];
@@ -243,11 +264,21 @@ export function appendScoringRevision(
         ? {
             judgments: orderedReceipts(input.judgments),
             judgmentReceiptSetDigest: judgmentReceiptSetDigest(input.judgments),
-            // …and the STATEMENT of provenance, born with the vector (arch-review 53, Wave D). A reader asks
-            // this one field instead of inferring from an absence that used to mean two things.
+            // …and the STATEMENT of provenance, born with the vector (arch-review 53, Wave D), now stating
+            // COVERAGE rather than its own existence (arch-review 54, Phase 3).
+            //
+            // `kind: "recorded"` used to follow from `judgments !== undefined`, and `[]` is not `undefined`.
+            // A pass that selected a judge, judged every case and recorded nothing therefore carried recorded
+            // provenance with the digest of the empty set, and the gate — asking only `kind !== "recorded"` —
+            // read it as vouched. What a decision needs is not "a vector exists" but "the vector covers the
+            // judgments this pass owed", so the count is part of the statement and `complete` is the field a
+            // gate may rely on.
             judgmentProvenance: {
               kind: "recorded" as const,
               digest: judgmentReceiptSetDigest(input.judgments),
+              expectedUnits: expectedJudgmentUnits(input),
+              recordedUnits: input.judgments.length,
+              complete: input.judgments.length >= expectedJudgmentUnits(input),
             },
           }
         : {
@@ -354,7 +385,16 @@ export function judgmentReceiptsFromPlane(
     for (const score of result.scores ?? []) {
       // `judge:<id>` is the metric family a judge writes; a grader's rows are not judgments and carry no
       // invocation identity to record.
-      const judgeId = score.metric.startsWith("judge:") ? score.metric.slice("judge:".length) : undefined;
+      // THE FAMILY, NOT THE WHOLE SUFFIX (arch-review 54, Phase 3). `slice("judge:".length)` read a
+      // three-segment criterion metric as a different judge: a registered judge's rows are rewritten into
+      // `judge:<id>` for its overall verdict and `judge:<id>:<criterion>` for each criterion, so judge `a`
+      // with two criteria minted THREE receipts — `a`, `a:helpfulness`, `a:safety` — each carrying an
+      // `evidenceEmitter` naming a plane that does not exist. A receipt exists to point at its evidence, and
+      // the join key was wrong for every criterion row.
+      //
+      // The first segment is exact rather than a heuristic: `JudgeIdSchema` forbids ':' in a judge id, and the
+      // selection surface refuses one at submit, so everything after the first colon is criterion.
+      const judgeId = judgeFamilyOf(score.metric);
       if (judgeId === undefined) continue;
       const rows = byJudge.get(judgeId) ?? [];
       rows.push(score);
