@@ -32,22 +32,27 @@ import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
 // Live-observability lane readers (from buildRuntimeAccess) — RunService wraps them in lazy closures.
 export interface RuntimeAccessReaders {
+  // The trailing `work` is the exact object to address when the caller holds one (arch-review 53, Wave B);
+  // omitted, the lane falls back to the case-id resolution and its documented ambiguity.
   readCaseLogsFn: (
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
     stream?: "stdout" | "stderr",
+    work?: RuntimeWorkRef,
   ) => Promise<string | undefined>;
   readCaseEventsFn: (
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    work?: RuntimeWorkRef,
   ) => Promise<TraceEvent[] | undefined>;
   execInSandboxFn: (
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
     command: string,
+    work?: RuntimeWorkRef,
   ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
   screenEndpointFn: (tenant: string, runtimeList: string | undefined, runId: string) => Promise<string | undefined>;
   captureBrowserScreenFn: (
@@ -187,8 +192,10 @@ export function buildRun(deps: {
     },
     ...(deps.onAgentRunCancelled ? { onAgentRunCancelled: deps.onAgentRunCancelled } : {}),
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
-    readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
-    execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
+    readCaseLogs: (tenant, runtimeList, caseId, stream, work) =>
+      readCaseLogsFn(tenant, runtimeList, caseId, stream, work),
+    execInSandbox: (tenant, runtimeList, caseId, command, work) =>
+      execInSandboxFn(tenant, runtimeList, caseId, command, work),
     // Self-hosted twin of execInSandbox for the workbench's repo reads — park on the hub, the runner answers.
     ...(deps.caseFsRequests
       ? {

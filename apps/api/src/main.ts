@@ -671,6 +671,7 @@ async function main(): Promise<void> {
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
   const {
     adoptCaseFn,
+    adoptWorkFn,
     readCaseLogsFn,
     readCaseEventsFn,
     openTerminalStreamFn,
@@ -825,6 +826,12 @@ async function main(): Promise<void> {
     scorecardService,
     service,
     adoptCaseFn,
+    // Boot recovery adopts by the HANDLE the attempt ledger holds, falling back to the case-id resolution
+    // only for rows that carry none (arch-review 53, Wave B). Adoption decides what a receipt vouches for,
+    // so "the newest job of this case" is not an acceptable resolution for it.
+    adoptWorkFn,
+    workHandlesFor: async (executionId: string) =>
+      (await executionAttemptStore.list(executionId)).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])),
     owner: REPLICA_ID,
     replicas,
   });

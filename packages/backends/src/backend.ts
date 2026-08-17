@@ -137,6 +137,46 @@ export interface WorkAddressable {
   killWork(work: RuntimeWorkRef): Promise<KillOutcome>;
 }
 
+// ── EXACT ADDRESSING IS THE DEFAULT, NOT A KILL-ONLY CAPABILITY (arch-review 53, Wave B) ─────────────
+//
+// Wave 2 gave the stop an exact address and stopped there. Every other control path into live work kept
+// resolving a CASE ID the way the old kill did — list the jobs carrying `everdict.dev/case=<slug>`, take the
+// newest — and "newest" is whichever job the cluster created last, not the one the caller asked about. Two
+// runs of one case are two live jobs by construction (a re-evaluation beside a scheduled batch, a retry
+// beside the attempt it replaces, a shadow beside its baseline), so:
+//
+//   logs      → another run's output in this run's live panel
+//   exec      → a command executed inside another run's sandbox: a WRITE into a world nobody asked about
+//   inspect   → this run's placement panel describing another run's phase, node and events
+//   adopt     → boot recovery handing THIS execution the verdict ANOTHER execution's job produced
+//
+// The last one is not observability. Adoption decides which bytes a receipt vouches for, so a case-id-resolved
+// adopt puts the decision plane at the mercy of creation timestamps.
+//
+// A backend that can name its work (`reserve`) can be asked about exactly that work. The case-id twins on
+// `Recoverable`/`Observable`/`CaseInspectable`/`CaseSampleable` survive as the LEGACY compatibility surface —
+// pre-handle rows, and the debug/display reads a human drives — and are forbidden on recovery, cancellation
+// and decision paths (`unknown-collapse-guard`'s sibling scan enforces the ban).
+export interface ManagedWorkControl {
+  // Harvest the finished result of exactly this work, for boot recovery. `absent` means the object is not
+  // there (safe to re-dispatch); `unknown` means the cluster could not be asked (re-dispatching may
+  // double-spend) — the same three-valued discipline the case-id adopt already had, now about the right job.
+  adoptWork(work: RuntimeWorkRef): Promise<AdoptOutcome>;
+  // Current output of exactly this work's pod/alloc. undefined = the object is gone or its log is unreadable.
+  logsForWork(work: RuntimeWorkRef, stream?: LogStream): Promise<string | undefined>;
+  // The live event lines this work emitted (the same stream `caseEvents` reads, addressed exactly).
+  eventsForWork(work: RuntimeWorkRef): Promise<TraceEvent[] | undefined>;
+  // One-shot exec inside exactly this work's container. undefined = no live container.
+  execInWork(
+    work: RuntimeWorkRef,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
+  // Placement view of exactly this work — phase, unit, node, events.
+  inspectWork(work: RuntimeWorkRef): Promise<CasePlacement | undefined>;
+  // Live resource usage of exactly this work.
+  sampleWork(work: RuntimeWorkRef): Promise<CaseRuntimeSample | undefined>;
+}
+
 // Observable — live-progress introspection into a case's running sandbox (logs + one-shot exec). The sandbox is
 // already untrusted+isolated, so the control plane gates WHO may call these (run creator / workspace admin).
 export interface Observable {
@@ -281,6 +321,13 @@ export function isRecoverable(backend: Backend): backend is Backend & Recoverabl
 
 export function isWorkAddressable(backend: Backend): backend is Backend & WorkAddressable {
   return typeof (backend as Partial<WorkAddressable>).killWork === "function";
+}
+
+// Narrows to the exact-work control surface (arch-review 53, Wave B). A backend implements all of it or none:
+// the methods share one resolution (the handle names the object) and a partial implementation would put a
+// caller back to guessing which reads are exact.
+export function isWorkControllable(backend: Backend): backend is Backend & ManagedWorkControl {
+  return typeof (backend as Partial<ManagedWorkControl>).adoptWork === "function";
 }
 
 export function isPoolReporting(backend: Backend): backend is Backend & PoolReporting {

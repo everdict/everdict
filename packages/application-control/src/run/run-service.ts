@@ -234,6 +234,9 @@ export interface RunServiceDeps {
     runtimeList: string | undefined,
     caseId: string,
     stream?: "stdout" | "stderr",
+    // The exact object to read, when this run's ledger holds one (arch-review 53, Wave B). Without it the
+    // lane resolves "the newest job of this case" — another run's, whenever two runs of one case are live.
+    work?: RuntimeWorkRef,
   ) => Promise<string | undefined>;
   // Open an interactive shell stream inside a run's live sandbox (observability ⑥). undefined = no live container.
   openTerminalStream?: (
@@ -270,6 +273,7 @@ export interface RunServiceDeps {
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    work?: RuntimeWorkRef,
   ) => Promise<TraceEvent[] | undefined>;
   // Self-hosted twin of execInSandbox for the run workbench's repo reads: the control plane cannot exec into a
   // runner's sandbox, so these PARK a request the runner's in-case servicing loop (RunContext.caseFs) answers,
@@ -286,6 +290,7 @@ export interface RunServiceDeps {
     runtimeList: string | undefined,
     caseId: string,
     command: string,
+    work?: RuntimeWorkRef,
   ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
   // Case-scoped placement read (runtime debugging): where the case's orchestrator job stands INSIDE the cluster —
   // queued/blocked (capacity verdict)/starting/running/dead, node, and the orchestrator event feed. Resolves the
@@ -294,6 +299,7 @@ export interface RunServiceDeps {
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    work?: RuntimeWorkRef,
   ) => Promise<CasePlacement | undefined>;
   // Topology health roster (runtime debugging, service harnesses): the warm topology's per-service state behind
   // the run's runtime lane. Best-effort — absent/miss = no topology info, never an error.
@@ -553,7 +559,15 @@ export class RunService {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
     const result = this.deps.execInSandbox
-      ? await this.deps.execInSandbox(record.tenant, record.runtime, record.caseId, command).catch(() => undefined)
+      ? await this.deps
+          .execInSandbox(
+            record.tenant,
+            record.runtime,
+            record.caseId,
+            command,
+            await this.displayWork(`evd-run-${record.id}`),
+          )
+          .catch(() => undefined)
       : undefined;
     return { record, result };
   }
@@ -663,7 +677,14 @@ export class RunService {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
     const placement = this.deps.inspectCasePlacement
-      ? await this.deps.inspectCasePlacement(record.tenant, record.runtime, record.caseId).catch(() => undefined)
+      ? await this.deps
+          .inspectCasePlacement(
+            record.tenant,
+            record.runtime,
+            record.caseId,
+            await this.displayWork(`evd-run-${record.id}`),
+          )
+          .catch(() => undefined)
       : undefined;
     return { record, placement };
   }
@@ -720,7 +741,15 @@ export class RunService {
     const pushed = this.deps.pushLogs?.(RunService.runIdFor(record));
     if (stream !== "stderr" && pushed) return { record, text: pushed };
     const text = this.deps.readCaseLogs
-      ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId, stream).catch(() => undefined)
+      ? await this.deps
+          .readCaseLogs(
+            record.tenant,
+            record.runtime,
+            record.caseId,
+            stream,
+            await this.displayWork(`evd-run-${record.id}`),
+          )
+          .catch(() => undefined)
       : undefined;
     // A lane with no orchestrator job carries ONE stream, so the stderr view falls back to that same pushed log —
     // otherwise switching streams on a self-hosted run reads as "this run wrote nothing to stderr", which is a
@@ -738,7 +767,9 @@ export class RunService {
     if (!record) return undefined;
     const pushed = this.deps.liveTraceEvents?.(RunService.runIdFor(record)) ?? [];
     const pulled = this.deps.readCaseEvents
-      ? ((await this.deps.readCaseEvents(record.tenant, record.runtime, record.caseId).catch(() => undefined)) ?? [])
+      ? ((await this.deps
+          .readCaseEvents(record.tenant, record.runtime, record.caseId, await this.displayWork(`evd-run-${record.id}`))
+          .catch(() => undefined)) ?? [])
       : [];
     // Disjoint sources (a runner pushes, a managed job prints — never both), so concatenation is the merge; the
     // dispatch marks lead, mirroring the sealed layout (TraceRecordingDispatcher prepends the placement plane).
@@ -1575,6 +1606,15 @@ export class RunService {
   // execution placed no managed work; an unreadable one means nobody knows what it placed — and "address it
   // the old way" is the case-id kill, which stops every concurrent run of the same case. So a database blip
   // during a cancel widened one run's teardown into everyone's.
+  // The one handle a display lane addresses — the newest this execution placed. `undefined` when the ledger
+  // holds none or could not be read: a display read then falls back to the case-id resolution, which is a
+  // possibly-wrong panel rather than a possibly-wrong record (arch-review 53, Wave B). Decisions do not use
+  // this; they use `workHandles`, which reports `unknown` instead of guessing.
+  private async displayWork(executionId: string): Promise<RuntimeWorkRef | undefined> {
+    const read = await this.workHandles(executionId);
+    return read.kind === "read" ? read.value.at(-1) : undefined;
+  }
+
   private async workHandles(executionId: string): Promise<ReadResult<RuntimeWorkRef[]>> {
     const attempts = this.deps.attempts;
     if (!attempts) return readOk([]); // no ledger wired at all — this deployment records no handles, established

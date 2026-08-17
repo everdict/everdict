@@ -18,6 +18,7 @@ import {
   isShellable,
   isTopologyInspectable,
   isWorkAddressable,
+  isWorkControllable,
 } from "@everdict/backends";
 import type {
   CaseResult,
@@ -114,6 +115,34 @@ export function buildRuntimeAccess(deps: {
     return adopted;
   };
 
+  // ── ADOPTION, ADDRESSED BY THE HANDLE (arch-review 53, Wave B) ────────────────────────────────────
+  //
+  // Adoption is not an observability read: it HARVESTS a finished job and hands the result back as this
+  // execution's own, which decides what a receipt vouches for. `adoptCaseFn` resolves "the newest job of this
+  // case", and two runs of one case are two jobs — so the case-id form could hand run A the verdict run B's
+  // job produced. Boot recovery uses THIS whenever the attempt ledger holds a handle; `adoptCaseFn` remains
+  // for the pre-handle rows.
+  const adoptWorkFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ): Promise<{ result?: CaseResult; established: boolean }> => {
+    let harvested: CaseResult | undefined;
+    let established = true;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isWorkControllable(backend)) return false;
+      const outcome = await backend.adoptWork(work);
+      if (outcome.status === "adopted") {
+        harvested = outcome.result;
+        return true;
+      }
+      // `unknown` leaves liveness unestablished — the caller must not re-dispatch on it (double-spend).
+      if (outcome.status === "unknown") established = false;
+      return false;
+    });
+    return { ...(harvested !== undefined ? { result: harvested } : {}), established };
+  };
+
   // Live-progress log read — same lane resolution as adoption; the first backend with a readable log wins.
   // stream=stderr reads the job's stderr (harness progress); default stdout (the result stream).
   const readCaseLogsFn = async (
@@ -121,9 +150,17 @@ export function buildRuntimeAccess(deps: {
     runtimeList: string | undefined,
     caseId: string,
     stream?: LogStream,
+    // The exact object to read, when the caller holds one (arch-review 53, Wave B). Without it the read
+    // resolves "the newest job of this case", which is another run's job whenever two runs of one case are
+    // live — a panel showing a stranger's output. With it, the tail belongs to the run that asked.
+    work?: RuntimeWorkRef,
   ): Promise<string | undefined> => {
     let text: string | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (work && isWorkControllable(backend)) {
+        text = await backend.logsForWork(work, stream).catch(() => undefined);
+        return text !== undefined;
+      }
       if (!isObservable(backend)) return false;
       text = await backend.logs(caseId, stream).catch(() => undefined);
       return text !== undefined;
@@ -137,9 +174,14 @@ export function buildRuntimeAccess(deps: {
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    work?: RuntimeWorkRef,
   ): Promise<TraceEvent[] | undefined> => {
     let events: TraceEvent[] | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (work && isWorkControllable(backend)) {
+        events = await backend.eventsForWork(work).catch(() => undefined);
+        return events !== undefined;
+      }
       if (!isObservable(backend)) return false;
       events = await backend.caseEvents(caseId).catch(() => undefined);
       return events !== undefined;
@@ -196,9 +238,16 @@ export function buildRuntimeAccess(deps: {
     runtimeList: string | undefined,
     caseId: string,
     command: string,
+    // A command runs INSIDE a container — an exec resolved by case id is a write into a world the caller
+    // never named (arch-review 53, Wave B). With a handle it lands in the sandbox it was issued for.
+    work?: RuntimeWorkRef,
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> => {
     let out: { stdout: string; stderr: string; exitCode: number } | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (work && isWorkControllable(backend)) {
+        out = await backend.execInWork(work, command).catch(() => undefined);
+        return out !== undefined;
+      }
       if (!isObservable(backend)) return false;
       out = await backend.exec(caseId, command).catch(() => undefined);
       return out !== undefined;
@@ -212,9 +261,14 @@ export function buildRuntimeAccess(deps: {
     tenant: string,
     runtimeList: string | undefined,
     caseId: string,
+    work?: RuntimeWorkRef,
   ): Promise<CasePlacement | undefined> => {
     let placement: CasePlacement | undefined;
     await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (work && isWorkControllable(backend)) {
+        placement = await backend.inspectWork(work).catch(() => undefined);
+        return placement !== undefined;
+      }
       if (!isCaseInspectable(backend)) return false;
       placement = await backend.inspectCase(caseId).catch(() => undefined);
       return placement !== undefined;
@@ -326,6 +380,7 @@ export function buildRuntimeAccess(deps: {
   return {
     eachRuntimeBackend,
     adoptCaseFn,
+    adoptWorkFn,
     readCaseLogsFn,
     readCaseEventsFn,
     openTerminalStreamFn,
@@ -356,8 +411,27 @@ export async function runStartupRecovery(deps: {
   scorecardService: Pick<ScorecardService, "resume">;
   service: Pick<RunService, "resume">;
   adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
+  // The exact-work adopt and the ledger read that feeds it (arch-review 53, Wave B). Optional so a
+  // composition that wires no attempt ledger keeps today's behavior — with the case-id resolution and its
+  // documented blast radius, which is what the pre-handle rows have anyway.
+  adoptWorkFn?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    work: RuntimeWorkRef,
+  ) => Promise<{ result?: CaseResult; established: boolean }>;
+  workHandlesFor?: (executionId: string) => Promise<RuntimeWorkRef[]>;
 }): Promise<void> {
-  const { scorecardStore, store, scorecardService, service, adoptCaseFn, owner, replicas } = deps;
+  const {
+    scorecardStore,
+    store,
+    scorecardService,
+    service,
+    adoptCaseFn,
+    adoptWorkFn,
+    workHandlesFor,
+    owner,
+    replicas,
+  } = deps;
   const recovered = await recoverInterrupted({
     scorecards: scorecardStore,
     runs: store,
@@ -381,7 +455,24 @@ export async function runStartupRecovery(deps: {
     // called without the terminal fence.
     resumeRun: async (r, authority) => {
       void (async () => {
-        const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
+        // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
+        // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
+        // that mints none) falls back to "the newest job of this case", which can be another run's.
+        const handles = workHandlesFor ? await workHandlesFor(`evd-run-${r.id}`).catch(() => []) : [];
+        let adopted: CaseResult | undefined;
+        if (handles.length > 0 && adoptWorkFn) {
+          for (const work of handles) {
+            const outcome = await adoptWorkFn(r.tenant, r.runtime, work).catch(
+              (): { result?: CaseResult; established: boolean } => ({ established: false }),
+            );
+            if (outcome.result !== undefined) {
+              adopted = outcome.result;
+              break;
+            }
+          }
+        } else {
+          adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
+        }
         // A resume that THREW told us nothing, and the claim is binding — so it falls to the tombstone, which
         // is now fenced: if the run settled in the meantime the write simply loses and history keeps the real
         // outcome. That is the difference between guessing safely and guessing.

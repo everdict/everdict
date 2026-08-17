@@ -39,6 +39,7 @@ import {
   type DispatchOptions,
   type Inspectable,
   type LogStream,
+  type ManagedWorkControl,
   type Observable,
   type ProbeResult,
   type Probeable,
@@ -1014,11 +1015,59 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 
 // Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
+// The newest Job carrying a case label — the LEGACY resolution, named so its one remaining property is
+// visible at every call site: it answers about whichever job of that case the cluster created last, which is
+// not necessarily the one the caller means (arch-review 53, Wave B).
+async function newestJobForCase(api: K8sApi, caseId: string): Promise<{ name: string; namespace: string } | undefined> {
+  const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
+  return (jobs ?? []).sort((a, b) => (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""))[0];
+}
+
+// The placement projection for ONE named Job. Shared by the exact read and its legacy twin so the two cannot
+// describe the same object differently — the only thing that differs between them is which object.
+async function placementOf(api: K8sApi, name: string, namespace: string): Promise<CasePlacement | undefined> {
+  const base = { job: name, namespace };
+  const pods = (await api.podsForJob(name, namespace)) ?? [];
+  // backoffLimit 0 ⇒ normally one pod; prefer a live one over a leftover terminal sibling.
+  const pod = pods.find((p) => p.phase === "Running" || p.phase === "Pending") ?? pods.at(-1);
+  if (!pod) return { ...base, phase: "queued", events: [] };
+  const events = (await api.objectEvents(pod.name, namespace)) ?? [];
+  const scheduling = events.filter((e) => e.reason === "FailedScheduling").at(-1);
+  const phase =
+    pod.phase === "Running"
+      ? ("running" as const)
+      : pod.phase === "Succeeded" || pod.phase === "Failed"
+        ? ("dead" as const)
+        : scheduling
+          ? ("blocked" as const)
+          : ("starting" as const);
+  const started = pod.startedAt ? Date.parse(pod.startedAt) : Number.NaN;
+  const age = Number.isFinite(started) ? Math.max(0, Math.round((Date.now() - started) / 1000)) : undefined;
+  return {
+    ...base,
+    phase,
+    unit: pod.name,
+    ...(pod.node ? { node: pod.node } : {}),
+    ...(phase === "blocked" && scheduling ? { blockedReason: scheduling.message } : {}),
+    ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
+    ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
+    ...(pod.cpu !== undefined ? { cpu: pod.cpu } : {}),
+    ...(pod.memoryMb !== undefined ? { memoryMb: pod.memoryMb } : {}),
+    ...(age !== undefined ? { ageSeconds: age } : {}),
+    events: events.slice(-20).map((e) => ({
+      ...(e.reason ? { type: e.reason } : {}),
+      message: e.message,
+      ...(e.at ? { at: e.at } : {}),
+    })),
+  };
+}
+
 export class K8sBackend
   implements
     Backend,
     Recoverable,
     WorkAddressable,
+    ManagedWorkControl,
     Observable,
     Probeable,
     Inspectable,
@@ -1181,49 +1230,101 @@ export class K8sBackend
   async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
     try {
       return await this.withApi(async (api): Promise<CasePlacement | undefined> => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseLabelValue(caseId)}`);
-        const newest = (jobs ?? []).sort((a, b) =>
-          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-        )[0];
+        const newest = await newestJobForCase(api, caseId);
         if (!newest) return undefined;
-        const base = { job: newest.name, namespace: newest.namespace };
-        const pods = (await api.podsForJob(newest.name, newest.namespace)) ?? [];
-        // backoffLimit 0 ⇒ normally one pod; prefer a live one over a leftover terminal sibling.
-        const pod = pods.find((p) => p.phase === "Running" || p.phase === "Pending") ?? pods.at(-1);
-        if (!pod) return { ...base, phase: "queued", events: [] };
-        const events = (await api.objectEvents(pod.name, newest.namespace)) ?? [];
-        const scheduling = events.filter((e) => e.reason === "FailedScheduling").at(-1);
-        const phase =
-          pod.phase === "Running"
-            ? ("running" as const)
-            : pod.phase === "Succeeded" || pod.phase === "Failed"
-              ? ("dead" as const)
-              : scheduling
-                ? ("blocked" as const)
-                : ("starting" as const);
-        const started = pod.startedAt ? Date.parse(pod.startedAt) : Number.NaN;
-        const age = Number.isFinite(started) ? Math.max(0, Math.round((Date.now() - started) / 1000)) : undefined;
-        return {
-          ...base,
-          phase,
-          unit: pod.name,
-          ...(pod.node ? { node: pod.node } : {}),
-          ...(phase === "blocked" && scheduling ? { blockedReason: scheduling.message } : {}),
-          ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
-          ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
-          ...(pod.cpu !== undefined ? { cpu: pod.cpu } : {}),
-          ...(pod.memoryMb !== undefined ? { memoryMb: pod.memoryMb } : {}),
-          ...(age !== undefined ? { ageSeconds: age } : {}),
-          events: events.slice(-20).map((e) => ({
-            ...(e.reason ? { type: e.reason } : {}),
-            message: e.message,
-            ...(e.at ? { at: e.at } : {}),
-          })),
-        };
+        return placementOf(api, newest.name, newest.namespace);
       });
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
+  }
+
+  // ── THE EXACT-WORK CONTROL SURFACE (ManagedWorkControl — arch-review 53, Wave B) ──────────────────
+  //
+  // Each of these is the twin of a case-id read above, resolving the object by the handle's own name instead
+  // of by "newest job carrying this case label". They share the projections (`placementOf`, `parseResult`,
+  // `extractLiveEvents`) with their legacy twins so the two cannot describe the same job differently — what
+  // differs is only WHICH job, which is the entire defect.
+  async adoptWork(work: RuntimeWorkRef): Promise<AdoptOutcome> {
+    const ns = work.namespace ?? this.opts.namespace ?? "default";
+    try {
+      return await this.withApi(async (api): Promise<AdoptOutcome> => {
+        // Does the object the handle names exist? A cluster that cannot answer THROWS, and the catch below
+        // turns that into `unknown` — re-dispatching on an unestablished liveness may double-spend, which is
+        // what `unknown` exists to prevent. A 404 for this exact name is `absent`, and safe to re-dispatch.
+        const jobs = await api.jobsByLabel(`everdict.dev/run=${caseLabelValue(work.runId)}`);
+        if (jobs === undefined) return { status: "unknown" };
+        if (!jobs.some((j) => j.name === work.externalJobId)) return { status: "absent" };
+        await this.waitForJob(api, work.externalJobId, ns);
+        const result = parseResult(await api.podLogs(work.externalJobId, ns));
+        await api.deleteJob(work.externalJobId, ns).catch(() => {});
+        return { status: "adopted", result };
+      });
+    } catch {
+      return { status: "unknown" };
+    }
+  }
+
+  async logsForWork(work: RuntimeWorkRef, _stream?: LogStream): Promise<string | undefined> {
+    try {
+      const text = await this.rawWorkLogs(work);
+      return text === undefined ? undefined : stripSentinel(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async eventsForWork(work: RuntimeWorkRef): Promise<TraceEvent[] | undefined> {
+    try {
+      const text = await this.rawWorkLogs(work);
+      return text === undefined ? undefined : extractLiveEvents(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async execInWork(
+    work: RuntimeWorkRef,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+    try {
+      return await this.withApi(async (api) =>
+        api.exec(work.externalJobId, work.namespace ?? this.opts.namespace ?? "default", command),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  async inspectWork(work: RuntimeWorkRef): Promise<CasePlacement | undefined> {
+    try {
+      return await this.withApi(async (api) =>
+        placementOf(api, work.externalJobId, work.namespace ?? this.opts.namespace ?? "default"),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  async sampleWork(work: RuntimeWorkRef): Promise<CaseRuntimeSample | undefined> {
+    try {
+      return await this.withApi(async (api) => {
+        const top = await api.podTop(work.externalJobId, work.namespace ?? this.opts.namespace ?? "default");
+        if (!top || (top.cpuMillicores === undefined && top.memoryMb === undefined)) return undefined;
+        return {
+          ...(top.cpuMillicores !== undefined ? { cpuPct: top.cpuMillicores / 10 } : {}),
+          ...(top.memoryMb !== undefined ? { memBytes: top.memoryMb * 1024 * 1024 } : {}),
+        };
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async rawWorkLogs(work: RuntimeWorkRef): Promise<string | undefined> {
+    return await this.withApi(async (api) =>
+      api.podLogs(work.externalJobId, work.namespace ?? this.opts.namespace ?? "default"),
+    );
   }
 
   // Stop the work a HANDLE names, and nothing else (WorkAddressable — arch-review 52, Wave 2).

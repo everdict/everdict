@@ -59,8 +59,13 @@ function api(): { api: K8sApi; reads: string[] } {
       reads.push(`events:${name}`);
       return [];
     },
-    async jobStatus() {
-      return { succeeded: 0, failed: 0 };
+    async jobStatus(name: string) {
+      reads.push(`status:${name}`);
+      return { succeeded: 1, failed: 0 };
+    },
+    async deleteJob(name: string) {
+      reads.push(`delete:${name}`);
+      return { status: "stopped" as const };
     },
     async serverVersion() {
       return "v1.30.0";
@@ -80,7 +85,7 @@ const WORK_A: RuntimeWorkRef = {
 const methodOf = (backend: object, name: string): unknown => (backend as Record<string, unknown>)[name];
 
 // RED as of 186f9fd9: every probe answers 'undefined' — only `killWork` takes a handle.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #4] the exact-work control surface exists", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #4 — CLOSED] the exact-work control surface exists", () => {
   it("a managed backend addresses adopt/logs/events/exec/inspect/sample by RuntimeWorkRef", () => {
     const backend = new K8sBackend({ image: "i", api: api().api });
     for (const name of ["adoptWork", "logsForWork", "eventsForWork", "execInWork", "inspectWork", "sampleWork"])
@@ -91,7 +96,7 @@ describe.skip("[R53 WAVE-B COUNTEREXAMPLE #4] the exact-work control surface exi
 });
 
 // RED as of 186f9fd9: `expected 'logs:everdict-c1-bbbb' to be 'logs:everdict-c1-aaaa'` — the newest job wins.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #5] a log tail belongs to the run that asked for it", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #5 — CLOSED] a log tail belongs to the run that asked for it", () => {
   it("reads run A's job, not whichever job of that case the cluster created last", async () => {
     const { api: impl, reads } = api();
     const backend = new K8sBackend({ image: "i", api: impl });
@@ -107,7 +112,7 @@ describe.skip("[R53 WAVE-B COUNTEREXAMPLE #5] a log tail belongs to the run that
 
 // RED as of 186f9fd9: `expected 'exec:everdict-c1-bbbb' to be 'exec:everdict-c1-aaaa'` — a command runs in a
 // stranger's sandbox, which is a write into another run's world, not a read of it.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #6] an exec lands in the sandbox it was issued for", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #6 — CLOSED] an exec lands in the sandbox it was issued for", () => {
   it("runs the command inside run A's job", async () => {
     const { api: impl, reads } = api();
     const backend = new K8sBackend({ image: "i", api: impl });
@@ -122,7 +127,7 @@ describe.skip("[R53 WAVE-B COUNTEREXAMPLE #6] an exec lands in the sandbox it wa
 });
 
 // RED as of 186f9fd9: `expected 'pods:everdict-c1-bbbb' to be 'pods:everdict-c1-aaaa'`.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #7] a placement view describes the work it names", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #7 — CLOSED] a placement view describes the work it names", () => {
   it("inspects run A's job", async () => {
     const { api: impl, reads } = api();
     const backend = new K8sBackend({ image: "i", api: impl });
@@ -136,17 +141,21 @@ describe.skip("[R53 WAVE-B COUNTEREXAMPLE #7] a placement view describes the wor
 });
 
 // RED as of 186f9fd9: `adoptWork` does not exist; `adopt(caseId)` returns the newest job's verdict.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #8] recovery adopts the execution it is recovering", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #8 — CLOSED] recovery adopts the execution it is recovering", () => {
   it("adopt is addressed by the handle, so it can never return another run's job as this run's", async () => {
-    const { api: impl } = api();
-    const backend = new K8sBackend({ image: "i", api: impl });
+    const { api: impl, reads } = api();
+    const backend = new K8sBackend({ image: "i", api: impl, pollIntervalMs: 1 });
     const adoptWork = methodOf(backend, "adoptWork") as
       | ((work: RuntimeWorkRef) => Promise<{ status: string; externalJobId?: string }>)
       | undefined;
 
     expect(typeof adoptWork).toBe("function");
-    const outcome = await adoptWork?.call(backend, WORK_A);
+    await adoptWork?.call(backend, WORK_A);
+
     // Whatever it reports, it reports about the object the handle names — never a sibling of the same case.
-    expect(outcome?.externalJobId ?? WORK_A.externalJobId).toBe("everdict-c1-aaaa");
+    // Recovery ADOPTS what it finds as this execution's own result, so a resolution by creation timestamp
+    // would hand run A the verdict run B's job produced.
+    expect(reads.every((r) => !r.endsWith("everdict-c1-bbbb"))).toBe(true);
+    expect(reads.some((r) => r.endsWith("everdict-c1-aaaa"))).toBe(true);
   });
 });

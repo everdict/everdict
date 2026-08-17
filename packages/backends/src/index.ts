@@ -27,6 +27,7 @@ export {
   isShellable,
   isTopologyInspectable,
   isWorkAddressable,
+  isWorkControllable,
   type LogStream,
   type TopologyInspectable,
   type Observable,
@@ -38,6 +39,7 @@ export {
   type ScreenAttachable,
   type ScreenCapturable,
   type Shellable,
+  type ManagedWorkControl,
   type WorkAddressable,
 } from "./backend.js";
 export { LocalBackend } from "./orchestrators/local.js";

@@ -41,6 +41,7 @@ import {
   type ExecStreamHandle,
   type Inspectable,
   type LogStream,
+  type ManagedWorkControl,
   type Observable,
   type ProbeResult,
   type Probeable,
@@ -596,6 +597,7 @@ export class NomadBackend
     Driver,
     Recoverable,
     WorkAddressable,
+    ManagedWorkControl,
     Observable,
     Shellable,
     Probeable,
@@ -1006,13 +1008,7 @@ export class NomadBackend
     command: string,
   ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
     try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      const newest = await this.newestJobForCase(caseId);
       if (!newest?.ID) return undefined;
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
       const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
@@ -1022,25 +1018,25 @@ export class NomadBackend
         (a) => a.ClientStatus === "running",
       );
       if (!alloc) return undefined; // no RUNNING alloc — nothing to exec into
-      const runner = this.opts.execRunner ?? ((bin, args, env) => spawnRunner(bin, args, env));
-      const env: Record<string, string> = { NOMAD_ADDR: this.opts.addr };
-      if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
-      const args = [
-        "alloc",
-        "exec",
-        "-task",
-        "agent",
-        ...(ns ? ["-namespace", ns] : []),
-        alloc.ID,
-        "sh",
-        "-c",
-        command,
-      ];
-      const r = await runner("nomad", args, env);
-      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.code };
+      return await this.execInAlloc(alloc.ID, ns, command);
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
+  }
+
+  // `nomad alloc exec` into ONE named alloc — the shared tail of exec() and execInWork(), so a command can
+  // never land in a different container than the one its caller addressed.
+  private async execInAlloc(
+    allocId: string,
+    ns: string | undefined,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const runner = this.opts.execRunner ?? ((bin, args, env) => spawnRunner(bin, args, env));
+    const env: Record<string, string> = { NOMAD_ADDR: this.opts.addr };
+    if (this.opts.apiToken) env.NOMAD_TOKEN = this.opts.apiToken;
+    const args = ["alloc", "exec", "-task", "agent", ...(ns ? ["-namespace", ns] : []), allocId, "sh", "-c", command];
+    const r = await runner("nomad", args, env);
+    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.code };
   }
 
   // Open an interactive shell inside the case's live alloc (observability ⑥) — `nomad alloc exec -i -task agent
@@ -1075,18 +1071,119 @@ export class NomadBackend
   // The case's newest job's current raw output — the shared fetch behind logs() (human view, sentinel-stripped)
   // and caseEvents() (live-event lines, decoded). No waiting: a job with no alloc yet reads as undefined and the
   // caller polls again.
+  // ── THE EXACT-WORK CONTROL SURFACE (ManagedWorkControl — arch-review 53, Wave B) ──────────────────
+  //
+  // The twins of the case-id reads above, resolving the object by the handle's own job id and namespace
+  // instead of by "the newest job whose id starts with everdict-<caseId>- in any namespace". They share the
+  // projections with their legacy twins, so the pair can differ only in WHICH job — which was the defect.
+  async adoptWork(work: RuntimeWorkRef): Promise<AdoptOutcome> {
+    const ns = work.namespace;
+    try {
+      // Does exactly this job exist? A read that FAILED is `unknown` — re-dispatching on an unestablished
+      // liveness double-spends — while a successful read that finds nothing is `absent` and safe.
+      const found = await this.findJob(work.externalJobId, ns);
+      if (found === undefined) return { status: "absent" };
+      const allocId = await this.waitForAlloc(work.externalJobId, ns);
+      const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+      const logs = await this.http.request(
+        "GET",
+        `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
+      );
+      if (logs.status >= 300) return { status: "unknown" };
+      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId, ns) };
+    } catch {
+      return { status: "unknown" };
+    }
+  }
+
+  async logsForWork(work: RuntimeWorkRef, stream: LogStream = "stdout"): Promise<string | undefined> {
+    try {
+      const text = await this.rawJobLogs(work.externalJobId, work.namespace, stream);
+      return text === undefined ? undefined : stripSentinel(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async eventsForWork(work: RuntimeWorkRef): Promise<TraceEvent[] | undefined> {
+    try {
+      const text = await this.rawJobLogs(work.externalJobId, work.namespace, "stdout");
+      return text === undefined ? undefined : extractLiveEvents(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async execInWork(
+    work: RuntimeWorkRef,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+    try {
+      const allocId = await this.currentAllocIdOf(work.externalJobId, work.namespace);
+      if (!allocId) return undefined;
+      return await this.execInAlloc(allocId, work.namespace, command);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async inspectWork(work: RuntimeWorkRef): Promise<CasePlacement | undefined> {
+    try {
+      return await this.placementOfJob(work.externalJobId, work.namespace);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async sampleWork(work: RuntimeWorkRef): Promise<CaseRuntimeSample | undefined> {
+    try {
+      const allocId = await this.currentAllocIdOf(work.externalJobId, work.namespace);
+      if (!allocId) return undefined;
+      return await this.sampleAlloc(allocId, work.namespace);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // The live alloc of ONE named job — shared by the exec/sample twins, so "which container" is decided once.
+  private async currentAllocIdOf(jobId: string, ns: string | undefined): Promise<string | undefined> {
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${nsq}`);
+    if (res.status >= 300) return undefined;
+    const alloc = currentAlloc(
+      JSON.parse(res.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
+    );
+    return alloc?.ID;
+  }
+
   private async rawCaseLogs(caseId: string, stream: LogStream): Promise<string | undefined> {
+    const newest = await this.newestJobForCase(caseId);
+    if (!newest?.ID) return undefined;
+    const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+    return this.rawJobLogs(newest.ID, ns, stream);
+  }
+
+  // ── THE LEGACY RESOLUTION, NAMED (arch-review 53, Wave B) ──────────────────────────────────────────
+  //
+  // "The newest job whose id starts with `everdict-<caseId>-`, in ANY namespace". Two runs of one case are
+  // two such jobs, so this answers about whichever the cluster submitted last — which is why every control
+  // path that DECIDES anything now takes a `RuntimeWorkRef` instead. Kept for the pre-handle rows and the
+  // human-driven debug reads.
+  private async newestJobForCase(
+    caseId: string,
+  ): Promise<{ ID?: string; Namespace?: string; SubmitTime?: number } | undefined> {
     const prefix = `everdict-${caseId}-`;
     const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
     if (res.status >= 300) return undefined;
     const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-    const newest = jobs
-      .filter((j) => j.ID?.startsWith(prefix))
-      .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
-    if (!newest?.ID) return undefined;
-    const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+    return jobs.filter((j) => j.ID?.startsWith(prefix)).sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+  }
+
+  // The current output of ONE named job. The shared tail of both the exact read and the legacy one, so the
+  // two cannot differ in anything but which job they were pointed at.
+  private async rawJobLogs(jobId: string, ns: string | undefined, stream: LogStream): Promise<string | undefined> {
     const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-    const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+    const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${nsq}`);
     if (allocsRes.status >= 300) return undefined;
     // The CURRENT alloc's log file — a stale terminal alloc's file used to be tailed as "live progress".
     const alloc = currentAlloc(
@@ -1131,36 +1228,31 @@ export class NomadBackend
   // (a client whose stats API is unreachable must read as "no sample", never fail a run). Best-effort.
   async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
     try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      const newest = await this.newestJobForCase(caseId);
       if (!newest?.ID) return undefined;
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
-      if (allocsRes.status >= 300) return undefined;
-      const alloc = currentAlloc(
-        JSON.parse(allocsRes.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
-      );
-      if (!alloc?.ID) return undefined;
-      const stats = await this.http.request("GET", `/v1/client/allocation/${alloc.ID}/stats${nsq}`);
-      if (stats.status >= 300) return undefined;
-      const usage = (
-        JSON.parse(stats.text) as {
-          ResourceUsage?: { MemoryStats?: { RSS?: number; Usage?: number }; CpuStats?: { Percent?: number } };
-        }
-      ).ResourceUsage;
-      const cpuPct = usage?.CpuStats?.Percent;
-      const memBytes = usage?.MemoryStats?.RSS ?? usage?.MemoryStats?.Usage;
-      if (cpuPct === undefined && memBytes === undefined) return undefined;
-      return { ...(cpuPct !== undefined ? { cpuPct } : {}), ...(memBytes !== undefined ? { memBytes } : {}) };
+      const allocId = await this.currentAllocIdOf(newest.ID, ns);
+      if (!allocId) return undefined;
+      return await this.sampleAlloc(allocId, ns);
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
+  }
+
+  // The client stats read for ONE named alloc — shared by sampleCase() and sampleWork().
+  private async sampleAlloc(allocId: string, ns: string | undefined): Promise<CaseRuntimeSample | undefined> {
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const stats = await this.http.request("GET", `/v1/client/allocation/${allocId}/stats${nsq}`);
+    if (stats.status >= 300) return undefined;
+    const usage = (
+      JSON.parse(stats.text) as {
+        ResourceUsage?: { MemoryStats?: { RSS?: number; Usage?: number }; CpuStats?: { Percent?: number } };
+      }
+    ).ResourceUsage;
+    const cpuPct = usage?.CpuStats?.Percent;
+    const memBytes = usage?.MemoryStats?.RSS ?? usage?.MemoryStats?.Usage;
+    if (cpuPct === undefined && memBytes === undefined) return undefined;
+    return { ...(cpuPct !== undefined ? { cpuPct } : {}), ...(memBytes !== undefined ? { memBytes } : {}) };
   }
 
   // Case-scoped placement introspection (CaseInspectable): where the case's newest job stands INSIDE the cluster —
@@ -1169,26 +1261,29 @@ export class NomadBackend
   // undefined = no job for the case (pre-dispatch / GC'd). Best-effort, never throws (observability read).
   async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
     try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      const newest = await this.newestJobForCase(caseId);
       if (!newest?.ID) return undefined;
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
-      if (allocsRes.status >= 300) return undefined;
-      const alloc = currentAlloc(
-        JSON.parse(allocsRes.text) as Array<NomadAllocStub & { CreateIndex?: number; DesiredStatus?: string }>,
-      );
-      const base = { job: newest.ID, ...(ns ? { namespace: ns } : {}) };
+      return await this.placementOfJob(newest.ID, ns);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // The placement projection for ONE named job — shared by inspectCase() and inspectWork(), so a panel can
+  // only ever be wrong about WHICH job it was pointed at, never about how a job is described.
+  private async placementOfJob(jobId: string, ns: string | undefined): Promise<CasePlacement | undefined> {
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${nsq}`);
+    if (allocsRes.status >= 300) return undefined;
+    const alloc = currentAlloc(
+      JSON.parse(allocsRes.text) as Array<NomadAllocStub & { CreateIndex?: number; DesiredStatus?: string }>,
+    );
+      const base = { job: jobId, ...(ns ? { namespace: ns } : {}) };
       if (!alloc?.ID) {
         // No alloc: either the scheduler simply hasn't placed it yet (queued) or it CANNOT place it (blocked) —
         // the blocked-evaluation read tells them apart, with the exhausted dimensions as the reason.
-        const blocked = await this.blockedPlacement(newest.ID, nsq);
+        const blocked = await this.blockedPlacement(jobId, nsq);
         return {
           ...base,
           phase: blocked ? "blocked" : "queued",
@@ -1221,9 +1316,6 @@ export class NomadBackend
         ...(age !== undefined ? { ageSeconds: age } : {}),
         events: nomadEventsToPlacement(events),
       };
-    } catch {
-      return undefined; // best-effort — observability must never fail a run
-    }
   }
 
   // Stop the work a HANDLE names, and nothing else (WorkAddressable — arch-review 52, Wave 2).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { trajectoryForAttempt } from "./trajectory-store.js";
+import { trajectoryForAttempt, trajectoryForDecision } from "./trajectory-store.js";
 
 // ── A DISPLAY READ AND A DECISION READ ARE NOT ONE READ (arch-review 53, Wave B) ─────────────────────
 //
@@ -44,15 +44,15 @@ const sealed = (segments: ReturnType<typeof plane>[]) =>
 
 // RED as of 186f9fd9: the unattributed plane rides back with the exact one under the same type, so a
 // decision-grade caller cannot tell which half it is holding.
-describe.skip("[R53 WAVE-B COUNTEREXAMPLE #28] a decision read returns only what the identity vouches for", () => {
+describe("[R53 WAVE-B COUNTEREXAMPLE #28 — CLOSED] a decision read returns only what the identity vouches for", () => {
   it("does not serve an unattributed plane as the asked-for attempt's evidence", () => {
     const both = sealed([plane("run", "evd-run-1#g2"), plane("judge:a")]);
 
-    const forDecision = (trajectoryForAttempt as unknown as Record<string, unknown>).forDecision as
-      | ((s: unknown, attemptId: string) => unknown)
-      | undefined;
+    const decided = trajectoryForDecision(both, "evd-run-1#g2");
 
-    expect(typeof forDecision, "there is one read, and it is the display one").toBe("function");
+    // Exactly the plane the identity vouches for — the unattributed one is not this attempt's evidence.
+    expect(decided?.segments).toHaveLength(1);
+    expect(decided?.segments[0]?.attemptId).toBe("evd-run-1#g2");
   });
 
   it("the display read states that it included evidence nothing attributed", () => {
