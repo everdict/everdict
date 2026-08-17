@@ -167,9 +167,14 @@ export const GateScoringPinSchema = z.object({
       z.object({
         kind: z.literal("recorded"),
         digest: z.string(),
-        expectedUnits: z.number().int().nonnegative(),
-        recordedUnits: z.number().int().nonnegative(),
-        complete: z.boolean(),
+        // OPTIONAL because revisions written before this field existed carry none — and a revision that never
+        // stated its coverage has not stated it. Absent therefore reads as NOT complete, which is the same
+        // answer the gate already gives a pre-provenance pin: history is not retro-vouched by its age.
+        // Required would have made every stored revision unparseable, which is a different bug wearing the
+        // same words.
+        expectedUnits: z.number().int().nonnegative().optional(),
+        recordedUnits: z.number().int().nonnegative().optional(),
+        complete: z.boolean().optional(),
       }),
       z.object({ kind: z.literal("unrecorded"), reason: z.string() }),
     ])

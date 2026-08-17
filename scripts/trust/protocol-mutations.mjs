@@ -38,7 +38,10 @@ const MUTATIONS = [
     name: "Phase 1 — a tracked run is placed with no reservation hook at all",
     file: "packages/backends/src/backend.ts",
     from: "  if (!onReserved)",
-    to: "  if (false && !onReserved)",
+    // Permissive, not merely disabled: simply removing the throw left `await onReserved(work)` to raise a
+    // TypeError, which aborted the dispatch anyway and kept the suite green over a hole. A mutation has to
+    // produce the DEFECT (a tracked run placed with nobody recording it), not a different failure.
+    to: '  if (!onReserved) return { attemptId: "unrecorded", work, persistedAt: "1970-01-01T00:00:00.000Z" };\n  if (false)',
     suite: ["--root", "packages/backends", "src/orchestrators/managed-conformance.test.ts"],
   },
   {
@@ -61,8 +64,11 @@ const MUTATIONS = [
     // silently re-dispatches a job that may still be running.
     name: "Phase 2 — an unestablished adoption becomes an absence",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: '    if (unresolved !== undefined) return { kind: "unknown", reason: unresolved };',
-    to: '    if (false && unresolved !== undefined) return { kind: "unknown", reason: "" };',
+    // The CALLER's arm, which is what the counterexample drives (it injects its own adoptWorkFn, so the fold
+    // above it never runs). Mutating the fold tested nothing — a mutation must target the line the suite
+    // actually reaches.
+    from: '            if (decision.kind === "unknown") {',
+    to: "            if (false) {",
     suite: ["--root", "apps/api", "src/composition/adoption-unknown-recovery.counterexample.test.ts"],
   },
   {

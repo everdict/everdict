@@ -1,7 +1,6 @@
 import type { TraceSinkCase, TraceSinkContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { seededIds } from "./idempotent-ids.js";
-import { langfuseBatch } from "./langfuse-sink.js";
+import { LangfuseTraceSink } from "./langfuse-sink.js";
 
 // ── A RETRIED EXPORT IS THE SAME EXPORT (arch-review 54, Phase 4) ────────────────────────────────────
 //
@@ -36,39 +35,47 @@ describe("an at-least-once export carries an idempotency key the sink can dedupe
     expect(declared.idempotencyKey).toBe("sc-1:pass-1");
   });
 
-  it("mints the same trace and event ids when the same export is retried", () => {
-    const first = langfuseBatch(
-      ctx({ idempotencyKey: "sc-1:pass-1" }),
-      [CASE],
-      seededIds("sc-1:pass-1"),
-      () => "2026-08-18T00:00:00.000Z",
-    );
-    const retry = langfuseBatch(
-      ctx({ idempotencyKey: "sc-1:pass-1" }),
-      [CASE],
-      seededIds("sc-1:pass-1"),
-      () => "2026-08-18T00:05:00.000Z", // a later sweep — the clock moved, the export did not
-    );
-    expect(first.traceIdByCase.get("c1"), "the fixture must produce a trace id to compare").toBeTruthy();
-    expect(retry.traceIdByCase.get("c1")).toBe(first.traceIdByCase.get("c1"));
-    expect(retry.events.map((e) => e.id)).toEqual(first.events.map((e) => e.id));
+  // THROUGH THE ADAPTER, not through its payload builder. The first version of this test called
+  // `langfuseBatch` directly and handed it `seededIds(key)` itself — so it proved the generator is
+  // deterministic and proved NOTHING about whether `export()` uses it. `protocol-mutations` said so: removing
+  // the wiring left this suite green. What has to be exercised is the line that chooses the generator.
+  async function idsFrom(key: string, now: string): Promise<string[]> {
+    const bodies: unknown[] = [];
+    const sink = new LangfuseTraceSink({
+      endpoint: "http://langfuse:3000",
+      now: () => now,
+      fetchImpl: (async (_url: string, init?: { body?: string }) => {
+        bodies.push(JSON.parse(init?.body ?? "{}"));
+        return {
+          ok: true,
+          status: 207,
+          async json() {
+            return { successes: [], errors: [] };
+          },
+          async text() {
+            return "{}";
+          },
+        };
+      }) as never,
+    } as never);
+    await sink.export(ctx({ idempotencyKey: key }), [CASE]);
+    const batch = bodies[0] as { batch?: Array<{ id: string; body?: { id?: string; traceId?: string } }> };
+    return (batch.batch ?? []).flatMap((e) => [e.id, e.body?.id ?? "", e.body?.traceId ?? ""]).filter(Boolean);
+  }
+
+  it("mints the same trace and event ids when the same export is retried", async () => {
+    const first = await idsFrom("sc-1:pass-1", "2026-08-18T00:00:00.000Z");
+    // A later sweep — the clock moved, the export did not.
+    const retry = await idsFrom("sc-1:pass-1", "2026-08-18T00:05:00.000Z");
+    expect(first.length, "the fixture must produce ids to compare").toBeGreaterThan(0);
+    expect(retry).toEqual(first);
   });
 
-  it("mints DIFFERENT ids for a different export, so the sequence is not reused across settlements", () => {
-    // The other half of the seeded generator: it is deterministic per key, not globally. Two settlements of
-    // one scorecard must not collapse into each other on the platform.
-    const one = langfuseBatch(
-      ctx({ idempotencyKey: "sc-1:pass-1" }),
-      [CASE],
-      seededIds("sc-1:pass-1"),
-      () => "2026-08-18T00:00:00.000Z",
-    );
-    const two = langfuseBatch(
-      ctx({ idempotencyKey: "sc-1:pass-2" }),
-      [CASE],
-      seededIds("sc-1:pass-2"),
-      () => "2026-08-18T00:00:00.000Z",
-    );
-    expect(two.traceIdByCase.get("c1")).not.toBe(one.traceIdByCase.get("c1"));
+  it("mints DIFFERENT ids for a different export, so the sequence is not reused across settlements", async () => {
+    // The other half: deterministic per key, not globally. Two settlements of one scorecard must not
+    // collapse into each other on the platform.
+    const one = await idsFrom("sc-1:pass-1", "2026-08-18T00:00:00.000Z");
+    const two = await idsFrom("sc-1:pass-2", "2026-08-18T00:00:00.000Z");
+    expect(two).not.toEqual(one);
   });
 });

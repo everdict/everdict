@@ -105,7 +105,9 @@ function inputTrustReasons(
         kind: "judgment_unrecorded",
         detail:
           provenance?.kind === "recorded"
-            ? `the ${side}'s pinned judgment records ${provenance.recordedUnits} of ${provenance.expectedUnits} judgment(s) — the rest name no invocation; refused unless the policy records allowUnrecordedJudgments`
+            ? provenance.expectedUnits === undefined
+              ? `the ${side}'s pinned judgment predates judgment coverage — it names invocations without saying how many it owed; refused unless the policy records allowUnrecordedJudgments`
+              : `the ${side}'s pinned judgment records ${provenance.recordedUnits ?? 0} of ${provenance.expectedUnits} judgment(s) — the rest name no invocation; refused unless the policy records allowUnrecordedJudgments`
             : provenance?.kind === "unrecorded"
               ? `the ${side}'s pinned judgment records no author — ${provenance.reason}; refused unless the policy records allowUnrecordedJudgments`
               : `the ${side}'s pinned judgment predates judgment provenance — nothing states which invocation produced its verdicts; refused unless the policy records allowUnrecordedJudgments`,
