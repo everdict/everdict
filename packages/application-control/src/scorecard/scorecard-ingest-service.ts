@@ -373,7 +373,21 @@ export class ScorecardIngestService {
       });
     }
     const scorecard: Scorecard = { suiteId: effectiveDataset.id, harness: harnessLabel, results };
-    await this.scoring.applyJudges(tenant, effectiveDataset, results, judges, undefined, submittedBy); // trace → judge scores (control plane)
+    // …UNDER THE PASS ITS REVISION IS KEYED BY (arch-review 56, Wave E). This judged with no scope, so the
+    // evidence sealed as a bare `judge:<id>` while the revision below wrote receipts naming
+    // `judge:<id>#initial:<sc>` — a plane nothing had written. The two ends of the join now read the same id.
+    await this.scoring.applyJudges(
+      tenant,
+      effectiveDataset,
+      results,
+      judges,
+      undefined,
+      submittedBy,
+      undefined,
+      undefined,
+      undefined,
+      { passId: initialScoringPassId(id) },
+    ); // trace → judge scores (control plane)
     await offloadResults(this.deps, id, results); // os-use screenshots → object storage (slim record)
     // Trace-sink export (when configured) — DEFERRED to the publication drain (arch-review 52, Wave 4). It
     // used to run here, before `settleIngest`'s read-guarded terminal write below: an ingest that a cancel beat

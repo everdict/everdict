@@ -251,6 +251,15 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/results/pg-execution-attempt-store.test.ts"],
   },
   {
+    // R56 Wave E's rung: a lane judges with no pass scope again, so its evidence seals under a bare
+    // `judge:<id>` while its revision's receipts name `judge:<id>#<passId>` — a plane nothing wrote.
+    name: "R56 Wave E — a lane judges without naming its pass",
+    file: "packages/application-control/src/scorecard/scorecard-ingest-service.ts",
+    from: "      { passId: initialScoringPassId(id) },\n    ); // trace → judge scores (control plane)",
+    to: "      undefined as never,\n    ); // trace → judge scores (control plane)",
+    suite: ["--root", "packages/application-control", "src/scorecard/judgment-scope-parity.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

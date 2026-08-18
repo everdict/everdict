@@ -279,15 +279,24 @@ export class ScoringService {
     evalCase: EvalCase,
     specs: ResolvedJudge[],
     result: CaseResult,
-    runtime?: string, // the producing run's runtime (for co-locate). The ingest path has no producing run, so undefined.
-    submittedBy?: string, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
-    runId?: string, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
+    runtime: string | undefined, // the producing run's runtime (for co-locate). The ingest path has none.
+    submittedBy: string | undefined, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
+    runId: string | undefined, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
     // Asked immediately before that seal, never before the judge starts — see the port's note.
-    publishWhen?: () => Promise<boolean>,
+    publishWhen: (() => Promise<boolean>) | undefined,
     // WHICH JUDGMENT INVOCATION this scoring is — scopes the sealed evidence plane so it is not dropped by
     // first-write-wins against an earlier one's (arch-review 41 P0-audit + 51 Track C). A bare pass id where
     // the path cannot re-invoke a (case, judge); the pass id AND its claim where it can. See the port.
-    scoringPass?: string | JudgeEvidenceScope,
+    //
+    // REQUIRED (arch-review 56, Wave E), for the reason `claimFor` was made required one review earlier and in
+    // the same pair: an optional parameter carrying identity is one that gets forgotten, and three lanes had
+    // forgotten it — ingest, recovery and retry-failed. Each sealed a bare `judge:<id>` while its revision
+    // wrote receipts naming `judge:<id>#<passId>`, so the receipt pointed at a plane nothing had written and
+    // the coverage check, which counts units rather than joining them, read `complete`.
+    //
+    // A lane with nothing to say answers with its pass id. There is no lane that legitimately has none: the
+    // pass is what the revision is keyed by, and a judgment nobody can locate is not evidence.
+    scoringPass: string | JudgeEvidenceScope,
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -348,19 +357,19 @@ export class ScoringService {
     tenant: string,
     dataset: Dataset,
     judges: Array<{ id: string; version: string }>,
-    runtime?: string,
-    submittedBy?: string,
+    runtime: string | undefined,
+    submittedBy: string | undefined,
     // Resolve a result's child run id (trial-aware — caseId alone is ambiguous under trials). When it resolves,
     // the runner seals the judge's own execution as a judge:<id> plane on that run's trajectory. Absent/undefined
     // (ingest, recollect-before-children) = judges still run and are still metered; no evidence plane lands.
-    runIdOf?: (caseId: string, trial?: number) => string | undefined,
+    runIdOf: ((caseId: string, trial?: number) => string | undefined) | undefined,
     // The pass's sealed closure (manifest.judges / ScoringPass.judges) — the concretization source (I6).
-    sealed?: SealedJudgeClosure[],
+    sealed: SealedJudgeClosure[] | undefined,
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
-    publishWhen?: () => Promise<boolean>,
-    // The judgment invocation identity — see applyJudgesToCase; re-score callers pass their pass (and, on
-    // the Temporal path, the claim that tells two invocations of that pass apart).
-    scoringPass?: string | JudgeEvidenceScope,
+    publishWhen: (() => Promise<boolean>) | undefined,
+    // The judgment invocation identity — see applyJudgesToCase; REQUIRED for the same reason (arch-review 56,
+    // Wave E): three lanes had forgotten it and sealed evidence under a name their receipts never used.
+    scoringPass: string | JudgeEvidenceScope,
   ): Promise<JudgeStream> {
     const { specs, unresolved } = await this.resolveJudges(tenant, judges, sealed);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
@@ -430,15 +439,20 @@ export class ScoringService {
     dataset: Dataset,
     results: CaseResult[],
     judges: Array<{ id: string; version: string }>,
-    runtime?: string,
-    submittedBy?: string,
-    runIdOf?: (caseId: string, trial?: number) => string | undefined,
-    sealed?: SealedJudgeClosure[],
+    runtime: string | undefined,
+    submittedBy: string | undefined,
+    runIdOf: ((caseId: string, trial?: number) => string | undefined) | undefined,
+    sealed: SealedJudgeClosure[] | undefined,
     // Asked right before each judge's evidence plane is sealed — see the port's note (arch-review 34 P1).
-    publishWhen?: () => Promise<boolean>,
+    publishWhen: (() => Promise<boolean>) | undefined,
     // The judgment invocation identity — see applyJudgesToCase; re-score callers pass their pass (and, on
     // the Temporal path, the claim that tells two invocations of that pass apart).
-    scoringPass?: string | JudgeEvidenceScope,
+    // REQUIRED (arch-review 56, Wave E). See `applyJudgesToCase`: an optional parameter carrying identity is
+    // one that gets forgotten, and three lanes had forgotten this one. The parameters above lost their `?`
+    // for the mechanical reason that a required parameter cannot follow an optional one — every caller
+    // already passed them positionally, so what changed is that omission is now a compiler error rather than
+    // a silent `undefined`.
+    scoringPass: string | JudgeEvidenceScope,
   ): Promise<void> {
     const stream = await this.createJudgeStream(
       tenant,

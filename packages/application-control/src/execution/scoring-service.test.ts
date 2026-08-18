@@ -49,7 +49,17 @@ describe("ScoringService — applyJudgesToCase", () => {
       snapshot: { kind: "prompt", output: "" },
       scores: [],
     };
-    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
+    await service.applyJudgesToCase(
+      "acme",
+      CASE,
+      [{ spec: JUDGE }],
+      result,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     // The judgment's evidence is on the case's trace, re-timed to the last instant (7)…
     const spans = result.trace.filter((e) => e.kind === "span");
     expect(spans).toHaveLength(2);
@@ -89,7 +99,17 @@ describe("ScoringService — applyJudgesToCase", () => {
       snapshot: { kind: "prompt", output: "" },
       scores: [],
     };
-    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
+    await service.applyJudgesToCase(
+      "acme",
+      CASE,
+      [{ spec: JUDGE }],
+      result,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     expect(seen).toHaveLength(1);
     expect(seen[0]?.trace.map((e) => e.kind)).toEqual(["message", "log"]);
     // The verdict still lands on the result.
@@ -129,7 +149,17 @@ describe("ScoringService — applyJudgesToCase", () => {
       snapshot: { kind: "prompt", output: "" },
       scores: [],
     };
-    await service.applyJudgesToCase("acme", CASE, [{ spec: JUDGE }], result);
+    await service.applyJudgesToCase(
+      "acme",
+      CASE,
+      [{ spec: JUDGE }],
+      result,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
 
     // The judge saw the execution only: the agent's message + its own span — no prior judge:* span.
     expect(seen).toHaveLength(1);
@@ -167,9 +197,17 @@ describe("ScoringService — a SELECTED judge that cannot be resolved stays visi
     };
 
     // When the stream scores a gradeable case
-    const stream = await service.createJudgeStream("acme", { id: "d", version: "1.0.0", cases: [CASE], tags: [] }, [
-      { id: "quality", version: "1.0.0" },
-    ]);
+    const stream = await service.createJudgeStream(
+      "acme",
+      { id: "d", version: "1.0.0", cases: [CASE], tags: [] },
+      [{ id: "quality", version: "1.0.0" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     await stream.push(result);
     await stream.settle();
 
@@ -308,6 +346,8 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       "bob",
       undefined,
       sealed,
+      undefined,
+      { passId: "pass-test" },
     );
     await service.applyJudges(
       "acme",
@@ -318,6 +358,8 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       "bob",
       undefined,
       sealed,
+      undefined,
+      { passId: "pass-test" },
     );
 
     // Then every case judged under the SEALED resolution, not the moved registry's
@@ -343,9 +385,17 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       rubrics: { get: async () => ({ id: "review-rubric", version: "7" }) as never },
       resolveModelBinding: async (_t, b) => `${b.ref}@7`,
     });
-    const stream = await service.createJudgeStream("acme", { id: "d", version: "1", cases: [CASE], tags: [] }, [
-      { id: "quality", version: "latest" },
-    ]);
+    const stream = await service.createJudgeStream(
+      "acme",
+      { id: "d", version: "1", cases: [CASE], tags: [] },
+      [{ id: "quality", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     await stream.push(gradeable());
     await stream.settle();
     expect(seen[0]).toMatchObject({
@@ -382,6 +432,8 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       "bob",
       undefined,
       sealedPinned,
+      undefined,
+      { passId: "pass-test" },
     );
     expect(seen[0]).toMatchObject({ harness: { id: "reviewer", version: "2" } });
 
@@ -396,6 +448,8 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       "bob",
       undefined,
       sealedUnresolved,
+      undefined,
+      { passId: "pass-test" },
     );
     expect(seen[1]).toMatchObject({ harness: { id: "reviewer", version: "latest" } });
   });

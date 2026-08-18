@@ -20,6 +20,7 @@ import {
   caseKeyOf,
   scoringPassReclaimable,
 } from "@everdict/contracts";
+import type { JudgeEvidenceScope } from "@everdict/domain";
 import {
   CURRENT_STAGE_PARITY_VERSION,
   type ReceiptLedgerReading,
@@ -576,7 +577,12 @@ export class ScorecardScoreService {
       // decided by the CLAIM at `stageJudgments` below, not by who sealed first. So invocation 1 could seal
       // `judge:J#P`, lose the claim, and still own the permanent evidence for invocation 2's score. The
       // claim rides into the emitter so each invocation writes its own plane and no seal is refused.
-      pass.passId !== undefined ? { passId: pass.passId, ...(claim !== undefined ? { claim } : {}) } : undefined,
+      // A PASS WITH NO ID CANNOT OWN A PLANE (arch-review 56, Wave E). `passId` is optional only for legacy
+      // markers, which the contract itself calls "never fenceable" — and the emitter is what makes an
+      // invocation's evidence findable. Sealing such a pass under the initial plane would lose its evidence
+      // to first-write-wins, which is the defect 41 P0-audit fixed; sealing it under nothing would write a
+      // receipt nobody can join. It refuses, which is what an unfenceable pass should have been doing anyway.
+      requirePassScope(pass.passId, record.id, claim),
     );
     // Count the attempt onto whatever this produced. A verdict ends the counting; another unmeasured row
     // carries prior+1, so a judge that keeps failing the same way exhausts its budget and the pass can end.
@@ -716,7 +722,7 @@ export class ScorecardScoreService {
         // with no per-case retry seam (that is the same fact the heartbeat above exists for), so a given
         // (case, judge) is invoked exactly once per pass; a takeover mints a NEW passId and is therefore a
         // new emitter already. It also carries no claim to state — `stageJudgments` gets none below.
-        pass.passId,
+        requirePassScope(pass.passId, record.id),
       );
       await this.writeBackScores(record, results, pass, { judges });
       await this.aggregate(record, scorecard, results, judges, submittedBy, pass);
@@ -1504,4 +1510,25 @@ export class ScorecardScoreService {
         );
     }
   }
+}
+
+// ── A JUDGMENT SAYS WHERE ITS EVIDENCE WILL BE (arch-review 56, Wave E) ─────────────────────────────
+//
+// `ScoringPass.passId` is optional for one reason the contract states plainly: rows written before the token
+// existed carry none, and such a marker is "reclaimable by age, and never fenceable". A pass that cannot be
+// fenced cannot own an evidence plane either — so rather than inventing a name for it (the initial plane,
+// which first-write-wins would then refuse, or none, which writes a receipt nobody can join), the judging
+// refuses. Absence is not a legacy allowance.
+function requirePassScope(
+  passId: string | undefined,
+  scorecardId: string,
+  claim?: { generation: number; attempt: number },
+): JudgeEvidenceScope {
+  if (passId === undefined)
+    throw new ConflictError(
+      "CONFLICT",
+      { scorecard: scorecardId },
+      "this scoring pass carries no pass id, so its judgments have no evidence plane to seal under — a legacy marker is not fenceable and may not judge.",
+    );
+  return { passId, ...(claim !== undefined ? { claim } : {}) };
 }

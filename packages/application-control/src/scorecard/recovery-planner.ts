@@ -1,5 +1,6 @@
 import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef } from "@everdict/contracts";
 import { UpstreamError, readOrUnknown } from "@everdict/contracts";
+import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
@@ -188,6 +189,11 @@ export class RecoveryPlanner {
                   input.sealedJudges,
                   // …publishable only while this recovery still holds the batch it is recovering.
                   input.holdsBatch,
+                  // …UNDER THE BATCH'S OWN INITIAL PASS (arch-review 56, Wave E). This passed no scope, so a
+                  // recovered case sealed a bare `judge:<id>` into a batch whose revision names
+                  // `judge:<id>#initial:<sc>` — a receipt pointing at a plane nothing wrote. A recovery
+                  // re-judges INTO the initial pass; it is the same decision, resumed, not a new one.
+                  { passId: initialScoringPassId(id) },
                 )
                 .then(() => true)
                 .catch(() => false);

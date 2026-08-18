@@ -207,6 +207,11 @@ describeTrust("TRUST-111 — the delegated agent's OWN model closure is sealed, 
       { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] } as never,
       specs,
       { caseId: "c1", harness: "h@1", trace: [], snapshot: { kind: "prompt", output: "" }, scores: [] } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
     );
     expect(carried?.model).toBe(contentDigest(modelDoc("claude-opus-4-8")));
   });

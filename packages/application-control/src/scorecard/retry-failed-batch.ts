@@ -16,7 +16,7 @@ import {
   newSeededScorecardChildRun,
   resolvePolicyResolution,
 } from "@everdict/domain";
-import { applyGradingPlan, selectSubsetCases } from "@everdict/domain";
+import { applyGradingPlan, initialScoringPassId, selectSubsetCases } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { OOM_ESCALATION_CAP_MB } from "../ops/oom-boost.js";
@@ -237,6 +237,11 @@ export class RetryFailedBatch {
                 input.submittedBy,
                 undefined,
                 sourcePlan.sealedJudges,
+                undefined,
+                // …UNDER THE NEW BATCH'S INITIAL PASS (arch-review 56, Wave E). A re-collected case is judged
+                // into the retry batch this call is building, so the plane it seals is that batch's — not the
+                // source batch's, and not a nameless one, which is what an omitted scope produced.
+                { passId: initialScoringPassId(record.id) },
               )
               .catch(() => {});
         }
