@@ -73,6 +73,7 @@ import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
+import type { ResumeResult } from "../run/run-service.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import { PublicationCoordinator } from "./publication.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
@@ -1623,7 +1624,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   }
 
   // --- Batch lifecycle — delegated to ScorecardBatchService (resume/retry + Batch-on-Temporal internals).
-  resume(id: string, authority?: DriverAuthority): Promise<boolean> {
+  resume(id: string, authority?: DriverAuthority): Promise<ResumeResult> {
     return this.batch.resume(id, authority);
   }
 

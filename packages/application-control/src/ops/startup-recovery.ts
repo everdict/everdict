@@ -3,6 +3,7 @@ import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
+import type { ResumeResult } from "../run/run-service.js";
 import { tombstoneInterrupted } from "./tombstone.js";
 
 // Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
@@ -52,10 +53,16 @@ export interface RecoveryDeps {
   // token, it is a lease check wearing one's clothes. Three replicas are enough to show why: B claims (epoch
   // 1) and pauses, C claims (epoch 2) and starts driving, B wakes, re-reads, adopts C's OWN token and drives
   // beside it. Nobody had to win a race; B only had to read.
-  resume?: (id: string, authority: DriverAuthority) => Promise<boolean>;
+  //
+  // IT ANSWERS FOUR WAYS, NOT TWO (arch-review 55). It returned `boolean`, and the sweep read `false` as
+  // "tombstone this as INTERRUPTED". Every failure downstream — a dataset that no longer resolves, an
+  // attempt ledger that could not be read, a cluster that would not say whether a job is live — funnelled
+  // through one `.catch(() => false)` into that single branch. So a transient outage was recorded as a
+  // permanently failed evaluation, over managed jobs that were still running.
+  resume?: (id: string, authority: DriverAuthority) => Promise<ResumeResult>;
   // RunService.resume (adopt-first) — re-drive an interrupted STANDALONE run (adopt the still-alive backend job
   // or re-dispatch from the persisted caseSpec). false = legacy record → tombstone as before.
-  resumeRun?: (record: RunRecord, authority: DriverAuthority) => Promise<boolean>;
+  resumeRun?: (record: RunRecord, authority: DriverAuthority) => Promise<ResumeResult>;
   // WHO this process is. Records it claims are re-stamped with it; records already stamped with it are ours to
   // reclaim (a replica whose identity is pinned across restarts must still recover its own interrupted work).
   owner?: string;
@@ -77,6 +84,11 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   // Records left alone because another replica is still driving them — the difference between a control plane
   // that scales and one that eats its own work at every boot.
   live: number;
+  // Records THIS sweep claimed and could not decide about — an unreadable ledger, a cluster that would not
+  // answer. Left open and untouched for the next sweep. Distinct from `live` (somebody else owns it) and from
+  // `scorecards`/`runs` (we wrote a terminal row): those two were the only answers the boolean boundary had,
+  // and this one is what it was missing (arch-review 55).
+  deferred: number;
 }> {
   const now = deps.now ?? (() => new Date().toISOString());
   // The clock + fact identity the tombstones write under (see `tombstoneInterrupted`).
@@ -85,6 +97,10 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   let resumedCount = 0;
   let runCount = 0;
   let liveCount = 0;
+  // Records this sweep could not DECIDE about — an unreadable ledger, a cluster that would not answer. Left
+  // exactly as they are and reported separately, because "we deferred 3" and "we failed 3" are opposite
+  // operational facts and the boolean boundary could only say the second (arch-review 55).
+  let deferredCount = 0;
 
   // A store hiccup here must not turn into "reclaim everything" — an unreadable heartbeat set means we cannot
   // prove anybody is dead, so with a registry wired we treat every OWNED record as still driven (fail-closed:
@@ -134,9 +150,28 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // again, because the value in the row a minute from now is whoever displaced us.
       authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: claimed.ownerEpoch ?? 0 };
     }
-    if (deps.resume && (await deps.resume(c.id, authority).catch(() => false))) {
+    // An exception is "we could not find out" — the same answer as an explicit `retry_later`, and never a
+    // reason to write a terminal row (rule `protocol` L2: never signal unknown by throwing, and never let a
+    // catch answer for a decision).
+    const disposition = deps.resume
+      ? await deps.resume(c.id, authority).catch(
+          (err: unknown): ResumeResult => ({
+            kind: "retry_later",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        )
+      : ({ kind: "unresumable" } as ResumeResult);
+    // resume re-dispatches unfinished cases and supersedes mid-flight children itself.
+    if (disposition.kind === "resumed" || disposition.kind === "already_settled") {
       resumedCount += 1;
-      continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
+      continue;
+    }
+    if (disposition.kind === "retry_later") {
+      // LEFT AS IT IS, deliberately: claimed by this replica, still open, and NOT counted as recovered. The
+      // next sweep asks again. Writing anything terminal here is the defect this case exists to prevent.
+      deferredCount += 1;
+      console.warn(`▶ boot recovery: batch ${c.id} left for a later sweep — ${disposition.reason}`);
+      continue;
     }
     // The tombstone that motivated the fence: a batch that settled while this recovery was deciding must not
     // be recorded as an infrastructure failure. `undefined` = it settled; nothing here is ours to write.
@@ -216,8 +251,21 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
         driving = claimed;
         runAuthority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: claimed.ownerEpoch ?? 0 };
       }
-      if (deps.resumeRun && (await deps.resumeRun(driving, runAuthority).catch(() => false))) {
+      const runDisposition = deps.resumeRun
+        ? await deps.resumeRun(driving, runAuthority).catch(
+            (err: unknown): ResumeResult => ({
+              kind: "retry_later",
+              reason: err instanceof Error ? err.message : String(err),
+            }),
+          )
+        : ({ kind: "unresumable" } as ResumeResult);
+      if (runDisposition.kind === "resumed" || runDisposition.kind === "already_settled") {
         runsResumed += 1;
+        continue;
+      }
+      if (runDisposition.kind === "retry_later") {
+        deferredCount += 1;
+        console.warn(`▶ boot recovery: run ${r.id} left for a later sweep — ${runDisposition.reason}`);
         continue;
       }
       // …and the same transition here, under the epoch this recovery claimed: a replica displaced by a later
@@ -233,5 +281,6 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
     runsResumed,
     sessions: sessionCount,
     live: liveCount,
+    deferred: deferredCount,
   };
 }

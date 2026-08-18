@@ -26,7 +26,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
     await runStartupRecovery({
       scorecardStore,
       store,
-      scorecardService: { resume: async () => false },
+      scorecardService: { resume: async () => ({ kind: "unresumable" as const }) },
       service: { resume: async () => ({ kind: "unresumable" }) }, // no caseSpec to re-dispatch
       adoptWorkFn: async () => ({ kind: "absent" as const }), // the cluster confirmed no job survived to adopt
       owner: "cp-test",
@@ -49,7 +49,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
     await runStartupRecovery({
       scorecardStore,
       store,
-      scorecardService: { resume: async () => false },
+      scorecardService: { resume: async () => ({ kind: "unresumable" as const }) },
       service: {
         resume: async () => {
           resumed = true;
@@ -82,7 +82,7 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
     await runStartupRecovery({
       scorecardStore,
       store,
-      scorecardService: { resume: async () => false },
+      scorecardService: { resume: async () => ({ kind: "unresumable" as const }) },
       service: {
         resume: async () => {
           // the worker's own settle lands first — exactly what the adopt was waiting for

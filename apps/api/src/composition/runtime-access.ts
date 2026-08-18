@@ -438,7 +438,7 @@ export async function runStartupRecovery(deps: {
     // service now says WHICH of the two happened, and the write goes through `settleRun`, which cannot be
     // called without the terminal fence.
     resumeRun: async (r, authority) => {
-      void (async () => {
+      return await (async (): Promise<ResumeResult> => {
         // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
         // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
         // that mints none) falls back to "the newest job of this case", which can be another run's.
@@ -449,12 +449,12 @@ export async function runStartupRecovery(deps: {
         const handlesRead = workHandlesFor
           ? await readOrUnknown(() => workHandlesFor(`evd-run-${r.id}`), "the run's runtime work handles")
           : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
-        if (handlesRead.kind === "unknown") {
-          console.warn(
-            `[recovery] run ${r.id} left for the next sweep: ${handlesRead.reason} — re-dispatching without knowing where its compute is may double-spend a live job`,
-          );
-          return; // the claim is released by the sweep; deciding on an unread ledger is the defect, not the delay
-        }
+        if (handlesRead.kind === "unknown")
+          // DEFERRED, AND THE SWEEP IS TOLD (arch-review 55). This used to `return` out of a fire-and-forget
+          // task while the caller had already answered `true`: the run stayed claimed by this replica,
+          // `running`, with no driver and no durable retry — a zombie the next booting replica reads as
+          // "another live replica is driving it".
+          return { kind: "retry_later", reason: handlesRead.reason };
         const handles = handlesRead.kind === "read" ? handlesRead.value : [];
         let adopted: CaseResult | undefined;
         if (handles.length > 0 && adoptWorkFn) {
@@ -470,45 +470,29 @@ export async function runStartupRecovery(deps: {
               adopted = decision.result;
               break;
             }
-            if (decision.kind === "unknown") {
-              console.warn(
-                `[recovery] run ${r.id} left for the next sweep: ${decision.reason} — its job may still be running`,
-              );
-              return;
-            }
+            if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };
           }
         }
         // No handle = nothing this system can name, so nothing to adopt. `service.resume` then re-dispatches
         // (safe for the dispatch that died before reserving, which is the only way a post-Wave-A row gets
         // here) or tombstones under its own fence. What it no longer does is harvest "the newest job of this
         // case", which could be another run's.
-        // A resume that THREW told us nothing, and the claim is binding — so it falls to the tombstone, which
-        // is now fenced: if the run settled in the meantime the write simply loses and history keeps the real
-        // outcome. That is the difference between guessing safely and guessing.
-        const outcome = await service
-          .resume(r, adopted, authority)
-          .catch((): ResumeResult => ({ kind: "unresumable" }));
-        if (outcome.kind !== "unresumable") return; // resumed, or already settled by whoever finished it
-        // …and the tombstone goes through the domain transition, so it emits the terminal FACT a normal
-        // failure emits (arch-review 34 P1) — the run's completion callback hangs off that fact, and a
-        // recovery that settled a row silently left the caller waiting on exactly the run this leg exists
-        // for. Fenced by the epoch this recovery HOLDS, not merely by the row being open: "open" is what
-        // makes it a successor's to finish (arch-review 32 P0).
-        await tombstoneInterrupted(
-          store,
-          r,
-          { now: () => new Date().toISOString(), newId: () => randomUUID() },
-          {
-            epoch: authority.epoch,
-          },
-        ).catch((err) => {
-          console.warn(
-            `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          return undefined;
-        });
+        // A resume that THREW told us nothing — which is `retry_later`, not `unresumable` (arch-review 55,
+        // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
+        // "this run failed", and the sweep wrote a tombstone on the strength of it.
+        const outcome = await service.resume(r, adopted, authority).catch(
+          (err: unknown): ResumeResult => ({
+            kind: "retry_later",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
+        // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
+        // fire-and-forget leg whose caller had already answered `true` — so the one place that knew the
+        // outcome was also the one place nobody was waiting on. `recoverInterrupted` already tombstones an
+        // `unresumable` disposition under the epoch it claimed; saying so once is the whole change.
+        return { kind: "unresumable" };
       })();
-      return true;
     },
   });
   if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed + recovered.sessions > 0)

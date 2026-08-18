@@ -106,8 +106,15 @@ export class RecoveryPlanner {
           if (handlesRead.kind === "unknown")
             // The plan CANNOT BE MADE, so none is returned. Skipping the case would be worse than useless:
             // a case that is not seeded is re-dispatched, which is exactly the double-spend this read
-            // protects against. The caller already treats a throw here as "not faithfully resumable" and
-            // leaves the batch for the next sweep, which is the honest outcome.
+            // protects against.
+            //
+            // ⚠️ THE COMMENT THAT USED TO BE HERE WAS WRONG (arch-review 55). It said the caller "already
+            // treats a throw here as 'not faithfully resumable' and leaves the batch for the next sweep".
+            // It did not: `resume` caught everything into `false`, and the sweep read `false` as
+            // TOMBSTONE — so this refusal, added to prevent a double-spend, recorded the batch as
+            // `failed{INTERRUPTED}` while its jobs were still running. The type is what fixed it: `resume`
+            // answers `retry_later` for an UpstreamError and the sweep leaves the row alone. The lesson is
+            // rule `protocol` L2's: a throw is not a third value, it is whatever the nearest catch means.
             throw new UpstreamError(
               "UPSTREAM_ERROR",
               { scorecardId: id, caseId: c.caseId },

@@ -378,7 +378,22 @@ function pricedTrace(trace: TraceEvent[]): TraceEvent[] {
 export type ResumeResult =
   | { kind: "resumed" }
   | { kind: "already_settled"; record: RunRecord }
-  | { kind: "unresumable" };
+  // The record cannot be driven and never will be — a legacy row with no caseSpec, a dataset that no longer
+  // resolves. The recovery sweep tombstones it as INTERRUPTED, which is a statement about history.
+  | { kind: "unresumable" }
+  // ── "WE COULD NOT FIND OUT" IS NOT "IT FAILED" (arch-review 55) ─────────────────────────────────────
+  //
+  // The fourth case, and the one whose absence turned a transient outage into a permanent verdict. An
+  // attempt-ledger read that failed, a cluster that would not answer whether a job is still live: nothing
+  // about the record has been established, so nothing terminal may be written for it. The sweep leaves it
+  // and comes back.
+  //
+  // It exists because `unresumable` was doing both jobs. The recovery boundary spoke `boolean`, every
+  // failure funnelled through `.catch(() => false)`, and `false` meant tombstone — so an unreadable ledger
+  // was recorded as `failed{INTERRUPTED}` on a batch whose managed jobs were still running. A caller that
+  // cannot tell "this will never work" from "ask again shortly" will always answer with the more damaging
+  // one, because that is the branch the boolean already had.
+  | { kind: "retry_later"; reason: string };
 
 const UNRESUMABLE: ResumeResult = { kind: "unresumable" };
 

@@ -192,6 +192,79 @@ debt is real; only the *retry frequency* should change, plus an operator signal.
 
 ---
 
+## Review 55 — the defects a fix can CREATE, and the ones a proof cannot prevent
+
+### R55.1 A refusal added for safety, consumed as a verdict ⚠️ SELF-INFLICTED
+`packages/application-control/src/scorecard/recovery-planner.ts` (arch-review 54, Phase 2)
+
+Phase 2 made the batch planner REFUSE to plan when the attempt ledger could not be read — correct, because a
+case that is not seeded gets re-dispatched, and re-dispatching over live compute double-spends. It refused by
+throwing, with this comment:
+
+> *"The caller already treats a throw here as 'not faithfully resumable' and leaves the batch for the next
+> sweep, which is the honest outcome."*
+
+The caller did no such thing. `ScorecardBatchService.resume` caught everything into `false`, and the boot sweep
+read `false` as **tombstone**: `settleScorecard(..., { status: "failed", error: INTERRUPTED })`. So a guard
+added to prevent a double-spend recorded the batch as an evaluation that FAILED — permanently, in history —
+while its managed jobs were still running. Strictly worse than the collapse it replaced.
+
+Two rules came out of it, both now in `protocol.md` L2:
+- **A throw is not a third value.** It is caught by the nearest generic handler and becomes THAT handler's
+  meaning. Return the union.
+- **The union is not done until the consumer chain is.** Introducing `unknown` at the producer moves the
+  question; someone must still name the case at the point a DURABLE decision is written. Walk it.
+
+And the meta-lesson, which is why this entry leads: **a fix verified only at its own layer can be worse than
+the defect.** The counterexample proved the planner refused. Nothing asked what the refusal became three
+frames up.
+
+### R55.2 An answer given before the work that would justify it
+`apps/api/src/composition/runtime-access.ts` — `resumeRun` started `void (async () => { … })()` and then
+`return true`. The sweep counted the run as resumed; the background leg, on `unknown`, simply returned. The
+row stayed claimed by this replica, `running`, driven by nobody — and the next booting replica reads exactly
+that as "another live replica has it".
+
+**Rule:** a fire-and-forget leg may not report an outcome its caller has not reached. Either await it, or
+report what it actually is (`retry_later`) and let the sweep come back.
+
+### R55.3 A proof that outlives its authority
+`packages/db/src/results/pg-execution-attempt-store.ts` — `reserveWork` is
+`UPDATE … WHERE attempt_id = $1 RETURNING …`. It refuses an attempt that does not exist (Phase 1's fix) and
+accepts one that is **cancelled, superseded, terminal, or belongs to a batch a newer epoch now owns**. So a
+driver displaced by a takeover can no longer commit an outcome and can still authorize new external compute;
+two dispatches onto one attempt both succeed, and `runtime_work` is last-write-wins over the column that names
+live work.
+
+**Shape:** the authorizing write is a CONDITIONAL transition, not a metadata update — state, owner epoch,
+parent liveness and "nothing reserved yet" asserted in the one statement that flips `created → reserved`.
+See `protocol.md` L1's second half: a proof has a lifetime.
+
+### R55.4 A debt stored in the subject's status
+`packages/application-control/src/scorecard/scorecard-service.ts` `stopInFlight` — the teardown iterates
+children that are `running`/`queued`, kills each one's exact work, and settles the row terminal **whether or
+not the kill converged**. The first attempt collects the failure and keeps the operation owed. The retry
+iterates the same way, skips every child it terminalized (`if (c.status !== "running" && … ) continue`), finds
+nothing live, and CERTIFIES completion — over compute it never confirmed was gone.
+
+The function's own closing comment already admitted the gap: *"no field claims the orchestrator was re-probed
+for the killed jobs afterwards."*
+
+**Shape:** the operation owns an explicit workset built from the ledger of what was PLACED. Row lifecycle and
+work lifecycle are different clocks (`protocol.md` L5).
+
+### R55.5 Provenance reconstructed at a different coordinate than it was sealed at
+The Temporal driver passes judges `{ passId: initial:<sc>, claim: { generation, attempt: 1 } }`, so evidence
+seals as `judge:<id>#initial:<sc>.<gen>.1`. Its finalizer then rebuilds receipts with
+`judgmentReceiptsFromPlane(results, initialScoringPassId(id))` — **no `claimFor`** — so the receipt names
+`judge:<id>#initial:<sc>`, a plane that does not exist. Recovery's re-judge passes no scope at all and seals
+`judge:<id>` bare, against the same reconstructed name.
+
+Phase 3's coverage check cannot see it: it counts (case, judge) units and never asks whether an emitter
+RESOLVES. A receipt exists to be joined; a count is not a join.
+
+---
+
 ## What review 54 actually cost to fix — the lessons the phases added
 
 Recorded because each one changed how the NEXT change should be made, not just what the code says.

@@ -9,6 +9,7 @@ import {
   type JudgeRunConfig,
   type ScorecardRecord,
   type ScorecardStep,
+  UpstreamError,
 } from "@everdict/contracts";
 import {
   type CircuitBreaker,
@@ -22,6 +23,7 @@ import { jobAttemptId } from "../execution/open-physical-attempt.js";
 import type { ScoringService } from "../execution/scoring-service.js";
 import type { SpilloverOutcome } from "../ops/runtime-spillover.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
+import type { ResumeResult } from "../run/run-service.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
@@ -49,6 +51,8 @@ import { WorkflowBatchDriver } from "./workflow-batch-driver.js";
 // The pinned model DOCUMENTS a manifest sealed, in the shape the job carries (arch-review 19 P0-4). Absent
 // when nothing was pinned — a raw string binding, an unregistered model, or a batch sealed before pins — which
 // the dispatcher reads as "unverifiable", never as agreement.
+
+const UNRESUMABLE: ResumeResult = { kind: "unresumable" };
 
 export class ScorecardBatchService {
   private readonly newId: () => string;
@@ -216,7 +220,14 @@ export class ScorecardBatchService {
   // `track` and never re-derived: a replica that reads the row for its epoch reads whatever number the
   // replica that displaced it wrote, and then drives beside it holding an identical token. Absent = nobody
   // claimed anything (a manual re-drive in a single-replica install), which drives under the record's own.
-  async resume(id: string, authority?: DriverAuthority): Promise<boolean> {
+  // ── IT ANSWERS WHICH KIND OF "NO" (arch-review 55) ────────────────────────────────────────────────
+  //
+  // This returned `boolean`, and the sweep above it read `false` as "tombstone this batch as INTERRUPTED".
+  // The `false`s below are genuine permanent refusals — the record is gone, the batch is not resumable, the
+  // dataset or harness no longer resolves — but the SAME value was produced by anything that threw inside,
+  // including a ledger read that only failed to answer. So a transient outage was written into history as an
+  // evaluation that failed, over managed jobs that were still running.
+  async resume(id: string, authority?: DriverAuthority): Promise<ResumeResult> {
     // What this resume may do to the batch AND to its children (arch-review 33 P0). The preprocessing below
     // touches children BEFORE `track` proves anything, so without carrying the parent's token down here a
     // replica displaced from the batch could still adopt and tombstone its successor's children — each write
@@ -226,13 +237,13 @@ export class ScorecardBatchService {
     // says: the same fallback `track` uses, and the one a single-replica install has always had.
     const parentDriver = authority === undefined ? undefined : { scorecardId: id, epoch: authority.epoch };
     const rec = await this.deps.store.get(id);
-    if (!rec) return false;
+    if (!rec) return UNRESUMABLE;
     const batch = ScorecardBatch.from(rec);
     const orch = rec.orchestration; // local narrow — canResume() already requires it
-    if (!batch.canResume() || !orch) return false;
+    if (!batch.canResume() || !orch) return UNRESUMABLE;
     // A Temporal-owned batch owns itself: the workflow's activity retries ride out a control-plane restart, so
     // boot recovery must neither tombstone nor double-drive it.
-    if (batch.isWorkflowOwned()) return true;
+    if (batch.isWorkflowOwned()) return { kind: "resumed" };
     // A MULTI-TRIAL BATCH IS RESUMABLE (arch-review 52, wave 1). It used to fall to the INTERRUPTED tombstone
     // — a control-plane restart threw away every committed trial of a pass@k run and told the submitter their
     // batch was interrupted, because the exclusion downstream was stated in case ids and a case is not the
@@ -280,8 +291,12 @@ export class ScorecardBatchService {
       seed = seeded.seed;
       seedRunIds = seeded.seedRunIds;
       adopted = seeded.adopted;
-    } catch {
-      return false; // dataset/subset no longer resolves — not faithfully resumable
+    } catch (err) {
+      // WHICH failure this was decides whether history records a verdict. A plan that cannot be MADE because
+      // the ledger could not be read is `retry_later`; one that cannot be made because the dataset no longer
+      // resolves is permanent. `seedFromLedger` says which by returning rather than throwing for the first.
+      if (err instanceof UpstreamError) return { kind: "retry_later", reason: err.message };
+      return UNRESUMABLE; // dataset/subset no longer resolves — not faithfully resumable
     }
     // Harness spec re-resolve at the recorded concrete version (+ the recorded ephemeral pins, if any).
     let harnessSpec: HarnessSpec | undefined;
@@ -305,7 +320,7 @@ export class ScorecardBatchService {
       try {
         plan.assertHarness(resolvedSpec);
       } catch (err) {
-        if (err instanceof ConflictError) return false;
+        if (err instanceof ConflictError) return UNRESUMABLE;
         throw err;
       }
       harnessSpec = plan.pinSpec(resolvedSpec);
@@ -340,7 +355,7 @@ export class ScorecardBatchService {
         resumeNote: `Resumed after a control-plane restart — ${seed.length} finished case(s) kept, ${remaining} re-dispatched${adopted > 0 ? ` (${adopted} in-flight job(s) adopted without re-running)` : ""}`,
       },
     );
-    return true;
+    return { kind: "resumed" };
   }
 
   // ── THE DRIVERS, ADDRESSED BY THE FACADE'S OWN SURFACE ─────────────────────────────────────────────

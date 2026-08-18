@@ -3280,7 +3280,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
     const { store, service, datasets } = wire(dispatcher);
     await datasets.register("acme", threeCases);
     await store.create({ ...record(), status: "running" });
-    expect(await service.resume("sc-t")).toBe(true);
+    expect(await service.resume("sc-t")).toEqual({ kind: "resumed" });
     expect((await store.get("sc-t"))?.status).toBe("running"); // untouched — the workflow owns it
   });
 });
@@ -3480,7 +3480,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       updatedAt: "2026-07-08T00:00:01.000Z",
     });
 
-    expect(await service.resume("sc-int")).toBe(true);
+    expect(await service.resume("sc-int")).toEqual({ kind: "resumed" });
     const rec = await waitTerminal(store, "sc-int");
 
     expect(dispatched.sort()).toEqual(["c2", "c3"]); // c1 is never re-run
@@ -3553,7 +3553,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       externalJobId: "everdict-c2-aaaa",
     });
 
-    expect(await service.resume("sc-adopt")).toBe(true);
+    expect(await service.resume("sc-adopt")).toEqual({ kind: "resumed" });
     const rec = await waitTerminal(store, "sc-adopt");
 
     expect(adoptedFor).toContain("child-c2");
@@ -3619,7 +3619,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       externalJobId: "everdict-c2-aaaa",
     });
 
-    expect(await service.resume("sc-adopt-receipt")).toBe(true);
+    expect(await service.resume("sc-adopt-receipt")).toEqual({ kind: "resumed" });
     await waitTerminal(store, "sc-adopt-receipt");
 
     // Every case the batch counted has a receipt — the adopted one included, so the parity check has nothing
@@ -3659,8 +3659,8 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       createdAt: "2026-07-08T00:00:00.000Z",
       updatedAt: "2026-07-08T00:00:00.000Z",
     });
-    expect(await service.resume("sc-done")).toBe(false);
-    expect(await service.resume("sc-legacy")).toBe(false);
+    expect(await service.resume("sc-done")).toEqual({ kind: "unresumable" });
+    expect(await service.resume("sc-legacy")).toEqual({ kind: "unresumable" });
   });
 
   it("retryFailed re-runs only the failed cases into a NEW scorecard and carries the passes verbatim", async () => {

@@ -50,7 +50,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
 
     const res = await recoverInterrupted({ scorecards, runs, now: () => "2026-07-04T00:00:00.000Z" });
 
-    expect(res).toEqual({ scorecards: 2, resumed: 0, runs: 2, runsResumed: 0, sessions: 0, live: 0 });
+    expect(res).toEqual({ scorecards: 2, resumed: 0, runs: 2, runsResumed: 0, sessions: 0, live: 0, deferred: 0 });
     expect((await scorecards.get("zombie-running"))?.status).toBe("failed");
     expect((await scorecards.get("zombie-running"))?.error?.code).toBe("INTERRUPTED");
     expect((await scorecards.get("zombie-queued"))?.status).toBe("failed");
@@ -72,6 +72,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       runsResumed: 0,
       sessions: 0,
       live: 0,
+      deferred: 0,
     });
   });
 
@@ -86,11 +87,11 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       runs,
       resume: async (id) => {
         resumedIds.push(id);
-        return id === "resumable";
+        return id === "resumable" ? { kind: "resumed" as const } : { kind: "unresumable" as const };
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 1, resumed: 1, runs: 0, runsResumed: 0, sessions: 0, live: 0 });
+    expect(res).toEqual({ scorecards: 1, resumed: 1, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 0 });
     expect(resumedIds).toEqual(["resumable", "legacy"]);
     // The resumed batch is left alone (its own track loop drives the status); the legacy one is tombstoned.
     expect((await scorecards.get("resumable"))?.status).toBe("running");
@@ -109,11 +110,11 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       runs,
       resumeRun: async (r) => {
         attempted.push(r.id);
-        return r.id === "solo-durable";
+        return r.id === "solo-durable" ? { kind: "resumed" as const } : { kind: "unresumable" as const };
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 1, sessions: 0, live: 0 });
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 1, sessions: 0, live: 0, deferred: 0 });
     expect(attempted).toEqual(["solo-durable", "solo-legacy"]);
     // The resumed run is left alone (RunService.resume drives its status); the legacy one is tombstoned.
     expect((await runs.get("solo-durable"))?.status).toBe("running");
@@ -129,22 +130,29 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
     const res = await recoverInterrupted({
       scorecards,
       runs,
-      // Mirrors main.ts: claim (return true) immediately, do the slow adopt/settle in the background.
+      // Mirrors main.ts: answer promptly, do the slow adopt/settle in the background. What the answer may
+      // NOT do is claim an outcome the background leg has not reached (arch-review 55) — the composition now
+      // returns the leg's own disposition, and this fixture keeps only the "startup is not blocked" property
+      // it was written for.
       resumeRun: async () => {
         void new Promise((r) => setTimeout(r, 200)).then(() => {
           backgroundSettled = true;
         });
-        return true;
+        return { kind: "resumed" as const };
       },
       now: () => "2026-07-09T00:00:00.000Z",
     });
     // Recovery returned promptly (before the 200ms background work) — startup is not blocked.
     expect(backgroundSettled).toBe(false);
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 1, sessions: 0, live: 0 });
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 1, sessions: 0, live: 0, deferred: 0 });
     expect((await runs.get("solo-running"))?.status).toBe("running"); // claimed, not tombstoned
   });
 
-  it("a throwing resumeRun does not crash boot — that run tombstones like a legacy one", async () => {
+  // RESTATED (arch-review 55). It read "a throwing resumeRun does not crash boot — that run tombstones like a
+  // legacy one", and that second clause was the defect: a throw says "we could not find out", and this sweep
+  // turned it into `failed{INTERRUPTED}` — a terminal verdict written over a run whose managed job may still
+  // be executing. Not crashing boot is the property worth keeping; tombstoning on an unknown is not.
+  it("a throwing resumeRun does not crash boot — and that run is DEFERRED, not tombstoned", async () => {
     const scorecards = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     await runs.create(runRec("solo-explodes"));
@@ -155,8 +163,9 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
         throw new Error("runtime registry gone");
       },
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 0, sessions: 0, live: 0 });
-    expect((await runs.get("solo-explodes"))?.status).toBe("failed");
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 1 });
+    // Left exactly as it was, for the next sweep to ask again.
+    expect((await runs.get("solo-explodes"))?.status).toBe("running");
   });
 
   it("leaves session runs (kind sandbox) to their reapers — never tombstoned, never claimed for resume", async () => {
@@ -179,17 +188,19 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       runs,
       resumeRun: async (r) => {
         attempted.push(r.id);
-        return false;
+        return { kind: "unresumable" as const };
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 0, sessions: 1, live: 0 });
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 0, sessions: 1, live: 0, deferred: 0 });
     expect(attempted).toEqual(["solo-stuck"]); // the session run was never offered for resume
     expect((await runs.get("session-orphan"))?.status).toBe("running"); // its reaper/orphan sweep settles it
     expect((await runs.get("solo-stuck"))?.status).toBe("failed");
   });
 
-  it("a throwing resume() does not crash boot — that batch tombstones like an unresumable one", async () => {
+  // RESTATED for the same reason as the run case above (arch-review 55): "the ledger could not be read" and
+  // "this batch can never be resumed" were one answer, and the sweep wrote history on the strength of it.
+  it("a throwing resume() does not crash boot — and that batch is DEFERRED, not tombstoned", async () => {
     const scorecards = new InMemoryScorecardStore();
     await scorecards.create(card("explodes"));
     const res = await recoverInterrupted({
@@ -198,8 +209,8 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
         throw new Error("dataset gone");
       },
     });
-    expect(res).toEqual({ scorecards: 1, resumed: 0, runs: 0, runsResumed: 0, sessions: 0, live: 0 });
-    expect((await scorecards.get("explodes"))?.status).toBe("failed");
+    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 1 });
+    expect((await scorecards.get("explodes"))?.status).toBe("running");
   });
   // ── Multi-replica (docs/architecture/multi-replica.md) ────────────────────────────────────────────────
   // Pre-fix, recovery reclaimed every in-flight record it found, so booting a second replica tombstoned the
@@ -237,7 +248,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       runs,
       owner: "cp-booting",
       replicas: aliveReplicas(["cp-booting"]), // only we are alive
-      resume: async () => true,
+      resume: async () => ({ kind: "resumed" as const }),
       now: () => "2026-07-04T00:00:00.000Z",
     });
 

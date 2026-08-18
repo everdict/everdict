@@ -25,6 +25,20 @@ effect's identity is durable.
   count, the written row) — never `Promise<void>`. Zero rows updated is a THROW, not a success.
 - Order is part of the contract: lifecycle flips (`running`) come after the reservation is durable, never
   before it.
+- **A PROOF HAS A LIFETIME — the effect re-proves it is still valid, in the write that records the intent.**
+  This is the half the first version of this law missed, and it is where the next review found the same defect
+  class again. "The row exists" is not "the row is still authorized"; "the handle was persisted" is not "the
+  parent is still open"; "a proof was returned" is not "it has not been revoked since". A reservation that
+  checks only `WHERE id = $1` authorizes a *cancelled* execution's dispatch just as happily as a live one's.
+  So the authorizing write is a CONDITIONAL transition, not a metadata update — one statement that asserts,
+  together: the subject is in the state that may still act (`created`, not terminal/superseded), nothing has
+  claimed it already (the work column is null), the owner's epoch is still current, and the parent/run it
+  belongs to is still non-terminal. It transitions the row in the same transaction, so "authorized" is a
+  state the ledger holds rather than a fact a caller remembers.
+- Consequently a proof object is a **capability, not a receipt**: `submit(job, authorization)` where the
+  authorization could not have been produced by a revoked actor. Two dispatches reaching one subject must not
+  both succeed — the second is refused by the guard, or is the *same* dispatch by exact id (idempotent), never
+  a silent last-write-wins on the column that names live compute.
 
 ## L2 — Unknown is unignorable
 A read that failed is not an empty set, not `undefined`, and not "absent".
@@ -40,6 +54,19 @@ A read that failed is not an empty set, not `undefined`, and not "absent".
   type failed to say it. Prefer the union that makes the line unrepresentable; if you must allowlist, the
   entry states *why this caller does not decide* — and "re-dispatch only costs compute" is NOT a reason
   (a second physical attempt spends money, writes competing evidence, and re-fires external side effects).
+- **NEVER SIGNAL `unknown` BY THROWING.** An exception is not a third value: it is caught by whatever generic
+  handler is nearest, and it becomes THAT handler's meaning. A `throw` intended as "leave this for the next
+  sweep" met `resume(...).catch(() => false)` one layer up and became "not faithfully resumable", which the
+  layer above turned into a terminal `failed{INTERRUPTED}` — a transient ledger outage recorded as an
+  evaluation that failed, permanently, in history. Return the union; make the caller name the case.
+- **The union is not done until the CONSUMER CHAIN is.** Introducing `unknown` at the producer moves the
+  question, it does not answer it. Walk every consumer to the point where a DURABLE decision is written and
+  state what each does with the third case — including the fire-and-forget ones. A caller that returns
+  `true` before its background work has decided has reported an outcome it does not have; the record is then
+  claimed, `running`, and driven by nobody.
+- The escape hatches that re-open this law, by name: `.catch(() => false)` on a resume, a `boolean` return
+  where three answers exist, a `void (async () => …)()` whose failure nobody records, and `throw` as a
+  signal. Each turns "we could not find out" into a decision somebody else made for you.
 
 ## L3 — Provenance is born at the source
 Identity is recorded where it is produced. Never re-derive it downstream from rendered output.
@@ -73,6 +100,21 @@ child rows" is not "the container exited".
   teardown directly and records a bare failure is a second protocol, and the two drift.
 - "We could not find out" is an ESCALATION FIELD (attempts, backoff, operator alert) — never a terminal state
   that removes the debt from the sweep. Terminal means verified.
+- **A DEBT OWNS ITS WORKLIST.** The law above says "terminal rows are not an exited container", and the first
+  version of it still let the teardown DERIVE what to stop from those rows: it iterated the children that were
+  still `running`, killed each one's work, and settled the row terminal whether or not the kill converged. So
+  the first attempt recorded a failure and kept the operation owed — and the retry, iterating the same way,
+  skipped every child it had just terminalized, found nothing live, and CERTIFIED completion over compute it
+  had never confirmed was gone. The debt evaporated because it was stored in the subject's status rather than
+  in the operation.
+  So the operation holds an explicit workset — the exact handles, leases, queued intents and workflow ids —
+  built from the ledger that records what was PLACED, not from what is currently open. Each item stays owed
+  until it is independently observed absent. Row lifecycle and work lifecycle are different clocks; a
+  cancellation converges on the second one.
+- A read that fails while building that workset makes the operation `verifying`, never a shorter worklist.
+  A teardown that could not enumerate what it owes has not enumerated zero.
+- **Cancellation is also a REVOCATION** (see L1): after it, the subject may no longer authorize new external
+  work. A stop that races a dispatch and loses is a teardown that will never converge.
 
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).

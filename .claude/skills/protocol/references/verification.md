@@ -45,6 +45,30 @@ Two structural scanners were first written in a form that passed against the cod
 > Revert the production line the guard targets, watch the guard go RED, restore. A guard nobody saw fail is a
 > comment with a test runner attached.
 
+## A protocol between two actors needs an INTERLEAVED counterexample
+
+Every counterexample in the first two programs drove ONE actor through a sequence. That is enough to pin an
+ordering ("the handle is reported before the object exists") and it cannot reach the defect class that made the
+third review: **two actors racing across the gap between a check and the effect it guards.** Nine of the ten
+open findings at `63194486` are that shape, and the mutation suite was green on all of them.
+
+The shapes, so they can be recognised rather than rediscovered:
+
+| Interleaving | The window | What a sequential test sees |
+|---|---|---|
+| cancel / takeover between `reserve()` and `submit()` | the guard checked liveness, then the world changed | a clean dispatch |
+| two publishers between `aliasIsAhead()` and `put()` | both read "nobody is ahead", both write | correct ordering |
+| retry after a FAILED kill | the first attempt terminalized the row it was iterating | a converged teardown |
+| a second dispatch onto one attempt | last-write-wins on the column naming live compute | one handle |
+| a judge retry vs the finalizer's receipt | the emitter moved; the reconstruction did not | matching counts |
+
+Write them as: **A acts to the point of no return → B acts → A completes.** Drive both explicitly (resolve a
+held promise, call the two drains in an interleaved order, mutate the row between the read and the write) —
+`Promise.all` over two calls proves nothing, because nothing forces the schedule.
+
+> A rung whose defect needs two actors needs two actors in its test. If the counterexample can be written as
+> one call after another, it is not testing the rung you think it is.
+
 ## A type-level counterexample cannot be planted and skipped
 
 `describe.skip` suppresses the RUNTIME, not `tsc`. A counterexample whose claim is about a CONTRACT — "this

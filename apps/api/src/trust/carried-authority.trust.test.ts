@@ -110,7 +110,7 @@ describeTrust("TRUST-147 — a fencing token is carried from the claim, never re
       replicas: aliveOnly(["cp-b"]),
       resume: async (_id, authority) => {
         carried = authority;
-        return true; // B claims, then pauses here — it has not driven anything yet
+        return { kind: "resumed" as const }; // B claims, then pauses here — it has not driven anything yet
       },
     });
     expect(carried?.epoch).toBe(1);
@@ -120,7 +120,7 @@ describeTrust("TRUST-147 — a fencing token is carried from the claim, never re
       scorecards: store,
       owner: "cp-c",
       replicas: aliveOnly(["cp-c"]),
-      resume: async () => true,
+      resume: async () => ({ kind: "resumed" as const }),
     });
     expect((await store.get(record.id))?.ownerEpoch).toBe(2);
     expect((await store.get(record.id))?.ownerReplica).toBe("cp-c");
@@ -162,7 +162,7 @@ describeTrust("TRUST-147 — a fencing token is carried from the claim, never re
       replicas: aliveOnly(["cp-b"]),
       resumeRun: async (_r, authority) => {
         bAuthority = authority;
-        return true; // B claims and pauses
+        return { kind: "resumed" as const }; // B claims and pauses
       },
     });
     expect(bAuthority?.epoch).toBe(1);
@@ -173,7 +173,7 @@ describeTrust("TRUST-147 — a fencing token is carried from the claim, never re
       runs: runStore,
       owner: "cp-c",
       replicas: aliveOnly(["cp-c"]),
-      resumeRun: async () => true,
+      resumeRun: async () => ({ kind: "resumed" as const }),
     });
     expect((await runStore.get("run-carried"))?.ownerEpoch).toBe(2);
 

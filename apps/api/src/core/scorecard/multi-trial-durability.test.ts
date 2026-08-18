@@ -131,7 +131,7 @@ describe("multi-trial durability — a resumed pass@k batch keeps the trials it 
     }
 
     // When the control plane comes back and resumes it
-    expect(await service.resume("sc-mt")).toBe(true);
+    expect(await service.resume("sc-mt")).toEqual({ kind: "resumed" });
     const rec = await waitTerminal(store, "sc-mt");
 
     // Then exactly the ONE unfinished execution was re-dispatched — not c2's committed trial beside it, and
