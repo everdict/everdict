@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import { type GradeContext, type TraceEvent, measuredScores, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
@@ -261,6 +262,7 @@ describe("JudgeGrader", () => {
     };
     const calls: string[] = [];
     const compute = {
+      image: NO_IMAGE,
       async exec(cmd: string) {
         calls.push(cmd);
         return { exitCode: 0, stdout: "QkFTRTY0\n", stderr: "" }; // base64 stdout (with newline)
@@ -295,6 +297,7 @@ describe("JudgeGrader", () => {
     };
     let execCalls = 0;
     const compute = {
+      image: NO_IMAGE,
       async exec() {
         execCalls++;
         return { exitCode: 0, stdout: "SHOULD_NOT_BE_USED", stderr: "" };
@@ -327,6 +330,7 @@ describe("JudgeGrader", () => {
     };
     let execCalls = 0;
     const compute = {
+      image: NO_IMAGE,
       async exec() {
         execCalls++;
         return { exitCode: 0, stdout: "x", stderr: "" };

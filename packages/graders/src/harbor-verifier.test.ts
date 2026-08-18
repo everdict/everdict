@@ -1,4 +1,5 @@
 import type { ComputeHandle, ExecResult, GradeContext, Score } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { isMeasured } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { HarborVerifierGrader } from "./harbor-verifier.js";
@@ -10,6 +11,7 @@ function harborCompute(opts: { publish?: Record<string, string>; verifierExit?: 
   const files = new Map<string, string>();
   const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "" });
   return {
+    image: NO_IMAGE,
     async exec(cmd: string): Promise<ExecResult> {
       if (cmd.startsWith("mkdir") || cmd.startsWith("chmod")) return ok();
       const cat = /^cat '(.+)'$/.exec(cmd);

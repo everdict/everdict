@@ -22,6 +22,10 @@ export function scopedComputeHandle(inner: ComputeHandle, prefix: string): Compu
   const scopedOpts = (opts?: ExecOpts): ExecOpts => ({ ...opts, cwd: rebase(opts?.cwd) });
   const scoped: ComputeHandle = {
     ...(inner.id !== undefined ? { id: inner.id } : {}),
+    // A task scope rebases paths; it does not provision. The world it reports is the session container's,
+    // so the inner answer is forwarded rather than re-stated — a scope that answered `none` would lose the
+    // digest the driver read and make a scoped task look like it ran no image at all.
+    image: inner.image,
     async exec(cmd, opts) {
       const next = scopedOpts(opts);
       await ensureDir(next.cwd ?? prefix);

@@ -1,4 +1,5 @@
 import type { ComputeHandle, Driver, Environment, EvalCase, EvaluableHarness, TraceEvent } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runCase } from "./run-case.js";
 
@@ -14,6 +15,7 @@ describe("runCase — live-screen capture (runCtx.liveScreen)", () => {
   function captureCompute(): ComputeHandle & { disposed: boolean; execCalls: string[] } {
     const handle = {
       disposed: false,
+    image: NO_IMAGE,
       execCalls: [] as string[],
       exec: async (command: string) => {
         handle.execCalls.push(command);

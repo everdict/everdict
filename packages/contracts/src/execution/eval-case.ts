@@ -3,6 +3,7 @@ import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
+import { ImageProvenanceSchema } from "./image-provenance.js";
 import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
@@ -189,10 +190,27 @@ export const ExecutionManifestSchema = z.object({
   // this, `placement.os: "linux"` and no placement at all leave identical evidence.
   osResolved: z.enum(["declared", "defaulted"]),
   driver: z.string().optional(), // Driver.id — "local" | "docker" (absent on lanes that provision no Driver)
-  image: z.string().optional(), // the image the compute was provisioned from (EvalCase.image)
+  // ERA 1 ONLY. A verbatim copy of the REQUEST (`EvalCase.image`) — a reference nothing ever resolved, so
+  // `repo:latest` here names whichever bytes the daemon happened to hold. Never written by an era-2
+  // producer and never read except through `imageProvenanceOf`, which reports it as unresolved.
+  image: z.string().optional(),
   runtime: z.string().optional(), // TopologyRuntime.id — the topology lane's answer to "driver"
+  // The DECLARED manifest era (the MANIFEST_IDENTITY_VERSION pattern). Absent = era 1: `image` is a request
+  // nobody resolved, AND its absence is ambiguous — a lane that provisioned an image and left the field
+  // blank (every k8s/nomad batch, every topology case) is indistinguishable from one that provisioned none.
+  // That ambiguity is exactly why an era-1 manifest reads as `unresolved{legacy_era}` and never as `none`.
+  // Detecting the era from the MARKER rather than from field absence is what makes "an era-2 producer that
+  // forgot to state its provenance" a detectable bug instead of a silent slide back to era 1.
+  manifestVersion: z.number().int().positive().optional(),
+  // Which image bytes this case actually ran from. Required at era 2 — the reader enforces it, because the
+  // stored blob must keep parsing rows written before the field existed.
+  imageProvenance: ImageProvenanceSchema.optional(),
 });
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
+
+// The era an execution manifest was written in. Bump whenever a new facet joins the manifest; a producer
+// stamps the current constant, and a reader may conclude nothing about facets a lower era never recorded.
+export const CURRENT_EXECUTION_MANIFEST_ERA = 2;
 
 // The platform coordinates of a case whose collection is deferred out of the job (to the control plane) — when spec.trace.collect="control-plane"
 // the agent loads it and executeCase completes the result by pull + scoring the deferred observation (kept as provenance even after collection).

@@ -12,6 +12,7 @@ import {
   type ExecOpts,
   type ExecResult,
   InternalError,
+  NO_IMAGE,
   isDefaultNetwork,
   isEmptyResourceRequest,
 } from "@everdict/contracts";
@@ -27,6 +28,11 @@ class LocalComputeHandle implements ComputeHandle {
   // disposes the compute, and a host-native child would otherwise linger orphaned (unlike the container path where
   // docker rm -f ends everything).
   private activeChild: ReturnType<typeof spawn> | undefined;
+
+  // A host process comes out of no image. This is a POSITIVE claim, not a shrug: two runs that both
+  // provisioned nothing ran in the same world, which is a different statement from two runs whose images
+  // nobody could identify.
+  readonly image = NO_IMAGE;
 
   constructor(
     private readonly root: string,

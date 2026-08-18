@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { NO_IMAGE } from "@everdict/contracts";
 import { AppError, type ComputeHandle, type ExecOpts, type GradeContext, measuredScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
@@ -14,6 +15,7 @@ function mockCompute(stdout: string, exitCode = 0) {
   const writes: Array<{ path: string; data: string }> = [];
   const execs: Array<{ cmd: string; opts?: ExecOpts }> = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec(cmd: string, opts?: ExecOpts) {
       execs.push({ cmd, opts });
       return { exitCode, stdout, stderr: "" };
@@ -108,6 +110,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     let provisionedImage: string | undefined;
     const writes: string[] = [];
     const dedicated: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 0, stdout: '[{"graderId":"g","metric":"m","value":1,"pass":true}]', stderr: "" };
       },
@@ -139,6 +142,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
   it("image mode disposes the dedicated compute even when the script fails", async () => {
     let disposed = false;
     const dedicated: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 1, stdout: "", stderr: "boom" };
       },
@@ -199,6 +203,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     // inline code written to an absolute /tmp path landed inside the sandbox while the interpreter read the host.
     const root = await mkdtemp(join(tmpdir(), "everdict-grader-test-"));
     const sandbox: ComputeHandle = {
+      image: NO_IMAGE,
       async exec(cmd: string, opts?: ExecOpts) {
         const cwd = opts?.cwd ? join(root, opts.cwd) : root;
         await mkdir(cwd, { recursive: true });

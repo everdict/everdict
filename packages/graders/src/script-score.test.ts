@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import { type ComputeHandle, type ExecResult, type GradeContext, measuredScores, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
@@ -5,6 +6,7 @@ import { ScriptScoreGrader } from "./script-score.js";
 
 function mockCompute(stdout: string, exitCode = 0): ComputeHandle {
   return {
+    image: NO_IMAGE,
     async exec(): Promise<ExecResult> {
       return { exitCode, stdout, stderr: "" };
     },

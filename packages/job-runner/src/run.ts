@@ -67,6 +67,10 @@ export function withJobEnv(driver: Driver, env: Record<string, string>): Driver 
     provision: async (spec) => {
       const handle = await driver.provision(spec);
       return {
+        // FORWARDED, never re-answered: this decorator injects env, it does not provision — so the world it
+        // reports must be the inner driver's answer. A wrapper that re-states `none` here would erase the
+        // digest the driver read, and the result would carry the same shape as a lane that ran no image.
+        image: handle.image,
         exec: (cmd, opts) => handle.exec(cmd, { ...opts, env: { ...env, ...opts?.env } }),
         writeFile: (path, data) => handle.writeFile(path, data),
         readFile: (path) => handle.readFile(path),

@@ -11,10 +11,14 @@ import {
   type ExecChunk,
   type ExecOpts,
   type ExecResult,
+  type ImageProvenance,
   InternalError,
+  NO_IMAGE,
   type RegistryAuth,
+  imageResolved,
+  imageUnresolved,
 } from "@everdict/contracts";
-import { dockerAuthConfigJson, pickRegistryAuth } from "@everdict/domain";
+import { dockerAuthConfigJson, imageRepositoryOf, parseImageRef, pickRegistryAuth } from "@everdict/domain";
 import { chunkSinks, runSpawn, teeSinks } from "./spawn.js";
 
 const pexecFile = promisify(execFile);
@@ -34,6 +38,10 @@ class DockerComputeHandle implements ComputeHandle {
     private readonly cid: string,
     private readonly base: string,
     private readonly echo: boolean = false,
+    // WHICH BYTES this container came out of, read back from the daemon at provision. Carried on the handle
+    // because the driver is the only party that knows, and whoever records the world reads it from here
+    // rather than from the reference the case asked for.
+    readonly image: ImageProvenance = NO_IMAGE,
   ) {
     this.id = cid;
   }
@@ -201,6 +209,64 @@ export function dockerWorldArgs(spec: ComputeSpec, label: string): string[] {
   return args;
 }
 
+// The daemon read, injected so the resolution below is testable without a docker daemon — the same reason
+// `dockerWorldArgs` is exported. Returns the command's stdout; a rejection means the read did not happen.
+export type DockerRead = (args: string[]) => Promise<string>;
+
+const dockerRead: DockerRead = async (args) =>
+  (await pexecFile("docker", args, { maxBuffer: MAX_BUFFER })).stdout;
+
+// WHICH BYTES THIS CONTAINER RUNS — asked of the CONTAINER, not of the reference.
+//
+// Asking the daemon "what does repo:latest resolve to?" answers a question about the registry a moment
+// after the run; asking the container answers the question we need, which is what THIS execution holds.
+// It also reports a stale local `latest` truthfully rather than the newer bytes a re-pull would have found.
+//
+// A reference that already carries a digest needs no read at all: the request itself named the bytes, and
+// no lane can disagree with it. That is the fast path AND the escape a user has from a lane that cannot
+// report — pin the digest and nothing has to be asked.
+export async function resolveDockerImageProvenance(
+  ref: string,
+  containerId: string,
+  read: DockerRead = dockerRead,
+): Promise<ImageProvenance> {
+  const requested = parseImageRef(ref).digest;
+  if (requested !== undefined) return imageResolved([{ ref, digest: requested }], "ref");
+  let repoDigests: string[];
+  try {
+    const imageId = (await read(["inspect", containerId, "--format", "{{.Image}}"])).trim();
+    const raw = (await read(["image", "inspect", imageId, "--format", "{{json .RepoDigests}}"])).trim();
+    const parsed: unknown = JSON.parse(raw === "" ? "[]" : raw);
+    repoDigests = Array.isArray(parsed) ? parsed.filter((d): d is string => typeof d === "string") : [];
+  } catch (err) {
+    // The read did not happen. This is `unknown`, not `absent` — reporting it as "this image has no digest"
+    // would turn a daemon hiccup into a claim about the image (rule `protocol` L2).
+    const message = err instanceof Error ? err.message : String(err);
+    return imageUnresolved([{ ref }], "inspect_failed", `docker could not be asked which image backs the container: ${message}`);
+  }
+  // The read HAPPENED and the image has no registry identity — locally built, never pushed. A real answer,
+  // and a different one from the failure above: nothing is wrong, there is simply nothing to name.
+  const digest = pickRepoDigest(repoDigests, ref);
+  if (digest === undefined)
+    return imageUnresolved(
+      [{ ref }],
+      "no_registry_digest",
+      "the image the container runs has no registry digest (built locally and never pushed), so its bytes cannot be named to another reader",
+    );
+  return imageResolved([{ ref, digest }], "driver");
+}
+
+// `RepoDigests` holds `repo@sha256:…` entries, one per repository the image is known by. Prefer the entry
+// for the repository that was ASKED for — a mirrored image carries several, and reporting a digest under a
+// repository nobody referenced would name bytes correctly and provenance wrongly.
+function pickRepoDigest(repoDigests: readonly string[], ref: string): string | undefined {
+  const wanted = imageRepositoryOf(ref);
+  const match = repoDigests.find((d) => d.startsWith(`${wanted}@`)) ?? repoDigests[0];
+  if (match === undefined) return undefined;
+  const at = match.lastIndexOf("@");
+  return at === -1 ? undefined : match.slice(at + 1);
+}
+
 // A Driver that launches a container from an env image. Isolation is docker (the container) — for local/simple execution, separate from the strong isolation of a Backend (Nomad/K8s).
 export class DockerDriver implements Driver {
   readonly id = "docker";
@@ -218,6 +284,7 @@ export class DockerDriver implements Driver {
       mounts?: DriverMount[];
       registryAuths?: RegistryAuth[];
       echo?: boolean; // TEE every exec's output to this process's stdio (in-job: the job log becomes a live feed)
+      read?: DockerRead; // the daemon read seam (image provenance) — injected in tests, real docker otherwise
     } = {},
   ) {
     this.base = opts.base ?? "/everdict";
@@ -284,7 +351,12 @@ export class DockerDriver implements Driver {
       const e = err as { stderr?: string; message?: string };
       throw new InternalError("DRIVER_PROVISION_FAILED", { image }, e.stderr || e.message);
     });
-    return new DockerComputeHandle(stdout.trim(), this.base, this.opts.echo ?? false);
+    const cid = stdout.trim();
+    // The provisioner is the site that knows which bytes it launched, so it is the site that records them
+    // (rule `protocol` L3). Reading this downstream from `spec.image` would re-derive the world from the
+    // request, which is the defect this exists to close.
+    const provenance = await resolveDockerImageProvenance(image, cid, this.opts.read);
+    return new DockerComputeHandle(cid, this.base, this.opts.echo ?? false, provenance);
   }
 
   // Tear down a container this process holds no handle to (Driver.reap — the durable session reaper after

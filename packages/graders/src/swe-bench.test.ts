@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SweBenchGrader } from "./swe-bench.js";
@@ -6,6 +7,7 @@ import { SweBenchGrader } from "./swe-bench.js";
 function mockCompute(opts: { applyExit?: number; testExit?: number }): { compute: ComputeHandle; cmds: string[] } {
   const cmds: string[] = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec(cmd: string): Promise<ExecResult> {
       cmds.push(cmd);
       if (cmd.startsWith("git apply")) return { exitCode: opts.applyExit ?? 0, stdout: "", stderr: "apply" };

@@ -14,6 +14,7 @@ import type {
   Grader,
   Score,
 } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { measuredScores } from "@everdict/contracts";
 import { LocalDriver } from "@everdict/drivers";
 import { RepoEnvironment } from "@everdict/environments";
@@ -79,6 +80,7 @@ const CASE: EvalCase = {
 
 function fakeCompute(overrides: Partial<ComputeHandle> = {}): ComputeHandle & { disposed: boolean } {
   const handle = {
+    image: NO_IMAGE,
     disposed: false,
     async exec() {
       return { exitCode: 0, stdout: "", stderr: "" };

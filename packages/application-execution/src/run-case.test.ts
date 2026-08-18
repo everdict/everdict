@@ -7,15 +7,16 @@ import type {
   EvaluableHarness,
   TraceEvent,
 } from "@everdict/contracts";
-import { AppError } from "@everdict/contracts";
+import { AppError, CURRENT_EXECUTION_MANIFEST_ERA, NO_IMAGE, imageResolved } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runCase } from "./run-case.js";
 
 // A compute handle that records whether it was disposed — disposal is how runCase frees the runtime, so a
 // cancelled run must reach it (docker rm -f / process kill happens inside a real driver's dispose()).
-function fakeComputeHandle(): ComputeHandle & { disposed: boolean } {
+function fakeComputeHandle(over: Partial<ComputeHandle> = {}): ComputeHandle & { disposed: boolean } {
   const handle = {
     disposed: false,
+    image: over.image ?? NO_IMAGE,
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     writeFile: async () => {},
     readFile: async () => "",
@@ -283,8 +284,15 @@ describe("runCase — the execution manifest records the world the case actually
       graders: [],
       runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
     });
-    // Then: the world AND the fact that the default chose it are both on the result.
-    expect(result.execution).toEqual({ os: "linux", osResolved: "defaulted", driver: "local" });
+    // Then: the world AND the fact that the default chose it are both on the result, under the era that
+    // says what the manifest's other facets are entitled to claim.
+    expect(result.execution).toEqual({
+      os: "linux",
+      osResolved: "defaulted",
+      driver: "local",
+      manifestVersion: CURRENT_EXECUTION_MANIFEST_ERA,
+      imageProvenance: NO_IMAGE,
+    });
   });
 
   it("records an authored windows AS declared, and rides the driver that provisioned the compute", async () => {
@@ -295,18 +303,28 @@ describe("runCase — the execution manifest records the world the case actually
       graders: [],
       runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
     });
-    expect(result.execution).toEqual({ os: "windows", osResolved: "declared", driver: "docker" });
+    expect(result.execution).toEqual({
+      os: "windows",
+      osResolved: "declared",
+      driver: "docker",
+      manifestVersion: CURRENT_EXECUTION_MANIFEST_ERA,
+      imageProvenance: NO_IMAGE,
+    });
   });
 
-  it("records the image the compute was provisioned from when the case named one", async () => {
+  it("records the BYTES the compute came out of, never the reference the case named", async () => {
+    // The reference is what the case ASKED for; `ghcr.io/acme/swe:1` names different bytes over time. Only
+    // the provisioner knows which ones ran, so only the provisioner's answer is recorded.
+    const resolved = imageResolved([{ ref: "ghcr.io/acme/swe:1", digest: "sha256:aaaa" }], "driver");
     const result = await runCase({ ...CASE, image: "ghcr.io/acme/swe:1" } as EvalCase, {
-      driver: { id: "docker", provision: async () => fakeComputeHandle() } as Driver,
+      driver: { id: "docker", provision: async () => fakeComputeHandle({ image: resolved }) } as Driver,
       environment: ENVIRONMENT,
       harness: completingHarness(),
       graders: [],
       runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
     });
-    expect(result.execution?.image).toBe("ghcr.io/acme/swe:1");
+    expect(result.execution?.imageProvenance).toEqual(resolved);
+    expect(result.execution?.image).toBeUndefined();
   });
 });
 

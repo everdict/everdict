@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import {
   type CommandHarnessSpec,
   type ComputeHandle,
@@ -12,6 +13,7 @@ import { CommandHarness } from "./command.js";
 function fakeCompute() {
   const execs: Array<{ cmd: string; env?: Record<string, string>; cwd?: string }> = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec(cmd, opts) {
       execs.push({ cmd, env: opts?.env, cwd: opts?.cwd });
       return { exitCode: 0, stdout: "", stderr: "" };
@@ -105,6 +107,7 @@ describe("CommandHarness", () => {
   it("with trace none, stdout becomes the final assistant message (QA scoring for a black-box CLI — the answer answer-match reads)", async () => {
     // Regression: previously trace:none emitted no events, so prompt QA benchmarks always scored 0 (OfficeQA-style).
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 0, stdout: "thinking...\nThe answer is 258.7 billion.\n", stderr: "" };
       },
@@ -132,6 +135,7 @@ describe("CommandHarness", () => {
     // drew as a pile of ticks at its last instant with nothing saying when the work began.
     let nowMs = 1_700_000_000_000;
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         nowMs += 5_000; // the command took 5 seconds
         return { exitCode: 0, stdout: "", stderr: "" };
@@ -151,6 +155,7 @@ describe("CommandHarness", () => {
 
   it("when the command exits ≠0, surface it as an error event (no silent swallowing)", async () => {
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 127, stdout: "", stderr: "sh: codex: command not found" };
       },
@@ -184,6 +189,7 @@ describe("CommandHarness", () => {
     const sourceEvents: TraceEvent[] = [{ t: 1, kind: "message", role: "assistant", text: "from-otel" }];
     const source: TraceSource = { fetch: async () => sourceEvents };
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 0, stdout: "raw stdout noise", stderr: "" };
       },
@@ -424,6 +430,7 @@ describe("CommandHarness", () => {
 
   it("a setup failure (exit≠0) is an error", async () => {
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: 1, stdout: "", stderr: "boom" };
       },
@@ -440,6 +447,7 @@ describe("CommandHarness", () => {
 describe("CommandHarness — trace:none evidence fallback (stderr log events)", () => {
   function computeWith(out: { stdout?: string; stderr?: string; exitCode?: number }) {
     const compute: ComputeHandle = {
+      image: NO_IMAGE,
       async exec() {
         return { exitCode: out.exitCode ?? 0, stdout: out.stdout ?? "", stderr: out.stderr ?? "" };
       },
@@ -499,6 +507,7 @@ describe("CommandHarness — trace:none evidence fallback (stderr log events)", 
 function computeWithTraceFile(body: string | (() => never), stdout = "the answer") {
   const reads: string[] = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec() {
       return { exitCode: 0, stdout, stderr: "" };
     },

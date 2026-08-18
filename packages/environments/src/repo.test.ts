@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, ExecOpts } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { RepoEnvironment } from "./repo.js";
@@ -6,6 +7,7 @@ import { RepoEnvironment } from "./repo.js";
 function recorder() {
   const calls: { cmd: string; opts?: ExecOpts }[] = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec(cmd, opts) {
       calls.push({ cmd, ...(opts ? { opts } : {}) });
       return { exitCode: 0, stdout: "", stderr: "" };

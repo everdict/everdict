@@ -1,4 +1,5 @@
 import type { CapabilityStore, SecretStore } from "@everdict/application-control";
+import { NO_IMAGE } from "@everdict/contracts";
 import {
   type CapabilityRecord,
   type CodeToolSpec,
@@ -16,6 +17,7 @@ function fakeHandle(exec: (cmd: string, opts?: { env?: Record<string, string> })
   const files = new Map<string, string>();
   let disposed = false;
   const handle: ComputeHandle = {
+    image: NO_IMAGE,
     exec: async (cmd, opts) => exec(cmd, opts),
     writeFile: async (path, data) => {
       files.set(path, data);

@@ -1,9 +1,11 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, ExecChunk, ExecOpts, ExecResult, RunContext, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ClaudeCodeHarness } from "./claude-code.js";
 
 // Without actually calling claude, deterministically verify the injected auth env and stream-json parsing.
 class MockCompute implements ComputeHandle {
+  readonly image = NO_IMAGE;
   lastEnv: Record<string, string> | undefined;
   lastCwd: string | undefined;
   lastCmd = "";
@@ -24,6 +26,7 @@ class MockCompute implements ComputeHandle {
 // A compute WITH execStream: delivers the given chunks one macrotask apart (so line boundaries and event
 // interleaving are real), then resolves with the exec result — the streaming-session shape of the driver.
 class StreamingMockCompute implements ComputeHandle {
+  readonly image = NO_IMAGE;
   lastEnv: Record<string, string> | undefined;
   lastCmd = "";
   constructor(

@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import { RunService, SandboxSessionService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { ComputeHandle, Driver, EvaluableHarness } from "@everdict/contracts";
@@ -21,6 +22,7 @@ function fakeDriver() {
     async provision() {
       const cid = `c-${++seq}`;
       const handle: ComputeHandle = {
+        image: NO_IMAGE,
         async exec(command) {
           return { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
         },
@@ -463,6 +465,7 @@ describe("sandbox world routes — agent worlds (W1): snapshot, touch, close-wit
       async provision() {
         const cid = `c-${++seq}`;
         const handle: ComputeHandle = {
+          image: NO_IMAGE,
           id: cid,
           async exec(command) {
             return { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
@@ -631,6 +634,7 @@ describe("sandbox git routes — agent worlds (W2): a repository in, commits out
       async provision() {
         const cid = `c-${++seq}`;
         const handle: ComputeHandle = {
+          image: NO_IMAGE,
           id: cid,
           async exec(command) {
             return { stdout: `ran:${command}`, stderr: "", exitCode: 0 };

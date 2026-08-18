@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, ExecOpts, ExecResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { OsUseEnvironment } from "./os-use.js";
@@ -5,6 +6,7 @@ import { OsUseEnvironment } from "./os-use.js";
 function mock(): { compute: ComputeHandle; calls: Array<{ cmd: string; display?: string }> } {
   const calls: Array<{ cmd: string; display?: string }> = [];
   const compute: ComputeHandle = {
+    image: NO_IMAGE,
     async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
       calls.push({ cmd, display: opts?.env?.DISPLAY });
       const stdout = cmd.startsWith("wmctrl")

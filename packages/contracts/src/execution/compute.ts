@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type RegistryAuth, RegistryAuthSchema } from "../infra/image-ref.js";
 import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
+import type { ImageProvenance } from "./image-provenance.js";
 
 export const CapabilitySchema = z.enum(["shell", "browser", "desktop"]);
 export type Capability = z.infer<typeof CapabilitySchema>;
@@ -55,6 +56,11 @@ export interface ComputeHandle {
   // The driver-level identity of this compute (a container id), when the driver has one. Session runs
   // persist it on the row so a reaper in a LATER process can still tear the compute down (see Driver.reap).
   readonly id?: string;
+  // WHICH IMAGE BYTES this compute came out of — REQUIRED, for the same reason `os` is enforced rather than
+  // assumed: a driver allowed to leave this absent is a driver that reports a mutable tag as a world, and
+  // the result carries the same shape either way. A driver that provisions no image answers `{kind:"none"}`;
+  // one that could not read the digest answers `unresolved` WITH a reason. Neither is silence.
+  readonly image: ImageProvenance;
   exec(cmd: string, opts?: ExecOpts): Promise<ExecResult>;
   // Streaming exec: the SAME result contract as exec (a non-zero exit resolves, a timeout resolves 124),
   // with output chunks ALSO delivered incrementally as they arrive. Optional so callers can DETECT support

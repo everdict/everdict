@@ -1,4 +1,5 @@
 import type { ComputeHandle, ComputeSpec, Driver, RegistryAuth, RunRecord, TraceEvent } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { LiveSessionQuery, OutboxEvent, RunStore } from "../ports/run-store.js";
@@ -147,6 +148,7 @@ function fakeDriver(
       provisioned.push(spec);
       const cid = `c-${++seq}`;
       const handle: ComputeHandle = {
+        image: NO_IMAGE,
         id: cid,
         async exec(command, execOpts) {
           execs.push(command);
@@ -1316,6 +1318,7 @@ describe("SandboxSessionService — snapshot without a container daemon", () => 
         id: "sized",
         async provision() {
           return {
+            image: NO_IMAGE,
             id: "c-sized",
             async exec(cmd: string) {
               return { stdout: cmd.includes("wc -c") ? "999999" : "", stderr: "", exitCode: 0 };

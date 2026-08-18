@@ -1,3 +1,4 @@
+import type { ImageProvenance } from "@everdict/contracts";
 import { type ComputeHandle, type ExecOpts, type ExecResult, InternalError, shq } from "@everdict/contracts";
 import type { NomadHttp } from "./nomad.js";
 
@@ -36,13 +37,20 @@ export interface NomadSessionHandleContext {
     args: string[],
     env: Record<string, string>,
   ) => Promise<{ code: number; stdout: string; stderr: string }>;
+  // The world this alloc was placed from, resolved by the placing lane (see NomadSessionHandle.image).
+  image: ImageProvenance;
 }
 
 export class NomadSessionHandle implements ComputeHandle {
   readonly id: string;
+  // WHICH BYTES this alloc runs. The Nomad API reports no resolved image digest for an allocation, so a
+  // reference the caller did not already pin cannot be identified from here — and saying so is the point:
+  // "this lane cannot report it" is a standing property of the lane, not an absence of an image.
+  readonly image: ImageProvenance;
 
   constructor(private readonly ctx: NomadSessionHandleContext) {
     this.id = sessionComputeId(ctx.jobId, ctx.allocId, ctx.namespace);
+    this.image = ctx.image;
   }
 
   private resolve(p: string): string {

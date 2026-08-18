@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import {
   FileExecutionService,
   FsService,
@@ -24,6 +25,7 @@ const scriptedDriver: Driver = {
   id: "scripted",
   async provision(): Promise<ComputeHandle> {
     return {
+      image: NO_IMAGE,
       async exec(cmd: string): Promise<ExecResult> {
         if (cmd.startsWith("find")) return { exitCode: 0, stdout: "./chart.py\n./chart.png\n", stderr: "" };
         if (cmd.startsWith("wc -c")) return { exitCode: 0, stdout: "4\n", stderr: "" };

@@ -1,4 +1,5 @@
 import type { ComputeHandle, Driver, Environment, EvalCase, EvaluableHarness, TraceEvent } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { runCase } from "./run-case.js";
 
@@ -12,6 +13,7 @@ const ENVIRONMENT = {
 function fakeCompute(): ComputeHandle & { disposed: boolean } {
   const handle = {
     disposed: false,
+    image: NO_IMAGE,
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     writeFile: async () => {},
     readFile: async () => "",

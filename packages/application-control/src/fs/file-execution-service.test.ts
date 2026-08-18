@@ -1,4 +1,5 @@
 import type { ComputeHandle, ComputeSpec, Driver, ExecOpts, ExecResult, FsEntry, RunRecord } from "@everdict/contracts";
+import { NO_IMAGE } from "@everdict/contracts";
 import { BadRequestError, NotFoundError, PaymentRequiredError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { RunStore } from "../ports/run-store.js";
@@ -65,6 +66,7 @@ class FakeDriver implements Driver {
     this.provisioned = spec;
     const self = this;
     return {
+      image: NO_IMAGE,
       async exec(cmd: string, _opts?: ExecOpts): Promise<ExecResult> {
         self.commands.push(cmd);
         return self.respond(cmd);

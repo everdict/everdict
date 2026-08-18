@@ -12,6 +12,7 @@ import { SkillService, SubscriptionService } from "@everdict/application-control
 import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
+import { NO_IMAGE } from "@everdict/contracts";
 import { RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import type { CaseJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
 import {
@@ -172,6 +173,7 @@ function harness() {
       driver: {
         id: "stub",
         provision: async () => ({
+          image: NO_IMAGE,
           exec: async (command: string) => ({ stdout: `ran:${command}`, stderr: "", exitCode: 0 }),
           writeFile: async () => {},
           readFile: async () => "",

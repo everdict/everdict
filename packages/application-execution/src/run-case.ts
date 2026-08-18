@@ -18,7 +18,13 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/contracts";
-import { CURRENT_EVIDENCE_VERSION, UpstreamError, resolvePlacementOs, stamp } from "@everdict/contracts";
+import {
+  CURRENT_EVIDENCE_VERSION,
+  CURRENT_EXECUTION_MANIFEST_ERA,
+  UpstreamError,
+  resolvePlacementOs,
+  stamp,
+} from "@everdict/contracts";
 import {
   classifyFailure,
   computeNeedsFor,
@@ -441,7 +447,12 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
         os: world.os,
         osResolved: world.resolved,
         driver: deps.driver.id,
-        ...(evalCase.image !== undefined ? { image: evalCase.image } : {}),
+        manifestVersion: CURRENT_EXECUTION_MANIFEST_ERA,
+        // WHICH BYTES, from the driver that pulled them — not `evalCase.image`, which is the reference the
+        // case ASKED for. `repo:latest` names different bytes on different days, so recording the request
+        // let a release gate find two batches identical on every sealed axis and green-light a comparison
+        // between two different images.
+        imageProvenance: compute.image,
       },
       trace,
       // The positive seal: this producer ran the collection path to completion (deferred collection is NOT

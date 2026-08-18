@@ -378,6 +378,40 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "packages/application-execution", "src/run-case.test.ts"],
   },
+  {
+    // The world a case RAN IN, not the one it asked for. The mutation does not merely disable the read — it
+    // produces the defect: a container launched from a real image reports that it provisioned none, which
+    // is the (a)/(c) collapse one optional field used to make invisible.
+    name: "world provenance — the driver stops reading back the bytes it launched",
+    file: "packages/drivers/src/docker.ts",
+    from: "  const requested = parseImageRef(ref).digest;",
+    to: "  return NO_IMAGE;\n  const requested = parseImageRef(ref).digest;",
+    suite: ["--root", "packages/drivers", "src/image-provenance.counterexample.test.ts"],
+  },
+  {
+    // …and the hop after it: the driver's answer never reaches the manifest, which fails exactly like a
+    // driver that never read it — the drivers' tests build the handle themselves and cannot see this.
+    name: "world provenance — the manifest records the request instead of the driver's answer",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "        imageProvenance: compute.image,",
+    to: "        ...(evalCase.image !== undefined ? { image: evalCase.image } : {}),",
+    suite: [
+      "--root",
+      "packages/application-execution",
+      "src/image-provenance-hop.counterexample.test.ts",
+    ],
+  },
+  {
+    // The reader's era rule, neutralized into the collapse it exists to prevent: a manifest from before
+    // provenance reads as a world that ran NO image, so every legacy batch claims it provisioned nothing
+    // instead of admitting nobody recorded what it ran.
+    name: "world provenance — a legacy manifest is read as a world that ran no image",
+    file: "packages/domain/src/image/image-provenance.ts",
+    from: "    const ref = manifest.image ?? \"\";",
+    to: '    return { kind: "none" };\n    const ref = manifest.image ?? "";',
+    suite: ["--root", "packages/domain", "src/image/image-provenance.test.ts"],
+    build: "@everdict/domain",
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

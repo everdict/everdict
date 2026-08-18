@@ -35,7 +35,7 @@ import type {
   InspectWorkload,
   PlacementEvent,
 } from "@everdict/contracts/wire";
-import { assertHardenedIsolation, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
+import { assertHardenedIsolation, laneImageProvenance, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
@@ -1654,6 +1654,9 @@ export class NomadBackend
       return new NomadSessionHandle({
         jobId,
         allocId,
+        // A reference the caller already pinned names its own bytes and needs no cluster read; anything else
+        // cannot be identified from Nomad's API, and the lane says so rather than staying silent.
+        image: laneImageProvenance(spec.image, "the Nomad API"),
         ...(namespace ? { namespace } : {}),
         http: this.http,
         addr: this.opts.addr,
