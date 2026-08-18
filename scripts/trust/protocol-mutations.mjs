@@ -125,6 +125,32 @@ const MUTATIONS = [
     build: "@everdict/domain",
   },
   {
+    // Wave 5's rung: an unreadable publication ledger folds back into "a newer settlement is already there",
+    // so the drain skips its only effect, records nothing owed, and certifies the operation published.
+    name: "Wave 5 — an unknown alias position becomes 'already ahead'",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: '  if (siblings.kind === "unknown") return "unknown";',
+    to: '  if (siblings.kind === "unknown") return "ahead";',
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/publication-projection-unknown.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the consumer half: naming the third case is worth nothing if the effect loop still treats it as a
+    // state of the world instead of a debt.
+    name: "Wave 5 — the effect loop skips an unknown position without owing it",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: '          fail("the publication ledger could not be read, so the alias position is unknown — not promoted");\n          continue;',
+    to: "          continue;",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/publication-projection-unknown.counterexample.test.ts",
+    ],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",

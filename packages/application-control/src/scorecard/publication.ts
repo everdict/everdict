@@ -5,7 +5,7 @@ import type {
   ScorecardExport,
   ScorecardRecord,
 } from "@everdict/contracts";
-import { publicationOperationId } from "@everdict/contracts";
+import { publicationOperationId, readOrUnknown } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
@@ -201,7 +201,12 @@ export async function drainPublicationOperation(
     // can reach this line for one operation" was true and beside the point: two settlements are two
     // operations, and an older one draining late would replace a newer settlement's export receipt with its
     // own. Whoever is behind writes nothing.
-    if (outcome.export !== undefined && !(await aliasIsAhead(deps, operation)))
+    // `behind` = this settlement is the newest published position, so its receipt is the one to show.
+    // `ahead` and `unknown` both leave the projection alone — but for different reasons, and only one of them
+    // is a state of the world. The operation itself is already `complete`, so an unreadable ledger here costs
+    // a reader-facing projection rather than a decision; it is named so nobody later reads the skip as
+    // agreement.
+    if (outcome.export !== undefined && (await aliasPosition(deps, operation)) === "behind")
       await deps.store.update(record.id, { export: outcome.export, updatedAt: now() }).catch(() => undefined);
     return outcome;
   }
@@ -209,26 +214,50 @@ export async function drainPublicationOperation(
   return { kind: "owed", reason: outcome.reason };
 }
 
-// The effects themselves, shared by the operation drain and the legacy plan drain below.
-// Has a LATER settlement already published this scorecard's alias? (arch-review 54, Phase 4.)
+// Where the monotonic alias currently STANDS relative to this operation (arch-review 54, Phase 4 · made
+// three-valued arch-review 55, Wave 5).
 //
-// Skipping is not a failure: `current` is a monotonic projection of the revision ledger, so an operation that
-// finds a newer one already there has nothing to do — the world is where it wanted it, or ahead. Reporting
-// that as owed would put the sweep in a loop it can never leave.
+//   ahead    — a LATER settlement already published. Nothing to do: the world is where this operation wanted
+//              it, or better. Skipping is not a failure, and reporting it as owed would put the sweep in a
+//              loop it can never leave.
+//   behind   — this operation is the newest published position; promote.
+//   unknown  — the ledger could not be read.
 //
-// Unreadable = do not promote. A projection moved on a guess is exactly the backwards write this exists to
-// prevent, and the operation stays owed so a later sweep can decide with a readable ledger.
-async function aliasIsAhead(
+// It returned a BOOLEAN, with `unknown` folded into `ahead` under a comment claiming the operation would
+// "stay owed so a later sweep can decide with a readable ledger". It did not: the caller skipped the effect
+// with no failure recorded, so the drain fell out of its loop with nothing owed, returned `published` and
+// completed the row. A projection that could not be read had certified itself finished — the alias then
+// describes whichever pass wrote it last, permanently, because the one debt that would have fixed it is gone.
+//
+// Both consumers now name the third case (L2: the union is not done until the consumer chain is).
+type AliasPosition = "ahead" | "behind" | "unknown";
+
+async function aliasPosition(
   deps: PublicationDeps & { operations?: PublicationOperationStore },
   operation: PublicationOperation,
-): Promise<boolean> {
-  if (!deps.operations) return false; // single-publisher deployment: no second settlement can race this one
-  const siblings = await deps.operations.listForScorecard(operation.settlement.scorecardId).catch(() => undefined);
-  if (siblings === undefined) return true;
-  return siblings.some(
-    (o) => o.state === "published" && o.settlement.scoringRevision > operation.settlement.scoringRevision,
+): Promise<AliasPosition> {
+  const operations = deps.operations;
+  if (!operations) return "behind"; // single-publisher deployment: no second settlement can race this one
+  // `readOrUnknown`, not `.catch(() => undefined)`: the difference between "no newer settlement" and "we
+  // could not find out" is the whole subject here, and a catch that produces the same value for both is the
+  // exact line `unknown-collapse-guard` scans for — including on this ledger, since Wave 5.
+  const siblings = await readOrUnknown(
+    () => operations.listForScorecard(operation.settlement.scorecardId),
+    "publication ledger read",
   );
+  if (siblings.kind === "unknown") return "unknown";
+  // `absent` cannot come from a list read, and folding it into `behind` here would be the same collapse one
+  // constructor over — a ledger that answered "there is no such thing" is not one that answered "nothing is
+  // newer". `readOrUnknown` only ever produces the other two, so the exhaustive arm states that.
+  if (siblings.kind === "absent") return "unknown";
+  return siblings.value.some(
+    (o) => o.state === "published" && o.settlement.scoringRevision > operation.settlement.scoringRevision,
+  )
+    ? "ahead"
+    : "behind";
 }
+
+// The effects themselves, shared by the operation drain and the legacy plan drain below.
 
 async function performEffects(
   deps: PublicationDeps & { operations?: PublicationOperationStore },
@@ -280,7 +309,17 @@ async function performEffects(
         // already records which settlement published, and asking it costs no new artifact shape, no sidecar
         // object and no second race. A published operation for a HIGHER revision means the alias is already
         // ahead of this one.
-        if (await aliasIsAhead(deps, operation)) continue;
+        //
+        // …AND AN UNREADABLE LEDGER IS NOT A POSITION (arch-review 55, Wave 5). This was `if (await
+        // aliasIsAhead(...)) continue;` over a boolean that folded "could not find out" into "already ahead",
+        // so a Postgres blip made the drain skip its only effect, record nothing, and certify `published`.
+        // Owed-and-transient is the honest answer: a later sweep with a readable ledger decides.
+        const position = await aliasPosition(deps, operation);
+        if (position === "unknown") {
+          fail("the publication ledger could not be read, so the alias position is unknown — not promoted");
+          continue;
+        }
+        if (position === "ahead") continue;
         await deps.artifacts.put(effect.key, Buffer.from(bytes), "application/json");
       } catch (err) {
         fail(`analysis alias promotion failed: ${err instanceof Error ? err.message : String(err)}`);

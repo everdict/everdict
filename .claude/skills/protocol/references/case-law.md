@@ -279,6 +279,28 @@ Two lessons, both generalizable:
   `inputObservation` was made mandatory for one review earlier, for the same reason, in the same builder.
   When a value must cross a lane boundary, make the compiler ask.
 
+### R55.6 A monotonic projection whose position could not be read, certified as published
+`packages/application-control/src/scorecard/publication.ts` (arch-review 54, Phase 4)
+
+Phase 4 made the mutable `analyses/<id>.json` alias monotonic and took the position from the operations
+LEDGER rather than from the object — the right design. `aliasIsAhead` returned a BOOLEAN, with the unreadable
+case folded into `true`, under a comment asserting the operation "stays owed so a later sweep can decide with
+a readable ledger".
+
+It did not. The consumer was a bare `continue` with no `fail(...)` beside it, so the effect loop fell out with
+nothing owed, the drain returned `published`, and the row was `complete`d and left the sweep. A ledger blip
+therefore retired the only debt that would ever have promoted that settlement's alias.
+
+The generalizable part is NOT "another boolean": it is that **the fail-closed half was implemented and the
+owed half was only written down**. Refusing to move the projection on a guess was correct and was the entire
+fix; nobody checked what the refusal became one frame up — the same shape as R55.1, in a different file, in
+the same review. When a guard's justification contains the words "stays owed", that clause is a claim about
+another function, and it is the half that needs the test.
+
+Closed in Wave 5: `aliasPosition` is `ahead | behind | unknown`, the read goes through `readOrUnknown` rather
+than a catch, both consumers name the third case, and `unknown-collapse-guard` now watches this ledger too —
+verified RED by reintroducing the fold.
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added

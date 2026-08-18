@@ -35,6 +35,11 @@ const WATCHED_READS = [
   // and reports the failure as the WORK's, not the config read's.
   /\bsecretsFor\s*\(/,
   /\bruntimeSecretsFor\s*\(/,
+  // The PUBLICATION ledger (arch-review 55, Wave 5). Its `listForScorecard` answers where the monotonic
+  // analysis alias currently stands, and it was read with `.catch(() => undefined)` folded into "a newer
+  // settlement is already there" — so a ledger blip made the drain skip its only effect, record nothing, and
+  // certify the operation `published`. The debt then left the sweep. Watched so the fold cannot return.
+  /\boperations\??\.listForScorecard\s*\(/,
 ];
 
 // …and the OTHER collapse, which has no read on its line at all: a DECISION reduced to a boolean by its own
