@@ -93,6 +93,26 @@ type RewardRead =
   | { kind: "rewards"; rewards: Record<string, number>; source: string }
   | { kind: "absent"; detail: string };
 
+// ── A TASK FILE STAYS INSIDE THE TESTS DIRECTORY (arch-review 56, Wave B) ───────────────────────────
+//
+// `tests` is third-party content — a Harbor task is somebody else's repository — and its keys were written
+// straight into `${testsDir}/${name}`. `LocalDriver.writeFile` is `join(root, path)` with no containment
+// check, so `../../x` writes outside the sandbox: on the self-hosted and CLI lanes, the operator's own
+// filesystem; inside a job container, the agent's workspace or the container's system paths.
+//
+// Refused rather than sanitised. A key that climbs is not a path this system should guess the intent of, and
+// silently rewriting it would make the tests that ran differ from the tests the task declared.
+export function containedTestsPath(name: string): string {
+  const segments = name.split("/").filter((s) => s !== "" && s !== ".");
+  if (segments.length === 0 || segments.some((s) => s === ".." || s.includes("\0")) || name.startsWith("/"))
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { name },
+      `the task file '${name}' escapes the tests directory — a traversal path is refused, never rewritten.`,
+    );
+  return segments.join("/");
+}
+
 export class HarborVerifierGrader implements Grader {
   readonly id: string;
   // Its metric name is fixed in this file, not taken from config or from the reward file's keys, so the
@@ -117,11 +137,21 @@ export class HarborVerifierGrader implements Grader {
     const rewardDir = this.cfg.rewardDir ?? DEFAULTS.rewardDir;
     const exec = { ...(this.cfg.cwd ? { cwd: this.cfg.cwd } : {}), ...(this.cfg.env ? { env: this.cfg.env } : {}) };
 
-    // Harbor's environment layout, created before the verifier runs: it writes into `rewardDir` and expects
-    // the directory to exist (its own `test.sh` files often `mkdir -p` defensively, but not all of them do).
+    // ── THE REWARD NAMESPACE IS THE VERIFIER'S, AND IT STARTS EMPTY (arch-review 56, Wave B) ────────
+    //
+    // This was `mkdir -p` alone, and the verifier runs on the SAME compute the agent just used — so an agent
+    // that wrote `/logs/verifier/reward.json` during its own turn had authored the number this grader reads,
+    // and JSON wins over the `.txt` a real `test.sh` publishes. A verifier that then crashed or timed out
+    // left the agent's file standing as the verdict. "The verifier published a reward" and "a reward file
+    // exists" are different facts, and only the emptied directory makes them the same one.
+    //
+    // Emptied, not merely created: creating an existing directory is a no-op, which is exactly the case that
+    // matters. `tests/` is emptied for the same reason — a stale copy from an earlier attempt is not this
+    // verifier's.
+    await compute.exec(`rm -rf ${shq(rewardDir)} ${shq(testsDir)}`, exec);
     await compute.exec(`mkdir -p ${shq(rewardDir)} ${shq(testsDir)}`, exec);
     for (const [name, content] of Object.entries(this.cfg.files ?? {})) {
-      await compute.writeFile(`${testsDir}/${name}`, content);
+      await compute.writeFile(`${testsDir}/${containedTestsPath(name)}`, content);
     }
     if (this.cfg.files) await compute.exec(`chmod -R a+rx ${shq(testsDir)}`, exec);
 

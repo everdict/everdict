@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
+import { caseJobPayload, extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
 import {
   BadRequestError,
   type CaseJob,
@@ -933,7 +933,9 @@ export function buildK8sJob(
   runtimeClassName?: string,
 ): Record<string, unknown> {
   const env: Record<string, string> = {
-    EVERDICT_CASE_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
+    // this lane would hand to the agent along with the job.
+    EVERDICT_CASE_JOB: caseJobPayload(job),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER

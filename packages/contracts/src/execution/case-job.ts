@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BadRequestError } from "../errors.js";
 import { HarnessSpecSchema } from "../harness/harness-spec.js";
 import { ModelBindingSchema } from "../harness/model-spec.js";
 import { RegistryAuthSchema } from "../infra/image-ref.js";
@@ -150,3 +151,55 @@ export const CaseJobSchema = z.object({
   trial: z.number().int().nonnegative().optional(),
 });
 export type CaseJob = z.infer<typeof CaseJobSchema>;
+
+// ── WHAT THE AGENT MAY BE HANDED (arch-review 56, Wave B) ───────────────────────────────────────────
+//
+// A `CaseJob` is dispatched by base64-ing the WHOLE object into `EVERDICT_CASE_JOB` on the job container, and
+// the harness under evaluation is spawned inside that container with the process environment inherited. So
+// everything on this object is readable by the thing being measured.
+//
+// That is fine for the instruction, the environment and the harness spec — the agent needs them. It is not
+// fine for `evalCase.graders[].config` when that config carries the DECISION PROCEDURE: a Harbor task puts
+// its whole hidden `tests/` directory and the verifier's env (credentials included) in there, so an agent
+// that reads its own environment reads the tests it is graded against. "Tests are copied after the agent
+// finishes" is true of the FILESYSTEM and says nothing about disclosure — the bytes were handed over before
+// the first token.
+//
+// Stripping is not available: the job-runner reconstructs the graders from this same object INSIDE the
+// container, which is what lets an outcome grader touch `ctx.compute`. Agent and verifier share one
+// environment by design, and until they do not, a case whose grading depends on material the agent must not
+// see cannot be measured honestly on that lane.
+//
+// So it REFUSES. A silent disclosure that invalidates every score the benchmark produces becomes a visible
+// error naming the case and the field, and the refusal is lifted by the isolated verifier lane rather than by
+// remembering. `PRIVATE_GRADER_CONFIG_KEYS` is the closed list of fields that are constitutional rather than
+// instructional; a new one is added HERE, once, instead of at each dispatcher.
+export const PRIVATE_GRADER_CONFIG_KEYS = ["files", "env"] as const;
+
+// Which graders on this case carry material the agent must not see. Empty = the case can be measured on a
+// shared-environment lane. Named rather than boolean so the refusal can say WHICH grader and WHICH field,
+// which is the difference between an error somebody acts on and one they work around.
+export function verifierPrivateMaterial(evalCase: CaseJob["evalCase"]): string[] {
+  const found: string[] = [];
+  for (const grader of evalCase.graders ?? []) {
+    const config = grader.config;
+    if (config === undefined || config === null || typeof config !== "object") continue;
+    for (const key of PRIVATE_GRADER_CONFIG_KEYS)
+      if (Object.hasOwn(config as Record<string, unknown>, key)) found.push(`${grader.id}.${key}`);
+  }
+  return found;
+}
+
+// THE ONLY WAY A JOB BECOMES A DISPATCH PAYLOAD. A required call rather than a convention, for the reason the
+// reservation proof is a required parameter: a backend that serialized the job itself would re-open this the
+// moment somebody adds a lane, and nothing at the call site would look wrong.
+export function caseJobPayload(job: CaseJob): string {
+  const disclosed = verifierPrivateMaterial(job.evalCase);
+  if (disclosed.length > 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { caseId: job.evalCase.id, disclosed },
+      `case '${job.evalCase.id}' grades on material the agent must not see (${disclosed.join(", ")}), and this lane runs the agent and the verifier in one environment — the job payload is readable by the harness, so the case cannot be measured here. Run it on an isolated-verifier lane.`,
+    );
+  return Buffer.from(JSON.stringify(job)).toString("base64");
+}

@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { describeNomadPlacementFailure, extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
+import {
+  caseJobPayload,
+  describeNomadPlacementFailure,
+  extractLiveEvents,
+  parseResult,
+  stripSentinel,
+} from "@everdict/contracts";
 import type { NomadPlacementMetrics } from "@everdict/contracts";
 import {
   AppError,
@@ -460,7 +466,9 @@ function dispatchSuffix(): string {
 // CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
 export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
   const env: Record<string, string> = {
-    EVERDICT_CASE_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
+    // this lane would hand to the agent along with the job.
+    EVERDICT_CASE_JOB: caseJobPayload(job),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
