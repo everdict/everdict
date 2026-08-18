@@ -21,8 +21,10 @@ import { describe, expect, it } from "vitest";
 // call — a list endpoint that should become a 500 may throw freely, and wrapping those would be ceremony
 // that teaches nothing.
 const WATCHED_READS = [
-  // The handle ledger. An unreadable one made the cancel widen to every run of the case.
-  /\battempts\??\.list\s*\(/,
+  // The handle ledger. An unreadable one made the cancel widen to every run of the case — and its BATCH
+  // read (`listForScorecard`) was not watched at all until Wave 3 found it swallowing there too, which is
+  // why the pattern is the verb prefix rather than the exact method (arch-review 55).
+  /\battempts\??\.list(ForScorecard)?\s*\(/,
   // The receipt ledger. An unreadable one made the child trajectory read serve the clock's answer.
   /\bcaseReceipts\??\.list\s*\(/,
   // The registry lookup behind every managed teardown. An unreadable one certified absence.

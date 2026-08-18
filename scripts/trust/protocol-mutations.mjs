@@ -87,6 +87,25 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/exact-work-control.counterexample.test.ts"],
   },
   {
+    // Wave 3's rung: build the teardown's worklist from the children that still read as live, and the retry
+    // forgets every handle whose kill failed while it terminalized the row that named it.
+    name: "Wave 3 — the cancellation worklist comes from the rows again",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: '    const placed = placedRead.kind === "read" ? placedRead.value : [];',
+    to: "    const placed = [];",
+    suite: ["--root", "apps/api", "src/core/scorecard/cancellation-work-debt.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
+  {
+    // …and the enumeration half: a ledger this teardown could not read is not a batch that placed nothing.
+    name: "Wave 3 — an unreadable ledger becomes an empty workset",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: '    if (placedRead.kind === "unknown")',
+    to: "    if (false)",
+    suite: ["--root", "apps/api", "src/core/scorecard/cancellation-work-debt.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",

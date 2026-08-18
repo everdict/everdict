@@ -15,6 +15,7 @@ import {
   type ManifestCheck,
   type ManifestVerification,
   NotFoundError,
+  type ReadResult,
   type RunRecord,
   type RuntimeWorkRef,
   type ScorecardOrigin,
@@ -23,7 +24,7 @@ import {
   isConstitutionalMetric,
   killConverged,
 } from "@everdict/contracts";
-import { CANCELLED_ERROR_CODE, JudgeIdSchema } from "@everdict/contracts";
+import { CANCELLED_ERROR_CODE, JudgeIdSchema, readOrUnknown } from "@everdict/contracts";
 import type { CaseRunRef } from "@everdict/contracts/wire";
 import {
   type AnalysisConfig,
@@ -1057,15 +1058,36 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // happens to contain: the case-id kill selected on the case alone, so a re-evaluation of `c1` running
     // beside this batch — or another tenant's `c1` on a shared Nomad cluster, which that kill swept across
     // all namespaces — was cancelled by this batch's stop. It no longer exists.
-    const worksByChild = await this.workHandlesByChild(rec.id);
+    // ── THE WORKSET, FROM THE LEDGER (arch-review 55, Wave 3) ───────────────────────────────────────
+    //
+    // Every handle this batch placed is killed on EVERY attempt, whatever its child row now says. The kill is
+    // idempotent by contract (work that is gone answers `absent`), so re-asking costs a call and buys the
+    // thing the previous shape could not give: a retry that does not forget the handle whose kill failed
+    // while it terminalized the row that named it.
+    const placedRead = await this.placedWork(rec.id);
+    if (placedRead.kind === "unknown")
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { scorecard: rec.id },
+        `Teardown of ${rec.id} cannot enumerate what it placed: ${placedRead.reason}. A teardown that could not list its work has not listed zero — the cancellation stays owed.`,
+      );
+    const placed = placedRead.kind === "read" ? placedRead.value : [];
+    const runtimeOfChild = new Map(children.map((c) => [c.id, c.runtime]));
+    for (const item of placed) {
+      if (!this.deps.killWork) break;
+      await attempted(
+        this.deps.killWork(
+          rec.tenant,
+          (item.childId ? runtimeOfChild.get(item.childId) : undefined) ?? rec.runtime,
+          item.work,
+        ),
+        `kill ${item.work.externalJobId}`,
+      );
+    }
+    const childrenWithWork = new Set(placed.flatMap((i: { childId?: string }) => (i.childId ? [i.childId] : [])));
     for (const c of children) {
       if (c.status !== "running" && c.status !== "queued") continue;
-      const works = worksByChild.get(c.id) ?? [];
-      if (c.status === "running" && works.length > 0 && this.deps.killWork) {
-        // AWAITED — fire-and-forget made `completed` mean "commands were issued", never "the work stopped".
-        for (const work of works)
-          await attempted(this.deps.killWork(rec.tenant, c.runtime ?? rec.runtime, work), `kill ${work.externalJobId}`);
-      } else if (c.status === "running" && this.deps.killUnhandled)
+      if (c.status === "running" && !childrenWithWork.has(c.id) && this.deps.killUnhandled)
         // No handle for this child — a legacy attempt row, or a lane that mints none. The over-broad case-id
         // kill that used to stand here is GONE (arch-review 53, legacy removal): it stopped every run's job
         // of that case, and on Nomad every tenant's, which is a wrong action taken confidently rather than a
@@ -1113,11 +1135,18 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     }
     // …AND WHAT THE READ-BACK SAW IS RECORDED (arch-review 52, Wave 3). The operation row used to close on
     // "the teardown function returned"; it closes on this instead — the population the zero-live-children
-    // check was measured over, and the stops that answered converged. The honest gap is visible in what is
-    // NOT here: no field claims the orchestrator was re-probed for the killed jobs afterwards.
+    // check was measured over, and the stops that answered converged.
+    //
+    // `activeManagedWork` is now a real count rather than an admitted gap (arch-review 55, Wave 3). Every
+    // handle the LEDGER says this batch placed was asked about on this pass, and the ones that did not answer
+    // `stopped`/`absent` are counted here — the `failures` check above has already thrown for them, so
+    // reaching this line means the number is zero. It is stated anyway, because a certificate that omits the
+    // measurement it was gated on is the shape the previous version had.
     return {
       at: this.now(),
       childrenTerminal: after.length,
+      activeManagedWork: kills.filter((k) => !killConverged(k)).length,
+      unverifiable: kills.filter((k) => k.status === "unknown").length,
       kills: {
         stopped: kills.filter((k) => k.status === "stopped").length,
         absent: kills.filter((k) => k.status === "absent").length,
@@ -1130,15 +1159,30 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // attempt with no `childRunId` is not droppable silently — but it is also not attributable to a child, and
   // this teardown only kills what it can attribute, so those fall to the case-id fallback with their child.
   // Best-effort: an unreadable ledger reads as "no handles", which is the pre-Wave-2 behavior exactly.
-  private async workHandlesByChild(scorecardId: string): Promise<Map<string, RuntimeWorkRef[]>> {
-    const byChild = new Map<string, RuntimeWorkRef[]>();
-    if (!this.deps.attempts) return byChild;
-    const attempts = await this.deps.attempts.listForScorecard(scorecardId).catch(() => []);
-    for (const a of attempts) {
-      if (!a.runtimeWork || a.childRunId === undefined) continue;
-      byChild.set(a.childRunId, [...(byChild.get(a.childRunId) ?? []), a.runtimeWork]);
-    }
-    return byChild;
+  // ── THE WORKSET A CANCELLATION OWES (arch-review 55, Wave 3) ─────────────────────────────────────
+  //
+  // Everything this batch PLACED, from the ledger that records placements — not from the children that
+  // currently read as live. Those are different clocks: a child row goes terminal because this process
+  // decided it should, and a container exits because a cluster acted, and only the second frees anything.
+  // Building the worklist from the rows meant the first teardown terminalized them, and the retry then
+  // skipped every handle whose kill had just failed.
+  //
+  // THREE-VALUED, because a ledger this teardown could not read is not a batch that placed nothing: the
+  // operation stays owed rather than converging over work it never enumerated (`protocol` L5).
+  private async placedWork(
+    scorecardId: string,
+  ): Promise<ReadResult<Array<{ childId?: string; work: RuntimeWorkRef }>>> {
+    if (!this.deps.attempts) return { kind: "absent" };
+    const attempts = this.deps.attempts;
+    return await readOrUnknown(
+      async () =>
+        (await attempts.listForScorecard(scorecardId)).flatMap((a) =>
+          a.runtimeWork
+            ? [{ ...(a.childRunId !== undefined ? { childId: a.childRunId } : {}), work: a.runtimeWork }]
+            : [],
+        ),
+      `the work placed by scorecard ${scorecardId}`,
+    );
   }
 
   // ── THE TEARDOWN AS A DURABLE OPERATION (arch-review 47 §5.2) ───────────────────────────────────────
