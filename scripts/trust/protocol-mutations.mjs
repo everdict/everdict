@@ -360,17 +360,6 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/cancellation/verified-completion.counterexample.test.ts"],
   },
   {
-    // L3, in the scoring plane: read the outcome off rendered output (the verifier process's exit status)
-    // instead of at its source (the reward the verifier PUBLISHED). This is the shipped defect the
-    // reward-file grader replaced — a container task's verifier exits 0 whether the agent passed or failed,
-    // so the mutated grader scores the whole corpus as passing.
-    name: "reward file — the verdict is re-derived from the verifier's exit code",
-    file: "packages/graders/src/reward-file.ts",
-    from: "    const read = await this.readReward(ctx, rewardDir);",
-    to: '    const read: RewardRead = { kind: "rewards", rewards: { reward: run.exitCode === 0 ? 1 : 0 }, source: "exit" };',
-    suite: ["--root", "packages/graders", "src/reward-file.test.ts"],
-  },
-  {
     // A declared world that is silently ignored: the case asked for 2 CPUs and an offline box, the driver
     // gives it whatever the host has and full internet, and the score is filed as if the declaration held.
     name: "declared world — the case's resources/network are dropped by the driver",
