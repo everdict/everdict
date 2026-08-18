@@ -16,8 +16,8 @@ import {
   InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
-  attemptParentAuthority,
   InMemoryPublicationOperationStore,
+  attemptParentAuthority,
   soleLeader,
   soloReplicas,
 } from "@everdict/application-control";
