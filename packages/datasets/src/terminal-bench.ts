@@ -13,7 +13,18 @@ export const TerminalBenchTaskSchema = z.object({
   id: z.string().min(1), // task id / directory name
   instruction: z.string().min(1), // task.yaml `instruction` — the agent's prompt
   image: z.string().optional(), // prebuilt task image (referenced, not built). Falls back to the dataset imageTemplate.
-  testCommand: z.string().default("bash /tests/run-tests.sh"), // grades the task by exit code (tests-pass)
+  testCommand: z.string().default("bash /tests/test.sh"), // the tests/ verifier — its REWARD FILE is the verdict (v2)
+  // The bytes of the task's tests/ directory, keyed by file name — copied into the container only AFTER the
+  // agent finishes, so the dataset must carry them (see harbor.ts for why a run must not re-clone to grade).
+  tests: z.record(z.string()).default({}),
+  verifierTimeoutSec: z.number().int().positive().optional(), // task.toml [verifier].timeout_sec
+  verifierEnv: z.record(z.string()).default({}), // task.toml [verifier].env — values resolved by the caller
+  // HOW THE VERDICT IS READ, stated rather than assumed. Terminal-Bench 2.0 adopted the Harbor task format, so
+  // its verifier PUBLISHES a reward to /logs/verifier/reward.{txt,json} and exits 0 either way — reading such a
+  // run by its exit code passes every case (docs/architecture/harbor-interop.md §2). A v1-era task set, whose
+  // `run-tests.sh` really did decide by exit status, imports with
+  // `{ verdict: "exit-code", testCommand: "bash /tests/run-tests.sh" }`.
+  verdict: z.enum(["reward-file", "exit-code"]).default("reward-file"),
   workdir: z.string().default("/app"), // in-image working directory (repo env source.path — no clone)
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   tags: z.array(z.string()).default([]),
@@ -35,7 +46,8 @@ function resolveImage(task: TerminalBenchTask, imageTemplate?: string): string {
 }
 
 // One Terminal-Bench task → an Everdict EvalCase. Container-based coding task: the prebuilt image IS the environment
-// (a repo env with an in-image workdir, no clone), the instruction is the prompt, the test command is a tests-pass grader.
+// (a repo env with an in-image workdir, no clone), the instruction is the prompt, and the verifier is graded by the
+// reward it publishes (`verdict`, above — v1-era task sets opt back into the exit-code reading).
 export function terminalBenchTaskToCase(input: unknown, opts: { imageTemplate?: string } = {}): EvalCase {
   const task = TerminalBenchTaskSchema.parse(input);
   const image = resolveImage(task, opts.imageTemplate);
@@ -45,7 +57,20 @@ export function terminalBenchTaskToCase(input: unknown, opts: { imageTemplate?: 
     env: { kind: "repo", source: { path: task.workdir } },
     task: task.instruction,
     image,
-    graders: [{ id: "tests-pass", config: { cmd: task.testCommand } }],
+    graders: [
+      task.verdict === "exit-code"
+        ? { id: "tests-pass", config: { cmd: task.testCommand } }
+        : {
+            id: "harbor-verifier",
+            config: {
+              cmd: task.testCommand,
+              cwd: task.workdir,
+              ...(Object.keys(task.tests).length > 0 ? { files: task.tests } : {}),
+              ...(task.verifierTimeoutSec ? { timeoutSec: task.verifierTimeoutSec } : {}),
+              ...(Object.keys(task.verifierEnv).length > 0 ? { env: task.verifierEnv } : {}),
+            },
+          },
+    ],
     timeoutSec: task.timeoutSec ?? 900,
     tags,
   };

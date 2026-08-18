@@ -7,6 +7,7 @@ import {
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
+import { HarborVerifierGrader } from "./harbor-verifier.js";
 import { type Judge, JudgeGrader } from "./judge.js";
 import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
@@ -22,6 +23,19 @@ function strArray(v: unknown): string[] {
 
 function optStr(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+// A `Record<string, string>` config slot (the harbor verifier's tests/ payload and verifier env). A value
+// that is not a string map is DROPPED rather than coerced — `String(someObject)` would write "[object
+// Object]" into a container as a test file, which fails later and somewhere else.
+function strRecord(v: unknown): Record<string, string> | undefined {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(v)) {
+    if (typeof value !== "string") return undefined;
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // GraderSpec[] → Grader[]. A judge (LLM/VLM) needs an injected Judge, so it's received via opts.judge (explicit error if a judge spec has none).
@@ -112,6 +126,20 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
         ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
       });
     }
+    case "harbor-verifier":
+      // A Harbor / Terminal-Bench task's own verifier: run the task's tests/ in the environment and read the
+      // reward it PUBLISHES to /logs/verifier (never its exit code — see harbor-verifier.ts).
+      return new HarborVerifierGrader({
+        ...(optStr(s.config?.cmd) ? { cmd: optStr(s.config?.cmd) } : {}),
+        ...(strRecord(s.config?.files) ? { files: strRecord(s.config?.files) } : {}),
+        ...(optStr(s.config?.testsDir) ? { testsDir: optStr(s.config?.testsDir) } : {}),
+        ...(optStr(s.config?.rewardDir) ? { rewardDir: optStr(s.config?.rewardDir) } : {}),
+        ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
+        ...(typeof s.config?.timeoutSec === "number" ? { timeoutSec: s.config.timeoutSec } : {}),
+        ...(strRecord(s.config?.env) ? { env: strRecord(s.config?.env) } : {}),
+        ...(typeof s.config?.passThreshold === "number" ? { passThreshold: s.config.passThreshold } : {}),
+        ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
+      });
     case "swe-bench":
       return new SweBenchGrader({
         testPatch: String(s.config?.testPatch ?? ""),

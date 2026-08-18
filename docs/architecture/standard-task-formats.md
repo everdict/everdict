@@ -38,7 +38,7 @@ A Terminal-Bench task (github.com/laude-institute/terminal-bench) is a directory
 | `instruction` | `task` (the prompt) |
 | prebuilt task image (or an `imageTemplate` `{id}`) | `image` (**referenced, not built** — the portability contract) |
 | in-image working dir (default `/app`) | `env = { kind: "repo", source: { path } }` (no clone) |
-| test command (default `bash /tests/run-tests.sh`) | `graders: [{ id: "tests-pass", config: { cmd } }]` |
+| verifier command (default `bash /tests/test.sh`) + the `tests/` bytes | `graders: [{ id: "harbor-verifier", config: { cmd, files, … } }]` — the reward the verifier PUBLISHES, never its exit code (`docs/architecture/harbor-interop.md` §2) |
 | `difficulty` + `tags` | `tags` (difficulty prepended) |
 | `max_agent_timeout_sec` | `timeoutSec` (default 900) |
 
@@ -63,10 +63,15 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    accept a Terminal-Bench source (BFF↔MCP parity).
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
-6. **Harbor** ✅ — the same seam for Anthropic's Harbor task format (`harbor.ts`, a second dedicated mapper).
-   A Harbor task (instruction.md + task.toml `[metadata]`/`[agent]`/`[environment]`/`[verifier]` + environment/
-   Dockerfile + tests/ verifier) maps to the SAME EvalCase shape as Terminal-Bench (image env + instruction +
-   tests-pass over the verifier command). Pure + tested in `datasets`.
+6. **Harbor** ✅ — the same seam for the Harbor task format (`harbor.ts`, a second dedicated mapper).
+   Harbor is the framework from the **Terminal-Bench authors (Laude Institute)**, not Anthropic — an earlier
+   version of this doc and of `harbor.ts` said otherwise. A Harbor task (instruction.md + task.toml
+   `[metadata]`/`[agent]`/`[environment]`/`[verifier]` + environment/Dockerfile + tests/ verifier) maps to the
+   SAME EvalCase shape as Terminal-Bench 2.0, which adopted this format. Pure + tested in `datasets`.
+   **Grading is the `harbor-verifier` grader, not `tests-pass`**: a Harbor verifier writes its reward to
+   `/logs/verifier/reward.{txt,json}` and exits 0 either way, so the exit-code reading scored every task in the
+   corpus as passing. The full audit (concept mapping, a 63,372-task feature census, the stated limits and the
+   port plan) is `docs/architecture/harbor-interop.md` — the SSOT for Harbor interop from here on.
 
 ## Non-goals (for now)
 - Building task images in-platform (against the `case.image` contract — reference, don't build).

@@ -190,7 +190,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       {
         annotations: { readOnlyHint: false },
         description:
-          "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + tests-pass grader). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
+          "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + harbor-verifier grader, which runs the task's tests/ and reads the reward it publishes to /logs/verifier — a Terminal-Bench 2.0 verifier exits 0 whether the agent passed or failed, so the exit code is not the verdict). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
         inputSchema: {
           dataset_id: z.string(),
           dataset_version: z.string(),
@@ -239,7 +239,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       {
         annotations: { readOnlyHint: false },
         description:
-          "Register an Anthropic Harbor task set as a Dataset owned by the active workspace (standard task-format on-ramp, same as import_terminal_bench). Each task → an EvalCase (prebuilt image env + instruction prompt + tests-pass over the verifier command). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable.",
+          "Register a Harbor task set (harborframework.com — the Terminal-Bench authors' framework) as a Dataset owned by the active workspace (standard task-format on-ramp, same as import_terminal_bench). Each task → an EvalCase (prebuilt image env + instruction prompt + harbor-verifier grader, which runs the task's tests/ and reads the reward it publishes to /logs/verifier/reward.{txt,json} — never the verifier's exit code, which is 0 either way). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable.",
         inputSchema: {
           dataset_id: z.string(),
           dataset_version: z.string(),

@@ -53,7 +53,7 @@ const docs = {
   importTerminalBench: {
     summary: "Import a Terminal-Bench task set as a dataset",
     description:
-      "Maps Terminal-Bench tasks to eval cases (prebuilt image env + instruction + tests-pass) and registers " +
+      "Maps Terminal-Bench tasks to eval cases (prebuilt image env + instruction + the harbor-verifier grader, which reads the reward the task's verifier publishes rather than its exit code) and registers " +
       "them as a workspace dataset. Requires datasets:write (member+). A task with no resolvable image is 400 " +
       "(Everdict references images, never builds); a version collision is 409.",
     tags: ["dataset"],
@@ -66,7 +66,7 @@ const docs = {
   importHarbor: {
     summary: "Import a Harbor task set as a dataset",
     description:
-      "Maps Harbor (Anthropic) tasks to eval cases and registers them as a workspace dataset — same on-ramp as " +
+      "Maps Harbor (harborframework.com) tasks to eval cases and registers them as a workspace dataset — same on-ramp as " +
       "Terminal-Bench. Requires datasets:write (member+). An unresolved image is 400; a version collision is 409.",
     tags: ["dataset"],
     body: toJsonSchema(ImportHarborBodySchema),

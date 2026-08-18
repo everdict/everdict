@@ -277,6 +277,17 @@ const MUTATIONS = [
     to: '    const reached: "requested" | "verifying" = "requested";',
     suite: ["--root", "packages/application-control", "src/cancellation/verified-completion.counterexample.test.ts"],
   },
+  {
+    // L3, in the scoring plane: read the outcome off rendered output (the verifier process's exit status)
+    // instead of at its source (the reward the verifier PUBLISHED). This is the shipped defect the
+    // harbor-verifier grader replaced — every Harbor / Terminal-Bench task exits 0 whether the agent passed
+    // or failed, so the mutated grader scores the whole corpus as passing.
+    name: "harbor — the verdict is re-derived from the verifier's exit code",
+    file: "packages/graders/src/harbor-verifier.ts",
+    from: "    const read = await this.readReward(ctx, rewardDir);",
+    to: '    const read: RewardRead = { kind: "rewards", rewards: { reward: run.exitCode === 0 ? 1 : 0 }, source: "exit" };',
+    suite: ["--root", "packages/graders", "src/harbor-verifier.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

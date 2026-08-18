@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { terminalBenchTaskToCase, terminalBenchToDataset } from "./terminal-bench.js";
 
 describe("terminalBenchTaskToCase", () => {
-  it("maps a full task → EvalCase (image env + instruction + tests-pass + difficulty tag)", () => {
+  it("maps a full task → EvalCase (image env + instruction + reward-file verifier + difficulty tag)", () => {
     const c = terminalBenchTaskToCase({
       id: "fix-git-merge",
       instruction: "Resolve the merge conflict and make the tests pass.",
       image: "ghcr.io/acme/tb/fix-git-merge:v1",
-      testCommand: "bash /tests/run-tests.sh",
+      testCommand: "bash /tests/test.sh",
+      tests: { "test.sh": "#!/bin/bash\n" },
+      verifierTimeoutSec: 900,
       workdir: "/workspace",
       difficulty: "hard",
       tags: ["git", "vcs"],
@@ -18,7 +20,17 @@ describe("terminalBenchTaskToCase", () => {
     expect(c.task).toBe("Resolve the merge conflict and make the tests pass.");
     expect(c.image).toBe("ghcr.io/acme/tb/fix-git-merge:v1");
     expect(c.env).toEqual({ kind: "repo", source: { path: "/workspace" } }); // in-image, no clone
-    expect(c.graders).toEqual([{ id: "tests-pass", config: { cmd: "bash /tests/run-tests.sh" } }]);
+    expect(c.graders).toEqual([
+      {
+        id: "harbor-verifier",
+        config: {
+          cmd: "bash /tests/test.sh",
+          cwd: "/workspace",
+          files: { "test.sh": "#!/bin/bash\n" },
+          timeoutSec: 900,
+        },
+      },
+    ]);
     expect(c.tags).toEqual(["hard", "git", "vcs"]); // difficulty prepended
     expect(c.timeoutSec).toBe(1200);
   });
@@ -26,9 +38,27 @@ describe("terminalBenchTaskToCase", () => {
   it("applies defaults for testCommand, workdir, and timeout when omitted", () => {
     const c = terminalBenchTaskToCase({ id: "t1", instruction: "do X", image: "img:1" });
     expect(c.env).toEqual({ kind: "repo", source: { path: "/app" } });
-    expect(c.graders).toEqual([{ id: "tests-pass", config: { cmd: "bash /tests/run-tests.sh" } }]);
+    expect(c.graders).toEqual([{ id: "harbor-verifier", config: { cmd: "bash /tests/test.sh", cwd: "/app" } }]);
     expect(c.timeoutSec).toBe(900);
     expect(c.tags).toEqual([]);
+  });
+
+  // Terminal-Bench 2.0 adopted the Harbor task format: `test.sh` writes the reward to
+  // /logs/verifier/reward.{txt,json} and exits 0 either way, so the exit-code reading passes every case
+  // (docs/architecture/harbor-interop.md §2). The default must therefore be the reward file — the exit-code
+  // grader stays reachable ONLY for a v1-era task set that explicitly asks for it.
+  it("defaults to the published reward, and only an explicit verdict:'exit-code' brings back the v1 reading", () => {
+    const v2 = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "i:1" });
+    expect(v2.graders.map((g) => g.id)).toEqual(["harbor-verifier"]);
+
+    const v1 = terminalBenchTaskToCase({
+      id: "t",
+      instruction: "x",
+      image: "i:1",
+      verdict: "exit-code",
+      testCommand: "bash /tests/run-tests.sh",
+    });
+    expect(v1.graders).toEqual([{ id: "tests-pass", config: { cmd: "bash /tests/run-tests.sh" } }]);
   });
 
   it("resolves the image from an imageTemplate ({id}) when the task has none", () => {
@@ -73,7 +103,7 @@ describe("terminalBenchToDataset", () => {
     expect(ds.cases[0]?.image).toBe("reg.example.com/tb/a:v1");
     expect(ds.cases[0]?.tags).toEqual(["easy"]);
     expect(ds.cases[1]?.image).toBe("reg.example.com/tb/b:v1");
-    expect(ds.cases[1]?.graders).toEqual([{ id: "tests-pass", config: { cmd: "pytest -q" } }]);
+    expect(ds.cases[1]?.graders).toEqual([{ id: "harbor-verifier", config: { cmd: "pytest -q", cwd: "/app" } }]);
     expect(ds.cases[1]?.tags).toEqual(["python"]);
   });
 

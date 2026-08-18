@@ -65,7 +65,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // Terminal-Bench task-set → workspace Dataset (standard task-format on-ramp). Same gate as datasets:write. Each task
-  // maps to an EvalCase (prebuilt image env + instruction + tests-pass); a task with no resolvable image is a 400
+  // maps to an EvalCase (prebuilt image env + instruction + the harbor-verifier grader); a task with no resolvable image is a 400
   // (Everdict references images, never builds). Versions are immutable (409 on collision). docs/architecture/standard-task-formats.md
   app.post("/datasets/terminal-bench", { schema: datasetDocs.importTerminalBench }, async (req, reply) => {
     if (!deps.datasetRegistry)
@@ -103,7 +103,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  // Harbor (Anthropic) task-set → workspace Dataset — same on-ramp as Terminal-Bench (datasets:write, unresolved image 400).
+  // Harbor (harborframework.com — Laude Institute) task-set → workspace Dataset — same on-ramp as Terminal-Bench (datasets:write, unresolved image 400).
   app.post("/datasets/harbor", { schema: datasetDocs.importHarbor }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
