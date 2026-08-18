@@ -20,6 +20,12 @@ export interface PublicationOperationStore {
   // BY ID, not by state. The defect this replaces claimed "whatever is pending on this scorecard", which a
   // publisher holding a superseded plan passed against a newer settlement's plan.
   claim(id: string, owner: string, leaseSeconds: number, now: string): Promise<PublicationOperation | undefined>;
+  // Push this claim's lease forward while the drain is still working (arch-review 55, Wave 8). A lease is
+  // sized for "a publisher's process died", and the export it fences is a network call carrying a whole
+  // batch's traces — so the ordinary slow upload made the row look abandoned and the reconciler handed it to
+  // a second publisher mid-flight. Answers false when the claim is no longer this owner's, which is how a
+  // heartbeat learns it has already lost and stops.
+  renew(id: string, owner: string, leaseSeconds: number, now: string): Promise<boolean>;
   // The effects ran and the receipt is written. Terminal — the sweep never picks this row up again. Refused
   // (answers false) unless `owner` still holds the claim: a publisher whose lease expired and whose work was
   // redone by the sweep must not overwrite the sweep's receipt.
@@ -63,6 +69,18 @@ export class InMemoryPublicationOperationStore implements PublicationOperationSt
     };
     this.operations.set(id, claimed);
     return claimed;
+  }
+
+  async renew(id: string, owner: string, leaseSeconds: number, now: string): Promise<boolean> {
+    const current = this.operations.get(id);
+    // Only a claim this owner still holds may be extended: a heartbeat that could revive a lost or finished
+    // claim would be a second way to take the row, which is the thing the claim exists to prevent.
+    if (!current || current.claimedBy !== owner || current.state !== "claimed") return false;
+    this.operations.set(id, {
+      ...current,
+      leaseUntil: new Date(Date.parse(now) + leaseSeconds * 1000).toISOString(),
+    });
+    return true;
   }
 
   async complete(id: string, owner: string, now: string): Promise<boolean> {

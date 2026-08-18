@@ -13,6 +13,12 @@ export interface PublicationOperationWorld {
   drainTwice: () => Promise<number>;
   // Open two settlements' operations, then list what the ledger owes for that scorecard.
   owedAfterTwoSettlements: () => Promise<string[]>;
+  // Claim an operation, let the clock run past the lease, RENEW it, then ask the sweep whether the row is
+  // available. Answers how many operations the sweep would take (arch-review 55, Wave 8).
+  owedAfterRenewalPastLease: () => Promise<number>;
+  // The same clock, and a renewal attempted by somebody who is NOT the holder. Answers whether the store
+  // accepted it — a renewal that can revive or steal a claim is a second way to take the row.
+  renewalByAnotherOwner: () => Promise<boolean>;
 }
 
 export function describePublicationOperation(name: string, world: () => PublicationOperationWorld): void {
@@ -24,6 +30,22 @@ export function describePublicationOperation(name: string, world: () => Publicat
     it("a second settlement adds a debt rather than replacing one", async () => {
       const owed = await world().owedAfterTwoSettlements();
       expect(owed.length, "a re-score erased the previous settlement's export debt").toBe(2);
+    });
+
+    // ── THE LEASE IS EXTENDABLE, AND ONLY BY ITS HOLDER (arch-review 55, Wave 8) ──────────────────
+    //
+    // The drain heartbeats while the sink call is in flight, because an export carrying a whole batch's
+    // traces routinely outruns a lease sized for "a publisher's process died". An implementation whose
+    // renewal does not move the sweep's view of the row leaves that defect exactly where it was.
+    it("a renewed claim is not swept, however long the drain takes", async () => {
+      expect(
+        await world().owedAfterRenewalPastLease(),
+        "the sweep could take an operation whose publisher is still working on it",
+      ).toBe(0);
+    });
+
+    it("only the holder may renew — a renewal is not a second way to take the row", async () => {
+      expect(await world().renewalByAnotherOwner(), "a non-holder extended somebody else's claim").toBe(false);
     });
   });
 }

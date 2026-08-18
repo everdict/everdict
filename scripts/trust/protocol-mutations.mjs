@@ -154,6 +154,25 @@ const MUTATIONS = [
     ],
   },
   {
+    // Wave 8's rung: the drain stops renewing while the export is in flight, so a slow upload makes the row
+    // look abandoned and the sweep hands it to a second publisher mid-call.
+    name: "Wave 8 — the publication lease is not renewed across the sink call",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "      void operations.renew(operation.id, owner, leaseSeconds, now()).then(",
+    to: "      void Promise.resolve(false).then(",
+    suite: ["--root", "packages/application-control", "src/scorecard/publication-lease-renewal.counterexample.test.ts"],
+  },
+  {
+    // …and the ledger half: a renewal that does not check WHO is renewing is a second way to take the row,
+    // which is precisely what the claim exists to prevent. Certified by the conformance suite, so a second
+    // implementation inherits the question instead of having to remember it.
+    name: "Wave 8 — a renewal may be performed by somebody who does not hold the claim",
+    file: "packages/application-control/src/ports/publication-operation-store.ts",
+    from: '    if (!current || current.claimedBy !== owner || current.state !== "claimed") return false;\n    this.operations.set(id, {\n      ...current,\n      leaseUntil:',
+    to: "    if (!current) return false;\n    this.operations.set(id, {\n      ...current,\n      leaseUntil:",
+    suite: ["--root", "packages/application-control", "src/scorecard/protocol-conformance.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",

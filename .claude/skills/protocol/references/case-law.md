@@ -322,6 +322,31 @@ the export-receipt projection (the consumer of `settlementPosition` that survive
 vacuous — and its mutation had to change from `ahead` to `behind`, because `ahead` also skips the write and
 would have stayed green over a fold that is still wrong.
 
+### R55.8 A lease taken once and held across a network call
+`packages/application-control/src/scorecard/publication.ts` — the drain claimed its operation for
+`leaseSeconds`, then ran `performEffects` (an HTTP upload of a whole batch's traces to the tenant's
+observability platform), then completed. The lease was never touched in between.
+
+L4 had already written the rule — *"a lease held across an external call is renewed while the call runs, or
+the lease is not a fence"* — and this was the instance nobody had connected to it, because the lease was
+sized for the failure it was named after ("a publisher's process died") rather than for the work it fences.
+The moment an export ran longer than that, `listOwed` saw a `claimed` row with an expired lease — the
+ledger's own definition of an abandoned drain — and handed the operation to a second publisher mid-upload.
+**The row looked abandoned because the work was taking a long time.**
+
+Closed in Wave 8: the drain heartbeats at a third of the lease, stops in a `finally`, and stops on a renewal
+that comes back false (a heartbeat may never revive a claim — that would be a second way to take the row).
+`renew` is on the port with an owner-and-state guard in both implementations, and the conformance suite asks
+both questions, so a third implementation inherits them.
+
+Two things this cost that are worth remembering:
+- **The heartbeat belongs to the DRAIN, not to the effect.** Putting it inside `performEffects` would make
+  every effect added later responsible for remembering it is fenced.
+- **A timing counterexample has to advance the clock in STEPS.** The first draft jumped the whole span at
+  once, so a heartbeat that fired exactly once renewed the entire upload and the test passed over the
+  mutation that stopped it after one beat. Two of the three mutations written for this wave were green until
+  the test interleaved the injected clock with the timer wheel.
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added

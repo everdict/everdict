@@ -16,6 +16,9 @@ import type { AnalysisBundle } from "./scorecard-observability.js";
 
 const SCORECARD_ID = "sc-conf";
 const NOW = "2026-08-17T00:00:00.000Z";
+// The lease timeline: a claim at T0 for 60s, still working at T+90s.
+const LEASE_T0 = "2026-08-17T00:00:00.000Z";
+const LEASE_T90 = "2026-08-17T00:01:30.000Z";
 
 const results: CaseResult[] = [
   {
@@ -98,6 +101,22 @@ describePublicationOperation("InMemoryPublicationOperationStore", () => ({
     await operations.open(operationFor("initial-abc", 1));
     await operations.open(operationFor("rescore-def", 2));
     return (await operations.listForScorecard(SCORECARD_ID)).map((o) => o.id);
+  },
+  owedAfterRenewalPastLease: async () => {
+    const operations = new InMemoryPublicationOperationStore();
+    const operation = operationFor("initial-abc", 1);
+    await operations.open(operation);
+    await operations.claim(operation.id, "a", 60, LEASE_T0);
+    // The drain is still uploading when the original lease would have run out; the heartbeat moves it.
+    await operations.renew(operation.id, "a", 60, LEASE_T90);
+    return (await operations.listOwed(10, LEASE_T90)).length;
+  },
+  renewalByAnotherOwner: async () => {
+    const operations = new InMemoryPublicationOperationStore();
+    const operation = operationFor("initial-abc", 1);
+    await operations.open(operation);
+    await operations.claim(operation.id, "a", 60, LEASE_T0);
+    return await operations.renew(operation.id, "b", 60, LEASE_T90);
   },
 }));
 

@@ -76,6 +76,21 @@ export class PgPublicationOperationStore implements PublicationOperationStore {
     return row ? toOperation(row) : undefined;
   }
 
+  async renew(id: string, owner: string, leaseSeconds: number, now: string): Promise<boolean> {
+    // The heartbeat's write (arch-review 55, Wave 8). Guarded on STILL being this owner's live claim — not on
+    // the id alone: a renewal that could revive a claim somebody else took, or one this publisher already
+    // finished, would be a second way to hold the row, which is exactly what the claim exists to prevent.
+    // `false` is how the drain's heartbeat learns it has already lost and stops.
+    const res = await this.client.query<{ id: string }>(
+      `UPDATE everdict_publication_operations
+          SET lease_until = $3::timestamptz + make_interval(secs => $4)
+        WHERE id = $1 AND claimed_by = $2 AND state = 'claimed'
+        RETURNING id`,
+      [id, owner, now, leaseSeconds],
+    );
+    return res.rows.length > 0;
+  }
+
   async complete(id: string, owner: string, now: string): Promise<boolean> {
     // Conditional on STILL holding the claim: a publisher whose lease expired and whose work the sweep redid
     // must not overwrite the sweep's receipt.

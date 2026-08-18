@@ -175,11 +175,42 @@ export async function drainPublicationOperation(
       await deps.store.update(record.id, { export: direct.export, updatedAt: now() }).catch(() => undefined);
     return direct;
   }
-  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());
+  const operations = deps.operations;
+  const claimed = await operations.claim(operation.id, owner, leaseSeconds, now());
   if (!claimed) return { kind: "skipped" }; // published already, or another publisher holds a live lease
-  const outcome = await performEffects(deps, record, claimed, results);
+  // ── THE LEASE IS RENEWED WHILE THE CALL RUNS (arch-review 55, Wave 8) ────────────────────────────
+  //
+  // L4: a lease held across an external call is renewed, or it is not a fence. The claim above was taken once
+  // and never touched again, and the effect it fences is a network call carrying a whole batch's traces to
+  // the tenant's platform — the one effect that routinely outruns a lease sized for "a publisher's process
+  // died". The moment it did, `listOwed` saw a `claimed` row whose lease had expired, which is the ledger's
+  // definition of an abandoned drain, and handed the operation to a second publisher WHILE the first was
+  // still uploading. The row looked abandoned because the work was taking a long time.
+  //
+  // The heartbeat is the DRAIN's, not the effect's: `performEffects` must not have to know it is being
+  // fenced, or every effect added later has to remember to say so. A renewal that comes back false means the
+  // claim is no longer ours (already lost, or already finished) and the loop stops — it may never revive a
+  // claim, which would be a second way to take the row.
+  const heartbeat = setInterval(
+    () => {
+      void operations.renew(operation.id, owner, leaseSeconds, now()).then(
+        (held) => {
+          if (!held) clearInterval(heartbeat);
+        },
+        // A failed renewal is not a decision: the lease simply runs its course, and the sweep's takeover is
+        // then the ordinary abandoned-publisher path this row already handles.
+        () => clearInterval(heartbeat),
+      );
+    },
+    Math.max(1, Math.floor((leaseSeconds * 1000) / 3)),
+  );
+  // Never keep a process alive for a heartbeat (the CLI drains and exits).
+  heartbeat.unref?.();
+  // …and it stops when the drain does, won or lost. A renewal loop that outlives its drain keeps a failed
+  // operation un-sweepable for as long as the process lives.
+  const outcome = await performEffects(deps, record, claimed, results).finally(() => clearInterval(heartbeat));
   if (outcome.kind === "published") {
-    const wrote = await deps.operations.complete(operation.id, owner, now());
+    const wrote = await operations.complete(operation.id, owner, now());
     if (!wrote) return { kind: "skipped" }; // the lease expired and the sweep finished it — not ours to claim
     // THE RECEIPT ON THE RECORD, after the operation's own completion. It is a projection for readers (the
     // scorecard detail's export panel), not the fence — the fence is the claim above.
@@ -196,7 +227,7 @@ export async function drainPublicationOperation(
       await deps.store.update(record.id, { export: outcome.export, updatedAt: now() }).catch(() => undefined);
     return outcome;
   }
-  await deps.operations.release(operation.id, owner, outcome.reason, outcome.owed, now());
+  await operations.release(operation.id, owner, outcome.reason, outcome.owed, now());
   return { kind: "owed", reason: outcome.reason };
 }
 
