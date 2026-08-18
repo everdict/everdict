@@ -202,6 +202,9 @@ export const scorecardExportSchema = z.object({
   url: z.string().optional(), // deep link to the parent (experiment/project)
   message: z.string().optional(), // failure/partial reason
   exportedAt: z.string(),
+  // WHICH SETTLEMENT THIS RECEIPT IS (arch-review 56, Wave F) — the record's export is a monotonic projection
+  // of the publication ledger, and the store's guard compares this. Absent on receipts written before it.
+  scoringRevision: z.number().int().positive().optional(),
   cases: z
     .array(
       z.object({
