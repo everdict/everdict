@@ -135,7 +135,10 @@ describeTrust("TRUST-147 — a fencing token is carried from the claim, never re
     const after = await store.get(record.id);
     expect(after?.status).toBe("running");
     expect(after?.ownerReplica).toBe("cp-c");
-    expect(resumed).toBe(true); // the resume path ran; it simply had no authority to act
+    // The resume path RAN; it simply had no authority to act. It answers a disposition rather than a boolean
+    // now (arch-review 55) — the claim being unchanged is what this scenario is about, and `resumed` names
+    // exactly that: the sweep did not fall through to a tombstone.
+    expect(resumed).toEqual({ kind: "resumed" });
   }, 20_000);
 
   it("a displaced recovery cannot tombstone the open run its successor is driving", async () => {
