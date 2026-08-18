@@ -196,8 +196,10 @@ const MUTATIONS = [
     // …and the projection half: let a late drain move `current` backwards.
     name: "Phase 4 — an older settlement can overwrite the newer one's projection",
     file: "packages/application-control/src/scorecard/publication.ts",
-    from: "  if (!deps.operations) return false; // single-publisher deployment: no second settlement can race this one",
-    to: "  return false;",
+    // RE-ANCHORED (arch-review 55, Wave 5): the predicate became `aliasPosition` when its answer went
+    // three-valued, and the runner refused the stale line rather than silently testing nothing.
+    from: '  if (!operations) return "behind"; // single-publisher deployment: no second settlement can race this one',
+    to: '  return "behind";',
     suite: [
       "--root",
       "packages/application-control",

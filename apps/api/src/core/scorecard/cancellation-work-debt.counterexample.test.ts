@@ -44,7 +44,12 @@ const WORK: RuntimeWorkRef = { tenant: "acme", runId: "evd-sc-wd-c1", externalJo
 
 // A world whose cluster refuses the first stop and answers the second. The reconciler drives the teardown
 // twice over it, which is exactly the sequence the operation's `owed` state exists to produce.
-async function twoAttempts(outcomes: KillOutcome[]): Promise<{ killed: string[]; second: unknown }> {
+async function twoAttempts(
+  outcomes: KillOutcome[],
+  // A ledger that cannot be listed — the third answer `placedWork` has, and the one a teardown may never
+  // round down to an empty workset (arch-review 55, Wave 3).
+  opts?: { unreadableLedger?: boolean },
+): Promise<{ killed: string[]; second: unknown; first: unknown }> {
   const store = new InMemoryScorecardStore();
   const receipts = new InMemoryCaseReceiptStore();
   store.attachReceipts((id) => receipts.countFor(id));
@@ -95,12 +100,17 @@ async function twoAttempts(outcomes: KillOutcome[]): Promise<{ killed: string[];
     },
   } as never);
 
+  if (opts?.unreadableLedger === true)
+    attempts.listForScorecard = async (): Promise<never> => {
+      throw new Error("attempt ledger unreachable");
+    };
+
   const teardown = service.cancellationTeardown();
   // ── ATTEMPT ONE: the cluster refuses. The operation stays owed (the teardown throws). ─────────────
-  await teardown("sc-wd").catch(() => undefined);
+  const first = await teardown("sc-wd").catch((err: unknown) => ({ threw: String(err) }));
   // ── ATTEMPT TWO: what the reconciler does next, against the world attempt one left. ───────────────
   const second = await teardown("sc-wd").catch((err: unknown) => ({ threw: String(err) }));
-  return { killed, second };
+  return { killed, second, first };
 }
 
 // RED as of 898fc25f, observed: `expected [ 'everdict-c1-aaaa' ] to have a length of 2` — the second attempt
@@ -126,5 +136,20 @@ describe("[R55 WAVE-3 COUNTEREXAMPLE #3 — CLOSED] a cancellation retry re-kill
       second,
       "a teardown that stopped nothing and asked nothing certified that the batch's compute was gone",
     ).toHaveProperty("threw");
+  });
+
+  // ── …AND A WORKSET IT COULD NOT ENUMERATE IS NOT AN EMPTY ONE ───────────────────────────────────
+  //
+  // The third answer, and the one `pnpm protocol-mutations` found untested: the two cases above both read the
+  // ledger successfully, so neutralising the `unknown` arm left them green. A teardown whose ledger read
+  // FAILED knows nothing about what this batch placed — rounding that to zero handles is the same collapse
+  // one plane over, and it certifies completion over compute nobody ever enumerated, let alone stopped.
+  it("refuses to build a workset from a ledger it could not read", async () => {
+    const { first, killed } = await twoAttempts([{ status: "absent" }], { unreadableLedger: true });
+    expect(killed, "the teardown killed handles it derived from a ledger read that failed").toEqual([]);
+    expect(first, "a teardown that could not list its work reported the batch's compute as torn down").toHaveProperty(
+      "threw",
+    );
+    expect(String((first as { threw: string }).threw)).toMatch(/cannot enumerate what it placed/);
   });
 });
