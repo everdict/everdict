@@ -193,8 +193,10 @@ const MUTATIONS = [
   {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
-    from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",
-    to: "  const outcomeFirst = await performEffects(deps, record, operation, results);\n  void outcomeFirst;\n  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",
+    // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the
+    // heartbeat closes over it. The runner refused the stale line rather than silently testing nothing.
+    from: "  const claimed = await operations.claim(operation.id, owner, leaseSeconds, now());",
+    to: "  const outcomeFirst = await performEffects(deps, record, operation, results);\n  void outcomeFirst;\n  const claimed = await operations.claim(operation.id, owner, leaseSeconds, now());",
     suite: ["--root", "packages/application-control", "src/scorecard/publication-operation.counterexample.test.ts"],
   },
   {
