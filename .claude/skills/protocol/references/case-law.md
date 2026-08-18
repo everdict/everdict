@@ -380,6 +380,48 @@ Two things worth carrying forward:
 - **Making an optional required is a migration, not a type change.** The compiler found ten fixtures; only
   real rows in a real database found the rest, and "the migration ran" is not "the rows it wrote parse".
 
+## Review 56 — the boundaries a type never drew
+
+### R56.1 A negated status list is fail-OPEN, and it was in BOTH adapters
+`reserveWork`'s parent guard shipped as `status NOT IN ('succeeded', 'failed')`, true of the enum on the day
+it was written. A scorecard's terminal set is `succeeded · failed · superseded · cancelled` and a run's is
+`succeeded · failed · suspended`, so the guard answered "this parent may still place compute" for a batch the
+user had CANCELLED — the exact authorization the wave existed to remove.
+
+The review that found it reported the in-memory store as correct "because it uses the domain terminal
+predicate". **It did not**: the API composition root's `authorityOf` hand-wrote the same two statuses. That is
+why the previous wave's counterexample, which drives the in-memory store, could not catch it — there was no
+lane left where the right vocabulary was used, so comparing the lanes would have agreed with the defect.
+
+Two rules out of it: state the statuses that MAY act (an allowlist grows restrictive; a negated list grows
+permissive), and put the predicate somewhere a test can reach — a closure in a composition root is a lane no
+counterexample can drive. `negated-status-guard` is the ratchet.
+
+### R56.2 The evaluated agent could read the tests and write its own reward
+The Harbor mapper puts a task's hidden `tests/` bytes and its verifier env in `EvalCase.graders[].config`;
+`CaseJob.evalCase` is the whole case; the managed backends base64 the whole job into `EVERDICT_CASE_JOB`; and
+`LocalDriver` spawns the harness with `env: { ...process.env }`. The comment said "tests are copied after the
+agent finishes" — true of the FILESYSTEM, and silent about disclosure. The bytes were handed over before the
+first token.
+
+Stripping was not available: the job-runner rebuilds the graders from that same object INSIDE the container,
+which is what lets an outcome grader touch `ctx.compute`. Agent and verifier share one environment by design,
+so the lane REFUSES a case it would disclose (`caseJobPayload`) until an isolated verifier lane exists. A
+silent disclosure that invalidates every score is now a visible error naming the field.
+
+Two more boundaries in the same grader: the reward directory was `mkdir -p`'d and never emptied (an agent's
+`reward.json` written during its own turn WAS the verdict, and JSON beat the `.txt` a real verifier writes),
+and `tests` keys went unnormalized into `join(root, path)`.
+
+The generalizable line: **"not on disk yet" is not "not disclosed", and "a file exists" is not "the verifier
+wrote it".** A trust boundary that is maintained by ordering is not a boundary.
+
+### R56.3 …and three of this review's four defects were the same shape as R55's
+`retry_later` had no owner ("the next sweep asks again" — there was none), three judging lanes passed no pass
+scope while their receipts named one, and the export projection checked-then-wrote. Every one is a guard
+implemented locally with its recovery written down rather than wired. That is now a rule of its own in
+`protocol.md`, because four instances is a pattern and not a run of bad luck.
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added
