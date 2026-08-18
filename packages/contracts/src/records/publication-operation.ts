@@ -39,14 +39,20 @@ export type SettlementRef = z.infer<typeof SettlementRefSchema>;
 // minted one and never passed it anywhere, so the at-least-once export had no way for the receiving platform
 // to dedupe it. That is the difference between "at least once, and the sink can collapse them" and "at least
 // once, and duplicates are the tenant's problem".
+//
+// ── THE ARTIFACT VARIANT IS GONE (arch-review 55, Wave 7) ────────────────────────────────────────────
+//
+// It promoted the mutable `analyses/<id>.json` alias, and that promotion was WRITE-ONLY: it happened exactly
+// when the settle had also recorded the revision's own pass-scoped `analysisKey`, which is the key the
+// analysis reader resolves first. Every promotion therefore wrote an object its own settlement had just made
+// unreachable. It was also the one effect whose monotonicity could not be enforced — the position is read
+// from this ledger and the bytes are written to an object store, with no conditional put to join them, so
+// two settlements draining concurrently could still land newest-first.
+//
+// Wave 5 made its guard three-valued, which was correct for the defect in front of it; this removes the
+// effect the guard was protecting. Rows planned before it are stripped by mig 0191, so no stored operation
+// carries a variant this union no longer has.
 export const PublicationEffectSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("artifact"),
-    // The mutable alias this settlement promotes, and the immutable object it is promoted FROM.
-    key: z.string().min(1),
-    from: z.string().min(1),
-    digest: z.string().min(1),
-  }),
   z.object({
     kind: z.literal("export"),
     idempotencyKey: z.string().min(1),

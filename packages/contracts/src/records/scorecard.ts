@@ -693,11 +693,6 @@ export const PublicationPlanSchema = z.object({
   // Why the last drain did not finish. Diagnostics, never control: `state` alone decides whether the sweep
   // retries (the same posture as a cancellation operation's `lastError`).
   lastError: z.string().optional(),
-  // The MUTABLE aliases this settlement owes. `from` is the immutable object staged before the CAS, `key`
-  // the alias to promote it onto, `digest` the bundle the settle actually counted — the publisher refuses to
-  // promote bytes whose digest is not the planned one, so a later pass's object can never be promoted under
-  // this settlement's authority.
-  artifacts: z.array(z.object({ key: z.string(), from: z.string(), digest: z.string() })).optional(),
   // The outward exports this settlement owes. At most one today (the batched finalize export); an array
   // because the plan describes the settlement's owed effects, not one call site's.
   exports: z

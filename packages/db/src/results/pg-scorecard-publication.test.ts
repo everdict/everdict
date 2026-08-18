@@ -21,10 +21,12 @@ function capture(): { statements: Array<{ sql: string; params: unknown[] }>; cli
   return { statements, client };
 }
 
+// The owed EXPORT — the plan's only effect since the write-only alias promotion was deleted (arch-review 55,
+// Wave 7). What this file pins is the column, not the effect kind, so the fixture just has to be a real plan.
 const plan: PublicationPlan = {
   state: "pending",
   plannedAt: "2026-08-15T00:00:01.000Z",
-  artifacts: [{ key: "analyses/sc-1.json", from: "analyses/sc-1/passes/initial-abc.json", digest: "sha256:x" }],
+  exports: [{ idempotencyKey: "sc-1:initial-abc", payloadDigest: "sha256:x" }],
 };
 
 describe("the publication plan on the scorecard row", () => {

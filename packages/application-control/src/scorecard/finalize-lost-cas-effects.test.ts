@@ -398,18 +398,20 @@ describe("a re-score settle that loses the ledger CAS", () => {
     expect(putKeys).not.toContain(ANALYSIS_CURRENT_KEY);
   });
 
-  it("promotes the alias once its settle has committed, from the very object its revision points at", async () => {
+  // RESTATED (arch-review 55, Wave 7). It read "promotes the alias once its settle has committed, from the
+  // very object its revision points at" — true while the alias promotion existed, and the promotion is gone:
+  // it wrote an object the settle had already made unreachable (the revision's own pass-scoped `analysisKey`
+  // is what the analysis reader resolves first). The property that MATTERS here is the one this file is about
+  // and it survives unchanged: the pass-scoped object is staged, and the mutable key is never touched at all.
+  it("stages its own pass-scoped object and writes no mutable key, won or lost", async () => {
     const { svc, putKeys, objects } = rescoreHarness({ refuseSettle: false });
 
     await svc.finalizeScore(SCORECARD_ID, [], undefined, "pass-1");
 
-    // The winner drains its own plan inline, so the alias exists and is BYTE-IDENTICAL to the staged object
-    // the appended revision names — copied, never re-serialized.
-    expect(putKeys).toContain(ANALYSIS_CURRENT_KEY);
     const staged = putKeys.find((k) => k.startsWith(`analyses/${SCORECARD_ID}/passes/`));
-    expect(staged).toBeDefined();
-    expect(objects.get(ANALYSIS_CURRENT_KEY)).toEqual(objects.get(staged ?? ""));
-    // …and it is promoted AFTER the settle, never before it.
-    expect(putKeys.indexOf(ANALYSIS_CURRENT_KEY)).toBeGreaterThan(putKeys.indexOf(staged ?? ""));
+    expect(staged, "the pass's frozen artifact was not staged").toBeDefined();
+    expect(objects.get(staged ?? "")).toBeDefined();
+    // The alias is not a thing this settlement can move any more — winning does not license it either.
+    expect(putKeys).not.toContain(ANALYSIS_CURRENT_KEY);
   });
 });

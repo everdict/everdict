@@ -301,6 +301,27 @@ Closed in Wave 5: `aliasPosition` is `ahead | behind | unknown`, the read goes t
 than a catch, both consumers name the third case, and `unknown-collapse-guard` now watches this ledger too —
 verified RED by reintroducing the fold.
 
+### R55.7 …and then the effect the guard protected turned out to be WRITE-ONLY
+Wave 5 was the right fix for the defect in front of it and the wrong fix for the one underneath it. The alias
+promotion could not be made monotonic AT ALL: the position comes from the ledger and the bytes go to an object
+store, with no conditional put to join them, so two settlements draining concurrently could still land
+newest-first. Two reviews had now guarded a window that is between the read and the put.
+
+What licensed deleting it instead was a fact neither review had checked: the promotion was planned exactly
+when staging produced `revisionKey` — the same value the settle records on the revision as `analysisKey` — and
+the analysis reader resolves `analysisKey` FIRST. **Every promotion wrote an object its own settlement had
+just made unreachable.** `offloadAnalysis`, the alias's only other writer, had lost its last production caller
+one review earlier and nobody noticed.
+
+The lesson is about the ORDER of the two questions. Both reviews asked "is this effect correct?" and neither
+asked "**does anything read what this effect writes?**" — which is cheaper, and which would have skipped both
+guards. Before hardening an effect, resolve its reader; an effect with no reader is deleted, not fenced.
+
+Deleted in Wave 7, with mig 0191 stripping the variant from stored rows. Its counterexample was re-pointed at
+the export-receipt projection (the consumer of `settlementPosition` that survives) rather than left to go
+vacuous — and its mutation had to change from `ahead` to `behind`, because `ahead` also skips the write and
+would have stayed green over a fold that is still wrong.
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added

@@ -267,35 +267,9 @@ export async function stageAnalysis(
   return out;
 }
 
-// Offload the analysis bundle to object storage. Best-effort per key: no store or a failure yields an absent
-// ref and never affects the scorecard (same discipline as offloadResults). When `revision` is given, the
-// bundle ALSO freezes under its per-revision key — each put is independent, so a revision-key failure still
-// leaves the current surface working (and the revision entry honestly carries no artifact, never a ref to
-// the mutable current key that a later pass would rewrite).
-export async function offloadAnalysis(
-  deps: Pick<ScorecardServiceDeps, "artifacts">,
-  id: string,
-  bundle: AnalysisBundle,
-  // The PASS that is freezing this bundle. Absent = the initial (submit-time) offload, which has no
-  // competing writer and therefore only needs the current key.
-  passId?: string,
-): Promise<AnalysisOffload> {
-  if (!deps.artifacts) return {};
-  const bytes = Buffer.from(JSON.stringify(bundle));
-  const out: AnalysisOffload = {};
-  try {
-    out.ref = await deps.artifacts.put(analysisArtifactKey(id), bytes, "application/json");
-  } catch {
-    // best-effort — the record simply carries no analysisRef
-  }
-  if (passId !== undefined) {
-    try {
-      const key = analysisPassKey(id, passId);
-      out.revisionRef = await deps.artifacts.put(key, bytes, "application/json");
-      out.revisionKey = key;
-    } catch {
-      // best-effort — the revision entry simply carries no artifact
-    }
-  }
-  return out;
-}
+// `offloadAnalysis` USED TO LIVE HERE (deleted arch-review 55, Wave 7). It wrote the mutable
+// `analyses/<id>.json` alias at submit time, and its last production caller went away when settlements
+// started STAGING their bundle under a pass-scoped key instead. Nothing has written that key since, and
+// nothing reads it either for any revision that carries an `analysisKey` — which is every revision a modern
+// settle appends. The analytics reader keeps its fallback so the objects written before all this still
+// resolve; there is simply no longer a writer.

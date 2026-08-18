@@ -125,12 +125,15 @@ const MUTATIONS = [
     build: "@everdict/domain",
   },
   {
-    // Wave 5's rung: an unreadable publication ledger folds back into "a newer settlement is already there",
-    // so the drain skips its only effect, records nothing owed, and certifies the operation published.
-    name: "Wave 5 — an unknown alias position becomes 'already ahead'",
+    // Wave 5's rung, RE-POINTED in Wave 7: the effect that made the fold a wrong DECISION (the write-only
+    // alias promotion) is deleted, so the mutation now has to break the projection the fold still reaches —
+    // "we never established the order" collapsing into "I am the newest", which overwrites a newer receipt.
+    // Deliberately `behind` and not `ahead`: `ahead` also skips the write, so mutating to it would leave the
+    // suite green over a fold that is still wrong.
+    name: "Wave 5 — an unknown settlement order becomes 'I am the newest'",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: '  if (siblings.kind === "unknown") return "unknown";',
-    to: '  if (siblings.kind === "unknown") return "ahead";',
+    to: '  if (siblings.kind === "unknown") return "behind";',
     suite: [
       "--root",
       "packages/application-control",
@@ -138,12 +141,12 @@ const MUTATIONS = [
     ],
   },
   {
-    // …and the consumer half: naming the third case is worth nothing if the effect loop still treats it as a
-    // state of the world instead of a debt.
-    name: "Wave 5 — the effect loop skips an unknown position without owing it",
+    // …and the half that says the export is still OWED when the order is unknown: withholding the effect
+    // because the projection cannot be placed would be the opposite error, and just as invisible.
+    name: "Wave 7 — an unknown settlement order withholds the owed export",
     file: "packages/application-control/src/scorecard/publication.ts",
-    from: '          fail("the publication ledger could not be read, so the alias position is unknown — not promoted");\n          continue;',
-    to: "          continue;",
+    from: "  let exported: ScorecardExport | undefined;\n  for (const effect of operation.effects) {",
+    to: '  let exported: ScorecardExport | undefined;\n  if ((await settlementPosition(deps, operation)) !== "behind")\n    return { kind: "failed", reason: "order unknown", owed: true };\n  for (const effect of operation.effects) {',
     suite: [
       "--root",
       "packages/application-control",

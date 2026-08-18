@@ -5,7 +5,7 @@ import type { ArtifactStore } from "../ports/artifact-store.js";
 import { InMemoryPublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
 import { PublicationCoordinator, drainPublicationOperation, planPublicationOperation } from "./publication.js";
-import { type AnalysisBundle, analysisArtifactKey, analysisPassKey } from "./scorecard-observability.js";
+import { type AnalysisBundle, analysisPassKey } from "./scorecard-observability.js";
 
 // ── A COMMITTED SETTLEMENT PUBLISHES EXACTLY ONCE (arch-review 52 Wave 4, re-based on 53 Wave C) ─────
 //
@@ -160,22 +160,36 @@ describe("the publication outbox", () => {
     expect(swept).toBe(0); // the sweep found nothing owed — the operation is no longer claimable
     expect(current().export).toEqual(exportReceipt);
     expect((await operations.listForScorecard(SCORECARD_ID))[0]?.state).toBe("published");
-    // …and the mutable alias was promoted from the staged object, exactly once.
-    expect(puts).toEqual([analysisArtifactKey(SCORECARD_ID)]);
+    // …and NOTHING was written to object storage. The alias promotion that used to be the second owed effect
+    // is deleted (arch-review 55, Wave 7): it wrote a key the settle had already made unreachable, and it was
+    // the one effect whose monotonicity no guard here could enforce.
+    expect(puts).toEqual([]);
   });
 
-  it("an operation whose staged bytes are not the ones it planned promotes nothing and closes unverifiable", async () => {
-    // Given a staged object that is NOT what the settlement planned — another pass's bundle under the key.
-    const operation = plan();
+  // RE-POINTED AT THE EXPORT (arch-review 55, Wave 7). This pinned the digest guard on the ARTIFACT effect's
+  // staged object; that effect is gone, and the same property lives on the export's frozen payload. It is not
+  // a duplicate of the test below it: this one is "the immutable object under my key is not mine", that one
+  // is "the LIVE results I was handed are not the ones I counted". Both must refuse; only one is retryable.
+  it("an operation whose frozen payload is not the one it planned exports nothing and closes unverifiable", async () => {
+    const payloadKey = `payloads/${SCORECARD_ID}/${PASS_ID}.json`;
+    const operation = plan({ staged: { payloadKey } as never });
     const operations = new InMemoryPublicationOperationStore();
     await operations.open(operation);
     const { store } = fakeStore(record());
-    const { artifacts, puts } = fakeArtifacts({
-      [analysisPassKey(SCORECARD_ID, PASS_ID)]: { ...bundle, harness: "someone-else@9" },
-    });
+    // The object under this settlement's key holds ANOTHER plane's results.
+    const { artifacts, puts } = fakeArtifacts({ [payloadKey]: [{ ...results[0], scores: [] }] });
+    const exports: string[] = [];
 
     const outcome = await drainPublicationOperation(
-      { store, artifacts, operations },
+      {
+        store,
+        artifacts,
+        operations,
+        exportResults: async (): Promise<ScorecardExport> => {
+          exports.push(SCORECARD_ID);
+          return exportReceipt;
+        },
+      },
       record(),
       operation,
       results,
@@ -183,10 +197,11 @@ describe("the publication outbox", () => {
       () => "2026-08-15T00:00:04.000Z",
     );
 
-    // Then nothing is promoted, and the operation does not sit owed forever pretending a retry could fix it:
-    // the object under that key is not this settlement's, and no sweep changes that.
-    expect(outcome.kind).toBe("owed");
+    // Then nothing left the building, and the operation does not sit owed forever pretending a retry could
+    // fix it: the bytes under that key are not this settlement's, and no sweep changes that.
+    expect(exports).toEqual([]);
     expect(puts).toEqual([]);
+    expect(outcome.kind).toBe("owed");
     const held = (await operations.listForScorecard(SCORECARD_ID))[0];
     expect(held?.state).toBe("unverifiable");
     expect(held?.lastError).toContain("does not digest");
@@ -249,7 +264,7 @@ describe("the publication outbox", () => {
 
     expect(await coordinator.reconcile()).toBe(1);
     expect(exports).toEqual([SCORECARD_ID]);
-    expect(puts).toEqual([analysisArtifactKey(SCORECARD_ID)]);
+    expect(puts).toEqual([]); // the alias promotion is gone — the export is the whole debt
     expect((await operations.listForScorecard(SCORECARD_ID))[0]?.state).toBe("published");
   });
 });

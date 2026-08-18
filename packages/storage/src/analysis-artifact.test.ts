@@ -1,16 +1,11 @@
-import {
-  type AnalysisBundle,
-  type ArtifactStore,
-  analysisBundle,
-  offloadAnalysis,
-} from "@everdict/application-control";
+import { type AnalysisBundle, type ArtifactStore, analysisBundle, stageAnalysis } from "@everdict/application-control";
 import type { CaseResult, EnvSnapshot } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryArtifactStore } from "./artifact-store.js";
 
 // The analysis result as a first-class object: the aggregate summary + per-case verdict/scores, offloaded to the
 // object store at finalize → ScorecardRecord.analysisRef (the analysis-output sibling of the run-output snapshots).
-describe("analysisBundle + offloadAnalysis (analysis result → object storage)", () => {
+describe("analysisBundle + stageAnalysis (analysis result → object storage)", () => {
   const repoSnap: EnvSnapshot = { kind: "repo", diff: "", changedFiles: [], headSha: "h" };
   const failure = {
     stage: "grade",
@@ -40,18 +35,21 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
     expect(bundle.cases[1]?.failure).toEqual(failure);
   });
 
-  it("offloads the bundle to the store as application/json → a downloadable ref, bytes recoverable", async () => {
+  // RE-POINTED AT `stageAnalysis` (arch-review 55, Wave 7). These pinned `offloadAnalysis`, which wrote the
+  // MUTABLE `analyses/<id>.json` alias and had already lost its last production caller; it is deleted, and
+  // every property below except the alias itself belongs to the staging seam that replaced it.
+  it("stages the bundle as application/json under the PASS key → bytes recoverable, no mutable key touched", async () => {
     const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle);
-    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
-    const stored = store.objects.get("analyses/sc1.json");
+    const offload = await stageAnalysis({ artifacts: store }, "sc1", bundle, "pass-7");
+    const stored = store.objects.get("analyses/sc1/passes/pass-7.json");
     expect(stored?.contentType).toBe("application/json");
     // the FULL analysis is stored (round-trips), not a truncated preview.
     const decoded = JSON.parse(Buffer.from(stored?.data ?? new Uint8Array()).toString()) as AnalysisBundle;
     expect(decoded).toEqual(bundle);
-    // Without a revision, only the CURRENT key is written — the per-revision freeze is opt-in per call.
-    expect(offload.revisionRef).toBeUndefined();
+    expect(offload.revisionKey).toBe("analyses/sc1/passes/pass-7.json");
+    // The alias is not written by ANY settle path any more — that is the whole point of the deletion.
+    expect(store.objects.has("analyses/sc1.json")).toBe(false);
   });
 
   it("freezes the bundle under the PASS that wrote it, and reports the durable key", async () => {
@@ -62,8 +60,7 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
     // names the object a historical read has to fetch.
     const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const offload = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-7");
-    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
+    const offload = await stageAnalysis({ artifacts: store }, "sc1", bundle, "pass-7");
     expect(offload.revisionRef).toBe("memory://artifacts/analyses/sc1/passes/pass-7.json");
     expect(offload.revisionKey).toBe("analyses/sc1/passes/pass-7.json");
     const frozen = store.objects.get("analyses/sc1/passes/pass-7.json");
@@ -74,8 +71,8 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
   it("two passes racing for one revision write DIFFERENT objects — the loser can never overwrite the winner", async () => {
     const store = new InMemoryArtifactStore("memory://artifacts/");
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const a = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-A");
-    const b = await offloadAnalysis({ artifacts: store }, "sc1", bundle, "pass-B");
+    const a = await stageAnalysis({ artifacts: store }, "sc1", bundle, "pass-A");
+    const b = await stageAnalysis({ artifacts: store }, "sc1", bundle, "pass-B");
     expect(a.revisionKey).not.toBe(b.revisionKey);
     // Both objects survive: an abandoned pass's bundle is evidence of what it was doing, not garbage, and
     // the ledger entry that won points at its OWN key.
@@ -85,7 +82,7 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
 
   it("is best-effort: no store → no refs at all (dev fallback, never breaks the scorecard)", async () => {
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: undefined }, "sc1", bundle, "pass-7")).toEqual({});
+    expect(await stageAnalysis({ artifacts: undefined }, "sc1", bundle, "pass-7")).toEqual({});
   });
 
   it("is best-effort per key: a store failure → no ref, swallowed (a broken object store never fails the eval)", async () => {
@@ -101,12 +98,10 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle, "pass-7")).toEqual({});
+    expect(await stageAnalysis({ artifacts: failing }, "sc1", bundle, "pass-7")).toEqual({});
   });
 
-  it("a pass-key failure leaves the current surface intact — the entry stays honestly artifact-less", async () => {
-    // The two puts are independent: the record keeps its analysisRef while the revision entry carries NO
-    // ref, rather than a ref to the mutable current key that a later pass would rewrite.
+  it("a pass-key failure leaves the entry honestly artifact-less — never a key to bytes that failed", async () => {
     const halfBroken: ArtifactStore = {
       async put(key: string) {
         if (key.includes("/passes/")) throw new Error("revision bucket down");
@@ -120,8 +115,7 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
-    const offload = await offloadAnalysis({ artifacts: halfBroken }, "sc1", bundle, "pass-7");
-    expect(offload.ref).toBe("memory://artifacts/analyses/sc1.json");
+    const offload = await stageAnalysis({ artifacts: halfBroken }, "sc1", bundle, "pass-7");
     expect(offload.revisionRef).toBeUndefined();
     expect(offload.revisionKey).toBeUndefined(); // no key either — the entry must not point at bytes that failed
   });
