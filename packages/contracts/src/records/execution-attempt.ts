@@ -23,7 +23,21 @@ import { RuntimeWorkRefSchema } from "../execution/runtime-work-ref.js";
 // The vocabulary is CLOSED HERE and nowhere else — deliberately no SQL CHECK constraint, for the same reason
 // the receipt's `kind` has none (mig 0181): the boundary that refuses an unknown state is this schema, and
 // adding a state must not require a migration to be refusable.
-export const ExecutionAttemptStateSchema = z.enum(["created", "executing", "committed", "superseded", "failed"]);
+//   reserved    — this attempt has AUTHORIZED external work and holds its handle, but the orchestrator has
+//                  not been asked yet (arch-review 55, Wave 1). It exists so that "may this caller still
+//                  place work?" is a question the LEDGER answers rather than one a caller remembers: the
+//                  reservation is the `created → reserved` transition, conditional on the attempt being
+//                  fresh, unreserved, and belonging to a parent this driver still owns. Without it the
+//                  reservation was a metadata update that a superseded attempt, a displaced driver and a
+//                  cancelled batch all passed.
+export const ExecutionAttemptStateSchema = z.enum([
+  "created",
+  "reserved",
+  "executing",
+  "committed",
+  "superseded",
+  "failed",
+]);
 export type ExecutionAttemptState = z.infer<typeof ExecutionAttemptStateSchema>;
 
 // The states after which an attempt's story is over. Written ONCE because both store implementations arbitrate

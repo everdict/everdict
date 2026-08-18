@@ -93,7 +93,9 @@ describe("PgExecutionAttemptStore", () => {
     // The guard is the WHERE clause, not a read-then-write: a row that already ended is not matched at all.
     expect(text).toContain("state NOT IN ('committed', 'superseded', 'failed')");
     // …and `executing` is reachable only from `created`, so a late "compute started" cannot rewind a row.
-    expect(text).toContain("($2 <> 'executing' OR state = 'created')");
+    // `executing` may follow a RESERVATION as well as a bare `created` (arch-review 55, Wave 1): a managed
+    // dispatch authorizes its work first, so the row it starts from is the one the reservation transitioned.
+    expect(text).toContain("($2 <> 'executing' OR state IN ('created', 'reserved'))");
     expect(calls[0]?.params).toEqual(["evd-run-1#g1", "committed", "run-1", null, null, null]);
   });
 
@@ -140,25 +142,33 @@ describe("PgExecutionAttemptStore", () => {
     namespace: "everdict-acme",
   };
 
-  it("reserveWork stamps the handle unconditionally — a terminal row must still be able to take it", async () => {
-    const { client, calls } = fakeClient(() => ({
-      rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }],
-    }));
+  it("reserveWork is a CONDITIONAL transition — state, prior reservation and parent authority in one statement", async () => {
+    const { client, calls } = fakeClient((text) =>
+      text.startsWith("SELECT")
+        ? { rows: [{ runtime_work: null, updated_at: "2026-08-18T00:00:00.000Z" }] }
+        : { rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }] },
+    );
     const store = new PgExecutionAttemptStore(client);
 
     const intent = await store.reserveWork("evd-run-r1#g1", WORK);
 
-    // No state guard in the WHERE clause: a fast case can commit before this hook lands, and refusing the
-    // write then would leave the ledger with no handle for work that ran.
-    const text = calls[0]?.text ?? "";
+    // RESTATED (arch-review 55, Wave 1). It read "stamps the handle unconditionally — a terminal row must
+    // still be able to take it", and asserted `not.toContain("state")`. That was true while the stamp ran
+    // AFTER the apply; once it moved before, unconditional meant a superseded attempt, a displaced driver and
+    // a cancelled batch could all authorize new compute.
+    const text = calls[1]?.text ?? "";
     expect(text).toContain("UPDATE everdict_execution_attempts");
     expect(text).toContain("runtime_work = $2::jsonb");
-    expect(text).not.toContain("state");
-    // …and it RETURNS, because the caller is the reservation hook a backend awaits before it creates a
-    // cluster object. An UPDATE whose result nobody reads cannot tell "wrote the row" from "matched none".
+    expect(text).toContain("state = 'reserved'");
+    // The guard is the WHERE clause, so there is no window between checking authority and taking it.
+    expect(text).toContain("a.state = 'created'");
+    expect(text).toContain("a.runtime_work IS NULL");
+    expect(text).toContain("s.status NOT IN ('succeeded', 'failed')");
+    expect(text).toContain("s.owner_epoch = a.driver_epoch");
+    expect(text).toContain("r.owner_epoch = a.driver_epoch");
     expect(text).toContain("RETURNING");
-    expect(calls[0]?.params?.[0]).toBe("evd-run-r1#g1");
-    expect(JSON.parse(String(calls[0]?.params?.[1]))).toMatchObject({
+    expect(calls[1]?.params?.[0]).toBe("evd-run-r1#g1");
+    expect(JSON.parse(String(calls[1]?.params?.[1]))).toMatchObject({
       externalJobId: "everdict-c1-evd-run-r1-aaaaa",
       namespace: "everdict-acme",
       runId: "evd-run-r1",
@@ -166,6 +176,30 @@ describe("PgExecutionAttemptStore", () => {
     // The proof is read back from the write, not echoed from the argument.
     expect(intent).toMatchObject({ attemptId: "evd-run-r1#g1", persistedAt: "2026-08-18T00:00:00.000Z" });
     expect(intent.work.externalJobId).toBe("everdict-c1-evd-run-r1-aaaaa");
+  });
+
+  it("reserveWork REFUSES when the guarded update matched nothing — ended, taken, or no longer ours", async () => {
+    const { client } = fakeClient((text) =>
+      text.startsWith("SELECT") ? { rows: [{ runtime_work: null, updated_at: "t" }] } : { rows: [] },
+    );
+    await expect(
+      new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g1", WORK),
+      "a dispatch was authorized by an attempt that may no longer place work",
+    ).rejects.toThrow(/may no longer authorize work/);
+  });
+
+  it("reserveWork is IDEMPOTENT for the same work and REFUSES different work on a taken attempt", async () => {
+    const held = { rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }] };
+    const same = fakeClient(() => held);
+    const again = await new PgExecutionAttemptStore(same.client).reserveWork("evd-run-r1#g1", WORK);
+    expect(again.work.externalJobId).toBe(WORK.externalJobId);
+    expect(same.calls).toHaveLength(1); // the SELECT answered it; no UPDATE was attempted
+
+    const other = fakeClient(() => held);
+    await expect(
+      new PgExecutionAttemptStore(other.client).reserveWork("evd-run-r1#g1", { ...WORK, externalJobId: "other" }),
+      "a second reservation overwrote the handle of work that is still running",
+    ).rejects.toThrow(/already authorized other work/);
   });
 
   it("reserveWork REFUSES when the update matched no row — an attempt id that names nothing", async () => {

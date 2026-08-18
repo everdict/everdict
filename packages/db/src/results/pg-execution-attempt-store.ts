@@ -1,5 +1,6 @@
 import type { ExecutionAttemptStore, OpenAttemptInput } from "@everdict/application-control";
 import {
+  ConflictError,
   type ExecutionAttemptRecord,
   ExecutionAttemptRecordSchema,
   type ExecutionAttemptState,
@@ -145,7 +146,7 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
        WHERE attempt_id = $1
          AND state NOT IN (${TERMINAL_LIST})
          AND $2 <> 'created'
-         AND ($2 <> 'executing' OR state = 'created')
+         AND ($2 <> 'executing' OR state IN ('created', 'reserved'))
        RETURNING attempt_id`,
       [
         attemptId,
@@ -159,28 +160,85 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
     return rows.length > 0;
   }
 
-  // UNCONDITIONAL on the attempt's state, unlike `transition` (arch-review 52, Wave 2): the row can reach a
-  // terminal state before this reservation lands (a fast case commits while the hook is still in flight), and
-  // refusing the write then would leave the ledger holding no handle for work that ran. COALESCE-free, last
-  // write wins: a second handle for one attempt means the backend re-created the external object, and the
-  // newer one is the live one.
+  // ── THE RESERVATION IS A CONDITIONAL TRANSITION (arch-review 55, Wave 1) ──────────────────────────
   //
-  // `RETURNING` is the whole point (arch-review 54, Phase 1). This was an UPDATE whose result nobody looked
-  // at, so updating an attempt id that names NO ROW was indistinguishable from updating one that does — and
-  // its caller, the reservation hook the backend awaits before creating a cluster object, read that silence
-  // as success. Zero rows means this dispatch has no durable identity, which is the one answer that must stop
-  // it. The returned row is the proof the backend is handed.
+  // It was `WHERE attempt_id = $1` — which proves the row EXISTS and asks nothing about whether this caller
+  // may still act. So it authorized a superseded attempt, a driver a takeover had displaced, and a batch the
+  // user had cancelled a second earlier: each can no longer commit an outcome, and each could still bring new
+  // compute into existence that the cancellation racing it would never see.
+  //
+  // One statement asserts all of it, because a check followed by a write is the window itself:
+  //   • `state = 'created'` — an attempt whose story is over places nothing;
+  //   • `runtime_work IS NULL` — one attempt authorizes ONE piece of work (the same-id retry is handled
+  //     above the statement, so a caller repeating itself is idempotent rather than refused);
+  //   • the parent is still OPEN and still at the epoch this attempt was opened under — a correlated EXISTS
+  //     over the scorecard (batch children) or the run (standalone), matched on `driver_epoch`.
+  //
+  // A `driver_epoch` of NULL means the lane never claimed one (the single-process CLI); those rows keep the
+  // liveness half and skip the epoch comparison, which is what "we cannot check what nobody recorded" means
+  // here — never a licence.
+  //
+  // `RETURNING` is still the proof the backend is handed (arch-review 54, Phase 1): zero rows means this
+  // dispatch has no durable identity OR no remaining authority, and both must stop it.
   async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
-    const { rows } = await this.client.query<{ runtime_work: unknown; updated_at: string }>(
-      "UPDATE everdict_execution_attempts SET runtime_work = $2::jsonb, updated_at = now() WHERE attempt_id = $1 RETURNING runtime_work, updated_at",
-      [attemptId, JSON.stringify(work)],
+    // The idempotent re-reservation, asked first: a retry that re-offers the SAME external id is repeating
+    // itself, and the guarded UPDATE below would refuse it for `runtime_work IS NULL`.
+    const { rows: existing } = await this.client.query<{ runtime_work: unknown; updated_at: string }>(
+      "SELECT runtime_work, updated_at FROM everdict_execution_attempts WHERE attempt_id = $1",
+      [attemptId],
     );
-    const row = rows[0];
-    if (!row)
+    const held = existing[0];
+    if (held === undefined)
       throw new NotFoundError(
         "NOT_FOUND",
         { attemptId },
         "cannot reserve runtime work against an attempt row that does not exist — the dispatch has no durable identity to place work under.",
+      );
+    if (held.runtime_work !== null && held.runtime_work !== undefined) {
+      const reserved = RuntimeWorkRefSchema.parse(held.runtime_work);
+      if (reserved.externalJobId === work.externalJobId)
+        return {
+          attemptId,
+          work: reserved,
+          persistedAt: typeof held.updated_at === "string" ? held.updated_at : new Date(held.updated_at).toISOString(),
+        };
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId, reserved: reserved.externalJobId, offered: work.externalJobId },
+        "this attempt has already authorized other work — overwriting the handle would leave the running job unaddressable.",
+      );
+    }
+    const { rows } = await this.client.query<{ runtime_work: unknown; updated_at: string }>(
+      `UPDATE everdict_execution_attempts a SET
+         runtime_work = $2::jsonb,
+         state = 'reserved',
+         updated_at = now()
+       WHERE a.attempt_id = $1
+         AND a.state = 'created'
+         AND a.runtime_work IS NULL
+         AND (
+           a.scorecard_id IS NOT NULL AND EXISTS (
+             SELECT 1 FROM everdict_scorecards s
+              WHERE s.id = a.scorecard_id
+                AND s.status NOT IN ('succeeded', 'failed')
+                AND (a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch)
+           )
+           OR a.scorecard_id IS NULL AND EXISTS (
+             SELECT 1 FROM everdict_runs r
+              WHERE 'evd-run-' || r.id = a.execution_id
+                AND r.status NOT IN ('succeeded', 'failed')
+                AND (a.driver_epoch IS NULL OR r.owner_epoch = a.driver_epoch)
+           )
+         )
+       RETURNING runtime_work, updated_at`,
+      [attemptId, JSON.stringify(work)],
+    );
+    const row = rows[0];
+    if (!row)
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId },
+        "this attempt may no longer authorize work — it has ended, already reserved, or belongs to an execution this driver no longer owns.",
       );
     // Read back from the write rather than echoing the argument: what the ledger holds is what a teardown
     // will address, and a caller told otherwise would stop something that was never recorded.

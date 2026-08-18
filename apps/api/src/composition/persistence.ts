@@ -17,6 +17,7 @@ import {
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
   InMemoryPublicationOperationStore,
+  NamingTrajectoryStore,
   soleLeader,
   soloReplicas,
 } from "@everdict/application-control";
@@ -330,6 +331,13 @@ function resolveSecretCipher(): SecretCipher {
 // DATABASE_URL → Postgres (migrations applied at startup), else in-memory.
 // The secret store is always active (on by default). The at-rest encryption KEK is EVERDICT_SECRETS_KEY (base64 32B); if unset, an ephemeral key is
 // auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
+// Every sealed trajectory is named at seal, whichever rung holds it (in-memory · Postgres · ClickHouse) —
+// the decorator derives the line that tells one row from its siblings from the body it was handed, so no
+// seal path has to remember to. Wrapped HERE, once, for the same reason RevisionedWorkspaceFs is.
+function named(store: TrajectoryStore): TrajectoryStore {
+  return new NamingTrajectoryStore(store);
+}
+
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   // The trajectory store's ops-scale rung (native-observability N-O1 rung 2): EVERDICT_CLICKHOUSE_URL swaps
@@ -406,7 +414,27 @@ export async function makePersistence(): Promise<Persistence> {
       scoringStageStore: new InMemoryScoringStageStore(),
       recordingStore: new InMemoryRecordingStore(),
       caseReceiptStore: inMemoryReceipts,
-      executionAttemptStore: new InMemoryExecutionAttemptStore(),
+      // …and the reservation's PARENT AUTHORITY (arch-review 55, Wave 1): a dispatch may authorize external
+      // work only while the batch or run it belongs to is still open and still owned at the epoch the attempt
+      // was opened under. The Pg twin asks the same question as a correlated EXISTS inside its one UPDATE;
+      // here the two stores are in the same process, so the reader closes over them.
+      executionAttemptStore: new InMemoryExecutionAttemptStore(undefined, {
+        async authorityOf(attempt) {
+          if (attempt.scorecardId !== undefined) {
+            const parent = await inMemoryScorecards.get(attempt.scorecardId);
+            if (!parent || parent.status === "succeeded" || parent.status === "failed") return undefined;
+            return { epoch: parent.ownerEpoch ?? 0 };
+          }
+          const runId = attempt.executionId.startsWith("evd-run-") ? attempt.executionId.slice("evd-run-".length) : "";
+          const run = runId === "" ? undefined : await inMemoryRuns.get(runId);
+          // An execution with no parent row this store can name — the CLI's own lane — keeps the state and
+          // already-reserved guards and skips the epoch one. "We cannot check what nobody recorded" is not a
+          // licence, and it is also not a reason to refuse a lane that has no parent to be displaced from.
+          if (runId === "" || !run) return { epoch: attempt.driverEpoch ?? 0 };
+          if (run.status === "succeeded" || run.status === "failed") return undefined;
+          return { epoch: run.ownerEpoch ?? 0 };
+        },
+      }),
       cancellationStore: inMemoryCancellations,
       publicationOperationStore: inMemoryPublications,
       scorecardStore: inMemoryScorecards,
@@ -434,7 +462,7 @@ export async function makePersistence(): Promise<Persistence> {
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
-      trajectoryStore: clickhouseTrajectories ?? new InMemoryTrajectoryStore(),
+      trajectoryStore: named(clickhouseTrajectories ?? new InMemoryTrajectoryStore()),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -506,7 +534,7 @@ export async function makePersistence(): Promise<Persistence> {
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
-    trajectoryStore: clickhouseTrajectories ?? new PgTrajectoryStore(client),
+    trajectoryStore: named(clickhouseTrajectories ?? new PgTrajectoryStore(client)),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

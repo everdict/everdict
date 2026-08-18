@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
   NotFoundError,
@@ -11,6 +12,12 @@ import {
 // What an attempt is opened WITH — everything the opener already knows about the execution it is about to
 // start. Nothing here is discovered later except `childRunId`, which the batch lanes learn a few lines after
 // the open (the child row is created under the coordinate this call mints), so it is patchable on transition.
+// WHO an attempt still belongs to, asked at reservation time (arch-review 55, Wave 1). `undefined` means the
+// parent is gone or terminal — a cancelled batch, a settled run — and nothing may be placed for it.
+export interface AttemptParentAuthority {
+  authorityOf(attempt: ExecutionAttemptRecord): Promise<{ epoch: number } | undefined>;
+}
+
 export interface OpenAttemptInput {
   executionId: string;
   tenant: string;
@@ -107,6 +114,25 @@ export interface ExecutionAttemptStore {
   // move with it: today a refused reservation costs a dispatch that has placed nothing, and buys the
   // guarantee that no external object exists whose name the ledger does not hold. Zero rows updated is the
   // case that matters — it means this attempt id names nothing — and it is a throw, not a silent success.
+  //
+  // ── AND IT IS A CONDITIONAL TRANSITION, NOT A METADATA UPDATE (arch-review 55, Wave 1) ─────────────
+  //
+  // `WHERE attempt_id = $1` proved the row EXISTS. It did not ask whether this caller may still act, so it
+  // authorized a superseded attempt, a driver a takeover had displaced, and a batch the user had cancelled a
+  // second earlier — each of which can no longer commit an outcome and could still bring new compute into
+  // existence. The cancellation racing it never converges, because what it was converging on was created
+  // after it looked.
+  //
+  // The write now asserts, in the one statement that flips `created → reserved`:
+  //   • the attempt is `created` — a superseded or terminal one places nothing;
+  //   • nothing is reserved yet — one attempt authorizes ONE piece of work, so the second dispatch onto it
+  //     is refused rather than silently overwriting the column that names live compute (a re-reservation of
+  //     the SAME external id is the caller repeating itself, and is idempotent);
+  //   • the parent this attempt belongs to is still open AND still owned at the epoch it was opened under.
+  //
+  // That last clause is why `parents` exists on the constructor: the Pg twin asks it as a correlated EXISTS
+  // inside the same UPDATE, and the in-memory twin asks the injected reader in the same synchronous block.
+  // Same question, each with the mechanism its store actually has.
   reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent>;
   // The attempt ran with no fence raised — the recording coordinate it minted could not be claimed. Its own
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
@@ -125,7 +151,13 @@ export interface ExecutionAttemptStore {
 export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
   private readonly attempts = new Map<string, ExecutionAttemptRecord>();
 
-  constructor(private readonly now: () => string = () => new Date().toISOString()) {}
+  constructor(
+    private readonly now: () => string = () => new Date().toISOString(),
+    // The parent ledger a reservation consults — see `reserveWork`. Optional: a store with no parents wired
+    // (unit fixtures, the single-run CLI) keeps the state + already-reserved guards and skips the epoch one,
+    // which is the honest degrade — those two need nothing outside this table.
+    private readonly parents?: AttemptParentAuthority,
+  ) {}
 
   async open(input: OpenAttemptInput): Promise<{ attemptId: string; generation: number }> {
     const prior = [...this.attempts.values()].filter((a) => a.executionId === input.executionId);
@@ -163,7 +195,9 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     const current = this.attempts.get(attemptId);
     if (!current) return false;
     if (isTerminalAttemptState(current.state)) return false; // first terminal wins
-    if (to === "executing" && current.state !== "created") return false;
+    // …from `created` OR `reserved` (arch-review 55, Wave 1): a managed dispatch authorizes its work first,
+    // so the row it starts executing from is the one the reservation transitioned.
+    if (to === "executing" && current.state !== "created" && current.state !== "reserved") return false;
     if (to === "created") return false; // an attempt is opened into "created"; nothing transitions back to it
     this.attempts.set(attemptId, {
       ...current,
@@ -187,8 +221,41 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
         { attemptId },
         "cannot reserve runtime work against an attempt row that does not exist — the dispatch has no durable identity to place work under.",
       );
+    // IDEMPOTENT for the same work: a caller re-reserving the exact external id is repeating itself, and
+    // failing it would fail a dispatch that is correct. Checked before the state guard, because the retry
+    // legitimately arrives when the row already says `reserved`.
+    if (current.runtimeWork !== undefined) {
+      if (current.runtimeWork.externalJobId === work.externalJobId)
+        return { attemptId, work: current.runtimeWork, persistedAt: current.updatedAt };
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId, reserved: current.runtimeWork.externalJobId, offered: work.externalJobId },
+        "this attempt has already authorized other work — overwriting the handle would leave the running job unaddressable.",
+      );
+    }
+    if (current.state !== "created")
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId, state: current.state },
+        `an attempt in state '${current.state}' may not authorize new work — its outcome is no longer its own to decide.`,
+      );
+    // …and the parent must still be open and still ours. Synchronous with the write below (one JS turn), so
+    // there is no window between the check and the effect — the property the Pg twin gets from its statement.
+    const parent = await this.parents?.authorityOf(current);
+    if (this.parents !== undefined && parent === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId },
+        "the execution this attempt belongs to is no longer open — work placed for it could never be torn down by the cancellation that already ran.",
+      );
+    if (parent !== undefined && current.driverEpoch !== undefined && parent.epoch !== current.driverEpoch)
+      throw new ConflictError(
+        "CONFLICT",
+        { attemptId, held: current.driverEpoch, current: parent.epoch },
+        "this driver has been displaced by a newer epoch — it may no longer place work it could not settle.",
+      );
     const persistedAt = this.now();
-    this.attempts.set(attemptId, { ...current, runtimeWork: work, updatedAt: persistedAt });
+    this.attempts.set(attemptId, { ...current, state: "reserved", runtimeWork: work, updatedAt: persistedAt });
     return { attemptId, work, persistedAt };
   }
 
