@@ -42,7 +42,18 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     };
     const scoring = new ScoringService({ judges, judgeRunner });
     const results = [result()];
-    await scoring.applyJudges("acme", DATASET, results, [{ id: "j", version: "latest" }], "nomad-seoul");
+    await scoring.applyJudges(
+      "acme",
+      DATASET,
+      results,
+      [{ id: "j", version: "latest" }],
+      "nomad-seoul",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     expect(results[0]?.scores.some((s) => s.metric === "judge")).toBe(true);
     expect(seenPlacement?.target).toBe("nomad-seoul"); // runtime co-locate injection
   });
@@ -69,7 +80,18 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     };
     const scoring = new ScoringService({ judges, judgeRunner });
     const results = [result()];
-    await scoring.applyJudges("acme", DATASET, results, [{ id: "j", version: "latest" }], "self:r-123", "user-alice");
+    await scoring.applyJudges(
+      "acme",
+      DATASET,
+      results,
+      [{ id: "j", version: "latest" }],
+      "self:r-123",
+      "user-alice",
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     expect(seenSubmittedBy).toBe("user-alice");
   });
 
@@ -103,6 +125,9 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
       undefined,
       undefined,
       (caseId, trial) => `run-${caseId}#${trial ?? 0}`,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
     );
     expect(seenRunIds.sort()).toEqual(["run-c1#0", "run-c1#1"]);
   });
@@ -130,7 +155,18 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
   it("with no registry/runner configured it is a no-op (same as selecting no scoring)", async () => {
     const scoring = new ScoringService({});
     const results = [result()];
-    await scoring.applyJudges("acme", DATASET, results, [{ id: "j", version: "latest" }]);
+    await scoring.applyJudges(
+      "acme",
+      DATASET,
+      results,
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     expect(results[0]?.scores).toHaveLength(1); // only the original grader score
     expect(await scoring.collectJudgeModels("acme", [], undefined)).toEqual([]);
   });
@@ -186,7 +222,18 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     const scoring = new ScoringService({ judges, judgeRunner, caseConcurrency: 2 });
     const results = [resultFor("c1"), resultFor("c2")];
 
-    await scoring.applyJudges("acme", datasetWith("c1", "c2"), results, [{ id: "j", version: "latest" }]);
+    await scoring.applyJudges(
+      "acme",
+      datasetWith("c1", "c2"),
+      results,
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
 
     expect(results[0]?.scores.some((s) => s.metric === "judge:j")).toBe(true);
     expect(results[1]?.scores.some((s) => s.metric === "judge:j")).toBe(true);
@@ -204,10 +251,21 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     const scoring = new ScoringService({ judges, judgeRunner });
     const results = [resultFor("c1")];
 
-    await scoring.applyJudges("acme", datasetWith("c1"), results, [
-      { id: "j1", version: "latest" },
-      { id: "j2", version: "latest" },
-    ]);
+    await scoring.applyJudges(
+      "acme",
+      datasetWith("c1"),
+      results,
+      [
+        { id: "j1", version: "latest" },
+        { id: "j2", version: "latest" },
+      ],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
 
     const judgeMetrics = results[0]?.scores.filter((s) => s.metric.startsWith("judge:")).map((s) => s.metric);
     expect(judgeMetrics).toEqual(["judge:j1", "judge:j2"]);
@@ -225,7 +283,17 @@ describe("ScoringService — case streaming / parallel judge application", () =>
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
-    const stream = await scoring.createJudgeStream("acme", datasetWith("c1", "boom"), [{ id: "j", version: "latest" }]);
+    const stream = await scoring.createJudgeStream(
+      "acme",
+      datasetWith("c1", "boom"),
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
 
     stream.push(resultFor("unknown")); // not in the dataset — not fired
     stream.push(resultFor("c1"));
@@ -238,7 +306,17 @@ describe("ScoringService — case streaming / parallel judge application", () =>
 
   it("with no judge selected, a no-op stream (push ignored · settle completes immediately)", async () => {
     const scoring = new ScoringService({});
-    const stream = await scoring.createJudgeStream("acme", datasetWith("c1"), []);
+    const stream = await scoring.createJudgeStream(
+      "acme",
+      datasetWith("c1"),
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     stream.push(resultFor("c1"));
     await stream.settle(); // completes immediately without throwing
   });
@@ -267,7 +345,17 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     const scoring = new ScoringService({ judges, judgeRunner });
     const ok = resultFor("c1");
     const failed = failedResultFor("c2");
-    const stream = await scoring.createJudgeStream("acme", datasetWith("c1", "c2"), [{ id: "j", version: "latest" }]);
+    const stream = await scoring.createJudgeStream(
+      "acme",
+      datasetWith("c1", "c2"),
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     await stream.push(ok);
     await stream.push(failed);
     await stream.settle();
@@ -286,7 +374,17 @@ describe("ScoringService — case streaming / parallel judge application", () =>
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
-    const stream = await scoring.createJudgeStream("acme", datasetWith("c1"), [{ id: "j", version: "latest" }]);
+    const stream = await scoring.createJudgeStream(
+      "acme",
+      datasetWith("c1"),
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
     await stream.push(failedResultFor("c1"));
     await stream.settle(); // must not throw — the judge never ran
     expect(stream.stats()).toEqual({ pushed: 1, gradeable: 0, skipped: 1 });
