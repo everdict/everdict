@@ -50,7 +50,18 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
 
     const res = await recoverInterrupted({ scorecards, runs, now: () => "2026-07-04T00:00:00.000Z" });
 
-    expect(res).toEqual({ scorecards: 2, resumed: 0, runs: 2, runsResumed: 0, sessions: 0, live: 0, deferred: 0 });
+    // `owed` names WHICH records were deferred (arch-review 56, Wave C) — empty here, because this sweep
+    // decided about all of them.
+    expect(res).toEqual({
+      scorecards: 2,
+      resumed: 0,
+      runs: 2,
+      runsResumed: 0,
+      sessions: 0,
+      live: 0,
+      deferred: 0,
+      owed: [],
+    });
     expect((await scorecards.get("zombie-running"))?.status).toBe("failed");
     expect((await scorecards.get("zombie-running"))?.error?.code).toBe("INTERRUPTED");
     expect((await scorecards.get("zombie-queued"))?.status).toBe("failed");
@@ -73,6 +84,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       sessions: 0,
       live: 0,
       deferred: 0,
+      owed: [],
     });
   });
 
@@ -91,7 +103,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 1, resumed: 1, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 0 });
+    expect(res).toEqual({
+      scorecards: 1,
+      resumed: 1,
+      runs: 0,
+      runsResumed: 0,
+      sessions: 0,
+      live: 0,
+      deferred: 0,
+      owed: [],
+    });
     expect(resumedIds).toEqual(["resumable", "legacy"]);
     // The resumed batch is left alone (its own track loop drives the status); the legacy one is tombstoned.
     expect((await scorecards.get("resumable"))?.status).toBe("running");
@@ -114,7 +135,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 1, sessions: 0, live: 0, deferred: 0 });
+    expect(res).toEqual({
+      scorecards: 0,
+      resumed: 0,
+      runs: 1,
+      runsResumed: 1,
+      sessions: 0,
+      live: 0,
+      deferred: 0,
+      owed: [],
+    });
     expect(attempted).toEqual(["solo-durable", "solo-legacy"]);
     // The resumed run is left alone (RunService.resume drives its status); the legacy one is tombstoned.
     expect((await runs.get("solo-durable"))?.status).toBe("running");
@@ -144,7 +174,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
     });
     // Recovery returned promptly (before the 200ms background work) — startup is not blocked.
     expect(backgroundSettled).toBe(false);
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 1, sessions: 0, live: 0, deferred: 0 });
+    expect(res).toEqual({
+      scorecards: 0,
+      resumed: 0,
+      runs: 0,
+      runsResumed: 1,
+      sessions: 0,
+      live: 0,
+      deferred: 0,
+      owed: [],
+    });
     expect((await runs.get("solo-running"))?.status).toBe("running"); // claimed, not tombstoned
   });
 
@@ -163,7 +202,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
         throw new Error("runtime registry gone");
       },
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 1 });
+    expect(res).toEqual({
+      scorecards: 0,
+      resumed: 0,
+      runs: 0,
+      runsResumed: 0,
+      sessions: 0,
+      live: 0,
+      deferred: 1,
+      owed: [{ kind: "run", id: "solo-explodes" }],
+    });
     // Left exactly as it was, for the next sweep to ask again.
     expect((await runs.get("solo-explodes"))?.status).toBe("running");
   });
@@ -192,7 +240,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       },
       now: () => "2026-07-04T00:00:00.000Z",
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 1, runsResumed: 0, sessions: 1, live: 0, deferred: 0 });
+    expect(res).toEqual({
+      scorecards: 0,
+      resumed: 0,
+      runs: 1,
+      runsResumed: 0,
+      sessions: 1,
+      live: 0,
+      deferred: 0,
+      owed: [],
+    });
     expect(attempted).toEqual(["solo-stuck"]); // the session run was never offered for resume
     expect((await runs.get("session-orphan"))?.status).toBe("running"); // its reaper/orphan sweep settles it
     expect((await runs.get("solo-stuck"))?.status).toBe("failed");
@@ -209,7 +266,16 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
         throw new Error("dataset gone");
       },
     });
-    expect(res).toEqual({ scorecards: 0, resumed: 0, runs: 0, runsResumed: 0, sessions: 0, live: 0, deferred: 1 });
+    expect(res).toEqual({
+      scorecards: 0,
+      resumed: 0,
+      runs: 0,
+      runsResumed: 0,
+      sessions: 0,
+      live: 0,
+      deferred: 1,
+      owed: [{ kind: "scorecard", id: "explodes" }],
+    });
     expect((await scorecards.get("explodes"))?.status).toBe("running");
   });
   // ── Multi-replica (docs/architecture/multi-replica.md) ────────────────────────────────────────────────
