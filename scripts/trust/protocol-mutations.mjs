@@ -283,6 +283,15 @@ const MUTATIONS = [
     build: "@everdict/application-control",
   },
   {
+    // R56 Wave H's rung: the split stops recognising private material, so a Harbor case would ship its hidden
+    // tests to the agent again — with the difference that now nothing refuses it either.
+    name: "R56 Wave H — the verifier split stops separating anything",
+    file: "packages/domain/src/execution/verifier-plan.ts",
+    from: "  const priv = graders.filter(decides);",
+    to: "  const priv = [];",
+    suite: ["--root", "packages/domain", "src/execution/verifier-plan.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

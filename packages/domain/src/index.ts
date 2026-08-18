@@ -723,3 +723,4 @@ export {
   eventSelectorMatches,
   type SelectorEvent,
 } from "./subscription/selector-match.js";
+export { type VerifierPlan, verifierPlanOf } from "./execution/verifier-plan.js";
