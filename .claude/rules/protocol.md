@@ -116,6 +116,28 @@ child rows" is not "the container exited".
 - **Cancellation is also a REVOCATION** (see L1): after it, the subject may no longer authorize new external
   work. A stop that races a dispatch and loses is a teardown that will never converge.
 
+## A COMMENT THAT PROMISES ANOTHER COMPONENT'S BEHAVIOUR IS A CLAIM, AND THE CLAIM NEEDS THE TEST
+Three reviews in a row have found the same thing: a guard was written correctly, and the sentence justifying
+it described what some OTHER function would do next — and that function did not do it.
+
+- *"the caller already treats a throw here as 'not faithfully resumable' and leaves the batch for the next
+  sweep"* — the caller caught everything into `false` and the sweep wrote a tombstone.
+- *"the operation stays owed so a later sweep can decide with a readable ledger"* — the caller skipped the
+  effect with no failure recorded and certified the operation published.
+- *"the next sweep asks again"* — boot recovery ran once; the periodic reconcilers beside it were somebody
+  else's.
+- *"an ingest judges the pushed plane ONCE, so the pass id alone is the invocation"* — the judging site passed
+  no pass id at all, so the evidence sealed under a different name than the receipt.
+
+The shape is always the same: **the half that was implemented is the refusal, and the half that was written
+down is the recovery.** A refusal is local and easy to verify; what the refusal BECOMES is three frames away
+and nobody looks.
+
+So, when a comment contains a promise about another component — "the caller handles", "the sweep retries",
+"stays owed", "is retried later", "the next pass" — that clause is the part of the change that needs a
+counterexample. Grep for the promised component before writing the sentence; if it does not exist, the change
+is not done, and if it does exist, the test drives it rather than the guard.
+
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
 2. `pnpm protocol-mutations` neutralizes the new protocol in the production file and the owning suite goes RED.

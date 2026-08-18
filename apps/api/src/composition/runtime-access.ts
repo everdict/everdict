@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  type RecoveryTarget,
   type ReplicaRegistry,
   type ResumeResult,
   recoverInterrupted,
+  retryDeferredRecovery,
   tombstoneInterrupted,
 } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
@@ -414,7 +416,7 @@ export async function runStartupRecovery(deps: {
   // documented blast radius, which is what the pre-handle rows have anyway.
   adoptWorkFn?: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
   workHandlesFor?: (executionId: string) => Promise<RuntimeWorkRef[]>;
-}): Promise<void> {
+}): Promise<RecoveryTarget[]> {
   const { scorecardStore, store, scorecardService, service, adoptWorkFn, workHandlesFor, owner, replicas } = deps;
   const recovered = await recoverInterrupted({
     scorecards: scorecardStore,
@@ -503,4 +505,34 @@ export async function runStartupRecovery(deps: {
   // needs when a replica boots into a running fleet.
   if (recovered.live > 0)
     console.error(`▶ boot recovery: left ${recovered.live} record(s) alone — another live replica is driving them`);
+  // …AND WHAT IT STILL OWES (arch-review 56, Wave C). A deferred record is claimed by THIS replica, open, and
+  // fenced at a raised epoch — which every other replica correctly reads as "somebody is driving this". The
+  // caller registers `sweepDeferredRecovery` over this list; without it the record has an owner, a fence and
+  // no driver until the process restarts, which is what the deferral's own comment assumed somebody was
+  // already doing.
+  if (recovered.owed.length > 0)
+    console.error(
+      `▶ boot recovery: ${recovered.owed.length} record(s) deferred — retried by this replica until they decide`,
+    );
+  return recovered.owed;
+}
+
+// The retry the deferral always assumed, wired to the same services boot recovery used. Returns what is STILL
+// owed, so the caller feeds its own answer back in and a persistent outage keeps the debt visible instead of
+// resolving it. Never `runStartupRecovery` on a timer — see `retryDeferredRecovery`.
+export async function sweepDeferredRecovery(
+  deps: Parameters<typeof runStartupRecovery>[0],
+  owed: readonly RecoveryTarget[],
+): Promise<RecoveryTarget[]> {
+  if (owed.length === 0) return [];
+  return await retryDeferredRecovery(
+    {
+      scorecards: deps.scorecardStore,
+      runs: deps.store,
+      owner: deps.owner,
+      resume: (id, authority) => deps.scorecardService.resume(id, authority),
+      resumeRun: (r, authority) => deps.service.resume(r, undefined, authority),
+    },
+    owed,
+  );
 }

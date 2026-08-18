@@ -75,6 +75,12 @@ export interface RecoveryDeps {
   newId?: () => string;
 }
 
+// WHAT A DEFERRED RECOVERY STILL OWES (arch-review 56, Wave C). A target, not a count — see `owed` above.
+export interface RecoveryTarget {
+  kind: "scorecard" | "run";
+  id: string;
+}
+
 export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   scorecards: number;
   resumed: number;
@@ -85,10 +91,26 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   // that scales and one that eats its own work at every boot.
   live: number;
   // Records THIS sweep claimed and could not decide about — an unreadable ledger, a cluster that would not
-  // answer. Left open and untouched for the next sweep. Distinct from `live` (somebody else owns it) and from
+  // answer. Left open and untouched. Distinct from `live` (somebody else owns it) and from
   // `scorecards`/`runs` (we wrote a terminal row): those two were the only answers the boolean boundary had,
   // and this one is what it was missing (arch-review 55).
   deferred: number;
+  // …AND WHICH ONES (arch-review 56, Wave C). The count said "we deferred 3" and nothing said which three, so
+  // the comment beside the deferral — "the next sweep asks again" — described a component that did not exist:
+  // boot recovery runs ONCE, and the periodic reconcilers beside it are the cancellation and publication ones.
+  //
+  // What the deferral leaves behind is not a stale row. The claim ran first, so the record is open, owned by a
+  // LIVE replica and fenced at a raised epoch — which every other replica's recovery correctly reads as
+  // "somebody is driving this" and steps around. An owner, a fence, and no driver.
+  //
+  // So the debt owns its worklist (L5). These are the targets this replica still owes an answer for, retried
+  // by `retryDeferredRecovery` — and only these: re-running the whole sweep on a timer would re-claim and
+  // re-resume every ACTIVE record this replica is currently DRIVING, which is re-dispatching live work.
+  //
+  // Durable across a crash without a new store: a process that dies stops heartbeating, and the next
+  // replica's boot recovery finds the record with a dead owner and reclaims it. The worklist is what closes
+  // the gap while the owner is still alive, which is the case nothing covered.
+  owed: RecoveryTarget[];
 }> {
   const now = deps.now ?? (() => new Date().toISOString());
   // The clock + fact identity the tombstones write under (see `tombstoneInterrupted`).
@@ -101,6 +123,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   // exactly as they are and reported separately, because "we deferred 3" and "we failed 3" are opposite
   // operational facts and the boolean boundary could only say the second (arch-review 55).
   let deferredCount = 0;
+  const owed: RecoveryTarget[] = [];
 
   // A store hiccup here must not turn into "reclaim everything" — an unreadable heartbeat set means we cannot
   // prove anybody is dead, so with a registry wired we treat every OWNED record as still driven (fail-closed:
@@ -167,9 +190,12 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       continue;
     }
     if (disposition.kind === "retry_later") {
-      // LEFT AS IT IS, deliberately: claimed by this replica, still open, and NOT counted as recovered. The
-      // next sweep asks again. Writing anything terminal here is the defect this case exists to prevent.
+      // LEFT AS IT IS, deliberately: claimed by this replica, still open, and NOT counted as recovered.
+      // Writing anything terminal here is the defect this case exists to prevent — and the record is now on
+      // THIS replica's worklist, because it is the only process the record's own ownership permits to act
+      // (arch-review 56, Wave C: the previous version said "the next sweep asks again" and there was none).
       deferredCount += 1;
+      owed.push({ kind: "scorecard", id: c.id });
       console.warn(`▶ boot recovery: batch ${c.id} left for a later sweep — ${disposition.reason}`);
       continue;
     }
@@ -265,6 +291,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       }
       if (runDisposition.kind === "retry_later") {
         deferredCount += 1;
+        owed.push({ kind: "run", id: r.id });
         console.warn(`▶ boot recovery: run ${r.id} left for a later sweep — ${runDisposition.reason}`);
         continue;
       }
@@ -282,5 +309,61 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
     sessions: sessionCount,
     live: liveCount,
     deferred: deferredCount,
+    owed,
   };
+}
+
+// ── THE SWEEP THE DEFERRAL ALWAYS ASSUMED (arch-review 56, Wave C) ──────────────────────────────────
+//
+// Re-attempt exactly the targets a previous pass could not decide about, and answer with the ones that STILL
+// cannot be decided. The caller registers it on a timer and feeds its own answer back in, so a transient
+// ledger outage converges without a process restart and a persistent one keeps the debt visible instead of
+// resolving it.
+//
+// Deliberately NOT `recoverInterrupted` on a timer. That function claims and resumes every ACTIVE record
+// whose owner is not another live replica — which, after boot, is every batch this replica is currently
+// DRIVING. Running it periodically would re-dispatch live work, which is why the retry is a worklist rather
+// than a schedule.
+//
+// It never writes a terminal row. A target that defers again is returned, not decided about: the tombstone
+// this union exists to prevent is exactly as wrong on the tenth attempt as on the first.
+export async function retryDeferredRecovery(
+  deps: Pick<RecoveryDeps, "scorecards" | "runs" | "resume" | "resumeRun" | "owner" | "now">,
+  owed: readonly RecoveryTarget[],
+): Promise<RecoveryTarget[]> {
+  const stillOwed: RecoveryTarget[] = [];
+  for (const target of owed) {
+    if (target.kind === "scorecard") {
+      const record = await deps.scorecards.get?.(target.id);
+      // Gone or settled by whoever finished it — the debt is discharged, and re-resuming would be the
+      // takeover this whole file is written to avoid.
+      if (!record || !ACTIVE.has(record.status)) continue;
+      // The record is still ours by construction: this worklist only holds targets this replica claimed, and
+      // a takeover raises the epoch so the resume below is refused rather than racing.
+      const authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: record.ownerEpoch ?? 0 };
+      const disposition = deps.resume
+        ? await deps.resume(target.id, authority).catch(
+            (err: unknown): ResumeResult => ({
+              kind: "retry_later",
+              reason: err instanceof Error ? err.message : String(err),
+            }),
+          )
+        : ({ kind: "retry_later", reason: "no resume wired" } as ResumeResult);
+      if (disposition.kind === "retry_later") stillOwed.push(target);
+      continue;
+    }
+    const run = await deps.runs?.get?.(target.id);
+    if (!run || !ACTIVE.has(run.status)) continue;
+    const authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: run.ownerEpoch ?? 0 };
+    const disposition = deps.resumeRun
+      ? await deps.resumeRun(run, authority).catch(
+          (err: unknown): ResumeResult => ({
+            kind: "retry_later",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        )
+      : ({ kind: "retry_later", reason: "no resume wired" } as ResumeResult);
+    if (disposition.kind === "retry_later") stillOwed.push(target);
+  }
+  return stillOwed;
 }

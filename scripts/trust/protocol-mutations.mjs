@@ -217,6 +217,23 @@ const MUTATIONS = [
     ],
   },
   {
+    // R56 Wave C's rung: the deferral goes back to a counter, so nothing names what the sweep still owes and
+    // the record sits claimed by a live replica with no driver.
+    name: "R56 Wave C — a deferred recovery names no worklist",
+    file: "packages/application-control/src/ops/startup-recovery.ts",
+    from: '      owed.push({ kind: "scorecard", id: c.id });',
+    to: "",
+    suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
+  },
+  {
+    // …and the retry half: dropping a target that deferred AGAIN is the current defect with more steps.
+    name: "R56 Wave C — a still-undecidable target is dropped from the worklist",
+    file: "packages/application-control/src/ops/startup-recovery.ts",
+    from: '      if (disposition.kind === "retry_later") stillOwed.push(target);\n      continue;',
+    to: "      continue;",
+    suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

@@ -88,7 +88,7 @@ import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
 import { REPLICA_ID } from "./composition/replica.js";
 import { buildRun } from "./composition/run.js";
-import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
+import { buildRuntimeAccess, runStartupRecovery, sweepDeferredRecovery } from "./composition/runtime-access.js";
 import { buildRuntimeCompute } from "./composition/runtime-compute.js";
 import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
@@ -827,7 +827,9 @@ async function main(): Promise<void> {
   });
   cascadeCancel.fn = (tenant, runId) => scorecardService.cancelCausedBy(tenant, runId);
 
-  await runStartupRecovery({
+  // The deps are named so the deferred-retry sweep below drives the SAME services with the same authority —
+  // a second bag would be a second protocol, and the two would drift (arch-review 56, Wave C).
+  const recoveryDeps = {
     scorecardStore,
     store,
     scorecardService,
@@ -840,7 +842,24 @@ async function main(): Promise<void> {
       (await executionAttemptStore.list(executionId)).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])),
     owner: REPLICA_ID,
     replicas,
-  });
+  };
+  let owedRecovery = await runStartupRecovery(recoveryDeps);
+  // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────
+  //
+  // A record boot recovery could not decide about is left OPEN and claimed by this replica at a raised epoch,
+  // which every other replica correctly reads as "somebody is driving this". Until this sweep existed, that
+  // was true of the row and false of the world: an owner, a fence, and no driver, until the process
+  // restarted. The comment beside the deferral said "the next sweep asks again" and there was none.
+  //
+  // Only the WORKLIST is retried, never the whole boot pass: that one claims and resumes every active record
+  // whose owner is not another live replica, which after boot includes every batch this replica is driving.
+  // Not leader-gated either — the debt belongs to the replica that claimed the record, and no other process
+  // is permitted to act on it.
+  setInterval(() => {
+    void (async () => {
+      owedRecovery = await sweepDeferredRecovery(recoveryDeps, owedRecovery).catch(() => owedRecovery);
+    })();
+  }, 60_000).unref();
   // The cancel teardown's reconciler (mig 0184, arch-review 47 §5.2). Boot recovery above resumes batches
   // whose DRIVER died; this closes the other half — batches whose cancellation was decided and whose teardown
   // never finished. Registered here rather than inside runStartupRecovery because it is not a one-shot boot
