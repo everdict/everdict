@@ -106,6 +106,25 @@ const MUTATIONS = [
     build: "@everdict/application-control",
   },
   {
+    // Wave 4's rung: the finalize stops joining its receipts to the ledger row the settle conditions on, and
+    // every receipt on the Temporal lane names an evidence plane that was never sealed.
+    name: "Wave 4 — the judgment receipt drops its invocation ordinal",
+    file: "packages/application-control/src/scorecard/workflow-batch-driver.ts",
+    from: "      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id), (r) =>\n        judgeClaimOfAttempt(receiptByKey.get(childKey(r.caseId, r.trial))?.attemptId),\n      ),",
+    to: "      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id)),",
+    suite: ["--root", "packages/application-control", "src/scorecard/judgment-receipt-join.counterexample.test.ts"],
+  },
+  {
+    // …and the other direction: an attempt with no recording generation has no ordinal to state, so a claim
+    // fabricated here names a plane just as wrongly as omitting a real one.
+    name: "Wave 4 — an absent attempt is given a fabricated ordinal",
+    file: "packages/domain/src/scorecard/judge-execution-spans.ts",
+    from: "  return generation === undefined ? undefined : { generation, attempt: 1 };",
+    to: "  return { generation: generation ?? 0, attempt: 1 };",
+    suite: ["--root", "packages/application-control", "src/scorecard/judgment-receipt-join.counterexample.test.ts"],
+    build: "@everdict/domain",
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",

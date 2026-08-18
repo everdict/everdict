@@ -263,6 +263,22 @@ seals as `judge:<id>#initial:<sc>.<gen>.1`. Its finalizer then rebuilds receipts
 Phase 3's coverage check cannot see it: it counts (case, judge) units and never asks whether an emitter
 RESOLVES. A receipt exists to be joined; a count is not a join.
 
+**CLOSED (Wave 4).** The finalizer's own comment stated the reasoning that made this a protocol defect rather
+than an oversight — *"the per-case claims are not reachable from here (the activity that judged has returned)"*
+— and they were one map lookup away: it already holds `receiptByKey`, and a commit receipt names the physical
+attempt it vouches for (`attemptId`) precisely so a later reader can answer this. The derivation moved to a
+single owner beside the emitter that consumes it (`judgeClaimOfAttempt`, `@everdict/domain`), called by BOTH
+the judging site and the finalize, and `claimFor` became a REQUIRED parameter — the two lanes that genuinely
+have no ordinal now answer `() => undefined` instead of omitting it.
+
+Two lessons, both generalizable:
+- **A comment explaining why a coordinate is unavailable is a claim to verify, not a constraint to design
+  around.** This one was written by the same change that introduced the receipts, and it was wrong about its
+  own function's locals.
+- **An optional parameter carrying identity is a parameter that gets forgotten** — the same shape
+  `inputObservation` was made mandatory for one review earlier, for the same reason, in the same builder.
+  When a value must cross a lane boundary, make the compiler ask.
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added

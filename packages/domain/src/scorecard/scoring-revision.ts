@@ -374,10 +374,18 @@ export function scoringPinInputDiverged(pin: GateScoringPin | undefined): number
 // `undefined` where it does not (the in-process loop judges once per pass). Never defaulted to (0, 1) —
 // `judgeEvidenceEmitter` names a claimless invocation differently, and inventing an ordinal would make the
 // receipt disagree with the emitter it carries.
+//
+// REQUIRED, and required for the reason `inputObservation` above it is (arch-review 55, Wave 4). It shipped
+// optional, and the one lane that HAS ordinals then omitted it — writing a whole batch's receipts against a
+// plane nothing had sealed, with a comment explaining that the claims were unreachable. They were one map
+// lookup away. An optional parameter on a builder this wide is a parameter that gets forgotten, and the
+// forgetting is silent: the receipts are well-formed, the coverage count agrees, and only a join nobody runs
+// would notice. Mandatory means the compiler asks every lane the question, and a lane with no ordinal to
+// state answers `() => undefined` — which is a statement, where omission was an accident.
 export function judgmentReceiptsFromPlane(
   results: readonly CaseResult[],
   passId: string,
-  claimFor?: (result: CaseResult) => JudgmentClaim | undefined,
+  claimFor: (result: CaseResult) => JudgmentClaim | undefined,
 ): JudgmentReceipt[] {
   const receipts: JudgmentReceipt[] = [];
   for (const result of results) {

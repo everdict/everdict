@@ -433,7 +433,10 @@ export class ScorecardIngestService {
       // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D) — derived from the plane this
       // ingest adopted, under its own pass id. Ingest judges once, in this process, with no retry seam, so
       // the receipts carry no claim.
-      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id)),
+      // No ordinal to state: an ingest judges the pushed plane ONCE, in this process, so the pass id alone
+      // is the invocation (see the emitter's grammar). Answered explicitly rather than omitted — arch-review
+      // 55, Wave 4.
+      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id), () => undefined),
       inputObservation: inputObservationOf(results, {
         kind: "unavailable",
         reason:

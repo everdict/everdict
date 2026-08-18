@@ -58,7 +58,7 @@ const initialPass = () =>
     kind: "initial",
     judges: [{ id: "a", version: "1" }],
     results,
-    judgments: judgmentReceiptsFromPlane(results, initialScoringPassId("sc-1")),
+    judgments: judgmentReceiptsFromPlane(results, initialScoringPassId("sc-1"), () => undefined),
     inputObservation: { completed: true, cases: results.length, diverged: 0, vouched: results.length },
     createdAt: "2026-08-17T00:00:00.000Z",
   } as never);

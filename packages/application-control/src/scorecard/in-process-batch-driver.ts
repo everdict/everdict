@@ -1128,7 +1128,9 @@ export class InProcessBatchDriver {
             // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D) — derived from the plane
             // this settle adopted, under the same pass id the judging ran with. An initial pass has no
             // stage to mint from; the adopted rows ARE what it certifies.
-            judgments: judgmentReceiptsFromPlane(scorecard.results, initialScoringPassId(id)),
+            // No ordinal to state: this lane judges the whole plane in one `applyJudges` call and has no
+            // per-case retry seam, so the pass id IS the invocation. Answered, not omitted (arch-review 55).
+            judgments: judgmentReceiptsFromPlane(scorecard.results, initialScoringPassId(id), () => undefined),
             inputObservation: inputObservationOf(
               scorecard.results,
               accounted.receipts

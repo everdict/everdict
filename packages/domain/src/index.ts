@@ -128,6 +128,7 @@ export { caseObservationDigest, caseResultDigest } from "./scorecard/case-result
 export {
   executionEvidenceTrace,
   type JudgeEvidenceScope,
+  judgeClaimOfAttempt,
   judgeEvidenceEmitter,
   judgeFamilyOf,
   judgeExecutionSpans,

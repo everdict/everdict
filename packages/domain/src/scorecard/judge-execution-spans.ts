@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@everdict/contracts";
+import { type TraceEvent, generationOfAttempt } from "@everdict/contracts";
 
 // ── THE JUDGE'S EXECUTION, IN THE VOCABULARY THE MEASUREMENT PLANE CANNOT MISREAD (report 1.1) ───────
 //
@@ -71,6 +71,28 @@ export function judgeFamilyOf(metric: string): string | undefined {
   const colon = rest.indexOf(":");
   const id = colon === -1 ? rest : rest.slice(0, colon);
   return id === "" ? undefined : id;
+}
+
+// ── THE CLAIM HAS ONE OWNER (arch-review 55, Wave 4) ────────────────────────────────────────────────
+//
+// The ordinal an invocation seals under is derived from the physical attempt it ran as, and it is asked for
+// in two places: by the JUDGING site (which has the live attempt id) and by the FINALIZE (which has the
+// commit receipt naming that same attempt). Written twice, the two answers were different — the finalize
+// wrote no ordinal at all, so its receipts pointed at a plane nothing had sealed. So the derivation lives
+// beside the emitter that consumes it: one function, both callers, and a `#g`-grammar change can only ever
+// move both together (L3 — "a predicate written twice has already diverged").
+//
+// `undefined` is a STATEMENT, not a failure: an unisolated attempt has a ledger row and no recording
+// generation, so this lane has no ordinal to state and the emitter says so by omitting the suffix. Defaulting
+// to `.0.1` would name a different plane just as wrongly, in the other direction.
+export function judgeClaimOfAttempt(
+  attemptId: string | undefined,
+): { generation: number; attempt: number } | undefined {
+  const generation = generationOfAttempt(attemptId);
+  // `attempt` is the driver's own retry index within the generation, and every lane that has an ordinal opens
+  // a NEW ledger row per physical re-run — so the generation moves and this stays 1. A lane that ever retries
+  // a judgment within one attempt row would pass its index here instead of calling this.
+  return generation === undefined ? undefined : { generation, attempt: 1 };
 }
 
 export function judgeEvidenceEmitter(judgeId: string, scope?: JudgeEvidenceScope): string {

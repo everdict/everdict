@@ -17,7 +17,7 @@ import {
   caseKeyOf,
   encodeCaseKey,
 } from "@everdict/contracts";
-import { generationOfAttempt } from "@everdict/contracts";
+import type { JudgmentClaim } from "@everdict/contracts";
 import {
   type CircuitBreaker,
   type HarnessSecretMaps,
@@ -39,6 +39,7 @@ import {
   childKey,
   initialScoringPassId,
   inputObservationOf,
+  judgeClaimOfAttempt,
   judgmentReceiptsFromPlane,
   selectSubsetCases,
   verdictSummaryOf,
@@ -630,11 +631,11 @@ export class WorkflowBatchDriver {
       // attempt has a ledger row and NO recording generation, and inventing one here is exactly the
       // fabrication `identity-sentinel-guard` refuses — the receipt says "no ordinal" by carrying no claim,
       // which is also what `judgeEvidenceEmitter` names differently.
-      const judgeClaimOf = (
-        attemptId: string | undefined,
-      ): { claim: { generation: number; attempt: number } } | undefined => {
-        const generation = generationOfAttempt(attemptId);
-        return generation === undefined ? undefined : { claim: { generation, attempt: 1 } };
+      // …DERIVED BY THE EMITTER'S OWN OWNER (arch-review 55, Wave 4): the finalize has to answer this same
+      // question from the commit receipt, and while the derivation lived here it simply did not answer it.
+      const judgeClaimOf = (attemptId: string | undefined): { claim: JudgmentClaim } | undefined => {
+        const claim = judgeClaimOfAttempt(attemptId);
+        return claim === undefined ? undefined : { claim };
       };
       if (ctx.judges.length > 0) {
         await this.scoring
@@ -880,11 +881,16 @@ export class WorkflowBatchDriver {
       // WHAT THE JUDGES READ (arch-review 46), against the receipts this finalize already holds — the same
       // `committed` list the divergence check above ran on, so the revision states the input the settle
       // conditioned on rather than a second read of a ledger that can move between them.
-      // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D). The per-case claims are not
-      // reachable from here (the activity that judged has returned), so the vector is derived from the plane
-      // under this batch's pass id — the coordinate a reader needs to find the evidence, with the ordinal
-      // left to the emitter the seal itself minted.
-      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id)),
+      // WHICH INVOCATION AUTHORED EACH JUDGMENT (arch-review 53, Wave D · corrected arch-review 55, Wave 4).
+      // The claim is NOT unreachable from here — that was the reasoning, and it wrote receipts naming
+      // `judge:<id>#<pass>` while every seal on this lane carries the attempt's ordinal. A commit receipt
+      // names the physical attempt it vouches for precisely so a later reader can answer this, so the vector
+      // is joined to the SAME ledger row the settle conditions on, through the same owner the judging site
+      // called (`judgeClaimOfAttempt`). A receipt whose row records no attempt states no ordinal — the
+      // unisolated case, where the judging passed no claim either.
+      judgments: judgmentReceiptsFromPlane(results, initialScoringPassId(id), (r) =>
+        judgeClaimOfAttempt(receiptByKey.get(childKey(r.caseId, r.trial))?.attemptId),
+      ),
       inputObservation: inputObservationOf(results, { kind: "read", receipts: committed }),
       createdAt: this.now(),
       ...(rec.createdBy !== undefined ? { createdBy: rec.createdBy } : {}),

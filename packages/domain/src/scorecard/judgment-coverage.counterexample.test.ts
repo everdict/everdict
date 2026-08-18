@@ -53,7 +53,7 @@ const multiCriteria: CaseResult[] = [
 //   expected [ 'judge:a#initial:sc-1', …(2) ] to deeply equal [ 'judge:a#initial:sc-1' ]
 describe("[R54 PHASE-3 COUNTEREXAMPLE #9 — CLOSED] one invoked judge is one receipt, however many criteria it scored", () => {
   it("does not mint a phantom judge per criterion metric", () => {
-    const receipts = judgmentReceiptsFromPlane(multiCriteria, passId);
+    const receipts = judgmentReceiptsFromPlane(multiCriteria, passId, () => undefined);
     expect(
       receipts.map((r) => r.ref.judgeId).sort(),
       "a criterion metric was read as a separate judge — `judge:a:safety` is judge `a` scoring `safety`",
@@ -61,7 +61,7 @@ describe("[R54 PHASE-3 COUNTEREXAMPLE #9 — CLOSED] one invoked judge is one re
   });
 
   it("carries the emitter the judge's evidence plane actually has", () => {
-    const receipts = judgmentReceiptsFromPlane(multiCriteria, passId);
+    const receipts = judgmentReceiptsFromPlane(multiCriteria, passId, () => undefined);
     // The evidence side mints its plane name from the judge id alone. Both sides are built with their
     // production functions here, so a divergence in either shows up as a failed join rather than as prose.
     expect(receipts.map((r) => r.evidenceEmitter)).toEqual([judgeEvidenceEmitter("a", { passId })]);
@@ -104,7 +104,7 @@ describe("[R54 PHASE-3 COUNTEREXAMPLE #10 — CLOSED] provenance states coverage
       kind: "initial",
       judges: [{ id: "a", version: "1" }],
       results: multiCriteria,
-      judgments: judgmentReceiptsFromPlane(multiCriteria, passId),
+      judgments: judgmentReceiptsFromPlane(multiCriteria, passId, () => undefined),
       inputObservation: { completed: true, cases: 1, diverged: 0, vouched: 1 },
       createdAt: "2026-08-18T00:00:00.000Z",
     } as never);
