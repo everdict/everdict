@@ -103,8 +103,8 @@ The same file is also evidence for a second point: Harbor's GAIA verifier compar
 `tr '[:upper:]' '[:lower:]'` + trim, which is **not** the official GAIA `question_scorer`
 (number/list normalization, no article stripping). Harbor's dataset is an *adaptation*, not the official
 scorer, and must be imported with `scoring: { kind: "proxy" }` — never as `official`
-(`packages/datasets/src/scoring-semantics.ts` already models this; see also `judges.ts`, which carries
-our verified GAIA/GSM8K ports).
+(`BenchmarkScoringSemantics` in `packages/datasets/src/catalog.ts` already models this; see also
+`packages/datasets/src/judges.ts`, which carries our verified GAIA/GSM8K scorer ports).
 
 ## 3. Fit audit against the real corpus
 
