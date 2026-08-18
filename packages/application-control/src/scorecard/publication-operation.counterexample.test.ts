@@ -88,9 +88,10 @@ const stagedOf = (marker: string) => ({
   revisionKey: `analyses/${SCORECARD_ID}/pass-${marker}.json`,
   key: `analyses/${SCORECARD_ID}/pass-${marker}.json`,
 });
-// A plan that owes only the EXPORT. The alias promotion needs an artifact store, and an unwired one leaves
-// every plan owed for a reason that has nothing to do with the races below — it would mask them.
-const exportOnly = () => ({ key: `analyses/${SCORECARD_ID}/x.json` });
+// A plan that owes only the EXPORT — which since arch-review 55 Wave 7 is the only owed effect there is. The
+// payload is UNFROZEN: these cases hand the drain the exact plane the settlement counted, so the compare-and-
+// export path runs, and nothing here is about where the bytes were staged.
+const exportOnly = () => ({ payload: { kind: "unfrozen" as const, reason: "not the subject of this file" } });
 
 const now = () => "2026-08-17T01:00:00.000Z";
 

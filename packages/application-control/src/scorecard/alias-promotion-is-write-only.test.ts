@@ -30,7 +30,7 @@ import { analysisArtifactKey, analysisPassKey } from "./scorecard-observability.
 const STAGED_KEY = analysisPassKey("sc-1", "pass-1");
 
 describe("a settlement's publication plan (arch-review 55, Wave 7)", () => {
-  const plan = (staged: { revisionKey?: string; payloadKey?: string }) =>
+  const plan = (staged: { revisionKey?: string; payload?: { kind: "frozen"; key: string } }) =>
     planPublicationOperation({
       scorecardId: "sc-1",
       bundle: { summary: "b" } as never,
@@ -43,7 +43,7 @@ describe("a settlement's publication plan (arch-review 55, Wave 7)", () => {
     });
 
   it("owes the export and NOTHING else — the alias promotion is gone", () => {
-    const operation = plan({ revisionKey: STAGED_KEY, payloadKey: "payloads/sc-1/pass-1.json" });
+    const operation = plan({ revisionKey: STAGED_KEY, payload: { kind: "frozen", key: "payloads/sc-1/pass-1.json" } });
     expect(operation?.effects, "a plan with a staged bundle should owe exactly one effect").toHaveLength(1);
     expect(operation?.effects[0]?.kind).toBe("export");
     // The mutable key is not named anywhere in the debt: an operation that cannot reference it cannot move it.
@@ -57,7 +57,7 @@ describe("a settlement's publication plan (arch-review 55, Wave 7)", () => {
       planPublicationOperation({
         scorecardId: "sc-1",
         bundle: { summary: "b" } as never,
-        staged: { revisionKey: STAGED_KEY },
+        staged: { revisionKey: STAGED_KEY }, // no payload: this settlement owes no export
         passId: "pass-1",
         exports: false,
         results: [],
@@ -68,7 +68,7 @@ describe("a settlement's publication plan (arch-review 55, Wave 7)", () => {
   });
 
   it("still names the bytes it owes by digest — the export half is untouched by the deletion", () => {
-    const operation = plan({ revisionKey: STAGED_KEY, payloadKey: "payloads/sc-1/pass-1.json" });
+    const operation = plan({ revisionKey: STAGED_KEY, payload: { kind: "frozen", key: "payloads/sc-1/pass-1.json" } });
     const effect = operation?.effects[0];
     if (effect?.kind !== "export") throw new Error("expected an export effect");
     expect(effect.payloadDigest).toBe(contentDigest([]));

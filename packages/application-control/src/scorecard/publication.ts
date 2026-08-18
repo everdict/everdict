@@ -5,7 +5,7 @@ import type {
   ScorecardExport,
   ScorecardRecord,
 } from "@everdict/contracts";
-import { publicationOperationId, readOrUnknown } from "@everdict/contracts";
+import { InternalError, publicationOperationId, readOrUnknown } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
@@ -87,21 +87,29 @@ export function planPublicationOperation(
 // The effect computation itself, kept INTERNAL: `planPublicationOperation` is the only producer, because a
 // plan with no operation id is a debt nobody can claim (arch-review 53, Wave C).
 function planPublication(input: PublicationPlanInput): PublicationPlan | undefined {
-  const exports = input.exports
-    ? [
-        {
-          idempotencyKey: `${input.scorecardId}:${input.passId}`,
-          payloadDigest: contentDigest(input.results),
-          // The frozen bytes this settlement owes (arch-review 54, Phase 4), when staging produced them.
-          // Absent = the pre-Phase-4 path: compare the record's current results against the digest and refuse
-          // on mismatch, which is honest but cannot converge after a legitimate re-score.
-          ...(input.staged.payloadKey !== undefined ? { payloadKey: input.staged.payloadKey } : {}),
-          ...(input.sink !== undefined ? { sink: input.sink } : {}),
-          ...(input.judgeModels !== undefined ? { judgeModels: input.judgeModels } : {}),
-          ...(input.attach !== undefined ? { attach: input.attach } : {}),
-        },
-      ]
-    : [];
+  // WHERE THE BYTES ARE, ALWAYS ANSWERED (arch-review 55, Wave 9). `staged.payload` is absent only when the
+  // caller never ASKED to freeze one — which, for a settlement that owes an export, means it has not answered
+  // the question at all. That is a bug in this system rather than a weaker state of the world, so it is
+  // refused here: defaulting to `unfrozen` would put the escape hatch back one layer down wearing a name.
+  if (input.exports && input.staged.payload === undefined)
+    throw new InternalError(
+      "UPSTREAM_ERROR",
+      { scorecardId: input.scorecardId, passId: input.passId },
+      "this settlement owes an export but never staged a payload — the plan cannot say where its bytes are.",
+    );
+  const exports =
+    input.exports && input.staged.payload !== undefined
+      ? [
+          {
+            idempotencyKey: `${input.scorecardId}:${input.passId}`,
+            payloadDigest: contentDigest(input.results),
+            payload: input.staged.payload,
+            ...(input.sink !== undefined ? { sink: input.sink } : {}),
+            ...(input.judgeModels !== undefined ? { judgeModels: input.judgeModels } : {}),
+            ...(input.attach !== undefined ? { attach: input.attach } : {}),
+          },
+        ]
+      : [];
   // A STAGED BUNDLE IS NOT A DEBT (arch-review 55, Wave 7). It used to be: a settle that staged its analysis
   // planned an alias promotion, so every batch of a sinkless install carried an operation forever to write an
   // object nobody reads. The only owed effect left is the one that leaves this system.
@@ -305,17 +313,18 @@ async function performEffects(
     // receipt was right; concluding the old export could never happen was a consequence of nobody having
     // frozen what it owed.
     let payload = results;
-    if (effect.payloadKey !== undefined) {
+    if (effect.payload.kind === "frozen") {
+      const key = effect.payload.key;
       if (!deps.artifacts) {
         fail("no artifact store is wired here — the settlement's frozen export payload cannot be read");
         continue;
       }
       let frozen: unknown;
       try {
-        const bytes = await deps.artifacts.get(effect.payloadKey);
+        const bytes = await deps.artifacts.get(key);
         if (!bytes) {
           // PERMANENT: the immutable object is gone and no retry brings it back.
-          fail(`the staged export payload '${effect.payloadKey}' is not in the store`, true);
+          fail(`the staged export payload '${key}' is not in the store`, true);
           continue;
         }
         frozen = JSON.parse(new TextDecoder().decode(bytes));
@@ -326,16 +335,21 @@ async function performEffects(
       // The digest still guards it — a staged object that does not digest to what was planned is not this
       // settlement's payload, whatever its key says.
       if (contentDigest(frozen) !== effect.payloadDigest) {
-        fail(`the staged export payload '${effect.payloadKey}' does not digest to the planned payload`, true);
+        fail(`the staged export payload '${key}' does not digest to the planned payload`, true);
         continue;
       }
       payload = frozen as CaseResult[];
     } else if (contentDigest(results) !== effect.payloadDigest) {
-      // PRE-PHASE-4 operations (mig 0188's backfill, and any settle whose payload staging failed) carry a
-      // digest and no key. They keep the old behaviour exactly: compare the record's current results and
-      // refuse on mismatch. Honest, and unable to converge after a re-score — which is why new operations
-      // freeze their bytes.
-      fail("the record's results are no longer the ones this settlement counted — not exported", true);
+      // THE WEAKER PATH, TAKEN OUT LOUD (arch-review 55, Wave 9). The settlement could not freeze its bytes —
+      // mig 0188's backfilled rows, an install with no object store, or a PUT that failed during the settle —
+      // so all this drain can do is compare the record's live plane and refuse on mismatch. Fail-closed, and
+      // unable to converge once anything re-scores, which is why the reason travels: an operator reading
+      // "these are not the bytes this settlement counted" learned nothing about why the bytes were never
+      // frozen, and an incident during a settle looked exactly like an ordinary re-score.
+      fail(
+        `the record's results are no longer the ones this settlement counted, and its payload was never frozen (${effect.payload.reason}) — not exported`,
+        true,
+      );
       continue;
     }
     try {

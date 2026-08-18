@@ -108,7 +108,12 @@ const plan = (over: Partial<Parameters<typeof planPublicationOperation>[0]> = {}
       scorecardId: SCORECARD_ID,
       scoringRevision: 1,
       bundle,
-      staged: { revisionKey: analysisPassKey(SCORECARD_ID, PASS_ID) } as never,
+      staged: {
+        revisionKey: analysisPassKey(SCORECARD_ID, PASS_ID),
+        // Unfrozen by default: these cases hand the drain the plane it counted, which is the path an
+        // unfrozen payload takes (compare, then export). The frozen path has its own cases below.
+        payload: { kind: "unfrozen", reason: "not the subject of this file" },
+      } as never,
       passId: PASS_ID,
       exports: true,
       results,
@@ -172,7 +177,7 @@ describe("the publication outbox", () => {
   // is "the LIVE results I was handed are not the ones I counted". Both must refuse; only one is retryable.
   it("an operation whose frozen payload is not the one it planned exports nothing and closes unverifiable", async () => {
     const payloadKey = `payloads/${SCORECARD_ID}/${PASS_ID}.json`;
-    const operation = plan({ staged: { payloadKey } as never });
+    const operation = plan({ staged: { payload: { kind: "frozen", key: payloadKey } } as never });
     const operations = new InMemoryPublicationOperationStore();
     await operations.open(operation);
     const { store } = fakeStore(record());
@@ -211,7 +216,7 @@ describe("the publication outbox", () => {
     // Given an operation whose payload digest is the results the settle counted, and a drain handed a
     // DIFFERENT plane (a re-score landed in the crash window). Exporting the newer bytes under the older
     // settlement's receipt is the substitution this whole seam exists to prevent.
-    const operation = plan({ staged: {} as never });
+    const operation = plan({ staged: { payload: { kind: "unfrozen", reason: "no store wired" } } as never });
     expect(operation.effects.find((e) => e.kind === "export")?.payloadDigest).toBe(contentDigest(results));
     const operations = new InMemoryPublicationOperationStore();
     await operations.open(operation);

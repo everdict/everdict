@@ -173,6 +173,24 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/protocol-conformance.test.ts"],
   },
   {
+    // Wave 9's rung: the settle swallows a payload-freeze failure again, so an object-store blip during a
+    // settle becomes indistinguishable from a row planned before payload freezing existed.
+    name: "Wave 9 — a failed payload freeze is swallowed into silence",
+    file: "packages/application-control/src/scorecard/scorecard-observability.ts",
+    from: '      out.payload = {\n        kind: "unfrozen",\n        reason: `the export payload could not be frozen:',
+    to: '      const swallowed = {\n        kind: "unfrozen",\n        reason: `the export payload could not be frozen:',
+    suite: ["--root", "packages/application-control", "src/scorecard/frozen-payload-required.counterexample.test.ts"],
+  },
+  {
+    // …and the planner half: a settlement that owes an export and never staged a payload is defaulted to the
+    // weaker state instead of refused, which puts the escape hatch back one layer down wearing a name.
+    name: "Wave 9 — an unanswered payload question is defaulted rather than refused",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "  if (input.exports && input.staged.payload === undefined)\n    throw new InternalError(",
+    to: "  if (false)\n    throw new InternalError(",
+    suite: ["--root", "packages/application-control", "src/scorecard/frozen-payload-required.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     from: "  const claimed = await deps.operations.claim(operation.id, owner, leaseSeconds, now());",

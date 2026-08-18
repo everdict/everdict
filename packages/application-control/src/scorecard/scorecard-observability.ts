@@ -10,6 +10,7 @@ import {
   caseKeyOf,
   measuredScores,
 } from "@everdict/contracts";
+import type { ExportPayloadSource } from "@everdict/contracts";
 import { type ScorecardOutcomes, caseVerdict, scorecardOutcomes } from "@everdict/domain";
 import { contentDigest } from "@everdict/domain";
 import { offloadSnapshot } from "../ports/artifact-store.js";
@@ -220,10 +221,15 @@ export interface AnalysisOffload {
   // revision number now that artifacts are pass-scoped — so the ledger entry has to remember where its own
   // bundle lives, or a historical read has nothing but an expired URL to go on.
   revisionKey?: string;
-  // The EXPORT PAYLOAD this settlement froze (arch-review 54, Phase 4) — the results as counted, under a
-  // pass-scoped immutable key. The publication operation carries the key so its drain reads what the
-  // settlement published rather than whatever the record holds by the time the sweep gets to it.
-  payloadKey?: string;
+  // The EXPORT PAYLOAD this settlement froze (arch-review 54, Phase 4 · a union arch-review 55, Wave 9) — the
+  // results as counted, under a pass-scoped immutable key, so the drain reads what the settlement published
+  // rather than whatever the record holds by the time the sweep gets to it.
+  //
+  // ABSENT means the caller did not ASK for one (it passed no results, because it owes no export). It never
+  // means "the freeze failed" — that is `{ kind: "unfrozen", reason }`, which is a different question with a
+  // different answer, and collapsing the two into a missing field is what let an object-store blip during a
+  // settle look identical to a row migrated from before payload freezing existed.
+  payload?: ExportPayloadSource;
 }
 
 // ── STAGING, WITHOUT PUBLISHING (arch-review 52, Wave 4) ────────────────────────────────────────────
@@ -244,7 +250,13 @@ export async function stageAnalysis(
   // caller that owes no export, which stages nothing extra.
   results?: readonly CaseResult[],
 ): Promise<AnalysisOffload> {
-  if (!deps.artifacts) return {};
+  // No store at all: nothing is frozen and nothing can be. A caller that asked for a payload gets the named
+  // weaker state rather than silence — this is the deployment shape (no S3/MinIO wired) that the optional
+  // field used to hide behind the legacy explanation.
+  if (!deps.artifacts)
+    return results === undefined
+      ? {}
+      : { payload: { kind: "unfrozen", reason: "no artifact store is wired here — nothing can be frozen" } };
   const out: AnalysisOffload = {};
   try {
     const key = analysisPassKey(id, passId);
@@ -256,13 +268,21 @@ export async function stageAnalysis(
   // Staged SEPARATELY on purpose: an export whose payload could not be frozen must fall back to the
   // re-read-and-compare path rather than lose its analysis artifact too, and vice versa. Each failure costs
   // only what it is.
+  //
+  // …AND THE FAILURE IS REPORTED, not swallowed (arch-review 55, Wave 9). This was a bare `catch {}` whose
+  // comment said the plan "then carries a digest and no key, which is the pre-Phase-4 behaviour" — and that
+  // is the problem: an incident on THIS batch became indistinguishable from a row older than the feature.
+  // The weaker path is still taken; it now says so and says why.
   if (results !== undefined)
     try {
       const key = exportPayloadKey(id, passId);
       await deps.artifacts.put(key, Buffer.from(JSON.stringify(results)), "application/json");
-      out.payloadKey = key;
-    } catch {
-      // best-effort — the plan then carries a digest and no key, which is the pre-Phase-4 behaviour
+      out.payload = { kind: "frozen", key };
+    } catch (err) {
+      out.payload = {
+        kind: "unfrozen",
+        reason: `the export payload could not be frozen: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   return out;
 }

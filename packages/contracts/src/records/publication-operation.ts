@@ -52,6 +52,15 @@ export type SettlementRef = z.infer<typeof SettlementRefSchema>;
 // Wave 5 made its guard three-valued, which was correct for the defect in front of it; this removes the
 // effect the guard was protecting. Rows planned before it are stripped by mig 0191, so no stored operation
 // carries a variant this union no longer has.
+// WHERE A SETTLEMENT'S EXPORT BYTES ARE — one shape, both ends (arch-review 55, Wave 9). Declared once and
+// imported by the plan schema, the operation effect and the staging seam, because the previous version was
+// spelled in two of those three and silently missing from the type of the third.
+export const ExportPayloadSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("frozen"), key: z.string().min(1) }),
+  z.object({ kind: z.literal("unfrozen"), reason: z.string().min(1) }),
+]);
+export type ExportPayloadSource = z.infer<typeof ExportPayloadSourceSchema>;
+
 export const PublicationEffectSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("export"),
@@ -59,19 +68,26 @@ export const PublicationEffectSchema = z.discriminatedUnion("kind", [
     // What the settlement counted. A drain whose results do not digest to this is looking at a plane the
     // settlement never published — it publishes nothing and says so.
     payloadDigest: z.string().min(1),
-    // …AND WHERE THOSE BYTES ARE (arch-review 54, Phase 4). The digest alone made the operation refusable but
-    // not performable: the drain re-read the record's CURRENT results, so an ordinary re-score between the
-    // settle and the drain moved the plane, the digests disagreed, and the older settlement's owed export was
-    // closed PERMANENTLY unverifiable. The operation survived; the bytes it owed did not.
+    // …AND WHERE THOSE BYTES ARE (arch-review 54, Phase 4 · made a union arch-review 55, Wave 9). The digest
+    // alone made the operation refusable but not performable: the drain re-read the record's CURRENT results,
+    // so an ordinary re-score between the settle and the drain moved the plane, the digests disagreed, and the
+    // older settlement's owed export closed PERMANENTLY unverifiable. The operation survived; the bytes it
+    // owed did not. Refusing to ship the new bytes under the old receipt was right; concluding the old export
+    // could therefore never happen was a consequence of nobody having frozen what it owed.
     //
-    // Refusing to ship the new bytes under the old receipt was right. Concluding the old export can therefore
-    // never happen was not — nobody had frozen what it owed. Staged as an immutable object at settle time, so
-    // the drain reads what the settlement counted instead of whatever the record says now. The artifact effect
-    // above has worked this way since Wave C; only the export half reached for live state.
+    // It shipped as an OPTIONAL key, whose absence was documented as the legacy shape (mig 0188's backfill).
+    // It was not only that. `stageAnalysis` froze the payload best-effort, so a live settlement whose object
+    // store blipped for one PUT produced a row byte-identical to one migrated from before the feature existed
+    // — and the absent field was doing two incompatible jobs: "this predates payload freezing" (our history)
+    // and "this settlement tried and failed" (an incident on THIS batch). Nothing could tell them apart and
+    // nothing said why.
     //
-    // Optional for the operations mig 0188 backfilled from the pre-Phase-4 field: they carry a digest and no
-    // key, and the drain treats them exactly as before (re-read, compare, refuse on mismatch).
-    payloadKey: z.string().min(1).optional(),
+    // So the weaker case is NAMED and carries its reason. `frozen` is performable: read the immutable object,
+    // check its digest, export exactly what the settlement counted, converge whatever else has happened since.
+    // `unfrozen` keeps the pre-Phase-4 behaviour exactly — compare the live plane, refuse on mismatch, which
+    // is fail-closed and cannot converge after a re-score — and says out loud that this is the weaker path and
+    // why it is being taken.
+    payload: ExportPayloadSourceSchema,
     sink: z.string().optional(),
     judgeModels: z.record(z.string(), z.string()).optional(),
     attach: z.object({ sourceKind: z.string(), externalIdByCase: z.record(z.string(), z.string()) }).optional(),

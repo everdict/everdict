@@ -75,7 +75,7 @@ const operation: PublicationOperation = {
       kind: "export",
       idempotencyKey: `${SCORECARD_ID}:pass-1`,
       payloadDigest: contentDigest(RESULTS),
-      payloadKey: PAYLOAD_KEY,
+      payload: { kind: "frozen", key: PAYLOAD_KEY },
     },
   ],
   plannedAt: "2026-08-18T00:00:01.000Z",

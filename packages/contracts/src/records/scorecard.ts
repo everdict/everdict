@@ -4,6 +4,7 @@ import { CaseKeySchema } from "../execution/case-key.js";
 import { GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
 import { GateDecisionSchema } from "./gate.js";
+import { ExportPayloadSourceSchema } from "./publication-operation.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
 // superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch.
@@ -704,6 +705,13 @@ export const PublicationPlanSchema = z.object({
         // The results the settle counted, digested — the payload the export is of. A drain that finds the
         // record's results no longer digest to this is looking at a re-scored plane, not at this settlement.
         payloadDigest: z.string(),
+        // …and WHERE those bytes are, or why they could not be frozen (arch-review 55, Wave 9). Declared HERE
+        // as well as on the operation effect because it was not: Phase 4 added `payloadKey` to the effect and
+        // built it in `planPublication`, whose return type is this schema — and a conditional spread defeats
+        // excess-property checking, so the field travelled at runtime while this type said it did not exist.
+        // Exactly the hazard rule `typescript` names: a value that must survive a hop is declared on ONE
+        // shared shape used by both ends.
+        payload: ExportPayloadSourceSchema,
         // The batch's per-batch sink override (`orchestration.traceSink`), carried so the drain does not
         // have to re-derive the routing the settle decided.
         sink: z.string().optional(),

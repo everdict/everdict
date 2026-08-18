@@ -95,7 +95,7 @@ function fakeStore(initial: ScorecardRecord): { store: ScorecardStore; current: 
 const payloadKeyFor = (marker: string) => `analyses/${SCORECARD_ID}/passes/pass-${marker}.export.json`;
 const exportOnly = (marker: string) => ({
   key: `analyses/${SCORECARD_ID}/x.json`,
-  payloadKey: payloadKeyFor(marker),
+  payload: { kind: "frozen" as const, key: payloadKeyFor(marker) },
 });
 
 // The artifact store those staged payloads live in.

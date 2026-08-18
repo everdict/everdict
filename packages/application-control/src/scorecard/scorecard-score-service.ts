@@ -55,7 +55,6 @@ import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { JudgmentClaim, StagedJudgment } from "../ports/scoring-stage-store.js";
 import { ExecutionPlan } from "./execution-plan.js";
-import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardScoringDeps } from "./scorecard-deps.js";
 import { type AnalysisOffload, analysisBundle, initialPassId, stageAnalysis } from "./scorecard-observability.js";
 import { sealJudgeClosure } from "./scorecard-plan.js";
@@ -837,25 +836,11 @@ export class ScorecardScoreService {
     const passKey = pass?.passId ?? fresh.scoringPass?.passId ?? (bundle ? initialPassId(bundle) : undefined);
     const analysis: AnalysisOffload =
       bundle !== undefined && passKey !== undefined ? await stageAnalysis(this.deps, record.id, bundle, passKey) : {};
-    // What this settlement OWES outward: the alias promotion, and nothing else — the re-score path wires no
-    // trace-sink exporter (a re-score never re-exports; the batch's own settle owns that), so `exports` is
-    // false rather than a debt nobody can pay.
-    const publication =
-      bundle !== undefined && passKey !== undefined
-        ? planPublicationOperation({
-            scorecardId: record.id,
-            bundle,
-            staged: analysis,
-            passId: passKey,
-            // THE REVISION THIS RE-SCORE APPENDS (arch-review 53, Wave C). Every re-score owes its own
-            // operation, keyed by the revision it is about to write — which is what stops it from erasing
-            // the previous settlement's debt, and stops a stale publisher from completing this one.
-            scoringRevision: (fresh.scoring?.length ?? 0) + 1,
-            exports: false,
-            results: plane,
-            now: this.now(),
-          })
-        : undefined;
+    // A RE-SCORE OWES NOTHING OUTWARD (arch-review 55, Wave 7). This planned a publication operation whose
+    // only effect was the alias promotion — a re-score never re-exports, because the batch's own settle owns
+    // that — and the promotion is deleted, so the planner answered `undefined` for every call. The plan, the
+    // `publishOperation` guard and the inline drain that followed it are gone with it; what still crosses the
+    // commit here is the revision's own frozen artifact, which `stageAnalysis` above already wrote.
     // The stage observation was taken BEFORE anything derived from the plane, so it can ride the REVISION
     // (arch-review 16 P1-6). It used to be a fire-and-forget callback after the settle: a control plane dying
     // in between left the pass with no observation at all, indistinguishable from an agreeing one — and the
@@ -965,7 +950,6 @@ export class ScorecardScoreService {
       {
         expectScoringCount: fresh.scoring?.length ?? 0,
         // The debt is inserted by the write that decides this re-score won (arch-review 53, Wave C).
-        ...(publication ? { publishOperation: publication } : {}),
         // …and the settle belongs to the pass that OWNS the marker. Guarded by the pass IDENTITY: an epoch
         // restarts at 1 after every settle, so a stale pass could hold a number a later pass also holds —
         // and for an EMBED group there is no child-run fence to catch it, the settle guard is the only one.
@@ -979,26 +963,6 @@ export class ScorecardScoreService {
         "another scoring pass settled this group first — this pass's aggregate is refused (its revision would have overwritten the ledger).",
       );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    // …AND ONLY NOW IS ANYTHING PUBLISHED (arch-review 52, Wave 4). The winner drains its own plan inline,
-    // holding the exact plane the settle certified, so the alias tracks the revision promptly. A crash
-    // between the commit above and this line leaves the plan owed and the reconciler converges it — the
-    // effect is no longer this call's to lose. Never a reason for a settled re-score to fail: an undrained
-    // plan stays owed with its reason recorded on the record by the drain itself.
-    //
-    // AWAITED, and swallowed rather than unawaited — the same call the drivers make, and for the reason the
-    // stage clear below is awaited: an unawaited effect makes the order unobservable, so nothing can assert
-    // that publication follows the commit, and a process exiting right after the settle drops the promotion
-    // for no reason.
-    const operations = this.deps.publicationOperations;
-    if (publication)
-      await drainPublicationOperation(
-        { ...this.deps, ...(operations ? { operations } : {}) },
-        settled,
-        publication,
-        plane,
-        this.deps.publisherId ?? "publisher",
-        this.now,
-      ).catch(() => undefined);
     // The same observation as a process METRIC — an operator watching a fleet wants a series, not a walk over
     // revisions. It is now a projection of the durable record rather than the only place the fact exists.
     if (parity !== undefined) this.deps.scoringStageParity?.(parity);

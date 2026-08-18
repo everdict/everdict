@@ -347,6 +347,39 @@ Two things this cost that are worth remembering:
   mutation that stopped it after one beat. Two of the three mutations written for this wave were green until
   the test interleaved the injected clock with the timer wheel.
 
+### R55.9 An optional field doing two incompatible jobs
+`packages/contracts/src/records/publication-operation.ts` — an export effect carried `payloadKey` as
+OPTIONAL, with its absence documented as the legacy shape:
+
+> *"Optional for the operations mig 0188 backfilled from the pre-Phase-4 field: they carry a digest and no
+> key, and the drain treats them exactly as before."*
+
+It was never only that. `stageAnalysis` froze the payload inside a bare `catch {}` whose comment said the
+plan "then carries a digest and no key, which is the pre-Phase-4 behaviour" — so a live settlement whose
+object store refused one PUT produced a row byte-identical to one migrated from before the feature existed.
+
+The absent field was answering two different questions with the same silence:
+- *"this operation predates payload freezing"* — a statement about our history;
+- *"this settlement tried to freeze its bytes and failed"* — an incident on THIS batch.
+
+The drain took the weaker path for both (re-read the live plane, compare, refuse on mismatch), which is
+fail-closed and cannot converge once anything re-scores. Nothing said which had happened, or why. Rule `suite`
+had already written the answer for this shape — *absence is not a legacy allowance* — and it applies to a
+degradation that a LIVE path can produce, not only to old rows.
+
+Closed in Wave 9: `payload` is a required union, `frozen{key}` or `unfrozen{reason}`; the staging seam reports
+the failure it used to swallow; the planner REFUSES a settlement that owes an export and never staged one at
+all (defaulting to `unfrozen` there would put the escape hatch back one layer down wearing a name); mig 0192
+converts stored rows both ways and was verified by re-reading them through the production store.
+
+Two things worth carrying forward:
+- **A conditional spread defeats excess-property checking.** `payloadKey` was built in `planPublication`,
+  whose return type is `PublicationPlan` — a schema that never declared the field. It travelled at runtime for
+  two reviews while the type said it did not exist, which is precisely the hazard rule `typescript` names. The
+  union is now declared ONCE in contracts and imported by both ends.
+- **Making an optional required is a migration, not a type change.** The compiler found ten fixtures; only
+  real rows in a real database found the rest, and "the migration ran" is not "the rows it wrote parse".
+
 ---
 
 ## What review 54 actually cost to fix — the lessons the phases added

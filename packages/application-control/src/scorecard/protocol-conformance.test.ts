@@ -70,7 +70,7 @@ const operationFor = (passId: string, revision: number) => {
     scorecardId: SCORECARD_ID,
     scoringRevision: revision,
     bundle,
-    staged: { key: "x" } as never,
+    staged: { payload: { kind: "unfrozen", reason: "not the subject of this suite" } } as never,
     passId,
     exports: true,
     results,

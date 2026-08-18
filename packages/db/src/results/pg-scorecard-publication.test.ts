@@ -26,7 +26,13 @@ function capture(): { statements: Array<{ sql: string; params: unknown[] }>; cli
 const plan: PublicationPlan = {
   state: "pending",
   plannedAt: "2026-08-15T00:00:01.000Z",
-  exports: [{ idempotencyKey: "sc-1:initial-abc", payloadDigest: "sha256:x" }],
+  exports: [
+    {
+      idempotencyKey: "sc-1:initial-abc",
+      payloadDigest: "sha256:x",
+      payload: { kind: "frozen", key: "payloads/sc-1/initial-abc.json" },
+    },
+  ],
 };
 
 describe("the publication plan on the scorecard row", () => {
