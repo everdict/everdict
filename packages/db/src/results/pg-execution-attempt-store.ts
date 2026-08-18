@@ -69,6 +69,26 @@ const TERMINAL_LIST = TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ");
 const OPEN_SCORECARDS = OPEN_SCORECARD_STATUSES.map((s) => `'${s}'`).join(", ");
 const OPEN_RUNS = OPEN_RUN_STATUSES.map((s) => `'${s}'`).join(", ");
 
+// ── "MAY THIS ATTEMPT STILL AUTHORIZE WORK?", WRITTEN ONCE (arch-review 56, Wave D) ─────────────────
+//
+// Used by the guarded UPDATE and by the idempotent re-reservation's read, because those two used to be a
+// condition and a shortcut PAST it: the retry path returned a stored intent having asked nothing, so a
+// cancelled parent re-authorized the very work its teardown had converged on. One fragment, both places.
+const PARENT_AUTHORIZES = `(
+           a.scorecard_id IS NOT NULL AND EXISTS (
+             SELECT 1 FROM everdict_scorecards s
+              WHERE s.id = a.scorecard_id
+                AND s.status IN (${OPEN_SCORECARDS})
+                AND (a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch)
+           )
+           OR a.scorecard_id IS NULL AND EXISTS (
+             SELECT 1 FROM everdict_runs r
+              WHERE 'evd-run-' || r.id = a.execution_id
+                AND r.status IN (${OPEN_RUNS})
+                AND (a.driver_epoch IS NULL OR r.owner_epoch = a.driver_epoch)
+           )
+         )`;
+
 // Postgres-backed physical-execution ledger (mig 0182). See ports/execution-attempt-store.ts for what this
 // plane is and is not: a Phase-1 dual-write audit spine, observed rather than depended on.
 export class PgExecutionAttemptStore implements ExecutionAttemptStore {
@@ -194,8 +214,14 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
   async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     // The idempotent re-reservation, asked first: a retry that re-offers the SAME external id is repeating
     // itself, and the guarded UPDATE below would refuse it for `runtime_work IS NULL`.
-    const { rows: existing } = await this.client.query<{ runtime_work: unknown; updated_at: string }>(
-      "SELECT runtime_work, updated_at FROM everdict_execution_attempts WHERE attempt_id = $1",
+    const { rows: existing } = await this.client.query<{
+      runtime_work: unknown;
+      updated_at: string;
+      authorized: boolean;
+    }>(
+      `SELECT a.runtime_work, a.updated_at, ${PARENT_AUTHORIZES} AS authorized
+         FROM everdict_execution_attempts a
+        WHERE a.attempt_id = $1`,
       [attemptId],
     );
     const held = existing[0];
@@ -207,12 +233,22 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
       );
     if (held.runtime_work !== null && held.runtime_work !== undefined) {
       const reserved = RuntimeWorkRefSchema.parse(held.runtime_work);
-      if (reserved.externalJobId === work.externalJobId)
+      if (reserved.externalJobId === work.externalJobId) {
+        // …AND THE AUTHORITY IS RE-ASKED (arch-review 56, Wave D). Same identity is a reason to hand back the
+        // SAME handle rather than mint a second one; it is not a reason to skip the question. A proof has a
+        // lifetime (L1), and this path used to return one minted from a memory.
+        if (!held.authorized)
+          throw new ConflictError(
+            "CONFLICT",
+            { attemptId },
+            "this attempt may no longer authorize work — the execution it belongs to has ended or is owned by a newer driver, so re-offering the same handle does not revive the authorization.",
+          );
         return {
           attemptId,
           work: reserved,
           persistedAt: typeof held.updated_at === "string" ? held.updated_at : new Date(held.updated_at).toISOString(),
         };
+      }
       throw new ConflictError(
         "CONFLICT",
         { attemptId, reserved: reserved.externalJobId, offered: work.externalJobId },
@@ -227,20 +263,7 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
        WHERE a.attempt_id = $1
          AND a.state = 'created'
          AND a.runtime_work IS NULL
-         AND (
-           a.scorecard_id IS NOT NULL AND EXISTS (
-             SELECT 1 FROM everdict_scorecards s
-              WHERE s.id = a.scorecard_id
-                AND s.status IN (${OPEN_SCORECARDS})
-                AND (a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch)
-           )
-           OR a.scorecard_id IS NULL AND EXISTS (
-             SELECT 1 FROM everdict_runs r
-              WHERE 'evd-run-' || r.id = a.execution_id
-                AND r.status IN (${OPEN_RUNS})
-                AND (a.driver_epoch IS NULL OR r.owner_epoch = a.driver_epoch)
-           )
-         )
+         AND ${PARENT_AUTHORIZES}
        RETURNING runtime_work, updated_at`,
       [attemptId, JSON.stringify(work)],
     );

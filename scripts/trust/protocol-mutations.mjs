@@ -234,6 +234,23 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
   },
   {
+    // R56 Wave D's rung: the idempotent path goes back to returning a stored intent without asking, so a
+    // cancelled or superseded parent re-authorizes work its teardown already converged on.
+    name: "R56 Wave D — a re-offered reservation skips its authority check",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "        await this.assertParentStillAuthorizes(attemptId, current);\n        return { attemptId, work: current.runtimeWork, persistedAt: current.updatedAt };",
+    to: "        return { attemptId, work: current.runtimeWork, persistedAt: current.updatedAt };",
+    suite: ["--root", "packages/application-control", "src/execution/reservation-lifetime.counterexample.test.ts"],
+  },
+  {
+    // …and the SQL twin, where the shortcut was a bare `WHERE attempt_id = $1`.
+    name: "R56 Wave D — the SQL idempotency read stops carrying the authority answer",
+    file: "packages/db/src/results/pg-execution-attempt-store.ts",
+    from: "        if (!held.authorized)",
+    to: "        if (false)",
+    suite: ["--root", "packages/db", "src/results/pg-execution-attempt-store.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

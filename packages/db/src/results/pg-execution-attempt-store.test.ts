@@ -151,7 +151,7 @@ describe("PgExecutionAttemptStore", () => {
   it("reserveWork is a CONDITIONAL transition — state, prior reservation and parent authority in one statement", async () => {
     const { client, calls } = fakeClient((text) =>
       text.startsWith("SELECT")
-        ? { rows: [{ runtime_work: null, updated_at: "2026-08-18T00:00:00.000Z" }] }
+        ? { rows: [{ runtime_work: null, updated_at: "2026-08-18T00:00:00.000Z", authorized: true }] }
         : { rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }] },
     );
     const store = new PgExecutionAttemptStore(client);
@@ -197,7 +197,7 @@ describe("PgExecutionAttemptStore", () => {
   it("reserveWork names the OPEN parent statuses positively, from the shared allowlist", async () => {
     const { client, calls } = fakeClient((text) =>
       text.startsWith("SELECT")
-        ? { rows: [{ runtime_work: null, updated_at: "t" }] }
+        ? { rows: [{ runtime_work: null, updated_at: "t", authorized: true }] }
         : { rows: [{ runtime_work: WORK, updated_at: "t" }] },
     );
     await new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g1", WORK);
@@ -212,7 +212,7 @@ describe("PgExecutionAttemptStore", () => {
 
   it("reserveWork REFUSES when the guarded update matched nothing — ended, taken, or no longer ours", async () => {
     const { client } = fakeClient((text) =>
-      text.startsWith("SELECT") ? { rows: [{ runtime_work: null, updated_at: "t" }] } : { rows: [] },
+      text.startsWith("SELECT") ? { rows: [{ runtime_work: null, updated_at: "t", authorized: true }] } : { rows: [] },
     );
     await expect(
       new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g1", WORK),
@@ -221,7 +221,9 @@ describe("PgExecutionAttemptStore", () => {
   });
 
   it("reserveWork is IDEMPOTENT for the same work and REFUSES different work on a taken attempt", async () => {
-    const held = { rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z" }] };
+    // `authorized` is the SAME correlated EXISTS the guarded UPDATE uses, carried on the read (arch-review 56,
+    // Wave D). Before it, this path returned a stored intent having asked nothing about the parent.
+    const held = { rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z", authorized: true }] };
     const same = fakeClient(() => held);
     const again = await new PgExecutionAttemptStore(same.client).reserveWork("evd-run-r1#g1", WORK);
     expect(again.work.externalJobId).toBe(WORK.externalJobId);
@@ -232,6 +234,29 @@ describe("PgExecutionAttemptStore", () => {
       new PgExecutionAttemptStore(other.client).reserveWork("evd-run-r1#g1", { ...WORK, externalJobId: "other" }),
       "a second reservation overwrote the handle of work that is still running",
     ).rejects.toThrow(/already authorized other work/);
+  });
+
+  it("reserveWork REFUSES the SAME work once the parent may no longer authorize any", async () => {
+    // The lifetime half (arch-review 56, Wave D): between the first reservation and this retry the batch was
+    // cancelled, superseded or taken over. Returning the stored intent here handed the backend a capability
+    // minted from a memory — and a cancellation that had already converged on "nothing exists under this
+    // handle" then watched the job appear.
+    const { client } = fakeClient(() => ({
+      rows: [{ runtime_work: WORK, updated_at: "2026-08-18T00:00:00.000Z", authorized: false }],
+    }));
+    await expect(
+      new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g1", WORK),
+      "a revoked attempt re-authorized its own work by repeating itself",
+    ).rejects.toThrow(/may no longer authorize work/);
+  });
+
+  it("carries the authority answer on the idempotency read, from the one predicate", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g9", WORK).catch(() => undefined);
+    // One definition of "may still authorize", used by the read and by the write — they used to be a
+    // condition and a shortcut past it.
+    expect(calls[0]?.text).toContain("AS authorized");
+    expect(calls[0]?.text).toContain(`s.status IN (${OPEN_SCORECARD_STATUSES.map((s) => `'${s}'`).join(", ")})`);
   });
 
   it("reserveWork REFUSES when the update matched no row — an attempt id that names nothing", async () => {

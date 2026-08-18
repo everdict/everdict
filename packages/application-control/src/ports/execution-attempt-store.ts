@@ -226,9 +226,18 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     // IDEMPOTENT for the same work: a caller re-reserving the exact external id is repeating itself, and
     // failing it would fail a dispatch that is correct. Checked before the state guard, because the retry
     // legitimately arrives when the row already says `reserved`.
+    //
+    // …BUT IT STILL ANSWERS TO THE PARENT (arch-review 56, Wave D). This returned the stored intent and asked
+    // NOTHING — so between the first reservation and the retry the batch could be cancelled, superseded or
+    // taken over at a new epoch, and the caller would still receive a capability and still submit. A
+    // cancellation that converged on a world where the work did not exist then watched it appear afterwards.
+    // Same identity is a reason to hand back the SAME handle rather than mint a second one; it is not a
+    // reason to skip the question the guarded write exists to ask (L1: a proof has a lifetime).
     if (current.runtimeWork !== undefined) {
-      if (current.runtimeWork.externalJobId === work.externalJobId)
+      if (current.runtimeWork.externalJobId === work.externalJobId) {
+        await this.assertParentStillAuthorizes(attemptId, current);
         return { attemptId, work: current.runtimeWork, persistedAt: current.updatedAt };
+      }
       throw new ConflictError(
         "CONFLICT",
         { attemptId, reserved: current.runtimeWork.externalJobId, offered: work.externalJobId },
@@ -243,6 +252,15 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
       );
     // …and the parent must still be open and still ours. Synchronous with the write below (one JS turn), so
     // there is no window between the check and the effect — the property the Pg twin gets from its statement.
+    await this.assertParentStillAuthorizes(attemptId, current);
+    const persistedAt = this.now();
+    this.attempts.set(attemptId, { ...current, state: "reserved", runtimeWork: work, updatedAt: persistedAt });
+    return { attemptId, work, persistedAt };
+  }
+
+  // ONE ANSWER, BOTH PATHS (arch-review 56, Wave D). Extracted so the idempotent return cannot drift from the
+  // guarded write — the two used to be a check and a shortcut past it, which is the whole defect.
+  private async assertParentStillAuthorizes(attemptId: string, current: ExecutionAttemptRecord): Promise<void> {
     const parent = await this.parents?.authorityOf(current);
     if (this.parents !== undefined && parent === undefined)
       throw new ConflictError(
@@ -254,11 +272,8 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
       throw new ConflictError(
         "CONFLICT",
         { attemptId, held: current.driverEpoch, current: parent.epoch },
-        "this driver has been displaced by a newer epoch — it may no longer place work it could not settle.",
+        "this driver has been displaced by a newer epoch — it may no longer authorize work it could not settle.",
       );
-    const persistedAt = this.now();
-    this.attempts.set(attemptId, { ...current, state: "reserved", runtimeWork: work, updatedAt: persistedAt });
-    return { attemptId, work, persistedAt };
   }
 
   async markUnisolated(attemptId: string): Promise<void> {
