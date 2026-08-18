@@ -395,11 +395,7 @@ const MUTATIONS = [
     file: "packages/application-execution/src/run-case.ts",
     from: "        imageProvenance: compute.image,",
     to: "        ...(evalCase.image !== undefined ? { image: evalCase.image } : {}),",
-    suite: [
-      "--root",
-      "packages/application-execution",
-      "src/image-provenance-hop.counterexample.test.ts",
-    ],
+    suite: ["--root", "packages/application-execution", "src/image-provenance-hop.counterexample.test.ts"],
   },
   {
     // The reader's era rule, neutralized into the collapse it exists to prevent: a manifest from before
@@ -407,7 +403,7 @@ const MUTATIONS = [
     // instead of admitting nobody recorded what it ran.
     name: "world provenance — a legacy manifest is read as a world that ran no image",
     file: "packages/domain/src/image/image-provenance.ts",
-    from: "    const ref = manifest.image ?? \"\";",
+    from: '    const ref = manifest.image ?? "";',
     to: '    return { kind: "none" };\n    const ref = manifest.image ?? "";',
     suite: ["--root", "packages/domain", "src/image/image-provenance.test.ts"],
     build: "@everdict/domain",
