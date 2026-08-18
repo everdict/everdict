@@ -163,7 +163,9 @@ describe("the publication outbox", () => {
     expect(first.kind).toBe("published");
     expect(exports).toEqual([SCORECARD_ID]);
     expect(swept).toBe(0); // the sweep found nothing owed — the operation is no longer claimable
-    expect(current().export).toEqual(exportReceipt);
+    // …carrying the settlement it belongs to (arch-review 56, Wave F): the receipt states its own revision so
+    // the projection's monotonicity is a property of the stored value rather than a second read of the ledger.
+    expect(current().export).toEqual({ ...exportReceipt, scoringRevision: 1 });
     expect((await operations.listForScorecard(SCORECARD_ID))[0]?.state).toBe("published");
     // …and NOTHING was written to object storage. The alias promotion that used to be the second owed effect
     // is deleted (arch-review 55, Wave 7): it wrote a key the settle had already made unreachable, and it was

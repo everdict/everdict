@@ -394,6 +394,16 @@ export class PgScorecardStore implements ScorecardStore {
       guardSql += ` AND status = ANY($${i}::text[])`;
       vals.push([...guard.expectStatusIn]);
     }
+    // THE EXPORT PROJECTION MOVES FORWARD ONLY (arch-review 56, Wave F). Conditioned in the write rather
+    // than read-then-written: two publishers at once is this seam's ordinary shape, so a position read
+    // followed by an unconditional update let an older settlement land on a newer one's receipt. A stored
+    // receipt with no revision is older than every revision — a pre-Wave-F receipt is exactly that, not an
+    // unknown — which `COALESCE(..., 0)` states.
+    if (guard?.expectExportRevisionBelow !== undefined) {
+      i++;
+      guardSql += ` AND COALESCE((export->>'scoringRevision')::int, 0) < $${i}`;
+      vals.push(guard.expectExportRevisionBelow);
+    }
     // THE FENCE the driver proves on every write that drives this batch (mig 0166).
     if (guard?.expectOwnerEpoch !== undefined) {
       i++;

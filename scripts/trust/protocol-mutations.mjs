@@ -260,6 +260,19 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/judgment-scope-parity.counterexample.test.ts"],
   },
   {
+    // R56 Wave F's rung: the receipt write drops its condition, so it goes back to a read followed by an
+    // unconditional update and an older settlement can land on a newer one's receipt.
+    name: "R56 Wave F — the export projection is written unconditionally again",
+    file: "packages/application-control/src/scorecard/publication.ts",
+    from: "            expectExportRevisionBelow: operation.settlement.scoringRevision,",
+    to: "",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/export-projection-monotonic.counterexample.test.ts",
+    ],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

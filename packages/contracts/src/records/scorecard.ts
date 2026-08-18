@@ -659,6 +659,12 @@ export const ScorecardExportSchema = z.object({
   url: z.string().optional(), // top-level (experiment/project) deep link
   message: z.string().optional(), // failure/partial reason
   exportedAt: z.string(),
+  // WHICH SETTLEMENT THIS RECEIPT IS (arch-review 56, Wave F). The record's `export` is a monotonic projection
+  // of the publication ledger, and it carried no way to say where it stood — so "is the stored receipt older
+  // than mine?" could only be answered by reading the ledger separately and then writing, with nothing holding
+  // between the two. Stated on the receipt, the question is answerable by the write itself. Absent on receipts
+  // written before this, which a comparison reads as "older than any revision", because it is.
+  scoringRevision: z.number().int().positive().optional(),
   cases: z
     .array(
       z.object({

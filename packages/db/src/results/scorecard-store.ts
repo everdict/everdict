@@ -73,6 +73,13 @@ export class InMemoryScorecardStore implements ScorecardStore {
     if (guard?.expectOwnerReplica !== undefined && (cur.ownerReplica ?? null) !== guard.expectOwnerReplica)
       return undefined;
     if (guard?.expectStatusIn !== undefined && !guard.expectStatusIn.includes(cur.status)) return undefined;
+    // THE EXPORT PROJECTION MOVES FORWARD ONLY (arch-review 56, Wave F). A stored receipt with no revision is
+    // older than every revision — that is what a pre-Wave-F receipt IS, not an unknown.
+    if (
+      guard?.expectExportRevisionBelow !== undefined &&
+      (cur.export?.scoringRevision ?? 0) >= guard.expectExportRevisionBelow
+    )
+      return undefined;
     // The driver's fencing token (mig 0166) — a stale loop's write fails against a number that moved.
     if (guard?.expectOwnerEpoch !== undefined && (cur.ownerEpoch ?? 0) !== guard.expectOwnerEpoch) return undefined;
     // The pass-claim CAS — `null` means "I read no epoch" (absent marker, or a legacy one), so a rival that

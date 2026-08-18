@@ -74,6 +74,19 @@ export interface SettleOptions {
 }
 
 export interface ScorecardUpdateGuard {
+  // ── THE CURRENT EXPORT RECEIPT MOVES FORWARD ONLY (arch-review 56, Wave F) ────────────────────────
+  //
+  // `ScorecardRecord.export` is the reader-facing projection of the publication ledger, and it was kept
+  // monotonic by READING the ledger's position and then writing unconditionally. Nothing holds between those
+  // two statements, and two publishers running at once is the ordinary shape of this seam — the winner drains
+  // inline while the reconciler sweeps whatever a crash left owed. So revision 1 could read "behind", revision
+  // 2 could complete and write, and revision 1 could then land on top of it. The ledger stayed right; the
+  // answer a human reads went backwards.
+  //
+  // The condition therefore rides the WRITE: the update applies only while the receipt currently stored
+  // belongs to a settlement OLDER than this one. A loser matches no row instead of matching the row it should
+  // not have — the same shape as every other fence in this file, applied to the projection they all feed.
+  expectExportRevisionBelow?: number;
   // FIRST TERMINAL WRITE WINS, FOR THE PARENT TOO (arch-review 29 P0). The run lifecycle got this fence one
   // review at a time; the aggregate that owns those runs never did — so a booting replica whose `resume`
   // read a batch that had SUCCEEDED in the meantime went on to tombstone it FAILED{INTERRUPTED}. That is not

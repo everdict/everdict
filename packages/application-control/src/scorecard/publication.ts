@@ -231,8 +231,29 @@ export async function drainPublicationOperation(
     // `unknown` both leave the projection alone — for different reasons, and only one of them is a state of
     // the world. The operation is already `complete` by here, so an unreadable ledger costs a reader-facing
     // projection rather than a decision; it is named so nobody later reads the skip as agreement.
+    // …AND THE CONDITION RIDES THE WRITE (arch-review 56, Wave F). The position read above stopped being the
+    // fence: nothing held between it and the update, and two publishers at once is this seam's ordinary shape
+    // — the winner drains inline while the reconciler sweeps what a crash left owed. So revision 1 could read
+    // `behind`, revision 2 could complete and write, and revision 1 could land on top of it. The ledger stayed
+    // right and the answer a human reads went backwards. `expectExportRevisionBelow` makes the loser match no
+    // row at the store instead of matching the row it should not have; the read stays, because `ahead` and
+    // `unknown` still mean "do not even try".
     if (outcome.export !== undefined && (await settlementPosition(deps, operation)) === "behind")
-      await deps.store.update(record.id, { export: outcome.export, updatedAt: now() }).catch(() => undefined);
+      await deps.store
+        .update(
+          record.id,
+          // The receipt SAYS which settlement it is, so a later comparison is a property of the stored value
+          // rather than a second read of the ledger (L3: provenance is born at the source).
+          {
+            export: { ...outcome.export, scoringRevision: operation.settlement.scoringRevision },
+            updatedAt: now(),
+          },
+          undefined,
+          {
+            expectExportRevisionBelow: operation.settlement.scoringRevision,
+          },
+        )
+        .catch(() => undefined);
     return outcome;
   }
   await operations.release(operation.id, owner, outcome.reason, outcome.owed, now());
