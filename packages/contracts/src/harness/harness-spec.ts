@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SpanAttrMappingSchema } from "../execution/trace-source.js";
+import { type ResourceRequest, ResourceRequestSchema } from "../infra/world.js";
 import { VersionSchema } from "../version.js";
 import { ModelBindingSchema } from "./model-spec.js";
 
@@ -104,18 +105,12 @@ export const ServiceReadinessSchema = z.object({
 });
 export type ServiceReadiness = z.infer<typeof ServiceReadinessSchema>;
 
-// Service resource request — cpu (1000 = 1 vCPU; k8s millicores convention) + memoryMb. Unset = runtime default.
-// Mapping across the 3 runtimes: nomad Resources.CPU(MHz)/MemoryMB · k8s requests/limits(${cpu}m / ${memoryMb}Mi) ·
-// docker --cpus(=cpu/1000 cores)/--memory(${memoryMb}m). A "bigger box" variation of the same topology + fairness/cost.
-export const ServiceResourcesSchema = z.object({
-  cpu: z.number().int().positive().optional(),
-  memoryMb: z.number().int().positive().optional(),
-  // GPUs to reserve for this workload — a PORTABLE resource ask (like cpu/memoryMb), not a node selector. It routes
-  // the job to a gpu-capable runtime (the `gpu` capability) and reserves the device (k8s nvidia.com/gpu / nomad
-  // device); WHICH node pool it lands on is the runtime-owned binding. Harness-declared count wins over the runtime default.
-  gpu: z.number().int().positive().optional(),
-});
-export type ServiceResources = z.infer<typeof ServiceResourcesSchema>;
+// Service resource request — the SAME vocabulary an eval case and a driver use (`ResourceRequest`,
+// contracts/infra/world.ts): cpu millicores + memoryMb + gpu. Kept as a name because "the resources of a
+// topology service" reads better at its call sites, but it is an ALIAS, not a second declaration — two
+// spellings of one concept diverge, and this one was about to gain a `memMb` twin on the case.
+export const ServiceResourcesSchema = ResourceRequestSchema;
+export type ServiceResources = ResourceRequest;
 
 // Topology service (stateless → per-version warm). perRun = key names injected by the runtime.
 // env = the service's static env (non-store config like MODEL/LOG_LEVEL/feature flags). Injection precedence: store connEnv (convention) < env < operational storeEnv.

@@ -288,6 +288,25 @@ const MUTATIONS = [
     to: '    const read: RewardRead = { kind: "rewards", rewards: { reward: run.exitCode === 0 ? 1 : 0 }, source: "exit" };',
     suite: ["--root", "packages/graders", "src/harbor-verifier.test.ts"],
   },
+  {
+    // A declared world that is silently ignored: the case asked for 2 CPUs and an offline box, the driver
+    // gives it whatever the host has and full internet, and the score is filed as if the declaration held.
+    name: "declared world — the case's resources/network are dropped by the driver",
+    file: "packages/drivers/src/docker.ts",
+    from: "export function dockerWorldArgs(spec: ComputeSpec, label: string): string[] {",
+    to: "export function dockerWorldArgs(spec: ComputeSpec, label: string): string[] {\n  void spec;\n  void label;\n  return [];",
+    suite: ["--root", "packages/drivers", "src/declared-world.test.ts"],
+  },
+  {
+    // …and the hop before it: the declaration never reaches the thing that enforces it, which fails exactly
+    // like a case that declared nothing — the drivers' own tests build the ComputeSpec themselves and
+    // cannot see this.
+    name: "declared world — the declaration is dropped on the way to the driver",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "    ...(evalCase.resources ? { resources: evalCase.resources } : {}),",
+    to: "",
+    suite: ["--root", "packages/application-execution", "src/run-case.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

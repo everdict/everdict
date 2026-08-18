@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type RegistryAuth, RegistryAuthSchema } from "../infra/image-ref.js";
+import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 
 export const CapabilitySchema = z.enum(["shell", "browser", "desktop"]);
 export type Capability = z.infer<typeof CapabilitySchema>;
@@ -11,8 +12,15 @@ export const ComputeSpecSchema = z.object({
   os: z.enum(["linux", "windows", "macos"]),
   image: z.string().optional(),
   needs: z.array(CapabilitySchema).default(["shell"]),
-  cpu: z.number().optional(),
-  memMb: z.number().optional(),
+  // The declared world (EvalCase.resources / EvalCase.network), carried to whoever provisions. These
+  // replace a dead `cpu`/`memMb` pair that nothing ever filled and nothing ever read — and that used a
+  // second spelling of the resource vocabulary the harness specs already had.
+  //
+  // A driver that cannot ENFORCE what is declared here refuses, exactly like `os` above. That is the whole
+  // point of moving the declaration onto the case: a limit nobody applies is worse than no limit, because
+  // the result carries the same shape either way and only one of them is true.
+  resources: ResourceRequestSchema.optional(),
+  network: NetworkPolicySchema.optional(),
   // Pull credentials for `image`, resolved per provision (the CaseJob.registryAuths twin for the driver lane:
   // a grant is short-lived, so it belongs to the call, not to a driver built once at boot). A driver that
   // authenticates pulls prefers these over its constructor-level ones.

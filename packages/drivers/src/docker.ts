@@ -171,6 +171,36 @@ async function pushWithRegistryAuth(ref: string, auth?: RegistryAuth): Promise<v
   }
 }
 
+// ── THE DECLARED WORLD → DOCKER FLAGS (or a refusal) ────────────────────────────────────────────────
+//
+// Pure and exported so the refusal is testable without a docker daemon, and so a second container-launching
+// driver reaches for THIS function rather than re-deriving the same mapping (a mapping written twice has
+// already diverged). `label` names the refusing driver in the error the operator reads.
+export function dockerWorldArgs(spec: ComputeSpec, label: string): string[] {
+  const args: string[] = [];
+  const resources = spec.resources;
+  if (resources?.cpu !== undefined) args.push("--cpus", String(resources.cpu / 1000));
+  if (resources?.memoryMb !== undefined) args.push("--memory", `${resources.memoryMb}m`);
+  // Passed through rather than pre-validated: `docker run --gpus` fails loudly when the host has no GPU
+  // runtime, and a loud failure is the correct outcome for a case that declared it needs one. Silently
+  // dropping the flag would hand the agent a CPU-only box and score the result as a fair attempt.
+  if (resources?.gpu !== undefined) args.push("--gpus", String(resources.gpu));
+
+  const network = spec.network;
+  if (network !== undefined && network.mode !== "public") {
+    if (network.mode === "none") {
+      args.push("--network", "none");
+    } else {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { network: network.mode, allowedHosts: network.allowedHosts },
+        `${label} cannot enforce an egress allowlist (it has no filtering network), and the case declared network mode 'allowlist'. Route it to a runtime that can filter egress, or change the declaration — running it with full network access would measure a different task.`,
+      );
+    }
+  }
+  return args;
+}
+
 // A Driver that launches a container from an env image. Isolation is docker (the container) — for local/simple execution, separate from the strong isolation of a Backend (Nomad/K8s).
 export class DockerDriver implements Driver {
   readonly id = "docker";
@@ -223,6 +253,11 @@ export class DockerDriver implements Driver {
     const auth = pickRegistryAuth([...(spec.registryAuths ?? []), ...(this.opts.registryAuths ?? [])], image);
     if (auth) await pullWithRegistryAuth(image, auth);
     const keep = this.opts.keepAlive ?? "infinity";
+    // The declared world → docker flags, or a refusal. `allowlist` has no docker equivalent (it needs an
+    // egress proxy or a firewalled network we do not run), and the honest answer to "I cannot restrict this
+    // to pypi.org" is to refuse the case — not to run it with full internet and report the score as if the
+    // restriction had held. Same contract as the os refusal above.
+    const worldArgs = dockerWorldArgs(spec, "DockerDriver");
     // Bind-mount args (-v source:target[:ro]) — come before the image.
     const mountArgs = this.mounts.flatMap((m) => ["-v", `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`]);
     // Ignore the image ENTRYPOINT/CMD + ensure the base directory + keep-alive. Commands run inside via docker exec.
@@ -236,6 +271,7 @@ export class DockerDriver implements Driver {
         "-d",
         "--add-host",
         "host.docker.internal:host-gateway",
+        ...worldArgs,
         ...mountArgs,
         "--entrypoint",
         "sh",

@@ -1,4 +1,12 @@
-import type { ComputeHandle, Driver, Environment, EvalCase, EvaluableHarness, TraceEvent } from "@everdict/contracts";
+import type {
+  ComputeHandle,
+  ComputeSpec,
+  Driver,
+  Environment,
+  EvalCase,
+  EvaluableHarness,
+  TraceEvent,
+} from "@everdict/contracts";
 import { AppError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runCase } from "./run-case.js";
@@ -299,5 +307,71 @@ describe("runCase — the execution manifest records the world the case actually
       runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
     });
     expect(result.execution?.image).toBe("ghcr.io/acme/swe:1");
+  });
+});
+
+// ── THE DECLARATION HAS TO REACH THE THING THAT ENFORCES IT ─────────────────────────────────────────
+//
+// `EvalCase.resources` / `EvalCase.network` are enforced (or refused) by the driver, which means the only
+// thing standing between a declared world and a silently ignored one is this hop. A field that never
+// arrives fails exactly like a field that was never declared, and the drivers' own tests cannot tell the
+// difference — they build the ComputeSpec themselves. So the wiring is asserted here, at the seam.
+describe("runCase — the world a case declares reaches the driver", () => {
+  const worldCase = {
+    ...CASE,
+    resources: { cpu: 2000, memoryMb: 4096 },
+    network: { mode: "none" as const, allowedHosts: [] },
+  } as EvalCase;
+
+  const quietHarness: EvaluableHarness = {
+    id: "quiet",
+    version: "1.0.0",
+    install: async () => {},
+    run: async function* (): AsyncIterable<TraceEvent> {},
+  };
+
+  it("forwards the case's resources and network policy verbatim into the ComputeSpec", async () => {
+    const seen: ComputeSpec[] = [];
+    const driver = {
+      id: "fake",
+      provision: async (spec: ComputeSpec) => {
+        seen.push(spec);
+        return fakeComputeHandle();
+      },
+    } as Driver;
+
+    await runCase(worldCase, {
+      driver,
+      environment: ENVIRONMENT,
+      harness: quietHarness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.resources).toEqual({ cpu: 2000, memoryMb: 4096 });
+    expect(seen[0]?.network).toEqual({ mode: "none", allowedHosts: [] });
+  });
+
+  it("leaves both unset when the case declared neither — absence stays absence", async () => {
+    const seen: ComputeSpec[] = [];
+    const driver = {
+      id: "fake",
+      provision: async (spec: ComputeSpec) => {
+        seen.push(spec);
+        return fakeComputeHandle();
+      },
+    } as Driver;
+
+    await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT,
+      harness: quietHarness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    expect(seen[0]).not.toHaveProperty("resources");
+    expect(seen[0]).not.toHaveProperty("network");
   });
 });

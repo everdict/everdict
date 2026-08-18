@@ -12,6 +12,8 @@ import {
   type ExecOpts,
   type ExecResult,
   InternalError,
+  isDefaultNetwork,
+  isEmptyResourceRequest,
 } from "@everdict/contracts";
 import { chunkSinks, runSpawn, teeSinks } from "./spawn.js";
 
@@ -141,6 +143,27 @@ export class LocalDriver implements Driver {
         "BAD_REQUEST",
         { needs: spec.needs },
         "LocalDriver cannot provide a desktop world (os-use case). Route it to a computer-use-capable runtime.",
+      );
+    }
+    // …and the same rule, third axis: a host process is not a box with a size or a network of its own.
+    // LocalDriver runs the harness as a child process in the operator's own namespace, so it can enforce
+    // neither a cpu/memory ceiling nor an egress restriction. Accepting the declaration and ignoring it is
+    // the failure this whole field exists to prevent — the case would run unlimited and online, and its
+    // score would be filed as the answer to a question about a 2 GB offline box.
+    if (!isEmptyResourceRequest(spec.resources)) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { resources: spec.resources },
+        "LocalDriver runs the harness as a host process and cannot enforce a cpu/memory/gpu limit, but the case declared one. " +
+          "Route it to a container runtime (DockerDriver / a registered nomad·k8s runtime), or drop the declaration.",
+      );
+    }
+    if (!isDefaultNetwork(spec.network)) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { network: spec.network?.mode },
+        "LocalDriver shares the host network and cannot enforce a network policy, but the case declared one. " +
+          "Route it to a container runtime — running an offline-declared case with host network access would measure a different task.",
       );
     }
     const root = await mkdtemp(join(tmpdir(), "everdict-"));

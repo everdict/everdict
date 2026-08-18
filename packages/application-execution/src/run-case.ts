@@ -254,6 +254,12 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     os: world.os,
     needs: computeNeedsFor(evalCase),
     image: evalCase.image,
+    // The world the CASE declared (resources/network) travels to whoever provisions it. Forwarded verbatim
+    // and unconditionally: a driver that cannot enforce a declaration refuses here, which is the only place
+    // that knows what it can actually provide — dropping the fields instead would run the case in a
+    // different world and report the number as if nothing had changed.
+    ...(evalCase.resources ? { resources: evalCase.resources } : {}),
+    ...(evalCase.network ? { network: evalCase.network } : {}),
   });
   let released = false;
   // Live-screen capture loop handle (opt-in) — started after install, stopped inside release() so the frame grab is

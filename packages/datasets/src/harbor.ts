@@ -1,4 +1,12 @@
-import { BadRequestError, type Dataset, DatasetSchema, type EvalCase } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type Dataset,
+  DatasetSchema,
+  type EvalCase,
+  type NetworkPolicy,
+  type ResourceRequest,
+  isEmptyResourceRequest,
+} from "@everdict/contracts";
 import { z } from "zod";
 
 // Harbor (harborframework.com — the framework from the Terminal-Bench authors at the Laude Institute, and the
@@ -25,6 +33,17 @@ export const HarborTaskSchema = z.object({
   // task.toml [verifier].env — the values are the CALLER's to resolve (28% of the real corpus asks for an
   // OPENAI_API_KEY here because the verifier itself calls an LLM judge). A dataset never carries a secret.
   verifierEnv: z.record(z.string()).default({}),
+  // ── THE WORLD task.toml [environment] DECLARES ──────────────────────────────────────────────────────
+  // Carried into EvalCase.resources / EvalCase.network so the execution site can enforce it or refuse the
+  // case (rule `drivers`). Dropping these is how an import silently changes what the benchmark measures —
+  // an under-provisioned task reads as an agent that failed, and an offline task that ran online answered
+  // a different question. Stated in the SOURCE's units (whole cores, and its own network vocabulary); the
+  // conversion to Everdict's (millicores, `none`) happens once, here.
+  cpus: z.number().int().positive().optional(), // [environment].cpus — whole cores
+  memoryMb: z.number().int().positive().optional(), // [environment].memory_mb
+  gpus: z.number().int().nonnegative().optional(), // [environment].gpus (0 = "no GPU", not a request)
+  networkMode: z.enum(["public", "no-network", "allowlist"]).optional(), // [environment].network_mode
+  allowedHosts: z.array(z.string().min(1)).default([]), // [environment].allowed_hosts (allowlist mode only)
   workdir: z.string().default("/app"), // in-image working directory (repo env source.path — no clone)
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   tags: z.array(z.string()).default([]),
@@ -43,6 +62,30 @@ function resolveImage(task: HarborTask, imageTemplate?: string): string {
       "A Harbor task needs a prebuilt image (task.image or an imageTemplate) — Everdict references images, it does not build them.",
     );
   return image;
+}
+
+// task.toml's world → Everdict's. `cpus` is whole cores and `EvalCase.resources.cpu` is millicores (the k8s
+// convention the harness/topology specs already use), so the multiplication lives HERE rather than in every
+// caller that fills a HarborTask. `gpus = 0` is Harbor's way of saying "no GPU", not a request for zero.
+function resourcesOf(task: { cpus?: number; memoryMb?: number; gpus?: number }): ResourceRequest | undefined {
+  const resources: ResourceRequest = {
+    ...(task.cpus !== undefined ? { cpu: task.cpus * 1000 } : {}),
+    ...(task.memoryMb !== undefined ? { memoryMb: task.memoryMb } : {}),
+    ...(task.gpus !== undefined && task.gpus > 0 ? { gpu: task.gpus } : {}),
+  };
+  return isEmptyResourceRequest(resources) ? undefined : resources;
+}
+
+// `public` is what every case got before this existed, so it is carried as ABSENT rather than as an explicit
+// declaration — otherwise every imported task would look like it had made a deliberate network choice.
+function networkOf(task: {
+  networkMode?: "public" | "no-network" | "allowlist";
+  allowedHosts: string[];
+}): NetworkPolicy | undefined {
+  if (task.networkMode === undefined || task.networkMode === "public") return undefined;
+  return task.networkMode === "no-network"
+    ? { mode: "none", allowedHosts: [] }
+    : { mode: "allowlist", allowedHosts: task.allowedHosts };
 }
 
 // One Harbor task → an Everdict EvalCase. Container task: the prebuilt image IS the environment (a repo env with
@@ -76,6 +119,8 @@ export function harborTaskToCase(input: unknown, opts: { imageTemplate?: string 
     ],
     timeoutSec: task.timeoutSec ?? 900,
     tags,
+    ...(resourcesOf(task) ? { resources: resourcesOf(task) } : {}),
+    ...(networkOf(task) ? { network: networkOf(task) } : {}),
   };
 }
 

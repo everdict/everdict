@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
@@ -126,6 +127,21 @@ export const EvalCaseSchema = z.object({
   timeoutSec: z.number().int().positive().default(1800),
   tags: z.array(z.string()).default([]),
   placement: PlacementSchema.optional(),
+  // ── THE WORLD THIS CASE NEEDS, AS DATA THE CASE OWNS ───────────────────────────────────────────────
+  //
+  // `placement` says WHERE the work goes; these say WHAT KIND OF WORLD it must be once it gets there, and
+  // they belong to the case rather than the harness because they are properties of the TASK: a build task
+  // needs 4 GB whichever agent attempts it, and an offline reasoning task must be offline for every
+  // harness being compared. A benchmark corpus states both routinely (Harbor's `[environment]` declares
+  // cpus/memory_mb on tens of thousands of tasks and an internet policy on thousands more).
+  //
+  // Both are OPTIONAL and absent means what it always meant: the runtime's default box, ordinary network.
+  // What they must never become is advisory — an execution site that cannot provide the declared world
+  // REFUSES the case (`ComputeSpec` below), because the failure mode of ignoring them is silent and
+  // scoring-relevant: an under-provisioned case reads as an agent that failed, and an offline benchmark
+  // that ran online measured something the benchmark does not claim to measure.
+  resources: ResourceRequestSchema.optional(),
+  network: NetworkPolicySchema.optional(),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 

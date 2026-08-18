@@ -86,3 +86,50 @@ describe("harborToDataset", () => {
     expect(ds.cases[1]?.graders).toEqual([{ id: "harbor-verifier", config: { cmd: "pytest -q", cwd: "/app" } }]);
   });
 });
+
+describe("harborTaskToCase — the world task.toml declares", () => {
+  // An adapter that drops [environment] silently changes what the benchmark measures: the case runs in a
+  // default box on the open internet and its score is filed as the answer to a question about a 4 GB
+  // offline machine. The execution site can only enforce or refuse a declaration that survived the import.
+  it("carries cpus/memory/gpus over as resources, converting whole cores to millicores", () => {
+    const c = harborTaskToCase({
+      id: "build-heavy",
+      instruction: "compile it",
+      image: "img:1",
+      cpus: 4,
+      memoryMb: 8192,
+      gpus: 1,
+    });
+    expect(c.resources).toEqual({ cpu: 4000, memoryMb: 8192, gpu: 1 });
+  });
+
+  it("reads gpus = 0 as 'no GPU', not as a request for zero of them", () => {
+    const c = harborTaskToCase({ id: "t", instruction: "x", image: "img:1", cpus: 1, gpus: 0 });
+    expect(c.resources).toEqual({ cpu: 1000 });
+  });
+
+  it("translates the network vocabulary, and leaves 'public' absent rather than declared", () => {
+    const offline = harborTaskToCase({ id: "t", instruction: "x", image: "img:1", networkMode: "no-network" });
+    expect(offline.network).toEqual({ mode: "none", allowedHosts: [] });
+
+    const allow = harborTaskToCase({
+      id: "t",
+      instruction: "x",
+      image: "img:1",
+      networkMode: "allowlist",
+      allowedHosts: ["pypi.org"],
+    });
+    expect(allow.network).toEqual({ mode: "allowlist", allowedHosts: ["pypi.org"] });
+
+    // `public` is what every case got before the field existed — recording it as a deliberate choice would
+    // make "the task said nothing" and "the task chose the open internet" indistinguishable.
+    const open = harborTaskToCase({ id: "t", instruction: "x", image: "img:1", networkMode: "public" });
+    expect(open.network).toBeUndefined();
+  });
+
+  it("declares nothing when the task declared nothing", () => {
+    const c = harborTaskToCase({ id: "t", instruction: "x", image: "img:1" });
+    expect(c.resources).toBeUndefined();
+    expect(c.network).toBeUndefined();
+  });
+});

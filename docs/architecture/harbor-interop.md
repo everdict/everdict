@@ -165,11 +165,13 @@ For an eval runtime this is not cosmetic: `no-network` is what makes an offline 
 measure reasoning instead of retrieval, and 7.9% of the corpus declares it (as legacy `allow_internet`).
 Importing those tasks while ignoring the field silently changes what the benchmark measures.
 
-**Decision: borrow it, minimally and honestly.** Add `EvalCase.network` (`{ mode, allowedHosts[] }`),
-carry it to the driver, enforce what each driver can (`DockerDriver`: `--network none` for `no-network`;
-allowlist needs a proxy/firewall sidecar we do not have). Where a driver **cannot** enforce the declared
-mode, the case **refuses** rather than running unprotected — an unenforceable isolation claim is the same
-class of lie as the exit-code reward. Phase-level overrides are NOT ported (0 tasks use them).
+**Decision: borrow it, minimally and honestly — ✅ shipped.** `EvalCase.network` (`{ mode, allowedHosts[] }`)
+and `EvalCase.resources` (cpu/memoryMb/gpu) are carried to the driver on the `ComputeSpec`; `DockerDriver`
+enforces `--network none` / `--cpus` / `--memory` / `--gpus`, and refuses `allowlist` because it has no
+egress filter; `LocalDriver` refuses both (a host process can enforce neither). Where a driver cannot
+enforce the declared world the case is **refused** rather than run unprotected — an unenforceable isolation
+claim is the same class of lie as the exit-code reward. Phase-level overrides are NOT ported (0 tasks use
+them). See rule `drivers` and `packages/contracts/src/infra/world.ts`.
 
 ### 3.3 Verifier secrets — the 28% that decides feasibility
 
