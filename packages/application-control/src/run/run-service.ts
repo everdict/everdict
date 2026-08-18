@@ -26,6 +26,7 @@ import {
   type TraceSourceConfig,
   type TraceSpan,
   UpstreamError,
+  type WorkPresence,
   attemptIdOf,
   isPulledCommandTrace,
   killConverged,
@@ -203,11 +204,10 @@ export interface RunServiceDeps {
   // `unknown` is a first-class answer: a cluster that cannot be asked leaves the postcondition unestablished,
   // and the operation stays owed rather than completing on an optimistic reading. Absent dep = this
   // deployment takes no readback, and the certificate says so by carrying no count.
-  probeWork?: (
-    tenant: string,
-    runtime: string | undefined,
-    work: RuntimeWorkRef,
-  ) => Promise<"absent" | "live" | "unknown">;
+  // The postcondition read (arch-review 53, Wave E) — now the SHARED `WorkPresence` (arch-review 56, Wave G).
+  // It was its own `"absent" | "live" | "unknown"` string union here and a different one in the scorecard
+  // lane, which is two spellings of one question; the shared one also carries WHY an unknown is unknown.
+  probeWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<WorkPresence>;
   // Drop a still-queued scheduler entry — it would otherwise dispatch only to be discarded.
   cancelQueued?: (predicate: (job: CaseJob) => boolean) => number;
   // Revoke a self-hosted lease: the runner aborts the in-flight case on its next heartbeat. AWAITED by the
@@ -1620,9 +1620,14 @@ export class RunService {
     let unverifiable = 0;
     if (this.deps.probeWork && works.length > 0)
       for (const work of works) {
-        const seen = await this.deps.probeWork(rec.tenant, rec.runtime, work).catch((): "unknown" => "unknown");
-        if (seen === "live") activeManagedWork += 1;
-        else if (seen === "unknown") unverifiable += 1;
+        const seen = await this.deps.probeWork(rec.tenant, rec.runtime, work).catch(
+          (err: unknown): WorkPresence => ({
+            kind: "unknown",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        if (seen.kind === "live") activeManagedWork += 1;
+        else if (seen.kind === "unknown") unverifiable += 1;
       }
     if (activeManagedWork > 0 || unverifiable > 0)
       throw new UpstreamError(

@@ -27,6 +27,7 @@ import type {
   RuntimeSpec,
   RuntimeWorkRef,
   TraceEvent,
+  WorkPresence,
 } from "@everdict/contracts";
 import { readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
@@ -343,16 +344,30 @@ export function buildRuntimeAccess(deps: {
     tenant: string,
     runtimeList: string | undefined,
     work: RuntimeWorkRef,
-  ): Promise<"absent" | "live" | "unknown"> => {
-    let seen: "absent" | "live" | "unknown" | undefined;
+  ): Promise<WorkPresence> => {
+    let seen: WorkPresence | undefined;
     const { unresolved } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isWorkControllable(backend)) return false;
-      const placement = await backend.inspectWork(work).catch(() => undefined);
-      seen = placement === undefined || placement.phase === "dead" ? "absent" : "live";
+      // …THROUGH THE BACKEND'S OWN EXISTENCE READ (arch-review 56, Wave G). This used to derive absence from
+      // `inspectWork`, which answers a display PHASE: K8s reports `queued` for a Job whose pods do not exist
+      // yet, so a Job that had genuinely gone away read as live and the cancellation could never converge.
+      // `probeWork` asks the question this needs — does the object exist — and says why when it cannot tell.
+      seen = await backend.probeWork(work).catch(
+        (err: unknown): WorkPresence => ({
+          kind: "unknown",
+          reason: `probeWork ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+        }),
+      );
       return true; // the first backend that can answer about this exact object is the answer
     });
     if (seen !== undefined) return seen;
-    return unresolved.length > 0 ? "unknown" : "unknown"; // nobody could be asked either way
+    return {
+      kind: "unknown",
+      reason:
+        unresolved.length > 0
+          ? `probeWork ${work.externalJobId}: ${unresolved.join(", ")} could not be resolved`
+          : `probeWork ${work.externalJobId}: no runtime could be asked about this handle`,
+    };
   };
 
   // ── A MANAGED LANE WITH NO HANDLE IS `unknown` (arch-review 53, legacy removal) ────────────────────

@@ -12,6 +12,7 @@ import type {
   RegistryAuth,
   RuntimeWorkRef,
   TraceEvent,
+  WorkPresence,
 } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -135,11 +136,7 @@ export function buildRun(deps: {
   killWork: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
   // The postcondition read behind a VERIFIED cancellation (arch-review 53, Wave E). `killWork` answers what
   // the delete returned; this answers whether the object went away.
-  probeWork?: (
-    tenant: string,
-    runtimeList: string | undefined,
-    work: RuntimeWorkRef,
-  ) => Promise<"absent" | "live" | "unknown">;
+  probeWork?: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<WorkPresence>;
   // The cancel TEARDOWN's durable owner (mig 0184/0186) — the run lane joins the ledger the batch lane has
   // owned since arch-review 47, so a crash between the CANCELLED commit and a successful kill leaves an
   // operation the coordinator sweeps rather than a terminal row over live compute.

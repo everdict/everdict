@@ -108,7 +108,17 @@ export function describeRuntimeWorkControl(name: string, backendOf: () => Backen
   describe(`${name} — runtime work control conformance`, () => {
     it("implements the whole exact-work surface, or none of it", () => {
       const backend = backendOf() as unknown as Record<string, unknown>;
-      const methods = ["adoptWork", "logsForWork", "eventsForWork", "execInWork", "inspectWork", "sampleWork"];
+      // `probeWork` joins the all-or-none set (arch-review 56, Wave G): a lane that can stop work and cannot
+      // read back whether it went away converges its cancellations on an accepted delete.
+      const methods = [
+        "adoptWork",
+        "logsForWork",
+        "eventsForWork",
+        "execInWork",
+        "inspectWork",
+        "sampleWork",
+        "probeWork",
+      ];
       const present = methods.filter((m) => typeof backend[m] === "function");
       // All or nothing: a partial implementation puts a caller back to guessing which reads are exact, which
       // is the state Wave B exists to end.

@@ -49,3 +49,27 @@ export function worstKillOutcome(outcomes: readonly KillOutcome[]): KillOutcome 
   for (const outcome of outcomes) if (SEVERITY[outcome.status] > SEVERITY[worst.status]) worst = outcome;
   return worst;
 }
+
+// ── DOES THIS WORK STILL EXIST? (arch-review 56, Wave G) ────────────────────────────────────────────
+//
+// `stopped` above says the orchestrator ACCEPTED the delete, and the comment beside it says "the object is
+// going away" — which is a prediction, not an observation. K8s deletes with `--wait=false` and returns as
+// soon as the API server records the intent; Nomad's stop returns once the job is marked. Between that and
+// the container exiting there is a graceful-termination period, an image pull to interrupt, a finalizer to
+// run. A cancellation that converged on `stopped` certified that a batch's compute was gone while it was
+// still running and still billing.
+//
+// So the teardown READS BACK. This is that read, and it is deliberately NOT `inspectWork`: that one answers
+// a display phase (`queued` for a K8s Job whose pods have not been created), which cannot tell "not started
+// yet" from "not there any more". Existence is a different question and gets its own answer.
+//
+//   live    — the object is there. The teardown has not converged, whatever the stop returned.
+//   absent  — the sweep looked and there is nothing. This is the observation `stopped` was standing in for.
+//   unknown — the cluster could not be asked. Not an absence (L2), so the operation stays owed.
+export type WorkPresence = { kind: "live" } | { kind: "absent" } | { kind: "unknown"; reason: string };
+
+// Convergence for a READ-BACK, which is narrower than for a stop: only an observed absence counts. A `live`
+// answer is the case this exists for and an `unknown` is the case L2 exists for.
+export function presenceConverged(presence: WorkPresence): boolean {
+  return presence.kind === "absent";
+}

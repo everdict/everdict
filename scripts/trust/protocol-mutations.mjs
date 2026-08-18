@@ -273,6 +273,16 @@ const MUTATIONS = [
     ],
   },
   {
+    // R56 Wave G's rung: the teardown stops reading back, so an accepted delete converges the cancellation
+    // while the container is still running through its grace period.
+    name: "R56 Wave G — an accepted stop converges without an observed absence",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: '      if (outcome?.status === "stopped" && this.deps.probeWork) {',
+    to: "      if (false && this.deps.probeWork) {",
+    suite: ["--root", "apps/api", "src/core/scorecard/cancellation-verified-absence.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the
@@ -358,6 +368,17 @@ const MUTATIONS = [
     from: '    const reached: "requested" | "verifying" = detail?.unverifiable !== undefined ? "verifying" : "requested";',
     to: '    const reached: "requested" | "verifying" = "requested";',
     suite: ["--root", "packages/application-control", "src/cancellation/verified-completion.counterexample.test.ts"],
+  },
+  {
+    // L3, in the scoring plane: read the outcome off rendered output (the verifier process's exit status)
+    // instead of at its source (the reward the verifier PUBLISHED). This is the shipped defect the
+    // reward-file grader replaced — a container task's verifier exits 0 whether the agent passed or failed,
+    // so the mutated grader scores the whole corpus as passing.
+    name: "reward file — the verdict is re-derived from the verifier's exit code",
+    file: "packages/graders/src/reward-file.ts",
+    from: "    const read = await this.readReward(ctx, rewardDir);",
+    to: '    const read: RewardRead = { kind: "rewards", rewards: { reward: run.exitCode === 0 ? 1 : 0 }, source: "exit" };',
+    suite: ["--root", "packages/graders", "src/reward-file.test.ts"],
   },
   {
     // A declared world that is silently ignored: the case asked for 2 CPUs and an offline box, the driver

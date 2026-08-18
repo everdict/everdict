@@ -21,8 +21,10 @@ import {
   type ScorecardOrigin,
   type ScorecardRecord,
   UpstreamError,
+  type WorkPresence,
   isConstitutionalMetric,
   killConverged,
+  presenceConverged,
 } from "@everdict/contracts";
 import { CANCELLED_ERROR_CODE, JudgeIdSchema, readOrUnknown } from "@everdict/contracts";
 import type { CaseRunRef } from "@everdict/contracts/wire";
@@ -1041,7 +1043,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // reported the same thing as one that did. `unknown`/`failed` join `failures` and keep the operation
     // owed; the converged pair is what the certificate counts.
     const kills: KillOutcome[] = [];
-    const attempted = async (call: Promise<KillOutcome>, what: string): Promise<void> => {
+    // Every read-back this teardown performed (arch-review 56, Wave G) — the certificate counts them, because
+    // a certificate that omits the measurement it was gated on is the shape the previous version had.
+    const presences: WorkPresence[] = [];
+    const attempted = async (call: Promise<KillOutcome>, what: string): Promise<KillOutcome> => {
       const outcome = await call.catch(
         (err: unknown): KillOutcome => ({
           status: "failed",
@@ -1050,6 +1055,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       );
       kills.push(outcome);
       if (!killConverged(outcome)) failures.push(`${what}: ${outcome.reason ?? outcome.status}`);
+      return outcome;
     };
     // ── THE EXACT WORK EACH CHILD PLACED (arch-review 52, Wave 2) ────────────────────────────────────
     //
@@ -1075,14 +1081,36 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     const runtimeOfChild = new Map(children.map((c) => [c.id, c.runtime]));
     for (const item of placed) {
       if (!this.deps.killWork) break;
-      await attempted(
-        this.deps.killWork(
-          rec.tenant,
-          (item.childId ? runtimeOfChild.get(item.childId) : undefined) ?? rec.runtime,
-          item.work,
-        ),
+      const runtime = (item.childId ? runtimeOfChild.get(item.childId) : undefined) ?? rec.runtime;
+      const outcome = await attempted(
+        this.deps.killWork(rec.tenant, runtime, item.work),
         `kill ${item.work.externalJobId}`,
       );
+      // ── AND THE STOP IS READ BACK (arch-review 56, Wave G) ────────────────────────────────────────
+      //
+      // `stopped` means the orchestrator ACCEPTED the delete — K8s returns from `--wait=false` as soon as the
+      // API server records the intent, Nomad once the job is marked. The container is still running through
+      // its graceful-termination period, and a certificate written on that answer says a batch's compute is
+      // gone while it is still burning. `absent` needs no probe: it already IS the observation, and probing
+      // again would double every teardown's cluster calls to re-learn what the kill just said.
+      //
+      // A probe that answers `live` or `unknown` joins `failures`, so the operation stays owed and the
+      // reconciler asks again — the same treatment a refused kill gets, because it means the same thing.
+      if (outcome?.status === "stopped" && this.deps.probeWork) {
+        const presence = await this.deps.probeWork(rec.tenant, runtime, item.work).catch(
+          (err: unknown): WorkPresence => ({
+            kind: "unknown",
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        presences.push(presence);
+        if (!presenceConverged(presence))
+          failures.push(
+            `probe ${item.work.externalJobId}: the stop was accepted but the work reads ${presence.kind}${
+              presence.kind === "unknown" ? ` (${presence.reason})` : ""
+            }`,
+          );
+      }
     }
     const childrenWithWork = new Set(placed.flatMap((i: { childId?: string }) => (i.childId ? [i.childId] : [])));
     for (const c of children) {
@@ -1145,8 +1173,12 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return {
       at: this.now(),
       childrenTerminal: after.length,
-      activeManagedWork: kills.filter((k) => !killConverged(k)).length,
-      unverifiable: kills.filter((k) => k.status === "unknown").length,
+      // A stop that was only ACCEPTED is not converged work until a probe said so (arch-review 56, Wave G):
+      // both vectors count, because `stopped` was standing in for an observation nobody made.
+      activeManagedWork:
+        kills.filter((k) => !killConverged(k)).length + presences.filter((p) => !presenceConverged(p)).length,
+      unverifiable:
+        kills.filter((k) => k.status === "unknown").length + presences.filter((p) => p.kind === "unknown").length,
       kills: {
         stopped: kills.filter((k) => k.status === "stopped").length,
         absent: kills.filter((k) => k.status === "absent").length,

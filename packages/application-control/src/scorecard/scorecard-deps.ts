@@ -13,6 +13,7 @@ import type {
   SpanAttrMapping,
   TraceSource,
   TraceSourceConfig,
+  WorkPresence,
 } from "@everdict/contracts";
 import type {
   BudgetTracker,
@@ -165,6 +166,11 @@ export interface ScorecardServiceDeps {
   // placed, addressed by the handle the backend reported and the attempt ledger persisted. Preferred wherever
   // a handle exists — the case-id kill it replaced selected on the case alone, i.e. every other run's job too.
   killWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<KillOutcome>;
+  // THE READ-BACK (arch-review 56, Wave G). `killWork` answering `stopped` means the orchestrator accepted the
+  // delete, not that the object went away — so a teardown asks this about the exact same handle and converges
+  // only on an observed `absent`. Optional because a deployment with no managed lane has nothing to probe; a
+  // managed one that omits it converges on the accepted stop, which is the defect.
+  probeWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<WorkPresence>;
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
   // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).

@@ -16,6 +16,7 @@ import {
   type RuntimeWorkRef,
   type TraceEvent,
   UpstreamError,
+  type WorkPresence,
   judgeAuthEnv,
   judgeEnv,
   worstKillOutcome,
@@ -1197,6 +1198,32 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   // What is NOT here is the thing that made the old kill dangerous: no case-only selector, so a concurrent
   // run of the same case — and, since the case label became injective, a different case that truncated to the
   // same value — is not this cancellation's business. Best-effort/idempotent, never throws.
+  // ── DOES THIS WORK STILL EXIST? (arch-review 56, Wave G) ────────────────────────────────────────
+  //
+  // `deleteJob` above passes `--wait=false`, so `stopped` means the API server RECORDED the delete — the pod
+  // is still running through its grace period, its finalizers and any in-flight image pull. A cancellation
+  // that converged there certified a batch's compute freed while it was still burning.
+  //
+  // Answered from the same label selector the delete used, so the probe and the stop address exactly the same
+  // objects. Deliberately not `inspectWork`: that returns a display PHASE, and it reports `queued` for a Job
+  // whose pods do not exist yet — indistinguishable from a Job that is gone.
+  async probeWork(work: RuntimeWorkRef): Promise<WorkPresence> {
+    try {
+      return await this.withApi(async (api): Promise<WorkPresence> => {
+        const jobs = await api.jobsByLabel(runWorkSelector(work));
+        // A listing that FAILED is not an empty cluster (L2) — the teardown stays owed.
+        if (jobs === undefined)
+          return { kind: "unknown", reason: `list jobs for ${work.externalJobId}: the cluster did not answer` };
+        return jobs.length === 0 ? { kind: "absent" } : { kind: "live" };
+      });
+    } catch (err) {
+      return {
+        kind: "unknown",
+        reason: `list jobs for ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
   async killWork(work: RuntimeWorkRef): Promise<KillOutcome> {
     try {
       return await this.withApi(async (api): Promise<KillOutcome> => {

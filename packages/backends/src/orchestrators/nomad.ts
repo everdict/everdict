@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  type WorkPresence,
   caseJobPayload,
   describeNomadPlacementFailure,
   extractLiveEvents,
@@ -1232,6 +1233,42 @@ export class NomadBackend
       return {
         status: "failed",
         reason: `nomad deregister ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  // ── DOES THIS JOB STILL EXIST? (arch-review 56, Wave G) ─────────────────────────────────────────
+  //
+  // `killWork` above answers `stopped` once Nomad has MARKED the job for stopping — its allocations are still
+  // running through their kill timeout at that moment. A cancellation that converged there certified freed
+  // compute that was still burning. This is the read-back, and it is an EXISTENCE question rather than the
+  // placement projection `inspectWork` returns: that one reports a phase, and a phase cannot tell "not
+  // started" from "not there".
+  //
+  // A dead job is one Nomad no longer has (404) or one it reports as `dead` with nothing still running — the
+  // second matters because a deregistered job lingers in the API until garbage collection.
+  async probeWork(work: RuntimeWorkRef): Promise<WorkPresence> {
+    try {
+      const nsq =
+        work.namespace && work.namespace !== "default" ? `?namespace=${encodeURIComponent(work.namespace)}` : "";
+      const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(work.externalJobId)}${nsq}`);
+      if (res.status === 404) return { kind: "absent" };
+      if (res.status >= 300)
+        return { kind: "unknown", reason: `nomad job read ${work.externalJobId}: HTTP ${res.status}` };
+      let job: { Status?: string } | undefined;
+      try {
+        job = JSON.parse(res.text) as { Status?: string };
+      } catch {
+        // A body this adapter cannot read is not a job it can call gone.
+        return { kind: "unknown", reason: `nomad job read ${work.externalJobId}: unparseable body` };
+      }
+      // `dead` is Nomad's terminal job status; anything else means allocations may still be running.
+      return job?.Status === "dead" ? { kind: "absent" } : { kind: "live" };
+    } catch (err) {
+      // An unreachable cluster is not an absence (L2) — the teardown stays owed.
+      return {
+        kind: "unknown",
+        reason: `nomad job read ${work.externalJobId}: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

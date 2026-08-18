@@ -8,6 +8,7 @@ import {
   type RuntimeSample,
   type RuntimeWorkRef,
   type TraceEvent,
+  type WorkPresence,
 } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / ManagedWorkControl.
 // inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
@@ -156,6 +157,13 @@ export interface ManagedWorkControl {
   inspectWork(work: RuntimeWorkRef): Promise<CasePlacement | undefined>;
   // Live resource usage of exactly this work.
   sampleWork(work: RuntimeWorkRef): Promise<CaseRuntimeSample | undefined>;
+  // DOES IT STILL EXIST? (arch-review 56, Wave G.) `killWork` answers `stopped` when the orchestrator ACCEPTED
+  // the delete — K8s returns from `--wait=false` as soon as the API server records it, Nomad once the job is
+  // marked — and the container keeps running through its grace period. A cancellation converging on that
+  // certifies freed compute that is still burning, so a teardown reads back and only an observed `absent`
+  // converges. Separate from `inspectWork` on purpose: that answers a display PHASE, and a phase cannot tell
+  // "not started yet" from "not there any more".
+  probeWork(work: RuntimeWorkRef): Promise<WorkPresence>;
 }
 
 // ScreenCapturable — a live screen frame for a run's per-case browser (topology backends only). Deliberately keyed
