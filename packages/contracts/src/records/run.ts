@@ -16,6 +16,16 @@ export type RunStatus = z.infer<typeof RunStatusSchema>;
 // One list, two enforcement sites, no chance of them drifting into two different definitions of "done".
 export const TERMINAL_RUN_STATUSES = ["succeeded", "failed", "suspended"] as const satisfies readonly RunStatus[];
 
+// …AND ITS COMPLEMENT, WRITTEN AS AN ALLOWLIST (arch-review 56, Wave A). A store that asks "may this run
+// still act?" must express it POSITIVELY. The negated form — `status NOT IN ('succeeded','failed')` — is
+// fail-OPEN: it was correct when it was written, and the day `suspended` joined the enum it silently started
+// answering "yes, still open" for a run whose work had stopped. An allowlist is fail-closed by construction,
+// so a new status is excluded until somebody decides otherwise, and the `satisfies` below makes the compiler
+// ask that question at the moment the enum grows.
+//
+// Every enforcement site — the domain guard, the in-memory adapter, the SQL — reads THIS, never its own copy.
+export const OPEN_RUN_STATUSES = ["queued", "running"] as const satisfies readonly RunStatus[];
+
 // THE SETTLEMENT THAT ABANDONS THE WORK. A run settled with this code stopped because somebody decided it
 // should, which is a different fact from "it ran and failed" — and it is the one settlement whose PAYLOAD must
 // never be overwritten by a late result. A dispatch already past the point of no return when the user hit stop

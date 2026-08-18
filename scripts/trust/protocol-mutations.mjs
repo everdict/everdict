@@ -191,6 +191,32 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/frozen-payload-required.counterexample.test.ts"],
   },
   {
+    // Wave A's rung (arch-review 56): the parent-authority vocabulary goes back to the negated form, so a
+    // cancelled or superseded batch may authorize new compute again.
+    name: "R56 Wave A — the reservation guard excludes instead of allowing",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "if (!parent || !(OPEN_SCORECARD_STATUSES as readonly string[]).includes(parent.status)) return undefined;",
+    to: 'if (!parent || parent.status === "succeeded" || parent.status === "failed") return undefined;',
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/reservation-authority-vocabulary.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the SQL twin, which is the lane the review found and the lane no behavioural test can evaluate.
+    name: "R56 Wave A — the SQL parent guard spells its own status list",
+    file: "packages/db/src/results/pg-execution-attempt-store.ts",
+    from: "                AND s.status IN (${OPEN_SCORECARDS})",
+    to: "                AND s.status NOT IN ('succeeded', 'failed')",
+    suite: [
+      "--root",
+      "packages/db",
+      "src/results/pg-execution-attempt-store.test.ts",
+      "src/negated-status-guard.test.ts",
+    ],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the
@@ -280,13 +306,13 @@ const MUTATIONS = [
   {
     // L3, in the scoring plane: read the outcome off rendered output (the verifier process's exit status)
     // instead of at its source (the reward the verifier PUBLISHED). This is the shipped defect the
-    // harbor-verifier grader replaced — every Harbor / Terminal-Bench task exits 0 whether the agent passed
-    // or failed, so the mutated grader scores the whole corpus as passing.
-    name: "harbor — the verdict is re-derived from the verifier's exit code",
-    file: "packages/graders/src/harbor-verifier.ts",
+    // reward-file grader replaced — a container task's verifier exits 0 whether the agent passed or failed,
+    // so the mutated grader scores the whole corpus as passing.
+    name: "reward file — the verdict is re-derived from the verifier's exit code",
+    file: "packages/graders/src/reward-file.ts",
     from: "    const read = await this.readReward(ctx, rewardDir);",
     to: '    const read: RewardRead = { kind: "rewards", rewards: { reward: run.exitCode === 0 ? 1 : 0 }, source: "exit" };',
-    suite: ["--root", "packages/graders", "src/harbor-verifier.test.ts"],
+    suite: ["--root", "packages/graders", "src/reward-file.test.ts"],
   },
   {
     // A declared world that is silently ignored: the case asked for 2 CPUs and an offline box, the driver

@@ -6,6 +6,8 @@ import {
   type ExecutionAttemptState,
   InternalError,
   NotFoundError,
+  OPEN_RUN_STATUSES,
+  OPEN_SCORECARD_STATUSES,
   type PersistedWorkIntent,
   type RuntimeWorkRef,
   RuntimeWorkRefSchema,
@@ -57,6 +59,15 @@ function toAttempt(row: AttemptRow): ExecutionAttemptRecord {
 }
 
 const TERMINAL_LIST = TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ");
+// ── THE PARENT-AUTHORITY VOCABULARY, GENERATED (arch-review 56, Wave A) ─────────────────────────────
+//
+// The reservation's parent condition was hand-written as `NOT IN ('succeeded', 'failed')`, which is fail-OPEN:
+// it was true of the enum on the day it was written, and `superseded` and `cancelled` (scorecards) and
+// `suspended` (runs) joined afterwards, so the guard answered "this parent may still place compute" for a
+// batch the user had cancelled. Generated from the shared allowlist instead, so the SQL cannot say something
+// the domain does not — and a status added tomorrow is excluded until somebody classifies it.
+const OPEN_SCORECARDS = OPEN_SCORECARD_STATUSES.map((s) => `'${s}'`).join(", ");
+const OPEN_RUNS = OPEN_RUN_STATUSES.map((s) => `'${s}'`).join(", ");
 
 // Postgres-backed physical-execution ledger (mig 0182). See ports/execution-attempt-store.ts for what this
 // plane is and is not: a Phase-1 dual-write audit spine, observed rather than depended on.
@@ -220,13 +231,13 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
            a.scorecard_id IS NOT NULL AND EXISTS (
              SELECT 1 FROM everdict_scorecards s
               WHERE s.id = a.scorecard_id
-                AND s.status NOT IN ('succeeded', 'failed')
+                AND s.status IN (${OPEN_SCORECARDS})
                 AND (a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch)
            )
            OR a.scorecard_id IS NULL AND EXISTS (
              SELECT 1 FROM everdict_runs r
               WHERE 'evd-run-' || r.id = a.execution_id
-                AND r.status NOT IN ('succeeded', 'failed')
+                AND r.status IN (${OPEN_RUNS})
                 AND (a.driver_epoch IS NULL OR r.owner_epoch = a.driver_epoch)
            )
          )

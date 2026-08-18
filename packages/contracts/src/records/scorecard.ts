@@ -24,6 +24,12 @@ export const TERMINAL_SCORECARD_STATUSES = [
 ] as const satisfies readonly z.infer<typeof ScorecardStatusSchema>[];
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
+// …AND ITS COMPLEMENT, AS AN ALLOWLIST (arch-review 56, Wave A). See OPEN_RUN_STATUSES for why the negated
+// form is the bug: `s.status NOT IN ('succeeded', 'failed')` in the reservation guard answered "this batch may
+// still place compute" for a CANCELLED and a SUPERSEDED batch, because those two joined the enum after the
+// query was written. The allowlist cannot drift that way — a status nobody has classified is simply not open.
+export const OPEN_SCORECARD_STATUSES = ["queued", "running"] as const satisfies readonly ScorecardStatus[];
+
 // phase = the failed pipeline stage (dispatch|judges|metrics|offload|persist) — for "at which stage" diagnosis (jsonb, so no migration needed).
 export const ScorecardRunErrorSchema = z.object({
   code: z.string(),

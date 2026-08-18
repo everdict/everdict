@@ -3,6 +3,8 @@ import {
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
   NotFoundError,
+  OPEN_RUN_STATUSES,
+  OPEN_SCORECARD_STATUSES,
   type PersistedWorkIntent,
   type RuntimeWorkRef,
   attemptIdOf,
@@ -278,4 +280,37 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
         a.executionId === b.executionId ? a.generation - b.generation : a.executionId < b.executionId ? -1 : 1,
       );
   }
+}
+
+// ── WHO MAY STILL AUTHORIZE WORK, IN ONE PLACE (arch-review 56, Wave A) ─────────────────────────────
+//
+// The in-process twin of the Postgres reservation's correlated EXISTS. It lived as a closure in the API's
+// composition root and hand-wrote its own vocabulary (`status === "succeeded" || status === "failed"`) — the
+// same drift the SQL had, in the one lane a counterexample could actually drive. So the two adapters agreed
+// with each other and both disagreed with the domain, and a test comparing them would have agreed too.
+//
+// It reads the OPEN allowlist rather than a terminal check, for the reason the allowlist exists: a status
+// added to the enum tomorrow is excluded until somebody classifies it, instead of silently joining the
+// permitted side.
+export function attemptParentAuthority(stores: {
+  scorecards: { get: (id: string) => Promise<{ status: string; ownerEpoch?: number } | undefined> };
+  runs: { get: (id: string) => Promise<{ status: string; ownerEpoch?: number } | undefined> };
+}): AttemptParentAuthority {
+  return {
+    async authorityOf(attempt) {
+      if (attempt.scorecardId !== undefined) {
+        const parent = await stores.scorecards.get(attempt.scorecardId);
+        if (!parent || !(OPEN_SCORECARD_STATUSES as readonly string[]).includes(parent.status)) return undefined;
+        return { epoch: parent.ownerEpoch ?? 0 };
+      }
+      const runId = attempt.executionId.startsWith("evd-run-") ? attempt.executionId.slice("evd-run-".length) : "";
+      const run = runId === "" ? undefined : await stores.runs.get(runId);
+      // An execution with no parent row this store can name — the CLI's own lane — keeps the state and
+      // already-reserved guards and skips the epoch one. "We cannot check what nobody recorded" is not a
+      // licence, and it is also not a reason to refuse a lane that has no parent to be displaced from.
+      if (runId === "" || !run) return { epoch: attempt.driverEpoch ?? 0 };
+      if (!(OPEN_RUN_STATUSES as readonly string[]).includes(run.status)) return undefined;
+      return { epoch: run.ownerEpoch ?? 0 };
+    },
+  };
 }

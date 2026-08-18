@@ -16,6 +16,7 @@ import {
   InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
+  attemptParentAuthority,
   InMemoryPublicationOperationStore,
   soleLeader,
   soloReplicas,
@@ -410,23 +411,14 @@ export async function makePersistence(): Promise<Persistence> {
       // work only while the batch or run it belongs to is still open and still owned at the epoch the attempt
       // was opened under. The Pg twin asks the same question as a correlated EXISTS inside its one UPDATE;
       // here the two stores are in the same process, so the reader closes over them.
-      executionAttemptStore: new InMemoryExecutionAttemptStore(undefined, {
-        async authorityOf(attempt) {
-          if (attempt.scorecardId !== undefined) {
-            const parent = await inMemoryScorecards.get(attempt.scorecardId);
-            if (!parent || parent.status === "succeeded" || parent.status === "failed") return undefined;
-            return { epoch: parent.ownerEpoch ?? 0 };
-          }
-          const runId = attempt.executionId.startsWith("evd-run-") ? attempt.executionId.slice("evd-run-".length) : "";
-          const run = runId === "" ? undefined : await inMemoryRuns.get(runId);
-          // An execution with no parent row this store can name — the CLI's own lane — keeps the state and
-          // already-reserved guards and skips the epoch one. "We cannot check what nobody recorded" is not a
-          // licence, and it is also not a reason to refuse a lane that has no parent to be displaced from.
-          if (runId === "" || !run) return { epoch: attempt.driverEpoch ?? 0 };
-          if (run.status === "succeeded" || run.status === "failed") return undefined;
-          return { epoch: run.ownerEpoch ?? 0 };
-        },
-      }),
+      executionAttemptStore: new InMemoryExecutionAttemptStore(
+        undefined,
+        // …and the reservation's PARENT AUTHORITY (arch-review 55, Wave 1). The predicate itself is
+        // `attemptParentAuthority` (arch-review 56, Wave A): it used to be a closure right here that
+        // hand-wrote its own status vocabulary, which is how this lane came to permit a CANCELLED batch's
+        // dispatch exactly like the SQL twin did.
+        attemptParentAuthority({ scorecards: inMemoryScorecards, runs: inMemoryRuns }),
+      ),
       cancellationStore: inMemoryCancellations,
       publicationOperationStore: inMemoryPublications,
       scorecardStore: inMemoryScorecards,

@@ -1,3 +1,9 @@
+import {
+  OPEN_RUN_STATUSES,
+  OPEN_SCORECARD_STATUSES,
+  TERMINAL_RUN_STATUSES,
+  TERMINAL_SCORECARD_STATUSES,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
 import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
@@ -163,7 +169,10 @@ describe("PgExecutionAttemptStore", () => {
     // The guard is the WHERE clause, so there is no window between checking authority and taking it.
     expect(text).toContain("a.state = 'created'");
     expect(text).toContain("a.runtime_work IS NULL");
-    expect(text).toContain("s.status NOT IN ('succeeded', 'failed')");
+    // RESTATED (arch-review 56, Wave A). It read `s.status NOT IN ('succeeded', 'failed')` — the negated form
+    // that let a cancelled and a superseded parent through. The vocabulary now comes from the shared
+    // allowlist and has its own case above; what this line asserts is that the parent is checked AT ALL.
+    expect(text).toContain("s.status IN (");
     expect(text).toContain("s.owner_epoch = a.driver_epoch");
     expect(text).toContain("r.owner_epoch = a.driver_epoch");
     expect(text).toContain("RETURNING");
@@ -176,6 +185,29 @@ describe("PgExecutionAttemptStore", () => {
     // The proof is read back from the write, not echoed from the argument.
     expect(intent).toMatchObject({ attemptId: "evd-run-r1#g1", persistedAt: "2026-08-18T00:00:00.000Z" });
     expect(intent.work.externalJobId).toBe("everdict-c1-evd-run-r1-aaaaa");
+  });
+
+  // ── THE PARENT VOCABULARY IS GENERATED, NOT SPELLED (arch-review 56, Wave A) ──────────────────────
+  //
+  // The condition shipped as `NOT IN ('succeeded', 'failed')`, which is fail-OPEN: it was true of the enum on
+  // the day it was written, and `superseded`/`cancelled` (scorecards) and `suspended` (runs) joined
+  // afterwards — so a batch the user had CANCELLED still passed the guard that exists to stop exactly that
+  // dispatch. Asserted against the exported allowlists, so the day a status is added the compiler moves the
+  // expectation and this test asks whether the SQL followed.
+  it("reserveWork names the OPEN parent statuses positively, from the shared allowlist", async () => {
+    const { client, calls } = fakeClient((text) =>
+      text.startsWith("SELECT")
+        ? { rows: [{ runtime_work: null, updated_at: "t" }] }
+        : { rows: [{ runtime_work: WORK, updated_at: "t" }] },
+    );
+    await new PgExecutionAttemptStore(client).reserveWork("evd-run-r1#g1", WORK);
+    const text = calls[1]?.text ?? "";
+    expect(text).toContain(`s.status IN (${OPEN_SCORECARD_STATUSES.map((s) => `'${s}'`).join(", ")})`);
+    expect(text).toContain(`r.status IN (${OPEN_RUN_STATUSES.map((s) => `'${s}'`).join(", ")})`);
+    // …and the negated form is gone: it is the shape, not the two missing strings, that made this drift.
+    expect(text, "the parent guard is still a negated status list").not.toContain("status NOT IN");
+    for (const status of [...TERMINAL_SCORECARD_STATUSES, ...TERMINAL_RUN_STATUSES])
+      expect(text, `the guard still spells '${status}' by hand`).not.toContain(`'${status}'`);
   });
 
   it("reserveWork REFUSES when the guarded update matched nothing — ended, taken, or no longer ours", async () => {

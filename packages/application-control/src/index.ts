@@ -87,6 +87,7 @@ export type {
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export { recordingGenerationOf, recordingRefOf } from "./ports/recording-store.js";
 export { type CaseReceiptStore, type CaseSettleOutcome, InMemoryCaseReceiptStore } from "./ports/case-receipt-store.js";
+export { attemptParentAuthority } from "./ports/execution-attempt-store.js";
 export {
   type ExecutionAttemptStore,
   InMemoryExecutionAttemptStore,
