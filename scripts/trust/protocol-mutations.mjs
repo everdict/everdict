@@ -292,6 +292,15 @@ const MUTATIONS = [
     suite: ["--root", "packages/domain", "src/execution/verifier-plan.counterexample.test.ts"],
   },
   {
+    // R56 Wave I's rung: the verifier job stops restoring the agent's work, so it reaches a verdict about an
+    // empty checkout — a benchmark that scores every case the same and looks like it ran.
+    name: "R56 Wave I — the verifier judges a workspace it never restored",
+    file: "packages/job-runner/src/verifier-job.ts",
+    from: '    if (job.workspace.diff !== "") {',
+    to: "    if (false) {",
+    suite: ["--root", "packages/job-runner", "src/verifier-job.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the
