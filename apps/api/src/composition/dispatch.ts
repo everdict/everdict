@@ -1,3 +1,4 @@
+import type { Score, VerifierJob } from "@everdict/contracts";
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import {
@@ -21,7 +22,6 @@ import {
   buildRuntimeBackend,
   isWorkControllable,
 } from "@everdict/backends";
-import type { Score, VerifierJob } from "@everdict/contracts";
 import type { RuntimeWorkRef } from "@everdict/contracts";
 import { BadRequestError, type CaseJob, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -34,13 +34,13 @@ import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
+import { VerifierAwareDispatcher } from "../core/execution/verifier-aware-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { RuntimeSamplingDispatcher } from "../core/execution/runtime-sampling-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
 import { buildTopologyEnvironment } from "../core/execution/topology-backend.js";
 import { TraceRecordingDispatcher } from "../core/execution/trace-recording-dispatcher.js";
-import { VerifierAwareDispatcher } from "../core/execution/verifier-aware-dispatcher.js";
 import { makeRuntimeController } from "../core/ops/runtime-control.js";
 import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";

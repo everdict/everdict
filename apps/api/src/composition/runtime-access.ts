@@ -15,11 +15,13 @@ import {
   isScreenAttachable,
   isScreenCapturable,
   isTopologyInspectable,
-  isVerifierDispatchable,
   isWorkAddressable,
   isWorkControllable,
+  isVerifierDispatchable,
 } from "@everdict/backends";
 import type {
+  Score,
+  VerifierJob,
   AdoptionDecision,
   CaseResult,
   KillOutcome,
@@ -27,9 +29,7 @@ import type {
   RegistryAuth,
   RuntimeSpec,
   RuntimeWorkRef,
-  Score,
   TraceEvent,
-  VerifierJob,
   WorkPresence,
 } from "@everdict/contracts";
 import { NotFoundError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
