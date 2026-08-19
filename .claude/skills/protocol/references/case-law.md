@@ -416,10 +416,10 @@ and `tests` keys went unnormalized into `join(root, path)`.
 The generalizable line: **"not on disk yet" is not "not disclosed", and "a file exists" is not "the verifier
 wrote it".** A trust boundary that is maintained by ordering is not a boundary.
 
-**AND IT WAS NEVER THE NEW IMPORTER'S DEFECT.** The review found this through the Harbor mapper, and the Harbor
-interop has since been removed at the maintainer's request — which changed nothing about the finding, because
-`terminal-bench.ts` writes the identical `{files, env}` grader config and always did. The new mapper was a copy
-of the old one; the review attributed the defect to the copy because that is what it was reading.
+**AND IT WAS NEVER THE NEW IMPORTER'S DEFECT.** The review found this through a task-format mapper that has
+since been removed — which changed nothing about the finding, because `terminal-bench.ts` writes the identical
+`{files, env}` grader config and always did. The removed mapper was a copy of that one; the review attributed
+the defect to the copy because that is what it was reading.
 So: when a defect is found in freshly added code, check whether the code it was modelled on has it too. The
 new arrival is the thing under review and is rarely the thing that introduced the shape.
 

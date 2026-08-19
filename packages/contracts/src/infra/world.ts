@@ -40,7 +40,7 @@ export const NetworkPolicySchema = z
   .object({
     mode: NetworkModeSchema,
     // Hostnames / IP literals / CIDR ranges reachable in `allowlist` mode. An EMPTY list under `allowlist`
-    // denies everything (Harbor's semantics) — it is a valid, meaningful policy, not a missing one.
+    // denies everything — it is a valid, meaningful policy, not a missing one.
     allowedHosts: z.array(z.string().min(1)).default([]),
   })
   .refine((policy) => policy.mode === "allowlist" || policy.allowedHosts.length === 0, {
