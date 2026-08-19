@@ -213,7 +213,8 @@ export function dockerWorldArgs(spec: ComputeSpec, label: string): string[] {
 // `dockerWorldArgs` is exported. Returns the command's stdout; a rejection means the read did not happen.
 export type DockerRead = (args: string[]) => Promise<string>;
 
-const dockerRead: DockerRead = async (args) => (await pexecFile("docker", args, { maxBuffer: MAX_BUFFER })).stdout;
+const dockerRead: DockerRead = async (args) =>
+  (await pexecFile("docker", args, { maxBuffer: MAX_BUFFER })).stdout;
 
 // WHICH BYTES THIS CONTAINER RUNS — asked of the CONTAINER, not of the reference.
 //
@@ -241,11 +242,7 @@ export async function resolveDockerImageProvenance(
     // The read did not happen. This is `unknown`, not `absent` — reporting it as "this image has no digest"
     // would turn a daemon hiccup into a claim about the image (rule `protocol` L2).
     const message = err instanceof Error ? err.message : String(err);
-    return imageUnresolved(
-      [{ ref }],
-      "inspect_failed",
-      `docker could not be asked which image backs the container: ${message}`,
-    );
+    return imageUnresolved([{ ref }], "inspect_failed", `docker could not be asked which image backs the container: ${message}`);
   }
   // The read HAPPENED and the image has no registry identity — locally built, never pushed. A real answer,
   // and a different one from the failure above: nothing is wrong, there is simply nothing to name.

@@ -137,7 +137,10 @@ export class OpenAiTransport implements LlmTransport {
       );
 
       for await (const chunk of stream) {
-        const choice = chunk.choices[0];
+        // `choices` itself can be absent, not merely empty — a gateway's usage-only chunk or an error envelope
+        // returned with a 200. Indexing it directly threw a TypeError that surfaced as a grader/agent crash
+        // instead of the missing-choice case every line below already handles.
+        const choice = chunk.choices?.[0];
         const delta = choice?.delta;
         if (delta?.content) {
           content += delta.content;
@@ -203,7 +206,7 @@ export class OpenAiTransport implements LlmTransport {
         req.signal ? { signal: req.signal } : undefined,
       )
       .catch((err: unknown) => remapProviderError(err));
-    const choice = res.choices[0];
+    const choice = res.choices?.[0];
     const toolCalls: LlmToolCall[] = (choice?.message.tool_calls ?? [])
       .filter(
         (tc): tc is OpenAI.Chat.Completions.ChatCompletionMessageToolCall & { type: "function" } =>

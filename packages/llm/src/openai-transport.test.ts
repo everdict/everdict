@@ -129,6 +129,29 @@ describe("OpenAiTransport", () => {
     expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 3, totalTokens: 23 });
   });
 
+  // Observed live behind a LiteLLM proxy: a 200 whose body carries no `choices` at all. Indexing it threw
+  // `Cannot read properties of undefined (reading '0')`, which reached the caller as a grader crash — a case
+  // whose agent had already done its work lost its verdict to a TypeError instead of an empty answer.
+  it("survives a 200 response whose body carries no choices", async () => {
+    const create = () => Promise.resolve({ usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 } });
+    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const result = await new OpenAiTransport(client).complete(baseReq);
+    expect(result.content).toBeNull();
+    expect(result.toolCalls).toEqual([]);
+    expect(result.finishReason).toBeNull();
+  });
+
+  it("survives a stream chunk that carries no choices", async () => {
+    async function* chunks(): AsyncGenerator<unknown> {
+      yield { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } }; // usage-only chunk
+      yield { choices: [{ delta: { content: "ok" } }] };
+    }
+    const create = () => Promise.resolve(chunks());
+    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const result = await new OpenAiTransport(client).stream(baseReq);
+    expect(result.content).toBe("ok");
+  });
+
   it("remaps a provider failure to an UpstreamError that keeps the status, the retry pacing and the body", async () => {
     // What LiteLLM/OpenAI answer when the tenant's plan quota is gone: a 429 whose BODY is the whole diagnosis.
     const apiError = Object.assign(new Error("429 The usage limit has been reached"), {
