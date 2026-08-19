@@ -43,10 +43,10 @@ describe("terminalBenchTaskToCase", () => {
     expect(c.tags).toEqual([]);
   });
 
-  // A Terminal-Bench 2.0 task's `test.sh` writes the reward to
-  // /logs/verifier/reward.{txt,json} and exits 0 either way, so the exit-code reading passes every case
-  // (see reward-file.ts). The default must therefore be the reward file — the exit-code
-  // grader stays reachable ONLY for a v1-era task set that explicitly asks for it.
+  // A v2 task's `test.sh` writes the reward to /logs/verifier/reward.{txt,json} and exits 0 either way, so
+  // the exit-code reading marks every case as passing (see graders/src/reward-file.ts). The default must
+  // therefore be the reward file — the exit-code grader stays reachable ONLY for a v1-era task set that
+  // explicitly asks for it.
   it("defaults to the published reward, and only an explicit verdict:'exit-code' brings back the v1 reading", () => {
     const v2 = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "i:1" });
     expect(v2.graders.map((g) => g.id)).toEqual(["reward-file"]);
@@ -111,5 +111,53 @@ describe("terminalBenchToDataset", () => {
     expect(() => terminalBenchToDataset([{ id: "a", instruction: "x" }], { id: "d", version: "1.0.0" })).toThrow(
       BadRequestError,
     );
+  });
+});
+
+describe("terminalBenchTaskToCase — the world the task declares", () => {
+  // An adapter that drops the task's environment declaration silently changes what the benchmark measures:
+  // the case runs in a default box on the open internet and its score is filed as the answer to a question
+  // about a 4 GB offline machine. The execution site can only enforce or refuse a declaration that survived
+  // the import (rule `drivers`).
+  it("carries cpus/memory/gpus over as resources, converting whole cores to millicores", () => {
+    const c = terminalBenchTaskToCase({
+      id: "build-heavy",
+      instruction: "compile it",
+      image: "img:1",
+      cpus: 4,
+      memoryMb: 8192,
+      gpus: 1,
+    });
+    expect(c.resources).toEqual({ cpu: 4000, memoryMb: 8192, gpu: 1 });
+  });
+
+  it("reads gpus = 0 as 'no GPU', not as a request for zero of them", () => {
+    const c = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "img:1", cpus: 1, gpus: 0 });
+    expect(c.resources).toEqual({ cpu: 1000 });
+  });
+
+  it("translates the network vocabulary, and leaves 'public' absent rather than declared", () => {
+    const offline = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "img:1", networkMode: "no-network" });
+    expect(offline.network).toEqual({ mode: "none", allowedHosts: [] });
+
+    const allow = terminalBenchTaskToCase({
+      id: "t",
+      instruction: "x",
+      image: "img:1",
+      networkMode: "allowlist",
+      allowedHosts: ["pypi.org"],
+    });
+    expect(allow.network).toEqual({ mode: "allowlist", allowedHosts: ["pypi.org"] });
+
+    // `public` is what every case got before the field existed — recording it as a deliberate choice would
+    // make "the task said nothing" and "the task chose the open internet" indistinguishable.
+    const open = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "img:1", networkMode: "public" });
+    expect(open.network).toBeUndefined();
+  });
+
+  it("declares nothing when the task declared nothing", () => {
+    const c = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "img:1" });
+    expect(c.resources).toBeUndefined();
+    expect(c.network).toBeUndefined();
   });
 });

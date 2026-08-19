@@ -99,6 +99,12 @@ add, all member+ (`datasets:write`), all immutable-on-register:
     it is scoreable only via the authors' email leaderboard); the other four ship data **in-repo**, so importing them
     means uploading a **jsonl** (TravelBench's `datas/*.jsonl` are already jsonl; TREK's `trek_queries.csv`,
     Flex-TravelPlanner's JSON array and TravelEval's `queries`-wrapped JSON need converting first).
+  - **`travelplanner-fs`** — the same 180 rows and the same rubric, with the row's 14–44 KB reference table **seeded as
+    a file** in the agent's working directory (`filesTemplate`, a `repo` env) instead of inlined into the prompt; the
+    task names that path and asks for the plan in `plan.md`. Nothing about the harness changes — it reads the file with
+    **its own tools**, which is what keeps the benchmark harness-agnostic; only the case's *world* moved. The produced
+    file reaches the judge as the repo snapshot's diff (`JudgeInput.diff`). Keep it a **separate dataset id**: mixing
+    the two trends would read as the agent changing when only the delivery did.
   - ⚠️ **Their scores are approximations, not official metrics.** Each of these benchmarks officially scores with a
     repo-local constraint checker over its own sandbox database, which cannot run harness-agnostically here. Everdict
     scores the same constraints with a **judge seeded from the row's own constraint fields** (the adaptation `osworld`

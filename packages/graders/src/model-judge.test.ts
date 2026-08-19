@@ -1,7 +1,7 @@
 import { AppError, type TraceEvent } from "@everdict/contracts";
 import type { LlmTransport, StreamRequest, StreamResult } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
-import { harnessComplete, modelJudge, traceToText, transportComplete } from "./model-judge.js";
+import { harnessComplete, modelJudge, previewJudge, traceToText, transportComplete } from "./model-judge.js";
 
 const TRACE: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
 
@@ -245,5 +245,26 @@ describe("harnessComplete", () => {
     });
     const verdict = await modelJudge(complete).judge({ task: "t", trace: TRACE, rubric: "r" });
     expect(verdict).toEqual({ pass: true, score: 1, reason: "ok" });
+  });
+});
+
+// A benchmark can ship its world inside the task (TravelPlanner: the whole options table, up to 44k chars).
+// Unbounded, that prompt came back empty from the model and the case was recorded `unmeasured` — so the
+// suite's largest cases were exactly the ones that never got judged.
+describe("judge prompt: the task is bounded like every other section", () => {
+  it("truncates an oversized task and says so, in the prompt and in the preview", () => {
+    const task = "x".repeat(44_300);
+    const preview = previewJudge({ task, rubric: "PASS if ok" });
+    expect(preview.prompt.length).toBeLessThan(task.length);
+    expect(preview.prompt).toContain("[truncated");
+    expect(preview.warnings.some((w) => w.startsWith("task is truncated"))).toBe(true);
+  });
+
+  it("leaves an ordinary task byte-identical and unwarned", () => {
+    const task = "plan a 3-day trip";
+    const preview = previewJudge({ task, rubric: "PASS if ok" });
+    expect(preview.prompt).toContain(task);
+    expect(preview.prompt).not.toContain("[truncated");
+    expect(preview.warnings.some((w) => w.startsWith("task is truncated"))).toBe(false);
   });
 });

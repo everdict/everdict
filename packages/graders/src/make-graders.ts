@@ -7,6 +7,7 @@ import {
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
+
 import { type Judge, JudgeGrader } from "./judge.js";
 import { RewardFileGrader } from "./reward-file.js";
 import { ScriptGrader } from "./script-grader.js";
@@ -25,7 +26,7 @@ function optStr(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-// A `Record<string, string>` config slot (the reward-file verifier's tests/ payload and verifier env). A value
+// A `Record<string, string>` config slot (the reward-file verifier's tests/ payload and its env). A value
 // that is not a string map is DROPPED rather than coerced — `String(someObject)` would write "[object
 // Object]" into a container as a test file, which fails later and somewhere else.
 function strRecord(v: unknown): Record<string, string> | undefined {
@@ -127,8 +128,8 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
       });
     }
     case "reward-file":
-      // A Terminal-Bench / Terminal-Bench task's own verifier: run the task's tests/ in the environment and read the
-      // reward it PUBLISHES to /logs/verifier (never its exit code — see reward-file.ts).
+      // A container task's own verifier: run the task's tests/ in the environment and read the reward it
+      // PUBLISHES to /logs/verifier (never its exit code — see reward-file.ts).
       return new RewardFileGrader({
         ...(optStr(s.config?.cmd) ? { cmd: optStr(s.config?.cmd) } : {}),
         ...(strRecord(s.config?.files) ? { files: strRecord(s.config?.files) } : {}),

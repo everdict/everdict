@@ -32,6 +32,11 @@ function isFlagSet(v: unknown): boolean {
   return s !== "false" && s !== "none" && s !== "nan";
 }
 
+// Where the seeded TravelPlanner reference lands in the agent's working directory. ONE literal, because the task
+// instruction and the file seed must name the same path — a drift between them sends the agent to a missing file and
+// the case fails for a reason that has nothing to do with travel planning.
+const TP_REFERENCE_PATH = "reference/travelplanner-reference.txt";
+
 // Shared preamble: the judge reads a plan, not a short answer, so it needs the "reject on any violation" instruction
 // up front — a travel plan that satisfies most constraints is a failing plan under every one of these benchmarks.
 const STRICT =
@@ -168,6 +173,46 @@ export const TRAVEL_BENCHMARKS = {
       taskField: "query",
       taskTemplate: "{query}\n\nReference information:\n{reference_information}",
       promptEnv: true,
+      tagFields: ["level"],
+    },
+    graderBuilder: (row: Record<string, unknown>): GraderSpec[] => [
+      { id: "judge", config: { rubric: travelPlannerRubric(row) } },
+    ],
+  },
+  // Same 180 rows, same rubric, ONE thing different: where the reference world lives.
+  //
+  // `travelplanner` above inlines the row's whole reference table (14–44 KB of flights/hotels/restaurants/attractions
+  // WITH prices) into the prompt. That is the only delivery a `prompt` env has, and it costs the agent its context
+  // before it has decided what it needs — the failure it produces is an agent that skims the table and then invents a
+  // price, which is precisely a hard-constraint violation the benchmark exists to catch.
+  //
+  // Here the same bytes are SEEDED AS A FILE and the task says where it is. The agent reads it with its own tools —
+  // everdict adds no tool and the harness under test is not modified, so the comparison stays harness-agnostic (the
+  // point of the whole layer): Claude Code greps it, a CLI agent cats it, a future harness does whatever it does.
+  //
+  // Keep it a SEPARATE dataset id, never a swap of the one above: the two are different evaluation setups, and a trend
+  // that silently changed how the world was delivered would read as the agent getting better or worse.
+  "travelplanner-fs": {
+    id: "travelplanner-fs",
+    scoring: {
+      kind: "proxy" as const,
+      approximates:
+        "the official six metrics (delivery rate, commonsense and hard-constraint pass rates, final pass rate) over the authors' sandbox database and structured plan schema",
+      officialEvaluator: "osunlp/TravelPlanner evaluation/eval.py",
+      license: "data CC-BY-4.0, code MIT",
+    },
+    description:
+      "TravelPlanner (workspace variant) — identical rows and rubric to `travelplanner`, with the reference information SEEDED AS A FILE in the agent's working directory instead of inlined into the prompt, and the plan written to plan.md. Measures the same constraints against an agent that must go and read its own source material. Judge-scored approximation; not comparable with the `travelplanner` trend (different setup).",
+    category: "qa",
+    defaultVersion: "validation",
+    source: { kind: "huggingface", dataset: "osunlp/TravelPlanner", config: "validation", split: "validation" },
+    mapping: {
+      idField: "id",
+      taskField: "query",
+      // The path appears in the instruction AND in the seed below; they are the same literal because a mismatch would
+      // send the agent to a file that does not exist and the case would fail for a reason that is not the benchmark's.
+      taskTemplate: `{query}\n\nThe reference information for this trip — every available flight, accommodation, restaurant, attraction and driving/taxi option, with prices — is in ${TP_REFERENCE_PATH} in your working directory. Read it and build the plan ONLY from options it lists; do not assume a price or a place that is not in that file. Write the final day-by-day plan to plan.md in your working directory.`,
+      filesTemplate: { [TP_REFERENCE_PATH]: "{reference_information}" },
       tagFields: ["level"],
     },
     graderBuilder: (row: Record<string, unknown>): GraderSpec[] => [

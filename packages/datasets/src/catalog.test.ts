@@ -79,6 +79,7 @@ describe("BenchmarkAdapter catalog", () => {
       "travelbench",
       "traveleval",
       "travelplanner",
+      "travelplanner-fs",
       "trek",
       "webvoyager",
     ]);

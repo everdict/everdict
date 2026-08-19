@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
+import type { CaseMapping } from "./mapping.js";
 import type { FetchLike } from "./sources.js";
-import { BenchmarkAdapterSpecSchema, importFromSpec, specToAdapter } from "./spec.js";
+import { BenchmarkAdapterSpecSchema, CaseMappingSchema, importFromSpec, specToAdapter } from "./spec.js";
+
+// The isomorphism the schema's own comment declares, enforced instead of asserted in prose. Zod STRIPS unspecified
+// keys, so a CaseMapping field the schema forgets does not error for a self-serve recipe — it silently vanishes and
+// the case falls back to another env kind. The `Record<keyof CaseMapping, true>` below is the compile-time half: a
+// new field on the interface fails typecheck here until it is listed, and the runtime half then proves the schema
+// exposes exactly that set.
+describe("CaseMappingSchema ⟷ CaseMapping", () => {
+  it("exposes every mapping field, so a user recipe cannot silently lose one", () => {
+    const interfaceKeys: Record<keyof CaseMapping, true> = {
+      idField: true,
+      taskField: true,
+      taskTemplate: true,
+      startUrlField: true,
+      promptEnv: true,
+      answerField: true,
+      answerMode: true,
+      gitField: true,
+      refField: true,
+      filesTemplate: true,
+      repoPath: true,
+      osUseEnv: true,
+      osUseSetup: true,
+      display: true,
+      screenshotPath: true,
+      imageField: true,
+      image: true,
+      placement: true,
+      testCmdField: true,
+      tagFields: true,
+      extraGraders: true,
+    };
+    expect(Object.keys(CaseMappingSchema.shape).sort()).toEqual(Object.keys(interfaceKeys).sort());
+  });
+});
 
 const hfFetch =
   (rows: Array<Record<string, unknown>>): FetchLike =>

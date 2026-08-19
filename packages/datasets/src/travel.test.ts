@@ -20,20 +20,24 @@ describe("travel benchmarks: catalog wiring", () => {
     }
   });
 
-  it("all five produce environment-less planning cases (prompt env), not browser cases", () => {
+  it("every entry but the workspace variant produces environment-less planning cases (prompt env)", () => {
     for (const adapter of Object.values(TRAVEL_BENCHMARKS)) {
+      if (adapter.id === "travelplanner-fs") continue; // the one entry that deliberately seeds a world — asserted below
       const ds = adapterToDataset(adapter, [{}], { id: adapter.id, version: adapter.defaultVersion });
-      expect(ds.cases[0]?.env).toEqual({ kind: "prompt" });
+      expect(ds.cases[0]?.env, adapter.id).toEqual({ kind: "prompt" });
     }
   });
 
-  it("only TravelPlanner has a HuggingFace mirror; the rest ship data in-repo and need a jsonl upload", () => {
-    expect(TRAVEL_BENCHMARKS.travelplanner.source).toEqual({
+  it("the two TravelPlanner entries share the HuggingFace mirror; the rest ship data in-repo (jsonl upload)", () => {
+    const hfMirror = {
       kind: "huggingface",
       dataset: "osunlp/TravelPlanner",
       config: "validation",
       split: "validation",
-    });
+    };
+    expect(TRAVEL_BENCHMARKS.travelplanner.source).toEqual(hfMirror);
+    // The workspace variant is the SAME benchmark data delivered differently — it must not drift onto another source.
+    expect(TRAVEL_BENCHMARKS["travelplanner-fs"].source).toEqual(hfMirror);
     for (const id of ["flex-travelplanner", "trek", "travelbench", "traveleval"] as const) {
       expect(TRAVEL_BENCHMARKS[id].source.kind).toBe("jsonl");
     }
@@ -79,6 +83,53 @@ describe("travelplanner (sole-planning mode)", () => {
     expect(rubric).toContain("1700");
     expect(rubric).toContain("Mexican");
     expect(rubric).toContain("2 traveler(s)");
+  });
+});
+
+describe("travelplanner-fs: the same benchmark with its reference seeded as a world", () => {
+  const row = {
+    org: "St. Petersburg",
+    dest: "Rockford",
+    days: 3,
+    people_number: 1,
+    budget: 1700,
+    local_constraint: "{'house rule': None, 'cuisine': None}",
+    query: "Plan a trip from St. Petersburg to Rockford.",
+    level: "easy",
+    reference_information: "[{'Description': 'Attractions in Rockford', 'Content': 'Anderson Gardens  price 12'}]",
+  };
+  const caseOf = () =>
+    adapterToDataset(BENCHMARK_CATALOG["travelplanner-fs"], [row], { id: "tpfs", version: "validation" }).cases[0];
+
+  it("seeds the row's reference as a repo file instead of inlining it into the prompt", () => {
+    const c = caseOf();
+    expect(c?.env.kind).toBe("repo");
+    const source = c?.env.kind === "repo" ? c.env.source : undefined;
+    const files = source && "files" in source ? source.files : undefined;
+    expect(Object.values(files ?? {})[0]).toContain("Anderson Gardens");
+    // The whole point: the reference is NOT in the task. If it leaked back in, the variant would be measuring
+    // nothing different from `travelplanner` while claiming to.
+    expect(c?.task).not.toContain("Anderson Gardens");
+    expect(c?.task).toContain("Plan a trip from St. Petersburg to Rockford.");
+  });
+
+  it("points the agent at exactly the path it seeded", () => {
+    const c = caseOf();
+    const source = c?.env.kind === "repo" ? c.env.source : undefined;
+    const seededPath = Object.keys(source && "files" in source ? source.files : {})[0];
+    expect(seededPath).toBeTruthy();
+    // A drift between the instruction and the seed fails the case for a reason that is not the benchmark's.
+    expect(c?.task).toContain(seededPath as string);
+    expect(c?.task).toContain("plan.md"); // the produced artifact the judge reads back off the repo diff
+  });
+
+  it("grades the identical constraints as the inline entry — only the delivery differs", () => {
+    const fsRubric = rubricOf(caseOf()?.graders ?? []);
+    const inlineRubric = rubricOf(
+      adapterToDataset(BENCHMARK_CATALOG.travelplanner, [row], { id: "tp", version: "validation" }).cases[0]?.graders ??
+        [],
+    );
+    expect(fsRubric).toBe(inlineRubric);
   });
 });
 

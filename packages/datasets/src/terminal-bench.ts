@@ -23,15 +23,15 @@ export const TerminalBenchTaskSchema = z.object({
   image: z.string().optional(), // prebuilt task image (referenced, not built). Falls back to the dataset imageTemplate.
   testCommand: z.string().default("bash /tests/test.sh"), // the tests/ verifier — its REWARD FILE is the verdict (v2)
   // The bytes of the task's tests/ directory, keyed by file name — copied into the container only AFTER the
-  // agent finishes, so the dataset must carry them (a run must not re-clone to grade).
+  // agent finishes, so the dataset must carry them: a run that re-cloned the benchmark repo to find out how it
+  // is graded would make the case non-self-contained and its verdict dependent on an unpinned repository state.
   tests: z.record(z.string()).default({}),
   verifierTimeoutSec: z.number().int().positive().optional(), // task.toml [verifier].timeout_sec
   verifierEnv: z.record(z.string()).default({}), // task.toml [verifier].env — values resolved by the caller
-  // HOW THE VERDICT IS READ, stated rather than assumed. Terminal-Bench 2.0 adopted the Terminal-Bench task format, so
-  // its verifier PUBLISHES a reward to /logs/verifier/reward.{txt,json} and exits 0 either way — reading such a
-  // run by its exit code passes every case (see reward-file.ts). A v1-era task set, whose
-  // `run-tests.sh` really did decide by exit status, imports with
-  // `{ verdict: "exit-code", testCommand: "bash /tests/run-tests.sh" }`.
+  // HOW THE VERDICT IS READ, stated rather than assumed. A v2 task's verifier PUBLISHES its reward to
+  // /logs/verifier/reward.{txt,json} and then exits 0 either way, so reading such a run by its exit code marks
+  // every case as passing (see reward-file.ts). A v1-era task set, whose `run-tests.sh` really did decide by
+  // exit status, imports with `{ verdict: "exit-code", testCommand: "bash /tests/run-tests.sh" }`.
   verdict: z.enum(["reward-file", "exit-code"]).default("reward-file"),
   // ── THE WORLD task.toml [environment] DECLARES ──────────────────────────────────────────────────────
   // Carried into EvalCase.resources / EvalCase.network so the execution site can enforce it or refuse the
@@ -66,7 +66,7 @@ function resolveImage(task: TerminalBenchTask, imageTemplate?: string): string {
 
 // task.toml's world → Everdict's. `cpus` is whole cores and `EvalCase.resources.cpu` is millicores (the k8s
 // convention the harness/topology specs already use), so the multiplication lives HERE rather than in every
-// caller that fills a TerminalBenchTask. `gpus = 0` is Terminal-Bench's way of saying "no GPU", not a request for zero.
+// caller that fills a TerminalBenchTask. `gpus = 0` means "no GPU", not a request for zero of them.
 function resourcesOf(task: { cpus?: number; memoryMb?: number; gpus?: number }): ResourceRequest | undefined {
   const resources: ResourceRequest = {
     ...(task.cpus !== undefined ? { cpu: task.cpus * 1000 } : {}),

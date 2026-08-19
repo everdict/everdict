@@ -193,7 +193,7 @@ export async function runCaseJob(
     harness,
     graders,
     // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
-    // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Dataset adapters (terminal-bench) capture the
+    // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Container-task dataset adapters capture the
     // task's own timeout here, previously dropped at execution.
     // signal (self-hosted lease cancel): threaded into the run context so runCase aborts mid-case and disposes the
     // compute (frees the runtime). Absent for managed dispatch (the backend kills the whole alloc instead).

@@ -8,7 +8,7 @@
 ## Why
 
 The market gap Everdict targets is the managed **run + score** layer over standard task formats — the
-managed-cloud position: a team that already has Terminal-Bench (or SWE-bench) tasks
+managed position: a team that already has Terminal-Bench (or SWE-bench) tasks
 should point Everdict at them and get a defensible verdict, without re-authoring the benchmark. Today the
 dataset on-ramp (`packages/datasets`) is **row-based** (HuggingFace / jsonl / csv → `CaseMapping` →
 `EvalCase`), which fits tabular QA/web benchmarks but not the **directory/container** task formats that
@@ -38,7 +38,7 @@ A Terminal-Bench task (github.com/laude-institute/terminal-bench) is a directory
 | `instruction` | `task` (the prompt) |
 | prebuilt task image (or an `imageTemplate` `{id}`) | `image` (**referenced, not built** — the portability contract) |
 | in-image working dir (default `/app`) | `env = { kind: "repo", source: { path } }` (no clone) |
-| verifier command (default `bash /tests/test.sh`) + the `tests/` bytes | `graders: [{ id: "reward-file", config: { cmd, files, … } }]` — the reward the verifier PUBLISHES, never its exit code (see `reward-file.ts`). The `files`/`env` here are VERIFIER-PRIVATE: `caseJobPayload` refuses to ship such a case to a lane that runs the agent and the verifier in one environment (arch-review 56, Wave B) |
+| verifier command (default `bash /tests/test.sh`) + the `tests/` bytes | `graders: [{ id: "reward-file", config: { cmd, files, … } }]` — the reward the verifier PUBLISHES, never its exit code (`packages/graders/src/reward-file.ts`) |
 | `difficulty` + `tags` | `tags` (difficulty prepended) |
 | `max_agent_timeout_sec` | `timeoutSec` (default 900) |
 
@@ -63,10 +63,6 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    accept a Terminal-Bench source (BFF↔MCP parity).
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
-6. **The verifier's material is PRIVATE** ✅ — a task format's `tests/` bytes and verifier env decide the
-   verdict, so they may not travel in the payload the agent's container receives (arch-review 56). A case
-   carrying them is refused by `caseJobPayload` until it is split (`verifierPlanOf`) and its judging half runs
-   as its own job (`runVerifierJob`). The dispatch of that second job is the remaining piece.
 
 ## Non-goals (for now)
 - Building task images in-platform (against the `case.image` contract — reference, don't build).

@@ -22,6 +22,9 @@ export const CaseMappingSchema = z.object({
   gitField: z.string().optional(),
   refField: z.string().optional(),
   repoPath: z.string().optional(), // in-image repo (e.g. SWE-bench "/testbed") — no clone
+  // path → {field} template: seed the row's own material as FILES the agent reads with its own tools (repo env).
+  // git/repoPath take precedence.
+  filesTemplate: z.record(z.string()).optional(),
   osUseEnv: z.boolean().optional(), // true → os-use (desktop) env — OSWorld-style
   osUseSetup: z.array(z.string()).optional(), // os-use env.setup (starting Xvfb, etc.)
   display: z.string().optional(), // os-use display (default ":99")

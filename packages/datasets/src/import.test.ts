@@ -50,6 +50,33 @@ describe("importJsonl (generic mapping)", () => {
     expect(ds.cases[0]?.graders).toEqual([]);
     expect(ds.cases[0]?.expected).toBeUndefined();
   });
+
+  // filesTemplate: the row's own material becomes the case's WORLD (files on disk) instead of prompt text, so the
+  // harness reads it with its own tools and stays unmodified. Per-row interpolation is the contract — one seeded
+  // world shared across cases would be a fixture, not a benchmark.
+  it("filesTemplate seeds a repo env from the row, interpolated per case", () => {
+    const jsonl = [
+      '{"id":"a","q":"use the table","table":"row-A"}',
+      '{"id":"b","q":"use the table","table":"row-B"}',
+    ].join("\n");
+    const ds = importJsonl(
+      jsonl,
+      { id: "d", version: "1" },
+      { idField: "id", taskField: "q", filesTemplate: { "reference/data.txt": "{table}" } },
+    );
+    expect(ds.cases[0]?.env).toEqual({ kind: "repo", source: { files: { "reference/data.txt": "row-A" } } });
+    expect(ds.cases[1]?.env).toEqual({ kind: "repo", source: { files: { "reference/data.txt": "row-B" } } });
+    expect(ds.cases[0]?.task).toBe("use the table"); // the material is NOT also inlined into the prompt
+  });
+
+  it("an explicitly declared repo source outranks filesTemplate", () => {
+    const ds = importJsonl(
+      '{"id":"a","q":"fix it","repo":"https://github.com/o/r","table":"unused"}',
+      { id: "d", version: "1" },
+      { idField: "id", taskField: "q", gitField: "repo", filesTemplate: { "reference/data.txt": "{table}" } },
+    );
+    expect(ds.cases[0]?.env).toEqual({ kind: "repo", source: { git: "https://github.com/o/r", ref: "HEAD" } });
+  });
 });
 
 describe("importCsv / parseCsv", () => {

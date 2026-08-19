@@ -5,7 +5,8 @@ import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSp
 // their format into EvalCase is needed (the registry only accepts the Everdict Dataset schema). The result is register(tenant).
 
 // External row (record) → EvalCase mapping rules. Data-driven (no functions → JSON-serializable, "a new benchmark by config").
-// env: with gitField, a repo env (coding benchmark SWE-bench); otherwise a browser env (with/without startUrl).
+// env: with gitField, a repo env (coding benchmark SWE-bench); with filesTemplate, a repo env seeded from the row itself
+// (the task's world on disk); otherwise a browser env (with/without startUrl).
 // Scoring: answerField→answer-match (contains|exact via answerMode), testCmdField→tests-pass (per-row cmd), extraGraders always.
 export interface CaseMapping {
   idField: string;
@@ -17,6 +18,13 @@ export interface CaseMapping {
   answerMode?: "contains" | "exact"; // answer-match mode (default contains). GAIA-style answer matching is exact.
   gitField?: string; // If present, a repo env (source.git) — clone-based coding benchmark
   refField?: string; // repo env ref (HEAD if absent)
+  // If present, a repo env seeded from INLINE FILES: workspace path → a {field} template interpolated per row. The
+  // reference material the task operates on lands ON DISK instead of inside the prompt, so the harness reads it with
+  // ITS OWN tools — everdict defines no tool and the agent under test is not modified, which is what keeps a
+  // benchmark harness-agnostic. It is the same adaptation `taskTemplate` makes for text, one layer down: the row
+  // still supplies the bytes, they just arrive as a world instead of as a paragraph. Ranks below repoPath/gitField
+  // (an explicitly declared repo source wins) and above every environment-less kind — seeded files ARE a world.
+  filesTemplate?: Record<string, string>;
   repoPath?: string; // If present, a repo env (source.path = in-image repo, e.g. SWE-bench "/testbed") — no clone
   osUseEnv?: boolean; // If true, an os-use (desktop/computer-use) env — OSWorld-style. If repo/git exists, that wins.
   osUseSetup?: string[]; // os-use env.setup (shared; e.g. start Xvfb + app). Data-driven (JSON array).
@@ -54,6 +62,12 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   } else if (git) {
     const ref = m.refField ? str(row[m.refField]) : "";
     env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
+  } else if (m.filesTemplate) {
+    // Inline-file seed: each value is interpolated from THIS row, so the world differs per case exactly as the task does.
+    const files = Object.fromEntries(
+      Object.entries(m.filesTemplate).map(([path, tpl]) => [path, interpolateFields(tpl, row)]),
+    );
+    env = { kind: "repo", source: { files } };
   } else if (m.osUseEnv) {
     env = {
       kind: "os-use", // desktop computer-use (OSWorld) — the agent manipulates the GUI with real OS input, a VLM scores the snapshot
