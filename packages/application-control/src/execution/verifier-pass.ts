@@ -66,6 +66,19 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
       `this case's environment left a '${result.snapshot?.kind ?? "absent"}' snapshot, which has no workspace to judge`,
     );
 
+  // ── A VERIFIER WITHOUT A TENANT HAS NO LANE, AND MUST NOT GUESS ONE (arch-review 57) ──────────────
+  //
+  // `CaseJob.runId` and `.tenant` are optional; `VerifierJob` requires both, and the first version bridged
+  // that with `as VerifierJob`. Undefined would have gone straight into the runtime resolution that picks the
+  // lane — a verifier is dispatched with the tenant's credentials against the tenant's image, so resolving it
+  // under no tenant is not a smaller question but a different one. The honest answer is that this deployment
+  // cannot judge THIS case, which is what `owed` records.
+  if (job.runId === undefined || job.tenant === undefined)
+    return owed(
+      "missing_evidence",
+      "this case was dispatched with no run id or no tenant, so there is no lane a verifier could be resolved against",
+    );
+
   const verifierJob: VerifierJob = {
     runId: job.runId,
     tenant: job.tenant,
@@ -77,7 +90,12 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
       job.evalCase.env.kind === "repo" && "path" in job.evalCase.env.source ? job.evalCase.env.source.path : "/app",
     workspace: result.snapshot,
     plan: { digest: plan.digest, graders: plan.graders },
-  } as VerifierJob;
+    // The lane that ran the agent is the lane that judges it — see `placementTarget` on the schema for what
+    // passing nothing here used to cost.
+    ...(job.evalCase.placement?.target !== undefined ? { placementTarget: job.evalCase.placement.target } : {}),
+    // The same budget the agent had — see `timeoutSec` on the schema for what passing none used to cost.
+    timeoutSec: job.evalCase.timeoutSec,
+  };
 
   const verdict = await deps
     .dispatchVerifier(verifierJob)

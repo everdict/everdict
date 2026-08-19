@@ -64,7 +64,11 @@ async function runVerifierEntry(raw: string): Promise<void> {
   let scores: Score[];
   try {
     const job = VerifierJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
-    scores = await runVerifierJob(job, { driver: new LocalDriver() });
+    // ROOTED AT THE CONTAINER, not at a temp directory (arch-review 57 P0). A container task's world is the
+    // image's own `/app`, `/tests` and `/logs/verifier`; a driver rooted in `/tmp` would write the hidden
+    // tests to one namespace and run the image's copy from another. `root: "/"` also means this handle did
+    // not create the root, so `dispose()` leaves it alone — see LocalDriverOptions.
+    scores = await runVerifierJob(job, { driver: new LocalDriver({ root: "/" }) });
   } catch (err) {
     // An `unmeasured` verdict, never a zero: a verifier that could not run produced no number, and a number
     // the benchmark never produced must not reach a mean.

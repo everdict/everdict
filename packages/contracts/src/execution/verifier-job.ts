@@ -39,6 +39,30 @@ export const VerifierJobSchema = z.object({
   // re-create, and a verifier for those is not this shape.
   workspace: RepoSnapshotSchema,
   plan: VerifierPlanRefSchema,
+  // ── WHERE IT MAY RUN, CARRIED (arch-review 57 P0) ────────────────────────────────────────────────
+  //
+  // The judging half needs a lane, and it is not free to pick one: it must be a lane of the SAME tenant that
+  // ran the agent, because the verifier reads that tenant's task image and holds that tenant's credentials.
+  // The first version of this type left the field out and the composition asked for "any runtime" by passing
+  // `undefined` — which the runtime iterator reads as an EMPTY target set, not as a wildcard. So no backend
+  // was ever visited, the dispatch threw NOT_FOUND, and `withVerifierPass` recorded the throw as
+  // `tests_pass: unmeasured`. Every private-verifier case ran its agent and then reported that it could not
+  // be judged, in a deployment that could judge it.
+  //
+  // It is the agent's own `placement.target`, verbatim, so the two halves cannot drift onto different
+  // runtimes: whatever ran the agent is what the verifier resolves against.
+  placementTarget: z.string().optional(),
+  // ── THE JUDGING BUDGET (arch-review 57, found while fixing the P0 above) ─────────────────────────
+  //
+  // `safeGrade` gives each grader what is left of `ctx.deadlineAt`. The first version of this lane built its
+  // GradeContext with a cast and passed no deadline at all, so `Math.max(0, undefined - Date.now())` was NaN
+  // and `setTimeout(fn, NaN)` fires IMMEDIATELY — every verifier grader lost its race on the first tick and
+  // returned `unmeasured{grader_timeout}`. That is a fourth independent breakage behind the three the review
+  // named: fixing routing, the ComputeSpec and the paths would still have produced no verdict.
+  //
+  // It is the case's own declared budget, carried, so the verifier is bounded by the same number the agent
+  // was rather than by a constant invented here.
+  timeoutSec: z.number().positive(),
 });
 export type VerifierJob = z.infer<typeof VerifierJobSchema>;
 

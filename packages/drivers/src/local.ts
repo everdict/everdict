@@ -37,6 +37,11 @@ class LocalComputeHandle implements ComputeHandle {
   constructor(
     private readonly root: string,
     private readonly echo: boolean = false,
+    // Did THIS handle create the root? A handle given a root it did not make must never remove it — the
+    // verifier lane runs rooted at the container's own filesystem (`/`), and a dispose that recursed from
+    // there would delete the container. Ownership is a fact about how the handle was built, so it is a
+    // parameter rather than something dispose() tries to infer from the path.
+    private readonly ownsRoot: boolean = true,
   ) {}
 
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
@@ -119,13 +124,25 @@ class LocalComputeHandle implements ComputeHandle {
         } catch {}
       }
     }
-    await rm(this.root, { recursive: true, force: true });
+    if (this.ownsRoot) await rm(this.root, { recursive: true, force: true });
   }
 }
 
 export interface LocalDriverOptions {
   // TEE every exec's output to this process's stdio (in-job: the job log becomes a live progress feed).
   echo?: boolean;
+  // ── THE FILE API AND THE SHELL MUST SHARE ONE NAMESPACE (arch-review 57 P0) ──────────────────────
+  //
+  // `writeFile(p)` is `join(root, p)`, so with the default temp root an absolute path is REWRITTEN:
+  // `/tests/test.sh` becomes `<tmp>/tests/test.sh`, while `bash /tests/test.sh` in a shell command means the
+  // real one. For an agent sandbox that is exactly right — the temp directory IS the world, and paths are
+  // relative to it. For a container task it is not: the format's `/app`, `/tests` and `/logs/verifier` are
+  // absolute paths in an image that already exists, and a verifier that wrote its hidden tests to a temp
+  // directory then ran the image's copy would grade a world it had not set up.
+  //
+  // So a lane whose world is the container itself passes `root: "/"`, and with it `ownsRoot: false` — the
+  // handle did not create that directory and must not remove it. Absent: a fresh temp directory, owned.
+  root?: string;
 }
 
 export class LocalDriver implements Driver {
@@ -172,7 +189,8 @@ export class LocalDriver implements Driver {
           "Route it to a container runtime — running an offline-declared case with host network access would measure a different task.",
       );
     }
-    const root = await mkdtemp(join(tmpdir(), "everdict-"));
-    return new LocalComputeHandle(root, this.opts.echo ?? false);
+    const given = this.opts.root;
+    const root = given ?? (await mkdtemp(join(tmpdir(), "everdict-")));
+    return new LocalComputeHandle(root, this.opts.echo ?? false, given === undefined);
   }
 }

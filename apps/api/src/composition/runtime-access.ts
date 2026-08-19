@@ -345,7 +345,12 @@ export function buildRuntimeAccess(deps: {
   // deployment cannot judge this case away from its agent".
   const dispatchVerifier = async (job: VerifierJob): Promise<Score[]> => {
     let scores: Score[] | undefined;
-    await eachRuntimeBackend(job.tenant, undefined, async (backend) => {
+    // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
+    // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
+    // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
+    // private-verifier case (arch-review 57 P0). The verifier also MUST NOT roam — it reads this tenant's task
+    // image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
+    await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
       if (!isVerifierDispatchable(backend)) return false;
       scores = await backend.dispatchVerifier(job);
       return true; // the first lane that can judge is the answer
@@ -354,7 +359,9 @@ export function buildRuntimeAccess(deps: {
       throw new NotFoundError(
         "NOT_FOUND",
         { caseId: job.caseId },
-        "no runtime in this workspace can run a verifier away from the agent's container — the case cannot be judged here.",
+        job.placementTarget === undefined
+          ? "this case was placed on no named runtime, so there is no lane to resolve a verifier against."
+          : `runtime '${job.placementTarget}' cannot run a verifier away from the agent's container — the case cannot be judged here.`,
       );
     return scores;
   };
