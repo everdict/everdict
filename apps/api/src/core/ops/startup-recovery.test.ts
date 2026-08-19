@@ -34,6 +34,10 @@ const runRec = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
   ...over,
 });
 
+// A sweep with no replica identity never claims, so the debt carries the sentinel authority rather than a
+// capability — see `stillHolds`, which compares the unclaimed state on both sides.
+const UNCLAIMED = { ownerReplica: "unknown", epoch: 0 };
+
 describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
   it("finalizes queued/running batches, children, and standalone runs orphaned by a restart as INTERRUPTED", async () => {
     const scorecards = new InMemoryScorecardStore();
@@ -210,7 +214,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       sessions: 0,
       live: 0,
       deferred: 1,
-      owed: [{ kind: "run", id: "solo-explodes" }],
+      owed: [{ kind: "run", id: "solo-explodes", authority: UNCLAIMED }],
     });
     // Left exactly as it was, for the next sweep to ask again.
     expect((await runs.get("solo-explodes"))?.status).toBe("running");
@@ -274,7 +278,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       sessions: 0,
       live: 0,
       deferred: 1,
-      owed: [{ kind: "scorecard", id: "explodes" }],
+      owed: [{ kind: "scorecard", id: "explodes", authority: UNCLAIMED }],
     });
     expect((await scorecards.get("explodes"))?.status).toBe("running");
   });

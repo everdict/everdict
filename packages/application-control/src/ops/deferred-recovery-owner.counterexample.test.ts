@@ -24,7 +24,12 @@ import { recoverInterrupted, retryDeferredRecovery } from "./startup-recovery.js
 // targets this replica still owes an answer for, and the owner is the one that must retry: it is the only
 // process the record's own ownership permits to act.
 
-type Target = { kind: "scorecard" | "run"; id: string };
+// The worklist entry, as production now shapes it: identity PLUS the capability the claim issued. Carrying
+// the authority is arch-review 57's fix — a retry re-presents its own token instead of reading whatever
+// generation the row holds by then (`deferred-recovery-authority.counterexample.test.ts`).
+type Target = { kind: "scorecard" | "run"; id: string; authority: { ownerReplica: string; epoch: number } };
+// The fixture row is claimed at generation 1 by replica-1 — the capability this sweep was issued.
+const CLAIMED = { ownerReplica: "replica-1", epoch: 1 };
 
 // A world whose ledger is unreadable on the first pass and readable afterwards — the ordinary shape of the
 // transient failure `retry_later` was introduced for.
@@ -86,7 +91,7 @@ describe("[R56 WAVE-C COUNTEREXAMPLE #4 — CLOSED] a deferred recovery is owed 
     expect(
       (outcome as { owed?: Target[] }).owed,
       "nothing names what this sweep still owes an answer for, so nothing can retry it",
-    ).toEqual([{ kind: "scorecard", id: "sc-1" }]);
+    ).toEqual([{ kind: "scorecard", id: "sc-1", authority: CLAIMED }]);
   });
 
   it("retries exactly that worklist without a process restart, and converges", async () => {
@@ -111,7 +116,7 @@ describe("[R56 WAVE-C COUNTEREXAMPLE #4 — CLOSED] a deferred recovery is owed 
     owed = await retryDeferredRecovery(w.deps as never, owed);
 
     expect(owed, "a still-unreadable ledger dropped the debt instead of keeping it").toEqual([
-      { kind: "scorecard", id: "sc-1" },
+      { kind: "scorecard", id: "sc-1", authority: CLAIMED },
     ]);
     expect(w.record.status, "the retry wrote a terminal row over a transient failure").toBe("running");
   });

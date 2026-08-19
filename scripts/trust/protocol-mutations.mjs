@@ -17,6 +17,26 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 57 P0. The retry used to rebuild an authority from the row it was about to drive, which is
+    // how a displaced replica adopted its successor's generation. Neutralizing the fence must go red, or the
+    // worklist is back to carrying identity that any live token can be attached to.
+    name: "R57 — a deferred retry drives whatever generation the row now holds",
+    file: "packages/application-control/src/ops/startup-recovery.ts",
+    from: "      if (!stillHolds(target.authority, record)) continue;",
+    to: "      // MUTATED: the successor's token is good enough",
+    suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-authority.counterexample.test.ts"],
+  },
+  {
+    // …and the same for the verifier's own restore. A `git apply` whose exit code nobody reads means the
+    // graders run over a pristine image and return that as the agent's verdict — a wrong number, which is
+    // worse than the `unmeasured` an honest failure produces.
+    name: "R57 — the verifier grades whatever the container held when the restore failed",
+    file: "packages/job-runner/src/verifier-job.ts",
+    from: "      if (applied.exitCode !== 0)",
+    to: "      if (false)",
+    suite: ["--root", "packages/job-runner", "src/verifier-job.real-driver.counterexample.test.ts"],
+  },
+  {
     name: "Wave A — the reservation moves back behind the effect",
     file: "packages/backends/src/orchestrators/k8s.ts",
     from: "    if (job.runId !== undefined) await requireReservation(job, work, options?.onReserved);",
@@ -221,7 +241,7 @@ const MUTATIONS = [
     // the record sits claimed by a live replica with no driver.
     name: "R56 Wave C — a deferred recovery names no worklist",
     file: "packages/application-control/src/ops/startup-recovery.ts",
-    from: '      owed.push({ kind: "scorecard", id: c.id });',
+    from: '      owed.push({ kind: "scorecard", id: c.id, authority });',
     to: "",
     suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
   },

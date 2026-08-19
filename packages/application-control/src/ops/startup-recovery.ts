@@ -79,6 +79,17 @@ export interface RecoveryDeps {
 export interface RecoveryTarget {
   kind: "scorecard" | "run";
   id: string;
+  // ── THE CAPABILITY THE CLAIM ISSUED, CARRIED (arch-review 57 P0) ────────────────────────────────
+  //
+  // A worklist entry used to be identity alone, and the retry rebuilt an authority when it fired: this
+  // process's replica id combined with whatever epoch the ROW held by then. That is not re-presenting a
+  // capability, it is minting one out of the successor's — a replica displaced while its retry was pending
+  // woke up, read the new owner's generation, and drove the batch with it. The write fence compares
+  // `expectOwnerEpoch` alone, so it was accepted.
+  //
+  // A fencing token is issued BY a claim TO an owner. It is not a version number to be looked up, which is
+  // exactly the confusion that made this reachable, so the token travels with the debt.
+  authority: DriverAuthority;
 }
 
 export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
@@ -195,7 +206,8 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // THIS replica's worklist, because it is the only process the record's own ownership permits to act
       // (arch-review 56, Wave C: the previous version said "the next sweep asks again" and there was none).
       deferredCount += 1;
-      owed.push({ kind: "scorecard", id: c.id });
+      // The capability THIS claim issued — not the row's current one, which is what the retry used to read.
+      owed.push({ kind: "scorecard", id: c.id, authority });
       console.warn(`▶ boot recovery: batch ${c.id} left for a later sweep — ${disposition.reason}`);
       continue;
     }
@@ -291,7 +303,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       }
       if (runDisposition.kind === "retry_later") {
         deferredCount += 1;
-        owed.push({ kind: "run", id: r.id });
+        owed.push({ kind: "run", id: r.id, authority: runAuthority });
         console.warn(`▶ boot recovery: run ${r.id} left for a later sweep — ${runDisposition.reason}`);
         continue;
       }
@@ -327,6 +339,25 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
 //
 // It never writes a terminal row. A target that defers again is returned, not decided about: the tombstone
 // this union exists to prevent is exactly as wrong on the tenth attempt as on the first.
+// Does the record still belong to the holder this debt was claimed by?
+//
+// The EPOCH is the load-bearing half, and on its own it is sufficient: the store issues `ownerEpoch + 1` per
+// RECORD, so a given (record, generation) pair has exactly one holder for all time. Any takeover moves it,
+// whether the successor is another replica or the same one restarted.
+//
+// The replica name is compared too, and it is REDUNDANT while that stays true — a mutation that drops it
+// leaves every counterexample here green, which is the honest report. It is kept as a statement of what the
+// token is (a capability issued BY a claim TO an owner, not a number read off a row) and as the check that
+// would start mattering if generations ever became global rather than per-record. Nothing depends on it.
+//
+// UNCLAIMED is a state both sides can be in, and it has to compare equal. A deployment with no replica
+// identity configured never claims — the sweep's authority is the `unknown`/0 sentinel and the row's owner
+// columns stay NULL — so comparing the raw values would make every retry look displaced and discharge the
+// whole worklist in silence. That is the single-replica path, i.e. every dev install.
+function stillHolds(authority: DriverAuthority, record: { ownerReplica?: string; ownerEpoch?: number }): boolean {
+  return (record.ownerReplica ?? UNKNOWN) === authority.ownerReplica && (record.ownerEpoch ?? 0) === authority.epoch;
+}
+
 export async function retryDeferredRecovery(
   deps: Pick<RecoveryDeps, "scorecards" | "runs" | "resume" | "resumeRun" | "owner" | "now">,
   owed: readonly RecoveryTarget[],
@@ -340,7 +371,11 @@ export async function retryDeferredRecovery(
       if (!record || !ACTIVE.has(record.status)) continue;
       // The record is still ours by construction: this worklist only holds targets this replica claimed, and
       // a takeover raises the epoch so the resume below is refused rather than racing.
-      const authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: record.ownerEpoch ?? 0 };
+      // The row's ownership NOW, against the capability this target was claimed with. Different means this
+      // replica was displaced: the batch has a live owner that is not us, so the debt is discharged rather
+      // than retried — keeping it owed would have us asking forever about someone else's work.
+      if (!stillHolds(target.authority, record)) continue;
+      const authority = target.authority;
       const disposition = deps.resume
         ? await deps.resume(target.id, authority).catch(
             (err: unknown): ResumeResult => ({
@@ -354,7 +389,8 @@ export async function retryDeferredRecovery(
     }
     const run = await deps.runs?.get?.(target.id);
     if (!run || !ACTIVE.has(run.status)) continue;
-    const authority = { ownerReplica: deps.owner ?? UNKNOWN, epoch: run.ownerEpoch ?? 0 };
+    if (!stillHolds(target.authority, run)) continue;
+    const authority = target.authority;
     const disposition = deps.resumeRun
       ? await deps.resumeRun(run, authority).catch(
           (err: unknown): ResumeResult => ({
