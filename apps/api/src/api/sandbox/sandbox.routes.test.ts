@@ -1,6 +1,6 @@
-import { NO_IMAGE } from "@everdict/contracts";
 import { RunService, SandboxSessionService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, Driver, EvaluableHarness } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryTrajectoryStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";

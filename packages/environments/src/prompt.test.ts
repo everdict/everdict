@@ -5,7 +5,7 @@ import { PromptEnvironment } from "./prompt.js";
 
 // seed/snapshot don't use compute, so this stub fails if called (guaranteeing there's no stage).
 const noCompute: ComputeHandle = {
-    image: NO_IMAGE,
+  image: NO_IMAGE,
   async exec() {
     throw new Error("prompt env should not exec");
   },
