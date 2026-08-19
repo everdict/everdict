@@ -33,20 +33,59 @@ const toplevel = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: effec
 if (toplevel.status !== 0 || toplevel.stdout.trim() !== root) process.exit(0);
 
 const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
-let stamp = "";
-try {
-  stamp = readFileSync(path.join(root, ".git", "everdict-ci-ok"), "utf8").trim();
-} catch {
-  // no stamp yet
+
+// ── EVERY COMMIT IN THE PUSH, NOT ONLY ITS TIP (arch-review 57 follow-up) ─────────────────────────
+//
+// This compared the stamp to HEAD, so a batch of eight commits was let through on one gated commit and seven
+// that had never been built. The history then advertises a bisectability it does not have — and the hole is
+// invisible, because GitHub also only runs checks on the tip, so nothing downstream contradicts it.
+//
+// The stamp is a ledger now (`<sha> full|fast`). Every commit ahead of the remote must appear in it, and the
+// TIP must be `full`: the expensive checks — gitleaks over all history, the web build, the mutation suite —
+// answer questions about the tree being published, while lint/typecheck/test are what bisect actually lands
+// on. `pnpm ci:commits` fills the intermediate ones.
+const ledger = new Map();
+for (const line of readFileSync(path.join(root, ".git", "everdict-ci-ok"), "utf8")
+  .split("\n")
+  .filter(Boolean)) {
+  const [sha, level] = line.split(" ");
+  // A bare sha predates the ledger and attested the full gate.
+  if (sha !== undefined) ledger.set(sha, level ?? "full");
 }
-if (stamp === head && head !== "") process.exit(0);
+
+// What this push would carry. The remote's own ref is the base — anything it already has was gated when it
+// was pushed. If that ref cannot be resolved (a first push, a detached setup), fall back to guarding HEAD
+// alone rather than refusing everything.
+const remote = spawnSync("git", ["remote"], { cwd: root, encoding: "utf8" }).stdout.split("\n").filter(Boolean)[0];
+const base = `${remote}/main`;
+const haveBase =
+  remote !== undefined && spawnSync("git", ["rev-parse", "--verify", "--quiet", base], { cwd: root }).status === 0;
+const pushed = haveBase
+  ? spawnSync("git", ["rev-list", `${base}..HEAD`], { cwd: root, encoding: "utf8" })
+      .stdout.split("\n")
+      .filter(Boolean)
+  : [head];
+
+const unstamped = pushed.filter((sha) => !ledger.has(sha));
+const tipLevel = ledger.get(head);
+if (head !== "" && unstamped.length === 0 && tipLevel === "full") process.exit(0);
+
+const reason =
+  tipLevel !== "full"
+    ? `git push blocked: HEAD ${head.slice(0, 9)} has no FULL gate stamp. Run \`pnpm ci:local\` (mirrors .github/workflows/ci.yml), then push.`
+    : `git push blocked: ${unstamped.length} of the ${pushed.length} commit(s) this push carries were never gated — ${unstamped
+        .slice(0, 3)
+        .map((s) => s.slice(0, 9))
+        .join(
+          ", ",
+        )}${unstamped.length > 3 ? ", …" : ""}. GitHub only checks the tip too, so these would be holes nothing contradicts. Run \`pnpm ci:commits\`.`;
 
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: `git push blocked: the local CI parity gate has not passed for HEAD ${head.slice(0, 9)}. Run \`pnpm ci:local\` (mirrors .github/workflows/ci.yml; stamps .git/everdict-ci-ok on a clean green tree), then push. See .claude/rules/ci.md.`,
+      permissionDecisionReason: `${reason} See .claude/rules/ci.md.`,
     },
   }),
 );

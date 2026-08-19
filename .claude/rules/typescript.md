@@ -27,6 +27,12 @@ Non-default rules — see skill `foundation` for rationale.
   compiler had been holding: a missing `tags`, an optional `tenant` flowing into runtime resolution, and a
   `GradeContext` missing every required field. Type the call; if the type genuinely cannot say it, add an
   allowlist entry stating why.
+- **A control character in source is written as an ESCAPE, never as a literal byte.** `\u0000` compiles to
+  the same byte and keeps the file TEXT; raw, git treats the source as binary — `git diff` says "Binary files
+  differ", `git grep` skips it, and every scanner in this repo goes blind to that file. Seven files carried
+  one as a composite-key separator (`${tenant}\u0000${id}`, which is the right idea), and one of them was
+  `sameResolvedImages` — the function deciding whether two runs used the same image bytes sat unreviewable and
+  unsearchable for as long as the byte did. `pnpm source-bytes` refuses it (CI-required).
 - **Model a decision as a discriminated union, never `{ value?: T; ok: boolean }`.** A caller can read the
   value and never look at the flag — and will. Exhaustive `switch` on `kind` is the shape that cannot be
   half-consumed. See rule `protocol` L2.

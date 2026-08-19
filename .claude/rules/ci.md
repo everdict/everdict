@@ -9,12 +9,21 @@ See skill `ci`.
   (`scripts/ci-local.mjs`) — it mirrors `.github/workflows/ci.yml` step-for-step and, on a clean
   green tree, stamps `.git/everdict-ci-ok` with the HEAD sha.
 - **Enforced, not advisory**: a PreToolUse hook (`scripts/hooks/pre-push-gate.mjs`, wired in
-  `.claude/settings.json`) denies `git push` unless the stamp matches HEAD. Committing after the
-  gate invalidates the stamp — re-run `pnpm ci:local` (turbo cache makes it fast). Never work
-  around the hook (no stamp forging, no pushing from outside the tool).
+  `.claude/settings.json`) denies `git push` unless every commit the push carries is stamped and HEAD's stamp
+  is `full`. Committing after the gate invalidates that commit's stamp — re-run `pnpm ci:local` (turbo cache
+  makes it fast). Never work around the hook (no stamp forging, no pushing from outside the tool).
+- **EVERY COMMIT IN A PUSH, NOT ONLY ITS TIP.** `pnpm ci:local` validates HEAD, and GitHub also only runs its
+  checks on the tip — so a batch of eight commits used to ship seven that had never been built, while the split
+  history advertised a bisectability it did not have and nothing downstream contradicted it. `.git/everdict-ci-ok`
+  is a LEDGER now (`<sha> full|fast`), and **`pnpm ci:commits`** walks what is ahead of the remote and runs
+  lint+typecheck+test on each in a throwaway worktree. Fast, not full, on purpose: gitleaks-over-all-history,
+  the web build and the mutation suite answer questions about the tree being PUBLISHED, while a broken build or
+  a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
+  them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
-  **`pnpm constructed-casts`**, **`pnpm protocol-mutations`**,
+  **`pnpm constructed-casts`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
+  **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
@@ -34,6 +43,12 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **`pnpm language-policy` keeps the repo English** (CLAUDE.md's language policy), as a RATCHET: the 550
+  files that already carry Korean are recorded in `scripts/language-policy-baseline.txt` and pass, a file NOT
+  in that list may not introduce it, and a baselined file that has been cleaned must leave the list in the
+  same change. A bulk translation would be the wrong repair — those comments carry the REASON a piece of code
+  is what it is, and precision is exactly what a sweep trades away. The debt is repaid where someone is
+  already reading the file.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A

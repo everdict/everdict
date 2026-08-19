@@ -6,7 +6,7 @@
 // (CI validates the pushed commit, so a dirty-tree pass proves nothing about HEAD).
 // Plain Node, no external deps. Usage: `pnpm ci:local` (or `node scripts/ci-local.mjs`).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +69,8 @@ run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
+run("pnpm language-policy", "pnpm", ["language-policy"]);
+run("pnpm source-bytes", "pnpm", ["source-bytes"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 
 // Job 2 — web (self-contained; contracts d.ts already exists via the root build above).
@@ -115,5 +117,23 @@ const commonDir = path.resolve(
   root,
   spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).stdout.trim(),
 );
-for (const dir of new Set([gitDir, commonDir])) writeFileSync(path.join(dir, "everdict-ci-ok"), `${head}\n`);
-console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} — safe to push.`);
+// ── THE STAMP IS A LEDGER, NOT A LATCH (arch-review 57 follow-up) ─────────────────────────────────
+//
+// It used to hold one sha, and the hook compared it to HEAD. That verifies the TIP of a push and nothing
+// else: a batch of eight commits pushed together had one gated commit and seven that had never been built,
+// while the split history advertises itself as bisectable. `git bisect` landing on one of those seven is
+// asking a question the tree cannot answer.
+//
+// So every gated commit appends a line, and the line records WHICH gate it passed — `full` here, `fast` from
+// `scripts/ci-commits.mjs`. A fast-stamped commit is not a full-stamped one, and writing them alike would be
+// the same lie one level down. The hook requires a stamp for every commit being pushed and `full` for the tip.
+// Bounded: the last 200 lines, which is more history than any push spans.
+const LEDGER_LINES = 200;
+for (const dir of new Set([gitDir, commonDir])) {
+  const file = path.join(dir, "everdict-ci-ok");
+  const prior = existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+  // A bare sha is a pre-ledger stamp; keep it readable as `full`, which is what it attested.
+  const kept = prior.map((l) => (l.includes(" ") ? l : `${l} full`)).filter((l) => !l.startsWith(head));
+  writeFileSync(file, `${[...kept, `${head} full`].slice(-LEDGER_LINES).join("\n")}\n`);
+}
+console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} full — safe to push.`);

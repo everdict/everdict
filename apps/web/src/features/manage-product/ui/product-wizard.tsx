@@ -72,7 +72,7 @@ const repoKeyOf = (repository: string, host?: string): string =>
 
 // 서비스 행 하나의 정체성 — 이름이 아니라 좌표다(같은 레포에서 프리픽스만 다른 두 서비스가 공존한다).
 const rowKeyOf = (row: Pick<ServiceRow, 'repository' | 'host' | 'tagPrefix' | 'path'>): string =>
-  [row.host, row.repository, row.tagPrefix, row.path].join('')
+  [row.host, row.repository, row.tagPrefix, row.path].join('\u0001')
 
 // 프리픽스가 실제로 무엇을 집는지 — 싱크와 **같은 규칙**(startsWith, 없으면 전부)으로 표본을 다시 센다.
 // 서버 왕복 없이 즉시 갱신되므로 프리픽스를 손보는 순간 "몇 개가 잡히는지"가 눈에 보인다.
@@ -365,7 +365,7 @@ export function ProductWizard({
                     const preview = previewOf(discovery, suggestion.tagPrefix ?? '')
                     return (
                       <li
-                        key={`${suggestion.name}${suggestion.tagPrefix ?? ''}${suggestion.path ?? ''}`}
+                        key={`${suggestion.name}\u0001${suggestion.tagPrefix ?? ''}\u0001${suggestion.path ?? ''}`}
                       >
                         <button
                           type="button"
