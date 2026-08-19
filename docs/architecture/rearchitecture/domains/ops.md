@@ -234,7 +234,10 @@ From the apps-api survey catalog (§1.16 + §1.2 #26, §1.3 #31–33):
 | Temporal drivers (`TemporalBatchDriver`, `TemporalScheduleDriver`) | `@everdict/orchestrator` client side, injected into scorecard/schedule services | `infrastructure/temporal` (00 §4) |
 | `Autoscaler` + `MutableSlots` + `parseAutoscale`/`parseTenantMap` | `@everdict/backends` + `core/ops/scheduling-config.ts` (malformed env fails boot loudly) | policy → `domain/placement`; env parsing → composition root |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

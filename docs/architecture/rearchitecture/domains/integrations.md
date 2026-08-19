@@ -250,7 +250,10 @@ From the apps-api survey catalog (§1.11, #103–118):
 | `imageWarnings`/`classifyImageRef`/`RegistryAuth` | `@everdict/core` (`packages/core/src/infra/image-ref.ts`) | `domain/image` |
 | `GithubAppRepoAccess` / `WorkspaceRunnerRoster` (structural ports of CiLinkService) | declared IN `ci-link-service.ts:32-52`, satisfied by GithubAppService / RunnerService | good port discipline — keep; ownership moves to the application layer |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

@@ -11,7 +11,7 @@
 A **Dataset** is a versioned, tenant-owned (or `_shared`) bundle of **EvalCase**s that never knows
 which harness runs it. Content enters through three on-ramps: **mapping** (row-based sources —
 HF/jsonl/csv → `CaseMapping` rules), **standard task formats** (Terminal-Bench directory
-tasks → dedicated pure mappers), and direct registration (`DatasetSchema`-validated JSON). Datasets
+tasks → a dedicated pure mapper), and direct registration (`DatasetSchema`-validated JSON). Datasets
 are compared version-to-version (**diff**) and consumed at submit time through **subset selection**
 (partial runs stamped as such).
 
@@ -203,14 +203,17 @@ From the apps-api survey catalog (§1.5, #47–63):
 | HF gated token | `SecretStore` `HF_TOKEN` (personal-first) via BenchmarkService | secrets port |
 | First-party catalog (`BENCHMARK_CATALOG`) | `@everdict/datasets` `catalog.ts` (code) | content → `examples/bundles/*` (memory: "codex/pinch are bundles, not core") |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|
 | Row→case mapping (env precedence, grader synthesis, `imageField` wins) | `packages/datasets/src/mapping.ts:49-96` (`rowToCase`) — pure, well-tested | moves verbatim to `domain/dataset/mapping.ts` |
 | **CaseMapping code↔Zod dual maintenance** | `mapping.ts:10-31` (interface) vs `spec.ts:13-35` (`CaseMappingSchema`) — spec.ts's own comment: a too-narrow schema silently downgrades user recipes to browser envs because Zod strips unknown keys | ONE Zod schema in `contracts`, `type CaseMapping = z.infer<…>`; the interface is deleted; a drift test is impossible to need |
 | Import never silently truncates | `packages/datasets/src/sources.ts` (`fetchHfRows` — no limit = full dataset, 100-row paging) — policy enforced only by connector defaults | named `domain/dataset` import policy; connectors take an explicit `all | limit(n)` argument |
-| Reference images, never build | `packages/datasets/src/terminal-bench.ts:26-37` (`resolveImage` throws) + `.claude/rules/datasets.md` | `domain/dataset` rule shared by a unified container-task mapper |
+| Reference images, never build | `packages/datasets/src/terminal-bench.ts` (`resolveImage` throws) + `.claude/rules/datasets.md` | `domain/dataset` rule shared by a unified container-task mapper |
 | Subset selection (ids→tags→limit; unknown id 400; empty 400; stamped) | `apps/api/src/core/scorecard/scorecard-shared.ts:114-153` (`selectSubsetCases`) — a dataset-domain rule living in the scorecard folder | `domain/dataset/subset.ts`; the scorecard use-case consumes it |
 | Grading-plan overlay (dataset stays pure data) | `scorecard-shared.ts:158-161` (`applyGradingPlan`) — applied identically at submit / resume / retry / Temporal planBatch | `domain/scorecard` (it is a batch rule, not dataset content) — split confirmed in review |
 | Diff canonicalization (no false changes from key order) | `packages/datasets/src/diff.ts:4-13` (`canonical`), field set `:23-33` | `domain/dataset/diff.ts` verbatim |

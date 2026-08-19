@@ -31,6 +31,16 @@ const walk = (dir, out = []) => {
 };
 
 const docs = walk("docs").sort();
+
+// The rules and skills are documentation the MODEL reads, not the human — the push layer is injected into
+// context by a `paths:` glob, so a rule citing a moved file teaches the wrong address at the moment of
+// editing, with nobody reading it deliberately enough to notice. `pnpm convention-harness` checks that
+// layer's STRUCTURE (every rule reaches live paths, every workspace is governed); what it cannot see is a
+// path that still exists beside a symbol that does not. So check 3 — "cited code paths still exist" — runs
+// over both bodies of text from one predicate. Checks 1 and 2 stay docs-only: `.claude/**` has its own
+// index (`.claude/skills/README.md`, guarded by the convention harness) and does not link relatively.
+const conventions = [...walk(".claude/rules"), ...walk(".claude/skills")].sort();
+const citing = [...docs, ...conventions];
 const failures = [];
 
 // ── 1. index completeness ───────────────────────────────────────────────────────────────────────
@@ -106,7 +116,7 @@ for (const doc of docs) {
   // `.env` and friends are gitignored by design — the docs tell you to create them.
   const candidates = new Set();
   const sites = [];
-  for (const doc of docs) {
+  for (const doc of citing) {
     if (doc.startsWith(HISTORICAL)) continue;
     const text = readFileSync(join(ROOT, doc), "utf8");
     for (const m of text.matchAll(/`([^`\n]+)`/g)) {
@@ -135,10 +145,77 @@ for (const doc of docs) {
   }
 }
 
+// ── 4. symbols the CONVENTION layer names still exist ───────────────────────────────────────────
+// Scoped to `.claude/**` on purpose. A path that moved is caught by check 3; a path that stayed while the
+// SYMBOL inside it was deleted is not, and that is the shape that actually rots here: the backends rule
+// taught `Recoverable`/`isObservable` for two review cycles after arch-review 53 deleted the case-id control
+// surface, because `packages/backends/src/backend.ts` still existed. Docs are read deliberately by a human
+// who can notice; a rule is injected by a glob at the moment of editing and read by a model that cannot.
+// It is also a difference in KIND: a design record under `docs/architecture/` is allowed to name a type it
+// is proposing — that is what a design record is for, and ~25 of the names `docs/**` uses this way are
+// either external API surface (Temporal RPCs, S3 verbs, A2A events) or a shape still being argued about.
+// A rule may not: it describes what to do RIGHT NOW in code that exists.
+{
+  // A backticked identifier is a claim about this repository. Absences that are deliberate name their reason.
+  const KNOWN_ABSENT_SYMBOLS = new Map([
+    ["CreateXBodySchema", "a naming TEMPLATE — the X stands for the resource (api-layer recipe)"],
+    ["UpdateXBodySchema", "a naming TEMPLATE — the X stands for the resource (api-layer recipe)"],
+  ]);
+
+  // Test files are EXCLUDED from what counts as live. A deleted interface keeps being named by the ratchet
+  // that keeps it deleted — `Recoverable` survives in `legacy-case-addressing-guard.test.ts` precisely
+  // BECAUSE it is gone — so counting tests makes this check green over the one defect it was written for.
+  // A surface that exists only in a test is not a surface a rule may teach.
+  //
+  // `scripts/**` is excluded for the same reason one level up: this very file explains the check by NAMING
+  // `Recoverable`, and while scripts counted, that sentence was enough to make the mutation pass. A guard
+  // whose own prose satisfies it is the failure mode this repo has now shipped three times.
+  const live = new Set(
+    execSync(
+      'git grep -h -o -E "\\b[A-Z][A-Za-z0-9]{3,}\\b" -- packages apps ' +
+        '":(exclude)*.test.ts" ":(exclude)*.test.tsx"',
+      {
+        cwd: ROOT,
+        maxBuffer: 512 * 1024 * 1024,
+      },
+    )
+      .toString()
+      .split("\n")
+      .filter(Boolean),
+  );
+
+  // The testing rule and skill are ABOUT tests, so test files are their live surface: `ControlledBackend` and
+  // `InMemoryTransport` are fixtures that exist nowhere else and are exactly what those documents teach.
+  // Nothing else may resolve against a test — see the comment on `live`.
+  const testOnly = new Set(
+    execSync('git grep -h -o -E "\\b[A-Z][A-Za-z0-9]{3,}\\b" -- "*.test.ts" "*.test.tsx"', {
+      cwd: ROOT,
+      maxBuffer: 512 * 1024 * 1024,
+    })
+      .toString()
+      .split("\n")
+      .filter(Boolean),
+  );
+  const aboutTests = (doc) => doc === ".claude/rules/testing.md" || doc.startsWith(".claude/skills/testing/");
+
+  for (const doc of conventions) {
+    const text = readFileSync(join(ROOT, doc), "utf8");
+    for (const m of text.matchAll(/`([A-Z][A-Za-z0-9]{3,})`/g)) {
+      const symbol = m[1];
+      if (live.has(symbol) || KNOWN_ABSENT_SYMBOLS.has(symbol)) continue;
+      if (aboutTests(doc) && testOnly.has(symbol)) continue;
+      failures.push(`${doc} names \`${symbol}\`, which no source file declares or uses`);
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`docs check FAILED — ${failures.length} problem(s):\n`);
   for (const f of failures) console.error(`  ✗ ${f}`);
   console.error("\nSee docs/architecture/docs-site.md for what this gate is protecting.");
   process.exit(1);
 }
-console.log(`docs check OK — ${docs.length} documents: indexed, links resolve, cited code paths exist.`);
+console.log(
+  `docs check OK — ${docs.length} documents indexed with resolving links; ` +
+    `${citing.length} documents cite only live paths, and ${conventions.length} rules/skills name only live symbols.`,
+);

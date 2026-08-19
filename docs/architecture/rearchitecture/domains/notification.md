@@ -178,7 +178,10 @@ desktop watcher (30s MCP poll, runner token — works with zero web session).
 | `apiPublicUrl` (Rerun button post-back base) | config field | composition config |
 | id / clock | ctor defaults | `clock/id` port |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

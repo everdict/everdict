@@ -209,7 +209,10 @@ From the apps-api survey catalog (§1.8, #72–82):
 | GitHub registration token mint | `CiLinkService.mintRunnerToken` → `GithubAppService.runnerRegistrationToken` | integrations domain port |
 | Runner-side execution (`runCaseJob`, `DockerTopologyRuntime`) | `@everdict/self-hosted-runner` → `@everdict/job-runner`/`topology` | `application/execution` consumer (00 §8 Q3 keeps the package) |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

@@ -240,7 +240,10 @@ From the apps-api survey catalog (§1.2, #12–26):
 | ops policies (spillover, OOM boost, speculation, shard weights, adaptive gate) | batch resilience decisions | `apps/api/src/core/ops/*` (pure, already isolated) |
 | `onComplete` / notifications | completion + regression alerts | `NotificationService` closures |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

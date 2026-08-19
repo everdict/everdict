@@ -17,7 +17,7 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 5. External model/HTTP failure in a transport → `UpstreamError` (never raw).
 
 ## Reference impl
-`apps/api/src/execution/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
+`packages/application-control/src/scorecard/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
 → `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede/**user cancel**) with **streaming
 judges** (each case is pushed into `ScoringService.createJudgeStream` from `onResult` the moment it completes —
 bounded case-axis parallelism, deterministic per-case judge order; the `judges` phase after dispatch is just
@@ -26,7 +26,7 @@ downstream of a produced outcome**: `createJudgeStream.push` skips a result with
 pre-trace/dispatch death has no real trace/snapshot, so judging it burns provider tokens for a spurious `judge:<id>`
 score) and tallies `stats()` (`pushed`/`gradeable`/`skipped`); the `judges` phase reports it — `judges skipped: 0
 gradeable traces (N/N failed pre-trace)` when every case died — instead of a misleading "judges applied". Scoring is
-split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
+split out to `packages/application-control/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
 **Recover transient scoring.** `POST /scorecards/:id/rescore-unmeasured` (+ MCP `rescore_unmeasured_scores`,
@@ -143,7 +143,7 @@ dispatch/install/run death) contributes NOTHING to the metric plane — its stor
 `caseOutcome`/`scorecardOutcomes`; only collect-stage failures keep their compute-bound measurements.
 `classifyFailure` marks CANCELLED non-retryable (a retry would un-stop a stop), and runCase records a
 `compute.dispose()` failure on the lifecycle mark instead of destroying the finished result. The web dashboard is
-**metric-kind-aware** (`classifyMetric`/`fmtMetricValue` in `apps/web/.../format.ts`): categorical → distribution
+**metric-kind-aware** (`classifyMetric`/`fmtMetricValue` in `apps/web/src/shared/lib/format.ts`): categorical → distribution
 bar, pass/fail → proportion bar, numeric → the mean in its inferred unit ($ / s / % / count) — never a raw `0.50`.
 
 ## Agent Judges
@@ -251,14 +251,14 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   serves `direction` (absent = unknown ⇒ nothing flagged, deltas uncolored) — never interpret a delta's sign
   alone. The **served `headlinePassRate` rides list AND detail** (`serveScorecardListItem`); a client never
   re-derives a representative metric from summary order.
-- Model axis (`packages/suite/src/models.ts` `scorecardModels`): **observed** (distinct `llm_call.model` from the
+- Model axis (`packages/domain/src/scorecard/models.ts` `scorecardModels`): **observed** (distinct `llm_call.model` from the
   trace) + **declared** (command harness `spec.model`) both kept; `primary` = mode observed → declared fallback.
   Persisted as `models` jsonb (mig `0028_add_scorecard_models.sql`); judge models mig `0030`.
-- Trend/regression-over-time: `trendSeries` (`packages/suite/src/trend.ts`), route `GET /scorecards/trend`
+- Trend/regression-over-time: `trendSeries` (`packages/domain/src/scorecard/trend.ts`), route `GET /scorecards/trend`
   + MCP twin `trend_scorecards` (direction/policyMixed semantics reach agents too — BFF↔MCP parity).
 - Flexible analysis pivot: `computeAnalysis` (`packages/domain/src/scorecard/analysis.ts`) — filter/group/pivot/
   measure over the light list shape; route `POST /scorecards/query` + MCP `query_scorecards`. It is the
-  **server-side twin of the web engine** (`apps/web/.../analyze-scorecards/model/analysis.ts`) — change BOTH in
+  **server-side twin of the web engine** (`apps/web/src/features/analyze-scorecards/model/analysis.ts`) — change BOTH in
   lockstep. `GET /scorecards/:id/analysis` + `get_scorecard_analysis` fetch the offloaded `analysisRef` bundle
   server-side (http-only ref → else 404). See `docs/architecture/analysis-studio.md`.
 
@@ -290,12 +290,12 @@ whose `source.kind` equals the sink kind **attaches scores to the original trace
 `runs[{caseId,runId}]` mapping flows through as `attach`. SSOT `docs/architecture/trace-sink.md` + rule `trace`.
 
 ## Saved Views
-`apps/api/src/workspace/view-service.ts` + `packages/db/src/results/view-store.ts` — private|workspace saved scorecard-analysis
+`packages/application-control/src/view/view-service.ts` + `packages/db/src/results/view-store.ts` — private|workspace saved scorecard-analysis
 lenses (opaque `config`, live re-run). AuthZ **reuses** `scorecards:read` (read) / `scorecards:run` (write) —
 no new action; edit/delete = owner or admin. See `docs/architecture/scorecard-analysis-views.md`.
 
 ## Execution/scoring/orchestration separation
-Three concerns stay split: `apps/api/src/execution/execute-case.ts` (`executeCase` = pure exec: token resolve + attach +
+Three concerns stay split: `packages/application-control/src/execution/execute-case.ts` (`executeCase` = pure exec: token resolve + attach +
 dispatch) · `ScoringService` (scoring on a trace) · the services (`ScorecardService`/`RunService` orchestrate
 lifecycle, budget, child runs). Live batch and ingest share the SAME scoring path. See
 `docs/architecture/execution-scoring-orchestration.md`.

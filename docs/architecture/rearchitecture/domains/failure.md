@@ -165,7 +165,10 @@ The failure domain has no transport of its own — it rides other domains' use-c
 | Backend adapters (evidence) | OOM signal stamping needs orchestrator APIs | `nomad.ts` alloc task events; `k8s.ts` pod termination reason |
 | `CircuitBreaker` | infra-failure health memory | `@everdict/backends` (consumer, not dependency) |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

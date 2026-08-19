@@ -223,7 +223,10 @@ From the apps-api survey catalog (§1.1, #1–11):
 | `artifacts` (`ArtifactStore`) | screenshot offload | `@everdict/storage` S3ArtifactStore |
 | `fetch` (webhook) | completion webhook | global fetch |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

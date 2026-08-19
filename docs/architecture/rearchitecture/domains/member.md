@@ -196,7 +196,10 @@ From the apps-api survey catalog (§1.9, #83–96):
 | Token primitives: `generateInviteToken` (`inv_`), `hashKey` | values exported from `@everdict/db` | `domain/member` (issuance recipe) over a hash contract in `contracts` |
 | `validateImageRef` (workspace logo) | `apps/api/src/common/image-ref.ts` | `domain/image` |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

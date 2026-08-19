@@ -14,7 +14,7 @@ transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell =
 
 ## Checklist
 1. Read the SSOT doc first. Runner behavior changes go in `packages/self-hosted-runner` ONLY (CLI + desktop stay identical) — never fork logic into `apps/cli` or `apps/desktop`.
-2. Capability vocab is one SSOT (`packages/core/src/infra/capability.ts`) — add a capability = one line in `CAPABILITY_DEFS`; its `kind` auto-routes advertise/match/enforce.
+2. Capability vocab is one SSOT (`packages/contracts/src/infra/capability.ts`) — add a capability = one line in `CAPABILITY_DEFS`; its `kind` auto-routes advertise/match/enforce.
 3. Runners self-advertise via probes (`detectCapabilities`), never user input. Add a probe to `defaultProbes` when you add a functional capability.
 4. Placement gates on **functional** caps only (`functionalGate`); security→trust-zone, auth→budget. Never gate placement on a security/auth cap.
 5. Boundary-validate every leased job with `CaseJobSchema`; release the MCP session in `finally`.
@@ -31,23 +31,23 @@ transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell =
 - `RunnerHost` (`packages/self-hosted-runner/src/runner-host.ts`) — GUI facade wrapping the loop for the desktop main process; CLI uses `runLeaseWorkers` directly.
 - `detectCapabilities`/`defaultProbes` (`packages/self-hosted-runner/src/capabilities.ts`) — probes THIS machine (git/docker/browser/computer-use/sandbox/codex-login/claude-login/gpu + **os-windows/os-macos** from `platform()` — a Windows/macOS runner advertises its own OS so `requires.os` can place on it, incl. Docker-less host-exec services); `topology` has no local probe (derived, gated by `docker`).
 
-## Capability model (`packages/core/src/infra/capability.ts`)
+## Capability model (`packages/contracts/src/infra/capability.ts`)
 `CAPABILITY_DEFS` = the vocab SSOT; each name → a `kind` that decides HOW it is matched:
 - **functional** (`git·docker·browser·computer-use·topology`) → **placement gate** (`functionalGate`/`runtimeSatisfies`: required ⊆ advertised).
 - **security** (`sandbox`) → **trust-zone** enforces (`assertHardenedIsolation`); the label is a hint, **not** enforcement.
 - **auth** (`codex-login·claude-login`) → **budget** (own-pays: the machine's own login, workspace budget untouched).
 `partitionCapabilities` splits requirements by kind → each kind routes to its own layer. `requiredCapabilities(evalCase)` derives a case's needs (image→docker, git source→git, browser/os-use env, isolation→sandbox, **placement.os→os-windows/os-macos** — a declared non-linux world gates pre-placement instead of dying inside the job); `defaultRuntimeCapabilities(spec)` auto-labels a registered runtime (both in `packages/domain/src/runtime/capability-requirements.ts`, alongside `computeNeedsFor` — the driver lane's env-kind→ComputeSpec.needs derivation).
 
-## Runtime = WHERE (`packages/core/src/infra/runtime-spec.ts`)
+## Runtime = WHERE (`packages/contracts/src/infra/runtime-spec.ts`)
 Registered `RuntimeSpec` kinds are **`local | nomad | k8s`** only. The `docker` and `topology` KINDS were removed (slice 5b): "single docker host" → the self-hosted runner's local docker (the `docker` capability), and topology → a `nomad|k8s` runtime carrying `traceSource` (the `topology` capability). `local` = control-plane host, dev-only. `authSecret`/`kubeconfigSecret` name a SecretStore key (never the value; stripped from alloc env).
 
 ## Tiers, pairing, dispatch (apps/api)
-- Pairing token `rnr_` (desktop `safeStorage`, or CLI `--pair`) → `runnerAuthenticator` maps it to `Principal{via:"runner"}` (`packages/auth/src/runner.ts`). Pair via `RunnerService.pair`/`pairWorkspace` (`apps/api/src/runners/runner-service.ts`).
-- Targets (`runtime` selector → `placement.target`), routed by `RuntimeDispatcher` (`apps/api/src/execution/runtime-dispatcher.ts`):
+- Pairing token `rnr_` (desktop `safeStorage`, or CLI `--pair`) → `runnerAuthenticator` maps it to `Principal{via:"runner"}` (`packages/auth/src/runner.ts`). Pair via `RunnerService.pair`/`pairWorkspace` (`packages/application-control/src/runner/runner-service.ts`).
+- Targets (`runtime` selector → `placement.target`), routed by `RuntimeDispatcher` (`apps/api/src/core/execution/runtime-dispatcher.ts`):
   - `self:<id>` — a personal-owned runner (owner=submitter, **owner-checked**, own-pays).
   - `self` — the personal pool (any of my runners; own-pays).
-  - `self:ws:<id>` / `self:ws` — a workspace-shared runner / pool (owner=`ws:<tenant>` **derived from the job tenant** → membership IS access, cross-workspace structurally impossible; workspace-pays via `billingTenant`, `packages/backends/src/budget.ts`).
-- `RunnerHub` (`apps/api/src/runners/runner-hub.ts`) — the lease queue; `POOL_RUNNER="*"` sentinel + `poolKeyFor(owner)` route pool jobs (a capability mismatch on the pool is **skipped**, not rejected, so a capable runner takes it); `requiredRunnerCapabilities(job)` adds `docker` for service harnesses. `SelfHostedBackend` (`apps/api/src/execution/self-hosted-backend.ts`) stamps `provenance`.
+  - `self:ws:<id>` / `self:ws` — a workspace-shared runner / pool (owner=`ws:<tenant>` **derived from the job tenant** → membership IS access, cross-workspace structurally impossible; workspace-pays via `billingTenant`, `packages/domain/src/billing/cost.ts`).
+- `RunnerHub` (`packages/application-control/src/runner/runner-hub.ts`) — the lease queue; `POOL_RUNNER="*"` sentinel + `poolKeyFor(owner)` route pool jobs (a capability mismatch on the pool is **skipped**, not rejected, so a capable runner takes it); `requiredRunnerCapabilities(job)` adds `docker` for service harnesses. `SelfHostedBackend` (`apps/api/src/core/execution/self-hosted-backend.ts`) stamps `provenance`.
 - **Ownership precedent**: personal ownership (`owner=subject`, no role gate) — originally mirrored the now-removed Connected accounts; the pattern persists for personal runners + personal API keys.
 
 ## `everdict runner` (`apps/cli/src/main.ts` `runnerCommand`)

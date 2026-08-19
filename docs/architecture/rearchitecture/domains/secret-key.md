@@ -193,7 +193,10 @@ From the apps-api survey catalog (§1.10, #98–102):
 | `secretsFor(tenant)` (shared tier) / `scopedSecretsFor(tenant, subject)` | lambda closures in `apps/api/src/main.ts:560,770`; personal-first merge for HF at `:429-432` | typed `SecretResolution` port in the `application/control` port bag |
 | Consumers of the resolve ports | run/scorecard dispatch (harness env `{secretRef}`), judge model keys, trace collect `authSecret`, GitHub App PEM, Mattermost tokens, trace-sink auth, registry pull/push, HF_TOKEN | unchanged — all stay name-ref consumers |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

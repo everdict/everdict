@@ -11,7 +11,7 @@ rules for the seams between a decision and an effect.
 
 **Why this skill exists.** Fifty-three architecture reviews found the same defect class over and over, and the
 cause was never a missing concept. The concepts were added — `RuntimeWorkRef`, `ReadResult`, `AttemptRef`,
-`PublicationOperation`, `JudgmentProvenance`. Each was then consumed as an *annotation*: optional, swallowed,
+`PublicationOperation`, `judgmentProvenance`. Each was then consumed as an *annotation*: optional, swallowed,
 re-derived, or advisory at the one seam where the next effect begins. Read `references/case-law.md` before
 designing; it is the list of exactly how, with file and line.
 

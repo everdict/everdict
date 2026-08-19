@@ -148,6 +148,54 @@ for (const entry of existsSync(skillsDir) ? readdirSync(skillsDir) : []) {
     );
 }
 
+// ── (5) every workspace is GOVERNED — the map has no blank regions ──────────────────────────────────
+//
+// (2) proves each rule reaches live code. It says nothing about the other direction: a package nobody wrote a
+// rule for is a package Claude Code edits with no conventions injected at all, and that absence is invisible
+// — no check fails, no rule looks wrong, the model simply works without the constraints the rest of the repo
+// has. Six packages were in that state when this check was written.
+//
+// GOVERNED means some rule's `paths:` glob covers the workspace, OR a skill names it. A skill is enough
+// because the pull layer is how a model reaches deep guidance; what is not enough is nothing.
+const workspaces = [];
+for (const group of ["packages", "apps"]) {
+  const dir = path.join(root, group);
+  if (!existsSync(dir)) continue;
+  for (const name of readdirSync(dir))
+    if (statSync(path.join(dir, name)).isDirectory()) workspaces.push(`${group}/${name}`);
+}
+// The always-on rules (`**/*`, `**/*.ts`, `**/*.test.ts`) cover every workspace by construction, which is
+// exactly why they cannot answer this question: counting them would make the check vacuously green over the
+// blank regions it exists to find. Coverage means a rule that chose this code.
+const REPO_WIDE = new Set(["**/*", "**/*.ts", "**/*.test.ts"]);
+const ruleGlobs = ruleFiles.flatMap((file) => {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(path.join(rulesDir, file), "utf8"));
+  const declared = frontmatter && /^paths:\s*"([^"]+)"\s*$/m.exec(frontmatter[1]);
+  if (!declared) return [];
+  return splitTopLevel(declared[1])
+    .map((seg) => seg.trim())
+    .filter((seg) => !REPO_WIDE.has(seg))
+    .flatMap((seg) => expandBraces(seg));
+});
+const skillText = (existsSync(skillsDir) ? readdirSync(skillsDir) : [])
+  .map((entry) => path.join(skillsDir, entry, "SKILL.md"))
+  .filter((f) => existsSync(f))
+  .map((f) => readFileSync(f, "utf8"))
+  .join("\n");
+for (const workspace of workspaces) {
+  const probe = `${workspace}/src/index.ts`;
+  const covered = ruleGlobs.some((glob) => {
+    const re = globToRegExp(glob.endsWith("/**") ? `${glob.slice(0, -3)}/**/*` : glob);
+    return re.test(probe) || re.test(workspace);
+  });
+  if (covered) continue;
+  const named = skillText.includes(workspace) || skillText.includes(`@everdict/${workspace.split("/")[1]}`);
+  if (!named)
+    problems.push(
+      `${workspace} is governed by no rule and named by no skill — an unmapped workspace is edited with no conventions injected, and nothing else in this repo notices. Point an existing rule's \`paths:\` at it, or give it one.`,
+    );
+}
+
 if (problems.length > 0) {
   console.error("✖ convention harness — a rule or skill cannot reach the code it governs:\n");
   for (const p of problems) console.error(`  - ${p}`);

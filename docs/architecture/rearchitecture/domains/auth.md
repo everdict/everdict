@@ -205,7 +205,10 @@ Auth is mostly a per-request decorator rather than a resource; its owned surface
 | `resolveTrust(claims, hint)` + `enterprise.hostsFor(hint)` | injected into `githubActionsAuthenticator` from CI-link settings (good port discipline already) | stays injected; trust policy owned by the integrations domain |
 | GHES per-issuer JWKS cache | inside the GitHub adapter | infrastructure detail, stays |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

@@ -205,7 +205,10 @@ From the apps-api survey catalog (§1.3, #27–34):
 | `notifyRegression` | lambda port → `NotificationService` | typed notification port |
 | Failure taxonomy (`classifyFailure`) | `@everdict/core` | `domain/failure` (single owner per 00 §4) |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

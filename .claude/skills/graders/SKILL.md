@@ -11,7 +11,7 @@ metrics (multi-criteria judge, script grader); the runner flattens across every 
 case in grader order. Same grader scores every harness identically → fair cross-harness/version comparison.
 
 ## Checklist
-1. Implement `Grader` (`packages/core/src/execution/grader.ts`): `readonly id` + `grade(ctx): Promise<Score | Score[]>` (return one Score unless one pass genuinely yields several metrics).
+1. Implement `Grader` (`packages/contracts/src/execution/grader.ts`): `readonly id` + `grade(ctx): Promise<Score | Score[]>` (return one Score unless one pass genuinely yields several metrics).
 2. Read from `ctx` only — NEVER mutate the trace/env and NEVER re-run the harness.
 3. `ctx.compute` is OPTIONAL (service/browser harnesses have none) — outcome graders MUST guard it
    (else `BadRequestError`); trace graders read ONLY `ctx.trace`; browser graders require the snapshot `kind`.
@@ -50,12 +50,10 @@ its family needs (`readStore?` = a co-located store reader injected by the topol
   `reward-file.ts` (`RewardFileGrader`, **a benchmark task's own verifier**: materializes the task's
   `tests/` into the container, runs the verifier command, and reads the reward it PUBLISHED to
   `/logs/verifier/reward.json|txt` → `tests_pass` + `reward:<key>` per extra dimension). Its verdict is
-  deliberately NOT the exit code: Terminal-Bench 2.0 verifiers write the reward to a file and then exit 0
+  deliberately NOT the exit code: a container task's verifier writes the reward to a file and then exits 0
   whether the agent passed or failed, so the exit-code reading passes every case. A verifier that published
-  nothing is `unmeasured` (`missing_evidence`), never a zero — a number the benchmark never produced must not
-  reach a mean. Its `files`/`env` config is VERIFIER-PRIVATE: see `verifierPrivateMaterial` (contracts) and
-  `caseJobPayload`, which refuses to ship such a case to a lane that runs the agent and the verifier in one
-  environment (arch-review 56, Wave B).
+  nothing is `unmeasured` (`missing_evidence`), never a zero — a number the benchmark never produced must
+  not reach a mean.
   All need `ctx.compute` → guard it (image mode guards `ctx.provision`).
 - **trace** — `trace-graders.ts`: `stepsGrader` (tool_call count), `costGrader` (sum `llm_call.cost.usd`),
   `latencyGrader` (last.t − first.t). Read ONLY `ctx.trace`; cost/tokens come from the harness's own trace.
@@ -70,7 +68,7 @@ its family needs (`readStore?` = a co-located store reader injected by the topol
   → see the **evaluation** skill for transports, `JudgeRunner`, and how it lands under metric `judge:<id>`.
 
 ## GraderSpec reconstruction
-The agent rebuilds graders from `GraderSpec[]` (`packages/core/src/execution/eval-case.ts`) in
+The agent rebuilds graders from `GraderSpec[]` (`packages/contracts/src/execution/eval-case.ts`) in
 `makeGraders` (`packages/graders/src/make-graders.ts`) — a `switch (s.id)` mapping `{id, config}` to an
 instance (`tests-pass` → `{cmd}`, `answer-match` → `{expect, mode}`, …). Add your no-dep grader as a new
 `case`. The `judge` case is SPECIAL: it needs an injected `Judge`, so it **throws** in `makeGraders`

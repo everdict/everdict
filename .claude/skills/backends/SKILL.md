@@ -11,7 +11,7 @@ whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT
 ## Checklist
 1. Implement the CORE `Backend` (`packages/backends/src/backend.ts`) = `dispatch` + `capacity` only.
 2. Add capabilities as SEPARATE interfaces you also `implements`, never as optional methods on `Backend`
-   (see "Capabilities" below). A caller narrows with a guard (`isObservable(backend)`), not `backend.logs`.
+   (see "Capabilities" below). A caller narrows with a guard (`isWorkControllable(backend)`), not `backend.logsForWork`.
 3. Dispatch the `@everdict/job-runner` image with the job as `EVERDICT_CASE_JOB` (base64 JSON) env.
 4. Isolation = orchestrator runtime (Nomad `runtime`, K8s `runtimeClassName`) — config, not code.
 5. Inject auth (`collectAuthEnv()` from `@everdict/job-runner`) into the job env; never log it.
@@ -21,65 +21,43 @@ whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT
 `Backend` is the CORE contract (`dispatch` + `capacity` + `id`). Everything else a backend can do is a distinct
 capability interface it *also* implements, narrowed by a guard — so the compiler tracks who can do what, instead of
 a runtime `backend.logs?.()` returning `undefined` on backends that never had it:
-- `Recoverable` (`adopt` + `kill`) — jobs that outlive the control plane (Nomad/K8s). In-process/pull backends omit it.
-  ⚠️ Both are CASE-ID addressed and therefore ambiguous — see `WorkAddressable` below; they are the no-handle fallback.
-- `WorkAddressable` (`killWork(work: RuntimeWorkRef)`) — control addressed by the EXACT work, not by what the work
-  was about (arch-review 52, Wave 2). Semantic case identity ≠ physical runtime work identity: two runs of one case
-  (a re-evaluation beside a scheduled batch, a shadow beside its baseline, a retry) are two live jobs, so
-  `kill(caseId)` stopped strangers' compute — silently, since kill then returned void. The backend mints the handle when
-  it creates the external object (`DispatchOptions.onWork` — K8s after `applyJob`, Nomad after the submit), the
-  caller persists it on the physical-attempt ledger row (`ExecutionAttemptStore.recordWork`, mig 0185) so it
-  outlives the dispatching process, and teardown calls `killWork` with it. `kill(caseId)` stays ONLY for callers
-  holding no handle (legacy attempt rows, lanes that mint none) — never as a second call beside `killWork`, which
-  would restore the blast radius. Nomad kills by exact job id in the handle's own namespace (no listing at all);
-  K8s deletes the named Job in its namespace plus one `(app, tenant, run)` label sweep for the same run's
-  handle-less siblings. Nomad/K8s implement it; in-process/pull backends have no external object to name.
-  Both `kill` and `killWork` return a **`KillOutcome`** (`stopped|absent|unknown|failed` + `reason`), never
-  `void` (arch-review 52, Wave 3): they still never throw, but the caller can now tell a stop that happened
-  from one that could not be confirmed, and only `stopped`/`absent` (`killConverged`) let a cancellation
-  operation complete. A failed LISTING is `unknown`, not `absent`; a fan-out reports `worstKillOutcome`.
-- `Observable` (`logs` + `caseEvents` + `exec`) — live-progress read + one-shot exec (Nomad + K8s). `logs` is the
-  human view (result sentinel AND live-event lines stripped); `caseEvents` decodes the job's `EVENT_SENTINEL`
-  stdout lines to `TraceEvent[]` (live-observability ⑨ — the managed lane's live trajectory, snapshot semantics).
-- `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
-- `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
-- `Probeable` (`probe`) — connection test without a job.
-- `CaseInspectable` (`inspectCase(caseId)`) — CASE-scoped placement introspection (runtime debugging): the case's
-  newest orchestrator job normalized to `CasePlacement` (wire SSOT, `@everdict/contracts/wire`) — `phase queued |
-  blocked | starting | running | dead`, the placed unit/node, the scheduler's capacity verdict when blocked (Nomad
-  blocked-evaluation exhausted dimensions / K8s FailedScheduling), OOM verdict, restarts, and the orchestrator event
-  feed. The case-scoped sibling of `Inspectable` — answers "is MY case blocked/stuck/OOM-looping" while it is alive
-  instead of only inside a thrown error. Nomad + K8s. undefined = no job (pre-dispatch/GC'd); best-effort, never
-  throws. Served as `GET /runs/:id/placement` + MCP `get_run_placement`.
-- `TopologyInspectable` (`inspectTopology(harness, tenant)` + `topologyServiceLogs(harness, service, tenant)`) —
-  service-topology health (runtime debugging): the warm topology's per-service roster (`TopologyStatus` wire SSOT:
-  state/readiness/restart churn/OOM/last event) + one service's log tail. Keyed by HARNESS (the topology is a warm
-  per-(harness,version,zone) deployment, not a per-case unit); the tenant resolves the same trust zone dispatch
-  uses. Only `ServiceTopologyBackend` implements it (backed by `TopologyRuntime.describeTopology`/`serviceLogs` —
-  Nomad/K8s/Docker). Served as `GET /runs/:id/topology`(+`/services/:service/logs`) + MCP twins.
-- `Inspectable` (`inspect`) — read-only live cluster view for the runtime detail screen: composition (nodes/DCs, plus
-  each node's OS/arch/kernel/container-runtime/agent-version/IP/disk, best-effort), concurrent capacity, the live
-  workload placed on it — everdict units AND external (`role:"other"`) services co-resident on the nodes, with
-  `namespace`/`ownerKind` — and pool shared stores. A superset of probe (Nomad + K8s). TOTAL/best-effort — a
-  partial-cluster failure lands in the result's `warnings`, never throws. Result schema = the SSOT
-  `InspectRuntimeResult` in `@everdict/contracts/wire`, reused type-only by the interface (no drift). apps/api wraps it
-  (`makeRuntimeInspector`, like the prober) behind `GET /runtimes/:id/versions/:version/inspect` + `inspect_runtime`
-  MCP (both `runtimes:read`).
-- `Reclaimable` (`stopWorkload` / `reclaimIdle` / `purgeTerminal` / `setNodeSchedulable` / `resizeWorkload`) —
-  DESTRUCTIVE control paired with Inspectable, for the runtime detail screen's admin actions. The first four are
-  best-effort/idempotent (a gone target is a no-op; shared stores never reclaimed; cluster-infra namespaces refused).
-  `stopWorkload(name, namespace?)` and `resizeWorkload(name, {cpu?,memoryMb?}, namespace?)` take the unit's namespace
-  to target an EXTERNAL unit (K8s: delete/patch the pod's ROOT controller; Nomad: the namespaced job). `resizeWorkload`
-  is the ONE deliberately loud method — an unsupported target (multi-task/multi-container, K8s Job, bare pod, empty
-  resize) THROWS an AppError, never a silent no-op. apps/api wraps it (`makeRuntimeController`) behind
-  `POST /runtimes/:id/versions/:version/control` + `control_runtime` MCP, gated the NEW admin-only `runtimes:control`
+- `WorkAddressable` (`killWork(work: RuntimeWorkRef)`) — destructive control addressed by the EXACT work, not by
+  what the work was about (arch-review 52 Wave 2). Semantic case identity ≠ physical runtime work identity: two runs
+  of one case (a re-evaluation beside a scheduled batch, a shadow beside its baseline, a retry) are two live jobs, so
+  the case-id-addressed `kill` this replaced stopped strangers' compute — silently, since it returned void. THE
+  CASE-ID SURFACE IS NOW DELETED, not deprecated (arch-review 53): there is no no-handle fallback, because leaving
+  one asked every caller to know which of two functions was safe and the answer was never visible at the call site.
+  A caller holding no handle answers `unknown` and the cancellation stays owed.
+  The backend reports the handle BEFORE it creates the external object (`DispatchOptions.onReserved`, **awaited**;
+  a rejection aborts the dispatch — `reserve(job)` is pure, which is what makes that order possible), the caller
+  persists it on the physical-attempt ledger row (`ExecutionAttemptStore.recordWork`, mig 0185) so it outlives the
+  dispatching process, and teardown calls `killWork` with it. Nomad kills by exact job id in the handle's own
+  namespace (no listing at all); K8s deletes the named Job in its namespace. Nomad/K8s implement it; in-process/pull
+  backends have no external object to name.
+  `killWork` returns a **`KillOutcome`** (`stopped|absent|unknown|failed` + `reason`), never `void` (Wave 3): it
+  still never throws, but the caller can tell a stop that happened from one that could not be confirmed, and only
+  `stopped`/`absent` (`killConverged`) let a cancellation operation complete. A failed LISTING is `unknown`, not
+  `absent`; a fan-out reports `worstKillOutcome`.
+- `ManagedWorkControl` (`adoptWork` · `logsForWork` · `eventsForWork` · `execInWork` · `execStreamInWork?` ·
+  `inspectWork` · `sampleWork` · `probeWork`) — the rest of the handle-addressed surface, all-or-none per backend.
+  `probeWork` answers `WorkPresence` (`live` | `absent` | `unknown{reason}`), which is what a cancellation reads
+  back before it may call itself complete: accepted ≠ gone.
+- `VerifierDispatchable` (`dispatchVerifier(job: VerifierJob)`) — runs the judging half of a case in a container the
+  agent never had (arch-review 56 Wave I). The agent's lane never serialized the hidden tests or the verifier's
+  credentials, so the boundaries a same-container verifier had to police by ordering are two different containers
+  instead. A managed lane that lacks it cannot host a private verifier and refuses rather than degrading.
+- `Reclaimable` (`stopWorkload`/`reclaimIdle`/`purgeTerminal`/`setNodeSchedulable`) — DESTRUCTIVE operator control.
+  `POST /runtimes/:id/versions/:version/control` + `control_runtime` MCP, gated on the admin-only `runtimes:control`
   action (distinct from `runtimes:write` viewer+ registration). Command/result SSOT = `RuntimeControlCommand` /
   `RuntimeControlResult` in `@everdict/contracts/wire`. See `docs/architecture/runtime-inspection.md`.
 
-Guards live next to the interfaces: `isRecoverable` / `isWorkAddressable` / `isObservable` / `isShellable` / `isScreenCapturable` /
-`isProbeable` / `isInspectable` / `isCaseInspectable` / `isTopologyInspectable` / `isReclaimable`. A consumer does
-`if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
-overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
+Guards live next to the interfaces: `isWorkAddressable` / `isWorkControllable` / `isVerifierDispatchable` /
+`isScreenCapturable` / `isScreenAttachable` / `isProbeable` / `isInspectable` / `isTopologyInspectable` /
+`isPoolReporting` / `isCaseCapacityAware` / `isReclaimable` / `isSessionable`. A consumer does
+`if (!isWorkControllable(backend)) return; backend.logsForWork(work)` — no `?.`, no `undefined` overload for "not
+implemented". If your new backend can't do a capability, just don't implement its interface.
+`legacy-case-addressing-guard` is the ratchet that keeps the deleted case-id methods deleted, and it asserts the
+replacement set too — a ban whose alternative quietly shrank would push the next caller straight back to a case id.
 
 **Failure evidence rides the throw.** The orchestrator job (and its raw log) is deleted/GC'd right after
 settlement, so a dispatch-failure throw is the LAST moment the evidence is reachable: Nomad (`waitForAlloc`
@@ -89,7 +67,7 @@ failure paths, `parseResultOrExplain`) and K8s (`waitForJob`) attach `extra.plac
 `runSuite`'s synthesized failed result carries the tail as a `log` trace event (sealed into the trajectory).
 A new backend's failure paths should do the same — capture before throwing, best-effort.
 
-`Recoverable.adopt` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |
+`adoptWork` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |
 undefined` — `absent` (listing succeeded, no job → safe to re-dispatch) must stay distinct from `unknown` (an
 API/parse failure → re-dispatch may double-spend a still-live job). Observability methods return `undefined` for the
 single meaning "no live job" and MUST NOT throw (best-effort).
@@ -99,7 +77,8 @@ single meaning "no live job" and MUST NOT throw (best-effort).
 moment it aborts (via `abortableDelay`) and reclaim the orchestrator job; in-process/pull backends refuse a
 not-yet-started run. Reject with `dispatchAborted(job)` (the shared `CANCELLED` factory). The `Scheduler` also cancels
 a signal that fires while the job is still QUEUED (removes the entry, no wasted slot) and forwards the signal to the
-backend once in-flight. This is promise-tied cancellation, complementing the id-keyed `kill(caseId)` side channel.
+backend once in-flight. This is promise-tied cancellation, for work THIS process still awaits; `killWork` is the out-of-band half, for
+work that outlived the dispatcher.
 
 ## Reference impl
 `packages/backends/src/orchestrators/nomad.ts` — `buildNomadJob` (job spec) + `NomadBackend` (submit → poll

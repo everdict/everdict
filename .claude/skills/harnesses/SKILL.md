@@ -10,7 +10,7 @@ language/CLI). It `install`s into a sandbox, `run`s a task, and yields a **norma
 never scores itself — `graders` read the trace and the env snapshot (see skill `evaluation`).
 
 ## Checklist
-1. Implement `EvaluableHarness` (`packages/core/src/harness/harness.ts`); carry a pinned `version` (the unit of versioning).
+1. Implement `EvaluableHarness` (`packages/contracts/src/harness/harness.ts`); carry a pinned `version` (the unit of versioning).
 2. `run()` MUST yield normalized `TraceEvent`s — convert native output in an adapter, never leak raw output upstream.
    A harness whose trace lands on an external platform (OTel/MLflow) does NOT pull it in `run()` — implement
    the optional `traceSource()`/`collectTrace(runId)` hooks; `runCase` pulls **after compute release**
@@ -26,7 +26,7 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
 6. **Prefer a declarative `CommandHarness` spec over new code** (below) — new TS code needs an image rebuild.
 
 ## The contract
-`EvaluableHarness` (`packages/core/src/harness/harness.ts`): `{ id, version, install(compute), run(compute, task, ctx) }`.
+`EvaluableHarness` (`packages/contracts/src/harness/harness.ts`): `{ id, version, install(compute), run(compute, task, ctx) }`.
 `run` is an `AsyncIterable<TraceEvent>`; `RunContext = { apiKeyEnv, timeoutSec, runId? }` (`runId` = the trace
 correlation key `runCase` mints and later collects by). `apiKeyEnv` is usually
 **empty** — `LocalDriver` uses the machine's own `claude` login (own-pays); keys are injected only in a
@@ -58,7 +58,7 @@ credential always wins) < the forced sandbox flags. See `docs/architecture/capab
 - `CommandHarness` (`command.ts`) — the declarative one (below); the preferred way to add a harness.
 
 ## Declarative CommandHarness (any CLI agent, no code)
-`CommandHarnessSpec` (`packages/core/src/harness/harness-spec.ts`, `kind:"command"`) makes onboarding a CLI agent
+`CommandHarnessSpec` (`packages/contracts/src/harness/harness-spec.ts`, `kind:"command"`) makes onboarding a CLI agent
 **data, not code**: `{ setup[], command, model?, env, params, trace }`. `install()` runs each `setup` line;
 `run()` templates `command` — `{{task}}` (auto shell-quoted via `shq`, don't wrap it), `{{model}}`, `{{run_id}}`,
 plus any `{{key}}` from `params` (reserved tokens substituted first so params can't clobber them) — then
@@ -84,7 +84,7 @@ playground (`docs/architecture/harness-playground.md`) — a live session shows 
 
 ## Trace normalization (`stream-json.ts`)
 Graders only read the normalized event stream, so every harness converts its native output to `TraceEvent[]`
-(`packages/core/src/execution/trace.ts`: `message` / `llm_call` / `tool_call` / `tool_result` / `env_action` / `error`).
+(`packages/contracts/src/execution/trace.ts`: `message` / `llm_call` / `tool_call` / `tool_result` / `env_action` / `error`).
 `mapClaudeStreamJson(obj, nextT)` maps one Claude `stream-json` line: `assistant` → `message`/`tool_call`
 (+ `llm_call` from `message.usage`), `user` → `tool_result`, `result` → an aggregate `llm_call` carrying
 `total_cost_usd`. **Cost/tokens ride in `llm_call.cost` from the harness's own report**; `usageFromTrace`

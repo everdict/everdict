@@ -32,31 +32,36 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 - Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).
-- **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
-  beyond it (`Recoverable`=adopt/kill, `Observable`=logs/caseEvents/exec, `Shellable`=execStream, `ScreenCapturable`=
-  captureScreen, `Probeable`=probe, `Inspectable`=inspect [read-only live cluster view: nodes/capacity/workload/
-  stores, best-effort→`warnings`], `CaseInspectable`=inspectCase [case-scoped placement: phase queued|blocked|
-  starting|running|dead + blocked capacity verdict + unit/node/events — wire SSOT `CasePlacement`],
-  `TopologyInspectable`=inspectTopology/topologyServiceLogs [service-topology health roster + service log tail,
-  harness-keyed; ServiceTopologyBackend only], `PoolReporting`=poolStats [last session-pool readings for the
-  /metrics gauges — never a live probe], `CaseCapacityAware`=capacityFor [harness-keyed capacity: the Scheduler
-  consults it per job so each harness is admitted by ITS pool on a shared runtime; must answer from already-
-  probed readings, cheap enough for per-job-per-round], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
-  [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed],
-  **session mode** = the `Driver` contract itself (`provision`/`reap`/optional `snapshot`), guarded by
-  `isSessionable` — a target that can HOLD compute open (agent worlds / the playground) as well as run a case to
-  completion; Nomad + Docker have it, K8s does not, and the session lane must narrow rather than build a parallel
-  driver class for the same cluster [a second owner re-derives the address/token/namespace/trust zone and its
-  sessions go uncounted by `capacity()`]) is a SEPARATE
-  interface the backend also `implements`, and consumers narrow
-  with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
-  optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
-  capability, it simply doesn't implement that interface (e.g. K8s is not `Shellable` — no interactive stream exec).
+- **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`); everything
+  beyond it is a SEPARATE interface the backend also `implements`, and consumers narrow with the matching guard
+  (`isWorkControllable(backend)`), never a `backend.logsForWork?.()` feature-detect. Don't add a new optional
+  method to `Backend`; add/extend a capability interface + its `is*` guard. A backend that cannot do a capability
+  simply does not implement it. The live set, each with its guard in `backend.ts`:
+  - `WorkAddressable`=killWork · `ManagedWorkControl`=adoptWork/logsForWork/eventsForWork/execInWork/
+    execStreamInWork?/inspectWork/sampleWork/probeWork — the handle-addressed control surface, all-or-none
+    (`isWorkAddressable` / `isWorkControllable`; see the deletion bullet below for why nothing here takes a case id).
+  - `VerifierDispatchable`=dispatchVerifier — runs a `VerifierJob` in a container the agent never had, so the
+    hidden tests and the reward namespace are somewhere else entirely rather than somewhere ordered carefully
+    (arch-review 56 Wave I). A managed lane without it cannot host a private verifier and must refuse.
+  - `ScreenCapturable`=captureScreen · `ScreenAttachable`=screenEndpoint — run-keyed live screen.
+  - `Probeable`=probe · `Inspectable`=inspect [read-only live cluster view: nodes/capacity/workload/stores,
+    best-effort→`warnings`] · `TopologyInspectable`=inspectTopology/topologyServiceLogs [service-topology health
+    roster + service log tail, harness-keyed; ServiceTopologyBackend only].
+  - `PoolReporting`=poolStats [last session-pool readings for the /metrics gauges — never a live probe] ·
+    `CaseCapacityAware`=capacityFor [harness-keyed capacity: the Scheduler consults it per job so each harness is
+    admitted by ITS pool on a shared runtime; answers from already-probed readings, cheap enough per-job-per-round].
+  - `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable [DESTRUCTIVE control, admin-only
+    `runtimes:control`, best-effort/idempotent, stores never reclaimed].
+  - **session mode** = the `Driver` contract itself (`provision`/`reap`/optional `snapshot`), guarded by
+    `isSessionable` — a target that can HOLD compute open (agent worlds / the playground) as well as run a case to
+    completion; Nomad + Docker have it, K8s does not, and the session lane must narrow rather than build a parallel
+    driver class for the same cluster [a second owner re-derives the address/token/namespace/trust zone and its
+    sessions go uncounted by `capacity()`].
 
 - **Destructive control takes the WORK HANDLE, never a semantic case id** (`WorkAddressable.killWork(work:
   RuntimeWorkRef)`, arch-review 52 Wave 2). A case id names a GROUP of executions — two runs of one case are two
-  live jobs — so `Recoverable.kill(caseId)` stops other runs' (and, on Nomad's `namespace=*` sweep, other TENANTS')
-  compute — and it did so silently, because kill returned void. Every backend that creates external work
+  live jobs — so the case-id-addressed `kill` this replaced stopped other runs' (and, on Nomad's `namespace=*`
+  sweep, other TENANTS') compute, silently, because it returned void. Every backend that creates external work
   therefore REPORTS the exact handle BEFORE it creates it (`DispatchOptions.onReserved`, **awaited**, and a
   rejection ABORTS the dispatch — arch-review 53 Wave A replaced Wave 2's post-effect `onWork`; never fired for
   a job with no `runId`), and the control plane PERSISTS it on the physical-attempt ledger row
@@ -69,9 +74,10 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   `unknown`, and the cancellation stays owed. K8s label values a selector selects on must be INJECTIVE —
   `caseSlug` truncates at 50 chars, so `caseLabelValue`/`runLabelValue` append a digest whenever slugging lost
   information, and every job carries `everdict.dev/run` beside `everdict.dev/case`.
-- **THE CASE-ID CONTROL SURFACE IS DELETED** (arch-review 53, legacy removal). `Recoverable` · `Observable` ·
-  `Shellable` · `CaseInspectable` · `CaseSampleable` and their methods (`adopt`/`kill`/`logs`/`caseEvents`/
-  `exec`/`execStream`/`inspectCase`/`sampleCase`) are GONE. They resolved "the newest job of this case", which
+- **THE CASE-ID CONTROL SURFACE IS DELETED** (arch-review 53, legacy removal). The interfaces Recoverable,
+  Observable, Shellable, CaseInspectable and CaseSampleable and their methods (adopt/kill/logs/caseEvents/
+  exec/execStream/inspectCase/sampleCase) are GONE — written here without backticks because they are no
+  longer symbols you can reference, only names you may not reintroduce. They resolved "the newest job of this case", which
   is another run's whenever two runs of one case are live: a stop reached strangers' compute, a log tail showed
   a stranger's output, an exec ran INSIDE a stranger's sandbox, and an adopt attributed a stranger's verdict —
   the last being a decision, not an observation. The whole surface is `ManagedWorkControl` now (`adoptWork` ·
@@ -107,8 +113,8 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   there is **no** `EVERDICT_REQUIRE_RUNTIME`-style env flag); the service's `requireRuntime` boolean exists only so
   mock-dispatcher unit tests stay valid. Target existence is still validated later by `RuntimeDispatcher`/`Scheduler`
   (`NOT_FOUND`). In-process single-host dev execution lives in `apps/cli` (`everdict run`). See `docs/execution-backends.md`.
-- **Cancellation is promise-tied, via `dispatch(job, opts?: DispatchOptions)`'s optional `signal`** (not only the
-  id-keyed `kill(caseId)`). Pollers stop the poll on abort (`abortableDelay`) and reclaim the orchestrator job;
+- **Cancellation is promise-tied, via `dispatch(job, opts?: DispatchOptions)`'s optional `signal`** — the
+  in-flight complement to handle-addressed `killWork`, for work this process is still awaiting. Pollers stop the poll on abort (`abortableDelay`) and reclaim the orchestrator job;
   in-process/pull backends refuse a not-yet-started run. Reject with the shared `dispatchAborted(job)` (`CANCELLED`).
   Thread `opts` through every `Dispatcher` wrapper (Router/Scheduler + the apps/api chain); the `Scheduler` also
   drops a signal that aborts while QUEUED. `AdoptOutcome` (`adopted|absent|unknown`) keeps "no job" distinct from

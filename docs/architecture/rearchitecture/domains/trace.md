@@ -202,7 +202,10 @@ The trace domain has no resource of its own today — it serves other domains' u
 | `WorkspaceSettingsStore` | sink roster + per-harness selection persistence | `@everdict/db` (jsonb bag) |
 | `fetchImpl` | all platform HTTP | global fetch, test-injectable |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

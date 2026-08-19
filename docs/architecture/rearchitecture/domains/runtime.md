@@ -226,7 +226,10 @@ From the apps-api survey catalog (§1.7 + §1.16):
 | `CircuitBreaker` (shared instance: batch spillover + queue view + metrics) | `@everdict/backends`, singleton in main.ts | `domain/placement` policy object; instance owned by application |
 | `ScalingTarget` actuation | `MutableSlots` in-memory (main.ts) | `infrastructure` actuator behind a port |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

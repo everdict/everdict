@@ -13,7 +13,8 @@ See skill `ci`.
   gate invalidates the stamp — re-run `pnpm ci:local` (turbo cache makes it fast). Never work
   around the hook (no stamp forging, no pushing from outside the tool).
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm protocol-mutations`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
+  **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
@@ -22,6 +23,17 @@ See skill `ci`.
   it fails silently — two were found dead this way (`suite.md`, `workspace-integrations.md`), both holding
   invariants a later review then found broken. Moving or renaming a package re-points its rule in the SAME
   change.
+- **`pnpm docs-check` keeps the cited ADDRESSES real** — in `docs/**` and, since arch-review 56, in
+  `.claude/rules/**` + `.claude/skills/**` too, from the one predicate rather than a second copy. The push
+  layer is injected into context by a glob, so a rule citing a moved file teaches the wrong address at the
+  moment of editing and nobody is reading it deliberately enough to notice: widening the existing check found
+  29 dead paths across 7 skills on its first run. `docs/architecture/rearchitecture/**` is exempt on purpose
+  (historical review records), and a path that is absent BY DESIGN goes in `KNOWN_ABSENT` with its reason.
+  It also checks the SYMBOLS `.claude/**` names, because the rot that actually happens here is a file that
+  stayed while the interface inside it was deleted — a backtick is a claim that this repo declares the name.
+  Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
+  and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
+  gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A

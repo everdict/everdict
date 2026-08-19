@@ -151,7 +151,10 @@ Views are also a comment target (`resourceType: "view"` — see `comment.md`).
 (No other ports — the live re-run happens client-side today: the web fires the scorecard
 queries the config describes. The control plane never executes a view.)
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

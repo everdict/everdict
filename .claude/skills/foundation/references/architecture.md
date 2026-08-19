@@ -51,8 +51,9 @@ into an isolated unit; the agent reconstructs the harness+graders from a registr
 (`makeHarness`/`makeGraders`; graders carry config via `GraderSpec`), runs the eval loop above via
 `LocalDriver`, and prints the `CaseResult` behind the `__EVERDICT_RESULT__` sentinel; the Backend
 parses it. Isolation is the orchestrator's (Nomad task `runtime` / K8s `runtimeClassName` /
-Windows VM), not Everdict's. Backends: `LocalBackend` (in-process dev), `NomadBackend` (batch alloc;
-phase 1), `K8sBackend` + `WindowsBackend` (later). See skill `backends` + `docs/execution-backends.md`.
+Windows VM), not Everdict's. Backends: `LocalBackend` (in-process dev, never the
+control plane), `NomadBackend` (batch alloc) and `K8sBackend` (process→K8s Job) — both live. A Windows target
+is named in the placement comments as a future registration; there is no Windows backend class. See skill `backends` + `docs/execution-backends.md`.
 
 Fan out cases × harness-versions; regression = run a suite against `harness@vA` and `@vB`, diff
 scorecards. Durable dispatch+await is implemented in `@everdict/orchestrator` (Temporal):
@@ -78,5 +79,4 @@ Service-topology harnesses (browser-use-langgraph etc.): `@everdict/trace` (OTel
 `@everdict/topology` (HarnessSpec(service), orchestrator-agnostic `ServiceTopologyBackend`, Nomad+K8s builders,
 runId-keyed isolation) — Phase 1 built+tested; live runtimes/browser+ext provisioning = Phase 2. See
 `docs/service-harness.md`.
-Next: live TopologyRuntimes (Nomad/K8s apply) + browser+extension provisioning + real OTel/MLflow; process
-`K8sBackend`/`WindowsBackend`; suite/version-regression; `registry`, apps/api, Postgres/ClickHouse, deploy, dashboard.
+Next: a Windows placement target; everything else in this paragraph's earlier drafts has landed.

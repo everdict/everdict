@@ -23,7 +23,7 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
   `service.wiring`: an image reading its store connection under its OWN keys (`VALKEY_URL`, `OBJECT_STORAGE_ENDPOINT`)
   maps them on the dependency (`{env, template?}`; template = `{field}` over the closed per-store vocabulary
   `STORE_INJECT_FIELDS` in contracts, unset = `{url}`; unknown field fails at register + deploy). Rendered by ONE pure
-  renderer (`dependencyInjectEnv`, `deploy/inject-env.ts`) from the deployed store's structured `StoreValues`
+  renderer (`dependencyInjectEnv`, `packages/topology/src/deploy/inject-env.ts`) from the deployed store's structured `StoreValues`
   (docker/k8s build-time defaults · Nomad discovered endpoints · pool-minted creds via `StorePlan.storeValues`) in all
   3 builders, merged TOPMOST (a stale `service.env` literal must never shadow the deployed store — the
   `inject-shadowed-literal` portability warning flags such dead literals; a service.env value that hardcodes a bare
@@ -204,12 +204,13 @@ a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those s
   session error — app errors come back as `isError` results, no throw) drops the session and re-connects (fresh
   `initialize` → new session id) once before retrying; the poll loop's backoff covers repeat failures.
 
-## Front-door generalization — making driving harness-agnostic (in progress)
-`ServiceTopologyBackend.dispatch` was hardcoded to one protocol (browser-use-langgraph): fixed payload,
-fire-and-forget submit, trace-by-Everdict-runId, always-provisioned browser, fixed image. The direction — a declarative
-`FrontDoorProtocol` + a thin `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`), each hardcode →
-an optional knob defaulting to today — is in `docs/architecture/front-door-generalization.md`. Read it before
-touching `service-backend.ts`'s driving logic.
+## Front-door generalization — driving is harness-agnostic (LANDED)
+`ServiceTopologyBackend.dispatch` used to be hardcoded to one protocol (browser-use-langgraph): fixed payload,
+fire-and-forget submit, trace-by-Everdict-runId, always-provisioned browser, fixed image. Each hardcode is now an
+optional knob defaulting to that behaviour, declared by `FrontDoorSpec` and executed by `FrontDoorDriver` (the
+harness-agnostic sibling of `TopologyRuntime`) — the whole surface lives in `packages/topology/src/front-door/`
+and `service-backend.ts` drives through it. Read `docs/architecture/front-door-generalization.md` for the
+reasoning before touching that driving logic.
 - **Default submit is `node:http`/`node:https`, not global `fetch`.** undici's `headersTimeout` (default 300s) aborts
   `sync`-completion harnesses that hold the response for minutes while the agent runs; the raw node request has no such
   cap. `FrontDoorRequestOpts.timeoutMs` (from `completion.timeoutMs`) is applied as a **socket idle timeout**: while the

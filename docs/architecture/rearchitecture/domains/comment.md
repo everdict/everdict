@@ -161,7 +161,10 @@ screens) and the dataset activity timeline (`discuss-dataset`).
 | `notifyMention` hook (actor-name resolution + feed write) | late-bound closure in `apps/api/src/main.ts:884` (joins `UserProfileStore` for actor display name, then calls `NotificationService.notifyMention`) | typed domain-event port (`MentionRaised`) consumed by the notification domain |
 | id / clock | `crypto.randomUUID` / `new Date()` defaults in the service ctor | `clock/id` port (00 §4 port bag) |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|

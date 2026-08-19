@@ -18,16 +18,16 @@ so it's excluded from the root run — never add web unit tests here.
 5. Live E2E: `describe.skipIf(!env)` so CI stays green; boot the real thing via a shared factory, not ad-hoc wiring.
 
 ## Reference impl
-`apps/api/src/run-service.test.ts` — the canonical unit test: a file-local `okDispatcher`/`failDispatcher`
+`apps/api/src/core/run/run-service.test.ts` — the canonical unit test: a file-local `okDispatcher`/`failDispatcher`
 (satisfying `Dispatcher`) + capture dispatchers, `InMemoryRunStore`, injected `newId`/`budget`, and a
 `flush()` (`setTimeout 0`) to await the async submit. Assert status transitions + the exact job/side-effect.
 
 ## Unit tests — inject fakes at the interface
 Depend on the interface, hand it a fake. Patterns to copy:
 - **`Dispatcher`**: `{ async dispatch(job) { … } }` — `run-service.test.ts`; a bare `dispatch` fn for
-  `runSuite` in `packages/suite/src/suite.test.ts` (per-case isolation: one throw must not sink the batch).
+  `runSuite` in `packages/domain/src/scorecard/scorecard.test.ts` (per-case isolation: one throw must not sink the batch).
 - **`Backend`**: a class implementing `capacity()`+`dispatch()` — `ControlledBackend` in
-  `packages/backends/src/scheduler.test.ts` (hand-resolved promises observe concurrency/fairness) + `BackendRegistry`
+  `packages/backends/src/scheduling/scheduler.test.ts` (hand-resolved promises observe concurrency/fairness) + `BackendRegistry`
   + `inMemoryBudget`.
 - **Stub deps** via constructor opts (`newId`, `budget`, `meterUsageFor`, `secretsFor`, `fetch`) — never reach for
   real clocks/ids/network. Use `vi.spyOn` to assert a collaborator was (not) called.
@@ -42,7 +42,7 @@ helper — do not hand-wire routes ad-hoc. Auth is stubbed two ways: `roleAuth([
 
 ## Postgres — fake SqlClient, not a live DB
 Pg store logic is unit-tested against a fake `SqlClient` (`fakeClient` in
-`packages/db/src/scorecard-store.test.ts` / `db.test.ts`): assert the parameterized SQL text + params
+`packages/db/src/results/scorecard-store.test.ts` / `db.test.ts`): assert the parameterized SQL text + params
 (`INSERT INTO everdict_scorecards`, `$1`, `ORDER BY created_at DESC, id DESC`) and the row→record mapping. Behavior
 is covered against `InMemory*` in the same file — the two impls must stay interchangeable. **No Testcontainers**;
 real-Postgres verification is an env-gated live script (`scripts/live/pg-run-store.mjs`, boots via `DATABASE_URL`
@@ -60,5 +60,5 @@ and `/.well-known/oauth-protected-resource` are tested via Fastify `inject` in `
 (`packages/graders/src/model-judge.scenario.test.ts` — real OpenAI-compatible/LiteLLM). Full loops against
 Nomad/K8s/MLflow/Temporal/Postgres live in `scripts/live/*.mjs`, run by hand, not in `turbo test`.
 
-See rule `testing.md` for the pushed critical rules; the vitest config is `packages/core/vitest.config.ts`
+See rule `testing.md` for the pushed critical rules. Packages run bare `vitest run` on Vitest's defaults — there is no per-package config; `apps/web/vitest.config.ts` is the only one in the repo
 (`include: src/**/*.test.ts`).

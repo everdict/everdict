@@ -189,7 +189,10 @@ From the apps-api survey catalog (§1.10, §1.16):
 | `limitFor` fallback | env-configured caps for tenants without a stored limit | `budgetFromEnv()` (main.ts:1342) |
 | usage proxy | capture BYO provider calls in-job | `packages/trace/src/usage-proxy.ts` (loopback HTTP) |
 
-## Rules: today → target
+## Rules: pre-migration → target
+
+> The left column is the **2026-07 layout**, before this migration landed. It is an inventory of what
+> moved, not a map of where anything is now — do not follow these addresses.
 
 | Rule | Today (evidence) | Target |
 |---|---|---|
