@@ -7,7 +7,9 @@ import {
   type PersistedWorkIntent,
   type RuntimeSample,
   type RuntimeWorkRef,
+  type Score,
   type TraceEvent,
+  type VerifierJob,
   type WorkPresence,
 } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / ManagedWorkControl.
@@ -164,6 +166,23 @@ export interface ManagedWorkControl {
   // converges. Separate from `inspectWork` on purpose: that answers a display PHASE, and a phase cannot tell
   // "not started yet" from "not there any more".
   probeWork(work: RuntimeWorkRef): Promise<WorkPresence>;
+}
+
+// VerifierDispatchable — this lane can run a case's JUDGING half away from its agent (arch-review 56, Wave K).
+//
+// A case whose grading depends on material the agent must not see is REFUSED by `caseJobPayload` on a lane
+// that runs both in one container. This is what lifts that refusal: the same image and the same result
+// contract, dispatched a second time with the verifier payload, so the plan and its credentials are never in
+// the container the harness ran in.
+//
+// Separate from `Backend` because a lane may legitimately not have it (a self-hosted runner grades in place by
+// design), and a caller narrows with `isVerifierDispatchable` rather than feature-detecting a method.
+export interface VerifierDispatchable {
+  dispatchVerifier(job: VerifierJob): Promise<Score[]>;
+}
+
+export function isVerifierDispatchable(backend: Backend): backend is Backend & VerifierDispatchable {
+  return typeof (backend as Partial<VerifierDispatchable>).dispatchVerifier === "function";
 }
 
 // ScreenCapturable — a live screen frame for a run's per-case browser (topology backends only). Deliberately keyed

@@ -1,3 +1,4 @@
+import type { Score, VerifierJob } from "@everdict/contracts";
 import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import {
@@ -33,6 +34,7 @@ import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
+import { VerifierAwareDispatcher } from "../core/execution/verifier-aware-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { RuntimeSamplingDispatcher } from "../core/execution/runtime-sampling-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
@@ -78,6 +80,10 @@ export function buildDispatch(deps: {
   // nobody had a name for.
   attempts?: ExecutionAttemptStore;
   liveTraces?: LiveTraceStore; // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
+  // The lane that runs a case's JUDGING half away from its agent (arch-review 56, Wave K). Absent = this
+  // deployment has none, and `withVerifierPass` records such a case's verdict as `unmeasured` rather than
+  // grading it in the agent's own container.
+  dispatchVerifier?: (job: VerifierJob) => Promise<Score[]>;
 }) {
   const {
     callbackStore,
@@ -415,6 +421,15 @@ export function buildDispatch(deps: {
   // scopedSecretsFor: a harness Model binding injects its baseUrl + underlying model + API key (from the model's
   // apiKeySecret, workspace→personal tiers) into the agent server's env — the same secret seam the judge uses.
   const resolvingDispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);
+  // ── THE CASE'S TWO HALVES (arch-review 56, Wave K) ────────────────────────────────────────────────
+  //
+  // OUTERMOST of the dispatch chain, because the split decides what the inner layers are even given: a case
+  // whose grading depends on material the agent must not see is dispatched as its REMAINDER, and its verdict
+  // comes back from a lane the harness was never in. Everything below this line sees an ordinary case.
+  //
+  // With no verifier lane wired the pass records the verdict as `unmeasured` rather than omitting it — a case
+  // whose verdict never happened must not read downstream as a case that was graded.
+  const verifierAwareDispatcher = new VerifierAwareDispatcher(resolvingDispatcher, deps.dispatchVerifier);
   // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
   // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's
   // `runtime` lane. Resolves the SAME tenant-runtime build/auth path dispatch uses; a target whose backend cannot
@@ -447,11 +462,11 @@ export function buildDispatch(deps: {
     return undefined;
   };
   const samplingDispatcher = caseRecorder
-    ? new RuntimeSamplingDispatcher(resolvingDispatcher, {
+    ? new RuntimeSamplingDispatcher(verifierAwareDispatcher, {
         sample: sampleCaseRuntime,
         record: (runId, item, generation) => void caseRecorder.recordTrack(runId, item, generation),
       })
-    : resolvingDispatcher;
+    : verifierAwareDispatcher;
   // Control-plane infra-plane recording — the OUTERMOST decorator, so the sealed trajectory's account starts at
   // "the control plane accepted this case → target X" and carries queue wait + waiting diagnostics before the
   // backend's own events. Sits outside ModelResolving/RuntimeDispatcher to see the user-chosen target name.

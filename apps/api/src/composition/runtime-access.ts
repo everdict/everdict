@@ -17,8 +17,11 @@ import {
   isTopologyInspectable,
   isWorkAddressable,
   isWorkControllable,
+  isVerifierDispatchable,
 } from "@everdict/backends";
 import type {
+  Score,
+  VerifierJob,
   AdoptionDecision,
   CaseResult,
   KillOutcome,
@@ -29,7 +32,7 @@ import type {
   TraceEvent,
   WorkPresence,
 } from "@everdict/contracts";
-import { readOrUnknown, worstKillOutcome } from "@everdict/contracts";
+import { NotFoundError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -333,6 +336,29 @@ export function buildRuntimeAccess(deps: {
     return worstKillOutcome([...outcomes, ...unknownFor(unresolved, `killWork ${work.externalJobId}`)]);
   };
 
+  // ── THE JUDGING HALF'S LANE (arch-review 56, Wave K) ──────────────────────────────────────────────
+  //
+  // A case whose grading depends on material the agent must not see is refused by `caseJobPayload` on a lane
+  // that runs both in one container. This resolves the lane that can run the judging half on its own, so the
+  // refusal becomes a second dispatch instead of a dead end. A runtime that cannot do it answers by NOT being
+  // wired — `withVerifierPass` then records the verdict as `unmeasured`, which is the honest reading of "this
+  // deployment cannot judge this case away from its agent".
+  const dispatchVerifier = async (job: VerifierJob): Promise<Score[]> => {
+    let scores: Score[] | undefined;
+    await eachRuntimeBackend(job.tenant, undefined, async (backend) => {
+      if (!isVerifierDispatchable(backend)) return false;
+      scores = await backend.dispatchVerifier(job);
+      return true; // the first lane that can judge is the answer
+    });
+    if (scores === undefined)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { caseId: job.caseId },
+        "no runtime in this workspace can run a verifier away from the agent's container — the case cannot be judged here.",
+      );
+    return scores;
+  };
+
   // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────────
   //
   // Did the object this handle names actually go away? `killWork` answers what the DELETE returned; this
@@ -407,6 +433,7 @@ export function buildRuntimeAccess(deps: {
     topologyServiceLogsFn,
     killWork,
     killUnhandled,
+    dispatchVerifier,
     probeWork,
   };
 }

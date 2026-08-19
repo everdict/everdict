@@ -301,6 +301,24 @@ const MUTATIONS = [
     suite: ["--root", "packages/job-runner", "src/verifier-job.counterexample.test.ts"],
   },
   {
+    // R56 Wave K's rung: the split stops being applied at dispatch, so the agent's job carries the plan again
+    // — and `caseJobPayload` refuses it, which is the regression this wave exists to close.
+    name: "R56 Wave K — the dispatch stops splitting the case",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: "  const result = await deps.dispatch({ ...job, evalCase: plan.remainder });",
+    to: "  const result = await deps.dispatch(job);",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-pass.counterexample.test.ts"],
+  },
+  {
+    // …and the half that keeps a failed verdict visible: dropping it leaves a CaseResult whose scores are the
+    // observation-only ones, which reads as "graded, and it scored nothing".
+    name: "R56 Wave K — an unreachable verdict is omitted instead of recorded",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: '      unmeasuredVerdict("grader_error", err instanceof Error ? err.message : String(err)),',
+    to: "",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-pass.counterexample.test.ts"],
+  },
+  {
     name: "Wave C — the publication claim moves back below the effects",
     file: "packages/application-control/src/scorecard/publication.ts",
     // RE-ANCHORED (arch-review 55, Wave 8): the claim now reads from a local `operations` binding, because the

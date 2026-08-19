@@ -51,7 +51,7 @@ import {
   firstPartyDefaults,
   resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
-import type { ProductSeries, RegistryAuth } from "@everdict/contracts";
+import type { ProductSeries, RegistryAuth, Score, VerifierJob } from "@everdict/contracts";
 import { UpstreamError } from "@everdict/contracts";
 import {
   type SeriesContractResolution,
@@ -479,6 +479,15 @@ async function main(): Promise<void> {
       ? { host: workspaceImages.endpoint, namespace: workspaceImages.namespaceFor(workspace) }
       : undefined;
 
+  // LATE-BOUND VERIFIER LANE (arch-review 56, Wave K), the same holder idiom `cascadeCancel` uses below: the
+  // lane is resolved by `buildRuntimeAccess`, which runs after the dispatch chain is built. An unwired lane
+  // still means the verdict is `unmeasured` — never grading in the agent's own container.
+  const verifierLane: { fn: (job: VerifierJob) => Promise<Score[]> } = {
+    fn: async () => {
+      throw new Error("no verifier lane is wired");
+    },
+  };
+
   const {
     runnerHub,
     callbackRendezvous,
@@ -496,6 +505,11 @@ async function main(): Promise<void> {
     invalidateTenantBackends,
     releaseSelfRunnerBackend,
   } = buildDispatch({
+    // LATE-BOUND, like `cascadeCancel` below: the verifier lane is resolved by `buildRuntimeAccess`, which
+    // runs after this call. The holder is what lets the dispatch chain be built once while the lane it may
+    // need is wired further down — an absent lane still means `unmeasured`, never grading in the agent's
+    // own container (arch-review 56, Wave K).
+    dispatchVerifier: (job) => verifierLane.fn(job),
     ...(workspaceImages ? { images: workspaceImages } : {}),
     ...(trustZones ? { trustZones } : {}),
     callbackStore,
@@ -684,7 +698,9 @@ async function main(): Promise<void> {
     killWork,
     killUnhandled,
     probeWork,
+    dispatchVerifier,
   } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
+  verifierLane.fn = dispatchVerifier;
 
   // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness
   // (e.g. a Windows-service topology on a Linux-only cluster) before any case is dispatched (RuntimeDispatcher is the

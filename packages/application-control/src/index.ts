@@ -705,3 +705,4 @@ export {
   type KnowledgeEntryWithCoverage,
   type UpdateKnowledgeEntryInput,
 } from "./knowledge/knowledge-entry-service.js";
+export { type VerifierPassDeps, withVerifierPass } from "./execution/verifier-pass.js";

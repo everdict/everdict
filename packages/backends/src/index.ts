@@ -19,6 +19,8 @@ export {
   isScreenCapturable,
   isSessionable,
   isTopologyInspectable,
+  isVerifierDispatchable,
+  type VerifierDispatchable,
   isWorkAddressable,
   isWorkControllable,
   type LogStream,

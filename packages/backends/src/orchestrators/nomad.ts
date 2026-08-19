@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import {
+  type Score,
+  type VerifierJob,
   type WorkPresence,
   caseJobPayload,
   describeNomadPlacementFailure,
   extractLiveEvents,
   parseResult,
   stripSentinel,
+  verifierJobPayload,
 } from "@everdict/contracts";
 import type { NomadPlacementMetrics } from "@everdict/contracts";
 import {
@@ -465,11 +468,20 @@ function dispatchSuffix(): string {
 }
 
 // CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
-export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: string): NomadJobSpec {
+export function buildNomadJob(
+  job: CaseJob,
+  opts: NomadBackendOptions,
+  jobId?: string,
+  // THE JUDGING HALF (arch-review 56, Wave K) — see the K8s twin. The case payload is NOT set alongside it,
+  // which is what keeps "the agent's container never held the plan" a property of the spec.
+  verifierPayload?: string,
+): NomadJobSpec {
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
-    EVERDICT_CASE_JOB: caseJobPayload(job),
+    ...(verifierPayload !== undefined
+      ? { EVERDICT_VERIFIER_JOB: verifierPayload }
+      : { EVERDICT_CASE_JOB: caseJobPayload(job) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
@@ -837,7 +849,26 @@ export class NomadBackend
     };
   }
 
-  async dispatch(job: CaseJob, options?: DispatchOptions): Promise<CaseResult> {
+  // ── THE JUDGING HALF, AS ITS OWN UNIT (arch-review 56, Wave K) ─────────────────────────────────
+  //
+  // The same image, the same result contract and the same register/wait/log/parse path as a case — with the
+  // verifier payload instead of the case one, and no reservation or attempt row: a verifier unit is not one of
+  // the case's execution attempts, it is how the case's verdict is reached.
+  //
+  // It goes through `dispatch` rather than a second copy of that path, because a second copy is how the two
+  // would drift on the next change to alloc-log handling.
+  async dispatchVerifier(job: VerifierJob): Promise<Score[]> {
+    const spec = {
+      runId: undefined,
+      tenant: job.tenant,
+      evalCase: { id: `${job.caseId}-verify`, ...(job.image !== undefined ? { image: job.image } : {}) },
+      harness: { id: "verifier", version: "1" },
+    } as unknown as CaseJob;
+    const result = await this.dispatch(spec, undefined, verifierJobPayload(job));
+    return result.scores;
+  }
+
+  async dispatch(job: CaseJob, options?: DispatchOptions, verifierPayload?: string): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
@@ -880,7 +911,7 @@ export class NomadBackend
         at: new Date(now).toISOString(),
       });
     };
-    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId));
+    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifierPayload));
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }

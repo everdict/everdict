@@ -3,7 +3,15 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { caseJobPayload, extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
+import {
+  type Score,
+  type VerifierJob,
+  caseJobPayload,
+  extractLiveEvents,
+  parseResult,
+  stripSentinel,
+  verifierJobPayload,
+} from "@everdict/contracts";
 import {
   BadRequestError,
   type CaseJob,
@@ -932,11 +940,18 @@ export function buildK8sJob(
   name: string,
   ns: string,
   runtimeClassName?: string,
+  // THE JUDGING HALF (arch-review 56, Wave K). When present this unit runs the verifier instead of the agent:
+  // the same image, the same result contract, a different payload name — and the case job's own payload is
+  // NOT set, which is what makes "the agent's container never held the plan" a property of the spec rather
+  // than of somebody's discipline.
+  verifierPayload?: string,
 ): Record<string, unknown> {
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
-    EVERDICT_CASE_JOB: caseJobPayload(job),
+    ...(verifierPayload !== undefined
+      ? { EVERDICT_VERIFIER_JOB: verifierPayload }
+      : { EVERDICT_CASE_JOB: caseJobPayload(job) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
@@ -1198,6 +1213,36 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   // What is NOT here is the thing that made the old kill dangerous: no case-only selector, so a concurrent
   // run of the same case — and, since the case label became injective, a different case that truncated to the
   // same value — is not this cancellation's business. Best-effort/idempotent, never throws.
+  // ── THE JUDGING HALF, AS ITS OWN UNIT (arch-review 56, Wave K) ─────────────────────────────────
+  //
+  // The same image and the same result contract as a case, dispatched a second time with the verifier payload
+  // instead of the case one. It carries no reservation and no attempt row: a verifier unit is not one of the
+  // case's execution attempts, it is how the case's verdict is reached, and giving it an attempt would put a
+  // second physical execution on the ledger for a case that ran once.
+  //
+  // The scores come back through `parseResult` — the same sentinel the case entry prints — so a verifier that
+  // died mid-run surfaces as a parse failure here rather than as a silent absence.
+  async dispatchVerifier(job: VerifierJob): Promise<Score[]> {
+    const ns = this.opts.namespace ?? "default";
+    const name = `everdict-verify-${job.caseId
+      .replace(/[^a-z0-9-]/gi, "-")
+      .toLowerCase()
+      .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
+    const secretEnv = this.opts.secretEnv ?? {};
+    const spec = { evalCase: { id: job.caseId, image: job.image }, tenant: job.tenant } as unknown as CaseJob;
+    return await this.withApi(async (api) => {
+      await api.ensureNamespace(ns);
+      const manifest = buildK8sJob(spec, { ...this.opts, secretEnv }, name, ns, undefined, verifierJobPayload(job));
+      await api.applyJob(manifest, ns);
+      try {
+        await this.waitForJob(api, name, ns);
+        return parseResult(await api.podLogs(name, ns)).scores;
+      } finally {
+        await api.deleteJob(name, ns);
+      }
+    });
+  }
+
   // ── DOES THIS WORK STILL EXIST? (arch-review 56, Wave G) ────────────────────────────────────────
   //
   // `deleteJob` above passes `--wait=false`, so `stopped` means the API server RECORDED the delete — the pod
