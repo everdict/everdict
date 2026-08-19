@@ -128,7 +128,10 @@ describeTrust("TRUST-92/93 — resume() refuses a shadowed document (production 
       } as unknown as DatasetRegistry,
       registryFor(() => harnessOf("run --v2 {{task}}")),
     );
-    await expect(svc.resume("sc-1")).resolves.toBe(false); // refused, not resumed
+    // `unresumable`, NOT `retry_later`: a shadowed document is a permanent refusal — asking again cannot
+    // un-shadow it — and the two are different debts (arch-review 55). Asserting the kind rather than a
+    // truthiness keeps this test honest about WHICH refusal it pinned.
+    await expect(svc.resume("sc-1")).resolves.toEqual({ kind: "unresumable" });
     expect(dispatched()).toBe(0);
   });
 
@@ -148,7 +151,7 @@ describeTrust("TRUST-92/93 — resume() refuses a shadowed document (production 
     );
     // It gets past verification and into the batch loop; the dispatcher throwing is the loop's business, not
     // the guard's — what matters is that the refusal did NOT happen.
-    await expect(svc.resume("sc-1")).resolves.toBe(true);
+    await expect(svc.resume("sc-1")).resolves.toEqual({ kind: "resumed" });
   });
 
   it("TRUST-93 — a shadowed DATASET is refused on the same path, not just on Temporal's", async () => {
@@ -164,7 +167,7 @@ describeTrust("TRUST-92/93 — resume() refuses a shadowed document (production 
       } as unknown as DatasetRegistry,
       registryFor(() => base),
     );
-    await expect(svc.resume("sc-1")).resolves.toBe(false);
+    await expect(svc.resume("sc-1")).resolves.toEqual({ kind: "unresumable" });
     expect(dispatched()).toBe(0);
   });
 });
