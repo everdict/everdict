@@ -68,6 +68,7 @@ run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
+run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 
 // Job 2 — web (self-contained; contracts d.ts already exists via the root build above).

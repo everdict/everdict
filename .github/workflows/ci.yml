@@ -48,6 +48,7 @@ jobs:
       # still exist. It lives HERE, not only in docs.yml, because doc rot is caused by CODE moves and
       # docs.yml is path-filtered to docs/**.
       - run: pnpm docs-check
+      - run: pnpm constructed-casts
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
 

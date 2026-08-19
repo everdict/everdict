@@ -116,18 +116,11 @@ describe("[R56 WAVE-I COUNTEREXAMPLE #10 — CLOSED] a verifier job judges the w
     expect(primary !== undefined && "value" in primary ? primary.value : undefined).toBe(1);
   });
 
-  it("starts from an empty reward namespace it created itself", async () => {
-    // The container is fresh, so there is nothing of the agent's to clear — which is exactly the property the
-    // grader-side `rm -rf` was standing in for. Asserted so a future change that reuses the agent's compute
-    // has to explain itself.
-    const world = fakeDriver();
-    world.files.set("/logs/verifier/reward.json", JSON.stringify({ reward: 1 }));
-    await runVerifierJob(job(), { driver: world.driver });
-    expect(
-      world.execs.some((c) => /\brm\b/.test(c) && c.includes("/logs/verifier")),
-      "the verifier trusted a reward namespace it had not emptied",
-    ).toBe(true);
-  });
+  // The "starts from an empty reward namespace" assertion USED to live here, aimed at an `rm -rf
+  // /logs/verifier` this runner issued itself. That was a second copy of a path `RewardFileGrader` already
+  // owns as a config field, so a plan publishing elsewhere had the wrong directory emptied (arch-review 57).
+  // The property did not move — `reward-file-boundary.counterexample.test.ts` drives it at the reader, which
+  // is the only place that knows which directory it is about to read.
 
   it("REFUSES a job whose plan carries no deciding grader — there is nothing to be a verifier for", async () => {
     // A verifier job with an empty plan would provision a container, run nothing, and report an absence as a
