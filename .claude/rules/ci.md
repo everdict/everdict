@@ -44,11 +44,19 @@ See skill `ci`.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
 - **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`
-  (job name **`trust fast (real Postgres)`**) runs the Postgres-only trust subset — `apps/api/src/trust` minus
-  the Temporal durability files — on every push and PR, through `scripts/trust/trust-suite.mjs` so that a
-  scenario which SKIPPED still fails the check. The local gate deliberately boots no database, so this is the
-  one required check you cannot pre-run with `ci:local`; reproduce it against any throwaway Postgres with
-  `EVERDICT_TRUST_DATABASE_URL=… node scripts/trust/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'`.
+  (job name **`trust fast (real Postgres)`**) runs the Postgres-only trust subset on every push and PR, through
+  `scripts/trust/trust-suite.mjs` so that a scenario which SKIPPED still fails the check. Scope = every
+  `*.trust.test.ts` needing only Postgres: `apps/api/src/trust` minus the Temporal durability files, **plus
+  `packages/` and `apps/agent`** — those two were nightly-only until arch-review 56, which is how a signature
+  change left a package's scenario red for a day where the required check could not see it. The local gate
+  deliberately boots no database, so this is the one required check you cannot pre-run with `ci:local`;
+  reproduce it against a THROWAWAY Postgres (the suite migrates whatever you give it — never point it at a dev
+  stack) with `EVERDICT_TRUST_DATABASE_URL=… node scripts/trust/trust-suite.mjs apps/api/src/trust
+  '!apps/api/src/trust/temporal-' packages apps/agent`.
+- **A trust scenario that SKIPS is not a passing one, and locally that is the default.** Without
+  `EVERDICT_TRUST_DATABASE_URL` these files skip, so `pnpm test` going green says nothing about them. After
+  changing anything a trust scenario asserts on — a return type especially, since `expect(x).toBe(false)`
+  still compiles when `x` becomes an object — run the suite against a real Postgres before pushing.
   A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing.
   The full suite — Temporal, MinIO, Windows — stays nightly (`trust-nightly.yml`, non-blocking); see
   `docs/trust-certification.md`.

@@ -120,6 +120,13 @@ for (const [name, entry] of byPackage) {
       // files race the first-boot migration DDL (CREATE TABLE IF NOT EXISTS collides in pg_type —
       // 23505). Certification is about determinism, not speed: run files one at a time.
       "--no-file-parallelism",
+      // Vitest's 5s default is a bench-speed assumption, and these scenarios drive a real Postgres through
+      // migrate() + multi-statement fences. TRUST-64 takes ~3s alone and blew the default once the whole
+      // `packages` scope had populated the same database ahead of it — a TIMING artefact reported in the
+      // same shape as a broken invariant. A certification lane must not fail for being loaded, so the budget
+      // is set here, once, for every trust run: still far below a genuine hang, which is what a timeout is
+      // for. Raise it here rather than per-file, so no scenario can quietly buy itself more room.
+      "--testTimeout=20000",
       "--reporter=verbose",
       "--reporter=json",
       `--outputFile=${jsonPath}`,

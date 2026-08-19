@@ -5,8 +5,18 @@
 # had merged. This workflow is the other half of that trade: the scenarios that need nothing but a real
 # Postgres, run on every push and pull request, as a REQUIRED check.
 #
-# Scope = `apps/api/src/trust`, minus the two Temporal durability files (they start a test server and cost
-# ~70s each — the nightly's job). It runs through `scripts/trust/trust-suite.mjs` rather than a bare
+# Scope = every `*.trust.test.ts` that needs nothing but Postgres — `apps/api/src/trust` minus the two
+# Temporal durability files (they start a test server and cost ~70s each — the nightly's job), PLUS the
+# scenarios that live inside `packages/` and `apps/agent`.
+#
+# Those last two were nightly-only until arch-review 56, and it cost exactly what you would expect: the
+# resume boolean→union change of arch-review 55 left `shadow-execution.trust.test.ts` asserting
+# `resolves.toBe(false)`, and because that file sits in a package, the REQUIRED check could not see it. It
+# was red for a day in a non-blocking job. Worse, it does not fail on a developer machine either — with no
+# Postgres it SKIPS, which reads as silence rather than as a problem.
+#
+# The cost of closing that hole was measured before it was argued: `apps/api` is 304s of the 362s, so the
+# added scope is ~43s on a job that already ran five minutes. It runs through `scripts/trust/trust-suite.mjs` rather than a bare
 # `vitest run` for one reason: that script refuses to certify a suite whose scenarios SKIPPED. A required
 # check that quietly skips is worse than no check — it prints the word a reviewer is looking for over an
 # empty run.
@@ -62,3 +72,5 @@ jobs:
           node scripts/trust/trust-suite.mjs
           apps/api/src/trust
           '!apps/api/src/trust/temporal-'
+          packages
+          apps/agent
