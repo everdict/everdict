@@ -454,3 +454,183 @@ describe("trace list pagination (cursor → nextCursor)", () => {
     expect((await src.listTraces()).nextCursor).toBeUndefined();
   });
 });
+
+// A browse row that reads `<generic name> <uuid>` is a row nobody can pick out of twenty siblings. Each
+// platform already reports what its trace was ASKED to do — these assert we read it instead of dropping it.
+describe("a browse row says what the trace was asked to do (every source kind)", () => {
+  it("otel/jaeger reads the PROCESS tags, where the resource attributes actually live", async () => {
+    // Given a Jaeger doc whose everdict.run_id + service.name sit in `processes`, not on the span
+    const body = {
+      data: [
+        {
+          traceID: "t1",
+          processes: {
+            p1: {
+              serviceName: "checkout-agent",
+              tags: [
+                { key: "everdict.run_id", value: "run-77" },
+                { key: "deployment.environment", value: "prod" },
+              ],
+            },
+          },
+          spans: [
+            {
+              operationName: "invoke_agent default",
+              processID: "p1",
+              startTime: 1_700_000_000_000_000,
+              duration: 1_000_000,
+              tags: [{ key: "otel.status_code", value: "ERROR" }],
+            },
+            {
+              operationName: "checkout.submit",
+              processID: "p1",
+              startTime: 1_700_000_000_500_000,
+              duration: 200_000,
+              tags: [],
+            },
+          ],
+        },
+      ],
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new OtelTraceSource({ endpoint: "http://jaeger:16686", fetchImpl: fetchImpl as typeof fetch });
+    // When the service scope is listed
+    const { traces } = await src.listTraces({ scope: "checkout-agent" });
+    // Then the row carries its origin, its service and its failure — none of which a span's own tags hold
+    expect(traces[0]?.provenance).toEqual({ runId: "run-77" });
+    expect(traces[0]?.tags).toMatchObject({ "service.name": "checkout-agent", "deployment.environment": "prod" });
+    expect(traces[0]?.status).toBe("error");
+    // …and it is named by the work, not by the agent every sibling row also ran
+    expect(traces[0]?.preview).toBe("checkout.submit");
+  });
+
+  it("mlflow quotes request_preview — the field its own trace list shows as the row summary", async () => {
+    const body = {
+      traces: [
+        {
+          trace_id: "tr-1",
+          request_time: 1_700_000_000_000,
+          request_preview: '{"messages":[{"role":"user","content":"analyze the failing payment logs"}]}',
+          tags: { "mlflow.user": "kim", "mlflow.trace.session": "conv-9" },
+        },
+      ],
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
+    const { traces } = await src.listTraces({ scope: "exp1" });
+    // The chat envelope is unwrapped: a row reading `{"messages":[{"role":…` is the uuid problem again
+    expect(traces[0]?.preview).toBe("analyze the failing payment logs");
+    expect(traces[0]).toMatchObject({ userId: "kim", sessionId: "conv-9" });
+  });
+
+  it("langfuse reads the input/user/session/metadata the list already returns", async () => {
+    const body = {
+      data: [
+        {
+          id: "lf-1",
+          name: "agent",
+          timestamp: "2026-08-12T00:00:00.000Z",
+          input: { messages: [{ role: "user", content: "draft the release notes" }] },
+          userId: "kim",
+          sessionId: "conv-9",
+          // Our OWN sink writes provenance here — the list path used to drop it, so an everdict-exported
+          // trace browsed with no origin while the inspect dialog for the same trace showed one.
+          metadata: { scorecardId: "sc-8821", dataset: "travel-v2", caseId: "case-03" },
+          observations: ["o1", "o2", "o3"],
+          level: "ERROR",
+        },
+      ],
+      meta: { totalPages: 1 },
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new LangfuseTraceSource({
+      endpoint: "https://cloud.langfuse.com",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const { traces } = await src.listTraces();
+    expect(traces[0]).toMatchObject({
+      preview: "draft the release notes",
+      userId: "kim",
+      sessionId: "conv-9",
+      spanCount: 3,
+      status: "error",
+      provenance: { scorecardId: "sc-8821", dataset: "travel-v2", caseId: "case-03" },
+    });
+  });
+
+  it("langfuse accepts metadata as a JSON string too (some servers serialize it)", async () => {
+    const body = {
+      data: [{ id: "lf-2", metadata: JSON.stringify({ runId: "run-5" }), input: "hello" }],
+      meta: { totalPages: 1 },
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new LangfuseTraceSource({
+      endpoint: "https://cloud.langfuse.com",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const { traces } = await src.listTraces();
+    expect(traces[0]?.provenance).toEqual({ runId: "run-5" });
+  });
+
+  it("langsmith quotes the `inputs` it was already fetching for provenance, and selects tags", async () => {
+    const body = {
+      runs: [
+        {
+          trace_id: "ls-1",
+          name: "AgentExecutor",
+          inputs: { input: "find a flight to jeju" },
+          tags: ["nightly", "v2"],
+          extra: { metadata: { user_id: "kim", session_id: "conv-9" } },
+        },
+      ],
+      cursors: {},
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new LangsmithTraceSource({
+      endpoint: "https://api.smith.langchain.com",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const { traces } = await src.listTraces({ scope: "sess1" });
+    expect(traces[0]).toMatchObject({
+      preview: "find a flight to jeju",
+      userId: "kim",
+      sessionId: "conv-9",
+      tags: { nightly: "", v2: "" },
+    });
+    // the field has to be asked for, or the server never sends it
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).select).toContain("tags");
+  });
+
+  it("phoenix reads the ROOT span's input.value, not whichever nested span came first", async () => {
+    const body = {
+      data: [
+        {
+          name: "AgentRun",
+          context: { trace_id: "px-1", span_id: "s1" },
+          span_kind: "CHAIN",
+          start_time: "2026-08-12T00:00:00.000Z",
+          end_time: "2026-08-12T00:00:05.000Z",
+          status_code: "OK",
+          attributes: { input: { value: "book a hotel in busan" }, session: { id: "conv-9" }, user: { id: "kim" } },
+        },
+        {
+          name: "ChatCompletion",
+          context: { trace_id: "px-1", span_id: "s2" },
+          span_kind: "LLM",
+          start_time: "2026-08-12T00:00:01.000Z",
+          end_time: "2026-08-12T00:00:04.000Z",
+          status_code: "OK",
+          attributes: { input: { value: "system: you are a travel agent" } },
+        },
+      ],
+    };
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => Promise.resolve(json(body)));
+    const src = new PhoenixTraceSource({
+      endpoint: "http://phoenix:6006",
+      project: "p",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const { traces } = await src.listTraces();
+    expect(traces[0]).toMatchObject({ preview: "book a hotel in busan", userId: "kim", sessionId: "conv-9" });
+  });
+});

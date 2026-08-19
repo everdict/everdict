@@ -1,6 +1,6 @@
 'use client'
 
-import { TraceBrowser } from '@/features/browse-traces'
+import { TraceBrowser, traceRowText } from '@/features/browse-traces'
 import type { TraceSummary } from '@/entities/trace'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 
@@ -26,7 +26,14 @@ export function ObservabilityTraceBrowser({
       autoLoad={false}
       {...(deepLink ? { deepLink } : {})}
       onMention={(trace: TraceSummary, sourceName: string) =>
-        mention({ type: 'trace', id: trace.id, source: sourceName, label: trace.name ?? trace.id })
+        // The chat chip reads the same way the row does — the trace's own words first, since a mention
+        // labelled with the platform's root-span name says nothing about WHICH trace was handed over.
+        mention({
+          type: 'trace',
+          id: trace.id,
+          source: sourceName,
+          label: traceRowText(trace).headline,
+        })
       }
     />
   )

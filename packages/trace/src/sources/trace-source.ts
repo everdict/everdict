@@ -11,7 +11,7 @@ import {
   type TraceSummary,
   traceIdForRun,
 } from "@everdict/contracts";
-import { spansToEvents } from "@everdict/domain";
+import { previewFromEvents, spansToEvents } from "@everdict/domain";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
@@ -85,6 +85,85 @@ export function provenanceByLookup(lookup: (key: string) => unknown): TraceProve
   return extractProvenance(bag);
 }
 
+// The readable line inside a platform's raw input/output payload — the shared half of the row preview for the
+// kinds that hand us the payload itself (MLflow's request_preview, Langfuse's input, LangSmith's inputs, a
+// Phoenix root span's input.value). Those arrive as whatever the agent was called with: a plain string for a
+// simple prompt, a chat envelope (`{"messages":[{"role":"user","content":"…"}]}`) for anything LLM-shaped, a
+// JSON string wrapping either. Printed raw, a chat envelope makes every row read `{"messages":[{"role":…` —
+// the same non-answer as the uuid it replaced — so the message is unwrapped when there is one.
+const PREVIEW_MAX = 140;
+const PROMPT_FIELD_KEYS = ["input", "query", "prompt", "question", "task", "text", "content", "output"] as const;
+
+export function previewOfPayload(payload: unknown, depth = 0): string | undefined {
+  if (depth > 4) return undefined; // a payload nested deeper than this is structure, not a sentence
+  if (typeof payload === "string") {
+    const text = payload.trim();
+    if (text === "") return undefined;
+    // A JSON-encoded envelope is still an envelope — unwrap it before quoting.
+    if (text.startsWith("{") || text.startsWith("[")) {
+      const parsed = parseJson(text);
+      if (parsed !== undefined) {
+        const inner = previewOfPayload(parsed, depth + 1);
+        if (inner !== undefined) return inner;
+      }
+    }
+    return oneLine(text);
+  }
+  if (Array.isArray(payload)) {
+    // A message list: the LAST user turn is what this call was asked to do (earlier ones are history).
+    const messages = payload.filter(isRecord);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message === undefined) continue;
+      if (message.role === "user" || message.role === "human") {
+        const content = previewOfPayload(message.content, depth + 1);
+        if (content !== undefined) return content;
+      }
+    }
+    for (const item of payload) {
+      const first = previewOfPayload(item, depth + 1);
+      if (first !== undefined) return first;
+    }
+    return undefined;
+  }
+  if (!isRecord(payload)) return undefined;
+  if (payload.messages !== undefined) {
+    const fromMessages = previewOfPayload(payload.messages, depth + 1);
+    if (fromMessages !== undefined) return fromMessages;
+  }
+  for (const key of PROMPT_FIELD_KEYS) {
+    const value = payload[key];
+    if (value === undefined) continue;
+    const text = previewOfPayload(value, depth + 1);
+    if (text !== undefined) return text;
+  }
+  // Nothing conventionally named — the first string the payload carries still beats printing its uuid.
+  for (const value of Object.values(payload)) {
+    if (typeof value === "string" && value.trim() !== "") return oneLine(value);
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined; // a truncated preview payload is common — fall back to quoting it as text
+  }
+}
+
+function oneLine(text: string): string {
+  const line = text.replace(/\s+/gu, " ").trim();
+  if (line.length <= PREVIEW_MAX) return line;
+  const head = line.slice(0, PREVIEW_MAX);
+  const lastSpace = head.lastIndexOf(" ");
+  return `${(lastSpace > PREVIEW_MAX * 0.6 ? head.slice(0, lastSpace) : head).trimEnd()}…`;
+}
+
 // Span[] → the metric fields of a TraceSummary (id/scope/status/tags are added by the per-source caller).
 // Pure: derives name/time/duration from the spans and tokens/cost/model from the normalized llm_call events.
 export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
@@ -110,15 +189,59 @@ export function summarizeSpans(spans: Span[]): Omit<TraceSummary, "id"> {
   }
   const name = sorted[0]?.name;
   const provenance = provenanceFromSpans(spans);
+  // What the trace was ASKED to do, from the normalized events — the same derivation the owned ledger names
+  // its rows with (`previewFromEvents`, @everdict/domain), so our store and a pulled platform never answer
+  // differently. Root span names repeat across a project ("ChatCompletion", "invoke_agent x"); this does not.
+  const preview = previewFromEvents(events);
+  const status = statusFromSpans(spans);
+  const identity = identityFromSpans(spans);
   return {
     ...(name ? { name } : {}),
+    ...(preview ? { preview } : {}),
     ...(startMs > 0 ? { startedAt: new Date(startMs).toISOString() } : {}),
     durationMs: Math.max(0, endMs - startMs),
     spanCount: spans.length,
+    ...(status ? { status } : {}),
     ...(hasLlm ? { tokens: { input, output }, costUsd: usd } : {}),
     ...(model ? { llmModel: model } : {}),
+    ...identity,
     ...(provenance ? { provenance } : {}),
   };
+}
+
+// A span's failure, across the two spellings a span-based platform reports it in: OTel's status code (Jaeger
+// surfaces it as the `otel.status_code` tag) and Jaeger's own boolean `error` tag. Any failing span makes the
+// trace's row read `error` — an unset row (what every otel row read before) says nothing at all, which is
+// the wrong answer for a list a reader scans to find what went wrong.
+function statusFromSpans(spans: Span[]): "ok" | "error" | undefined {
+  if (spans.length === 0) return undefined;
+  for (const s of spans) {
+    const code = s.attrs["otel.status_code"] ?? s.attrs["status.code"];
+    if (typeof code === "string" && code.toUpperCase() === "ERROR") return "error";
+    const flag = s.attrs.error;
+    if (flag === true || flag === "true") return "error";
+  }
+  return "ok";
+}
+
+// WHO and WHICH conversation, across the attribute names the conventions actually use (OTel GenAI's
+// conversation id, OpenInference/Phoenix's session/user, the enduser convention). First span that carries a
+// key wins — these are trace-level facts written on whichever span the instrumentation had at hand.
+const SESSION_ATTR_KEYS = ["session.id", "gen_ai.conversation.id", "gen_ai.session.id", "thread.id"] as const;
+const USER_ATTR_KEYS = ["user.id", "enduser.id", "gen_ai.user.id"] as const;
+function identityFromSpans(spans: Span[]): { userId?: string; sessionId?: string } {
+  const pick = (keys: readonly string[]): string | undefined => {
+    for (const s of spans) {
+      for (const k of keys) {
+        const v = s.attrs[k];
+        if (typeof v === "string" && v.trim() !== "") return v;
+      }
+    }
+    return undefined;
+  };
+  const sessionId = pick(SESSION_ATTR_KEYS);
+  const userId = pick(USER_ATTR_KEYS);
+  return { ...(userId ? { userId } : {}), ...(sessionId ? { sessionId } : {}) };
 }
 
 // The first model an llm_call span reports, mapping-aware — enriches list rows on platforms whose trace-level

@@ -11,9 +11,42 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 
 import { listTrajectoriesAction, type TrajectoryMeta } from '../api/browse-trajectories'
+import { trajectoryRowText } from '../lib/row-text'
 import { TrajectoryDetailDialog } from './trajectory-detail-dialog'
 
 const PAGE_SIZE = 25
+
+// The row's left block: what the evidence DID on top, the producer beside it as a chip, and the id underneath
+// (or as the row's title when the second line is already spoken for). The reasoning for the split lives in
+// lib/row-text — the short version is that the stored label names the agent, and every row of one conversation
+// shares it, so leading with it made a page of turns unreadable.
+function TrajectoryRowText({ meta }: { meta: TrajectoryMeta }) {
+  const { headline, headlineIsId, sub, subIsId, chip } = trajectoryRowText(meta)
+  return (
+    <span className="min-w-0 flex-1" title={meta.runId}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className={cn('truncate', headlineIsId ? 'font-mono text-xs' : 'text-foreground')}>
+          {headline}
+        </span>
+        {chip ? (
+          <span className="shrink-0 truncate rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            {chip}
+          </span>
+        ) : null}
+      </span>
+      {sub ? (
+        <span
+          className={cn(
+            'block truncate text-muted-foreground',
+            subIsId ? 'font-mono text-[11px]' : 'text-xs'
+          )}
+        >
+          {sub}
+        </span>
+      ) : null}
+    </span>
+  )
+}
 
 // The run families a trajectory can belong to (`RUN_KINDS`), plus "everything". `undefined` = no filter.
 const KIND_FILTERS: (string | undefined)[] = [
@@ -149,19 +182,10 @@ export function TrajectoryBrowser({
                   onClick={() => setOpenId(m.runId)}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent"
                 >
-                  {/* The handle first (what a person recognizes), the id second (what they paste into a search). */}
-                  <span className="min-w-0 flex-1 truncate">
-                    {m.label ? (
-                      <>
-                        <span className="text-foreground">{m.label}</span>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">
-                          {m.runId}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="font-mono text-xs">{m.runId}</span>
-                    )}
-                  </span>
+                  {/* What this evidence DID first (what a person recognizes), then the producer as a chip and
+                      the id below it (what they paste into a search) — see lib/row-text: the label alone names
+                      the agent, which every sibling row also ran. */}
+                  <TrajectoryRowText meta={m} />
                   {m.kind ? <Badge tone="outline">{t(`kind_${m.kind}`)}</Badge> : null}
                   <Badge tone="outline">{t(`source_${m.source}`)}</Badge>
                   <span className="w-20 text-right text-xs text-muted-foreground">

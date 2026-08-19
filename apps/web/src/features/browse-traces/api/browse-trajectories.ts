@@ -20,6 +20,11 @@ const trajectoryMetaSchema = z.object({
   // arrived with no run to name it (and on a control plane older than the identity columns).
   kind: z.string().optional(),
   label: z.string().optional(),
+  // What the evidence was ASKED to do, derived from its own body at seal (mig 0168). The label names the
+  // PRODUCER — for an agent run it is the agent id, so every turn of one conversation carries the same one —
+  // and this is the line that tells two of its rows apart. Absent on evidence sealed before the column
+  // existed, and on a body that carried no phrase worth quoting.
+  preview: z.string().optional(),
 })
 export type TrajectoryMeta = z.infer<typeof trajectoryMetaSchema>
 

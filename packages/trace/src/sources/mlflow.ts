@@ -15,6 +15,7 @@ import {
   type Span,
   extractProvenance,
   modelFromSpans,
+  previewOfPayload,
   provenanceFromSpans,
   spansToRawAttributes,
   spansToSpanNodes,
@@ -101,9 +102,28 @@ interface MlflowTraceInfo {
   status?: string; // older
   tags?: Record<string, string> | Array<{ key?: string; value?: string }>;
   trace_metadata?: Record<string, string>;
+  // What the trace was asked to do, and what came back — the fields MLflow's OWN trace list shows as the row's
+  // summary. TraceInfo has carried them since 3.x; reading only the metrics left every browsed row identified
+  // by a trace name that is unset far more often than not.
+  request_preview?: string;
+  response_preview?: string;
 }
 
 const TRACE_NAME_TAG = "mlflow.traceName"; // TraceInfo has no name field — MLflow stores the display name in this tag
+// WHO ran it and WHICH conversation it belongs to, in MLflow's own tag/metadata vocabulary. `mlflow.trace.session`
+// is also the coordinate a controlled-correlate harness is pulled by (traceSource.correlateTag), so a row showing
+// it is a row a reader can tie back to the run that produced it.
+const USER_TAG_KEYS = ["mlflow.user", "mlflow.trace.user"] as const;
+const SESSION_TAG_KEYS = ["mlflow.trace.session", "mlflow.trace.session_id"] as const;
+
+// The row's one-line excerpt. MLflow serializes request_preview as the raw request payload, which for a chat
+// agent is a JSON envelope — quote the message inside it when there is one, so the row reads as the question
+// asked rather than as `{"messages":[{"role":"user","content":"…`.
+function mlflowPreview(info: MlflowTraceInfo): string | undefined {
+  const raw = info.request_preview ?? info.response_preview;
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  return previewOfPayload(raw);
+}
 
 // 3.x serializes execution_duration as a proto3-JSON Duration string ("1.2s"); v2 exposed *_ms number fields.
 function mlflowDurationMs(info: MlflowTraceInfo): number | undefined {
@@ -190,17 +210,31 @@ export function mlflowTracesToSummaries(traces: MlflowTraceInfo[], scope?: strin
     const tokens = mlflowTokens(info);
     const costUsd = mlflowCostUsd(info);
     const name = tags?.[TRACE_NAME_TAG];
+    const preview = mlflowPreview(info);
+    const bag = { ...info.trace_metadata, ...tags };
+    const pickTag = (keys: readonly string[]): string | undefined => {
+      for (const k of keys) {
+        const v = bag[k];
+        if (typeof v === "string" && v.trim() !== "") return v;
+      }
+      return undefined;
+    };
+    const userId = pickTag(USER_TAG_KEYS);
+    const sessionId = pickTag(SESSION_TAG_KEYS);
     // Everdict origin lives in trace_metadata (everdict.scorecardId/dataset/harness/caseId) + the everdict.run_id tag.
-    const provenance = extractProvenance({ ...info.trace_metadata, ...tags });
+    const provenance = extractProvenance(bag);
     out.push({
       id: info.trace_id,
       ...(name ? { name } : {}),
+      ...(preview ? { preview } : {}),
       ...(startedAt ? { startedAt } : {}),
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(status ? { status } : {}),
       ...(tags ? { tags } : {}),
       ...(tokens ? { tokens } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(userId ? { userId } : {}),
+      ...(sessionId ? { sessionId } : {}),
       ...(scope ? { scope } : {}),
       ...(provenance ? { provenance } : {}),
     });

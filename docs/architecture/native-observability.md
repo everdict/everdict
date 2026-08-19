@@ -148,6 +148,31 @@ collector and the store**.
   after the page would either N+1 or lie. `runEvidenceIdentity` (`@everdict/domain`) is the one rule; mig 0124
   backfills from the run ledger; `list` takes a `kind` filter in the same WHERE as the owner predicate, and
   Settings › Traces renders label + kind badge with a kind switcher.
+
+  **The handle names the PRODUCER; a row is told apart by its WORK.** mig 0124's label fixed the four-rows-
+  the-same case and left a fifth: for every kind but `eval` the label is the run's harness id, and for an agent
+  run the harness IS the agent (`Run.newAgentRun`/`newChatTurn`), so one agent answering twenty questions seals
+  twenty rows that all read `default <uuid>`. The label is a category — correct, constant, and useless as a
+  handle. A trajectory therefore also carries `preview` (mig 0168): the one-line excerpt of what it was asked
+  to do, derived from its own body by `previewFromEvents` (`@everdict/domain`) — the member's message, else the
+  first tool call, else the root span, with the assembled `invoke_agent <agent>` root kept as the last resort
+  because it names the producer again. It is stamped by `NamingTrajectoryStore`, a decorator wrapped once at
+  the composition root: eight seal paths reach the ledger and only some hold a run record, so naming at the
+  STORE also names the OTLP arrivals and materialized imports that no run-ledger join could ever reach. No
+  backfill — the value lives inside the sealed body, and evidence is never rewritten. The web then leads each
+  row with whichever of the pair actually varies (`lib/row-text`): the label for the work-named kinds, the
+  preview for `agent` and for evidence that arrived unnamed, the other one as a chip, the id below both.
+
+  **The same defect, from the other end, on the platform lists.** The external trace browser beside it drew
+  `name ?? "unnamed"` + the trace id, where `name` is whatever the instrumentation called its root span —
+  `ChatCompletion` on every trace in the project. Each platform already reports what its trace was asked to
+  do; the adapters were reading the metrics and dropping it. `TraceSummary` now carries `preview`/`userId`/
+  `sessionId` and each adapter fills them from the response it ALREADY fetches (no extra call): MLflow's
+  `request_preview`, Langfuse's `input`/`userId`/`sessionId`/`metadata` (which is where our own sink writes
+  provenance — the list path was dropping the origin the inspect dialog showed), LangSmith's `inputs` (fetched
+  for provenance keys, then discarded), a Phoenix root span's `input.value`, and — for Jaeger — the
+  `processes` table, where the resource attributes including `everdict.run_id` live and which the adapter did
+  not declare at all. See docs/architecture/trace-sink.md §F1 for the per-kind field table.
 - **N2 — Libraries + production ingestion.** `everdict-otel` (TS/Py) + migration recipes; continuous
   evaluation (judges over live traces; platform events from trace facts). **Continuous-evaluation rung
   SHIPPED (master-plan W6)**: the reserved trace source `everdict` points the pull machinery at the owned

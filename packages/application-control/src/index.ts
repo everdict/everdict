@@ -48,6 +48,8 @@ export {
   type TrajectorySegmentWire,
   type TrajectoryStore,
 } from "./ports/trajectory-store.js";
+// The seal-time naming choke point — every sealed trajectory gets the line that tells it from its siblings.
+export { NamingTrajectoryStore } from "./ports/naming-trajectory-store.js";
 export {
   EventConsumerRunner,
   type PlatformEventConsumer,

@@ -8,10 +8,12 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
   list: {
     summary: "List the workspace's sealed trajectories (the owned evidence ledger)",
     description:
-      "Metas only ({runId, source, kind?, label?, eventCount, sealedAt}), newest first, cursor-paginated. " +
+      "Metas only ({runId, source, kind?, label?, preview?, eventCount, sealedAt}), newest first, cursor-paginated. " +
       "source says how the evidence arrived: run (our own execution), otlp (the OTLP door), import " +
       "(materialized pull-ingest); kind says WHAT it is (eval | agent | command | sandbox | analysis) and " +
-      "label is its human handle (the case id, the agent, the harness). Open one via GET /trajectories/:id.",
+      "label is its human handle (the case id, the agent, the harness) while preview is the one-line excerpt of " +
+      "what it was asked to do (the member's message, the first tool call, the root span) — the label names the " +
+      "producer and repeats across rows, the preview is what tells two rows apart. Open one via GET /trajectories/:id.",
     tags: ["runs"],
     querystring: {
       type: "object",

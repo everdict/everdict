@@ -131,6 +131,12 @@ export const traceSummarySchema = z.object({
   llmModel: z.string().optional(),
   spanCount: z.number().optional(),
   tags: z.record(z.string(), z.string()).optional(),
+  // What the trace was ASKED to do (the platform's own input excerpt) and who/which conversation it belongs
+  // to. `name` is a platform label that repeats across a project ("ChatCompletion" twenty times over); these
+  // are what let a reader pick one row out of its siblings.
+  preview: z.string().optional(),
+  userId: z.string().optional(),
+  sessionId: z.string().optional(),
   scope: z.string().optional(),
   provenance: traceProvenanceSchema.optional(),
 })

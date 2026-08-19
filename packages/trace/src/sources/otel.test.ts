@@ -89,3 +89,31 @@ describe("OtelTraceSource — tag correlation (Jaeger search)", () => {
     expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("http://jaeger:16686/api/traces/abc123");
   });
 });
+
+// ── ADAPTER × CORRELATE MODE: a returned traceId is absent or platform-resolvable (report 1.4) ───────
+//
+// Under correlate:"id" the runId IS the platform's trace id, so echoing it back is a resolvable reference.
+// Under correlate:"tag" the runId is the tag VALUE searched for — naming it as a trace id hands the export a
+// back-reference nothing can resolve, so the adapter must name NOTHING. The next adapter gets the same two
+// modes; keep this a table.
+describe("OtelTraceSource.fetchDetailed — traceId truth by correlate mode", () => {
+  const jaegerBody = JSON.stringify({
+    data: [{ spans: [{ traceID: "abc123", spanID: "s1", operationName: "op", startTime: 1, duration: 5, tags: [] }] }],
+  });
+  const table: Array<{ mode: "id" | "tag"; expectId: string | undefined }> = [
+    { mode: "id", expectId: "run-42" }, // the id it was asked with IS the platform id
+    { mode: "tag", expectId: undefined }, // the search key is not a trace id — name nothing
+  ];
+  for (const { mode, expectId } of table) {
+    it(`correlate:"${mode}" → traceId ${expectId === undefined ? "absent" : "the asked id"}`, async () => {
+      const fetchImpl = (async () => new Response(jaegerBody, { status: 200 })) as typeof fetch;
+      const source = new OtelTraceSource({
+        endpoint: "http://jaeger:16686",
+        fetchImpl,
+        ...(mode === "tag" ? { correlate: "tag" as const, service: "agent" } : {}),
+      });
+      const detailed = await source.fetchDetailed("run-42");
+      expect(detailed.traceId).toBe(expectId);
+    });
+  }
+});

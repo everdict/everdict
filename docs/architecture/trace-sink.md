@@ -263,6 +263,27 @@ the platform's selectable scopes, so the scope field is a **picker over real dat
   **nested**, create-side flat — both normalized). New config knobs: `auth` (value; adapter owns
   the header name — langsmith `x-api-key`) + `project` (phoenix path requirement);
   `headers.authorization` is inherited as `auth` for the existing pull path.
+- **F6 — a browsed row says WHAT the trace is (SHIPPED).** The list adapters were reading each platform's
+  metrics and dropping everything that identifies a trace, so the browser drew `name ?? "unnamed"` + the id —
+  and `name` is whatever the instrumentation called its root span, i.e. `ChatCompletion` on every trace in the
+  project. `TraceSummary` gained `preview` (what the trace was asked to do) + `userId`/`sessionId`, filled
+  from the response each adapter ALREADY fetches — no extra per-row call. What each kind now reads, beyond
+  the metrics it read before:
+
+  | kind | newly read (all from the same request) |
+  |---|---|
+  | `mlflow` | `request_preview` / `response_preview` (its own list's row summary — TraceInfo carried them all along), `mlflow.user` → userId, `mlflow.trace.session` → sessionId |
+  | `langfuse` | `input`/`output` → preview, `userId`, `sessionId`, `metadata` → provenance (**where our own sink writes it** — the list path dropped the origin the inspect dialog showed, object or JSON string), `observations` → spanCount, `level` → status |
+  | `langsmith` | `inputs` → preview (it was already selected, read for provenance keys, then discarded), `tags` (added to the `select` list), `extra.metadata` user/session |
+  | `phoenix` | the ROOT span's `input.value` → preview (earliest-span order, so it is the outermost call and not a nested LLM's system prompt), `session.id`/`user.id` |
+  | `otel` (jaeger) | **`processes`** — the resource table the adapter did not declare, where `service.name` and an exporter-set `everdict.run_id` live; merged into each span's bag (span tag wins), surfaced as `tags` + provenance |
+  | shared (`summarizeSpans`) | `preview` via `previewFromEvents` (@everdict/domain — the SAME derivation the owned ledger names its rows with) + `status` from `otel.status_code`/`error`, so otel rows stopped reading "unset" |
+
+  A payload preview is unwrapped before it is quoted (`previewOfPayload`): these fields arrive as whatever the
+  agent was called with, and a chat envelope printed raw makes every row read `{"messages":[{"role":…` — the
+  same non-answer as the uuid it replaced. The web leads the row with the preview, falls back to the everdict
+  `dataset#caseId` when the trace carries provenance, keeps the platform name as a chip and drops the id to the
+  second line (`features/browse-traces/lib/row-text`, shared with the owned-ledger list).
 - **F5 — live e2e (PASS, 2026-07-06):** `scripts/live/trace-sink-mlflow.mjs` — real MLflow
   3.11.1 (infra stack, Basic auth): create + attach verified by assessment read-back, span upload
   degrades (documented; `traces/get` 500s span-less traces); MLflow 3.14.0 (sqlite): full span

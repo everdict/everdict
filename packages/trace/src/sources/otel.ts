@@ -297,13 +297,31 @@ interface JaegerSpan {
   startTime?: number; // microseconds
   duration?: number; // microseconds
   tags?: JaegerTag[];
+  // Which PROCESS emitted the span — the key into the trace doc's `processes` map, where Jaeger keeps the
+  // resource attributes (`service.name`, and everything an exporter set via OTEL_RESOURCE_ATTRIBUTES,
+  // `everdict.run_id` among them). A span's own tags never carry them.
+  processID?: string;
+}
+
+// The trace doc's process table: resource attributes, one entry per emitting process.
+interface JaegerProcess {
+  serviceName?: string;
+  tags?: JaegerTag[];
 }
 function microToMs(v: number | undefined): number {
   return Math.floor((v ?? 0) / 1000);
 }
-export function parseJaegerSpans(spans: JaegerSpan[]): Span[] {
+// `processes` is the trace doc's resource table. Merging it INTO each span's bag is the same rule the OTLP
+// path already applies to resource attributes, and it is what makes an exporter-set `everdict.run_id` (a
+// RESOURCE attribute, not a span tag) visible to provenance extraction and the identity keys — without it a
+// Jaeger-listed row can carry no correlation at all, which is exactly how a browse page ends up with nothing
+// but uuids on it. A span's own tag wins over the process's: the more specific statement is the truer one.
+export function parseJaegerSpans(spans: JaegerSpan[], processes?: Record<string, JaegerProcess>): Span[] {
   return spans.map((s) => {
     const attrs: Record<string, unknown> = {};
+    const process = s.processID !== undefined ? processes?.[s.processID] : undefined;
+    if (process?.serviceName) attrs[OTEL_SERVICE_NAME_ATTR] = process.serviceName;
+    for (const t of process?.tags ?? []) attrs[t.key] = t.value;
     for (const t of s.tags ?? []) attrs[t.key] = t.value;
     return {
       name: s.operationName ?? "",
@@ -318,14 +336,35 @@ export function parseJaegerSpans(spans: JaegerSpan[]): Span[] {
 interface JaegerTraceDoc {
   traceID?: string;
   spans?: JaegerSpan[];
+  processes?: Record<string, JaegerProcess>;
 }
+// String-valued resource attributes across every process in the doc, flattened for the row's `tags` column.
+// undefined rather than {} when there are none — an empty tag bag is a claim the trace carries no metadata.
+function jaegerResourceTags(processes?: Record<string, JaegerProcess>): Record<string, string> | undefined {
+  if (!processes) return undefined;
+  const out: Record<string, string> = {};
+  for (const process of Object.values(processes)) {
+    if (process.serviceName) out[OTEL_SERVICE_NAME_ATTR] = process.serviceName;
+    for (const t of process.tags ?? []) if (typeof t.value === "string" && t.value !== "") out[t.key] = t.value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 // Pure: Jaeger trace docs → summaries (metrics derived from the embedded spans). scope = the service listed under.
 export function jaegerTracesToSummaries(traces: JaegerTraceDoc[], scope?: string): TraceSummary[] {
   const out: TraceSummary[] = [];
   for (const tr of traces) {
     if (!tr.traceID) continue;
-    const spans = parseJaegerSpans(tr.spans ?? []);
-    out.push({ id: tr.traceID, ...summarizeSpans(spans), ...(scope ? { scope } : {}) });
+    const spans = parseJaegerSpans(tr.spans ?? [], tr.processes);
+    // The resource/process attributes as the row's tags — the correlation display the list column reads
+    // (`everdict.run_id` and the service that emitted it live here, never on a span's own tags).
+    const tags = jaegerResourceTags(tr.processes);
+    out.push({
+      id: tr.traceID,
+      ...summarizeSpans(spans),
+      ...(tags ? { tags } : {}),
+      ...(scope ? { scope } : {}),
+    });
   }
   return out;
 }
@@ -386,9 +425,9 @@ export class OtelTraceSource implements BrowsableTraceSource {
         `OTel trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    const body = (await res.json()) as { spans?: OtlpSpan[]; data?: Array<{ spans?: JaegerSpan[] }> };
+    const body = (await res.json()) as { spans?: OtlpSpan[]; data?: JaegerTraceDoc[] };
     // A tag search miss is data=[] → 0 spans (flush lag — retry is the caller's job).
-    if (Array.isArray(body.data)) return parseJaegerSpans(body.data.flatMap((t) => t.spans ?? []));
+    if (Array.isArray(body.data)) return body.data.flatMap((t) => parseJaegerSpans(t.spans ?? [], t.processes));
     return parseOtlpSpans(body.spans ?? []);
   }
 
@@ -412,7 +451,12 @@ export class OtelTraceSource implements BrowsableTraceSource {
     return {
       events: withEvidenceEvents(spansToTraceEvents(spans, m), evidence),
       ...(evidence ? { evidence } : {}),
-      traceId: runId, // this source addresses a trace by the id it was asked with
+      // The platform's own trace id — TRUE only in correlate:"id", where the runId IS the trace id this
+      // adapter addressed. Under correlate:"tag" the runId is the tag VALUE searched for, and the returned
+      // spans carry no resolvable id here — naming it anyway handed the export a back-reference that
+      // resolves to nothing (downstream report 1.4). An adapter that cannot name the platform's id names
+      // nothing; the field is optional for exactly this.
+      ...(this.opts.correlate === "tag" ? {} : { traceId: runId }),
     };
   }
 

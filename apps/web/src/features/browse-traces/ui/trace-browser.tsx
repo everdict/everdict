@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from 'react'
 import {
   Check,
   CheckCircle2,
@@ -33,6 +41,7 @@ import { Input } from '@/shared/ui/input'
 import { Tooltip } from '@/shared/ui/tooltip'
 
 import { listTracesAction } from '../api/browse-traces'
+import { traceRowText } from '../lib/row-text'
 import { TraceDetailDialog } from './trace-detail-dialog'
 
 type StatusFilter = 'all' | 'ok' | 'error'
@@ -46,6 +55,46 @@ const STATUS_ICON: Record<TraceStatus, { icon: typeof CheckCircle2; className: s
   ok: { icon: CheckCircle2, className: 'text-[var(--color-success)]' },
   error: { icon: XCircle, className: 'text-destructive' },
   unset: { icon: CircleSlash, className: 'text-faint' },
+}
+
+// The row's left block. A platform's `name` is whatever the instrumentation called its root span — the same
+// string on every trace in the project — so the row leads with what the trace itself said (its input excerpt)
+// or with the everdict case it came from, and keeps the platform name as a chip. The trace id drops to the
+// muted second line, where it is still copyable but no longer the only thing distinguishing two rows.
+// See lib/row-text for the rule shared with the owned-ledger list.
+function TraceRowText({
+  trace,
+  unnamed,
+  children,
+}: {
+  trace: TraceSummary
+  unnamed: string
+  children?: ReactNode
+}) {
+  const { headline, headlineIsId, sub, chip } = traceRowText(trace)
+  const identity = [trace.sessionId, trace.userId]
+    .filter((v): v is string => Boolean(v))
+    .join(' · ')
+  const second = [sub, identity].filter((v) => Boolean(v)).join(' · ')
+  return (
+    <div className="min-w-0 flex-1 space-y-1" title={trace.id}>
+      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+        <span className={cn('truncate', headlineIsId && 'font-mono text-[11.5px]')}>
+          {headlineIsId ? unnamed : headline}
+        </span>
+        {chip && (
+          <span className="hidden shrink-0 truncate rounded bg-elevated px-1.5 py-0.5 text-[10.5px] font-[450] text-muted-foreground sm:inline-block">
+            {chip}
+          </span>
+        )}
+        {children}
+      </div>
+      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[10.5px] text-faint">
+        {second && <span className="truncate">{second}</span>}
+        <span className={cn('shrink-0 font-mono', second && 'opacity-70')}>{trace.id}</span>
+      </div>
+    </div>
+  )
 }
 
 function TraceStatusIcon({ status }: { status: TraceStatus }) {
@@ -276,11 +325,21 @@ export function TraceBrowser({
     const matched = traces.filter((tr) => {
       if (status !== 'all' && (tr.status ?? 'unset') !== status) return false
       if (!q) return true
-      return (
-        tr.id.toLowerCase().includes(q) ||
-        (tr.name?.toLowerCase().includes(q) ?? false) ||
-        (tr.llmModel?.toLowerCase().includes(q) ?? false)
-      )
+      // Everything the row DISPLAYS is searchable — a value a reader can see but not filter on is half a
+      // handle. Provenance included: "which traces came from that scorecard" is the question an everdict-
+      // exported list is opened with.
+      const haystack = [
+        tr.id,
+        tr.name,
+        tr.preview,
+        tr.llmModel,
+        tr.userId,
+        tr.sessionId,
+        ...Object.keys(tr.tags ?? {}),
+        ...Object.values(tr.tags ?? {}),
+        ...Object.values(tr.provenance ?? {}),
+      ]
+      return haystack.some((value) => typeof value === 'string' && value.toLowerCase().includes(q))
     })
     const sorted = [...matched].sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
     const byDay = new Map<string, TraceSummary[]>()
@@ -461,24 +520,18 @@ export function TraceBrowser({
                         {isPicked && <Check className="size-3" strokeWidth={3} />}
                       </span>
                     )}
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                        <span className="truncate">{tr.name ?? t('unnamedTrace')}</span>
-                        {tr.llmModel && (
-                          <span className="hidden shrink-0 sm:inline-flex">
-                            <ModelChip muted>{tr.llmModel}</ModelChip>
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap font-mono text-[10.5px] text-faint">
-                        <span className="truncate">{tr.id}</span>
-                        {tr.spanCount !== undefined && (
-                          <span className="shrink-0">
-                            · {t('spanCount', { count: tr.spanCount })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    <TraceRowText trace={tr} unnamed={t('unnamedTrace')}>
+                      {tr.llmModel && (
+                        <span className="hidden shrink-0 sm:inline-flex">
+                          <ModelChip muted>{tr.llmModel}</ModelChip>
+                        </span>
+                      )}
+                      {tr.spanCount !== undefined && (
+                        <span className="shrink-0 font-mono text-[10.5px] text-faint">
+                          {t('spanCount', { count: tr.spanCount })}
+                        </span>
+                      )}
+                    </TraceRowText>
                     <div className="flex shrink-0 items-center gap-2.5">
                       <span
                         title={t('colTokens')}

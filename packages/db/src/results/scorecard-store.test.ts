@@ -572,6 +572,63 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect((await store.get("acme", "turn-a"))?.meta).toMatchObject({ kind: "agent", label: "sentinel" });
   });
 
+  it("carries the line that tells two rows of the SAME producer apart (mig 0168)", async () => {
+    // The handle names the producer: every turn of one agent seals with the same `label`, so a page of a
+    // conversation reads `default <uuid>` over and over. The preview is what distinguishes them.
+    const store = new InMemoryTrajectoryStore();
+    const turn = { tenant: "acme", source: "run" as const, kind: "agent", label: "default", events: events as never };
+    await store.seal({ ...turn, runId: "turn-a", preview: "analyze the failing payment logs" });
+    await store.seal({ ...turn, runId: "turn-b", preview: "draft the release notes" });
+
+    const listed = await store.list("acme", { kind: "agent" });
+    expect(listed.items.map((m) => m.preview)).toEqual(["draft the release notes", "analyze the failing payment logs"]);
+    expect(new Set(listed.items.map((m) => m.label))).toEqual(new Set(["default"])); // the label still repeats
+    expect((await store.get("acme", "turn-a"))?.meta.preview).toBe("analyze the failing payment logs");
+  });
+
+  it("Pg impl round-trips the preview through the INSERT and the browse SELECT", async () => {
+    // Given a store whose SELECT answers with a stored row
+    const { client, calls } = fakeClient((text) =>
+      text.startsWith("INSERT")
+        ? { rows: [{ run_id: "turn-a" }] }
+        : {
+            rows: [
+              {
+                run_id: "turn-a",
+                tenant: "acme",
+                source: "run",
+                emitter: "run",
+                event_count: 1,
+                segment_event_count: 0,
+                t0: null,
+                sealed_at: "2026-08-12T00:00:00.000Z",
+                owner: null,
+                kind: "agent",
+                label: "default",
+                preview: "analyze the failing payment logs",
+              },
+            ],
+          },
+    );
+    const store = new PgTrajectoryStore(client);
+    // When a named trajectory is sealed and the ledger is browsed
+    await store.seal({
+      runId: "turn-a",
+      tenant: "acme",
+      source: "run",
+      kind: "agent",
+      label: "default",
+      preview: "analyze the failing payment logs",
+      events: events as never,
+    });
+    const listed = await store.list("acme");
+    // Then the column is written and read back — a value that only lives in memory names nothing on reload
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_trajectories \([^)]*preview[^)]*\)/);
+    expect(calls[0]?.params?.[12]).toBe("analyze the failing payment logs");
+    expect(calls[1]?.text).toMatch(/label, preview FROM everdict_trajectories/);
+    expect(listed.items[0]?.preview).toBe("analyze the failing payment logs");
+  });
+
   it("Pg impl filters the kind IN the WHERE too — beside the owner, before the LIMIT", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgTrajectoryStore(client).list("acme", { viewer: "alice", kind: "agent" });

@@ -10,7 +10,7 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 
-import { provenanceByLookup } from "./trace-source.js";
+import { previewOfPayload, provenanceByLookup } from "./trace-source.js";
 
 // Arize Phoenix spans — the GET /v1/projects/{p}/spans?trace_id=<hex> response (Span schema, read side).
 // Real-API notes: there is no GET /v1/traces/{id} — cursor-loop the project spans via the trace_id filter (≥13.9.0).
@@ -111,6 +111,28 @@ function phoenixProvenance(spans: PhoenixSpan[]): TraceProvenance | undefined {
   });
 }
 
+// The first readable value at `path` across the trace's spans, earliest first — the ROOT span carries the
+// trace's own argument, and reading it in start order is what makes "the trace's input" mean the outermost
+// call rather than whichever nested LLM span happened to be enumerated first.
+function phoenixIo(sorted: PhoenixSpan[], path: string): string | undefined {
+  for (const s of sorted) {
+    const value = previewOfPayload(phAttr(s.attributes, path));
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+// The first string value any span carries under one of the given attribute paths (nested/flat tolerant).
+function phoenixFirstAttr(spans: PhoenixSpan[], paths: readonly string[]): string | undefined {
+  for (const s of spans) {
+    for (const path of paths) {
+      const value = phStr(phAttr(s.attributes, path));
+      if (value !== undefined && value.trim() !== "") return value;
+    }
+  }
+  return undefined;
+}
+
 export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): TraceSummary[] {
   const byTrace = new Map<string, PhoenixSpan[]>();
   for (const s of spans) {
@@ -141,15 +163,23 @@ export function phoenixSpansToSummaries(spans: PhoenixSpan[], scope?: string): T
       if (s.status_code === "ERROR") hasError = true;
     }
     const provenance = phoenixProvenance(group);
+    // OpenInference records a span's argument under input.value (output.value for the reply). Phoenix's own UI
+    // shows it as the row summary; without it a project of LLM traces browses as N rows of "ChatCompletion".
+    const preview = phoenixIo(sorted, "input.value") ?? phoenixIo(sorted, "output.value");
+    const sessionId = phoenixFirstAttr(group, ["session.id", "metadata.session_id", "thread.id"]);
+    const userId = phoenixFirstAttr(group, ["user.id", "metadata.user_id"]);
     out.push({
       id,
       ...(first?.name ? { name: first.name } : {}),
+      ...(preview ? { preview } : {}),
       ...(startMs > 0 ? { startedAt: new Date(startMs).toISOString() } : {}),
       durationMs: Math.max(0, endMs - startMs),
       spanCount: group.length,
       status: hasError ? "error" : "ok",
       ...(hasLlm ? { tokens: { input, output } } : {}),
       ...(model ? { llmModel: model } : {}),
+      ...(userId ? { userId } : {}),
+      ...(sessionId ? { sessionId } : {}),
       ...(scope ? { scope } : {}),
       ...(provenance ? { provenance } : {}),
     });

@@ -10,7 +10,7 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 
-import { provenanceByLookup } from "./trace-source.js";
+import { previewOfPayload, provenanceByLookup } from "./trace-source.js";
 
 // LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.
 // Real-API notes: auth is the X-API-Key header (bare path = same as the SDK), full-trace fetch is v1 /runs/query's
@@ -30,6 +30,8 @@ interface LangsmithRun {
   total_cost?: string | null; // decimal string
   inputs?: Record<string, unknown> | null; // the sink writes everdict origin here: caseId/dataset/harness (unprefixed)
   extra?: { metadata?: Record<string, unknown> | null } | null; // and scorecardId under extra.metadata
+  tags?: string[] | null; // the run's own labels — the reader's second axis when every trace is named alike
+  session_id?: string | null; // the project the run belongs to (LangSmith calls a project a session)
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
@@ -102,15 +104,28 @@ export function langsmithRunsToSummaries(runs: LangsmithRun[], scope?: string): 
     const hasTokens = r.prompt_tokens != null || r.completion_tokens != null;
     const cost = r.total_cost != null && r.total_cost !== "" ? Number(r.total_cost) : undefined;
     const provenance = langsmithProvenance([r]);
+    // `inputs` was already being fetched and read for provenance keys, then thrown away — it is the run's
+    // actual argument, which is what tells one root run from the next when they all share a chain name.
+    const preview = previewOfPayload(r.inputs) ?? previewOfPayload(r.outputs);
+    const tags =
+      Array.isArray(r.tags) && r.tags.length > 0 ? Object.fromEntries(r.tags.map((t) => [t, ""])) : undefined;
+    const metaSession = r.extra?.metadata?.session_id ?? r.extra?.metadata?.thread_id;
+    const sessionId = typeof metaSession === "string" && metaSession !== "" ? metaSession : undefined;
+    const metaUser = r.extra?.metadata?.user_id;
+    const userId = typeof metaUser === "string" && metaUser !== "" ? metaUser : undefined;
     out.push({
       id,
       ...(r.name ? { name: r.name } : {}),
+      ...(preview ? { preview } : {}),
       ...(r.start_time ? { startedAt: r.start_time } : {}),
       ...(endMs > startMs ? { durationMs: endMs - startMs } : {}),
       status: r.error ? "error" : "ok",
       ...(hasTokens ? { tokens: { input: r.prompt_tokens ?? 0, output: r.completion_tokens ?? 0 } } : {}),
       ...(cost !== undefined && !Number.isNaN(cost) ? { costUsd: Math.max(0, cost) } : {}),
       ...(model ? { llmModel: model } : {}),
+      ...(tags ? { tags } : {}),
+      ...(userId ? { userId } : {}),
+      ...(sessionId ? { sessionId } : {}),
       ...(scope ? { scope } : {}),
       ...(provenance ? { provenance } : {}),
     });
@@ -170,6 +185,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
           "total_cost",
           "inputs",
           "extra",
+          "tags",
         ],
         limit: opts?.limit ?? 50,
         ...(opts?.cursor ? { cursor: opts.cursor } : {}), // /runs/query threads cursors.next back as body.cursor

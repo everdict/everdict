@@ -72,6 +72,17 @@ export const TraceSummarySchema = z.object({
   llmModel: z.string().optional(), // the primary/first model observed (a hint for the list column).
   spanCount: z.number().int().nonnegative().optional(),
   tags: z.record(z.string(), z.string()).optional(), // platform tags (e.g. everdict.run_id) — passthrough for correlation display.
+  // What this trace was asked to do — the platform's own input excerpt (MLflow's request_preview, Langfuse's
+  // input, LangSmith's inputs, a Phoenix root span's input.value) or, for span-based kinds, the first user
+  // message the normalized events carry. `name` is a platform label that repeats across a project's traces
+  // ("ChatCompletion" twenty times over); this is what tells two rows apart. Best-effort like every other
+  // field here — a platform that reports no input omits it rather than echoing its id.
+  preview: z.string().optional(),
+  // WHO and WHICH CONVERSATION the platform attributes the trace to (Langfuse userId/sessionId, LangSmith
+  // metadata, Phoenix user.id/session.id, MLflow's mlflow.user / session tags). The second axis a reader
+  // recognizes a trace by when its content looks like every other trace's.
+  userId: z.string().optional(),
+  sessionId: z.string().optional(),
   scope: z.string().optional(), // the scope this trace was listed under (experiment/project/service).
   provenance: TraceProvenanceSchema.optional(), // Everdict origin extracted from the trace's metadata/attrs (when present).
 });

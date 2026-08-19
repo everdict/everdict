@@ -87,6 +87,9 @@ const TRAJECTORY_COLUMNS: readonly ColumnSpec[] = [
   // store has no run ledger beside it to read from.
   { name: "kind", type: "String", default: "''" },
   { name: "label", type: "String", default: "''" },
+  // The line naming what the evidence was ASKED to do (mig 0168's rung-2 twin). '' = a body with no phrase
+  // to quote. No backfill, for the reason the Postgres migration gives: the value lives inside the body.
+  { name: "preview", type: "String", default: "''" },
   // WHICH physical attempt sealed it (mig 0176's rung-2 twin). '' = the producer did not say — never
   // agreement with whatever attempt a reader has in hand. No backfill: sealed evidence is not rewritten.
   { name: "attempt_id", type: "String", default: "''" },
@@ -139,6 +142,7 @@ interface RunRow {
   owner_run: string;
   kind_run: string;
   label_run: string;
+  preview_run: string;
 }
 
 function rowToMeta(row: RunRow): TrajectoryMeta {
@@ -151,6 +155,7 @@ function rowToMeta(row: RunRow): TrajectoryMeta {
     ...(row.owner_run ? { owner: row.owner_run } : {}),
     ...(row.kind_run ? { kind: row.kind_run } : {}),
     ...(row.label_run ? { label: row.label_run } : {}),
+    ...(row.preview_run ? { preview: row.preview_run } : {}),
   };
 }
 
@@ -209,6 +214,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       ...(input.owner !== undefined ? { owner: input.owner } : {}),
       ...(input.kind !== undefined ? { kind: input.kind } : {}),
       ...(input.label !== undefined ? { label: input.label } : {}),
+      ...(input.preview !== undefined ? { preview: input.preview } : {}),
     };
     if (existing) {
       // First seal per emitter wins — evidence is never rewritten; a new emitter is a new plane.
@@ -235,6 +241,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       owner: input.owner ?? "",
       kind: input.kind ?? "",
       label: input.label ?? "",
+      preview: input.preview ?? "",
       attempt_id: input.attemptId ?? "",
     };
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
@@ -348,7 +355,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               min(sealed_at_first) AS sealed_at_run,
               argMin(owner_first, sealed_at_first) AS owner_run,
               argMin(kind_first, sealed_at_first) AS kind_run,
-              argMin(label_first, sealed_at_first) AS label_run
+              argMin(label_first, sealed_at_first) AS label_run,
+              argMin(preview_first, sealed_at_first) AS preview_run
        FROM (${this.perEmitterSql(listWhere(opts))})
        GROUP BY run_id
        ${after !== undefined ? "HAVING (sealed_at_run, run_id) < ({afterSealedAt:String}, {afterRunId:String})" : ""}
@@ -408,6 +416,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(owner, sealed_at) AS owner_first,
               argMin(kind, sealed_at) AS kind_first,
               argMin(label, sealed_at) AS label_first,
+              argMin(preview, sealed_at) AS preview_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()} WHERE ${where} GROUP BY run_id, emitter`;
   }

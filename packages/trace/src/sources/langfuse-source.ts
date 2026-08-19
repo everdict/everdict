@@ -9,7 +9,7 @@ import {
   UpstreamError,
 } from "@everdict/contracts";
 
-import { extractProvenance } from "./trace-source.js";
+import { extractProvenance, previewOfPayload } from "./trace-source.js";
 
 // Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.
 // Real-API notes: observations are fully inline (no pagination), fields are present-but-null (not optional),
@@ -82,7 +82,11 @@ export function langfuseObservationsToTraceEvents(observations: LangfuseObservat
   return out;
 }
 
-// Langfuse GET /api/public/traces list item (selected fields — the paginated { data, meta } response).
+// Langfuse GET /api/public/traces list item (the paginated { data, meta } response).
+// The list payload carries far more than the metrics: the trace's own input/output, who ran it, which session
+// it belongs to, and the `metadata` bag — which is where OUR OWN SINK writes provenance (see langfuse-sink),
+// so reading only id/name/latency/cost meant an everdict-exported trace came back through the browse list with
+// no origin on it at all, while the inspect dialog for the same trace showed it.
 interface LangfuseTraceListItem {
   id?: string;
   name?: string | null;
@@ -90,6 +94,33 @@ interface LangfuseTraceListItem {
   latency?: number | null; // seconds (float)
   totalCost?: number | null;
   tags?: string[] | null;
+  input?: unknown;
+  output?: unknown;
+  userId?: string | null;
+  sessionId?: string | null;
+  metadata?: unknown; // object (or a JSON string on older servers) — the sink's provenance lives here
+  observations?: unknown[] | null; // the trace's observation ids — their count is the row's span count
+  // Langfuse's own level vocabulary (DEBUG/DEFAULT/WARNING/ERROR): the only failure signal a trace-level row
+  // carries. Without it every langfuse row rendered "unset" — a list nobody can scan for what broke.
+  level?: string | null;
+}
+
+// `metadata` is documented as an object but reaches us as a JSON string from some SDK/server versions — take
+// both rather than silently losing the provenance our own exporter wrote.
+function langfuseMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string" && value.trim() !== "") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 // Pure: Langfuse trace list items → summaries. scope = the project listed under (informational).
 export function langfuseTracesToSummaries(items: LangfuseTraceListItem[], scope?: string): TraceSummary[] {
@@ -100,14 +131,26 @@ export function langfuseTracesToSummaries(items: LangfuseTraceListItem[], scope?
     const costUsd = typeof it.totalCost === "number" ? Math.max(0, it.totalCost) : undefined;
     const tags =
       Array.isArray(it.tags) && it.tags.length > 0 ? Object.fromEntries(it.tags.map((t) => [t, ""])) : undefined;
+    const preview = previewOfPayload(it.input) ?? previewOfPayload(it.output);
+    const metadata = langfuseMetadata(it.metadata);
+    const provenance = metadata !== undefined ? extractProvenance(metadata) : undefined;
+    const spanCount = Array.isArray(it.observations) ? it.observations.length : undefined;
+    // ERROR is a fact the trace reports about itself; every other level (DEBUG/DEFAULT/WARNING) says it ran.
+    const status = typeof it.level === "string" ? (it.level.toUpperCase() === "ERROR" ? "error" : "ok") : undefined;
     out.push({
       id: it.id,
       ...(it.name ? { name: it.name } : {}),
+      ...(preview ? { preview } : {}),
       ...(it.timestamp ? { startedAt: it.timestamp } : {}),
       ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(status ? { status } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(spanCount !== undefined ? { spanCount } : {}),
       ...(tags ? { tags } : {}),
+      ...(it.userId ? { userId: it.userId } : {}),
+      ...(it.sessionId ? { sessionId: it.sessionId } : {}),
       ...(scope ? { scope } : {}),
+      ...(provenance ? { provenance } : {}),
     });
   }
   return out;
