@@ -1,7 +1,7 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 
+import { Link } from '@/shared/ui/link'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
