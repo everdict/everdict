@@ -7,7 +7,7 @@ import {
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
-import { HarborVerifierGrader } from "./harbor-verifier.js";
+import { RewardFileGrader } from "./reward-file.js";
 import { type Judge, JudgeGrader } from "./judge.js";
 import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
@@ -25,7 +25,7 @@ function optStr(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-// A `Record<string, string>` config slot (the harbor verifier's tests/ payload and verifier env). A value
+// A `Record<string, string>` config slot (the reward-file verifier's tests/ payload and verifier env). A value
 // that is not a string map is DROPPED rather than coerced — `String(someObject)` would write "[object
 // Object]" into a container as a test file, which fails later and somewhere else.
 function strRecord(v: unknown): Record<string, string> | undefined {
@@ -126,10 +126,10 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
         ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
       });
     }
-    case "harbor-verifier":
-      // A Harbor / Terminal-Bench task's own verifier: run the task's tests/ in the environment and read the
-      // reward it PUBLISHES to /logs/verifier (never its exit code — see harbor-verifier.ts).
-      return new HarborVerifierGrader({
+    case "reward-file":
+      // A Terminal-Bench / Terminal-Bench task's own verifier: run the task's tests/ in the environment and read the
+      // reward it PUBLISHES to /logs/verifier (never its exit code — see reward-file.ts).
+      return new RewardFileGrader({
         ...(optStr(s.config?.cmd) ? { cmd: optStr(s.config?.cmd) } : {}),
         ...(strRecord(s.config?.files) ? { files: strRecord(s.config?.files) } : {}),
         ...(optStr(s.config?.testsDir) ? { testsDir: optStr(s.config?.testsDir) } : {}),

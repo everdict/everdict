@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // A `CaseJob` becomes a dispatch payload by base64-ing it into `EVERDICT_CASE_JOB`, and the harness under
 // evaluation runs inside the container that env belongs to. So the payload is, in practice, readable by the
 // thing being measured — which is why `caseJobPayload` refuses a case whose grading depends on material the
-// agent must not see (a Harbor task's hidden `tests/` bytes and its verifier credentials).
+// agent must not see (an imported task's hidden `tests/` bytes and its verifier credentials).
 //
 // A refusal in one function is worth nothing if the next lane hand-rolls the same two lines. Both existing
 // backends did exactly that, independently, with the same expression — which is how the disclosure came to

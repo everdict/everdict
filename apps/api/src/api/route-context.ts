@@ -91,10 +91,8 @@ import {
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import {
   BenchmarkAdapterSpecSchema,
-  HarborTaskSchema,
   TerminalBenchTaskSchema,
   diffDatasets,
-  harborToDataset,
   terminalBenchToDataset,
 } from "@everdict/datasets";
 import {

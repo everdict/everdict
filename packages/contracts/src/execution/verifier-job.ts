@@ -4,7 +4,7 @@ import { GraderSpecSchema } from "./eval-case.js";
 
 // ── THE JUDGING HALF, AS A DISPATCHABLE UNIT (arch-review 56, Wave I) ────────────────────────────────
 //
-// Wave B closed the Harbor disclosure by REFUSING, because the job payload is readable by the harness that
+// Wave B closed the task-format disclosure by REFUSING, because the job payload is readable by the harness that
 // runs in the container it is set on. Wave H split a case into the half the agent gets and the half that
 // decides. This is where the second half runs: its own job, its own container, dispatched after the agent's
 // has returned.

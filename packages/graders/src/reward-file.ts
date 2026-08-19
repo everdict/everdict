@@ -1,13 +1,13 @@
 import { BadRequestError, type GradeContext, type Grader, type Score, shq } from "@everdict/contracts";
 
-// ── THE HARBOR VERIFIER PROTOCOL — the reward is a PUBLISHED FILE, never an exit code ────────────────
+// ── THE REWARD IS A PUBLISHED FILE, NEVER AN EXIT CODE ───────────────────────────────────────────────
 //
-// A Harbor / Terminal-Bench task grades itself by copying its `tests/` directory into the container after
+// A Terminal-Bench-format task grades itself by copying its `tests/` directory into the container after
 // the agent is done, running the verifier command, and having that command WRITE the reward to
 // `/logs/verifier/reward.txt` (a single number) or `/logs/verifier/reward.json` (`{key: number}`).
 //
 // The process exit status is not part of that contract, and in the real corpus it actively contradicts it.
-// Verbatim, the tail of `harbor-datasets/datasets/gaia/…/tests/test.sh`:
+// Verbatim, the tail of a Terminal-Bench task's `tests/test.sh`:
 //
 //     if [ "$AGENT_NORMALIZED" = "$EXPECTED_NORMALIZED" ]; then
 //         echo 1 > /logs/verifier/reward.txt
@@ -21,20 +21,20 @@ import { BadRequestError, type GradeContext, type Grader, type Score, shq } from
 // `echo`). Reading these tasks with the exit-code grader (`tests-pass`) scores EVERY case as passing — not a
 // weak measurement but a fabricated one. That is protocol law L3: the outcome was re-derived from rendered
 // output (process status) instead of read at its source (the bytes the verifier authored).
-// docs/architecture/harbor-interop.md §2.
-export interface HarborVerifierConfig {
-  // The verifier command, run inside the case compute after the agent (Harbor's `[verifier]` phase).
+// See `terminal-bench.ts` for the mapper that produces this grader's spec.
+export interface RewardFileConfig {
+  // The verifier command, run inside the case compute after the agent (the task format's verifier phase).
   cmd?: string;
-  // The task's `tests/` payload, materialized into `testsDir` before the command runs. Harbor copies the
+  // The task's `tests/` payload, materialized into `testsDir` before the command runs. The format copies the
   // directory in at verify time (the agent must not see it beforehand), so the dataset carries the bytes and
   // the case stays self-contained — a run never re-clones the benchmark repo to find out how it is graded.
   files?: Record<string, string>;
-  testsDir?: string; // where `files` land (Harbor's `/tests`)
-  rewardDir?: string; // where the verifier publishes its reward (Harbor's `/logs/verifier`)
+  testsDir?: string; // where `files` land (the format's `/tests`)
+  rewardDir?: string; // where the verifier publishes its reward (the format's `/logs/verifier`)
   cwd?: string; // verifier working directory; absent ⇒ the compute's own base (the image's WORKDIR)
   timeoutSec?: number; // `[verifier].timeout_sec`
   env?: Record<string, string>; // `[verifier].env` — resolved by the caller (secrets never live in a spec)
-  // The reward at which the task counts as solved. Harbor's own convention for TB is `reward == 1`; a
+  // The reward at which the task counts as solved. Terminal-Bench's convention is `reward == 1`; a
   // continuous-reward task can lower it. Named rather than hardcoded, because "what counts as passing" is
   // exactly the decision that must not be invented by the reader of a number.
   passThreshold?: number;
@@ -49,7 +49,7 @@ export interface HarborVerifierConfig {
 // rule exists to keep out of the ladder.
 const PRIMARY_METRIC = "tests_pass";
 const SECONDARY_PREFIX = "reward:";
-// Harbor's 1-D convention: a multi-key reward dict names its headline value `reward` (the same key its own
+// The 1-D convention: a multi-key reward dict names its headline value `reward` (the same key the format's
 // `[[steps]].min_reward` float form gates on).
 const PRIMARY_KEY = "reward";
 
@@ -95,7 +95,7 @@ type RewardRead =
 
 // ── A TASK FILE STAYS INSIDE THE TESTS DIRECTORY (arch-review 56, Wave B) ───────────────────────────
 //
-// `tests` is third-party content — a Harbor task is somebody else's repository — and its keys were written
+// `tests` is third-party content — an imported task is somebody else's repository — and its keys were written
 // straight into `${testsDir}/${name}`. `LocalDriver.writeFile` is `join(root, path)` with no containment
 // check, so `../../x` writes outside the sandbox: on the self-hosted and CLI lanes, the operator's own
 // filesystem; inside a job container, the agent's workspace or the container's system paths.
@@ -113,15 +113,15 @@ export function containedTestsPath(name: string): string {
   return segments.join("/");
 }
 
-export class HarborVerifierGrader implements Grader {
+export class RewardFileGrader implements Grader {
   readonly id: string;
   // Its metric name is fixed in this file, not taken from config or from the reward file's keys, so the
   // ladder's ground-truth reading of it is a property of the implementation (arch-review 17 P0-2).
   readonly ownsMetrics = [PRIMARY_METRIC] as const;
   readonly needsCompute = true; // runs the verifier in the case environment — before compute is released
 
-  constructor(private readonly cfg: HarborVerifierConfig = {}) {
-    this.id = cfg.id ?? "harbor-verifier";
+  constructor(private readonly cfg: RewardFileConfig = {}) {
+    this.id = cfg.id ?? "reward-file";
   }
 
   async grade(ctx: GradeContext): Promise<Score[]> {
@@ -130,7 +130,7 @@ export class HarborVerifierGrader implements Grader {
       throw new BadRequestError(
         "BAD_REQUEST",
         { grader: this.id },
-        "The harbor-verifier grader requires compute (an environment).",
+        "The reward-file grader requires compute (an environment).",
       );
 
     const testsDir = this.cfg.testsDir ?? DEFAULTS.testsDir;
@@ -214,7 +214,7 @@ export class HarborVerifierGrader implements Grader {
     ];
   }
 
-  // reward.json wins over reward.txt (Harbor reads the richer file first). A read is done with `cat` rather
+  // reward.json wins over reward.txt (the format reads the richer file first). A read is done with `cat` rather
   // than `readFile` on purpose: a missing file must come back as a VALUE this function can classify, not as
   // an exception some outer handler turns into its own meaning (protocol law L2).
   private async readReward(ctx: GradeContext, rewardDir: string): Promise<RewardRead> {

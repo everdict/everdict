@@ -22,7 +22,7 @@ describe("terminalBenchTaskToCase", () => {
     expect(c.env).toEqual({ kind: "repo", source: { path: "/workspace" } }); // in-image, no clone
     expect(c.graders).toEqual([
       {
-        id: "harbor-verifier",
+        id: "reward-file",
         config: {
           cmd: "bash /tests/test.sh",
           cwd: "/workspace",
@@ -38,18 +38,18 @@ describe("terminalBenchTaskToCase", () => {
   it("applies defaults for testCommand, workdir, and timeout when omitted", () => {
     const c = terminalBenchTaskToCase({ id: "t1", instruction: "do X", image: "img:1" });
     expect(c.env).toEqual({ kind: "repo", source: { path: "/app" } });
-    expect(c.graders).toEqual([{ id: "harbor-verifier", config: { cmd: "bash /tests/test.sh", cwd: "/app" } }]);
+    expect(c.graders).toEqual([{ id: "reward-file", config: { cmd: "bash /tests/test.sh", cwd: "/app" } }]);
     expect(c.timeoutSec).toBe(900);
     expect(c.tags).toEqual([]);
   });
 
-  // Terminal-Bench 2.0 adopted the Harbor task format: `test.sh` writes the reward to
+  // A Terminal-Bench 2.0 task's `test.sh` writes the reward to
   // /logs/verifier/reward.{txt,json} and exits 0 either way, so the exit-code reading passes every case
-  // (docs/architecture/harbor-interop.md §2). The default must therefore be the reward file — the exit-code
+  // (see reward-file.ts). The default must therefore be the reward file — the exit-code
   // grader stays reachable ONLY for a v1-era task set that explicitly asks for it.
   it("defaults to the published reward, and only an explicit verdict:'exit-code' brings back the v1 reading", () => {
     const v2 = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "i:1" });
-    expect(v2.graders.map((g) => g.id)).toEqual(["harbor-verifier"]);
+    expect(v2.graders.map((g) => g.id)).toEqual(["reward-file"]);
 
     const v1 = terminalBenchTaskToCase({
       id: "t",
@@ -103,7 +103,7 @@ describe("terminalBenchToDataset", () => {
     expect(ds.cases[0]?.image).toBe("reg.example.com/tb/a:v1");
     expect(ds.cases[0]?.tags).toEqual(["easy"]);
     expect(ds.cases[1]?.image).toBe("reg.example.com/tb/b:v1");
-    expect(ds.cases[1]?.graders).toEqual([{ id: "harbor-verifier", config: { cmd: "pytest -q", cwd: "/app" } }]);
+    expect(ds.cases[1]?.graders).toEqual([{ id: "reward-file", config: { cmd: "pytest -q", cwd: "/app" } }]);
     expect(ds.cases[1]?.tags).toEqual(["python"]);
   });
 

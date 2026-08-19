@@ -4,7 +4,7 @@ import { runVerifierJob } from "./verifier-job.js";
 
 // ── THE VERDICT IS REACHED SOMEWHERE THE AGENT NEVER WAS (arch-review 56, Wave I) ────────────────────
 //
-// Wave B closed the Harbor disclosure by refusing, and Wave H split the case into the half the agent gets and
+// Wave B closed the task-format disclosure by refusing, and Wave H split the case into the half the agent gets and
 // the half that judges it. Neither of those runs anything: the refusal still stands until the judging half has
 // somewhere to run that is not the agent's container.
 //
@@ -36,10 +36,10 @@ const job = (over: Partial<VerifierJob> = {}): VerifierJob =>
     runId: "r1",
     tenant: "acme",
     caseId: "c1",
-    image: "harbor/task:1",
+    image: "tasks/repro:1",
     workdir: "/app",
     workspace: SNAPSHOT,
-    // A `tests-pass` grader rather than the Harbor one: what this file is about is the RUNNER — restore, empty,
+    // A `tests-pass` grader rather than the reward-file one: what this file is about is the RUNNER — restore, empty,
     // grade, dispose — and pinning it to whichever grader id the verifier family currently uses would make it
     // fail on a rename that has nothing to do with the property. Which graders are private is Wave H's
     // question, and it is asserted there.

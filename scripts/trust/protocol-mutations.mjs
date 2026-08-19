@@ -283,7 +283,7 @@ const MUTATIONS = [
     build: "@everdict/application-control",
   },
   {
-    // R56 Wave H's rung: the split stops recognising private material, so a Harbor case would ship its hidden
+    // R56 Wave H's rung: the split stops recognising private material, so a task-format case would ship its hidden
     // tests to the agent again — with the difference that now nothing refuses it either.
     name: "R56 Wave H — the verifier split stops separating anything",
     file: "packages/domain/src/execution/verifier-plan.ts",

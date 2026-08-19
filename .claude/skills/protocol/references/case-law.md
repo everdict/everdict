@@ -398,7 +398,7 @@ permissive), and put the predicate somewhere a test can reach — a closure in a
 counterexample can drive. `negated-status-guard` is the ratchet.
 
 ### R56.2 The evaluated agent could read the tests and write its own reward
-The Harbor mapper puts a task's hidden `tests/` bytes and its verifier env in `EvalCase.graders[].config`;
+A task-format mapper puts a task's hidden `tests/` bytes and its verifier env in `EvalCase.graders[].config`;
 `CaseJob.evalCase` is the whole case; the managed backends base64 the whole job into `EVERDICT_CASE_JOB`; and
 `LocalDriver` spawns the harness with `env: { ...process.env }`. The comment said "tests are copied after the
 agent finishes" — true of the FILESYSTEM, and silent about disclosure. The bytes were handed over before the
@@ -415,6 +415,13 @@ and `tests` keys went unnormalized into `join(root, path)`.
 
 The generalizable line: **"not on disk yet" is not "not disclosed", and "a file exists" is not "the verifier
 wrote it".** A trust boundary that is maintained by ordering is not a boundary.
+
+**AND IT WAS NEVER THE NEW IMPORTER'S DEFECT.** The review found this through the Harbor mapper, and the Harbor
+interop has since been removed at the maintainer's request — which changed nothing about the finding, because
+`terminal-bench.ts` writes the identical `{files, env}` grader config and always did. The new mapper was a copy
+of the old one; the review attributed the defect to the copy because that is what it was reading.
+So: when a defect is found in freshly added code, check whether the code it was modelled on has it too. The
+new arrival is the thing under review and is rarely the thing that introduced the shape.
 
 ### R56.3 …and three of this review's four defects were the same shape as R55's
 `retry_later` had no owner ("the next sweep asks again" — there was none), three judging lanes passed no pass

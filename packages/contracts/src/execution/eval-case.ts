@@ -133,7 +133,7 @@ export const EvalCaseSchema = z.object({
   // `placement` says WHERE the work goes; these say WHAT KIND OF WORLD it must be once it gets there, and
   // they belong to the case rather than the harness because they are properties of the TASK: a build task
   // needs 4 GB whichever agent attempts it, and an offline reasoning task must be offline for every
-  // harness being compared. A benchmark corpus states both routinely (Harbor's `[environment]` declares
+  // harness being compared. A benchmark corpus states both routinely (the Terminal-Bench task format's `[environment]` declares
   // cpus/memory_mb on tens of thousands of tasks and an internet policy on thousands more).
   //
   // Both are OPTIONAL and absent means what it always meant: the runtime's default box, ordinary network.

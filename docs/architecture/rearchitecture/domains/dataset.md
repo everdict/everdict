@@ -10,7 +10,7 @@
 
 A **Dataset** is a versioned, tenant-owned (or `_shared`) bundle of **EvalCase**s that never knows
 which harness runs it. Content enters through three on-ramps: **mapping** (row-based sources —
-HF/jsonl/csv → `CaseMapping` rules), **standard task formats** (Terminal-Bench / Harbor directory
+HF/jsonl/csv → `CaseMapping` rules), **standard task formats** (Terminal-Bench directory
 tasks → dedicated pure mappers), and direct registration (`DatasetSchema`-validated JSON). Datasets
 are compared version-to-version (**diff**) and consumed at submit time through **subset selection**
 (partial runs stamped as such).
@@ -61,7 +61,6 @@ classDiagram
     class StandardTaskMappers {
         <<exists today - pure domain>>
         +terminalBenchTaskToCase image required
-        +harborTaskToCase near-identical twin
     }
     class SubsetSelector {
         <<exists today - pure fn in apps-api scorecard>>
@@ -181,7 +180,6 @@ From the apps-api survey catalog (§1.5, #47–63):
 |---|---|---|---|---|
 | 47 | Register dataset | `POST /datasets` · `create_dataset` | DatasetRegistry.register | `DatasetSchema`-validated |
 | 48 | Import terminal-bench | `POST /datasets/terminal-bench` · `import_terminal_bench` | route calls `terminalBenchToDataset` | image required (reference, not build) |
-| 49 | Import harbor | `POST /datasets/harbor` · `import_harbor` | `harborToDataset` | twin of #48 |
 | 50 | Validate dataset | `POST /datasets/validate` · `validate_dataset` | schema + would-conflict dry-run | |
 | 51 | List datasets | `GET /datasets` · `list_datasets` | registry.list | caseCount/tags/producedBy projection |
 | 52 | Get version | `GET /datasets/:id/versions/:version` · `get_dataset` | registry.get | |
@@ -212,8 +210,7 @@ From the apps-api survey catalog (§1.5, #47–63):
 | Row→case mapping (env precedence, grader synthesis, `imageField` wins) | `packages/datasets/src/mapping.ts:49-96` (`rowToCase`) — pure, well-tested | moves verbatim to `domain/dataset/mapping.ts` |
 | **CaseMapping code↔Zod dual maintenance** | `mapping.ts:10-31` (interface) vs `spec.ts:13-35` (`CaseMappingSchema`) — spec.ts's own comment: a too-narrow schema silently downgrades user recipes to browser envs because Zod strips unknown keys | ONE Zod schema in `contracts`, `type CaseMapping = z.infer<…>`; the interface is deleted; a drift test is impossible to need |
 | Import never silently truncates | `packages/datasets/src/sources.ts` (`fetchHfRows` — no limit = full dataset, 100-row paging) — policy enforced only by connector defaults | named `domain/dataset` import policy; connectors take an explicit `all | limit(n)` argument |
-| Reference images, never build | `packages/datasets/src/terminal-bench.ts:26-37` (`resolveImage` throws) + harbor twin + `.claude/rules/datasets.md` | `domain/dataset` rule shared by a unified container-task mapper |
-| Terminal-Bench / Harbor near-identical mappers | `terminal-bench.ts` vs `harbor.ts` (field names differ: `testCommand` vs `verifierCommand`) — a third format would clone again | one `domain/dataset` container-task mapper + per-format thin field adapters |
+| Reference images, never build | `packages/datasets/src/terminal-bench.ts:26-37` (`resolveImage` throws) + `.claude/rules/datasets.md` | `domain/dataset` rule shared by a unified container-task mapper |
 | Subset selection (ids→tags→limit; unknown id 400; empty 400; stamped) | `apps/api/src/core/scorecard/scorecard-shared.ts:114-153` (`selectSubsetCases`) — a dataset-domain rule living in the scorecard folder | `domain/dataset/subset.ts`; the scorecard use-case consumes it |
 | Grading-plan overlay (dataset stays pure data) | `scorecard-shared.ts:158-161` (`applyGradingPlan`) — applied identically at submit / resume / retry / Temporal planBatch | `domain/scorecard` (it is a batch rule, not dataset content) — split confirmed in review |
 | Diff canonicalization (no false changes from key order) | `packages/datasets/src/diff.ts:4-13` (`canonical`), field set `:23-33` | `domain/dataset/diff.ts` verbatim |
@@ -222,7 +219,7 @@ From the apps-api survey catalog (§1.5, #47–63):
 | Creator-or-admin delete | `apps/api/src/core/dataset/dataset-service.ts:8-27` (`deleteDatasetVersion`) — same shape as harness | shared `OwnedVersionPolicy` in `domain` |
 | Raw `Error` at package boundary | `spec.ts:150` ("The jsonl source requires text"), similar in `sources.ts`/`catalog.ts` guards — violates the AppError rule | remap to `BadRequestError` when the code moves |
 | Category vocabulary drift | `spec.ts:77` recipe `category: browser|qa|coding|tool` vs catalog adapters also using `desktop` | one category union in `contracts`; recipe schema regenerated from it |
-| Import/diff called from the ROUTE | `apps/api/src/api/dataset/dataset.routes.ts` (terminal-bench/harbor/diff call package functions in the transport) | `application/control` dataset use-cases; routes become drivers |
+| Import/diff called from the ROUTE | `apps/api/src/api/dataset/dataset.routes.ts` (terminal-bench/diff call package functions in the transport) | `application/control` dataset use-cases; routes become drivers |
 
 ## Invariants
 

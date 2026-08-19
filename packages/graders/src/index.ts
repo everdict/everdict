@@ -1,7 +1,7 @@
 export { TestsPassGrader } from "./tests-pass.js";
 export { CommandGrader, type CommandConfig } from "./command.js";
 export { SweBenchGrader, type SweBenchConfig } from "./swe-bench.js";
-export { HarborVerifierGrader, type HarborVerifierConfig } from "./harbor-verifier.js";
+export { RewardFileGrader, type RewardFileConfig } from "./reward-file.js";
 export { ScriptScoreGrader, type ScriptScoreConfig } from "./script-score.js";
 export { ScriptGrader, type ScriptGraderConfig } from "./script-grader.js";
 export { stepsGrader, costGrader, latencyGrader } from "./trace-graders.js";

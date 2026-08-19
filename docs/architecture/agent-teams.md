@@ -160,7 +160,7 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
     `set_{harness,dataset,judge,model,runtime}_version_tags` · `assign_harness_trace_{source,sink}` ·
     `set_harness_span_attr_mapping`
   - scheduling/ops/import/view: `create_schedule` · `update_schedule` · `control_runtime` ·
-    `import_benchmark` · `import_harbor` · `import_terminal_bench` · `apply_bundle` · `create_view` ·
+    `import_benchmark` · `import_terminal_bench` · `apply_bundle` · `create_view` ·
     `create_comment`
 
   **Excluded even with eval-drive on** (destructive/governance/secret — never the agent's job): `delete_*` ·

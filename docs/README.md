@@ -45,7 +45,6 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/harness-playground.md](architecture/harness-playground.md) — interactive test cases against a live harness session
 - [architecture/eval-domain-model.md](architecture/eval-domain-model.md) — the Dataset / Rubric / Grader split
 - [architecture/standard-task-formats.md](architecture/standard-task-formats.md) — bring an existing agent benchmark, run it managed
-- [architecture/harbor-interop.md](architecture/harbor-interop.md) — Harbor (Terminal-Bench's framework) interop: the domain-fit audit, the corpus census, the stated limits, and the port plan
 - [architecture/trace-normalization.md](architecture/trace-normalization.md) — getting evidence out of an agent we did not write: why one normalizer serves one agent, and the T1/T2/T3 ladder
 - [architecture/bundles.md](architecture/bundles.md) — one-shot self-serve registration (harness + benchmark + runtime as a unit)
 - [architecture/managed-case-image.md](architecture/managed-case-image.md) — the `case.image` agent-bootstrap contract

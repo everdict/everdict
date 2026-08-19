@@ -2,7 +2,7 @@ import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-con
 import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
-import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
+import { diffDatasets, terminalBenchToDataset } from "@everdict/datasets";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
@@ -22,7 +22,6 @@ import {
 import { MoveToTeamBodySchema } from "../team-move.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
-import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
 // datasets (workspace-owned SSOT, harness-agnostic eval-case bundles)
@@ -65,7 +64,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
   });
 
   // Terminal-Bench task-set → workspace Dataset (standard task-format on-ramp). Same gate as datasets:write. Each task
-  // maps to an EvalCase (prebuilt image env + instruction + the harbor-verifier grader); a task with no resolvable image is a 400
+  // maps to an EvalCase (prebuilt image env + instruction + the reward-file grader); a task with no resolvable image is a 400
   // (Everdict references images, never builds). Versions are immutable (409 on collision). docs/architecture/standard-task-formats.md
   app.post("/datasets/terminal-bench", { schema: datasetDocs.importTerminalBench }, async (req, reply) => {
     if (!deps.datasetRegistry)
@@ -81,43 +80,6 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       const dataset = terminalBenchToDataset(
-        parsed.data.tasks,
-        {
-          id: parsed.data.dataset.id,
-          version: parsed.data.dataset.version,
-          ...(parsed.data.description ? { description: parsed.data.description } : {}),
-          ...(parsed.data.tags ? { tags: parsed.data.tags } : {}),
-        },
-        parsed.data.imageTemplate ? { imageTemplate: parsed.data.imageTemplate } : {},
-      );
-      const constitutional = assertDatasetConstitution(principal, dataset); // an imported set declares like any other
-      await publishDataset(deps, principal, dataset, constitutional);
-      return reply.code(201).send({
-        workspace: principal.workspace,
-        id: dataset.id,
-        version: dataset.version,
-        cases: dataset.cases.length,
-      });
-    } catch (err) {
-      return sendError(reply, err); // unresolved image 400 / immutable 409
-    }
-  });
-
-  // Harbor (harborframework.com — Laude Institute) task-set → workspace Dataset — same on-ramp as Terminal-Bench (datasets:write, unresolved image 400).
-  app.post("/datasets/harbor", { schema: datasetDocs.importHarbor }, async (req, reply) => {
-    if (!deps.datasetRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "datasets:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    const parsed = ImportHarborBodySchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      const dataset = harborToDataset(
         parsed.data.tasks,
         {
           id: parsed.data.dataset.id,

@@ -1,17 +1,17 @@
 import type { CaseJob, ComputeHandle, EvalCase, ExecResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { HarborVerifierGrader } from "./harbor-verifier.js";
+import { RewardFileGrader } from "./reward-file.js";
 
 // ── THE EVALUATED AGENT MAY NOT SEE, OR WRITE, ITS OWN VERDICT (arch-review 56, Wave B) ──────────────
 //
-// The Harbor verifier reads a PUBLISHED REWARD FILE instead of an exit code, which is right: a Harbor task's
+// The Terminal-Bench verifier reads a PUBLISHED REWARD FILE instead of an exit code, which is right: a Terminal-Bench task's
 // `test.sh` routinely exits 0 having written `reward 0`. What the reward protocol assumes, and this
 // implementation does not provide, is that the reward was written by the VERIFIER.
 //
 // Three boundaries are open, and they compose into one sentence: the thing being measured can read the
 // measurement and can author its own result.
 //
-//   1. DISCLOSURE. The Harbor mapper puts the whole `tests/` directory and the verifier's env into
+//   1. DISCLOSURE. The Terminal-Bench mapper puts the whole `tests/` directory and the verifier's env into
 //      `EvalCase.graders[].config`. `CaseJob.evalCase` is the entire EvalCase, and the K8s/Nomad backends
 //      base64 the entire CaseJob into `EVERDICT_CASE_JOB` on the job container — which is the container the
 //      harness runs in, and `LocalDriver` spawns the harness with `env: { ...process.env }`. So the agent
@@ -75,7 +75,7 @@ function fakeCompute(files: Map<string, string>, onExec?: (cmd: string) => void)
 // The grader takes its CONFIG directly (not a GraderSpec) — the first draft wrapped it in `{ id, config }`,
 // so `this.cfg.files` was undefined and the traversal arm exercised nothing. Fixtures are derived from the
 // production constructor, and this is what that rule is for.
-const grader = (cfg: Record<string, unknown>) => new HarborVerifierGrader(cfg as never);
+const grader = (cfg: Record<string, unknown>) => new RewardFileGrader(cfg as never);
 
 // RED as of 0f4da459, observed:
 //   the agent's own reward file decided the case: expected [ { …, value: 1, pass: true } ] … to be false
@@ -119,7 +119,7 @@ describe("[R56 WAVE-B COUNTEREXAMPLE #2 — CLOSED] the verifier's reward is the
   });
 
   it("refuses a tests path that climbs out of the tests directory", async () => {
-    // A Harbor task is third-party content. `../../` in a key is a write outside the sandbox — on the
+    // A Terminal-Bench task is third-party content. `../../` in a key is a write outside the sandbox — on the
     // self-hosted and CLI lanes that is the operator's own filesystem.
     const files = new Map<string, string>();
     const compute = fakeCompute(files);
@@ -156,7 +156,7 @@ describe("[R56 WAVE-B COUNTEREXAMPLE #3 — CLOSED] a shared-environment lane re
         env: { kind: "repo", source: { path: "/app" } },
         graders: [
           {
-            id: "harbor-verifier",
+            id: "reward-file",
             config: {
               cmd: "bash /tests/test.sh",
               files: { "test.sh": "assert_solution()" },
@@ -175,8 +175,8 @@ describe("[R56 WAVE-B COUNTEREXAMPLE #3 — CLOSED] a shared-environment lane re
     try {
       caseJobPayload(job);
     } catch (err) {
-      expect(String(err)).toContain("harbor-verifier.files");
-      expect(String(err)).toContain("harbor-verifier.env");
+      expect(String(err)).toContain("reward-file.files");
+      expect(String(err)).toContain("reward-file.env");
     }
   });
 

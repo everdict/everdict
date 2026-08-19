@@ -47,13 +47,15 @@ its family needs (`readStore?` = a co-located store reader injected by the topol
   grader**: user python/node code gets the full serialized GradeContext as a JSON file arg and prints
   `Score | Score[]` JSON — multi-metric, sandboxed in the case compute; `image` mode instead provisions a
   DEDICATED grader container via `ctx.provision` — observation-family, own the handle + dispose in finally).
-  `harbor-verifier.ts` (`HarborVerifierGrader`, **a benchmark task's own verifier**: materializes the task's
+  `reward-file.ts` (`RewardFileGrader`, **a benchmark task's own verifier**: materializes the task's
   `tests/` into the container, runs the verifier command, and reads the reward it PUBLISHED to
   `/logs/verifier/reward.json|txt` → `tests_pass` + `reward:<key>` per extra dimension). Its verdict is
-  deliberately NOT the exit code: Harbor / Terminal-Bench 2.0 verifiers write the reward to a file and then
-  exit 0 whether the agent passed or failed, so the exit-code reading passes every case
-  (`docs/architecture/harbor-interop.md` §2). A verifier that published nothing is `unmeasured`
-  (`missing_evidence`), never a zero — a number the benchmark never produced must not reach a mean.
+  deliberately NOT the exit code: Terminal-Bench 2.0 verifiers write the reward to a file and then exit 0
+  whether the agent passed or failed, so the exit-code reading passes every case. A verifier that published
+  nothing is `unmeasured` (`missing_evidence`), never a zero — a number the benchmark never produced must not
+  reach a mean. Its `files`/`env` config is VERIFIER-PRIVATE: see `verifierPrivateMaterial` (contracts) and
+  `caseJobPayload`, which refuses to ship such a case to a lane that runs the agent and the verifier in one
+  environment (arch-review 56, Wave B).
   All need `ctx.compute` → guard it (image mode guards `ctx.provision`).
 - **trace** — `trace-graders.ts`: `stepsGrader` (tool_call count), `costGrader` (sum `llm_call.cost.usd`),
   `latencyGrader` (last.t − first.t). Read ONLY `ctx.trace`; cost/tokens come from the harness's own trace.

@@ -14,7 +14,6 @@ import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { teamMoveDocs } from "../team-move.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
-import { ImportHarborBodySchema } from "./request/import-harbor.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
 // OpenAPI descriptors for the dataset routes — doc-only (rule api-layer): the no-op compilers in server.ts
@@ -53,23 +52,11 @@ const docs = {
   importTerminalBench: {
     summary: "Import a Terminal-Bench task set as a dataset",
     description:
-      "Maps Terminal-Bench tasks to eval cases (prebuilt image env + instruction + the harbor-verifier grader, which reads the reward the task's verifier publishes rather than its exit code) and registers " +
+      "Maps Terminal-Bench tasks to eval cases (prebuilt image env + instruction + the reward-file grader, which reads the reward the task's verifier publishes rather than its exit code) and registers " +
       "them as a workspace dataset. Requires datasets:write (member+). A task with no resolvable image is 400 " +
       "(Everdict references images, never builds); a version collision is 409.",
     tags: ["dataset"],
     body: toJsonSchema(ImportTerminalBenchBodySchema),
-    response: {
-      201: { description: "Imported and registered", ...toJsonSchema(ImportDatasetResultSchema) },
-      ...errorResponses(400, 401, 403, 404, 409),
-    },
-  },
-  importHarbor: {
-    summary: "Import a Harbor task set as a dataset",
-    description:
-      "Maps Harbor (harborframework.com) tasks to eval cases and registers them as a workspace dataset — same on-ramp as " +
-      "Terminal-Bench. Requires datasets:write (member+). An unresolved image is 400; a version collision is 409.",
-    tags: ["dataset"],
-    body: toJsonSchema(ImportHarborBodySchema),
     response: {
       201: { description: "Imported and registered", ...toJsonSchema(ImportDatasetResultSchema) },
       ...errorResponses(400, 401, 403, 404, 409),

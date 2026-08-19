@@ -26,15 +26,15 @@ import { verifierPlanOf } from "./verifier-plan.js";
 // builds on it — and cannot be built safely without it, because a split done at the dispatcher is a split
 // every future dispatcher has to remember.
 
-const harborCase = (): EvalCase =>
+const privateCase = (): EvalCase =>
   ({
     id: "c1",
     task: "make the tests pass",
     env: { kind: "repo", source: { path: "/app" } },
-    image: "harbor/task:1",
+    image: "tasks/repro:1",
     graders: [
       {
-        id: "harbor-verifier",
+        id: "reward-file",
         config: {
           cmd: "bash /tests/test.sh",
           files: { "test.sh": "assert_solution()" },
@@ -53,19 +53,19 @@ const jobFor = (evalCase: EvalCase): CaseJob =>
 //   verifierPlanOf is not a function
 describe("[R56 WAVE-H COUNTEREXAMPLE #9 — CLOSED] a case separates its work from its verdict", () => {
   it("puts every private grader in the plan and leaves none on the agent's job", () => {
-    const plan = verifierPlanOf(harborCase());
+    const plan = verifierPlanOf(privateCase());
 
     expect(
       plan?.graders.map((g) => g.id),
       "the verifier's own grader is not in the plan",
-    ).toEqual(["harbor-verifier"]);
+    ).toEqual(["reward-file"]);
     // The bytes and the credential are the plan's, and the plan is not part of what a backend serializes.
     expect(JSON.stringify(plan)).toContain("assert_solution");
     expect(JSON.stringify(plan)).toContain("sk-real");
   });
 
   it("leaves the agent a case it can still work on, with nothing that decides the verdict", () => {
-    const agentCase = verifierPlanOf(harborCase())?.remainder;
+    const agentCase = verifierPlanOf(privateCase())?.remainder;
     const shipped = JSON.stringify(agentCase);
 
     expect(shipped, "the hidden tests rode along to the agent").not.toContain("assert_solution");
@@ -73,19 +73,19 @@ describe("[R56 WAVE-H COUNTEREXAMPLE #9 — CLOSED] a case separates its work fr
     // …and the work itself is intact: the instruction, the environment, the image, and the graders that
     // observe rather than decide.
     expect(shipped).toContain("make the tests pass");
-    expect(shipped).toContain("harbor/task:1");
+    expect(shipped).toContain("tasks/repro:1");
     expect(agentCase?.graders?.map((g) => g.id)).toEqual(["steps"]);
   });
 
   it("makes the split the ONLY way such a case ships — the remainder passes the payload guard", () => {
     // The join of the two waves: Wave B refuses a case carrying private material, and this is what a lane
     // hands it instead. If the remainder still tripped the refusal, the split would be decorative.
-    const plan = verifierPlanOf(harborCase());
+    const plan = verifierPlanOf(privateCase());
     if (!plan) throw new Error("this case has a verifier plan");
     expect(verifierPrivateMaterial(plan.remainder)).toEqual([]);
     expect(() => caseJobPayload(jobFor(plan.remainder))).not.toThrow();
     // …while the unsplit case is still refused, because a lane that forgets to split must not silently ship.
-    expect(() => caseJobPayload(jobFor(harborCase()))).toThrow(/must not see/);
+    expect(() => caseJobPayload(jobFor(privateCase()))).toThrow(/must not see/);
   });
 
   it("answers undefined for a case with nothing private — no second job, no second cost", () => {
@@ -104,12 +104,12 @@ describe("[R56 WAVE-H COUNTEREXAMPLE #9 — CLOSED] a case separates its work fr
     // The verifier job produces a reward, and the case's record has to be able to say which plan produced it.
     // A digest rather than a counter: two batches of one dataset run the same plan, and a replay has to be
     // able to tell that the thing that judged it then is the thing in front of it now.
-    const a = verifierPlanOf(harborCase());
-    const b = verifierPlanOf(harborCase());
+    const a = verifierPlanOf(privateCase());
+    const b = verifierPlanOf(privateCase());
     expect(a?.digest).toBe(b?.digest);
     expect(a?.digest).toMatch(/^[a-z0-9]+:/);
 
-    const moved = harborCase();
+    const moved = privateCase();
     (moved.graders?.[0] as { config: Record<string, unknown> }).config.files = { "test.sh": "assert_other()" };
     expect(verifierPlanOf(moved)?.digest, "a different verifier hashed to the same plan").not.toBe(a?.digest);
   });

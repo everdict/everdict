@@ -51,10 +51,8 @@ import {
 } from "@everdict/contracts";
 import {
   BenchmarkAdapterSpecSchema,
-  HarborTaskSchema,
   TerminalBenchTaskSchema,
   diffDatasets,
-  harborToDataset,
   terminalBenchToDataset,
 } from "@everdict/datasets";
 import {

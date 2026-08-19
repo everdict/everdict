@@ -23,13 +23,13 @@ export const TerminalBenchTaskSchema = z.object({
   image: z.string().optional(), // prebuilt task image (referenced, not built). Falls back to the dataset imageTemplate.
   testCommand: z.string().default("bash /tests/test.sh"), // the tests/ verifier — its REWARD FILE is the verdict (v2)
   // The bytes of the task's tests/ directory, keyed by file name — copied into the container only AFTER the
-  // agent finishes, so the dataset must carry them (see harbor.ts for why a run must not re-clone to grade).
+  // agent finishes, so the dataset must carry them (a run must not re-clone to grade).
   tests: z.record(z.string()).default({}),
   verifierTimeoutSec: z.number().int().positive().optional(), // task.toml [verifier].timeout_sec
   verifierEnv: z.record(z.string()).default({}), // task.toml [verifier].env — values resolved by the caller
-  // HOW THE VERDICT IS READ, stated rather than assumed. Terminal-Bench 2.0 adopted the Harbor task format, so
+  // HOW THE VERDICT IS READ, stated rather than assumed. Terminal-Bench 2.0 adopted the Terminal-Bench task format, so
   // its verifier PUBLISHES a reward to /logs/verifier/reward.{txt,json} and exits 0 either way — reading such a
-  // run by its exit code passes every case (docs/architecture/harbor-interop.md §2). A v1-era task set, whose
+  // run by its exit code passes every case (see reward-file.ts). A v1-era task set, whose
   // `run-tests.sh` really did decide by exit status, imports with
   // `{ verdict: "exit-code", testCommand: "bash /tests/run-tests.sh" }`.
   verdict: z.enum(["reward-file", "exit-code"]).default("reward-file"),
@@ -66,7 +66,7 @@ function resolveImage(task: TerminalBenchTask, imageTemplate?: string): string {
 
 // task.toml's world → Everdict's. `cpus` is whole cores and `EvalCase.resources.cpu` is millicores (the k8s
 // convention the harness/topology specs already use), so the multiplication lives HERE rather than in every
-// caller that fills a HarborTask. `gpus = 0` is Harbor's way of saying "no GPU", not a request for zero.
+// caller that fills a TerminalBenchTask. `gpus = 0` is Terminal-Bench's way of saying "no GPU", not a request for zero.
 function resourcesOf(task: { cpus?: number; memoryMb?: number; gpus?: number }): ResourceRequest | undefined {
   const resources: ResourceRequest = {
     ...(task.cpus !== undefined ? { cpu: task.cpus * 1000 } : {}),
@@ -104,7 +104,7 @@ export function terminalBenchTaskToCase(input: unknown, opts: { imageTemplate?: 
       task.verdict === "exit-code"
         ? { id: "tests-pass", config: { cmd: task.testCommand } }
         : {
-            id: "harbor-verifier",
+            id: "reward-file",
             config: {
               cmd: task.testCommand,
               cwd: task.workdir,

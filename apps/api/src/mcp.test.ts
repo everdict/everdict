@@ -828,7 +828,6 @@ describe("MCP tools", () => {
       "get_workspace_trace_thresholds",
       "heartbeat_job",
       "import_agent_triggers",
-      "import_harbor",
       "import_skill",
       "import_terminal_bench",
       "ingest_scorecard",
@@ -1537,33 +1536,6 @@ describe("MCP tools", () => {
     });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
-  });
-
-  it("import_harbor: member registers a Harbor task set; unresolved image → BAD_REQUEST", async () => {
-    const deps = harness();
-    const member = await connect(deps, ["member"]);
-    const tasks = JSON.stringify([
-      { id: "repro", instruction: "reproduce figure 3", difficulty: "hard" },
-      { id: "fix", instruction: "fix the bug", verifierCommand: "pytest -q", image: "explicit/fix:v1" },
-    ]);
-    const created = await member.callTool({
-      name: "import_harbor",
-      arguments: {
-        dataset_id: "harbor-core",
-        dataset_version: "1.0.0",
-        tasks,
-        image_template: "ghcr.io/acme/h/{id}:v1",
-      },
-    });
-    expect(created.isError).toBeFalsy();
-    expect(JSON.parse(text(created))).toMatchObject({ id: "harbor-core", version: "1.0.0", cases: 2 });
-
-    const bad = await member.callTool({
-      name: "import_harbor",
-      arguments: { dataset_id: "h2", dataset_version: "1.0.0", tasks: JSON.stringify([{ id: "a", instruction: "x" }]) },
-    });
-    expect(bad.isError).toBe(true);
-    expect(text(bad)).toContain("BAD_REQUEST");
   });
 
   it("get_usage: returns the workspace's metered usage shape (viewer+ read)", async () => {

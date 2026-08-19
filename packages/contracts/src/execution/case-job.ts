@@ -159,7 +159,7 @@ export type CaseJob = z.infer<typeof CaseJobSchema>;
 // everything on this object is readable by the thing being measured.
 //
 // That is fine for the instruction, the environment and the harness spec — the agent needs them. It is not
-// fine for `evalCase.graders[].config` when that config carries the DECISION PROCEDURE: a Harbor task puts
+// fine for `evalCase.graders[].config` when that config carries the DECISION PROCEDURE: a Terminal-Bench-format task puts
 // its whole hidden `tests/` directory and the verifier's env (credentials included) in there, so an agent
 // that reads its own environment reads the tests it is graded against. "Tests are copied after the agent
 // finishes" is true of the FILESYSTEM and says nothing about disclosure — the bytes were handed over before

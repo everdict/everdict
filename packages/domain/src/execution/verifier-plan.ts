@@ -3,7 +3,7 @@ import { contentDigest } from "../provenance/content-digest.js";
 
 // ── A CASE SPLITS INTO WHAT THE AGENT DOES AND HOW IT IS JUDGED (arch-review 56, Wave H) ─────────────
 //
-// Wave B closed the Harbor disclosure by REFUSING. `caseJobPayload` throws for a case whose grading depends on
+// Wave B closed the task-format disclosure by REFUSING. `caseJobPayload` throws for a case whose grading depends on
 // material the agent must not see, because the job payload is base64'd into the container the harness runs in
 // and `LocalDriver` spawns the harness with the process environment inherited — so "the tests are copied after
 // the agent finishes" was true of the filesystem and said nothing about disclosure.

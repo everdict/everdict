@@ -2,13 +2,7 @@ import { setVersionTags } from "@everdict/application-control";
 import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
-import {
-  HarborTaskSchema,
-  TerminalBenchTaskSchema,
-  diffDatasets,
-  harborToDataset,
-  terminalBenchToDataset,
-} from "@everdict/datasets";
+import { TerminalBenchTaskSchema, diffDatasets, terminalBenchToDataset } from "@everdict/datasets";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -190,7 +184,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       {
         annotations: { readOnlyHint: false },
         description:
-          "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + harbor-verifier grader, which runs the task's tests/ and reads the reward it publishes to /logs/verifier — a Terminal-Bench 2.0 verifier exits 0 whether the agent passed or failed, so the exit code is not the verdict). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
+          "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + reward-file grader, which runs the task's tests/ and reads the reward it publishes to /logs/verifier — a v2 verifier exits 0 whether the agent passed or failed, so the exit code is not the verdict). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
         inputSchema: {
           dataset_id: z.string(),
           dataset_version: z.string(),
@@ -219,54 +213,6 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           // terminalBenchToDataset throws BadRequestError for an unresolved image — run() maps it to a tool error.
           const dataset = terminalBenchToDataset(
-            result.data,
-            {
-              id: dataset_id,
-              version: dataset_version,
-              ...(description ? { description } : {}),
-              ...(tags ? { tags } : {}),
-            },
-            image_template ? { imageTemplate: image_template } : {},
-          );
-          const constitutional = assertDatasetConstitution(principal, dataset);
-          await publishDataset(ctx.deps, { ...principal, workspace: ws }, dataset, constitutional);
-          return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
-        }),
-    );
-
-    server.registerTool(
-      "import_harbor",
-      {
-        annotations: { readOnlyHint: false },
-        description:
-          "Register a Harbor task set (harborframework.com — the Terminal-Bench authors' framework) as a Dataset owned by the active workspace (standard task-format on-ramp, same as import_terminal_bench). Each task → an EvalCase (prebuilt image env + instruction prompt + harbor-verifier grader, which runs the task's tests/ and reads the reward it publishes to /logs/verifier/reward.{txt,json} — never the verifier's exit code, which is 0 either way). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable.",
-        inputSchema: {
-          dataset_id: z.string(),
-          dataset_version: z.string(),
-          tasks: z
-            .string()
-            .describe(
-              "JSON array of Harbor tasks: {id, instruction, image?, verifierCommand?, workdir?, difficulty?, tags?, timeoutSec?}",
-            ),
-          image_template: z
-            .string()
-            .optional()
-            .describe("resolve a task's image via {id} when the task carries none, e.g. ghcr.io/acme/harbor/{id}:v1"),
-          description: z.string().optional(),
-          tags: z.array(z.string()).optional(),
-        },
-      },
-      ({ dataset_id, dataset_version, tasks, image_template, description, tags }) =>
-        run(principal, "datasets:write", async () => {
-          let parsedTasks: unknown;
-          try {
-            parsedTasks = JSON.parse(tasks);
-          } catch {
-            return fail("BAD_REQUEST: tasks must be a JSON array.");
-          }
-          const result = z.array(HarborTaskSchema).min(1).safeParse(parsedTasks);
-          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          const dataset = harborToDataset(
             result.data,
             {
               id: dataset_id,

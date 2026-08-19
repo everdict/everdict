@@ -2,13 +2,13 @@
 
 > Status: **M2 in progress.** Slice 1 (Terminal-Bench task → EvalCase pure mapper) landed; later slices
 > wire ingestion, the API/MCP surface, image provenance, and the web. SSOT for how Everdict ingests the
-> emerging *standard agent-benchmark task formats* (Terminal-Bench first, Harbor next) into its
+> emerging *standard agent-benchmark task formats* (Terminal-Bench first) into its
 > harness-agnostic `Dataset` model.
 
 ## Why
 
 The market gap Everdict targets is the managed **run + score** layer over standard task formats — the
-"Harbor's managed cloud" position: a team that already has Terminal-Bench (or Harbor / SWE-bench) tasks
+managed-cloud position: a team that already has Terminal-Bench (or SWE-bench) tasks
 should point Everdict at them and get a defensible verdict, without re-authoring the benchmark. Today the
 dataset on-ramp (`packages/datasets`) is **row-based** (HuggingFace / jsonl / csv → `CaseMapping` →
 `EvalCase`), which fits tabular QA/web benchmarks but not the **directory/container** task formats that
@@ -38,7 +38,7 @@ A Terminal-Bench task (github.com/laude-institute/terminal-bench) is a directory
 | `instruction` | `task` (the prompt) |
 | prebuilt task image (or an `imageTemplate` `{id}`) | `image` (**referenced, not built** — the portability contract) |
 | in-image working dir (default `/app`) | `env = { kind: "repo", source: { path } }` (no clone) |
-| verifier command (default `bash /tests/test.sh`) + the `tests/` bytes | `graders: [{ id: "harbor-verifier", config: { cmd, files, … } }]` — the reward the verifier PUBLISHES, never its exit code (`docs/architecture/harbor-interop.md` §2) |
+| verifier command (default `bash /tests/test.sh`) + the `tests/` bytes | `graders: [{ id: "reward-file", config: { cmd, files, … } }]` — the reward the verifier PUBLISHES, never its exit code (see `reward-file.ts`). The `files`/`env` here are VERIFIER-PRIVATE: `caseJobPayload` refuses to ship such a case to a lane that runs the agent and the verifier in one environment (arch-review 56, Wave B) |
 | `difficulty` + `tags` | `tags` (difficulty prepended) |
 | `max_agent_timeout_sec` | `timeoutSec` (default 900) |
 
@@ -63,15 +63,10 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    accept a Terminal-Bench source (BFF↔MCP parity).
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
-6. **Harbor** ✅ — the same seam for the Harbor task format (`harbor.ts`, a second dedicated mapper).
-   Harbor is the framework from the **Terminal-Bench authors (Laude Institute)**, not Anthropic — an earlier
-   version of this doc and of `harbor.ts` said otherwise. A Harbor task (instruction.md + task.toml
-   `[metadata]`/`[agent]`/`[environment]`/`[verifier]` + environment/Dockerfile + tests/ verifier) maps to the
-   SAME EvalCase shape as Terminal-Bench 2.0, which adopted this format. Pure + tested in `datasets`.
-   **Grading is the `harbor-verifier` grader, not `tests-pass`**: a Harbor verifier writes its reward to
-   `/logs/verifier/reward.{txt,json}` and exits 0 either way, so the exit-code reading scored every task in the
-   corpus as passing. The full audit (concept mapping, a 63,372-task feature census, the stated limits and the
-   port plan) is `docs/architecture/harbor-interop.md` — the SSOT for Harbor interop from here on.
+6. **The verifier's material is PRIVATE** ✅ — a task format's `tests/` bytes and verifier env decide the
+   verdict, so they may not travel in the payload the agent's container receives (arch-review 56). A case
+   carrying them is refused by `caseJobPayload` until it is split (`verifierPlanOf`) and its judging half runs
+   as its own job (`runVerifierJob`). The dispatch of that second job is the remaining piece.
 
 ## Non-goals (for now)
 - Building task images in-platform (against the `case.image` contract — reference, don't build).
