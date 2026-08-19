@@ -76,6 +76,10 @@ plural too: it is the directory of teams. Old plural detail addresses redirect i
 An ISSUE carries its title as a trailing decorative slug — `/{workspace}/issue/ENG-12/the-judge-drops-cost-scores`
 (`issueHref(workspace, identifier, title)`; the route is `issue/[id]/[[...slug]]`). Nothing reads the slug: the
 identifier alone resolves, a stale slug after a rename still opens, and `/issue/ENG-12` is equally valid.
+A PRODUCT is addressed by a LOAD-BEARING slug instead — `/{workspace}/product/support-copilot` (`productHref` +
+`productRef`, which picks `slug ?? id`). It is minted from the name at creation and immutable after (mig 0169);
+the control plane resolves slug-or-id, so old uuid links keep working and the detail route redirects them to
+the canonical spelling — the same normalization the issue detail does for a lowercased `eng-12`.
 
 **A scope is a PATH; a filter is a query parameter — when the path really names a different collection.** What a
 TEAM owns lives under the team's slug — `/{workspace}/team/ENG/{issues,triage,cycles,projects}` (`TEAM_SECTIONS`)
