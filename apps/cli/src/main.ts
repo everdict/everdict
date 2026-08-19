@@ -13,6 +13,7 @@ import { diffScorecards, summarizeScorecard } from "@everdict/domain";
 import { collectAuthEnv, hasClaudeAuth } from "@everdict/job-runner";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@everdict/orchestrator";
 import { parseFlags } from "./flags.js";
+import { harnessSpecFrom, withHarnessSpec } from "./harness-spec.js";
 import { imageBakeCommand } from "./image-bake.js";
 import { imagePushCommand } from "./image-push.js";
 import { runnerCommand } from "./runner-command.js";
@@ -34,6 +35,10 @@ function usage(): void {
       "",
       "everdict suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
+      "",
+      '  --harness-spec <file.json>: run a DECLARATIVE harness (kind:"command") instead of a built-in adapter —',
+      "    any CLI agent becomes the one under test, no code. The spec names the harness (id/version).",
+      "    Works on `run` too.",
       "",
       "everdict image push <local-ref> [--registry <r>] [--name <n>] [--tag <t>] [--api-url <url>] [--api-key <ak_…>]",
       "  publish a locally built image to the workspace image registry (docker tag+push,",
@@ -138,7 +143,7 @@ async function runCommand(flags: Map<string, string>): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const job = buildJob(flags, task);
+  const job = withHarnessSpec(buildJob(flags, task), harnessSpecFrom(flags.get("harness-spec")));
   const orchestratorName = flags.get("orchestrator") ?? "direct";
   const orch = buildOrchestrator(flags);
   if (!orch) return; // error already printed
@@ -184,8 +189,12 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
   const orch = buildOrchestrator(flags);
   if (!orch) return;
 
-  console.error(`▶ suite '${suite.id}' (${suite.cases.length} cases) × ${suite.harness.id}@${version} …`);
-  const scorecard = await runSuite(suite, version, (job) => orch.run(job), {
+  // A declarative harness replaces the suite's built-in adapter for every case. The spec rides ON THE JOB
+  // (CaseJob.harnessSpec) — the suite file is a dataset-side artifact and does not change when the agent does.
+  const spec = harnessSpecFrom(flags.get("harness-spec"));
+  const harnessLabel = spec ? `${spec.id}@${spec.version} (spec)` : `${suite.harness.id}@${version}`;
+  console.error(`▶ suite '${suite.id}' (${suite.cases.length} cases) × ${harnessLabel} …`);
+  const scorecard = await runSuite(suite, version, (job) => orch.run(withHarnessSpec(job, spec)), {
     concurrency: Number(flags.get("concurrency") ?? "4"),
   });
 
