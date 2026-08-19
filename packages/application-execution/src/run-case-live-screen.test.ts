@@ -15,7 +15,7 @@ describe("runCase — live-screen capture (runCtx.liveScreen)", () => {
   function captureCompute(): ComputeHandle & { disposed: boolean; execCalls: string[] } {
     const handle = {
       disposed: false,
-      image: NO_IMAGE,
+    image: NO_IMAGE,
       execCalls: [] as string[],
       exec: async (command: string) => {
         handle.execCalls.push(command);

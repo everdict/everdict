@@ -1,4 +1,4 @@
-import { CURRENT_EXECUTION_MANIFEST_ERA, type ExecutionManifest, NO_IMAGE, imageResolved } from "@everdict/contracts";
+import { CURRENT_EXECUTION_MANIFEST_ERA, type ExecutionManifest, imageResolved, NO_IMAGE } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { imageProvenanceOf, laneImageProvenance, sameResolvedImages, withPlacementImage } from "./image-provenance.js";
 

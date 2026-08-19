@@ -1,3 +1,4 @@
+import { NO_IMAGE } from "@everdict/contracts";
 import {
   FileExecutionService,
   FsService,
@@ -6,7 +7,6 @@ import {
   SkillService,
 } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { NO_IMAGE } from "@everdict/contracts";
 import type { ComputeHandle, Driver, ExecResult } from "@everdict/contracts";
 import { InMemoryFsRevisionStore, InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
