@@ -7,8 +7,8 @@ import {
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
-import { RewardFileGrader } from "./reward-file.js";
 import { type Judge, JudgeGrader } from "./judge.js";
+import { RewardFileGrader } from "./reward-file.js";
 import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
 import { StoreStateGrader } from "./store-state.js";
