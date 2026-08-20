@@ -24,7 +24,7 @@ const MUTATIONS = [
     file: "apps/api/src/core/execution/judge-runner.ts",
     from: '    input.seal.outcome = sealed ? "sealed" : "unsealed";',
     to: "",
-    suite: ["--root", "packages/domain", "src/scorecard/judgment-evidence.counterexample.test.ts"],
+    suite: ["--root", "apps/api", "src/core/execution/judge-seal-outcome.counterexample.test.ts"],
   },
   {
     // …and the reader half: the case's judgment plane is what turns that answer into something visible.
@@ -40,8 +40,8 @@ const MUTATIONS = [
     // comparison whose two sides ran different image bytes can no longer pass as a clean green.
     name: "R58 — the world a comparison ran in stops being an identity axis",
     file: "packages/domain/src/scorecard/experiment-identity.ts",
-    from: '    ["execution_world", worldAxis(results.baseline, results.candidate)],',
-    to: "",
+    from: "  const world = worldAxis(results.baseline, results.candidate);",
+    to: "  const world = undefined;",
     suite: ["--root", "packages/domain", "src/scorecard/world-axis.counterexample.test.ts"],
   },
   {
