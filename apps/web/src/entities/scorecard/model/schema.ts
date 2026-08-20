@@ -370,6 +370,17 @@ export const trialDiffSchema = z.object({
   }),
 })
 
+// The identity axes, mirroring @everdict/contracts EXPERIMENT_AXES. The web is runtime-decoupled, so the
+// values are copied rather than imported — the AssertAssignable drift guards at the bottom of this file are
+// what keep the copy honest, and they are what caught `execution_world` missing here.
+const experimentAxisSchema = z.enum([
+  'dataset_content',
+  'grading_plan',
+  'judge_set',
+  'harness_model',
+  'execution_world',
+])
+
 export const scorecardDiffSchema = z.object({
   baseline: z.string(),
   candidate: z.string(),
@@ -448,19 +459,19 @@ export const scorecardDiffSchema = z.object({
   // acknowledged); `unverified` = nothing to verify against (unsealed side / digest-era gap) — informational.
   experiment: z
     .object({
-      held: z.array(z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model'])),
+      held: z.array(experimentAxisSchema),
       confounds: z.array(
         z.object({
-          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model']),
+          axis: experimentAxisSchema,
           detail: z.string(),
         })
       ),
       unverified: z.array(
         z.object({
-          axis: z.enum(['dataset_content', 'grading_plan', 'judge_set', 'harness_model']),
+          axis: experimentAxisSchema,
           // 'composite' = a pre-split seal (one bundle digest over content × selection × grading) differs —
           // which of the three moved is indistinguishable, so neither sameness nor difference is claimable.
-          reason: z.enum(['unsealed', 'digest_era', 'composite']),
+          reason: z.enum(['unsealed', 'digest_era', 'composite', 'unresolved']),
           detail: z.string(),
         })
       ),

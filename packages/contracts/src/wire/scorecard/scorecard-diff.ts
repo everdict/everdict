@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExperimentAxisSchema } from "../../records/experiment-axis.js";
 
 // GET /scorecards/diff — baseline↔candidate comparison (@everdict/domain ScorecardDiff, plus a TrialDiff
 // block when either side ran trials). Regressions/improvements are decided by objective pass transitions.
@@ -137,19 +138,22 @@ export const ScorecardDiffResponseSchema = z.object({
     ),
   experiment: z
     .object({
-      held: z.array(z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"])),
+      held: z.array(ExperimentAxisSchema),
       confounds: z.array(
         z.object({
-          axis: z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"]),
+          axis: ExperimentAxisSchema,
           detail: z.string(),
         }),
       ),
       unverified: z.array(
         z.object({
-          axis: z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"]),
+          axis: ExperimentAxisSchema,
           // "composite" = a pre-split seal (one bundle digest over content × selection × grading) differs —
           // WHICH of the three moved is indistinguishable, so no confound claim can be made either way.
-          reason: z.enum(["unsealed", "digest_era", "composite"]),
+          // "unresolved" = the side RAN and could not say from which bytes (a legacy-era manifest, an
+          // unpinned tag, a verifier receipt that cannot name its container) — distinct from "unsealed",
+          // which recorded no manifest at all.
+          reason: z.enum(["unsealed", "digest_era", "composite", "unresolved"]),
           detail: z.string(),
         }),
       ),

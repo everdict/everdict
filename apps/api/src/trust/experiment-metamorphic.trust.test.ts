@@ -7,6 +7,31 @@ import { InMemoryDatasetRegistry, InMemoryJudgeRegistry } from "@everdict/regist
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 
+// One shared, pinned world for the scenarios below — they are about the MANIFEST axes, and an empty results
+// pair would make every one of them report an unverifiable `execution_world` too (true, and somebody else's
+// scenario). See `world-axis.counterexample.test.ts` for the axis itself.
+const SAME_WORLD = (() => {
+  const ran = (caseId: string) =>
+    ({
+      caseId,
+      harness: "agent@1.0.0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+      execution: {
+        os: "linux",
+        osResolved: "declared",
+        manifestVersion: 2,
+        imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "img:1", digest: "sha256:img" }] },
+      },
+    }) as never;
+  return { baseline: [ran("login")], candidate: [ran("login")] };
+})();
+const identity = (
+  baseline: Parameters<typeof experimentIdentity>[0],
+  candidate: Parameters<typeof experimentIdentity>[1],
+) => experimentIdentity(baseline, candidate, SAME_WORLD);
+
 // Trust suite (docs/trust-certification.md) — TRUST-34.
 //
 // METAMORPHIC IDENTITY: varying exactly ONE experiment input moves exactly ONE identity axis — measured
@@ -91,35 +116,35 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
     const base = await submit();
 
     // Vary NOTHING — the same submit twice is the same experiment on every axis.
-    const twin = experimentIdentity(base, await submit());
+    const twin = identity(base, await submit());
     expect(twin.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
     expect(twin.confounds).toEqual([]);
     expect(twin.unverified).toEqual([]);
 
     // Vary ONLY the treatment (harness version) — deliberately not an identity axis.
-    const treatment = experimentIdentity(base, await submit({ harness: { id: "scripted", version: "1" } }));
+    const treatment = identity(base, await submit({ harness: { id: "scripted", version: "1" } }));
     expect(treatment.confounds).toEqual([]);
     expect(treatment.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
 
     // Vary ONLY the selection (a deliberate 1-of-2 subset) — coverage's business, NO axis confounds.
     // Pre-H5 this was the defect: the selection-keyed grading composite read as a grading confound.
-    const subset = experimentIdentity(base, await submit({ cases: { ids: ["a"] } }));
+    const subset = identity(base, await submit({ cases: { ids: ["a"] } }));
     expect(subset.confounds).toEqual([]);
     expect(subset.held).toContain("dataset_content");
     expect(subset.held).toContain("grading_plan");
 
     // Vary ONLY the grading (a default-grader edit under identical content) — grading moves, content holds.
-    const grading = experimentIdentity(base, await submit({ dataset: { id: "meta", version: "2.0.0" } }));
+    const grading = identity(base, await submit({ dataset: { id: "meta", version: "2.0.0" } }));
     expect(grading.confounds.map((c) => c.axis)).toEqual(["grading_plan"]);
     expect(grading.held).toContain("dataset_content");
 
     // Vary ONLY the content (a task edit under identical graders) — content moves, grading holds.
-    const content = experimentIdentity(base, await submit({ dataset: { id: "meta", version: "3.0.0" } }));
+    const content = identity(base, await submit({ dataset: { id: "meta", version: "3.0.0" } }));
     expect(content.confounds.map((c) => c.axis)).toEqual(["dataset_content"]);
     expect(content.held).toContain("grading_plan");
 
     // Vary ONLY the judge selection — the judge_set axis and nothing else.
-    const judged = experimentIdentity(base, await submit({ judges: [{ id: "quality", version: "1.0.0" }] }));
+    const judged = identity(base, await submit({ judges: [{ id: "quality", version: "1.0.0" }] }));
     expect(judged.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
     expect(judged.held).toContain("dataset_content");
     expect(judged.held).toContain("grading_plan");
@@ -164,7 +189,7 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
     const before = await submit();
     latest = "6.0.0"; // the registry moves — nothing else does
     const after = await submit();
-    const id = experimentIdentity(before, after);
+    const id = identity(before, after);
     expect(id.confounds.map((c) => c.axis)).toEqual(["harness_model"]);
     expect(id.confounds[0]?.detail).toContain("agent-model@5.0.0 → agent-model@6.0.0");
     expect(id.held).toContain("dataset_content");

@@ -17,6 +17,25 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 follow-through. `sameResolvedImages` and `VerifierReceipt.complete` were built by two
+    // waves and consumed by nobody. The world axis is their consumer, and the gate refuses on it — so a
+    // comparison whose two sides ran different image bytes can no longer pass as a clean green.
+    name: "R58 — the world a comparison ran in stops being an identity axis",
+    file: "packages/domain/src/scorecard/experiment-identity.ts",
+    from: '    ["execution_world", worldAxis(results.baseline, results.candidate)],',
+    to: "",
+    suite: ["--root", "packages/domain", "src/scorecard/world-axis.counterexample.test.ts"],
+  },
+  {
+    // …and the half that keeps it honest: a side that cannot pin its bytes is UNVERIFIED, never held. An
+    // axis that answered "held" on ignorance would be worse than no axis, because a gate would trust it.
+    name: "R58 — an unpinnable world is read as the same world",
+    file: "packages/domain/src/scorecard/experiment-identity.ts",
+    from: '    if (bp.kind !== "resolved" || cp.kind !== "resolved")',
+    to: "    if (false)",
+    suite: ["--root", "packages/domain", "src/scorecard/world-axis.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P1. `complete` asked whether `imageProvenance` was SET, and the union is three-valued
     // precisely because that is not the same question: `none` and `unresolved` both counted as complete, so
     // the one signal for "this verdict is not fully attributed" said yes for the two cases it exists to flag.

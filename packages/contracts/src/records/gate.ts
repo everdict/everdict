@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExperimentAxisSchema } from "./experiment-axis.js";
 
 // Release-gate decision artifact (metrics commercialization A1/B1) — the CI-facing verdict over a
 // baseline↔candidate comparison, RECORDED so governance can count what it never saw happen live: every
@@ -36,7 +37,7 @@ export const GatePolicySchema = z.object({
   // verified confound on any axis NOT listed here refuses the comparison as not_comparable — a dataset whose
   // content changed, a grading plan that differs, a judge document that was edited are a different
   // experiment, not a treatment comparison.
-  allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set", "harness_model"])).optional(),
+  allowConfounds: z.array(ExperimentAxisSchema).optional(),
   // UNVERIFIABLE identity (an unsealed side, a digest-era gap, a pre-split composite seal) also refuses the
   // GATE by default: analytics may honestly say "unknown", but a release gate issuing green on an identity
   // nobody can verify is a guarantee standing on nothing — the same reason an unresolvable policy refuses.

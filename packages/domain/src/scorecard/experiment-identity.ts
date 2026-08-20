@@ -1,4 +1,5 @@
-import type { ScorecardManifest } from "@everdict/contracts";
+import { type CaseResult, EXPERIMENT_AXES, type ExperimentAxis, type ScorecardManifest } from "@everdict/contracts";
+import { imageProvenanceOf, sameResolvedImages } from "../image/image-provenance.js";
 
 // Experiment identity — the right to call a diff a REGRESSION.
 //
@@ -25,7 +26,11 @@ import type { ScorecardManifest } from "@everdict/contracts";
 // (resolvePolicyResolution / policyMismatch / policyUnresolvable), and two owners for one invariant is how
 // the answers drift apart.
 
-export type ExperimentAxis = "dataset_content" | "grading_plan" | "judge_set" | "harness_model";
+// The axis vocabulary is OWNED BY CONTRACTS (`EXPERIMENT_AXES`) — it was hand-spelled in eight places, and
+// adding `execution_world` is what made that cost concrete: every copy had to learn the value or silently
+// reject a caller who used it (rule `protocol` L3). Re-exported here so this module stays the readable home
+// of what the axes MEAN, without being a second declaration of what they ARE.
+export { EXPERIMENT_AXES, type ExperimentAxis };
 
 export interface ExperimentConfound {
   axis: ExperimentAxis;
@@ -36,7 +41,10 @@ export interface ExperimentUnverified {
   // "composite" = the side sealed only the COMPOSITE bundle digest (content × selection × grading in one
   // hash, pre-split manifests): a differing composite cannot say WHICH of the three moved, so the axis is
   // unverifiable rather than confounded — a subset run or a grading change must not read as a content claim.
-  reason: "unsealed" | "digest_era" | "composite";
+  // "unresolved" = the side ran, and could not say from WHICH bytes (a legacy-era manifest, an unpinned
+  // tag, a verifier receipt that cannot name its container). Distinct from "unsealed", which is a side that
+  // recorded no manifest at all.
+  reason: "unsealed" | "digest_era" | "composite" | "unresolved";
   detail: string;
 }
 export interface ExperimentIdentity {
@@ -411,13 +419,105 @@ function harnessModelAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReadi
   return { state: "held" };
 }
 
+// ── DID THESE TWO RUNS HAPPEN IN THE SAME WORLD? ────────────────────────────────────────────────────
+//
+// Read from the RESULTS rather than the manifest, because that is where the answer lives: each case records
+// which image bytes it ran from (`ExecutionManifest.imageProvenance`, via `imageProvenanceOf` so a legacy
+// manifest reports itself as unresolved rather than as nothing), and a case judged in a second container
+// records whether that container could be named (`VerifierReceipt.complete`).
+//
+// Only SHARED cases are compared. A case one side never ran is missingness, which the diff reports on its
+// own axis; reading it here would make every subset run a world confound.
+//
+// Order matters: UNVERIFIED wins over CONFOUND. If any compared case cannot say what it ran, the pair does
+// not know whether it is looking at a difference or at its own ignorance, and "we cannot tell" must not be
+// upgraded into "they differ" any more than into "they match".
+// `undefined` = ABSTAIN. Not a fourth answer for the union — a claim this pair's records cannot support at
+// all, so the axis says nothing rather than saying "unverified".
+//
+// The distinction is a rollout one and it is deliberate. The gate REFUSES an unverified axis by default, so
+// an axis that read `unverified` whenever both sides were silent would retroactively block every comparison
+// made before lanes recorded image provenance — including `POST /scorecards/ingest`, which scores traces
+// from somebody else's runtime and has no world to record by construction. Those pairs are exactly as
+// verifiable as they were yesterday; a new axis must not change the answer for data that did not change.
+//
+// So this axis speaks when the records give it something to speak about: a side that pinned its bytes, or a
+// side that recorded an execution and could not. When every compared case on both sides is silent, it
+// abstains — and when the lanes all record provenance, the silence stops happening and the abstention
+// stops with it.
+function worldAxis(baseline: readonly CaseResult[], candidate: readonly CaseResult[]): AxisReading | undefined {
+  const byCase = new Map(candidate.map((r) => [r.caseId, r]));
+  const shared = baseline.flatMap((b) => {
+    const c = byCase.get(b.caseId);
+    return c ? [[b, c] as const] : [];
+  });
+  // No shared case is missingness, which the diff reports on its own axis — this one has nothing to say.
+  if (shared.length === 0) return undefined;
+
+  // Nothing on either side records what it ran from: see the note above for why that is an abstention
+  // rather than an unverifiable claim.
+  if (
+    shared.every(
+      ([b, c]) =>
+        b.execution === undefined && c.execution === undefined && b.verifier === undefined && c.verifier === undefined,
+    )
+  )
+    return undefined;
+
+  const differences: string[] = [];
+  for (const [b, c] of shared) {
+    // The DECIDING half first: a verdict produced in a container the lane could not name is unattributable
+    // however well the agent's half pinned its image.
+    for (const [side, r] of [
+      ["baseline", b],
+      ["candidate", c],
+    ] as const)
+      if (r.verifier !== undefined && !r.verifier.complete)
+        return {
+          state: "unverified",
+          reason: "unresolved",
+          detail: `case ${r.caseId}'s verdict came from a verifier container the ${side} lane could not name (an incomplete receipt), so the world its verdict was reached in is unknown`,
+        };
+
+    const bp = b.execution ? imageProvenanceOf(b.execution) : undefined;
+    const cp = c.execution ? imageProvenanceOf(c.execution) : undefined;
+    if (bp === undefined || cp === undefined)
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `case ${b.caseId} recorded no execution manifest on ${bp === undefined ? "the baseline" : "the candidate"}, so nothing states which bytes it ran`,
+      };
+    if (bp.kind !== "resolved" || cp.kind !== "resolved")
+      return {
+        state: "unverified",
+        reason: "unresolved",
+        detail: `case ${b.caseId} could not pin the image it ran from on ${bp.kind !== "resolved" ? "the baseline" : "the candidate"} (${bp.kind !== "resolved" ? bp.kind : cp.kind}), so sameness cannot be verified either way`,
+      };
+    if (!sameResolvedImages(bp, cp)) differences.push(b.caseId);
+  }
+  if (differences.length > 0)
+    return {
+      state: "confound",
+      detail: `${differences.length} compared case(s) ran different image bytes on the two sides (${differences
+        .slice(0, 5)
+        .join(
+          ", ",
+        )}${differences.length > 5 ? ", …" : ""}) — a delta across different worlds is not evidence about the change under test`,
+    };
+  return { state: "held" };
+}
+
 // The identity read. An entirely unsealed side (pre-manifest batch, mig 0126) verifies NOTHING: every axis
 // is unverified — which downgrades the claim a gate may make, without rewriting history as a refusal.
 export function experimentIdentity(
   baseline: ScorecardManifest | undefined,
   candidate: ScorecardManifest | undefined,
+  // The two sides' RESULTS, for the axes a manifest cannot answer. Required, not optional: an optional
+  // parameter here is the shape rule `protocol` L1 names — a caller that forgets it type checks, and the
+  // axis silently reports `held` over worlds nobody compared.
+  results: { baseline: readonly CaseResult[]; candidate: readonly CaseResult[] },
 ): ExperimentIdentity {
-  const axes: ExperimentAxis[] = ["dataset_content", "grading_plan", "judge_set", "harness_model"];
+  const axes: readonly ExperimentAxis[] = EXPERIMENT_AXES;
   if (baseline === undefined || candidate === undefined) {
     const sides =
       baseline === undefined && candidate === undefined
@@ -435,11 +535,14 @@ export function experimentIdentity(
       })),
     };
   }
+  const world = worldAxis(results.baseline, results.candidate);
   const readings: Array<[ExperimentAxis, AxisReading]> = [
     ["dataset_content", datasetAxis(baseline, candidate)],
     ["grading_plan", gradingPlanAxis(baseline, candidate)],
     ["judge_set", judgeSetAxis(baseline, candidate)],
     ["harness_model", harnessModelAxis(baseline, candidate)],
+    // Omitted entirely when the pair's records say nothing about the world — an abstention, not a verdict.
+    ...(world ? ([["execution_world", world]] as Array<[ExperimentAxis, AxisReading]>) : []),
   ];
   const out: ExperimentIdentity = { held: [], confounds: [], unverified: [] };
   for (const [axis, reading] of readings) {

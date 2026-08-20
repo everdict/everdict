@@ -6,6 +6,29 @@ import { evaluateGate } from "./gate.js";
 import { diffScorecards } from "./scorecard.js";
 import { sealGrading } from "./scoring-plan.js";
 
+// One shared, pinned world for the fixtures below. Same reason as the unit file beside this one: these scenarios are about the manifest axes.
+const SAME_WORLD = (() => {
+  const ran = (caseId: string) =>
+    ({
+      caseId,
+      harness: "agent@1.0.0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+      execution: {
+        os: "linux",
+        osResolved: "declared",
+        manifestVersion: 2,
+        imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "img:1", digest: "sha256:img" }] },
+      },
+    }) as unknown as CaseResult;
+  return { baseline: [ran("login")], candidate: [ran("login")] };
+})();
+const identity = (
+  baseline: Parameters<typeof experimentIdentity>[0],
+  candidate: Parameters<typeof experimentIdentity>[1],
+) => experimentIdentity(baseline, candidate, SAME_WORLD);
+
 // Trust suite (docs/trust-certification.md) — TRUST-21 / TRUST-22 / TRUST-25 / TRUST-26 / TRUST-27 / TRUST-30.
 //
 // TRUST-21: A CONFOUNDED PAIR CANNOT GATE GREEN. The manifests seal the held-constant documents (dataset
@@ -44,7 +67,7 @@ describeTrust("TRUST-21 — a confounded pair cannot gate green", () => {
   const candidate = card([result("login", false)]); // a broke transition, if anyone had the right to count it
 
   it("a verified dataset-content difference refuses the gate — acknowledgment is the only way through, and it is recorded", () => {
-    const experiment = experimentIdentity(manifest("sha256:content-a"), manifest("sha256:content-b"));
+    const experiment = identity(manifest("sha256:content-a"), manifest("sha256:content-b"));
     expect(experiment.confounds.map((c) => c.axis)).toEqual(["dataset_content"]);
     const diff = { ...diffScorecards(baseline, candidate), experiment };
 
@@ -58,7 +81,7 @@ describeTrust("TRUST-21 — a confounded pair cannot gate green", () => {
   });
 
   it("identical seals hold every axis and the gate proceeds clean — the treatment axis (harness) never confounds", () => {
-    const experiment = experimentIdentity(manifest("sha256:content-a"), manifest("sha256:content-a"));
+    const experiment = identity(manifest("sha256:content-a"), manifest("sha256:content-a"));
     expect(experiment.confounds).toEqual([]);
     const g = evaluateGate(
       { ...diffScorecards(baseline, card([result("login", true)])), experiment },
@@ -70,7 +93,7 @@ describeTrust("TRUST-21 — a confounded pair cannot gate green", () => {
 
 describeTrust("TRUST-22 — a refusal carries no verdict numbers", () => {
   it("a confound refusal presents structure only — never the regressions it had no right to derive", () => {
-    const experiment = experimentIdentity(manifest("sha256:a"), manifest("sha256:b"));
+    const experiment = identity(manifest("sha256:a"), manifest("sha256:b"));
     const diff = { ...diffScorecards(card([result("x", true)]), card([result("x", false)])), experiment };
     const g = evaluateGate(diff, { maxRegressions: 0 });
     expect(g.decision).toBe("not_comparable");
@@ -96,7 +119,7 @@ describeTrust("TRUST-22 — a refusal carries no verdict numbers", () => {
 
 describeTrust("TRUST-25 — a grading-only change claims exactly ONE axis", () => {
   it("changing only the grading moves grading_plan and nothing else — the composite seal used to claim the dataset changed too", () => {
-    const experiment = experimentIdentity(
+    const experiment = identity(
       { ...manifest("sha256:case-a"), grading: "sha256:grading-A" },
       { ...manifest("sha256:case-a"), grading: "sha256:grading-B" },
     );
@@ -124,7 +147,7 @@ describeTrust("TRUST-26 — a subset is coverage loss, never a dataset confound"
       cases: { login: "sha256:case-login" },
       ...sealGrading(undefined, [gcase("login")]),
     };
-    const experiment = experimentIdentity(baseline, candidate);
+    const experiment = identity(baseline, candidate);
     expect(experiment.confounds).toEqual([]);
     expect(experiment.held).toContain("dataset_content");
     expect(experiment.held).toContain("grading_plan"); // shared cases grade identically — the subset moved nothing
@@ -141,7 +164,7 @@ describeTrust("TRUST-26 — a subset is coverage loss, never a dataset confound"
 
 describeTrust("TRUST-27 — unverifiable identity cannot gate green", () => {
   it("an unsealed side refuses the gate by default; the acknowledgment is explicit and recorded", () => {
-    const experiment = experimentIdentity(undefined, manifest("sha256:case-a"));
+    const experiment = identity(undefined, manifest("sha256:case-a"));
     const diff = { ...diffScorecards(card([result("x", true)]), card([result("x", true)])), experiment };
     const refused = evaluateGate(diff, { maxRegressions: 0 });
     expect(refused.decision).toBe("not_comparable");
@@ -163,14 +186,14 @@ describeTrust(
         ...manifest("sha256:case-a"),
         judges: [{ id: "quality", version: "3", specDigest: "sha256:same-doc", model }],
       });
-      const moved = experimentIdentity(withJudge("judge-default@5.0.0"), withJudge("judge-default@6.0.0"));
+      const moved = identity(withJudge("judge-default@5.0.0"), withJudge("judge-default@6.0.0"));
       expect(moved.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
       const g = evaluateGate(
         { ...diffScorecards(card([result("x", true)]), card([result("x", true)])), experiment: moved },
         { maxRegressions: 0 },
       );
       expect(g.decision).toBe("not_comparable");
-      const unresolved = experimentIdentity(withJudge("unresolved"), withJudge("unresolved"));
+      const unresolved = identity(withJudge("unresolved"), withJudge("unresolved"));
       expect(unresolved.unverified.map((u) => u.axis)).toEqual(["judge_set"]);
     });
   },

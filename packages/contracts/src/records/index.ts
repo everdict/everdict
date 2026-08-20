@@ -7,6 +7,7 @@ export * from "./agent-member-preference.js";
 export * from "./analysis-artifact.js";
 export * from "./case-commit-receipt.js";
 export * from "./execution-attempt.js";
+export * from "./experiment-axis.js";
 export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";

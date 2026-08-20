@@ -191,7 +191,13 @@ export class ScorecardAnalyticsService {
     // The experiment-identity read (held / confounds / unverified) — the two manifests against each other,
     // so the gate can refuse a comparison whose held-constant axes verifiably differ (a different experiment)
     // and every consumer sees what the seals could and could not verify.
-    const experiment = experimentIdentity(baseRecord.manifest, candRecord.manifest);
+    // …and the two sides' RESULTS, for the axis a manifest cannot answer: which image bytes each case
+    // actually ran on, and whether a verdict reached in a second container can name where it happened
+    // (`execution_world`). A manifest seals what was ASKED; only the results say what ran.
+    const experiment = experimentIdentity(baseRecord.manifest, candRecord.manifest, {
+      baseline: baseline.results,
+      candidate: candidate.results,
+    });
     const withPolicy: ScorecardDiff & {
       policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
       policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
