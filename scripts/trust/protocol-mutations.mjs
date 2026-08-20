@@ -365,8 +365,11 @@ const MUTATIONS = [
     // observation-only ones, which reads as "graded, and it scored nothing".
     name: "R56 Wave K — an unreachable verdict is omitted instead of recorded",
     file: "packages/application-control/src/execution/verifier-pass.ts",
-    from: '      unmeasuredVerdict("grader_error", err instanceof Error ? err.message : String(err)),',
-    to: "",
+    // Re-pointed (arch-review 57): a lane now answers an INVOCATION rather than bare scores, so the failure
+    // path records the same `unmeasured` from a different line. The defect is unchanged — dropping it leaves
+    // a CaseResult whose scores are the observation-only ones, which reads as "graded, and it scored nothing".
+    from: '    return owed("grader_error", invocation instanceof Error ? invocation.message : String(invocation));',
+    to: "    return result;",
     suite: ["--root", "packages/application-control", "src/execution/verifier-pass.counterexample.test.ts"],
   },
   {
