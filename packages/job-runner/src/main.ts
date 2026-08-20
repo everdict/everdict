@@ -9,6 +9,7 @@ import {
 } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { LocalDriver } from "@everdict/drivers";
+import { takeJobPayload } from "./job-payload-env.js";
 import { failureResult, runCaseJob } from "./run.js";
 import { runVerifierJob } from "./verifier-job.js";
 
@@ -27,17 +28,21 @@ async function main(): Promise<void> {
   // the same sentinel the backends already parse. Branching here rather than in a second entrypoint keeps one
   // image and one result contract — and keeps the two payload names the only thing that differs, which is
   // what makes "the agent's container never held the plan" checkable.
-  const verifierRaw = process.env.EVERDICT_VERIFIER_JOB;
-  if (verifierRaw) {
-    await runVerifierEntry(verifierRaw);
+  //
+  // TAKEN, not read: the call that returns the payload is the call that deletes it. See
+  // `job-payload-env.ts` for what the variable was handing to the agent for as long as it stood — the
+  // decision is made here, before anything else in this process can start a child.
+  const payload = takeJobPayload();
+  if (payload.kind === "verifier") {
+    await runVerifierEntry(payload.payload);
     return;
   }
-  const raw = process.env.EVERDICT_CASE_JOB;
-  if (!raw) {
+  if (payload.kind === "absent") {
     console.error("✗ EVERDICT_CASE_JOB (env) is missing.");
     process.exitCode = 1;
     return;
   }
+  const raw = payload.payload;
   // Parse INSIDE the try: a corrupt job (bad base64/JSON, schema mismatch) must still cross the process boundary as
   // a CLASSIFIED CaseResult behind the sentinel. Parsing outside would let it crash bare — surfacing backend-side as
   // a mushy "sentinel not found" dispatch error that erases WHERE it died. `job` stays undefined until decoded, so a

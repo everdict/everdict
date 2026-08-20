@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P0. The job payload stayed in `process.env` after the runner decoded it, and every exec
+    // the runner starts inherits the environment — including the agent under test, which could read the repo
+    // token, the registry passwords, the provider key and its own grading configuration out of it.
+    name: "R58 — the job payload is left in the agent's environment",
+    file: "packages/job-runner/src/job-payload-env.ts",
+    from: "  delete process.env[VERIFIER];",
+    to: "",
+    suite: ["--root", "packages/job-runner", "src/job-payload-env.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P0. The verifier opened its own row with no parent, so `PARENT_AUTHORIZES` took the run
     // branch on every batch case (an execution id no run row can equal) and the scorecard teardown's worklist
     // could not see the row at all. Dropping the coordinate must go red, or the second unit is orphaned again.
