@@ -94,6 +94,9 @@ run("gitleaks (full history)", resolveGitleaks(), [
 // checkout whose CONTENT is exactly HEAD's reads as dirty and no stamp is written. The question is whether
 // this checkout IS the commit, which is what the stamp attests; untracked files count, because an untracked
 // source file is part of what was just built.
+// Same reason as `ci:commits`: `ls-files --others` consults the index, and a stale one reports files the
+// ref already has as untracked. `--refresh -q` only re-stats.
+spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root });
 const dirty = [
   spawnSync("git", ["diff", "HEAD", "--name-only"], { cwd: root, encoding: "utf8" }).stdout.trim(),
   spawnSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).stdout.trim(),

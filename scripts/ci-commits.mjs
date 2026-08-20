@@ -29,6 +29,11 @@ const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "
 // sessions commit into (via temp indexes, so the real one lags) that reports files as modified whose CONTENT
 // is exactly HEAD's. Ask the question that is actually being asked — does the checkout differ from HEAD? —
 // with `diff HEAD`, plus untracked files, which a stamp would also be attesting over.
+// Refresh the index against the worktree first. `ls-files --others` consults the INDEX, so a file the
+// ref already has but a stale index does not know about is reported as untracked — which in this tree is
+// routine, and made the gate refuse to run on a clean checkout. `--refresh -q` only re-stats; it changes
+// no content.
+git(["update-index", "--refresh", "-q", "--unmerged"]);
 const dirty = [
   git(["diff", "HEAD", "--name-only"]).stdout.trim(),
   git(["ls-files", "--others", "--exclude-standard"]).stdout.trim(),
