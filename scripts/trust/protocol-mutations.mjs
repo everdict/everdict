@@ -17,6 +17,19 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 W1. The judge's provider key was applied by wrapping the DRIVER, so it rode every exec
+    // through the compute the harness and the graders share — putting the tenant's credential in the
+    // environment of the code being evaluated. Widening it back must go red.
+    name: "R58 W1 — the judge's key rides the agent's execs again",
+    file: "packages/application-execution/src/run-case.ts",
+    // Aimed at the seam that hands the AGENT its compute. Wrapping the provision call would have left an
+    // unbalanced paren, and a mutation that produces a syntax error tests the parser rather than the
+    // protocol — the suite would go red for the wrong reason and prove nothing.
+    from: "    await deps.harness.install(compute);",
+    to: "    await deps.harness.install(forGrading(compute, deps.graderEnv));",
+    suite: ["--root", "packages/application-execution", "src/grader-env-isolation.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 W2. The Scheduler forwards dispatch options by an explicit allowlist whose own comment
     // says it is "the ONE place a hook can silently die" — and `onActivate` died in exactly it, so the
     // activation transition never ran on any SaaS dispatch. Forwarding half the authority must go red.

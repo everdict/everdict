@@ -56,30 +56,6 @@ function environmentFor(kind: EnvSpec["kind"], repoToken?: string): Environment 
   }
 }
 
-// Wrap a driver so every exec of every handle it provisions sees the job-level env (merged under any per-exec env).
-// This is the in-job equivalent of a managed alloc's task env: nomad/k8s inject judgeEnv/judgeAuthEnv at the alloc
-// level and child processes inherit them, but on the runner/local/docker paths the agent process env has no such
-// injection — without this, a code judge's script grader (compute.exec) never sees the judge model/credential.
-// Job-level values win over the machine env (LocalDriver merges exec env over process.env); per-exec env wins over both.
-export function withJobEnv(driver: Driver, env: Record<string, string>): Driver {
-  return {
-    id: driver.id,
-    provision: async (spec) => {
-      const handle = await driver.provision(spec);
-      return {
-        // FORWARDED, never re-answered: this decorator injects env, it does not provision — so the world it
-        // reports must be the inner driver's answer. A wrapper that re-states `none` here would erase the
-        // digest the driver read, and the result would carry the same shape as a lane that ran no image.
-        image: handle.image,
-        exec: (cmd, opts) => handle.exec(cmd, { ...opts, env: { ...env, ...opts?.env } }),
-        writeFile: (path, data) => handle.writeFile(path, data),
-        readFile: (path) => handle.readFile(path),
-        dispose: () => handle.dispose(),
-      };
-    },
-  };
-}
-
 // The classified CaseResult the agent emits when a job fails to produce a normal eval outcome. Crossing the process
 // boundary as a CLASSIFIED result (not a bare crash) preserves WHERE the case died (dispatch|install|run|grade) — a
 // bare non-zero exit surfaces backend-side as a mushy "sentinel not found" dispatch error. When the job is not yet
@@ -152,10 +128,14 @@ export async function runCaseJob(
     );
   const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec, { meterUsage });
   // Job-level judge env: model config (job.judge) + the dispatch-resolved provider credential (job.judgeAuth).
-  // A remote alloc already has both injected into its task env by the backend; here the agent carries them itself so
-  // the runner/local/docker paths behave the same — for the inline judge grader (below) AND for every compute exec
-  // (withJobEnv), which is how a code judge's script sees EVERDICT_JUDGE_MODEL + the provider key on a self-hosted
-  // runner. Absent judgeAuth (own-pays lanes), the machine env is the fallback.
+  // A remote alloc already has both injected into its task env by the backend; here the runner carries them itself
+  // so the runner/local/docker paths behave the same — for the inline judge grader (below) AND for a code judge's
+  // script, which reads EVERDICT_JUDGE_MODEL and the provider key from the env of the exec that runs it. Absent
+  // judgeAuth (own-pays lanes), the machine env is the fallback.
+  //
+  // It goes to `runCase` as `graderEnv` — the GRADING half only. It used to wrap the driver, which put the
+  // tenant's provider key on every exec through the compute both halves share, including the agent's
+  // (arch-review 58 W1).
   const jobEnv = { ...judgeEnv(job.judge), ...judgeAuthEnv(job.judge, job.judgeAuth) };
   // Include the judge grader: build the Judge from env + job-level judge env.
   // If unconfigured, only the judge spec gets a skip score (so a normal eval doesn't die).
@@ -194,11 +174,21 @@ export async function runCaseJob(
           ...(job.worldProof ? { worldProof: job.worldProof } : {}),
         }));
   return runCase(job.evalCase, {
-    // Job-level judge env rides every exec (incl. an explicitly injected driver — DockerBackend) via the wrapper.
-    driver: Object.keys(jobEnv).length > 0 ? withJobEnv(baseDriver, jobEnv) : baseDriver,
+    driver: baseDriver,
     environment,
     harness,
     graders,
+    // ── THE JUDGE'S KEY GOES TO THE GRADERS, NOT TO THE AGENT (arch-review 58, W1) ──────────────
+    //
+    // This used to wrap the DRIVER (`withJobEnv`), which put the judge's model config and the provider key
+    // resolved for this dispatch on every exec through the one compute both halves share. The consumer was
+    // always the grading half — a code judge's script reading EVERDICT_JUDGE_MODEL and the key — and the
+    // other process sharing that environment is the agent under test: arbitrary code, permissions
+    // deliberately disabled, holding the tenant's provider credential for the length of the run.
+    //
+    // `runCase` hands it to the graders' view of the compute instead. Same consumer, same value; the harness's
+    // environment no longer contains a credential it never needed.
+    ...(Object.keys(jobEnv).length > 0 ? { graderEnv: jobEnv } : {}),
     // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
     // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Container-task dataset adapters capture the
     // task's own timeout here, previously dropped at execution.

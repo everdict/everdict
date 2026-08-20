@@ -11,6 +11,8 @@ import type {
   Environment,
   EvalCase,
   EvaluableHarness,
+  ExecChunk,
+  ExecOpts,
   Grader,
   LiveScreenCapture,
   LiveTraceReport,
@@ -42,6 +44,33 @@ export interface RunCaseDeps {
   harness: EvaluableHarness;
   graders: Grader[];
   runCtx: RunContext;
+  // ── ENV FOR THE GRADING HALF ONLY (arch-review 58, W1) ──────────────────────────────────────
+  //
+  // A code judge's script needs the judge's model config and the provider key resolved for this dispatch.
+  // The job-runner supplied them by wrapping the DRIVER, which put them on every exec through the one
+  // compute handle both halves share — so the agent under test, arbitrary code with permissions deliberately
+  // disabled, ran with the tenant's provider key in its environment. Nothing needed it there: the harness
+  // has its own auth, and the only consumer was the grader.
+  //
+  // Applied to the compute the GRADERS are handed, and to any compute they provision for themselves. The
+  // harness's compute is untouched, so the key is not in the environment of the process being evaluated.
+  graderEnv?: Record<string, string>;
+}
+
+// The grading half's view of the compute: the same handle, with `graderEnv` on every exec. Wrapping the
+// HANDLE rather than the driver is the whole point — the harness holds the unwrapped one.
+function forGrading(compute: ComputeHandle, env: Record<string, string> | undefined): ComputeHandle {
+  if (env === undefined || Object.keys(env).length === 0) return compute;
+  return {
+    ...compute,
+    exec: (cmd, opts) => compute.exec(cmd, { ...opts, env: { ...env, ...opts?.env } }),
+    ...(compute.execStream
+      ? {
+          execStream: (cmd: string, onChunk: (chunk: ExecChunk) => void, opts?: ExecOpts) =>
+            compute.execStream?.(cmd, onChunk, { ...opts, env: { ...env, ...opts?.env } }),
+        }
+      : {}),
+  } as ComputeHandle;
 }
 
 // Trace correlation key — the harness injects it as EVERDICT_RUN_ID/everdict.run_id, and collection
@@ -352,10 +381,22 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const observes = deps.graders.some((g) => g.needsCompute !== true);
     const slots: Array<Score[] | undefined> = new Array(deps.graders.length);
     // Dedicated grading compute (script grader image mode) — a grader that provisions owns/disposes its handle.
-    const provision = (spec: ComputeSpec): Promise<ComputeHandle> => deps.driver.provision(spec);
+    // A grader that provisions its own box gets the grading view of it too — a code judge that spins up a
+    // container to run its script is the same consumer, one hop further out.
+    const provision = async (spec: ComputeSpec): Promise<ComputeHandle> =>
+      forGrading(await deps.driver.provision(spec), deps.graderEnv);
+    // The grading half's view of the case's compute — the harness holds the unwrapped handle.
+    const gradingCompute = forGrading(compute, deps.graderEnv);
     for (const [i, grader] of deps.graders.entries()) {
       if (grader.needsCompute === true) {
-        slots[i] = await safeGrade(grader, { case: evalCase, deadlineAt, trace, snapshot, compute, provision });
+        slots[i] = await safeGrade(grader, {
+          case: evalCase,
+          deadlineAt,
+          trace,
+          snapshot,
+          compute: gradingCompute,
+          provision,
+        });
       }
     }
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);

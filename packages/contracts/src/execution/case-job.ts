@@ -83,7 +83,9 @@ export const CaseJobSchema = z.object({
   // first, the submitter's personal key as fallback) so a personal-only key still judges on MANAGED runtimes
   // (the backend-level secretEnv carries only the workspace tier). Same discipline as repoToken/registryAuth:
   // never persisted to records. Backends map it to the provider env (OPENAI_/ANTHROPIC_ API_KEY + BASE_URL); the
-  // agent itself threads it into every compute exec (withJobEnv) so runner/local/docker paths see the same env.
+  // runner itself threads it into the GRADING half's execs (`runCase`'s `graderEnv`) so runner/local/docker
+  // paths see the same env. Not the agent's: it used to ride every exec through the shared compute, which put
+  // the tenant's provider key in the environment of the code being evaluated (arch-review 58 W1).
   // Resolved on EVERY lane, self-hosted included (parity with harness {secretRef}/model-binding secrets); when no
   // key resolves on a self-hosted lane the job ships without it and the runner's machine env is the fallback (own-pays).
   judgeAuth: z.object({ apiKey: z.string(), baseUrl: z.string().optional() }).optional(),
