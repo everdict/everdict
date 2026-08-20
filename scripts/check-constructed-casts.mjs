@@ -44,22 +44,6 @@ const ALLOWED = new Map([
     "packages/job-runner/src/main.ts",
     "the ingest-only result envelope has no harness and no case — the shape is a wire artifact, not a CaseResult",
   ],
-  // ── OPEN DEBT, NAMED (arch-review 57 P0-verifier, Wave 4) ────────────────────────────────────────
-  //
-  // These two build a synthetic CaseJob so a verifier submit can reuse the manifest builders. The cast is
-  // how the synthetic job gets away with having no placement, and that is the same finding as the review's:
-  // K8s reads `this.opts.namespace ?? "default"` directly instead of `resolve(job)`, so a verifier can run
-  // outside the tenant's trust zone and without its hardened runtime class while the agent ran inside both.
-  // They are listed rather than silenced: typing them is what forces the placement question, and doing that
-  // IS the fix. The entries go when the verifier gets a real placement instead of a synthesized one.
-  [
-    "packages/backends/src/orchestrators/k8s.ts",
-    "OPEN — the synthetic verifier CaseJob carries no placement, which is how the submit skips resolve(job) and the tenant trust zone (arch-review 57 P0-verifier)",
-  ],
-  [
-    "packages/backends/src/orchestrators/nomad.ts",
-    "OPEN — same synthetic verifier CaseJob; this lane reuses dispatch() so it keeps effectiveOpts, but the job itself is still untyped (arch-review 57 P0-verifier)",
-  ],
   [
     "packages/topology/src/deploy/nomad-topology.ts",
     "OPEN — a ServiceHarnessSpec assembled for a deploy preview; the builder wants the whole registered spec and this path holds only the deployable half",

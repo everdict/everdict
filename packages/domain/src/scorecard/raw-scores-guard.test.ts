@@ -24,6 +24,11 @@ const ALLOWED = new Set([
   // A digest is not an aggregation, the same reason scoring-revision.ts is here: it never averages and never
   // reads a score's value as a number, and the unmeasured rows are part of the judgment record it identifies.
   "ownership/ownership.ts",
+  // the verifier's RECEIPT — the same reason as scoring-revision.ts and ownership.ts: it digests the verdict
+  // plane to identify it and never reads a score's value. `sort` orders by `metric` so two lanes that ran the
+  // same graders digest alike; nothing here averages, thresholds or decides. The measured gate binds whoever
+  // aggregates these scores afterwards, which is `summarizeScorecard` on the allowlist above.
+  "execution/verifier-receipt.ts",
 ]);
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {

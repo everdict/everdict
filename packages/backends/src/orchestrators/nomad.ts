@@ -79,6 +79,7 @@ import {
   parseSessionComputeId,
 } from "./nomad-session.js";
 import { mergePlacedImage, withWorldProof } from "./placement-image.js";
+import { verifierCaseJob } from "./verifier-placement.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -866,12 +867,11 @@ export class NomadBackend
   // It goes through `dispatch` rather than a second copy of that path, because a second copy is how the two
   // would drift on the next change to alloc-log handling.
   async dispatchVerifier(job: VerifierJob): Promise<Score[]> {
-    const spec = {
-      runId: undefined,
-      tenant: job.tenant,
-      evalCase: { id: `${job.caseId}-verify`, ...(job.image !== undefined ? { image: job.image } : {}) },
-      harness: { id: "verifier", version: "1" },
-    } as unknown as CaseJob;
+    // Typed, and shared with the K8s lane (arch-review 57 P0-verifier). The cast this replaces built a job
+    // with no placement, no world and no credentials — which is precisely a job the trust-zone resolution
+    // cannot resolve. This lane already re-uses `dispatch`, so it keeps `effectiveOpts`; what it lacked was
+    // a job worth resolving.
+    const spec = verifierCaseJob(job);
     const result = await this.dispatch(spec, undefined, verifierJobPayload(job));
     return result.scores;
   }

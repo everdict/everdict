@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { RegistryAuthSchema } from "../infra/image-ref.js";
+import { ResourceRequestSchema } from "../infra/world.js";
 import { RepoSnapshotSchema } from "./environment.js";
 import { GraderSpecSchema } from "./eval-case.js";
 
@@ -63,6 +65,19 @@ export const VerifierJobSchema = z.object({
   // It is the case's own declared budget, carried, so the verifier is bounded by the same number the agent
   // was rather than by a constant invented here.
   timeoutSec: z.number().positive(),
+  // ── WHAT THE PLACEMENT NEEDS, CARRIED (arch-review 57 P0-verifier) ───────────────────────────────
+  //
+  // The backend only ever sees this job, so anything its placement depends on has to be here. Before these
+  // fields the K8s lane built a synthetic `CaseJob` with a cast and fell back to `this.opts.namespace ??
+  // "default"` — the two halves of one case could run in different worlds, with the verdict-producing half
+  // outside the tenant's trust zone while running the task's own untrusted image.
+  //
+  // The DECLARED WORLD: a case judged in a different box than it ran in is judged against a different
+  // question, and a container task declares one routinely.
+  resources: ResourceRequestSchema.optional(),
+  // …and the credentials for the task image. A private image the agent could pull and the verifier could
+  // not is a verdict that simply never happens.
+  registryAuths: z.array(RegistryAuthSchema).optional(),
 });
 export type VerifierJob = z.infer<typeof VerifierJobSchema>;
 

@@ -66,6 +66,7 @@ import {
   classifyWorkloadRole,
 } from "./inspect-common.js";
 import { mergePlacedImage, withWorldProof } from "./placement-image.js";
+import { verifierCaseJob } from "./verifier-placement.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {
@@ -1239,16 +1240,29 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   // The scores come back through `parseResult` — the same sentinel the case entry prints — so a verifier that
   // died mid-run surfaces as a parse failure here rather than as a silent absence.
   async dispatchVerifier(job: VerifierJob): Promise<Score[]> {
-    const ns = this.opts.namespace ?? "default";
+    // ── PLACED BY THE SAME RULES AS THE AGENT (arch-review 57 P0-verifier) ──────────────────────────
+    //
+    // This read `this.opts.namespace ?? "default"` and the backend's blanket `secretEnv`, so the half of the
+    // case that produces the VERDICT could run outside the tenant's trust zone while running the task's own
+    // untrusted image. `resolve` is what applies the zone, its namespace, the hardened runtimeClass and the
+    // tenant's own secrets — the defect was never that `resolve` is wrong, it is that nobody asked it.
+    const spec = verifierCaseJob(job);
+    const { ns, runtimeClassName, secretEnv } = await this.resolve(spec);
     const name = `everdict-verify-${job.caseId
       .replace(/[^a-z0-9-]/gi, "-")
       .toLowerCase()
       .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
-    const secretEnv = this.opts.secretEnv ?? {};
-    const spec = { evalCase: { id: job.caseId, image: job.image }, tenant: job.tenant } as unknown as CaseJob;
+
     return await this.withApi(async (api) => {
       await api.ensureNamespace(ns);
-      const manifest = buildK8sJob(spec, { ...this.opts, secretEnv }, name, ns, undefined, verifierJobPayload(job));
+      const manifest = buildK8sJob(
+        spec,
+        { ...this.opts, secretEnv },
+        name,
+        ns,
+        runtimeClassName,
+        verifierJobPayload(job),
+      );
       await api.applyJob(manifest, ns);
       try {
         await this.waitForJob(api, name, ns);

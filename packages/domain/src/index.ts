@@ -724,3 +724,8 @@ export {
   type SelectorEvent,
 } from "./subscription/selector-match.js";
 export { type VerifierPlan, verifierPlanOf } from "./execution/verifier-plan.js";
+export {
+  type VerifierInvocation,
+  type VerifierReceipt,
+  verifierReceiptOf,
+} from "./execution/verifier-receipt.js";
