@@ -95,7 +95,9 @@ run("gitleaks (full history)", resolveGitleaks(), [
 // this checkout IS the commit, which is what the stamp attests; untracked files count, because an untracked
 // source file is part of what was just built.
 // Same reason as `ci:commits`: `ls-files --others` consults the index, and a stale one reports files the
-// ref already has as untracked. `--refresh -q` only re-stats.
+// ref already has as untracked. `read-tree` re-points the index at HEAD and `--refresh` re-stats it;
+// neither touches the worktree.
+spawnSync("git", ["read-tree", "HEAD"], { cwd: root });
 spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root });
 const dirty = [
   spawnSync("git", ["diff", "HEAD", "--name-only"], { cwd: root, encoding: "utf8" }).stdout.trim(),

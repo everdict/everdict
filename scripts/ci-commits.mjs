@@ -33,6 +33,7 @@ const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "
 // ref already has but a stale index does not know about is reported as untracked — which in this tree is
 // routine, and made the gate refuse to run on a clean checkout. `--refresh -q` only re-stats; it changes
 // no content.
+git(["read-tree", "HEAD"]);
 git(["update-index", "--refresh", "-q", "--unmerged"]);
 const dirty = [
   git(["diff", "HEAD", "--name-only"]).stdout.trim(),
