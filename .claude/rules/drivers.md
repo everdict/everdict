@@ -21,6 +21,18 @@ not the Driver's.
   valid one. `LocalDriver` therefore refuses any resource or non-`public` network declaration (a host
   process has neither), and `DockerDriver` enforces cpu/memory/gpu/`none` but refuses `allowlist` (it has
   no egress filter). Translation lives ONCE in `dockerWorldArgs` — a second container driver imports it.
+- **…UNLESS THE LAYER THAT BUILT THE BOX PROVES IT ENFORCED IT** (arch-review 57 P1-high). A managed case
+  runs two layers deep, and the refusal above was the only half implemented: the outer backend read
+  `harnessSpec.resources` and never `evalCase.resources`, so a case declaring cpu/memory could not run on a
+  managed lane AT ALL — refused by the inner driver after the container was already up. Container-task
+  corpora declare one routinely. The fix is not to strip the declaration on the way in (that is a run in a
+  world nobody provided, reported as an ordinary result) but to give the inner driver something to accept:
+  `ProvisionedWorldProof` on the `CaseJob`, set by the backend, checked by the driver with
+  `worldProofCovers`. Exact match per axis — a bigger box is a different world — and a proof SILENT on an
+  axis does not cover it, so partial enforcement cannot read as enforcement. **A lane claims only what it
+  really applies**: both managed lanes translate cpu/memory/gpu into the unit's own request+limit and claim
+  that; neither writes a NetworkPolicy or a task network block, so NEITHER claims `network`, and an
+  offline-declared case still meets the refusal. Claiming an unenforced axis is worse than the defect.
 - Absence keeps its meaning: no declaration = the runtime's default box and ordinary network, exactly as
   before the fields existed. `isEmptyResourceRequest`/`isDefaultNetwork` (`@everdict/contracts`) are the
   one spelling of "asks for nothing", so a driver never refuses work it could have run.

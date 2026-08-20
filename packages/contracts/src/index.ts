@@ -4,6 +4,11 @@ export * from "./errors.js";
 export * from "./version.js";
 export * from "./job-result-wire.js";
 export * from "./execution/verifier-job.js";
+export {
+  type ProvisionedWorldProof,
+  ProvisionedWorldProofSchema,
+  worldProofCovers,
+} from "./execution/provisioned-world.js";
 export * from "./execution/trace.js";
 export * from "./execution/span.js";
 export * from "./execution/semconv.js";

@@ -64,6 +64,7 @@ import {
   WORKLOAD_CAP,
   classifyWorkloadRole,
 } from "./inspect-common.js";
+import { mergePlacedImage, withWorldProof } from "./placement-image.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {
@@ -951,7 +952,7 @@ export function buildK8sJob(
     // this lane would hand to the agent along with the job.
     ...(verifierPayload !== undefined
       ? { EVERDICT_VERIFIER_JOB: verifierPayload }
-      : { EVERDICT_CASE_JOB: caseJobPayload(job) }),
+      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "k8s", job.evalCase.resources)) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
@@ -965,7 +966,21 @@ export function buildK8sJob(
   const tenant = job.tenant ?? "default";
   // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
   // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
-  const hres = job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined;
+  //
+  // ── THE CASE'S OWN DECLARATION IS ENFORCED HERE, OR NOWHERE (arch-review 57 P1-high) ──────────────
+  //
+  // Only `harnessSpec.resources` was read, so a box declared by the CASE reached no manifest — while the
+  // in-container `LocalDriver` refused that same declaration, correctly, since a host process cannot enforce
+  // one. A case declaring cpu/memory therefore could not run on this lane at all, and the container-task
+  // corpora declare one routinely. The case wins where it speaks: it is the more specific statement about
+  // this particular unit of work, and the harness spec is the default for everything it runs.
+  const cres = job.evalCase.resources;
+  const hres = {
+    ...(job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined),
+    ...(cres?.cpu !== undefined ? { cpu: cres.cpu } : {}),
+    ...(cres?.memoryMb !== undefined ? { memoryMb: cres.memoryMb } : {}),
+    ...(cres?.gpu !== undefined ? { gpu: cres.gpu } : {}),
+  };
   // Harness-declared GPUs win over the runtime binding's blanket default (same "harness resources win" rule as cpu/mem).
   const gpuCount = hres?.gpu ?? opts.gpu;
   const resourceReqs: Record<string, string> = {};
@@ -1675,7 +1690,15 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         // timestamps) — appended to the trace so the sealed trajectory keeps the orchestrator's account after
         // the Job is deleted in the finally below. Best-effort: a read miss just leaves the record shorter.
         result.trace = [...result.trace, ...(await this.infraEvents(api, name, ns, t0))];
-        return result;
+        // The image THIS lane placed, added to what the in-container driver could see — which is nothing,
+        // since it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
+        //
+        // From the REFERENCE, not yet from the pod: `status.containerStatuses[].imageID` carries the digest
+        // the kubelet actually pulled, which is an observation rather than an inference and strictly better
+        // for a mutable tag. Reading it is a separate API round trip on a path that is already deleting the
+        // Job, so it is left for the wave that gives this lane a PlacementReceipt; until then an unpinned tag
+        // is honestly `unresolved{lane_cannot_report}` rather than dishonestly `none`.
+        return mergePlacedImage(result, job, "the Kubernetes API");
       } finally {
         // On an aborted wait this finally is exactly the reclaim — the submitted Job is deleted, not left running.
         await api.deleteJob(name, ns);

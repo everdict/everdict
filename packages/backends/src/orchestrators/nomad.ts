@@ -77,6 +77,7 @@ import {
   SESSION_TASK,
   parseSessionComputeId,
 } from "./nomad-session.js";
+import { mergePlacedImage, withWorldProof } from "./placement-image.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -481,7 +482,7 @@ export function buildNomadJob(
     // this lane would hand to the agent along with the job.
     ...(verifierPayload !== undefined
       ? { EVERDICT_VERIFIER_JOB: verifierPayload }
-      : { EVERDICT_CASE_JOB: caseJobPayload(job) }),
+      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "nomad", job.evalCase.resources)) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     ...opts.secretEnv,
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
@@ -526,13 +527,19 @@ export function buildNomadJob(
                 ...(auth ? { auth } : {}),
               },
               Env: env,
-              // Harness-declared resources win (heavier harnesses get real bin-packing; starvation reads as infra).
+              // Harness-declared resources win over the runtime default (heavier harnesses get real bin-packing;
+              // starvation reads as infra) — and the CASE's own declaration wins over both, because it is the
+              // more specific statement about this unit of work. Only `harnessSpec` was read before, so a box
+              // the case declared reached no task while the in-container driver refused that same declaration:
+              // a case declaring cpu/memory could not run on this lane at all (arch-review 57 P1-high).
               Resources: {
                 CPU:
+                  job.evalCase.resources?.cpu ??
                   (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.cpu : undefined) ??
                   opts.cpuMhz ??
                   1000,
                 MemoryMB:
+                  job.evalCase.resources?.memoryMb ??
                   (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??
                   opts.memMb ??
                   1024,
@@ -942,7 +949,9 @@ export class NomadBackend
         ...result.trace,
         ...[...infra, ...nomadInfraEvents(detail.events, allocId, detail.stub?.NodeName, t0)].sort((a, b) => a.t - b.t),
       ];
-      return result;
+      // The image THIS lane placed, added to what the in-container driver could see — which is nothing, since
+      // it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
+      return mergePlacedImage(result, job, "the Nomad API");
     } catch (err) {
       // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
       if (options?.signal?.aborted) {

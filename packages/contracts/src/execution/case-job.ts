@@ -4,6 +4,7 @@ import { HarnessSpecSchema } from "../harness/harness-spec.js";
 import { ModelBindingSchema } from "../harness/model-spec.js";
 import { RegistryAuthSchema } from "../infra/image-ref.js";
 import { EvalCaseSchema } from "./eval-case.js";
+import { ProvisionedWorldProofSchema } from "./provisioned-world.js";
 
 // per-run judge model config (not a secret). The control plane decides it from workspace/suite policy and loads it into the job.
 // An inline judge grader (e.g. the WebVoyager preset) is judged with this model on the dispatch path. The provider 'key' is a secret (secretEnv).
@@ -144,6 +145,13 @@ export const CaseJobSchema = z.object({
   // ⚠️ It names the attempt that opened THIS job. A path that restamps `recordingGeneration` with another
   // attempt's number (a re-lease's mint) must drop or replace this together with it — the two are one
   // coordinate, and disagreeing halves address two different executions.
+  // ── WHAT THE PLACEMENT ENFORCED, TOLD TO THE LAYER INSIDE IT (arch-review 57 P1-high) ────────────
+  //
+  // Set by the backend that built the container, read by the driver running inside it. Absent on a bare host
+  // run, and absent for any axis the lane did not really constrain — `worldProofCovers` treats silence as
+  // "not enforced", so a partial proof cannot cover a full declaration. Claiming an axis this lane does not
+  // apply would be worse than the defect it fixes: the run would proceed in a world nobody provided.
+  worldProof: ProvisionedWorldProofSchema.optional(),
   attemptId: z.string().optional(),
   // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
   // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =

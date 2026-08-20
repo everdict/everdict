@@ -17,6 +17,34 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 57 P1-high. The managed lanes recorded the in-container driver's `NO_IMAGE` — true of that
+    // driver, false of the run — so two executions of a moved tag compared as the same world. Neutralizing
+    // the merge must go red, or provenance is back to describing the wrong layer.
+    name: "R57 — a managed result keeps the inner driver's silence about its image",
+    file: "packages/backends/src/orchestrators/placement-image.ts",
+    from: "  if (ref === undefined || result.execution === undefined) return result;",
+    to: "  if (true) return result;",
+    suite: ["--root", "packages/backends", "src/orchestrators/placement-image.counterexample.test.ts"],
+  },
+  {
+    // …and the half that makes the merge safe: the placement FILLS a gap, never overwrites. A driver that
+    // really pulled the image knows more than a placement can infer.
+    name: "R57 — the placement overwrites a driver that actually read the digest",
+    file: "packages/backends/src/orchestrators/placement-image.ts",
+    from: "  return { ...result, execution: withPlacementImage(result.execution, laneImageProvenance(ref, lane)) };",
+    to: "  return { ...result, execution: { ...result.execution, imageProvenance: laneImageProvenance(ref, lane) } };",
+    suite: ["--root", "packages/backends", "src/orchestrators/placement-image.counterexample.test.ts"],
+  },
+  {
+    // The world proof is CHECKED, not trusted. Accepting a declared box on the strength of a proof nobody
+    // verified is the same as running unenforced, with a receipt.
+    name: "R57 — a host driver accepts a declared world without checking the proof",
+    file: "packages/drivers/src/local.ts",
+    from: "    const covered = worldProofCovers(this.opts.worldProof, spec.resources, spec.network);",
+    to: "    const covered = true;",
+    suite: ["--root", "packages/drivers", "src/local-world-proof.counterexample.test.ts"],
+  },
+  {
     // arch-review 57 P0. The retry used to rebuild an authority from the row it was about to drive, which is
     // how a displaced replica adopted its successor's generation. Neutralizing the fence must go red, or the
     // worklist is back to carrying identity that any live token can be attached to.

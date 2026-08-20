@@ -13,8 +13,10 @@ import {
   type ExecResult,
   InternalError,
   NO_IMAGE,
+  type ProvisionedWorldProof,
   isDefaultNetwork,
   isEmptyResourceRequest,
+  worldProofCovers,
 } from "@everdict/contracts";
 import { chunkSinks, runSpawn, teeSinks } from "./spawn.js";
 
@@ -143,6 +145,11 @@ export interface LocalDriverOptions {
   // So a lane whose world is the container itself passes `root: "/"`, and with it `ownsRoot: false` — the
   // handle did not create that directory and must not remove it. Absent: a fresh temp directory, owned.
   root?: string;
+  // What the OUTER layer enforced about this container, if anything (arch-review 57 P1-high). A host process
+  // can enforce no cpu ceiling and no egress rule, so a declared world is refused here — unless the backend
+  // that built the box states it applied that exact declaration. Absent on a bare host run, which is why
+  // `everdict run` still refuses a case that declares a world it cannot provide.
+  worldProof?: ProvisionedWorldProof;
 }
 
 export class LocalDriver implements Driver {
@@ -173,7 +180,18 @@ export class LocalDriver implements Driver {
     // neither a cpu/memory ceiling nor an egress restriction. Accepting the declaration and ignoring it is
     // the failure this whole field exists to prevent — the case would run unlimited and online, and its
     // score would be filed as the answer to a question about a 2 GB offline box.
-    if (!isEmptyResourceRequest(spec.resources)) {
+    // ── UNLESS THE LAYER THAT MADE THE BOX SAYS IT ENFORCED IT (arch-review 57 P1-high) ─────────────
+    //
+    // On a managed lane this driver runs INSIDE a container the backend built, and that backend is the only
+    // layer that could have applied the declaration. Before the proof existed there was no way to say so, so
+    // a declared world reached here and was refused — after the container was already up. A case declaring
+    // cpu/memory could not run managed at all, and the container-task corpora declare one routinely.
+    //
+    // The proof is checked, not trusted: `worldProofCovers` requires the SAME declaration on every axis the
+    // case asked about. A proof silent on one axis does not cover it, which keeps partial enforcement from
+    // reading as enforcement — and with no proof at all the refusals below stand exactly as they were.
+    const covered = worldProofCovers(this.opts.worldProof, spec.resources, spec.network);
+    if (!covered && !isEmptyResourceRequest(spec.resources)) {
       throw new BadRequestError(
         "BAD_REQUEST",
         { resources: spec.resources },
@@ -181,7 +199,7 @@ export class LocalDriver implements Driver {
           "Route it to a container runtime (DockerDriver / a registered nomad·k8s runtime), or drop the declaration.",
       );
     }
-    if (!isDefaultNetwork(spec.network)) {
+    if (!covered && !isDefaultNetwork(spec.network)) {
       throw new BadRequestError(
         "BAD_REQUEST",
         { network: spec.network?.mode },

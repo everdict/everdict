@@ -185,7 +185,14 @@ export async function runCaseJob(
           ...(opts.mounts ? { mounts: opts.mounts } : {}),
           ...(registryAuths.length > 0 ? { registryAuths } : {}),
         })
-      : new LocalDriver({ echo: true })); // in-job: tee harness output to the job log (live tail feed)
+      : new LocalDriver({
+          echo: true, // in-job: tee harness output to the job log (live tail feed)
+          // What the backend that built THIS container says it enforced (arch-review 57 P1-high). A host
+          // process can enforce no cpu ceiling, so a declared world is refused here — unless the layer that
+          // made the box states it applied that exact declaration, which the driver then checks. Absent on a
+          // bare host run, so `everdict run` still refuses a world it cannot provide.
+          ...(job.worldProof ? { worldProof: job.worldProof } : {}),
+        }));
   return runCase(job.evalCase, {
     // Job-level judge env rides every exec (incl. an explicitly injected driver — DockerBackend) via the wrapper.
     driver: Object.keys(jobEnv).length > 0 ? withJobEnv(baseDriver, jobEnv) : baseDriver,
