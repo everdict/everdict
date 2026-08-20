@@ -30,8 +30,12 @@ const MUTATIONS = [
     // …and the batch lane, which had no activation at all until the merge forced a supplier to answer both.
     name: "R58 W2 — the batch lane creates its container without re-proving the reservation",
     file: "packages/application-control/src/scorecard/in-process-batch-driver.ts",
+    // The line goes ENTIRELY, and the suite asserts the supplier reaches `commit.activateWork`. The first
+    // draft substituted a literal `activate: async () => ({kind:"activate"})`, which still contains the token
+    // a source read looks for — a mutation that leaves the asserted-on thing in place is not a mutation, and
+    // the runner said so before a human did.
     from: "            activate: (work: RuntimeWorkRef) => this.commit.activateWork(work),",
-    to: '            activate: async () => ({ kind: "activate" }),',
+    to: "",
     suite: ["--root", "packages/application-control", "src/scorecard/temporal-work-handle.counterexample.test.ts"],
   },
   {
@@ -210,8 +214,8 @@ const MUTATIONS = [
     // conditional transition is decoration again.
     name: "R58 — the activation transition loses its production producer",
     file: "packages/application-control/src/run/run-service.ts",
-    from: "        onActivate: (work) => this.activateWork(id, work),",
-    to: "",
+    from: "          activate: (work) => this.activateWork(id, work),",
+    to: '          activate: async () => ({ kind: "activate" }),',
     suite: ["--root", "packages/application-control", "src/run/activation-supplier.counterexample.test.ts"],
   },
   {
@@ -275,7 +279,7 @@ const MUTATIONS = [
   {
     name: "Wave A — the reservation moves back behind the effect",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "    if (job.runId !== undefined) await requireReservation(job, work, options?.onReserved);",
+    from: "    if (job.runId !== undefined) await requireReservation(job, work, options?.authority);",
     to: "    // MUTATED: identity after effect",
     suite: ["--root", "packages/backends", "src/orchestrators/dispatch-intent.counterexample.test.ts"],
   },
@@ -293,11 +297,11 @@ const MUTATIONS = [
     // …and the other half of the same protocol: a tracked run placed with nobody recording where.
     name: "Phase 1 — a tracked run is placed with no reservation hook at all",
     file: "packages/backends/src/backend.ts",
-    from: "  if (!onReserved)",
+    from: "  if (!authority)",
     // Permissive, not merely disabled: simply removing the throw left `await onReserved(work)` to raise a
     // TypeError, which aborted the dispatch anyway and kept the suite green over a hole. A mutation has to
     // produce the DEFECT (a tracked run placed with nobody recording it), not a different failure.
-    to: '  if (!onReserved) return { attemptId: "unrecorded", work, persistedAt: "1970-01-01T00:00:00.000Z" };\n  if (false)',
+    to: '  if (!authority) return { attemptId: "unrecorded", work, persistedAt: "1970-01-01T00:00:00.000Z" };\n  if (false)',
     suite: ["--root", "packages/backends", "src/orchestrators/managed-conformance.test.ts"],
   },
   {
