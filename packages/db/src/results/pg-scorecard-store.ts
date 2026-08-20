@@ -401,7 +401,11 @@ export class PgScorecardStore implements ScorecardStore {
     // unknown — which `COALESCE(..., 0)` states.
     if (guard?.expectExportRevisionBelow !== undefined) {
       i++;
-      guardSql += ` AND COALESCE((export->>'scoringRevision')::int, 0) < $${i}`;
+      // `sink_export`, not `export`: the RECORD field is `export` and the COLUMN is not (mig 0048 says so in
+      // its own comment). Naming the field here made this the one statement the guard exists to protect
+      // fail outright — `column "export" does not exist` — so the reader-facing projection never advanced
+      // while the historical protocol underneath it was perfectly correct (arch-review 58).
+      guardSql += ` AND COALESCE((sink_export->>'scoringRevision')::int, 0) < $${i}`;
       vals.push(guard.expectExportRevisionBelow);
     }
     // THE FENCE the driver proves on every write that drives this batch (mig 0166).
