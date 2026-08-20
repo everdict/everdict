@@ -17,6 +17,47 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P0. The verifier's scores travelled down the CASE result pipe under a cast, and the
+    // reader on the other side runs `CaseResultSchema.parse()` — where `snapshot` is required and a verifier
+    // has none. Every verifier verdict died at that parse. Neutralizing the separation must go red, or the
+    // two documents are back to sharing a sentinel.
+    name: "R58 — a verifier result is printed as a case result",
+    file: "packages/contracts/src/execution/verifier-result-wire.ts",
+    from: 'export const VERIFIER_RESULT_SENTINEL = "__EVERDICT_VERIFIER_RESULT__ ";',
+    to: 'export const VERIFIER_RESULT_SENTINEL = "__EVERDICT_RESULT__ ";',
+    suite: ["--root", "packages/contracts", "src/execution/verifier-result-wire.counterexample.test.ts"],
+  },
+  {
+    // arch-review 58 P0. `active` was added between `reserved` and the external object's birth without being
+    // added to the transition table beside it. Neutralizing it must go red, or a managed dispatch is back to
+    // walking reserved → active → (executing REFUSED) → committed with no phase saying it ran.
+    name: "R58 — an activated attempt may not report that it started",
+    file: "packages/contracts/src/records/execution-attempt.ts",
+    from: 'export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved", "active"];',
+    to: 'export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved"];',
+    suite: ["--root", "packages/application-control", "src/ports/executing-after-active.counterexample.test.ts"],
+  },
+  {
+    // arch-review 58 P0. The activation state machine shipped with no production producer, so every managed
+    // dispatch still spent a reservation nothing had re-checked. Removing the supplier must go red, or the
+    // conditional transition is decoration again.
+    name: "R58 — the activation transition loses its production producer",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: "        onActivate: (work) => this.activateWork(id, work),",
+    to: "",
+    suite: ["--root", "packages/application-control", "src/run/activation-supplier.counterexample.test.ts"],
+  },
+  {
+    // arch-review 58 P1-high. The monotonic projection guard named `export`, which is no column of
+    // `everdict_scorecards` (the column is `sink_export`), so the one write it exists to protect failed
+    // outright. Neutralizing it must go red, or a guard clause is back to being unchecked SQL.
+    name: "R58 — the export-revision guard names the TypeScript field instead of the column",
+    file: "packages/db/src/results/pg-scorecard-store.ts",
+    from: "COALESCE((sink_export->>'scoringRevision')::int, 0)",
+    to: "COALESCE((export->>'scoringRevision')::int, 0)",
+    suite: ["--root", "packages/db", "src/results/export-guard-column.counterexample.test.ts"],
+  },
+  {
     // arch-review 57 P1-high. The managed lanes recorded the in-container driver's `NO_IMAGE` — true of that
     // driver, false of the run — so two executions of a moved tag compared as the same world. Neutralizing
     // the merge must go red, or provenance is back to describing the wrong layer.

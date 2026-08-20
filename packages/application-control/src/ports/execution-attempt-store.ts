@@ -1,6 +1,7 @@
 import {
   type ActivationDecision,
   ConflictError,
+  EXECUTING_PREDECESSOR_STATES,
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
   NotFoundError,
@@ -218,9 +219,11 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     const current = this.attempts.get(attemptId);
     if (!current) return false;
     if (isTerminalAttemptState(current.state)) return false; // first terminal wins
-    // …from `created` OR `reserved` (arch-review 55, Wave 1): a managed dispatch authorizes its work first,
-    // so the row it starts executing from is the one the reservation transitioned.
-    if (to === "executing" && current.state !== "created" && current.state !== "reserved") return false;
+    // …from `created`, `reserved` OR `active` (arch-review 55 Wave 1, widened by 58): a managed dispatch
+    // authorizes its work first and then re-presents that authorization at the object's birth, so the row it
+    // starts executing from is whichever of those three the lane last transitioned. The set is owned by
+    // contracts because the Pg twin arbitrates on the same question.
+    if (to === "executing" && !EXECUTING_PREDECESSOR_STATES.includes(current.state)) return false;
     if (to === "created") return false; // an attempt is opened into "created"; nothing transitions back to it
     this.attempts.set(attemptId, {
       ...current,

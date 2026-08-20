@@ -1,4 +1,5 @@
 import {
+  type ActivationDecision,
   AppError,
   BadRequestError,
   type CaseFsFilePayload,
@@ -1147,6 +1148,11 @@ export class RunService {
         // restart, a supersede from another replica — can stop THAT job instead of every job of this case.
         // Awaited — a run whose handle cannot be recorded must not place compute (arch-review 53, Wave A).
         onReserved: (work) => this.reserveWork(id, work),
+        // …and the proof is re-presented at the seam where the object is actually created (arch-review 57
+        // P0). Supplying it is what makes the activation transition a protocol rather than an optional hook
+        // nobody passes — the state machine existed for a wave with no producer, so every managed dispatch
+        // still spent a reservation that nothing had re-checked (arch-review 58).
+        onActivate: (work) => this.activateWork(id, work),
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;
@@ -1305,6 +1311,17 @@ export class RunService {
   // alike from here and are not: a lane with no ledger (which must not be placing managed work at all) and a
   // run whose attempt row was never opened. Both resolved, and a resolved reservation is what licenses the
   // cluster object. Both are refusals now.
+  // The reservation, re-presented. Answers a DECISION rather than throwing: a refusal is the ordinary
+  // outcome when a cancellation got there first, and the lane turns it into an aborted dispatch. A run with
+  // no ledger answers `activate` — there is no reservation to re-check, and refusing would make the ledger a
+  // prerequisite for dispatching rather than a record of it.
+  private async activateWork(id: string, work: RuntimeWorkRef): Promise<ActivationDecision> {
+    const attempts = this.deps.attempts;
+    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    if (!attempts || attemptId === undefined) return { kind: "activate" };
+    return await attempts.activateWork(attemptId, work);
+  }
+
   private async reserveWork(id: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     const attempts = this.deps.attempts;
     const attemptId = this.attemptRow.get(`evd-run-${id}`);

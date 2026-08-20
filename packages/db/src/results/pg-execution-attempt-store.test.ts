@@ -1,4 +1,5 @@
 import {
+  EXECUTING_PREDECESSOR_STATES,
   OPEN_RUN_STATUSES,
   OPEN_SCORECARD_STATUSES,
   TERMINAL_ATTEMPT_STATES,
@@ -102,10 +103,16 @@ describe("PgExecutionAttemptStore", () => {
     // rather than in a read-then-write, and a hand-copied list turns "the vocabulary grew" into a test failure
     // that says nothing (arch-review 57 added `revoked`, which is terminal for the same reason the others are).
     expect(text).toContain(`state NOT IN (${TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ")})`);
-    // …and `executing` is reachable only from `created`, so a late "compute started" cannot rewind a row.
-    // `executing` may follow a RESERVATION as well as a bare `created` (arch-review 55, Wave 1): a managed
-    // dispatch authorizes its work first, so the row it starts from is the one the reservation transitioned.
-    expect(text).toContain("($2 <> 'executing' OR state IN ('created', 'reserved'))");
+    // …and `executing` is reachable only from the states that PRECEDE running, so a late "compute started"
+    // cannot rewind a row. Derived from the constant for the same reason as the line above — and this file is
+    // where that lesson had to be learnt twice: the terminal set was already read from contracts while the
+    // predecessor set right beside it was spelled by hand, so when arch-review 58 added `active` the twins
+    // drifted and this assertion pinned the drift rather than catching it.
+    expect(text).toContain(
+      `($2 <> 'executing' OR state IN (${EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ")}))`,
+    );
+    // The set is a WHITELIST, not a formality: a terminal state may never appear in it.
+    expect(EXECUTING_PREDECESSOR_STATES.some((s) => TERMINAL_ATTEMPT_STATES.includes(s))).toBe(false);
     expect(calls[0]?.params).toEqual(["evd-run-1#g1", "committed", "run-1", null, null, null]);
   });
 

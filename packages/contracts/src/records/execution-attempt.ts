@@ -70,6 +70,15 @@ export function isTerminalAttemptState(state: ExecutionAttemptState): boolean {
   return TERMINAL_ATTEMPT_STATES.includes(state);
 }
 
+// The states an attempt may report `executing` FROM — written once, for the same reason as the set above.
+// `active` joined this list late (arch-review 58): the state was added between `reserved` and the external
+// object's birth without being added to the transition table beside it, and nothing supplied `onActivate`,
+// so no attempt ever occupied it and the omission cost nothing. The moment a producer existed, every managed
+// dispatch walked `reserved → active → (executing REFUSED) → committed` — the run still finished, and the
+// ledger recorded work that was authorized and then settled with no phase saying it ran.
+// A new state is not shipped until every guard that mentions its NEIGHBOURS has been re-read.
+export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved", "active"];
+
 // ONE PHYSICAL EXECUTION, as the ledger holds it.
 export const ExecutionAttemptRecordSchema = z.object({
   // `<executionId>#g<generation>` — the SAME spelling the receipt and the sealed trajectory use (attemptIdOf).

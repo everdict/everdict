@@ -2,6 +2,7 @@ import type { ExecutionAttemptStore, OpenAttemptInput } from "@everdict/applicat
 import {
   type ActivationDecision,
   ConflictError,
+  EXECUTING_PREDECESSOR_STATES,
   type ExecutionAttemptRecord,
   ExecutionAttemptRecordSchema,
   type ExecutionAttemptState,
@@ -62,6 +63,9 @@ function toAttempt(row: AttemptRow): ExecutionAttemptRecord {
 }
 
 const TERMINAL_LIST = TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ");
+// Hand-enumerating this beside the in-memory twin is how the two drifted the last time a state was added, so
+// both read the one list in contracts (arch-review 58).
+const EXECUTING_FROM_LIST = EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ");
 // ── THE PARENT-AUTHORITY VOCABULARY, GENERATED (arch-review 56, Wave A) ─────────────────────────────
 //
 // The reservation's parent condition was hand-written as `NOT IN ('succeeded', 'failed')`, which is fail-OPEN:
@@ -180,7 +184,7 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
        WHERE attempt_id = $1
          AND state NOT IN (${TERMINAL_LIST})
          AND $2 <> 'created'
-         AND ($2 <> 'executing' OR state IN ('created', 'reserved'))
+         AND ($2 <> 'executing' OR state IN (${EXECUTING_FROM_LIST}))
        RETURNING attempt_id`,
       [
         attemptId,
