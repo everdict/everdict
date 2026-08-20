@@ -1,4 +1,6 @@
+import { gunzipSync, gzipSync } from "node:zlib";
 import { z } from "zod";
+import { BadRequestError } from "../errors.js";
 
 // ── OPERATION CARDINALITY EQUALS DECISION CARDINALITY (arch-review 53, Wave C) ───────────────────────
 //
@@ -57,9 +59,58 @@ export type SettlementRef = z.infer<typeof SettlementRefSchema>;
 // spelled in two of those three and silently missing from the type of the third.
 export const ExportPayloadSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("frozen"), key: z.string().min(1) }),
+  // ── THE SAME BYTES, A DIFFERENT HOME (arch-review 57 P1) ─────────────────────────────────────────
+  //
+  // An install with no object store — the ordinary self-hosted shape — could previously only plan
+  // `unfrozen`, and an operation in that state is one whose bytes NOBODY holds: the drain re-reads the
+  // record and compares, which converges exactly until something re-scores and then fails permanently. A
+  // durable operation existing is not the same as it durably holding what it must publish.
+  //
+  // So the payload travels ON the operation instead, compressed. Not a weaker freeze — the same bytes,
+  // verified by the same digest at drain time; only their address is different.
+  z.object({
+    kind: z.literal("inline"),
+    encoding: z.literal("gzip+base64"),
+    bytes: z.string().min(1),
+    // WHY these bytes are here rather than in a store. arch-review 55 established that a failure to freeze
+    // must be recorded and not look like an absence, and that is still true when the fallback works: an
+    // operator reading a settle that inlined its payload should learn whether this deployment has no object
+    // store at all or whether one blipped during the settle. Those call for different actions.
+    reason: z.string().min(1),
+  }),
+  // LEGACY READ ONLY. Rows written before the inline variant existed (mig 0188's backfill, and settles from
+  // installs with no store) still carry this, and the drain still knows how to take the weaker path for
+  // them. Nothing PLANS it any more: a settlement that can neither freeze nor inline refuses at plan time,
+  // where the operator can act, instead of at drain time where the batch is already recorded as pending.
   z.object({ kind: z.literal("unfrozen"), reason: z.string().min(1) }),
 ]);
 export type ExportPayloadSource = z.infer<typeof ExportPayloadSourceSchema>;
+
+// The bound on what may travel on an operation row. An outbox row is not an object store: past this, the
+// honest answer is that this deployment cannot publish this settlement, said where it is actionable.
+export const INLINE_EXPORT_PAYLOAD_CAP_BYTES = 512 * 1024;
+
+// Read the bytes back. Same shape in, same shape out — the digest guard at drain time is what makes this
+// safe, and it is applied to an inline payload exactly as it is to a frozen one.
+export function readExportPayload(source: Extract<ExportPayloadSource, { kind: "inline" }>): unknown {
+  return JSON.parse(gunzipSync(Buffer.from(source.bytes, "base64")).toString("utf8"));
+}
+
+// …and write them. Throws when the result would exceed the cap, which is the plan-time refusal: an operation
+// that cannot hold its own bytes must not be planned.
+export function inlineExportPayload(
+  payload: unknown,
+  reason: string,
+): Extract<ExportPayloadSource, { kind: "inline" }> {
+  const bytes = gzipSync(Buffer.from(JSON.stringify(payload), "utf8")).toString("base64");
+  if (bytes.length > INLINE_EXPORT_PAYLOAD_CAP_BYTES)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { bytes: bytes.length, cap: INLINE_EXPORT_PAYLOAD_CAP_BYTES },
+      `this settlement's export payload is too large to travel on the operation (${reason}), so the export cannot be published from this deployment — wire an object store (S3/MinIO) for batches this size.`,
+    );
+  return { kind: "inline", encoding: "gzip+base64", bytes, reason };
+}
 
 export const PublicationEffectSchema = z.discriminatedUnion("kind", [
   z.object({

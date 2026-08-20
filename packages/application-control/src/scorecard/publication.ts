@@ -5,7 +5,7 @@ import type {
   ScorecardExport,
   ScorecardRecord,
 } from "@everdict/contracts";
-import { InternalError, publicationOperationId, readOrUnknown } from "@everdict/contracts";
+import { InternalError, publicationOperationId, readExportPayload, readOrUnknown } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
@@ -360,6 +360,26 @@ async function performEffects(
         continue;
       }
       payload = frozen as CaseResult[];
+    } else if (effect.payload.kind === "inline") {
+      // THE OPERATION CARRIED ITS OWN BYTES (arch-review 57 P1). No store was wired when this settled, so the
+      // payload rode the operation rather than being planned as bytes nobody holds. The digest guard below is
+      // the same one a frozen object gets — the address changed, not the verification.
+      let carried: unknown;
+      try {
+        carried = readExportPayload(effect.payload);
+      } catch (err) {
+        // PERMANENT: the bytes on the row cannot be decoded, and no retry re-encodes them.
+        fail(
+          `the inline export payload could not be decoded: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
+        continue;
+      }
+      if (contentDigest(carried) !== effect.payloadDigest) {
+        fail("the inline export payload does not digest to the planned payload", true);
+        continue;
+      }
+      payload = carried as CaseResult[];
     } else if (contentDigest(results) !== effect.payloadDigest) {
       // THE WEAKER PATH, TAKEN OUT LOUD (arch-review 55, Wave 9). The settlement could not freeze its bytes —
       // mig 0188's backfilled rows, an install with no object store, or a PUT that failed during the settle —

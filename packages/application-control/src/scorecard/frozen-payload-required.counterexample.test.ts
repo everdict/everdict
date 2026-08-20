@@ -93,8 +93,11 @@ describe("[R55 WAVE-9 COUNTEREXAMPLE #7 — CLOSED] an export effect states wher
       staged.payload,
       "a settlement that could not freeze its bytes produced an operation indistinguishable from a legacy one",
     ).toBeTruthy();
-    expect(staged.payload?.kind).toBe("unfrozen");
-    if (staged.payload?.kind !== "unfrozen") throw new Error("expected an unfrozen payload");
+    // `inline` since arch-review 57: the bytes now RIDE the operation rather than being planned as bytes
+    // nobody holds. This counterexample's property is untouched and strictly better served — the failure is
+    // still stated, with its reason, instead of looking like a row from before payload freezing existed.
+    expect(staged.payload?.kind).toBe("inline");
+    if (staged.payload?.kind !== "inline") throw new Error("expected an inline payload");
     expect(staged.payload.reason, "the incident was recorded as an absence").toMatch(/s3 down/);
   });
 

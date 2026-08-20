@@ -8,6 +8,7 @@ import {
   type VerdictPolicy,
   caseKeyAddress,
   caseKeyOf,
+  inlineExportPayload,
   measuredScores,
 } from "@everdict/contracts";
 import type { ExportPayloadSource } from "@everdict/contracts";
@@ -253,10 +254,13 @@ export async function stageAnalysis(
   // No store at all: nothing is frozen and nothing can be. A caller that asked for a payload gets the named
   // weaker state rather than silence — this is the deployment shape (no S3/MinIO wired) that the optional
   // field used to hide behind the legacy explanation.
+  // No store at all — the ordinary self-hosted shape. The payload travels ON the operation instead of being
+  // planned as bytes nobody holds (arch-review 57 P1); past the cap `inlineExportPayload` throws, which is the
+  // plan-time refusal rather than an export that can never converge.
   if (!deps.artifacts)
     return results === undefined
       ? {}
-      : { payload: { kind: "unfrozen", reason: "no artifact store is wired here — nothing can be frozen" } };
+      : { payload: inlineExportPayload(results, "no artifact store is wired here — nothing can be frozen") };
   const out: AnalysisOffload = {};
   try {
     const key = analysisPassKey(id, passId);
@@ -279,10 +283,15 @@ export async function stageAnalysis(
       await deps.artifacts.put(key, Buffer.from(JSON.stringify(results)), "application/json");
       out.payload = { kind: "frozen", key };
     } catch (err) {
-      out.payload = {
-        kind: "unfrozen",
-        reason: `the export payload could not be frozen: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      // An object-store blip during a settle is not a reason to plan an unverifiable export: the same bytes
+      // ride the operation instead. The incident still travels — an operator learns whether this deployment
+      // has no store or whether one failed, which call for different actions. `inlineExportPayload` throws
+      // past the cap, and that refusal propagates: a settlement that can neither freeze nor carry its payload
+      // must not be planned at all.
+      out.payload = inlineExportPayload(
+        results,
+        `the export payload could not be frozen: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   return out;
 }
