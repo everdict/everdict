@@ -1,5 +1,5 @@
-import type { CaseJob, CaseResult, Score, VerifierJob } from "@everdict/contracts";
-import { verifierPlanOf } from "@everdict/domain";
+import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
+import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -23,7 +23,9 @@ export interface VerifierPassDeps {
   dispatch: (job: CaseJob) => Promise<CaseResult>;
   // Run the judging half somewhere the agent was not. Absent = this deployment has no second lane, which is a
   // reason to REFUSE the case (the dispatch below already does), never to grade it in the agent's container.
-  dispatchVerifier?: (job: VerifierJob) => Promise<Score[]>;
+  // Answers the INVOCATION, not bare numbers (arch-review 57 P1) — which procedure ran, what it read, and
+  // where. `verifierReceiptOf` seals that into the receipt this pass attaches to the result.
+  dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
 }
 
 // The verdict a case owes but did not get. `unmeasured` rather than a zero, for the reason the reward-file
@@ -97,10 +99,24 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     timeoutSec: job.evalCase.timeoutSec,
   };
 
-  const verdict = await deps
-    .dispatchVerifier(verifierJob)
-    .catch((err: unknown): Score[] => [
-      unmeasuredVerdict("grader_error", err instanceof Error ? err.message : String(err)),
-    ]);
-  return { ...result, scores: [...(result.scores ?? []), ...verdict] };
+  const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
+  if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores)
+    return owed("grader_error", invocation instanceof Error ? invocation.message : String(invocation));
+
+  // ── THE VERDICT AND WHAT PRODUCED IT, TOGETHER (arch-review 57 P1) ──────────────────────────────
+  //
+  // The scores used to be appended alone, so the record could report `tests_pass` and not say which
+  // procedure read which workspace in which runtime to get it. `verifierReceiptOf` seals the invocation —
+  // digesting the verdict plane and stating whether the runtime identity is there — and the receipt rides
+  // the result beside the scores it explains.
+  //
+  // A receipt that cannot be sealed (an empty verdict) is `unmeasured`, not a silently dropped receipt: a
+  // case that was never judged must not read as one that was.
+  let receipt: VerifierReceipt;
+  try {
+    receipt = verifierReceiptOf(invocation as VerifierInvocation);
+  } catch (err) {
+    return owed("grader_error", err instanceof Error ? err.message : String(err));
+  }
+  return { ...result, scores: [...(result.scores ?? []), ...receipt.scores], verifier: receipt };
 }

@@ -3,6 +3,9 @@ import { RegistryAuthSchema } from "../infra/image-ref.js";
 import { ResourceRequestSchema } from "../infra/world.js";
 import { RepoSnapshotSchema } from "./environment.js";
 import { GraderSpecSchema } from "./eval-case.js";
+import { ScoreSchema } from "./grader.js";
+import { ImageProvenanceSchema } from "./image-provenance.js";
+import { RuntimeWorkRefSchema } from "./runtime-work-ref.js";
 
 // ── THE JUDGING HALF, AS A DISPATCHABLE UNIT (arch-review 56, Wave I) ────────────────────────────────
 //
@@ -85,6 +88,26 @@ export type VerifierJob = z.infer<typeof VerifierJobSchema>;
 // verifier job is BUILT from the private material, and it goes to a container the agent was never in. What
 // keeps that true is that nothing constructs one except `withVerifierPass`, and nothing else ever sets
 // `EVERDICT_VERIFIER_JOB`.
+// ── WHAT THE JUDGING HALF REPORTS BACK (arch-review 57 P1) ───────────────────────────────────────────
+//
+// A lane used to answer `Score[]`, and those numbers were appended to the case result with nothing attached.
+// Everything that makes a verdict defensible — which procedure, reading which workspace, in which runtime —
+// is known at the invocation and was discarded one frame later, so a replay could say `tests_pass` was 1 and
+// not say what was run to get it (rule `protocol` L3: provenance is born at the source).
+//
+// The wire shape lives here because a backend produces it; `verifierReceiptOf` (@everdict/domain) is what
+// turns it into the sealed receipt, since digesting is domain work.
+export const VerifierInvocationSchema = z.object({
+  planDigest: z.string().min(1),
+  workspaceDigest: z.string().min(1),
+  // WHERE it ran. Absent only on a lane that places nothing it can name.
+  work: RuntimeWorkRefSchema.optional(),
+  // …and in WHICH WORLD, three-valued as everywhere else.
+  imageProvenance: ImageProvenanceSchema.optional(),
+  scores: z.array(ScoreSchema),
+});
+export type VerifierInvocation = z.infer<typeof VerifierInvocationSchema>;
+
 export function verifierJobPayload(job: VerifierJob): string {
   return Buffer.from(JSON.stringify(job)).toString("base64");
 }

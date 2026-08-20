@@ -60,6 +60,14 @@ const agentResult = (): CaseResult =>
   }) as unknown as CaseResult;
 
 const VERDICT: Score[] = [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true } as Score];
+// A lane answers the INVOCATION now, not bare numbers (arch-review 57 P1) — which procedure ran and what it
+// read travel with the verdict. Built once here so these fixtures state the same thing a real lane does; a
+// fake that returned only scores would describe a call the production port no longer has.
+const INVOCATION = {
+  planDigest: "sha256:plan",
+  workspaceDigest: "sha256:workspace",
+  scores: VERDICT,
+};
 
 // RED as of a09cf2c3, observed:
 //   Cannot find module './verifier-pass.js'
@@ -77,7 +85,7 @@ describe("[R56 WAVE-K COUNTEREXAMPLE #11 — CLOSED] a case whose verdict is pri
       },
       dispatchVerifier: async (job) => {
         verified.push(job);
-        return VERDICT;
+        return INVOCATION;
       },
     });
 
@@ -102,7 +110,7 @@ describe("[R56 WAVE-K COUNTEREXAMPLE #11 — CLOSED] a case whose verdict is pri
       dispatch: async () => ({ ...agentResult(), caseId: "c2" }) as CaseResult,
       dispatchVerifier: async () => {
         verifierCalls += 1;
-        return VERDICT;
+        return INVOCATION;
       },
     });
     expect(verifierCalls, "an ordinary case was charged a verifier unit it does not need").toBe(0);
@@ -134,7 +142,7 @@ describe("[R56 WAVE-K COUNTEREXAMPLE #11 — CLOSED] a case whose verdict is pri
       dispatch: async () => ({ ...agentResult(), snapshot: { kind: "prompt", output: "hi" } }) as unknown as CaseResult,
       dispatchVerifier: async () => {
         verifierCalls += 1;
-        return VERDICT;
+        return INVOCATION;
       },
     });
     expect(verifierCalls).toBe(0);

@@ -11,6 +11,7 @@ import {
   type RuntimeWorkRef,
   type Score,
   type TraceEvent,
+  type VerifierInvocation,
   type VerifierJob,
   type WorkPresence,
 } from "@everdict/contracts";
@@ -180,7 +181,10 @@ export interface ManagedWorkControl {
 // Separate from `Backend` because a lane may legitimately not have it (a self-hosted runner grades in place by
 // design), and a caller narrows with `isVerifierDispatchable` rather than feature-detecting a method.
 export interface VerifierDispatchable {
-  dispatchVerifier(job: VerifierJob): Promise<Score[]>;
+  // Answers the INVOCATION, not bare numbers (arch-review 57 P1). A lane knows which procedure it ran, which
+  // workspace it read, where it ran and in which world; answering `Score[]` threw all of that away one frame
+  // from where it was known, so a replay could report a verdict and not what produced it.
+  dispatchVerifier(job: VerifierJob): Promise<VerifierInvocation>;
 }
 
 export function isVerifierDispatchable(backend: Backend): backend is Backend & VerifierDispatchable {

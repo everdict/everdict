@@ -8,6 +8,7 @@ import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
 import { MetricAuthoritySchema } from "./verdict-policy.js";
+import { VerifierReceiptSchema } from "./verifier-receipt-record.js";
 
 // Grader spec: id + optional config (e.g. tests-pass's { cmd }).
 // The agent reconstructs a Grader instance from this spec.
@@ -287,6 +288,13 @@ export const CaseResultSchema = z.object({
   // Evidence extracted from a pulled trace (mapping evidence slots) — the carrier that brings CUSTOM named slots
   // to the judges (GradeContext.evidence); the fixed slots also synthesize the browser snapshot above.
   evidence: TraceEvidenceSchema.optional(),
+  // ── WHAT PRODUCED THE VERIFIER'S HALF OF THIS VERDICT (arch-review 57 P1) ────────────────────────
+  //
+  // The deciding scores used to arrive alone, so the record could report `tests_pass` and not say which
+  // procedure read which workspace in which runtime to reach it. Sealed by `verifierReceiptOf`
+  // (@everdict/domain) at the invocation, which is where all of it is known. Absent on a case with no
+  // private verifier — most of them — and on a lane that could not judge, which says so as `unmeasured`.
+  verifier: VerifierReceiptSchema.optional(),
   // The platform trace this result was scored FROM (pull-ingest / a topology harness whose trace is pulled).
   // Carried so the judged result can point back at the evidence it judged — the export writes a link to it
   // rather than assuming its own external id addresses the same place.

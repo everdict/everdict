@@ -1,5 +1,10 @@
-import { BadRequestError, type ImageProvenance, type RuntimeWorkRef, type Score } from "@everdict/contracts";
+import { BadRequestError, type VerifierInvocation } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
+
+// The shape a lane REPORTS is declared once, in the wire contract a backend produces (`VerifierInvocation`).
+// Re-declaring it here would be the same document spelled twice, which is how the next field lands in one of
+// them (rule `protocol` L3).
+export type { VerifierInvocation };
 
 // ── A VERDICT CARRIES WHAT PRODUCED IT (arch-review 57 P1) ───────────────────────────────────────────
 //
@@ -14,20 +19,6 @@ import { contentDigest } from "../provenance/content-digest.js";
 // the image it placed. None of it was joined to the score, so a replay could say `tests_pass` was 1 and not
 // say what was run to get it — and rule `protocol` L3 is precisely that provenance is born at the source
 // rather than re-derived downstream from whatever the registry holds later.
-export interface VerifierInvocation {
-  // WHICH PROCEDURE, by content. The same digest the plan was sealed under, so a replay can compare the
-  // thing that judged it then with the thing in front of it now.
-  planDigest: string;
-  // WHAT IT READ. The agent's workspace as the environment recorded it.
-  workspaceDigest: string;
-  // WHERE it ran, when the lane can say. Absent on a lane that places nothing it can name.
-  work?: RuntimeWorkRef;
-  // …and in WHICH WORLD. Three-valued as everywhere else: `none` is a positive claim, `unresolved` is "we
-  // could not find out", and the two are not the same statement.
-  imageProvenance?: ImageProvenance;
-  scores: readonly Score[];
-}
-
 export interface VerifierReceipt extends VerifierInvocation {
   // The verdict, by content. A record whose scores no longer digest to this is not the verdict this
   // invocation reached, whatever the numbers say.

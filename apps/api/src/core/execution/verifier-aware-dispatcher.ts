@@ -1,6 +1,6 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
 import { withVerifierPass } from "@everdict/application-control";
-import type { CaseJob, CaseResult, Score, VerifierJob } from "@everdict/contracts";
+import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 
 // ── THE CASE'S TWO HALVES, AT THE DISPATCH SEAM (arch-review 56, Wave K) ─────────────────────────────
 //
@@ -18,7 +18,7 @@ import type { CaseJob, CaseResult, Score, VerifierJob } from "@everdict/contract
 export class VerifierAwareDispatcher implements Dispatcher {
   constructor(
     private readonly inner: Dispatcher,
-    private readonly dispatchVerifier?: (job: VerifierJob) => Promise<Score[]>,
+    private readonly dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>,
   ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {

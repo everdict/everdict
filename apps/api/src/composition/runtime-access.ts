@@ -29,6 +29,7 @@ import type {
   RuntimeWorkRef,
   Score,
   TraceEvent,
+  VerifierInvocation,
   VerifierJob,
   WorkPresence,
 } from "@everdict/contracts";
@@ -343,8 +344,8 @@ export function buildRuntimeAccess(deps: {
   // refusal becomes a second dispatch instead of a dead end. A runtime that cannot do it answers by NOT being
   // wired — `withVerifierPass` then records the verdict as `unmeasured`, which is the honest reading of "this
   // deployment cannot judge this case away from its agent".
-  const dispatchVerifier = async (job: VerifierJob): Promise<Score[]> => {
-    let scores: Score[] | undefined;
+  const dispatchVerifier = async (job: VerifierJob): Promise<VerifierInvocation> => {
+    let invocation: VerifierInvocation | undefined;
     // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
     // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
     // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
@@ -352,10 +353,10 @@ export function buildRuntimeAccess(deps: {
     // image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
     await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
       if (!isVerifierDispatchable(backend)) return false;
-      scores = await backend.dispatchVerifier(job);
+      invocation = await backend.dispatchVerifier(job);
       return true; // the first lane that can judge is the answer
     });
-    if (scores === undefined)
+    if (invocation === undefined)
       throw new NotFoundError(
         "NOT_FOUND",
         { caseId: job.caseId },
@@ -363,7 +364,7 @@ export function buildRuntimeAccess(deps: {
           ? "this case was placed on no named runtime, so there is no lane to resolve a verifier against."
           : `runtime '${job.placementTarget}' cannot run a verifier away from the agent's container — the case cannot be judged here.`,
       );
-    return scores;
+    return invocation;
   };
 
   // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────────

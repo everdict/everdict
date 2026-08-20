@@ -51,7 +51,7 @@ import {
   firstPartyDefaults,
   resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
-import type { ProductSeries, RegistryAuth, Score, VerifierJob } from "@everdict/contracts";
+import type { ProductSeries, RegistryAuth, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { UpstreamError } from "@everdict/contracts";
 import {
   type SeriesContractResolution,
@@ -482,7 +482,7 @@ async function main(): Promise<void> {
   // LATE-BOUND VERIFIER LANE (arch-review 56, Wave K), the same holder idiom `cascadeCancel` uses below: the
   // lane is resolved by `buildRuntimeAccess`, which runs after the dispatch chain is built. An unwired lane
   // still means the verdict is `unmeasured` — never grading in the agent's own container.
-  const verifierLane: { fn: (job: VerifierJob) => Promise<Score[]> } = {
+  const verifierLane: { fn: (job: VerifierJob) => Promise<VerifierInvocation> } = {
     fn: async () => {
       throw new Error("no verifier lane is wired");
     },

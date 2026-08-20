@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type Score,
+  type VerifierInvocation,
   type VerifierJob,
   caseJobPayload,
   extractLiveEvents,
@@ -36,7 +37,14 @@ import type {
   InspectStore,
   InspectWorkload,
 } from "@everdict/contracts/wire";
-import { assertHardenedIsolation, dockerAuthConfigJson, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
+import {
+  assertHardenedIsolation,
+  contentDigest,
+  dockerAuthConfigJson,
+  laneImageProvenance,
+  pickRegistryAuth,
+  registryAuthsOf,
+} from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
@@ -1239,7 +1247,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   //
   // The scores come back through `parseResult` — the same sentinel the case entry prints — so a verifier that
   // died mid-run surfaces as a parse failure here rather than as a silent absence.
-  async dispatchVerifier(job: VerifierJob): Promise<Score[]> {
+  async dispatchVerifier(job: VerifierJob): Promise<VerifierInvocation> {
     // ── PLACED BY THE SAME RULES AS THE AGENT (arch-review 57 P0-verifier) ──────────────────────────
     //
     // This read `this.opts.namespace ?? "default"` and the backend's blanket `secretEnv`, so the half of the
@@ -1266,7 +1274,18 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       await api.applyJob(manifest, ns);
       try {
         await this.waitForJob(api, name, ns);
-        return parseResult(await api.podLogs(name, ns)).scores;
+        // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and
+        // was previously discarded: which procedure ran (the plan's own digest, carried on the job), what it
+        // read (the workspace snapshot's), where it ran, and in which world. A verdict that cannot say those
+        // is a number a replay has to take on faith.
+        return {
+          planDigest: job.plan.digest,
+          workspaceDigest: contentDigest(job.workspace),
+          work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
+          imageProvenance:
+            job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
+          scores: parseResult(await api.podLogs(name, ns)).scores,
+        };
       } finally {
         await api.deleteJob(name, ns);
       }

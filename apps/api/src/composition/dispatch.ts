@@ -21,7 +21,7 @@ import {
   buildRuntimeBackend,
   isWorkControllable,
 } from "@everdict/backends";
-import type { Score, VerifierJob } from "@everdict/contracts";
+import type { Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import type { RuntimeWorkRef } from "@everdict/contracts";
 import { BadRequestError, type CaseJob, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -83,7 +83,7 @@ export function buildDispatch(deps: {
   // The lane that runs a case's JUDGING half away from its agent (arch-review 56, Wave K). Absent = this
   // deployment has none, and `withVerifierPass` records such a case's verdict as `unmeasured` rather than
   // grading it in the agent's own container.
-  dispatchVerifier?: (job: VerifierJob) => Promise<Score[]>;
+  dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
 }) {
   const {
     callbackStore,
