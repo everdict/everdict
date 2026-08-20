@@ -88,7 +88,18 @@ run("gitleaks (full history)", resolveGitleaks(), [
 ]);
 
 // Stamp — only a clean tree proves HEAD is what we just validated.
-const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout.trim();
+//
+// `git diff HEAD` + untracked, not `status --porcelain`: the latter also compares the worktree to the INDEX,
+// and in a tree several sessions commit into through temp indexes the real one lags behind the ref — so a
+// checkout whose CONTENT is exactly HEAD's reads as dirty and no stamp is written. The question is whether
+// this checkout IS the commit, which is what the stamp attests; untracked files count, because an untracked
+// source file is part of what was just built.
+const dirty = [
+  spawnSync("git", ["diff", "HEAD", "--name-only"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+  spawnSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+]
+  .filter(Boolean)
+  .join("\n");
 const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
 if (dirty) {
   console.log(

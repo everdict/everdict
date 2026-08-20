@@ -505,7 +505,11 @@ const MUTATIONS = [
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
-const dirty = execFileSync("git", ["status", "--porcelain", "--", ...files], { encoding: "utf8" }).trim();
+// `git diff HEAD`, not `status --porcelain`: the latter also compares the worktree to the INDEX, and in a
+// tree several sessions commit into through temp indexes the real one lags behind the ref — so files whose
+// CONTENT is exactly HEAD's get reported as modified and this refuses to run. The question here is only
+// whether the checkout differs from the commit, because that is what "restore the exact original" means.
+const dirty = execFileSync("git", ["diff", "HEAD", "--name-only", "--", ...files], { encoding: "utf8" }).trim();
 if (dirty !== "") {
   console.error(`✖ protocol mutations: the files under mutation have uncommitted changes:\n${dirty}`);
   console.error("  Commit or stash them first — a mutation run must be able to restore the exact original.");
