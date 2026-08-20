@@ -2283,6 +2283,8 @@
     "memoryBudgetHint": "Cap on the sum of in-flight harness-declared memory. When full, heavy jobs wait even with free slots.",
     "cpuBudgetLabel": "CPU budget (optional)",
     "cpuBudgetHint": "Cap on the sum of in-flight harness-declared cpu (1000 = 1 vCPU). When full, cpu-declaring jobs wait even with free slots.",
+    "cpuMhzPerCoreLabel": "CPU clock per core, MHz (optional)",
+    "cpuMhzPerCoreHint": "Nomad places CPU in MHz while a case declares it in millicores (1000 = 1 vCPU). Set this cluster’s per-core clock so a declared box is placed at its real size; without it, a case that declares cpu is refused rather than placed smaller than it asked for.",
     "placementTitle": "Node placement",
     "placementHint": "Pin jobs to a node pool and reserve GPUs. The cluster’s own scheduler places each job onto a matching node — the harness stays infra-agnostic.",
     "gpuLabel": "GPUs per job",

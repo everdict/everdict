@@ -84,6 +84,8 @@ export const runtimeSpecSchema = z
     maxConcurrent: z.number().optional(),
     memoryBudgetMb: z.number().optional(),
     cpuBudget: z.number().optional(),
+    // nomad only: this cluster's per-core clock, needed to place a millicore cpu declaration as MHz
+    cpuMhzPerCore: z.number().optional(),
   })
   .passthrough()
 export type RuntimeSpec = z.infer<typeof runtimeSpecSchema>

@@ -20,7 +20,15 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
   self-hosted runner callout above).
-- **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret?, gpu?, constraints? }`.
+- **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret?, gpu?, constraints?, cpuMhzPerCore? }`.
+  `cpuMhzPerCore` is **this cluster's per-core clock in MHz**, and it exists because the two sides measure CPU
+  differently: a case declares `resources.cpu` in MILLICORES (1000 = 1 vCPU) and Nomad places `Resources.CPU`
+  in MEGAHERTZ. For a wave the raw number was passed straight through, so a case declaring two vCPUs asked for
+  2000 MHz — roughly two-thirds of one core on a 3 GHz node — while the lane's world proof attested the
+  declared box, and the in-container check agreed because both sides were reading the same number
+  (arch-review 58). Only an operator knows the conversion, so unset means this runtime **refuses** a case that
+  declares a cpu box rather than placing it smaller than it asked for; cases that declare no cpu are
+  unaffected and keep using the lane's own MHz default.
 - **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret?, kubeconfigSecret?, gpu?, nodeSelector?, tolerations? }`.
 - shared admission envelope (nomad/k8s) — `maxConcurrent?` (slot cap the Scheduler admits; absent → backend
   default 20) + `memoryBudgetMb?` (cap on the SUM of in-flight harness-declared `resources.memoryMb`; heavy

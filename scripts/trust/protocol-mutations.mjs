@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P1. Millicores and megahertz shared one `??` chain, so a two-vCPU case was placed as
+    // 2000 MHz while the lane's world proof attested the declared box — a unit error walking straight through
+    // the check built to catch an unenforced world.
+    name: "R58 — a millicore cpu declaration is placed as megahertz",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "  return Math.round((declaredMillicores / 1000) * opts.cpuMhzPerCore);",
+    to: "  return declaredMillicores;",
+    suite: ["--root", "packages/backends", "src/orchestrators/nomad-cpu-units.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P1. The verifier applied the agent's diff into a fresh container without confirming the
     // container was checked out at the baseline the diff was computed against. `git apply` matches on
     // context, so a wrong baseline does not reliably fail — it succeeds and yields a tree the agent never

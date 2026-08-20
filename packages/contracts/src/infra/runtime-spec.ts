@@ -89,6 +89,14 @@ export const NomadRuntimeSpecSchema = z.object({
   // SecretStore key name of the token for control-plane↔Nomad API auth (ACL) — used as the X-Nomad-Token header.
   // The name only, not the value (token). This token is not injected into the alloc env (never expose the cluster token to the agent).
   authSecret: z.string().optional(),
+  // ── THIS CLUSTER'S PER-CORE CLOCK, IN MHZ ─────────────────────────────────────────────────
+  //
+  // `ResourceRequest.cpu` is millicores and Nomad places CPU in MHz, and converting between them needs a
+  // number only the operator knows. Without it this runtime cannot honour a case that DECLARES a cpu box —
+  // it refuses at placement rather than asking for the raw number as MHz, which for a wave meant a two-vCPU
+  // case ran in roughly two-thirds of one core while the lane's world proof attested the declared box
+  // (arch-review 58 P1). Cases that declare no cpu are unaffected.
+  cpuMhzPerCore: z.number().int().positive().optional(),
   ...topologyConfig, // with a traceSource, this Nomad runtime hosts topology (service harnesses)
 });
 

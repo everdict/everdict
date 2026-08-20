@@ -49,6 +49,9 @@ export function nomadRuntimeOptions(
     ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
     ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
     ...(spec.cpuBudget !== undefined ? { cpuBudget: spec.cpuBudget } : {}),
+    // Without it, a case DECLARING a cpu box is refused rather than placed under the wrong unit — see
+    // `cpuMhzPerCore` on the spec.
+    ...(spec.cpuMhzPerCore !== undefined ? { cpuMhzPerCore: spec.cpuMhzPerCore } : {}),
     ...(apiToken ? { apiToken } : {}),
     ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),
   };

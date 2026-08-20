@@ -129,7 +129,21 @@ export interface NomadBackendOptions {
   runtime?: string; // docker isolation runtime (e.g. "runsc" = gVisor). trustZones takes precedence if present.
   namespace?: string; // default namespace (when there's no tenant zone)
   trustZones?: TrustZonePolicy; // per-tenant isolation policy — enforces runtime/namespace per job.
+  // The lane's own CPU default, in the cluster's unit (MHz). Applies only when NOTHING declared a box.
   cpuMhz?: number;
+  // ── THE CLUSTER'S PER-CORE CLOCK, WHICH ONLY AN OPERATOR KNOWS (arch-review 58 P1) ─────────────
+  //
+  // `ResourceRequest.cpu` is MILLICORES and Nomad's `Resources.CPU` is MEGAHERTZ, and for a wave the two sat
+  // in one `??` chain as alternatives for the same field: a case declaring 2000 (two vCPUs) asked for 2000
+  // MHz, about two-thirds of one core on a 3 GHz node. Under-provisioning alone would be a bug; the lane then
+  // stamped the DECLARED millicores as the world it had enforced, the in-container driver compared that proof
+  // to the same declaration and agreed, and the case ran in a third of its box with a receipt saying
+  // otherwise — a unit error walking straight through the check built to catch an unenforced world.
+  //
+  // Converting needs this number and the control plane cannot know it. Unset, a cpu DECLARATION is refused
+  // rather than placed-and-attested: an axis we cannot enforce is one we do not claim, which is the rule the
+  // network axis already follows on this lane.
+  cpuMhzPerCore?: number;
   memMb?: number;
   pollIntervalMs?: number;
   // Dead-job purge is OPT-IN: purging a job whose alloc a client still tracks nils the alloc's job reference and
@@ -479,6 +493,22 @@ function dispatchSuffix(): string {
   return Math.random().toString(36).slice(2, 7);
 }
 
+// Millicores as this cluster measures CPU. See `cpuMhzPerCore` for why the conversion is explicit and why an
+// unstated clock is a refusal rather than a guess.
+export function nomadCpuMhz(
+  declaredMillicores: number | undefined,
+  opts: { cpuMhz?: number; cpuMhzPerCore?: number },
+): number {
+  if (declaredMillicores === undefined) return opts.cpuMhz ?? 1000;
+  if (opts.cpuMhzPerCore === undefined)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { declaredMillicores },
+      "this case declares a CPU box in millicores and Nomad places CPU in MHz, so the lane needs the cluster's per-core clock to honour it: set `cpuMhzPerCore` on the Nomad backend. Placing the number unconverted would run the case in a smaller box than it declared, under a receipt saying the box was enforced.",
+    );
+  return Math.round((declaredMillicores / 1000) * opts.cpuMhzPerCore);
+}
+
 // CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
 export function buildNomadJob(
   job: CaseJob,
@@ -544,11 +574,14 @@ export function buildNomadJob(
               // the case declared reached no task while the in-container driver refused that same declaration:
               // a case declaring cpu/memory could not run on this lane at all (arch-review 57 P1-high).
               Resources: {
-                CPU:
+                // MILLICORES if anything declared a box, converted through the operator's stated per-core
+                // clock; otherwise the lane's own MHz default. The two units never meet in one expression —
+                // see `cpuMhzPerCore` for what it cost when they did.
+                CPU: nomadCpuMhz(
                   job.evalCase.resources?.cpu ??
-                  (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.cpu : undefined) ??
-                  opts.cpuMhz ??
-                  1000,
+                    (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.cpu : undefined),
+                  opts,
+                ),
                 MemoryMB:
                   job.evalCase.resources?.memoryMb ??
                   (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??

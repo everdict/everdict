@@ -59,6 +59,7 @@ interface Fields {
   maxConcurrent: string
   memoryBudgetMb: string
   cpuBudget: string
+  cpuMhzPerCore: string
   supportsTopology: boolean
   browserImage: string
   traceSource: TraceSourceValue
@@ -87,6 +88,7 @@ const INITIAL: Fields = {
   maxConcurrent: '',
   memoryBudgetMb: '',
   cpuBudget: '',
+  cpuMhzPerCore: '',
   supportsTopology: false,
   browserImage: '',
   traceSource: EMPTY_TRACE_SOURCE,
@@ -121,6 +123,7 @@ function fieldsFromSpec(spec: RuntimeSpec): Fields {
     maxConcurrent: num(spec.maxConcurrent),
     memoryBudgetMb: num(spec.memoryBudgetMb),
     cpuBudget: num(spec.cpuBudget),
+    cpuMhzPerCore: num(spec.cpuMhzPerCore),
     supportsTopology: trace !== undefined,
     browserImage: str(spec.browserImage),
     traceSource: trace
@@ -255,6 +258,7 @@ function buildSpec(f: Fields, submitVersion?: string): Record<string, unknown> {
       ...opt('authSecret', f.authSecret),
       ...(gpu !== undefined ? { gpu } : {}),
       ...(constraints.length ? { constraints } : {}),
+      ...(posInt(f.cpuMhzPerCore) !== undefined ? { cpuMhzPerCore: posInt(f.cpuMhzPerCore) } : {}),
       ...envelope,
       ...topology,
     }
@@ -510,6 +514,17 @@ export function RegisterRuntimeForm({
               value={f.authSecret}
               onChange={(e) => set('authSecret', e.target.value)}
               placeholder="nomad-token"
+              autoComplete="off"
+            />
+          </Field>
+          {/* Without it, a case that DECLARES a cpu box is refused at placement rather than asked for as raw
+              MHz — millicores and MHz are different units and only the operator knows the conversion. */}
+          <Field label={t('cpuMhzPerCoreLabel')} hint={t('cpuMhzPerCoreHint')}>
+            <Input
+              value={f.cpuMhzPerCore}
+              onChange={(e) => set('cpuMhzPerCore', e.target.value)}
+              placeholder="2400"
+              inputMode="numeric"
               autoComplete="off"
             />
           </Field>
