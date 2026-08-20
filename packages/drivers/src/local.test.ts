@@ -116,7 +116,13 @@ describe("LocalDriver — echo mode (in-job live-tail feed)", () => {
       return true;
     }) as typeof process.stdout.write;
     try {
-      const compute = await new LocalDriver({ echo: true }).provision({ os: "linux", needs: [] });
+      // A 5s grace, not the production 250ms — see the twin of this case in `spawn.test.ts`. With the real
+      // grace this was also asserting that a loaded machine schedules a process within 250ms, which it does
+      // not, and shrinking the child's sleep narrowed the window without closing it.
+      const compute = await new LocalDriver({ echo: true, exitGraceMs: 5_000 }).provision({
+        os: "linux",
+        needs: [],
+      });
       const res = await compute.exec("echo teed-line");
       await compute.dispose();
       expect(res.exitCode).toBe(0);
@@ -159,7 +165,7 @@ describe("LocalDriver — echo mode (in-job live-tail feed)", () => {
     process.stdout.write = (() => true) as typeof process.stdout.write; // silence the tee for a clean test log
     try {
       const compute = await new LocalDriver({ echo: true }).provision({ os: "linux", needs: [] });
-      const res = await compute.exec("(sleep 0.1; echo late-line) &");
+      const res = await compute.exec("(sleep 0.02; echo late-line) &");
       await compute.dispose();
       expect(res.stdout).toContain("late-line"); // pre-fix: '' (resolved on the shell's immediate exit)
     } finally {

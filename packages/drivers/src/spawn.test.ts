@@ -100,7 +100,17 @@ describe("runSpawn (the shared incremental spawn core)", () => {
   });
 
   it("captures output that flushes around/after exit (settle on 'close' with the 250ms exit grace)", async () => {
-    const res = await runSpawn("(sleep 0.1; echo late-line) &", { detached: true, timeoutMs: 5_000 });
+    // A 5s grace, not the production 250ms. What this proves is the MECHANISM — output flushed by a detached
+    // grandchild AFTER the parent shell exited is still captured — and with the real grace it was also
+    // asserting that a loaded machine schedules a process within 250ms, which it does not. Shrinking the
+    // child's sleep narrowed the window and did not close it: the grandchild's scheduling latency is
+    // unbounded under load, and this case failed in the commit gate four separate times while passing on its
+    // own. The grace is a policy, so the caller states it and the race is gone.
+    const res = await runSpawn("(sleep 0.02; echo late-line) &", {
+      detached: true,
+      timeoutMs: 5_000,
+      exitGraceMs: 5_000,
+    });
     expect(res.stdout).toContain("late-line");
   });
 });

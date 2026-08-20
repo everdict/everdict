@@ -24,6 +24,8 @@ describe("runCaseJob", () => {
     const pass = measuredScores(result.scores).find((s) => s.graderId === "tests-pass");
     expect(pass?.pass).toBe(true);
     expect(result.snapshot.changedFiles).toContain("out.txt");
+    // The budget for this kind of work is stated once for the package, in `vitest.config.ts` — it is a
+    // property of every suite here, not of this case.
   });
 
   it("tees drained TraceEvents to opts.reportTrace while the case runs (live-observability ⑦)", async () => {
@@ -104,7 +106,9 @@ describe("failureResult (classified result crosses the process boundary)", () =>
 
 // The code-judge wrapper contract on the agent path: job.judge (model config) + job.judgeAuth (dispatch-resolved
 // credential) must reach a script grader's exec env — on managed allocs the backend injects them at the alloc level,
-// so the agent must do the equivalent itself (withJobEnv) for the runner/local/docker paths.
+// so the runner must do the equivalent itself for the runner/local/docker paths — as `graderEnv`, which
+// reaches the GRADING half only. It used to wrap the driver, which handed the tenant's provider key to the
+// agent under test as well (arch-review 58 W1).
 describe("runCaseJob judge env threading (code-judge wrapper on the local/runner path)", () => {
   it("a script grader's exec sees EVERDICT_JUDGE_MODEL + the provider key/base-url from job.judge/judgeAuth", async () => {
     // Regression: these values never reached compute.exec — a code judge on a self-hosted runner called the

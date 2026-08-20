@@ -11,6 +11,9 @@ export interface SpawnSinks {
   stderr?: (data: string) => void;
 }
 
+// What a detached grandchild gets to flush after the parent exited, when nothing closes the pipes.
+export const DEFAULT_EXIT_GRACE_MS = 250;
+
 export interface RunSpawnOptions {
   // argv mode (e.g. `docker exec …`): command + args, stdin ignored. Absent → `command` is a shell line
   // (spawn {shell:true}) with default stdio, matching the local echo path exactly.
@@ -26,6 +29,18 @@ export interface RunSpawnOptions {
   sinks?: SpawnSinks;
   // Hand the child to the caller so a dispose() can kill it on cancellation.
   register?: (child: ChildProcess) => void;
+  // ── HOW LONG 'exit' WAITS FOR 'close' (arch-review 58, follow-through) ───────────────────────
+  //
+  // A POLICY, and therefore injectable. The 250ms default is what a detached grandchild holding the pipes
+  // gets before the run force-settles with whatever is buffered — the right production number, and an
+  // untestable one: the test that proves late output IS captured has to lose the race deliberately, and it
+  // raced the OS scheduler instead. Shrinking the child's sleep only narrowed the window; the grandchild's
+  // scheduling latency is unbounded under load, so the case failed in the commit gate four separate times
+  // while passing on its own.
+  //
+  // With the grace stated by the caller, that test asserts the MECHANISM (output flushed after exit is still
+  // captured) instead of asserting that a loaded machine schedules a process within 250ms.
+  exitGraceMs?: number;
 }
 
 // The shared spawn core behind every incremental exec path (echo tee + execStream). Result contract is
@@ -82,7 +97,7 @@ export function runSpawn(command: string, opts: RunSpawnOptions): Promise<ExecRe
     child.on("close", (code) => settle(timedOut ? 124 : (code ?? 1)));
     child.on("exit", (code) => {
       if (settled) return;
-      exitGrace = setTimeout(() => settle(timedOut ? 124 : (code ?? 1)), 250);
+      exitGrace = setTimeout(() => settle(timedOut ? 124 : (code ?? 1)), opts.exitGraceMs ?? DEFAULT_EXIT_GRACE_MS);
     });
   });
 }

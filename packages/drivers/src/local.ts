@@ -44,6 +44,9 @@ class LocalComputeHandle implements ComputeHandle {
     // there would delete the container. Ownership is a fact about how the handle was built, so it is a
     // parameter rather than something dispose() tries to infer from the path.
     private readonly ownsRoot: boolean = true,
+    // How long a detached grandchild gets to flush after the parent exited (`DEFAULT_EXIT_GRACE_MS` when
+    // unset) — see `RunSpawnOptions.exitGraceMs`.
+    private readonly exitGraceMs?: number,
   ) {}
 
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
@@ -62,6 +65,7 @@ class LocalComputeHandle implements ComputeHandle {
           detached: true,
           timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
           timeoutNote: `[everdict] exec timed out after ${Math.round(opts?.timeoutSec ?? 600)}s`,
+          ...(this.exitGraceMs !== undefined ? { exitGraceMs: this.exitGraceMs } : {}),
           sinks: teeSinks(),
           register: (child) => {
             this.activeChild = child;
@@ -96,6 +100,7 @@ class LocalComputeHandle implements ComputeHandle {
       detached: true,
       timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
       timeoutNote: `[everdict] exec timed out after ${Math.round(opts?.timeoutSec ?? 600)}s`,
+      ...(this.exitGraceMs !== undefined ? { exitGraceMs: this.exitGraceMs } : {}),
       sinks: this.echo ? teeSinks(onChunk) : chunkSinks(onChunk),
       register: (child) => {
         this.activeChild = child;
@@ -133,6 +138,11 @@ class LocalComputeHandle implements ComputeHandle {
 export interface LocalDriverOptions {
   // TEE every exec's output to this process's stdio (in-job: the job log becomes a live progress feed).
   echo?: boolean;
+  // How long a detached grandchild gets to flush after the parent exited — `DEFAULT_EXIT_GRACE_MS` unless a
+  // caller says otherwise. Injectable because it is a policy, and because the case that proves late output
+  // is captured has to lose the race deliberately rather than by out-waiting the OS scheduler (see
+  // `RunSpawnOptions.exitGraceMs`).
+  exitGraceMs?: number;
   // ── THE FILE API AND THE SHELL MUST SHARE ONE NAMESPACE (arch-review 57 P0) ──────────────────────
   //
   // `writeFile(p)` is `join(root, p)`, so with the default temp root an absolute path is REWRITTEN:
@@ -209,6 +219,6 @@ export class LocalDriver implements Driver {
     }
     const given = this.opts.root;
     const root = given ?? (await mkdtemp(join(tmpdir(), "everdict-")));
-    return new LocalComputeHandle(root, this.opts.echo ?? false, given === undefined);
+    return new LocalComputeHandle(root, this.opts.echo ?? false, given === undefined, this.opts.exitGraceMs);
   }
 }
