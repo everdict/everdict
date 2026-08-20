@@ -20,10 +20,21 @@ const MUTATIONS = [
     // arch-review 58 follow-through. The managed lanes handed the agent under test the workspace's WHOLE
     // secret tier — GitHub App token, Mattermost bot token, registry passwords — because a default outlived
     // the per-job channels that replaced it. Spreading the tier back in must go red.
-    name: "R58 — an eval container is handed the whole workspace secret tier",
-    file: "packages/contracts/src/execution/eval-container-env.ts",
-    from: "  const out: Record<string, string> = {};",
-    to: "  const out: Record<string, string> = { ...secretEnv };",
+    // Aimed at each LANE, not at the shared filter in contracts: `packages/backends` resolves contracts
+    // through its built `dist`, so mutating another package's `src` is invisible to the suite — the same
+    // cross-package blind spot this runner caught twice in this wave. Two lanes, two entries, because the
+    // property is precisely that a tenant's exposure does not depend on which one placed the job.
+    name: "R58 — the nomad lane hands over the whole workspace secret tier",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "    ...evalContainerSecretEnv(opts.secretEnv),",
+    to: "    ...opts.secretEnv,",
+    suite: ["--root", "packages/backends", "src/orchestrators/eval-container-secrets.counterexample.test.ts"],
+  },
+  {
+    name: "R58 — the k8s lane hands over the whole workspace secret tier",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "    ...evalContainerSecretEnv(opts.secretEnv),",
+    to: "    ...opts.secretEnv,",
     suite: ["--root", "packages/backends", "src/orchestrators/eval-container-secrets.counterexample.test.ts"],
   },
   {
