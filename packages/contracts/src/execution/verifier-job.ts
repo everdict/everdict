@@ -81,6 +81,22 @@ export const VerifierJobSchema = z.object({
   // …and the credentials for the task image. A private image the agent could pull and the verifier could
   // not is a verdict that simply never happens.
   registryAuths: z.array(RegistryAuthSchema).optional(),
+  // ── WHOSE SECOND UNIT THIS IS (arch-review 58 P0) ─────────────────────────────────────────────
+  //
+  // The verifier gets its OWN attempt row — the agent's is committed by the time a verdict is produced — and
+  // a row with no parent is a row two protocols cannot reach. `PARENT_AUTHORIZES` asks whether the parent is
+  // still open and, with no scorecard id, falls to `'evd-run-' || r.id = a.execution_id`; a batch case's
+  // execution id is `evd-<batchId>-<caseId>[-t<n>]`, so the guard written to refuse a CANCELLED parent
+  // refused a live one on every batch verifier. And `listForScorecard` — the read a scorecard's teardown
+  // builds its workset from — filtered the row out, so the cancellation certified zero over a container it
+  // never looked for.
+  //
+  // Absent for a SINGLE run, and that is not an omission: its execution id already names its parent, and
+  // stamping a scorecard id it does not have would break the branch that works.
+  scorecardId: z.string().optional(),
+  // Which trial of a pass@k fan-out this judged. An attempt that cannot say is one a re-drive cannot tell
+  // apart from its predecessor.
+  trial: z.number().int().nonnegative().optional(),
 });
 export type VerifierJob = z.infer<typeof VerifierJobSchema>;
 

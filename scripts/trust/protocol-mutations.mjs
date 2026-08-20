@@ -17,6 +17,33 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P0. The verifier opened its own row with no parent, so `PARENT_AUTHORIZES` took the run
+    // branch on every batch case (an execution id no run row can equal) and the scorecard teardown's worklist
+    // could not see the row at all. Dropping the coordinate must go red, or the second unit is orphaned again.
+    name: "R58 — a verifier attempt is opened with no parent",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: "    ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),",
+    to: "",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-parent-authority.counterexample.test.ts"],
+  },
+  {
+    // …and the coordinate has to reach the OPEN, not merely the job. Two hops, two ways to lose it.
+    name: "R58 — the verifier job's parent never reaches the ledger",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "    ...(job.scorecardId !== undefined ? { scorecardId: job.scorecardId } : {}),",
+    to: "",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-parent-authority.counterexample.test.ts"],
+  },
+  {
+    // arch-review 58 P1. The terminal CAS is where a verdict re-proves its authorization is still live.
+    // Ignoring the answer must go red, or a cancelled attempt's verdict is a measurement again.
+    name: "R58 — a verifier verdict is returned without re-proving its authority",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: '    if (!(await attempts.transition(attemptId, "committed"))) {',
+    to: '    await attempts.transition(attemptId, "committed");\n    if (false) {',
+    suite: ["--root", "packages/application-control", "src/execution/verifier-settlement.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P0. The verifier's scores travelled down the CASE result pipe under a cast, and the
     // reader on the other side runs `CaseResultSchema.parse()` — where `snapshot` is required and a verifier
     // has none. Every verifier verdict died at that parse. Neutralizing the separation must go red, or the

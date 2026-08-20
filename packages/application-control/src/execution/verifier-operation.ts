@@ -1,4 +1,10 @@
-import type { PersistedWorkIntent, RuntimeWorkRef, VerifierInvocation, VerifierJob } from "@everdict/contracts";
+import {
+  type PersistedWorkIntent,
+  type RuntimeWorkRef,
+  UpstreamError,
+  type VerifierInvocation,
+  type VerifierJob,
+} from "@everdict/contracts";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 
 // ── THE JUDGING HALF IS DURABLE WORK (arch-review 57 P0-verifier) ────────────────────────────────────
@@ -52,10 +58,16 @@ export async function verifierOperation(
   // Its OWN row. The agent's attempt is committed by the time a verifier runs — the verdict is what closes
   // the case — so reusing it would be recording the second unit against a settled one. The `#verify` suffix
   // is what makes the two distinguishable in a ledger read, including the cancellation's.
+  //
+  // …under the SAME PARENT as the agent's half. A verifier row with no parent is refused by
+  // `PARENT_AUTHORIZES` on every batch case and invisible to the scorecard teardown's worklist — see
+  // `scorecardId` on `VerifierJobSchema` for both halves of what that cost.
   const opened = await attempts.open({
     executionId: job.runId,
     tenant: job.tenant,
     caseId: `${job.caseId}#verify`,
+    ...(job.scorecardId !== undefined ? { scorecardId: job.scorecardId } : {}),
+    ...(job.trial !== undefined ? { trial: job.trial } : {}),
   });
   const attemptId = opened.attemptId;
 
@@ -63,9 +75,29 @@ export async function verifierOperation(
     const invocation = await dispatch(job, {
       onReserved: async (work) => await attempts.reserveWork(attemptId, { ...work, attemptId }),
     });
-    // Settled as soon as the verdict is in hand. A row left live is compute a later sweep will chase, and
+    // ── THE TERMINAL CAS IS THIS VERDICT'S RE-PROOF (arch-review 58) ──────────────────────────────
+    //
+    // Settled as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and
     // chasing a container that finished is how a cancellation stops converging.
-    await attempts.transition(attemptId, "committed");
+    //
+    // And the ANSWER is consumed, because `transition` is a conditional write and the one way it says `false`
+    // here is the way that matters — something else made this attempt terminal while the verifier was judging,
+    // which in practice means a cancellation revoked it. A verdict produced under an authority that was taken
+    // back is not a measurement (rule `protocol` L1: the write that records the outcome is where the effect
+    // re-proves its proof is still valid). The throw becomes `tests_pass: unmeasured` upstream, which says the
+    // case was not judged — where a `1` would have said it passed.
+    if (!(await attempts.transition(attemptId, "committed"))) {
+      const state = await attempts
+        .list(job.runId)
+        .then((rows) => rows.find((r) => r.attemptId === attemptId)?.state ?? "absent")
+        // A ledger that cannot say whether the attempt settled has not said that it did (rule `protocol` L2).
+        .catch(() => "unreadable");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { attemptId, state },
+        `this verifier's attempt could not be settled (it is '${state}'), so the verdict it produced was not made under a live authorization`,
+      );
+    }
     return invocation;
   } catch (err) {
     // …and settled on failure too, for the same reason: an abandoned row is owed forever. The error keeps

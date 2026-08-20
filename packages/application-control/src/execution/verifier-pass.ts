@@ -97,6 +97,17 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     ...(job.evalCase.placement?.target !== undefined ? { placementTarget: job.evalCase.placement.target } : {}),
     // The same budget the agent had — see `timeoutSec` on the schema for what passing none used to cost.
     timeoutSec: job.evalCase.timeoutSec,
+    // The DECLARED WORLD and the credentials for the task image. Both fields have been on the schema since
+    // the lane was built and neither had a producer (arch-review 58 P1), so the judging half ran under the
+    // lane's defaults against a registry it could not authenticate to — a schema field with no producer is a
+    // promise the wire does not keep.
+    ...(job.evalCase.resources !== undefined ? { resources: job.evalCase.resources } : {}),
+    ...(job.registryAuths !== undefined ? { registryAuths: job.registryAuths } : {}),
+    // WHOSE second unit this is — see `scorecardId` on the schema for what a parentless row costs. `batchId`
+    // already IS the scorecard's id in the batch path, so the coordinate travels as itself rather than being
+    // parsed back out of the execution id (rule `protocol` L3).
+    ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
+    ...(job.trial !== undefined ? { trial: job.trial } : {}),
   };
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
