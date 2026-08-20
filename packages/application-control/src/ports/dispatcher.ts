@@ -68,19 +68,60 @@ export interface DispatchOptions {
   // reservation to make. A managed backend asked to place work for a job that carries a `runId` REFUSES when
   // it is absent, which is where the requirement is enforced — see `ManagedWorkControl` and the placement
   // conformance suite.
-  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
-  // ── …AND RE-PRESENTED WHERE THE EFFECT BEGINS (arch-review 57 P0) ────────────────────────────────
+  // ── THE AUTHORITY TO PLACE MANAGED WORK, AS ONE CAPABILITY (arch-review 58, W2) ─────────────
   //
-  // `onReserved` bounds who may reserve; it cannot bound how long the reservation stays good. The caller
-  // that won one held it across whatever came next, so a cancellation could kill the work, probe it absent,
-  // settle every child and COMPLETE — after which the paused caller woke and created the object. Verified
-  // zero, then a birth.
+  // These were two optional hooks — `onReserved` and `onActivate` — and being two is what broke them. The
+  // options travel through the Scheduler by an explicit allowlist, one line per hook, whose own comment reads
+  // "this whitelist is the ONE place a hook can silently die". `onActivate` then died in exactly that
+  // whitelist: it existed on the type, both managed backends consumed it, a producer was wired in the run
+  // service, and every SaaS dispatch goes through the Scheduler, which never carried it. `requireActivation`
+  // returns immediately when the hook is absent, so nothing reported the loss.
   //
-  // This is asked immediately before the external object is created, and it is a TRANSITION in the store
+  // Adding a fifth allowlist line would have fixed that instance and kept the shape. The shape is the defect:
+  // two halves of ONE protocol — reserve the work, then RE-PRESENT that reservation at the moment the
+  // external object is born — as independent optional fields, so every forwarder, wrapper and composition can
+  // carry one and drop the other, and half a protocol type checks.
+  //
+  // One object. A caller either holds the authority to place managed work or it does not; a forwarder carries
+  // one field; half is unrepresentable.
+  authority?: ManagedDispatchAuthority;
+}
+
+// ── WHO MAY CREATE EXTERNAL WORK, AND FOR HOW LONG ──────────────────────────────────────────────────
+//
+// Both halves of one protocol, so they cannot travel apart. See `DispatchOptions.authority` for what being
+// two independent hooks cost.
+export interface ManagedDispatchAuthority {
+  // Fired BEFORE a placement backend creates external work, carrying the exact handle it is about to create
+  // (arch-review 53, Wave A — it replaced Wave 2's `onWork`, which fired after).
+  //
+  // The ordering is the whole contract. Wave 2's hook reported the handle once the K8s Job was applied and
+  // the Nomad job submitted, which meant a control plane that died in that window left a running job nothing
+  // could address: teardown fell back to the case-id kill (reaching other runs' work) and recovery could not
+  // adopt at all. Both backends can NAME the object without creating it — `reserve()` is pure — so the
+  // decision is made, handed here to be made durable, and only then executed.
+  //
+  // AWAITED, and a rejection ABORTS THE DISPATCH before any external object exists. Under the old contract a
+  // handle that failed to persist still produced compute, so an unaddressable job was a SUCCESSFUL dispatch.
+  // A caller that cannot record where the work will be must not have the work.
+  //
+  // IT RETURNS THE STORE'S PROOF (arch-review 54, Phase 1), and the backend requires that proof before it
+  // submits: the hook could resolve having written nothing — no ledger wired, no attempt id on the handle, an
+  // UPDATE that matched no row — and a resolved hook is indistinguishable from a persisted reservation.
+  // `PersistedWorkIntent` exists only if a row was actually written.
+  reserve(work: RuntimeWorkRef): Promise<PersistedWorkIntent>;
+  // ── …AND RE-PRESENTED WHERE THE EFFECT BEGINS (arch-review 57 P0) ─────────────────────────────
+  //
+  // `reserve` bounds who may reserve; it cannot bound how long the reservation stays good. The caller that
+  // won one held it across whatever came next, so a cancellation could kill the work, probe it absent, settle
+  // every child and COMPLETE — after which the paused caller woke and created the object. Verified zero, then
+  // a birth.
+  //
+  // Asked immediately before the external object is created, and a TRANSITION in the store
   // (`reserved → active`, conditioned on this exact work and the parent still being open), not a read. A
-  // lane that gets `refuse` aborts instead of placing; `already_active` means a re-driven dispatch, which
-  // converges on the same object rather than a second one.
-  onActivate?: (work: RuntimeWorkRef) => Promise<ActivationDecision>;
+  // refusal is an ordinary outcome — a cancellation got there first — and the lane turns it into an aborted
+  // dispatch rather than an error.
+  activate(work: RuntimeWorkRef): Promise<ActivationDecision>;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).

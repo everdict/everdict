@@ -30,14 +30,22 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #12 — CLOSED] the durable driver persists
     const workflow = driverSource("workflow-batch-driver.ts");
     const inProcess = driverSource("in-process-batch-driver.ts");
 
-    // The in-process lane is the reference: it forwards the handle and stamps the ledger with it.
-    expect(inProcess.includes("onReserved")).toBe(true);
+    // The in-process lane is the reference: it forwards the AUTHORITY (the handle it is about to create, plus
+    // the re-presentation of that reservation at the object's birth) and stamps the ledger with it. The two
+    // used to be separate optional hooks and this assertion named one of them; merging them is what stopped a
+    // lane from supplying half (arch-review 58 W2), and pinning the whole capability is what says so.
+    expect(inProcess.includes("authority:")).toBe(true);
+    expect(inProcess.includes("activate:"), "the reference lane never re-presents its reservation").toBe(true);
 
     // The durable lane must do at least as much. A batch that survives a restart is precisely the batch whose
     // handle has to survive it too.
     expect(
-      workflow.includes("onReserved"),
+      workflow.includes("authority:"),
       "workflow-batch-driver dispatches managed work and records no handle for it",
+    ).toBe(true);
+    expect(
+      workflow.includes("activate:"),
+      "workflow-batch-driver creates its container without re-proving the reservation is still live",
     ).toBe(true);
   });
 });

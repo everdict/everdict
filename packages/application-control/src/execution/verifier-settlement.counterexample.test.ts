@@ -51,7 +51,7 @@ describe("[R58 COUNTEREXAMPLE] a verdict is only a measurement if its attempt se
 
     await expect(
       verifierOperation({ attempts }, JOB, async (_job, hooks) => {
-        const intent = await hooks.onReserved({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
+        const intent = await hooks.authority.reserve({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
         // The cancellation lands while the verifier container is judging — which is the whole window this
         // state exists for.
         await attempts.revokeReservation(intent.attemptId);
@@ -65,7 +65,7 @@ describe("[R58 COUNTEREXAMPLE] a verdict is only a measurement if its attempt se
     // The refusal above must not become a refusal of the ordinary path.
     const attempts = new InMemoryExecutionAttemptStore();
     const invocation = await verifierOperation({ attempts }, JOB, async (_job, hooks) => {
-      await hooks.onReserved({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
+      await hooks.authority.reserve({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
       return INVOCATION;
     });
     expect(invocation.scores).toHaveLength(1);
@@ -88,7 +88,7 @@ describe("[R58 COUNTEREXAMPLE] a verdict is only a measurement if its attempt se
 
     await expect(
       verifierOperation({ attempts: blind }, JOB, async (_job, hooks) => {
-        await hooks.onReserved({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
+        await hooks.authority.reserve({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
         return INVOCATION;
       }),
       "an unreadable ledger was treated as a settled attempt",
@@ -99,7 +99,7 @@ describe("[R58 COUNTEREXAMPLE] a verdict is only a measurement if its attempt se
     // A deployment with no ledger judged fine before any of this, and must keep doing so: the refusal above
     // is about a proof that was taken back, not about the absence of one.
     const invocation = await verifierOperation({}, JOB, async (_job, hooks) => {
-      await hooks.onReserved({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
+      await hooks.authority.reserve({ tenant: "acme", runId: JOB.runId, externalJobId: "verify-1" });
       return INVOCATION;
     });
     expect(invocation.scores).toHaveLength(1);

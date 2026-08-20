@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { ManagedDispatchAuthority } from "@everdict/application-control";
 import { RESULT_SENTINEL } from "@everdict/contracts";
 import {
   BadRequestError,
@@ -27,6 +28,14 @@ import {
   streamHandleFor,
   summarizeAllocFailure,
 } from "./nomad.js";
+
+// The dispatch AUTHORITY, as one capability (arch-review 58 W2). These cases exercise the reservation half,
+// so the activation half answers `activate` — a supplier that could hand over half the protocol is exactly
+// the shape this merge removed, and a fake that still could would be modelling the old contract.
+const authorityOf = (reserve: ManagedDispatchAuthority["reserve"]): ManagedDispatchAuthority => ({
+  reserve,
+  activate: async () => ({ kind: "activate" }),
+});
 
 const JOB: CaseJob = {
   harness: { id: "claude-code", version: "latest" },
@@ -339,10 +348,10 @@ describe("NomadBackend.dispatch", () => {
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
       {
-        onReserved: async (w: RuntimeWorkRef) => {
+        authority: authorityOf(async (w: RuntimeWorkRef) => {
           works.push(w);
           return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
-        },
+        }),
       },
     );
 

@@ -117,10 +117,19 @@ export class RuntimeDispatcher implements Dispatcher {
     // The PROOF travels back out unchanged (arch-review 54, Phase 1): this layer decorates the handle on the
     // way in and must not swallow the store's answer on the way out, or the backend loses the one value that
     // licenses it to create the job.
-    const inner = opts?.onReserved;
+    // The AUTHORITY travels whole. Decorating one half and rebuilding the object is how `onActivate` used to
+    // be lost in forwarding chains (arch-review 58 W2); here the decoration applies to the reservation and
+    // the activation is carried unchanged, in one object nobody can half-copy.
+    const inner = opts?.authority;
     const opted =
       inner && target !== undefined
-        ? { ...opts, onReserved: (work: RuntimeWorkRef) => inner({ ...work, runtimeId: target }) }
+        ? {
+            ...opts,
+            authority: {
+              reserve: (work: RuntimeWorkRef) => inner.reserve({ ...work, runtimeId: target }),
+              activate: (work: RuntimeWorkRef) => inner.activate({ ...work, runtimeId: target }),
+            },
+          }
         : opts;
 
     // Pool target ("any runner", no runner id, N runners drain):

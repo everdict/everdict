@@ -1,7 +1,16 @@
+import type { ManagedDispatchAuthority } from "@everdict/application-control";
 import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type K8sApi, K8sBackend } from "./k8s.js";
 import { NomadBackend, type NomadHttp } from "./nomad.js";
+
+// The dispatch AUTHORITY, as one capability (arch-review 58 W2). These cases exercise the reservation half,
+// so the activation half answers `activate` — a supplier that could hand over half the protocol is exactly
+// the shape this merge removed, and a fake that still could would be modelling the old contract.
+const authorityOf = (reserve: ManagedDispatchAuthority["reserve"]): ManagedDispatchAuthority => ({
+  reserve,
+  activate: async () => ({ kind: "activate" }),
+});
 
 // ── IDENTITY BEFORE EFFECT (arch-review 53, Wave A) ──────────────────────────────────────────────────
 //
@@ -98,10 +107,10 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #2 — CLOSED] the K8s handle exists before
     const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
     await backend
       .dispatch(JOB, {
-        onReserved: async (w: RuntimeWorkRef) => {
+        authority: authorityOf(async (w: RuntimeWorkRef) => {
           order.push("work");
           return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
-        },
+        }),
       })
       .catch(() => undefined);
 
@@ -134,10 +143,10 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #3 — CLOSED] the Nomad handle exists befo
     });
     await backend
       .dispatch(JOB, {
-        onReserved: async (w: RuntimeWorkRef) => {
+        authority: authorityOf(async (w: RuntimeWorkRef) => {
           order.push("work");
           return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
-        },
+        }),
       })
       .catch(() => undefined);
 

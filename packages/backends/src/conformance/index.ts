@@ -1,3 +1,4 @@
+import type { ManagedDispatchAuthority } from "@everdict/application-control";
 import { type KillOutcome, type PersistedWorkIntent, type RuntimeWorkRef, killConverged } from "@everdict/contracts";
 // ── ONE SUITE, EVERY IMPLEMENTATION (arch-review 53, Wave F) ────────────────────────────────────────
 //
@@ -15,6 +16,14 @@ import { type KillOutcome, type PersistedWorkIntent, type RuntimeWorkRef, killCo
 // and a `.test.ts` file cannot be imported across package boundaries.
 import { describe, expect, it } from "vitest";
 import type { Backend } from "../backend.js";
+
+// The dispatch AUTHORITY, as one capability (arch-review 58 W2). These cases exercise the reservation half,
+// so the activation half answers `activate` — a supplier that could hand over half the protocol is exactly
+// the shape this merge removed, and a fake that still could would be modelling the old contract.
+const authorityOf = (reserve: ManagedDispatchAuthority["reserve"]): ManagedDispatchAuthority => ({
+  reserve,
+  activate: async () => ({ kind: "activate" }),
+});
 
 // What a managed backend must hand a conformance suite: a fresh backend, the job to dispatch, and a record of
 // what the fake cluster was asked to do. `effects` is append-only and ordered — the ORDER is what several of
@@ -41,10 +50,10 @@ export function describeManagedDispatch(name: string, world: () => ManagedDispat
       const { backend, job, effects } = world();
       await backend
         .dispatch(job, {
-          onReserved: async (work) => {
+          authority: authorityOf(async (work) => {
             effects.push("reserved");
             return persisted(work);
-          },
+          }),
         })
         .catch(() => undefined);
       expect(
@@ -57,9 +66,9 @@ export function describeManagedDispatch(name: string, world: () => ManagedDispat
       const { backend, job, effects } = world();
       await backend
         .dispatch(job, {
-          onReserved: () => {
+          authority: authorityOf(() => {
             throw new Error("ledger down");
-          },
+          }),
         })
         .catch(() => undefined);
       expect(
@@ -84,7 +93,7 @@ export function describeManagedDispatch(name: string, world: () => ManagedDispat
 
     it("refuses to create work when the reservation hook returns no proof", async () => {
       const { backend, job, effects } = world();
-      await backend.dispatch(job, { onReserved: (async () => undefined) as never }).catch(() => undefined);
+      await backend.dispatch(job, { authority: authorityOf((async () => undefined) as never) }).catch(() => undefined);
       expect(
         effects,
         "the hook resolved without persisting anything and the dispatch proceeded — 'it returned' is not 'it was written down'",

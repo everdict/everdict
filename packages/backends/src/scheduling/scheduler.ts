@@ -1,4 +1,4 @@
-import type { AdmissionLedger } from "@everdict/application-control";
+import type { AdmissionLedger, ManagedDispatchAuthority } from "@everdict/application-control";
 import {
   type AttemptRef,
   type CaseJob,
@@ -71,9 +71,11 @@ interface QueueEntry {
   onStarted?: () => void; // fires when the entry leaves the wait queue and is dispatched — forwarded to the backend
   onWaiting?: (reason: string) => void; // "cannot start now + why" (blocked placement / no online runner) — forwarded to the backend
   onAttempt?: (attempt: AttemptRef) => void; // "the attempt that is actually executing" (self-hosted re-lease) — forwarded to the backend
-  // "the external object this dispatch is ABOUT to create" — forwarded to the backend, which awaits it before
-  // it creates anything (arch-review 53, Wave A) and requires the store's proof back (arch-review 54, Phase 1).
-  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
+  // THE AUTHORITY to create the external object this dispatch is about to place — forwarded to the backend,
+  // which awaits its reservation before it creates anything (arch-review 53 Wave A), requires the store's
+  // proof back (arch-review 54 Phase 1) and re-presents it at the birth (arch-review 57). ONE field, because
+  // this allowlist is where `onActivate` silently died when it was a second one (arch-review 58 W2).
+  authority?: ManagedDispatchAuthority;
 }
 
 export interface SchedulerOptions {
@@ -274,7 +276,7 @@ export class Scheduler {
         ...(opts?.onStarted ? { onStarted: opts.onStarted } : {}),
         ...(opts?.onWaiting ? { onWaiting: opts.onWaiting } : {}),
         ...(opts?.onAttempt ? { onAttempt: opts.onAttempt } : {}),
-        ...(opts?.onReserved ? { onReserved: opts.onReserved } : {}),
+        ...(opts?.authority ? { authority: opts.authority } : {}),
       };
       if (opts?.signal) {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
@@ -626,7 +628,7 @@ export class Scheduler {
     // hook). A managed backend fires onStarted at its dispatch entry (= now, post-admission); the self-hosted backend
     // forwards it to the lease hub so it fires only when a runner actually takes the job.
     const dispatchOpts =
-      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt || entry.onReserved
+      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt || entry.authority
         ? {
             ...(entry.signal ? { signal: entry.signal } : {}),
             ...(entry.onStarted ? { onStarted: entry.onStarted } : {}),
@@ -636,9 +638,11 @@ export class Scheduler {
             // …and onAttempt, for the same reason: this whitelist is the ONE place a hook can silently die,
             // and dropping this one would leave the caller sealing the attempt a requeue abandoned.
             ...(entry.onAttempt ? { onAttempt: entry.onAttempt } : {}),
-            // …and onReserved. Dropping this one costs the caller the only handle to the compute it is about to start:
-            // the teardown then falls back to the case id, which is another run's job too (arch-review 52).
-            ...(entry.onReserved ? { onReserved: entry.onReserved } : {}),
+            // …and the dispatch AUTHORITY. Dropping it costs the caller the only handle to the compute it is
+            // about to start (the teardown then falls back to the case id, which is another run's job too —
+            // arch-review 52) AND the re-presentation that keeps a cancelled reservation from being spent.
+            // It is one field on purpose: `onActivate` died here as a second one (arch-review 58 W2).
+            ...(entry.authority ? { authority: entry.authority } : {}),
           }
         : undefined;
     this.registry

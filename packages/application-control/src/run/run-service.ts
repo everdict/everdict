@@ -1147,12 +1147,17 @@ export class RunService {
         // memory. Persist it on the attempt row so a teardown that outlives this process — a cancel after a
         // restart, a supersede from another replica — can stop THAT job instead of every job of this case.
         // Awaited — a run whose handle cannot be recorded must not place compute (arch-review 53, Wave A).
-        onReserved: (work) => this.reserveWork(id, work),
-        // …and the proof is re-presented at the seam where the object is actually created (arch-review 57
-        // P0). Supplying it is what makes the activation transition a protocol rather than an optional hook
-        // nobody passes — the state machine existed for a wave with no producer, so every managed dispatch
-        // still spent a reservation that nothing had re-checked (arch-review 58).
-        onActivate: (work) => this.activateWork(id, work),
+        // ONE capability, because two optional hooks is what let the activation half die in the Scheduler's
+        // forwarding allowlist while every piece of it existed (arch-review 58 W2). A caller holds the
+        // authority to place managed work, or it does not.
+        authority: {
+          reserve: (work) => this.reserveWork(id, work),
+          // …and the proof is re-presented at the seam where the object is actually created (arch-review 57
+          // P0). Supplying it is what makes the activation transition a protocol rather than an optional hook
+          // nobody passes — the state machine existed for a wave with no producer, so every managed dispatch
+          // still spent a reservation that nothing had re-checked (arch-review 58).
+          activate: (work) => this.activateWork(id, work),
+        },
         onWaiting: (reason) => {
           if (waitingAnnounced) return;
           waitingAnnounced = true;

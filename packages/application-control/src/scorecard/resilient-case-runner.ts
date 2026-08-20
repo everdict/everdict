@@ -5,6 +5,7 @@ import { type PhysicalAttempt, jobAttemptId, openPhysicalAttempt } from "../exec
 import { executeWithOomBoost } from "../ops/oom-boost.js";
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import type { SpeculationController } from "../ops/speculation.js";
+import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 
@@ -125,7 +126,7 @@ export class ResilientCaseRunner {
       // just applied/submitted (arch-review 52, Wave 2). Forwarded verbatim: the handle carries the attempt
       // id off the dispatched job, so the caller stamps it without re-deriving which attempt this dispatch
       // was — which matters here, where spillover and speculation dispatch several.
-      onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
+      authority?: ManagedDispatchAuthority;
       onStep: (message: string, caseId: string) => void;
       // Opens a fresh recording attempt for a NEW physical execution (spill / OOM boost / speculation
       // duplicate) and returns the job stamped with it — see SpilloverOpts.reattempt.
@@ -165,7 +166,7 @@ export class ResilientCaseRunner {
             // rebuilt it), so the caller's executing-stamp names the attempt that actually started.
             ...(cfg.onStarted ? { onStarted: () => cfg.onStarted?.(jj) } : {}),
             onAttempt: (attempt) => attemptByJob.set(jj, attempt),
-            ...(cfg.onReserved ? { onReserved: cfg.onReserved } : {}),
+            ...(cfg.authority ? { authority: cfg.authority } : {}),
           }),
         j,
         {

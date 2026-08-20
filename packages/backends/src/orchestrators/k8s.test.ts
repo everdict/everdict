@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import type { ManagedDispatchAuthority } from "@everdict/application-control";
 import { RESULT_SENTINEL } from "@everdict/contracts";
 import {
   BadRequestError,
@@ -26,6 +27,14 @@ import {
   podResourceAsk,
   usageByNode,
 } from "./k8s.js";
+
+// The dispatch AUTHORITY, as one capability (arch-review 58 W2). These cases exercise the reservation half,
+// so the activation half answers `activate` — a supplier that could hand over half the protocol is exactly
+// the shape this merge removed, and a fake that still could would be modelling the old contract.
+const authorityOf = (reserve: ManagedDispatchAuthority["reserve"]): ManagedDispatchAuthority => ({
+  reserve,
+  activate: async () => ({ kind: "activate" }),
+});
 
 const JOB: CaseJob = {
   harness: { id: "aider", version: "latest" },
@@ -413,10 +422,10 @@ describe("K8sBackend.dispatch", () => {
     await backend.dispatch(
       { ...JOB, tenant: "acme", runId: "evd-run-r1", attemptId: "evd-run-r1#g1" },
       {
-        onReserved: async (w: RuntimeWorkRef) => {
+        authority: authorityOf(async (w: RuntimeWorkRef) => {
           works.push(w);
           return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
-        },
+        }),
       },
     );
 
@@ -440,10 +449,10 @@ describe("K8sBackend.dispatch", () => {
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     const works: unknown[] = [];
     await backend.dispatch(JOB, {
-      onReserved: async (w: RuntimeWorkRef) => {
+      authority: authorityOf(async (w: RuntimeWorkRef) => {
         works.push(w);
         return { attemptId: w.attemptId ?? `${w.runId}#g1`, work: w, persistedAt: "2026-08-18T00:00:00.000Z" };
-      },
+      }),
     }); // JOB has no runId
     expect(works).toEqual([]);
   });
@@ -458,9 +467,9 @@ describe("K8sBackend.dispatch", () => {
       backend.dispatch(
         { ...JOB, runId: "evd-run-r1" },
         {
-          onReserved: () => {
+          authority: authorityOf(() => {
             throw new Error("ledger down");
-          },
+          }),
         },
       ),
     ).rejects.toThrow(/ledger down/);

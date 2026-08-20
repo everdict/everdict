@@ -11,6 +11,7 @@ import {
   type JudgeRunConfig,
   NotFoundError,
   type RunRecord,
+  type RuntimeWorkRef,
   type Scorecard,
   type ScorecardStep,
   type VerdictPolicy,
@@ -511,7 +512,13 @@ export class WorkflowBatchDriver {
             // so every managed case a Temporal batch dispatched was addressable only by its case id after a
             // restart. Awaited by contract — a handle that cannot be recorded aborts the dispatch instead of
             // producing compute nobody can name.
-            onReserved: (work) => this.commit.reserveWork(work),
+            // ONE capability (arch-review 58 W2): the reservation and its re-presentation at the object's birth
+            // travel together, so this lane cannot supply the half it happens to remember — which is exactly what
+            // it did until now, having no activation at all.
+            authority: {
+              reserve: (work: RuntimeWorkRef) => this.commit.reserveWork(work),
+              activate: (work: RuntimeWorkRef) => this.commit.activateWork(work),
+            },
             // COMPUTE ACTUALLY STARTED — the child flips queued→running, and the attempt ledger records that
             // this execution reached the machine rather than only having been intended (arch-review 42).
             // Keyed to the STARTED job's own coordinates (arch-review 51 residue): a spill/OOM reattempt

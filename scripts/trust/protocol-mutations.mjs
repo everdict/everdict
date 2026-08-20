@@ -17,6 +17,24 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 W2. The Scheduler forwards dispatch options by an explicit allowlist whose own comment
+    // says it is "the ONE place a hook can silently die" — and `onActivate` died in exactly it, so the
+    // activation transition never ran on any SaaS dispatch. Forwarding half the authority must go red.
+    name: "R58 W2 — the scheduler forwards half the dispatch authority",
+    file: "packages/backends/src/scheduling/scheduler.ts",
+    from: "            ...(entry.authority ? { authority: entry.authority } : {}),",
+    to: "            ...(entry.authority ? { authority: { reserve: entry.authority.reserve } } : {}),",
+    suite: ["--root", "packages/backends", "src/scheduling/dispatch-authority.counterexample.test.ts"],
+  },
+  {
+    // …and the batch lane, which had no activation at all until the merge forced a supplier to answer both.
+    name: "R58 W2 — the batch lane creates its container without re-proving the reservation",
+    file: "packages/application-control/src/scorecard/in-process-batch-driver.ts",
+    from: "            activate: (work: RuntimeWorkRef) => this.commit.activateWork(work),",
+    to: '            activate: async () => ({ kind: "activate" }),',
+    suite: ["--root", "packages/application-control", "src/scorecard/temporal-work-handle.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 follow-through. The managed lanes handed the agent under test the workspace's WHOLE
     // secret tier — GitHub App token, Mattermost bot token, registry passwords — because a default outlived
     // the per-job channels that replaced it. Spreading the tier back in must go red.

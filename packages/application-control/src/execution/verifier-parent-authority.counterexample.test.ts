@@ -108,7 +108,7 @@ describe("[R58 COUNTEREXAMPLE] a batch case's verifier is recorded under the bat
     if (!job) throw new Error("no verifier job");
 
     await verifierOperation({ attempts }, job, async (_j, hooks) => {
-      await hooks.onReserved({ tenant: "acme", runId: job.runId, externalJobId: "verify-1" });
+      await hooks.authority.reserve({ tenant: "acme", runId: job.runId, externalJobId: "verify-1" });
       return INVOCATION;
     });
 

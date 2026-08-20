@@ -5,6 +5,7 @@ import {
   type VerifierInvocation,
   type VerifierJob,
 } from "@everdict/contracts";
+import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 
 // ── THE JUDGING HALF IS DURABLE WORK (arch-review 57 P0-verifier) ────────────────────────────────────
@@ -34,12 +35,11 @@ export interface VerifierOperationDeps {
   attempts?: ExecutionAttemptStore;
 }
 
-export interface VerifierDispatchHooks {
-  // Called by the lane with the exact work it is about to create, BEFORE it creates it — the same ordering
-  // the agent's dispatch uses, and for the same reason: a handle reported after the apply leaves a control
-  // plane that died in between with a running job nothing can address.
-  onReserved: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
-}
+// The judging half places external work exactly as the agent's half does, so it is handed the SAME
+// capability rather than a lookalike pair of hooks — see `ManagedDispatchAuthority` for what being two
+// optional fields cost the agent lane (arch-review 58 W2). Required here, not optional: a verifier dispatch
+// that cannot record where its container will be must not get one.
+export type VerifierDispatchHooks = { authority: ManagedDispatchAuthority };
 
 export async function verifierOperation(
   deps: VerifierOperationDeps,
@@ -52,7 +52,10 @@ export async function verifierOperation(
   // fabricated one that would read as a reservation somebody wrote.
   if (!attempts)
     return await dispatch(job, {
-      onReserved: async (work) => ({ attemptId: "", work, persistedAt: new Date(0).toISOString() }),
+      authority: {
+        reserve: async (work) => ({ attemptId: "", work, persistedAt: new Date(0).toISOString() }),
+        activate: async () => ({ kind: "activate" }),
+      },
     });
 
   // Its OWN row. The agent's attempt is committed by the time a verifier runs — the verdict is what closes
@@ -73,7 +76,12 @@ export async function verifierOperation(
 
   try {
     const invocation = await dispatch(job, {
-      onReserved: async (work) => await attempts.reserveWork(attemptId, { ...work, attemptId }),
+      authority: {
+        reserve: async (work) => await attempts.reserveWork(attemptId, { ...work, attemptId }),
+        // The verifier's own re-presentation: its row is opened under the batch's parent, so a cancellation
+        // that settled while the container was being created refuses the birth here rather than after it.
+        activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),
+      },
     });
     // ── THE TERMINAL CAS IS THIS VERDICT'S RE-PROOF (arch-review 58) ──────────────────────────────
     //

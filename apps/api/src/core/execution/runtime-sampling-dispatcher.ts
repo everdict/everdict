@@ -44,14 +44,19 @@ export class RuntimeSamplingDispatcher implements Dispatcher {
     // verbatim. Wrapping an ABSENT inner hook would be worse than useless: it would turn "nobody is recording
     // this placement" — which `requireReservation` refuses at the effect boundary, where the decision belongs
     // — into "a hook exists and it threw", moving one protocol's enforcement into a diagnostics decorator.
-    const inner = dispatchOpts?.onReserved;
+    const inner = dispatchOpts?.authority;
     const opts: DispatchOptions = {
       ...dispatchOpts,
       ...(inner
         ? {
-            onReserved: async (reserved): Promise<PersistedWorkIntent> => {
-              work = reserved;
-              return await inner(reserved);
+            // Observe the reservation, carry the activation through untouched — the authority is ONE object
+            // precisely so a decorator cannot keep half of it (arch-review 58 W2).
+            authority: {
+              reserve: async (reserved): Promise<PersistedWorkIntent> => {
+                work = reserved;
+                return await inner.reserve(reserved);
+              },
+              activate: inner.activate.bind(inner),
             },
           }
         : {}),

@@ -925,7 +925,7 @@ export class NomadBackend
     // placing.
     const result = await this.dispatch(
       spec,
-      hooks ? { onReserved: hooks.onReserved } : undefined,
+      hooks ? { authority: hooks.authority } : undefined,
       verifierJobPayload(job),
     );
     // The INVOCATION, not bare numbers (arch-review 57 P1). Which procedure ran, what it read, and in which
@@ -959,10 +959,10 @@ export class NomadBackend
         ...(ns !== undefined ? { namespace: ns } : {}),
         ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
       };
-      await requireReservation(job, work, options?.onReserved);
+      await requireReservation(job, work, options?.authority);
       // …and the reservation is re-presented immediately before the submit (arch-review 57 P0). A proof with
       // no lifetime let a paused driver create work after a cancellation had verified there was none.
-      await requireActivation(job, work, options?.onActivate);
+      await requireActivation(job, work, options?.authority);
     }
     // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire above, before the
     // reservation and before the submit, so a reservation failure left a record marked `running` with no

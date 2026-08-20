@@ -77,7 +77,12 @@ export interface ProbeResult {
 // The Dispatcher port lives in @everdict/application-control; Backend extends it, so backends re-exports it
 // here as a deliberate convenience — a consumer narrowing a Backend gets its supertype from the same module.
 export type { DispatchOptions, Dispatcher } from "@everdict/application-control";
-import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
+import type {
+  DispatchOptions,
+  Dispatcher,
+  ManagedDispatchAuthority,
+  VerifierDispatchHooks,
+} from "@everdict/application-control";
 
 // The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler
 // already rejects queued entries with, so callers classify it the same way).
@@ -180,14 +185,12 @@ export interface ManagedWorkControl {
 //
 // Separate from `Backend` because a lane may legitimately not have it (a self-hosted runner grades in place by
 // design), and a caller narrows with `isVerifierDispatchable` rather than feature-detecting a method.
-// What a verifier lane reports back mid-dispatch. Declared here beside the capability rather than imported
-// from application-control, because a backend may not depend on it (the cone runs the other way).
-export interface VerifierDispatchHooks {
-  // Answers the PERSISTED intent, exactly as `DispatchOptions.onReserved` does — so a lane that re-uses
-  // `dispatch` passes this straight through rather than manufacturing an empty proof to satisfy the shape.
-  // A proof nobody wrote is what rule `protocol` L1 refuses, and the shape is where that starts.
-  onReserved: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
-}
+// What a verifier lane is handed mid-dispatch. IMPORTED, not re-declared: the note that used to sit here said
+// it was spelled locally "because a backend may not depend on application-control (the cone runs the other
+// way)" — and this package has depended on it for as long as it has imported `DispatchOptions` from it. So
+// the sentence was false and the duplicate was drift: two spellings of one shape, which is how the next field
+// lands in one of them (rule `protocol` L3). Re-exported so consumers of this module keep their import.
+export type { VerifierDispatchHooks } from "@everdict/application-control";
 
 export interface VerifierDispatchable {
   // Answers the INVOCATION, not bare numbers (arch-review 57 P1). A lane knows which procedure it ran, which
@@ -327,15 +330,15 @@ export function isWorkControllable(backend: Backend): backend is Backend & Manag
 export async function requireReservation(
   job: CaseJob,
   work: RuntimeWorkRef,
-  onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>,
+  authority?: ManagedDispatchAuthority,
 ): Promise<PersistedWorkIntent> {
-  if (!onReserved)
+  if (!authority)
     throw new InternalError(
       "NOT_CONFIGURED",
       { runId: job.runId, externalJobId: work.externalJobId },
       "a managed dispatch for a tracked run needs a reservation hook — nothing would record where this work is placed, so no teardown, recovery or cancellation could name it.",
     );
-  const intent = await onReserved(work);
+  const intent = await authority.reserve(work);
   // A hook that answered with nothing is a hook that wrote nothing. Refusing here is what makes the returned
   // value a protocol rather than a courtesy: there is no path from "reservation unproven" to "job created".
   if (!intent || typeof intent.attemptId !== "string" || intent.attemptId === "")
@@ -359,10 +362,10 @@ export async function requireReservation(
 export async function requireActivation(
   job: CaseJob,
   work: RuntimeWorkRef,
-  onActivate?: (work: RuntimeWorkRef) => Promise<ActivationDecision>,
+  authority?: ManagedDispatchAuthority,
 ): Promise<void> {
-  if (!onActivate) return;
-  const decision = await onActivate(work);
+  if (!authority) return;
+  const decision = await authority.activate(work);
   if (decision.kind === "refuse")
     throw new ConflictError(
       "CONFLICT",

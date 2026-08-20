@@ -1269,7 +1269,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
 
     // BEFORE the Job exists (arch-review 57 P0-verifier). The name is already decided, so the ledger can
     // record where this work will be — which is what lets a cancellation find the verifier at all.
-    await hooks?.onReserved({
+    await hooks?.authority.reserve({
       tenant: job.tenant,
       runId: job.runId,
       externalJobId: name,
@@ -1715,11 +1715,11 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     // attempt id, an UPDATE matching no row) and this line could not tell that apart from a durable
     // reservation. So a job that names a run requires the store's answer, and a missing hook is refused here
     // rather than treated as "this deployment does not track placements".
-    if (job.runId !== undefined) await requireReservation(job, work, options?.onReserved);
+    if (job.runId !== undefined) await requireReservation(job, work, options?.authority);
     // …and the reservation is re-presented HERE, immediately before the Job exists (arch-review 57 P0). A
     // proof with no lifetime let a paused driver create work after a cancellation had verified there was
     // none; this is the transition that makes such a driver fail instead.
-    await requireActivation(job, work, options?.onActivate);
+    await requireActivation(job, work, options?.authority);
     // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire before both the
     // reservation and the apply, so a reservation failure left a record marked `running` with no Job anywhere.
     options?.onStarted?.();

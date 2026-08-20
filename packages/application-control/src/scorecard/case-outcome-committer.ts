@@ -1,4 +1,5 @@
 import {
+  type ActivationDecision,
   type CaseCommitReceipt,
   type CaseResult,
   type DomainFact,
@@ -618,6 +619,23 @@ export class CaseOutcomeCommitter {
         "the reserved work names no attempt, so nothing durable would point at the job about to be created.",
       );
     return await attempts.reserveWork(work.attemptId, work);
+  }
+
+  // …AND THE RE-PRESENTATION, at the seam where the container is actually created (arch-review 57 P0). The
+  // batch lane had no activation at all: the state machine existed, the run lane eventually got a producer,
+  // and every scorecard case still spent a reservation nothing had re-checked. Merging the two halves into
+  // one capability (arch-review 58 W2) is what made the omission impossible to keep — a supplier now has to
+  // answer both questions or none.
+  //
+  // Answers a DECISION rather than throwing: a refusal is the ordinary outcome when a cancellation got there
+  // first, and the lane turns it into an aborted dispatch. A handle with no attempt id is the composition
+  // error `reserveWork` above already refuses, so reaching here without one cannot happen — and if it did,
+  // there is no row to condition on, which is a refusal rather than a silent pass.
+  async activateWork(work: RuntimeWorkRef): Promise<ActivationDecision> {
+    const attempts = this.deps.attempts;
+    if (!attempts || work.attemptId === undefined)
+      return { kind: "refuse", reason: "no ledger row backs this dispatch, so its reservation cannot be re-proved" };
+    return await attempts.activateWork(work.attemptId, work);
   }
 
   // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on

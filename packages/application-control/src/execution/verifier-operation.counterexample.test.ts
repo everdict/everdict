@@ -67,7 +67,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
     const seen: string[] = [];
     await verifierOperation({ attempts }, job(), async (_j, hooks) => {
       seen.push("dispatch");
-      await hooks.onReserved(work("everdict-verify-1"));
+      await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
 
@@ -81,7 +81,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
     // container a completed cancellation never knew to stop.
     const attempts = new InMemoryExecutionAttemptStore();
     await verifierOperation({ attempts }, job(), async (_j, hooks) => {
-      await hooks.onReserved(work("everdict-verify-1"));
+      await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
     const handles = (await attempts.list("r1")).flatMap((a: ExecutionAttemptRecord) =>
@@ -93,7 +93,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
   it("SETTLES the row when the verdict comes back — a live row is compute a sweep will chase", async () => {
     const attempts = new InMemoryExecutionAttemptStore();
     await verifierOperation({ attempts }, job(), async (_j, hooks) => {
-      await hooks.onReserved(work("everdict-verify-1"));
+      await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
     expect((await attempts.list("r1"))[0]?.state).toBe("committed");

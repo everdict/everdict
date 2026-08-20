@@ -42,7 +42,7 @@ const reservation = async (work: RuntimeWorkRef) => ({
 
 const slowInner = (ms: number): Dispatcher => ({
   dispatch: async (job, opts) => {
-    await opts?.onReserved?.({
+    await opts?.authority?.reserve({
       tenant: job.tenant ?? "default",
       runId: job.runId ?? "",
       externalJobId: `everdict-${job.evalCase.id}-aaaa`,
@@ -64,7 +64,11 @@ describe("RuntimeSamplingDispatcher (replay runtime plane producer)", () => {
     // A tracked run always arrives with a reservation hook — the composition wires it, and a managed
     // backend refuses to place work without one (arch-review 54, Phase 1). The sampler observes that hook
     // rather than owning it, so the fixture must carry it or it is testing a lane production never has.
-    const result = await dispatcher.dispatch(jobFor("rt-1", "evd-run-r1"), { onReserved: reservation });
+    // ONE capability now: a fixture that could hand over half the protocol would be modelling a contract
+    // production no longer has (arch-review 58 W2).
+    const result = await dispatcher.dispatch(jobFor("rt-1", "evd-run-r1"), {
+      authority: { reserve: reservation, activate: async () => ({ kind: "activate" }) },
+    });
     expect(result).toEqual(RESULT);
     expect(recorded.length).toBeGreaterThanOrEqual(2);
     expect(recorded[0]?.runId).toBe("evd-run-r1");

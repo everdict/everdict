@@ -30,16 +30,20 @@ import { describe, expect, it } from "vitest";
 const RUN_SERVICE = join(import.meta.dirname, "run-service.ts");
 
 describe("[R58 COUNTEREXAMPLE] the activation transition has a production producer", () => {
-  it("the run service supplies onActivate wherever it supplies onReserved", () => {
+  it("the run service hands over BOTH halves of the dispatch authority", () => {
+    // Counting `onActivate` against `onReserved` was the right test for a contract with two optional hooks.
+    // That contract is gone: arch-review 58's W2 merged them into one capability precisely because a
+    // forwarding chain kept dropping the second one — the Scheduler's own allowlist, whose comment warned
+    // that it is "the ONE place a hook can silently die", did exactly that to `onActivate`.
+    //
+    // So the property is now that the supplier answers both questions. A composition that reached the store
+    // for one and not the other cannot type check, which is the point; what a source read still adds is that
+    // the supplier is REAL — both halves reach the ledger's own conditional writes rather than being
+    // satisfied with a literal.
     const source = readFileSync(RUN_SERVICE, "utf8");
-    const reservations = source.split("onReserved:").length - 1;
-    const activations = source.split("onActivate:").length - 1;
-
-    expect(reservations, "this test is pinned to a call site that no longer exists").toBeGreaterThan(0);
-    expect(
-      activations,
-      `the run service supplies onReserved ${reservations}× and onActivate ${activations}× — a dispatch that reserves without activating spends a proof nobody re-checked, which is the window arch-review 57 closed`,
-    ).toBeGreaterThanOrEqual(reservations);
+    expect(source, "the run service supplies no dispatch authority at all").toContain("authority: {");
+    expect(source, "the reservation half does not reach the ledger").toContain("this.reserveWork(");
+    expect(source, "the activation half does not reach the ledger").toContain("this.activateWork(");
   });
 
   it("the activation supplier reaches the attempt store's conditional transition", () => {
