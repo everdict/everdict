@@ -699,7 +699,14 @@ async function main(): Promise<void> {
     killUnhandled,
     probeWork,
     dispatchVerifier,
-  } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
+  } = buildRuntimeAccess({
+    runtimeRegistry,
+    runtimeSecretsFor,
+    runtimeBuildBackend,
+    // …so a verifier's compute gets an attempt row like every other managed unit, which is what makes it
+    // visible to the cancellation sweep (arch-review 57 P0-verifier).
+    ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),
+  });
   verifierLane.fn = dispatchVerifier;
 
   // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness

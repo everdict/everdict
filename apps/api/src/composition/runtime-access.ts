@@ -6,8 +6,9 @@ import {
   recoverInterrupted,
   retryDeferredRecovery,
   tombstoneInterrupted,
+  verifierOperation,
 } from "@everdict/application-control";
-import type { RunService } from "@everdict/application-control";
+import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
   type Backend,
@@ -48,8 +49,12 @@ export function buildRuntimeAccess(deps: {
     spec: RuntimeSpec,
     opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
   ) => Backend;
+  // The attempt ledger, so a verifier's compute gets a row like every other piece of managed work
+  // (arch-review 57 P0-verifier). Optional: a deployment without one records nothing and still judges —
+  // refusing there would make the ledger a prerequisite for a verdict rather than a record of one.
+  attempts?: ExecutionAttemptStore;
 }) {
-  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend } = deps;
+  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend, attempts } = deps;
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
   // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
@@ -353,7 +358,13 @@ export function buildRuntimeAccess(deps: {
     // image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
     await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
       if (!isVerifierDispatchable(backend)) return false;
-      invocation = await backend.dispatchVerifier(job);
+      // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
+      // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
+      // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
+      // otherwise certify zero live work over it.
+      invocation = await verifierOperation({ ...(attempts ? { attempts } : {}) }, job, (j, hooks) =>
+        backend.dispatchVerifier(j, hooks),
+      );
       return true; // the first lane that can judge is the answer
     });
     if (invocation === undefined)

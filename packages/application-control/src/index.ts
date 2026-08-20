@@ -708,3 +708,8 @@ export {
   type UpdateKnowledgeEntryInput,
 } from "./knowledge/knowledge-entry-service.js";
 export { type VerifierPassDeps, withVerifierPass } from "./execution/verifier-pass.js";
+export {
+  type VerifierDispatchHooks,
+  type VerifierOperationDeps,
+  verifierOperation,
+} from "./execution/verifier-operation.js";

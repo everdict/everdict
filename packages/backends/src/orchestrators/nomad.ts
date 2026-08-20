@@ -61,6 +61,7 @@ import {
   type ProbeResult,
   type Probeable,
   type Reclaimable,
+  type VerifierDispatchHooks,
   type WorkAddressable,
   dispatchAborted,
   requireActivation,
@@ -873,13 +874,22 @@ export class NomadBackend
   //
   // It goes through `dispatch` rather than a second copy of that path, because a second copy is how the two
   // would drift on the next change to alloc-log handling.
-  async dispatchVerifier(job: VerifierJob): Promise<VerifierInvocation> {
+  async dispatchVerifier(job: VerifierJob, hooks?: VerifierDispatchHooks): Promise<VerifierInvocation> {
     // Typed, and shared with the K8s lane (arch-review 57 P0-verifier). The cast this replaces built a job
     // with no placement, no world and no credentials — which is precisely a job the trust-zone resolution
     // cannot resolve. This lane already re-uses `dispatch`, so it keeps `effectiveOpts`; what it lacked was
     // a job worth resolving.
     const spec = verifierCaseJob(job);
-    const result = await this.dispatch(spec, undefined, verifierJobPayload(job));
+    // Reported BEFORE the submit (arch-review 57 P0-verifier), through `dispatch`'s OWN reservation hook.
+    // This lane cannot name the job id in advance — `dispatchSuffix()` is random per dispatch — so reporting
+    // a guess would record a reservation for work that never exists. Passing the hook down means the id that
+    // gets recorded is the one the submit actually uses, which is the whole point of reserving before
+    // placing.
+    const result = await this.dispatch(
+      spec,
+      hooks ? { onReserved: hooks.onReserved } : undefined,
+      verifierJobPayload(job),
+    );
     // The INVOCATION, not bare numbers (arch-review 57 P1). Which procedure ran, what it read, and in which
     // world — all known here and previously discarded. The image provenance comes off the dispatch's own
     // result, so this lane reports what the placement observed rather than re-deriving it.

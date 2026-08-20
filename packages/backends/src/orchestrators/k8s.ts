@@ -58,6 +58,7 @@ import {
   type ProbeResult,
   type Probeable,
   type Reclaimable,
+  type VerifierDispatchHooks,
   type WorkAddressable,
   dispatchAborted,
   requireActivation,
@@ -1247,7 +1248,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   //
   // The scores come back through `parseResult` — the same sentinel the case entry prints — so a verifier that
   // died mid-run surfaces as a parse failure here rather than as a silent absence.
-  async dispatchVerifier(job: VerifierJob): Promise<VerifierInvocation> {
+  async dispatchVerifier(job: VerifierJob, hooks?: VerifierDispatchHooks): Promise<VerifierInvocation> {
     // ── PLACED BY THE SAME RULES AS THE AGENT (arch-review 57 P0-verifier) ──────────────────────────
     //
     // This read `this.opts.namespace ?? "default"` and the backend's blanket `secretEnv`, so the half of the
@@ -1261,6 +1262,14 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       .toLowerCase()
       .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
 
+    // BEFORE the Job exists (arch-review 57 P0-verifier). The name is already decided, so the ledger can
+    // record where this work will be — which is what lets a cancellation find the verifier at all.
+    await hooks?.onReserved({
+      tenant: job.tenant,
+      runId: job.runId,
+      externalJobId: name,
+      namespace: ns,
+    });
     return await this.withApi(async (api) => {
       await api.ensureNamespace(ns);
       const manifest = buildK8sJob(

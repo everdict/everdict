@@ -180,11 +180,24 @@ export interface ManagedWorkControl {
 //
 // Separate from `Backend` because a lane may legitimately not have it (a self-hosted runner grades in place by
 // design), and a caller narrows with `isVerifierDispatchable` rather than feature-detecting a method.
+// What a verifier lane reports back mid-dispatch. Declared here beside the capability rather than imported
+// from application-control, because a backend may not depend on it (the cone runs the other way).
+export interface VerifierDispatchHooks {
+  // Answers the PERSISTED intent, exactly as `DispatchOptions.onReserved` does — so a lane that re-uses
+  // `dispatch` passes this straight through rather than manufacturing an empty proof to satisfy the shape.
+  // A proof nobody wrote is what rule `protocol` L1 refuses, and the shape is where that starts.
+  onReserved: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
+}
+
 export interface VerifierDispatchable {
   // Answers the INVOCATION, not bare numbers (arch-review 57 P1). A lane knows which procedure it ran, which
   // workspace it read, where it ran and in which world; answering `Score[]` threw all of that away one frame
   // from where it was known, so a replay could report a verdict and not what produced it.
-  dispatchVerifier(job: VerifierJob): Promise<VerifierInvocation>;
+  // `onReserved` is the SAME ordering the agent's dispatch uses (arch-review 57 P0-verifier): the lane
+  // reports the exact work it is about to create BEFORE creating it, so a control plane that dies in
+  // between leaves a row naming a job something can address — and so a cancellation, which reads attempt
+  // rows, can see the verifier at all. Optional: a lane with no ledger wired passes nothing.
+  dispatchVerifier(job: VerifierJob, hooks?: VerifierDispatchHooks): Promise<VerifierInvocation>;
 }
 
 export function isVerifierDispatchable(backend: Backend): backend is Backend & VerifierDispatchable {
