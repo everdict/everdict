@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P1. `complete` asked whether `imageProvenance` was SET, and the union is three-valued
+    // precisely because that is not the same question: `none` and `unresolved` both counted as complete, so
+    // the one signal for "this verdict is not fully attributed" said yes for the two cases it exists to flag.
+    name: "R58 — a receipt calls unresolved provenance complete",
+    file: "packages/domain/src/execution/verifier-receipt.ts",
+    from: '    complete: invocation.work !== undefined && invocation.imageProvenance?.kind === "resolved",',
+    to: "    complete: invocation.work !== undefined && invocation.imageProvenance !== undefined,",
+    suite: ["--root", "packages/domain", "src/execution/verifier-receipt-completeness.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P1. Millicores and megahertz shared one `??` chain, so a two-vCPU case was placed as
     // 2000 MHz while the lane's world proof attested the declared box — a unit error walking straight through
     // the check built to catch an unenforced world.

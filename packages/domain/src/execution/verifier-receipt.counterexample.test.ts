@@ -79,11 +79,24 @@ describe("[R57 COUNTEREXAMPLE] a verifier verdict says what produced it", () => 
     // real — but a consumer must be able to tell. Absence that reads as completeness is how a weaker record
     // gets counted as a stronger one.
     expect(verifierReceiptOf(invocation()).complete).toBe(false);
+    // …and `none` is NOT the completing half, which this assertion originally claimed. `ImageProvenance` is a
+    // three-valued union: `none` says the lane observed no image at all and `unresolved` says it saw refs it
+    // could not pin to bytes. Reading either as complete makes the one signal for "this verdict is not fully
+    // attributed" say yes for exactly the two cases it exists to flag (arch-review 58 P1, and see
+    // `verifier-receipt-completeness.counterexample.test.ts` for the full statement).
     expect(
       verifierReceiptOf(
         invocation({
           work: { tenant: "acme", runId: "r1", externalJobId: "j" },
           imageProvenance: { kind: "none" },
+        }),
+      ).complete,
+    ).toBe(false);
+    expect(
+      verifierReceiptOf(
+        invocation({
+          work: { tenant: "acme", runId: "r1", externalJobId: "j" },
+          imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "t:1", digest: "sha256:img" }] },
         }),
       ).complete,
     ).toBe(true);

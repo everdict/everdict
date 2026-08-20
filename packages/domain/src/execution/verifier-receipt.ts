@@ -45,6 +45,12 @@ export function verifierReceiptOf(invocation: VerifierInvocation): VerifierRecei
     // they happened to finish in is a scheduling detail. Digesting it would turn that detail into a
     // difference of evidence.
     scoreDigest: contentDigest([...invocation.scores].sort((a, b) => a.metric.localeCompare(b.metric))),
-    complete: invocation.work !== undefined && invocation.imageProvenance !== undefined,
+    // PRESENCE IS NOT PROVENANCE (arch-review 58). This asked whether `imageProvenance` was SET, and the
+    // union is three-valued precisely because a field being set is not a question being answered: `none` is
+    // a lane that observed no image and `unresolved` is refs nobody could pin to bytes. Both are defined, so
+    // both used to read as complete — the one signal a consumer has for "this verdict is not fully
+    // attributed" said yes for exactly the two cases it exists to flag (rule `protocol` L3: provenance
+    // states COVERAGE, and a consumer that only asks whether something is there accepts zero).
+    complete: invocation.work !== undefined && invocation.imageProvenance?.kind === "resolved",
   };
 }
