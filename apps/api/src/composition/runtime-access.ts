@@ -592,6 +592,10 @@ export async function runStartupRecovery(deps: {
 // A boolean is enough, but it has to live with the list rather than beside the timer: the two are one state.
 // Holding them in an object also gives the property somewhere to be tested, which a closure inside `main.ts`
 // did not have.
+// How many passes may fail to decide a target before it stops being ordinary. Ten minutes of 60-second ticks:
+// long enough that a blinking ledger never pages anyone, short enough that a stuck one does not sit for hours.
+const ESCALATE_AFTER_ATTEMPTS = 10;
+
 export class DeferredRecoverySweep {
   private running = false;
   constructor(
@@ -612,6 +616,21 @@ export class DeferredRecoverySweep {
     this.running = true;
     try {
       this.owed = await sweepDeferredRecovery(this.deps, this.owed).catch(() => this.owed);
+      // ── A DEBT THAT WILL NOT DECIDE IS AN ESCALATION, NOT A QUIET HOLD (arch-review 58, W4) ────
+      //
+      // `retry_later` always carried a REASON — "the attempt ledger would not answer", "the cluster did not
+      // say whether the job is live" — and every consumer dropped the string. So a target could sit here
+      // forever with nothing anywhere saying why, which is the state rule `protocol` L5 names: "we could not
+      // find out" is an escalation field (attempts, backoff, operator alert), never a silence.
+      //
+      // A first deferral is ordinary — a ledger blinked, the next tick decides it. A target that has failed
+      // to decide this many times is somebody's problem, and it says which target and what the last pass
+      // actually saw, so the operator starts from the answer rather than from a count.
+      for (const t of this.owed)
+        if (t.attempts >= ESCALATE_AFTER_ATTEMPTS)
+          console.error(
+            `▶ recovery: ${t.kind} ${t.id} has been undecidable for ${t.attempts} passes — ${t.lastReason ?? "no reason recorded"}`,
+          );
     } finally {
       this.running = false;
     }

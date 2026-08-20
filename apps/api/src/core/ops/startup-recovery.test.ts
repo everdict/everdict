@@ -214,7 +214,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       sessions: 0,
       live: 0,
       deferred: 1,
-      owed: [{ kind: "run", id: "solo-explodes", authority: UNCLAIMED }],
+      owed: [{ kind: "run", id: "solo-explodes", authority: UNCLAIMED, attempts: 1, lastReason: expect.any(String) }],
     });
     // Left exactly as it was, for the next sweep to ask again.
     expect((await runs.get("solo-explodes"))?.status).toBe("running");
@@ -278,7 +278,7 @@ describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
       sessions: 0,
       live: 0,
       deferred: 1,
-      owed: [{ kind: "scorecard", id: "explodes", authority: UNCLAIMED }],
+      owed: [{ kind: "scorecard", id: "explodes", authority: UNCLAIMED, attempts: 1, lastReason: expect.any(String) }],
     });
     expect((await scorecards.get("explodes"))?.status).toBe("running");
   });

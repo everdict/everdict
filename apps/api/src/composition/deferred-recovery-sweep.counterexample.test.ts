@@ -27,8 +27,8 @@ import { DeferredRecoverySweep } from "./runtime-access.js";
 // Seen RED with the re-entrancy guard neutralized, observed:
 //   a second tick ran while the first was still going: expected [ 'a' , 'a' ] to have a length of 1
 
-const target = (id: string): RecoveryTarget =>
-  ({ kind: "scorecard", id, authority: { ownerReplica: "r1", epoch: 1 } }) as unknown as RecoveryTarget;
+const target = (id: string, attempts = 1): RecoveryTarget =>
+  ({ kind: "scorecard", id, authority: { ownerReplica: "r1", epoch: 1 }, attempts }) as unknown as RecoveryTarget;
 
 // A deps object whose only job is to count resume calls and take as long as the test tells it to.
 function slowDeps(hold: Promise<void>, seen: string[]) {
@@ -111,5 +111,54 @@ describe("[R58 COUNTEREXAMPLE] the deferred-recovery sweep does not overlap itse
     const sweep = new DeferredRecoverySweep(failing, [target("a")]);
     await sweep.tick();
     expect(sweep.outstanding, "an unreadable ledger discharged the debt").toHaveLength(1);
+  });
+
+  it("ESCALATES a target that has been undecidable for too long, naming what the last pass saw", async () => {
+    // `retry_later` always carried a reason and every consumer dropped it, so a debt could sit in the
+    // worklist forever with nothing anywhere saying why — the silence rule `protocol` L5 refuses. A first
+    // deferral is ordinary; the tenth is somebody's problem, and the difference has to be visible.
+    const said: string[] = [];
+    const spy = console.error;
+    console.error = (m: unknown) => {
+      said.push(String(m));
+    };
+    try {
+      const deps = {
+        scorecardStore: { get: async () => ({ id: "a", status: "running", ownerReplica: "r1", ownerEpoch: 1 }) },
+        store: { get: async () => undefined },
+        owner: { ownerReplica: "r1", epoch: 1 },
+        scorecardService: {
+          resume: async () => ({ kind: "retry_later", reason: "the attempt ledger would not answer" }),
+        },
+        service: { resume: async () => ({ kind: "resumed" }) },
+      } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];
+      const sweep = new DeferredRecoverySweep(deps, [target("a", 9)]);
+      await sweep.tick();
+      expect(said.join("\n"), "a debt that will not decide was held in silence").toMatch(/undecidable for 10 passes/);
+      expect(said.join("\n"), "the escalation does not say what the last pass saw").toMatch(/ledger would not answer/);
+    } finally {
+      console.error = spy;
+    }
+  });
+
+  it("says NOTHING about a target on its first deferral — a blinking ledger is not a page", async () => {
+    const said: string[] = [];
+    const spy = console.error;
+    console.error = (m: unknown) => {
+      said.push(String(m));
+    };
+    try {
+      const deps = {
+        scorecardStore: { get: async () => ({ id: "a", status: "running", ownerReplica: "r1", ownerEpoch: 1 }) },
+        store: { get: async () => undefined },
+        owner: { ownerReplica: "r1", epoch: 1 },
+        scorecardService: { resume: async () => ({ kind: "retry_later", reason: "transient" }) },
+        service: { resume: async () => ({ kind: "resumed" }) },
+      } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];
+      await new DeferredRecoverySweep(deps, [target("a", 1)]).tick();
+      expect(said.filter((m) => m.includes("undecidable"))).toHaveLength(0);
+    } finally {
+      console.error = spy;
+    }
   });
 });

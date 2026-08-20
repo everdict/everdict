@@ -27,7 +27,15 @@ import { recoverInterrupted, retryDeferredRecovery } from "./startup-recovery.js
 // The worklist entry, as production now shapes it: identity PLUS the capability the claim issued. Carrying
 // the authority is arch-review 57's fix — a retry re-presents its own token instead of reading whatever
 // generation the row holds by then (`deferred-recovery-authority.counterexample.test.ts`).
-type Target = { kind: "scorecard" | "run"; id: string; authority: { ownerReplica: string; epoch: number } };
+// A deferred target also carries HOW MANY passes have failed to decide it and what the last one said — the
+// escalation field rule `protocol` L5 requires, added in arch-review 58 W4.
+type Target = {
+  kind: "scorecard" | "run";
+  id: string;
+  authority: { ownerReplica: string; epoch: number };
+  attempts: number;
+  lastReason?: string;
+};
 // The fixture row is claimed at generation 1 by replica-1 — the capability this sweep was issued.
 const CLAIMED = { ownerReplica: "replica-1", epoch: 1 };
 
@@ -91,7 +99,11 @@ describe("[R56 WAVE-C COUNTEREXAMPLE #4 — CLOSED] a deferred recovery is owed 
     expect(
       (outcome as { owed?: Target[] }).owed,
       "nothing names what this sweep still owes an answer for, so nothing can retry it",
-    ).toEqual([{ kind: "scorecard", id: "sc-1", authority: CLAIMED }]);
+      // `toMatchObject`, not `toEqual`: what this case is about is WHICH record is owed and under whose
+      // claim. A deferred target also carries how many passes have failed to decide it and what the last one
+      // said (arch-review 58 W4), and asserting exact equality would make every future field break a test
+      // that is not about it.
+    ).toMatchObject([{ kind: "scorecard", id: "sc-1", authority: CLAIMED }]);
   });
 
   it("retries exactly that worklist without a process restart, and converges", async () => {
@@ -115,9 +127,13 @@ describe("[R56 WAVE-C COUNTEREXAMPLE #4 — CLOSED] a deferred recovery is owed 
     let owed = (first as { owed?: Target[] }).owed ?? [];
     owed = await retryDeferredRecovery(w.deps as never, owed);
 
-    expect(owed, "a still-unreadable ledger dropped the debt instead of keeping it").toEqual([
+    // Identity + claim; the attempt count is asserted by its own case (arch-review 58 W4).
+    expect(owed, "a still-unreadable ledger dropped the debt instead of keeping it").toMatchObject([
       { kind: "scorecard", id: "sc-1", authority: CLAIMED },
     ]);
+    // …and the RETRY counted itself: a debt that keeps deferring has to be tellable from one on its first
+    // pass, which is what turns "still owed" into an escalation instead of a silence (arch-review 58 W4).
+    expect(owed[0]?.attempts, "a second undecided pass did not count itself").toBe(2);
     expect(w.record.status, "the retry wrote a terminal row over a transient failure").toBe("running");
   });
 

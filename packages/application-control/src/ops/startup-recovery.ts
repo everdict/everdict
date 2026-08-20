@@ -90,6 +90,20 @@ export interface RecoveryTarget {
   // A fencing token is issued BY a claim TO an owner. It is not a version number to be looked up, which is
   // exactly the confusion that made this reachable, so the token travels with the debt.
   authority: DriverAuthority;
+  // ── WHY THIS IS STILL OWED, AND FOR HOW LONG (arch-review 58, W4) ────────────────────────────
+  //
+  // `retry_later` carries a REASON — "the attempt ledger would not answer", "the cluster did not say
+  // whether the job is live" — and every one of the four places that consumed it dropped the string and kept
+  // only the target. So a debt could sit in the worklist forever with nothing anywhere saying why, which is
+  // precisely the state rule `protocol` L5 says must be an ESCALATION rather than a quiet hold: "we could
+  // not find out" is an escalation field (attempts, backoff, operator alert), never a terminal state and
+  // never a silence.
+  //
+  // `attempts` counts the passes that could not decide; `lastReason` is what the last one said. A target on
+  // its first deferral is ordinary; one on its fiftieth is an operator's problem, and the difference is now
+  // visible instead of being a number nobody kept.
+  attempts: number;
+  lastReason?: string;
 }
 
 export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
@@ -207,7 +221,13 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       // (arch-review 56, Wave C: the previous version said "the next sweep asks again" and there was none).
       deferredCount += 1;
       // The capability THIS claim issued — not the row's current one, which is what the retry used to read.
-      owed.push({ kind: "scorecard", id: c.id, authority });
+      owed.push({
+        kind: "scorecard",
+        id: c.id,
+        authority,
+        attempts: 1,
+        ...(disposition.kind === "retry_later" ? { lastReason: disposition.reason } : {}),
+      });
       console.warn(`▶ boot recovery: batch ${c.id} left for a later sweep — ${disposition.reason}`);
       continue;
     }
@@ -303,7 +323,13 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
       }
       if (runDisposition.kind === "retry_later") {
         deferredCount += 1;
-        owed.push({ kind: "run", id: r.id, authority: runAuthority });
+        owed.push({
+          kind: "run",
+          id: r.id,
+          authority: runAuthority,
+          attempts: 1,
+          lastReason: runDisposition.reason,
+        });
         console.warn(`▶ boot recovery: run ${r.id} left for a later sweep — ${runDisposition.reason}`);
         continue;
       }
@@ -384,7 +410,8 @@ export async function retryDeferredRecovery(
             }),
           )
         : ({ kind: "retry_later", reason: "no resume wired" } as ResumeResult);
-      if (disposition.kind === "retry_later") stillOwed.push(target);
+      if (disposition.kind === "retry_later")
+        stillOwed.push({ ...target, attempts: target.attempts + 1, lastReason: disposition.reason });
       continue;
     }
     const run = await deps.runs?.get?.(target.id);
@@ -399,7 +426,8 @@ export async function retryDeferredRecovery(
           }),
         )
       : ({ kind: "retry_later", reason: "no resume wired" } as ResumeResult);
-    if (disposition.kind === "retry_later") stillOwed.push(target);
+    if (disposition.kind === "retry_later")
+      stillOwed.push({ ...target, attempts: target.attempts + 1, lastReason: disposition.reason });
   }
   return stillOwed;
 }

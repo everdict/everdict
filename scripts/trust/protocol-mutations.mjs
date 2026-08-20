@@ -17,6 +17,15 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 W4. `retry_later` always carried a reason and every consumer dropped it, so a debt
+    // could sit in the worklist forever with nothing saying why. Removing the escalation must go red.
+    name: "R58 W4 — an undecidable debt is held in silence again",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        if (t.attempts >= ESCALATE_AFTER_ATTEMPTS)",
+    to: "        if (false)",
+    suite: ["--root", "apps/api", "src/composition/deferred-recovery-sweep.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 W5. A network declaration nothing on the way enforces was refused inside the container
     // the lane had already placed — right decision, wrong moment, after a reservation and an activation had
     // been spent. Removing the entry guard must go red on the ORDERING, not just on the refusal.

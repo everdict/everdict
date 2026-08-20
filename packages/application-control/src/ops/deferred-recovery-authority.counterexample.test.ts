@@ -50,7 +50,7 @@ function world(row: Row) {
 const owed: RecoveryTarget[] = [
   // What replica A was granted when it claimed the batch: generation 41, to A. The worklist has to carry it,
   // because the row will not — the row holds whoever owns it NOW.
-  { kind: "scorecard", id: "sc-1", authority: { ownerReplica: "replica-a", epoch: 41 } },
+  { kind: "scorecard", id: "sc-1", authority: { ownerReplica: "replica-a", epoch: 41 }, attempts: 1 },
 ];
 
 describe("[R57 COUNTEREXAMPLE] a deferred retry re-presents its own claim, and never adopts a successor's", () => {
