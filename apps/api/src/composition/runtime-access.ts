@@ -578,6 +578,46 @@ export async function runStartupRecovery(deps: {
   return recovered.owed;
 }
 
+// ── THE WORKLIST IS A STATE, AND A TIMER IS NOT ALLOWED TO FORK IT (arch-review 58 P1) ──────────────
+//
+// The sweep below was registered as `setInterval(() => void (async () => { owed = await sweep(owed) })())`,
+// which forks the moment one pass outlives the interval — and a pass RESUMES BATCHES, so outliving 60s is
+// the ordinary case rather than the pathological one. Two consequences, both silent:
+//
+//   · two ticks call `resume` for the same target concurrently, which is the re-dispatch of live work this
+//     whole file is written to avoid;
+//   · the second tick started from the PRE-tick list, so whatever the first discharged is written back when
+//     the second finishes — a lost update that keeps a settled debt owed forever.
+//
+// A boolean is enough, but it has to live with the list rather than beside the timer: the two are one state.
+// Holding them in an object also gives the property somewhere to be tested, which a closure inside `main.ts`
+// did not have.
+export class DeferredRecoverySweep {
+  private running = false;
+  constructor(
+    private readonly deps: Parameters<typeof runStartupRecovery>[0],
+    private owed: readonly RecoveryTarget[],
+  ) {}
+
+  // What is still owed. Read by tests and by anything that wants to report the debt.
+  get outstanding(): readonly RecoveryTarget[] {
+    return this.owed;
+  }
+
+  // One pass, or nothing. A tick that arrives while a pass is running is DROPPED, not queued: the next one
+  // is 60 seconds away and it will read the list the running pass leaves behind, which is the answer a queued
+  // tick would have had to wait for anyway.
+  async tick(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      this.owed = await sweepDeferredRecovery(this.deps, this.owed).catch(() => this.owed);
+    } finally {
+      this.running = false;
+    }
+  }
+}
+
 // The retry the deferral always assumed, wired to the same services boot recovery used. Returns what is STILL
 // owed, so the caller feeds its own answer back in and a persistent outage keeps the debt visible instead of
 // resolving it. Never `runStartupRecovery` on a timer — see `retryDeferredRecovery`.

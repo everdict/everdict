@@ -70,6 +70,10 @@ function fakeDriver(): { driver: Driver; execs: string[]; files: Map<string, str
         return files.has("/app/solution.py")
           ? { exitCode: 0, stdout: "", stderr: "" }
           : { exitCode: 1, stdout: "", stderr: "" };
+      // A real container answers what it is checked out at, and the verifier confirms it before applying
+      // (arch-review 58). A fake that stayed silent here would be LESS capable than the thing it stands in
+      // for, which is how a fake starts certifying behaviour production does not have.
+      if (cmd.includes("rev-parse HEAD")) return { exitCode: 0, stdout: `${SNAPSHOT.headSha}\n`, stderr: "" };
       // `git apply` — model the restore by materializing the file the diff names.
       if (cmd.includes("git apply")) files.set("/app/solution.py", "def solve(): return 42");
       return { exitCode: 0, stdout: "", stderr: "" };

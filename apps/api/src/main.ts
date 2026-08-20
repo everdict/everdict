@@ -88,7 +88,7 @@ import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
 import { REPLICA_ID } from "./composition/replica.js";
 import { buildRun } from "./composition/run.js";
-import { buildRuntimeAccess, runStartupRecovery, sweepDeferredRecovery } from "./composition/runtime-access.js";
+import { DeferredRecoverySweep, buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { buildRuntimeCompute } from "./composition/runtime-compute.js";
 import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
@@ -866,7 +866,7 @@ async function main(): Promise<void> {
     owner: REPLICA_ID,
     replicas,
   };
-  let owedRecovery = await runStartupRecovery(recoveryDeps);
+  const owedRecovery = await runStartupRecovery(recoveryDeps);
   // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────
   //
   // A record boot recovery could not decide about is left OPEN and claimed by this replica at a raised epoch,
@@ -878,11 +878,13 @@ async function main(): Promise<void> {
   // whose owner is not another live replica, which after boot includes every batch this replica is driving.
   // Not leader-gated either — the debt belongs to the replica that claimed the record, and no other process
   // is permitted to act on it.
-  setInterval(() => {
-    void (async () => {
-      owedRecovery = await sweepDeferredRecovery(recoveryDeps, owedRecovery).catch(() => owedRecovery);
-    })();
-  }, 60_000).unref();
+  //
+  // The worklist and "is a pass running" are ONE state, so the timer drives an object rather than a closure
+  // over a mutable binding. A pass resumes batches, so outliving 60 seconds is ordinary — and the previous
+  // shape forked on exactly that, re-driving live work and writing a stale list back over what the running
+  // pass had discharged (arch-review 58 P1, `DeferredRecoverySweep`).
+  const deferredRecovery = new DeferredRecoverySweep(recoveryDeps, owedRecovery);
+  setInterval(() => void deferredRecovery.tick(), 60_000).unref();
   // The cancel teardown's reconciler (mig 0184, arch-review 47 §5.2). Boot recovery above resumes batches
   // whose DRIVER died; this closes the other half — batches whose cancellation was decided and whose teardown
   // never finished. Registered here rather than inside runStartupRecovery because it is not a one-shot boot

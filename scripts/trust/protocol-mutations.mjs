@@ -17,6 +17,27 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 P1. The verifier applied the agent's diff into a fresh container without confirming the
+    // container was checked out at the baseline the diff was computed against. `git apply` matches on
+    // context, so a wrong baseline does not reliably fail — it succeeds and yields a tree the agent never
+    // made, and the verdict is real evidence about the wrong world.
+    name: "R58 — a verifier applies the diff without confirming the baseline",
+    file: "packages/job-runner/src/verifier-job.ts",
+    from: '    if (job.workspace.headSha !== "") {',
+    to: "    if (false) {",
+    suite: ["--root", "packages/job-runner", "src/verifier-baseline.counterexample.test.ts"],
+  },
+  {
+    // arch-review 58 P1. A recovery pass resumes batches, so outliving the 60s interval is ordinary — and the
+    // timer forked on exactly that, re-driving live work and writing a stale worklist back over what the
+    // running pass had discharged.
+    name: "R58 — the deferred-recovery sweep forks on a slow pass",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "    if (this.running) return;",
+    to: "",
+    suite: ["--root", "apps/api", "src/composition/deferred-recovery-sweep.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 P0. The job payload stayed in `process.env` after the runner decoded it, and every exec
     // the runner starts inherits the environment — including the agent under test, which could read the repo
     // token, the registry passwords, the provider key and its own grading configuration out of it.

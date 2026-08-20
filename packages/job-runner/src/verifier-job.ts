@@ -47,6 +47,26 @@ export async function runVerifierJob(job: VerifierJob, opts: { driver: Driver })
   });
   try {
     const workdir = job.workdir === "" ? "/app" : job.workdir;
+    // ── THE PATCH LANDS ON THE TREE IT WAS COMPUTED AGAINST (arch-review 58 P1) ──────────
+    //
+    // A diff is only the agent's work relative to a baseline, and this is a DIFFERENT container: the image
+    // could be behind a mutable tag, the seed could clone a branch tip, a re-pin could land between the two
+    // dispatches. `git apply` matches on context, so a wrong baseline does not reliably fail — it succeeds
+    // and produces a tree the agent never made, and the verdict is then real evidence about the wrong world.
+    //
+    // `headSha` carried that baseline here from the moment the environment recorded it, and nothing read it.
+    // An EMPTY one is a workdir that is not a git repository, where there is nothing to confirm; a non-empty
+    // one the container cannot confirm is refused rather than assumed (rule `protocol` L2).
+    if (job.workspace.headSha !== "") {
+      const head = await compute.exec("git rev-parse HEAD", { cwd: workdir });
+      const at = head.stdout.trim();
+      if (head.exitCode !== 0 || at !== job.workspace.headSha)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { caseId: job.caseId, expected: job.workspace.headSha, found: at },
+          `this container is not checked out at the baseline the agent's diff was computed against (expected ${job.workspace.headSha}, found ${at === "" ? "no answer" : at}), so applying the patch would judge a tree the agent never produced`,
+        );
+    }
     // The agent's work, restored. `--allow-empty` because a run that changed nothing is a real outcome (the
     // verifier is entitled to score it zero), not a reason to fail the job.
     if (job.workspace.diff !== "") {

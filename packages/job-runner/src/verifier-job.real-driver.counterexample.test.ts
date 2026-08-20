@@ -110,7 +110,10 @@ describe("[R57 WAVE-0 COUNTEREXAMPLE] the verifier reaches a verdict through the
       kind: "repo",
       diff: "diff --git a/absent.py b/absent.py\n--- a/absent.py\n+++ b/absent.py\n@@ -1 +1 @@\n-gone\n+here\n",
       changedFiles: ["absent.py"],
-      headSha: "deadbeef",
+      // The repository's OWN head. This was an arbitrary string for as long as nothing read `headSha`, and
+      // arch-review 58 made the verifier confirm the baseline before applying — an invented one now refuses
+      // one step earlier, which would leave this test green for the wrong reason.
+      headSha: shell(workdir, "git rev-parse HEAD").trim(),
     };
     await expect(runVerifierJob(job(broken), { driver: new LocalDriver({ root }) })).rejects.toThrow(
       /could not be restored/i,
