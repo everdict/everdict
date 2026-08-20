@@ -12,6 +12,7 @@ import {
   extractLiveEvents,
   parseResult,
   parseVerifierResult,
+  refuseUnenforceableNetwork,
   stripSentinel,
   verifierJobPayload,
 } from "@everdict/contracts";
@@ -960,6 +961,9 @@ export function buildK8sJob(
   // than of somebody's discipline.
   verifierPayload?: string,
 ): Record<string, unknown> {
+  // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
+  // in-container check was the right decision at the wrong moment.
+  refuseUnenforceableNetwork(job.evalCase.network, "k8s");
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
@@ -1715,6 +1719,11 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     // attempt id, an UPDATE matching no row) and this line could not tell that apart from a durable
     // reservation. So a job that names a run requires the store's answer, and a missing hook is refused here
     // rather than treated as "this deployment does not track placements".
+    // BEFORE the reservation, not after (arch-review 58 W5). The spec builder refuses this too, but by
+    // then a reservation has been spent and an activation burned on a case that will never place — a
+    // refusal that arrives after an effect is the shape this whole series keeps finding. It is a pure,
+    // total decision, so it belongs at the first moment it can be made.
+    refuseUnenforceableNetwork(job.evalCase.network, "k8s");
     if (job.runId !== undefined) await requireReservation(job, work, options?.authority);
     // …and the reservation is re-presented HERE, immediately before the Job exists (arch-review 57 P0). A
     // proof with no lifetime let a paused driver create work after a cancellation had verified there was

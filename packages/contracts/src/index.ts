@@ -4,6 +4,7 @@ export * from "./errors.js";
 export * from "./version.js";
 export * from "./job-result-wire.js";
 export { evalContainerSecretEnv } from "./execution/eval-container-env.js";
+export { refuseUnenforceableNetwork } from "./execution/network-enforcement.js";
 export * from "./execution/verifier-job.js";
 export {
   VERIFIER_RESULT_SENTINEL,

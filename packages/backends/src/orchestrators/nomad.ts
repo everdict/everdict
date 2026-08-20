@@ -10,6 +10,7 @@ import {
   extractLiveEvents,
   parseResult,
   parseVerifierResult,
+  refuseUnenforceableNetwork,
   stripSentinel,
   verifierJobPayload,
 } from "@everdict/contracts";
@@ -519,6 +520,9 @@ export function buildNomadJob(
   // which is what keeps "the agent's container never held the plan" a property of the spec.
   verifierPayload?: string,
 ): NomadJobSpec {
+  // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
+  // in-container check was the right decision at the wrong moment.
+  refuseUnenforceableNetwork(job.evalCase.network, "nomad");
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
@@ -950,6 +954,11 @@ export class NomadBackend
     // most, and the old post-submit hook guaranteed there was none. A hook that RESOLVED having written
     // nothing was the same hole one layer in, so the store's answer is required rather than assumed.
     if (job.runId !== undefined) {
+      // BEFORE the reservation, not after (arch-review 58 W5). The spec builder refuses this too, but by
+      // then a reservation has been spent and an activation burned on a case that will never place — a
+      // refusal that arrives after an effect is the shape this whole series keeps finding. It is a pure,
+      // total decision, so it belongs at the first moment it can be made.
+      refuseUnenforceableNetwork(job.evalCase.network, "nomad");
       // Built ONCE and used by both seams: a reservation authorizes one external object, so the id the
       // activation re-presents has to be the id that was reserved. Two literals here is how those drift.
       const work = {

@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 W5. A network declaration nothing on the way enforces was refused inside the container
+    // the lane had already placed — right decision, wrong moment, after a reservation and an activation had
+    // been spent. Removing the entry guard must go red on the ORDERING, not just on the refusal.
+    name: "R58 W5 — an unenforceable network is refused only after the reservation",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      refuseUnenforceableNetwork(job.evalCase.network, "nomad");',
+    to: "      void job;",
+    suite: ["--root", "packages/backends", "src/orchestrators/network-declaration.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 W1. The judge's provider key was applied by wrapping the DRIVER, so it rode every exec
     // through the compute the harness and the graders share — putting the tenant's credential in the
     // environment of the code being evaluated. Widening it back must go red.
