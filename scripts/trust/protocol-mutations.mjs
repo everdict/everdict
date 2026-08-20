@@ -225,8 +225,11 @@ const MUTATIONS = [
     // settle becomes indistinguishable from a row planned before payload freezing existed.
     name: "Wave 9 — a failed payload freeze is swallowed into silence",
     file: "packages/application-control/src/scorecard/scorecard-observability.ts",
-    from: '      out.payload = {\n        kind: "unfrozen",\n        reason: `the export payload could not be frozen:',
-    to: '      const swallowed = {\n        kind: "unfrozen",\n        reason: `the export payload could not be frozen:',
+    // Re-pointed at the inline form (arch-review 57): the bytes now ride the operation instead of being
+    // planned as bytes nobody holds, and the REASON rides with them. Swallowing it is still the defect —
+    // "no store here" and "the store blipped" call for different actions.
+    from: "      out.payload = inlineExportPayload(",
+    to: "      const swallowed = inlineExportPayload(",
     suite: ["--root", "packages/application-control", "src/scorecard/frozen-payload-required.counterexample.test.ts"],
   },
   {
