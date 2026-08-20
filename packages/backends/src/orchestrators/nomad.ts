@@ -6,6 +6,7 @@ import {
   type WorkPresence,
   caseJobPayload,
   describeNomadPlacementFailure,
+  evalContainerSecretEnv,
   extractLiveEvents,
   parseResult,
   parseVerifierResult,
@@ -525,7 +526,10 @@ export function buildNomadJob(
       ? { EVERDICT_VERIFIER_JOB: verifierPayload }
       : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "nomad", job.evalCase.resources)) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
-    ...opts.secretEnv,
+    // The workspace tier, FILTERED to the model-auth vocabulary — see `evalContainerSecretEnv` for what
+    // the whole tier used to hand the agent under test. One function for both lanes, because a tenant's
+    // exposure must not depend on which orchestrator placed the job.
+    ...evalContainerSecretEnv(opts.secretEnv),
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
     ...judgeAuthEnv(job.judge, job.judgeAuth),

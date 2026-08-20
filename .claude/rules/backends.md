@@ -128,7 +128,14 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   scheduler must never let one tenant starve another — fairness is enforced, not best-effort.
 - Multi-tenant secrets & budgets (keyed by `CaseJob.tenant`): inject a tenant's model keys via a
   `SecretProvider` (`secretsFor(tenant)`) into ONLY that tenant's alloc env — never a global key, never cross
-  tenants. Enforce per-tenant `BudgetTracker` at the `Scheduler`: `admit` before queuing (over-limit ⇒
+  tenants. **And only the MODEL-AUTH NAMES** (`evalContainerSecretEnv`, over `HARNESS_AUTH_ENV_VARS`):
+  `secretsFor(tenant)` returns the workspace's WHOLE secret tier — its GitHub App token, its Mattermost bot
+  token, its registry passwords, whatever a member saved for an integration — and the process that runs in
+  that container is the agent under test, arbitrary code whose `LocalDriver` execs inherit `process.env`.
+  The blanket injection was a default that outlived its reason: a harness's DECLARED env (`{secretRef}`) is
+  resolved into the job before dispatch, a judge's key rides as `judgeAuth`, and the runner reads only that
+  vocabulary from its own environment. Both managed lanes call the ONE filter, so a tenant's exposure never
+  depends on which orchestrator placed the job (arch-review 58). Enforce per-tenant `BudgetTracker` at the `Scheduler`: `admit` before queuing (over-limit ⇒
   `PaymentRequiredError` 402; reserve `runs` so bursts can't overshoot), `settle(cost)` on completion. Budget
   rejection is explicit (402), never a silent drop.
 - Autoscaling: the `Autoscaler` reads `Scheduler.stats()` (queue depth + in-flight) and drives `ScalingTarget`s

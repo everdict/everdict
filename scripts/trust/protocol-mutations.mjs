@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 follow-through. The managed lanes handed the agent under test the workspace's WHOLE
+    // secret tier — GitHub App token, Mattermost bot token, registry passwords — because a default outlived
+    // the per-job channels that replaced it. Spreading the tier back in must go red.
+    name: "R58 — an eval container is handed the whole workspace secret tier",
+    file: "packages/contracts/src/execution/eval-container-env.ts",
+    from: "  const out: Record<string, string> = {};",
+    to: "  const out: Record<string, string> = { ...secretEnv };",
+    suite: ["--root", "packages/backends", "src/orchestrators/eval-container-secrets.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 follow-through. A judge's evidence seal is best-effort BY CONTRACT and its failure was
     // SILENT, so a judgment whose account is gone read exactly like one whose account is on file. Swallowing
     // the outcome again must go red.
