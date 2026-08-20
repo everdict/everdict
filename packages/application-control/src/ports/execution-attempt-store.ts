@@ -1,4 +1,5 @@
 import {
+  type ActivationDecision,
   ConflictError,
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
@@ -8,6 +9,7 @@ import {
   type PersistedWorkIntent,
   type RuntimeWorkRef,
   attemptIdOf,
+  decideActivation,
   isTerminalAttemptState,
 } from "@everdict/contracts";
 
@@ -136,6 +138,25 @@ export interface ExecutionAttemptStore {
   // inside the same UPDATE, and the in-memory twin asks the injected reader in the same synchronous block.
   // Same question, each with the mechanism its store actually has.
   reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent>;
+  // ── …AND THE PROOF IS RE-PRESENTED WHERE THE EFFECT BEGINS (arch-review 57 P0) ───────────────────
+  //
+  // `reserveWork` bounds who may RESERVE. It cannot bound how long the reservation stays good, and until
+  // this existed nothing did: the caller that won one held it across whatever came next, and a cancellation
+  // could kill the work, probe it absent, settle every child and complete — after which the paused caller
+  // woke and created the object. A cancellation that verified zero live work, followed by live work.
+  //
+  // So the dispatch asks again at the seam where the external object is about to be created, and the answer
+  // is a TRANSITION rather than a read: `reserved → active`, conditioned on this exact work id and on the
+  // parent still being open. A revoked reservation fails here, which is what gives a cancellation something
+  // to CAS against instead of a hope that nobody is mid-flight.
+  //
+  // Answers `already_active` for a repeat of the same work — at-least-once delivery is ordinary and a
+  // re-driven dispatch must converge on the same object, not a second one. See `decideActivation`
+  // (@everdict/contracts) for the decision this performs.
+  activateWork(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision>;
+  // Take a reservation BACK. What a cancellation calls so a paused holder fails at activation instead of
+  // creating work after the sweep certified there was none. Idempotent, and never revives a settled attempt.
+  revokeReservation(attemptId: string): Promise<void>;
   // The attempt ran with no fence raised — the recording coordinate it minted could not be claimed. Its own
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
@@ -260,6 +281,39 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
 
   // ONE ANSWER, BOTH PATHS (arch-review 56, Wave D). Extracted so the idempotent return cannot drift from the
   // guarded write — the two used to be a check and a shortcut past it, which is the whole defect.
+  async activateWork(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision> {
+    const current = this.attempts.get(attemptId);
+    if (!current) return { kind: "refuse", reason: "this attempt row does not exist" };
+    // The parent question, asked as a boolean rather than by throwing: an activation refusal is a normal
+    // answer a lane acts on (it aborts the dispatch), not an exception to be caught somewhere generic.
+    let parentOpen = true;
+    try {
+      await this.assertParentStillAuthorizes(attemptId, current);
+    } catch {
+      parentOpen = false;
+    }
+    const decision = decideActivation({
+      state: current.state,
+      recordedWork: current.runtimeWork?.externalJobId,
+      work: work.externalJobId,
+      parentOpen,
+    });
+    // The transition IS the decision, in the same block that made it — a caller that read `activate` and
+    // then wrote separately would have reopened the window this closes.
+    if (decision.kind === "activate")
+      this.attempts.set(attemptId, { ...current, state: "active", updatedAt: this.now() });
+    return decision;
+  }
+
+  async revokeReservation(attemptId: string): Promise<void> {
+    const current = this.attempts.get(attemptId);
+    // A settled attempt is not revived into `revoked`, and a missing row needs nothing taken back. Both are
+    // no-ops rather than errors: a cancellation sweeping a batch must not fail on an attempt that already
+    // finished on its own.
+    if (!current || isTerminalAttemptState(current.state)) return;
+    this.attempts.set(attemptId, { ...current, state: "revoked", updatedAt: this.now() });
+  }
+
   private async assertParentStillAuthorizes(attemptId: string, current: ExecutionAttemptRecord): Promise<void> {
     const parent = await this.parents?.authorityOf(current);
     if (this.parents !== undefined && parent === undefined)

@@ -33,6 +33,19 @@ import { RuntimeWorkRefSchema } from "../execution/runtime-work-ref.js";
 export const ExecutionAttemptStateSchema = z.enum([
   "created",
   "reserved",
+  // ── THE WINDOW BETWEEN A RESERVATION AND A BIRTH (arch-review 57 P0) ────────────────────────────
+  //
+  // `reserved` used to run straight into `executing`, with the external object created somewhere in
+  // between and nothing able to name that moment. So a driver holding a reservation could pause, have its
+  // parent cancelled and verified free of live work, wake, and THEN create the job — a cancellation that
+  // certified zero followed by a birth.
+  //
+  // `active` is "the external object exists and this attempt is the one that made it"; `revoked` is the
+  // state a cancellation puts a reservation into so the holder has something to fail against. A dispatch
+  // re-presents its reservation at activation time (`decideActivation`) rather than spending a proof whose
+  // lifetime nobody bounded.
+  "active",
+  "revoked",
   "executing",
   "committed",
   "superseded",
@@ -43,7 +56,15 @@ export type ExecutionAttemptState = z.infer<typeof ExecutionAttemptStateSchema>;
 // The states after which an attempt's story is over. Written ONCE because both store implementations arbitrate
 // on it — two hand-enumerated terminal sets is how a guard drifts into a set that admits the write it exists
 // to refuse.
-export const TERMINAL_ATTEMPT_STATES: readonly ExecutionAttemptState[] = ["committed", "superseded", "failed"];
+// `revoked` is TERMINAL: a reservation a cancellation took back is not one a later dispatch may spend, and a
+// revoked attempt is not revived — a re-drive opens a new attempt, which is what the generation is for
+// (arch-review 57 P0). `active` is NOT terminal; it is an attempt with a live external object.
+export const TERMINAL_ATTEMPT_STATES: readonly ExecutionAttemptState[] = [
+  "committed",
+  "superseded",
+  "failed",
+  "revoked",
+];
 
 export function isTerminalAttemptState(state: ExecutionAttemptState): boolean {
   return TERMINAL_ATTEMPT_STATES.includes(state);

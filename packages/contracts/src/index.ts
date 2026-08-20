@@ -5,6 +5,11 @@ export * from "./version.js";
 export * from "./job-result-wire.js";
 export * from "./execution/verifier-job.js";
 export {
+  type ActivationDecision,
+  type ActivationRequest,
+  decideActivation,
+} from "./execution/dispatch-activation.js";
+export {
   type ProvisionedWorldProof,
   ProvisionedWorldProofSchema,
   worldProofCovers,

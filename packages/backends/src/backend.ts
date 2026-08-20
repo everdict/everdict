@@ -1,6 +1,8 @@
 import {
+  type ActivationDecision,
   type CaseJob,
   type CaseResult,
+  ConflictError,
   type Driver,
   InternalError,
   type KillOutcome,
@@ -326,6 +328,30 @@ export async function requireReservation(
       "the reservation hook returned no persisted intent — the placement was never recorded, so this dispatch would create work nothing can address.",
     );
   return intent;
+}
+
+// ── AND THE SAME PROOF, RE-PRESENTED AT THE SEAM (arch-review 57 P0) ─────────────────────────────────
+//
+// Called by every managed lane immediately before it creates the external object. `requireReservation` says
+// the placement was recorded; this says the recording is STILL good — the attempt has not been revoked, the
+// work is the one it reserved, and the run may still author external work.
+//
+// A lane with no hook wired keeps the old behaviour rather than failing: the CLI and the in-process paths
+// have no attempt ledger to transition, and refusing them would break dispatch for deployments that have no
+// cancellation racing anything. Where the ledger IS wired, a refusal aborts the dispatch before the birth.
+export async function requireActivation(
+  job: CaseJob,
+  work: RuntimeWorkRef,
+  onActivate?: (work: RuntimeWorkRef) => Promise<ActivationDecision>,
+): Promise<void> {
+  if (!onActivate) return;
+  const decision = await onActivate(work);
+  if (decision.kind === "refuse")
+    throw new ConflictError(
+      "CONFLICT",
+      { runId: job.runId, externalJobId: work.externalJobId },
+      `this dispatch may no longer create external work: ${decision.reason}`,
+    );
 }
 
 export function isPoolReporting(backend: Backend): backend is Backend & PoolReporting {

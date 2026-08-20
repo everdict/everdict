@@ -1,9 +1,11 @@
 import type { ExecutionAttemptStore, OpenAttemptInput } from "@everdict/application-control";
 import {
+  type ActivationDecision,
   ConflictError,
   type ExecutionAttemptRecord,
   ExecutionAttemptRecordSchema,
   type ExecutionAttemptState,
+  ExecutionAttemptStateSchema,
   InternalError,
   NotFoundError,
   OPEN_RUN_STATUSES,
@@ -13,6 +15,7 @@ import {
   RuntimeWorkRefSchema,
   TERMINAL_ATTEMPT_STATES,
   attemptIdOf,
+  decideActivation,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
@@ -211,6 +214,61 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
   //
   // `RETURNING` is still the proof the backend is handed (arch-review 54, Phase 1): zero rows means this
   // dispatch has no durable identity OR no remaining authority, and both must stop it.
+  // ── THE RESERVATION, RE-PRESENTED WHERE THE EFFECT BEGINS (arch-review 57 P0) ────────────────────
+  //
+  // ONE statement. The decision and the transition cannot be two reads apart, because the window between
+  // them is exactly the one this closes: a caller that read "you may activate" and then wrote separately has
+  // re-created the pause a cancellation slips through.
+  //
+  // The UPDATE asserts, together: this attempt is `reserved`, it reserved THIS work id, and its parent still
+  // authorizes it. Nothing matching means one of those is false, and the follow-up read says which — a
+  // revoked reservation, an attempt already active (idempotent: the same dispatch re-driven), or a settled
+  // one. `decideActivation` (@everdict/contracts) owns the vocabulary so both twins answer alike.
+  async activateWork(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision> {
+    const { rows: moved } = await this.client.query<{ attempt_id: string }>(
+      `UPDATE everdict_execution_attempts a
+          SET state = 'active', updated_at = now()
+        WHERE a.attempt_id = $1
+          AND a.state = 'reserved'
+          AND a.runtime_work ->> 'externalJobId' = $2
+          AND ${PARENT_AUTHORIZES}
+        RETURNING a.attempt_id`,
+      [attemptId, work.externalJobId],
+    );
+    if (moved.length > 0) return { kind: "activate" };
+    // Nothing moved — read back WHY, so the lane gets an actionable answer rather than a bare refusal.
+    const { rows } = await this.client.query<{
+      state: string;
+      external_job_id: string | null;
+      authorized: boolean;
+    }>(
+      `SELECT a.state, a.runtime_work ->> 'externalJobId' AS external_job_id, ${PARENT_AUTHORIZES} AS authorized
+         FROM everdict_execution_attempts a
+        WHERE a.attempt_id = $1`,
+      [attemptId],
+    );
+    const row = rows[0];
+    if (row === undefined) return { kind: "refuse", reason: "this attempt row does not exist" };
+    return decideActivation({
+      state: ExecutionAttemptStateSchema.parse(row.state),
+      recordedWork: row.external_job_id ?? undefined,
+      work: work.externalJobId,
+      parentOpen: row.authorized,
+    });
+  }
+
+  // Idempotent, and never revives a settled attempt: a cancellation sweeping a batch must not fail on an
+  // attempt that already finished on its own.
+  async revokeReservation(attemptId: string): Promise<void> {
+    await this.client.query(
+      `UPDATE everdict_execution_attempts
+          SET state = 'revoked', updated_at = now()
+        WHERE attempt_id = $1
+          AND state NOT IN (${TERMINAL_LIST})`,
+      [attemptId],
+    );
+  }
+
   async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     // The idempotent re-reservation, asked first: a retry that re-offers the SAME external id is repeating
     // itself, and the guarded UPDATE below would refuse it for `runtime_work IS NULL`.

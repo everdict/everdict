@@ -1,6 +1,7 @@
 import {
   OPEN_RUN_STATUSES,
   OPEN_SCORECARD_STATUSES,
+  TERMINAL_ATTEMPT_STATES,
   TERMINAL_RUN_STATUSES,
   TERMINAL_SCORECARD_STATUSES,
 } from "@everdict/contracts";
@@ -97,7 +98,10 @@ describe("PgExecutionAttemptStore", () => {
     const text = calls[0]?.text ?? "";
     expect(text).toContain("UPDATE everdict_execution_attempts");
     // The guard is the WHERE clause, not a read-then-write: a row that already ended is not matched at all.
-    expect(text).toContain("state NOT IN ('committed', 'superseded', 'failed')");
+    // Derived from the CONSTANT, not spelled again: the property is that the guard lives in the WHERE clause
+    // rather than in a read-then-write, and a hand-copied list turns "the vocabulary grew" into a test failure
+    // that says nothing (arch-review 57 added `revoked`, which is terminal for the same reason the others are).
+    expect(text).toContain(`state NOT IN (${TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ")})`);
     // …and `executing` is reachable only from `created`, so a late "compute started" cannot rewind a row.
     // `executing` may follow a RESERVATION as well as a bare `created` (arch-review 55, Wave 1): a managed
     // dispatch authorizes its work first, so the row it starts from is the one the reservation transitioned.

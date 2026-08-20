@@ -56,6 +56,7 @@ import {
   type Reclaimable,
   type WorkAddressable,
   dispatchAborted,
+  requireActivation,
   requireReservation,
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
@@ -885,18 +886,21 @@ export class NomadBackend
     // submit (Nomad accepted it, the response never arrived) is precisely the case where the handle matters
     // most, and the old post-submit hook guaranteed there was none. A hook that RESOLVED having written
     // nothing was the same hole one layer in, so the store's answer is required rather than assumed.
-    if (job.runId !== undefined)
-      await requireReservation(
-        job,
-        {
-          tenant: job.tenant ?? "default",
-          runId: job.runId,
-          externalJobId: jobId,
-          ...(ns !== undefined ? { namespace: ns } : {}),
-          ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
-        },
-        options?.onReserved,
-      );
+    if (job.runId !== undefined) {
+      // Built ONCE and used by both seams: a reservation authorizes one external object, so the id the
+      // activation re-presents has to be the id that was reserved. Two literals here is how those drift.
+      const work = {
+        tenant: job.tenant ?? "default",
+        runId: job.runId,
+        externalJobId: jobId,
+        ...(ns !== undefined ? { namespace: ns } : {}),
+        ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+      };
+      await requireReservation(job, work, options?.onReserved);
+      // …and the reservation is re-presented immediately before the submit (arch-review 57 P0). A proof with
+      // no lifetime let a paused driver create work after a cancellation had verified there was none.
+      await requireActivation(job, work, options?.onActivate);
+    }
     // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire above, before the
     // reservation and before the submit, so a reservation failure left a record marked `running` with no
     // cluster object anywhere and nothing to reconcile it against. `running` means the orchestrator was asked.

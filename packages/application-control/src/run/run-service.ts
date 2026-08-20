@@ -29,6 +29,7 @@ import {
   type WorkPresence,
   attemptIdOf,
   isPulledCommandTrace,
+  isTerminalAttemptState,
   killConverged,
   readOk,
   readOrUnknown,
@@ -1578,6 +1579,28 @@ export class RunService {
         ),
       );
     };
+    // ── TAKE THE RESERVATIONS BACK BEFORE STOPPING ANYTHING (arch-review 57 P0) ─────────────────────
+    //
+    // Killing what exists cannot stop what has not been created yet. A driver holding a reservation and
+    // paused mid-dispatch is invisible to every probe here — its job does not exist — and it would create one
+    // the moment it woke, after this teardown had verified zero live work and completed. Revoking first means
+    // that driver fails at its activation seam instead of placing.
+    //
+    // Best-effort and idempotent per attempt: a settled attempt is left alone, and an unreadable ledger has
+    // already made `worksRead` unknown, which keeps the whole cancellation owed anyway.
+    const attemptsStore = this.deps.attempts;
+    if (attemptsStore && worksRead.kind === "read")
+      // A revocation that FAILED leaves a reservation somebody may still spend, so it is an `unknown`
+      // outcome and not a swallowed error: the cancellation stays owed and the reconciler comes back. It
+      // joins the same outcome list the kills use, because it is the same question — is there anything
+      // that could still be running for this run?
+      for (const attemptId of await this.revocableAttempts(rec.id))
+        await attemptsStore.revokeReservation(attemptId).catch((err: unknown) => {
+          outcomes.push({
+            status: "unknown",
+            reason: `revoke ${attemptId}: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        });
     if (worksRead.kind === "unknown") {
       // UNKNOWN NEVER WIDENS SCOPE (arch-review 53, Wave A.5). Whether this run placed managed work is
       // unestablished, so neither arm is available: the exact kill has no handle to use, and the case-id
@@ -1688,6 +1711,16 @@ export class RunService {
   private async displayWork(executionId: string): Promise<RuntimeWorkRef | undefined> {
     const read = await this.workHandles(executionId);
     return read.kind === "read" ? read.value.at(-1) : undefined;
+  }
+
+  // The attempts a cancellation must take the reservation back from: everything not already settled. A
+  // ledger that cannot be read yields none here, and the caller is already `unknown` for that reason.
+  private async revocableAttempts(executionId: string): Promise<string[]> {
+    const attempts = this.deps.attempts;
+    if (!attempts) return [];
+    const read = await readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
+    if (read.kind !== "read") return [];
+    return read.value.filter((a) => !isTerminalAttemptState(a.state)).map((a) => a.attemptId);
   }
 
   private async workHandles(executionId: string): Promise<ReadResult<RuntimeWorkRef[]>> {

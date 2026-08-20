@@ -1,4 +1,11 @@
-import type { AttemptRef, CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef } from "@everdict/contracts";
+import type {
+  ActivationDecision,
+  AttemptRef,
+  CaseJob,
+  CaseResult,
+  PersistedWorkIntent,
+  RuntimeWorkRef,
+} from "@everdict/contracts";
 
 // Per-dispatch options — currently just cooperative cancellation. A backend that cannot interrupt an already-started
 // run (in-process / pull) honors `signal` best-effort by rejecting a not-yet-started dispatch; the pollers (Nomad/K8s)
@@ -62,6 +69,18 @@ export interface DispatchOptions {
   // it is absent, which is where the requirement is enforced — see `ManagedWorkControl` and the placement
   // conformance suite.
   onReserved?: (work: RuntimeWorkRef) => Promise<PersistedWorkIntent>;
+  // ── …AND RE-PRESENTED WHERE THE EFFECT BEGINS (arch-review 57 P0) ────────────────────────────────
+  //
+  // `onReserved` bounds who may reserve; it cannot bound how long the reservation stays good. The caller
+  // that won one held it across whatever came next, so a cancellation could kill the work, probe it absent,
+  // settle every child and COMPLETE — after which the paused caller woke and created the object. Verified
+  // zero, then a birth.
+  //
+  // This is asked immediately before the external object is created, and it is a TRANSITION in the store
+  // (`reserved → active`, conditioned on this exact work and the parent still being open), not a read. A
+  // lane that gets `refuse` aborts instead of placing; `already_active` means a re-driven dispatch, which
+  // converges on the same object rather than a second one.
+  onActivate?: (work: RuntimeWorkRef) => Promise<ActivationDecision>;
 }
 
 // The (job)→CaseResult dispatch abstraction — satisfied by both Router (static) and Scheduler (capacity-aware).
