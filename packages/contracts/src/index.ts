@@ -5,6 +5,13 @@ export * from "./version.js";
 export * from "./job-result-wire.js";
 export * from "./execution/verifier-job.js";
 export {
+  VERIFIER_RESULT_SENTINEL,
+  type VerifierResultEnvelope,
+  VerifierResultEnvelopeSchema,
+  encodeVerifierResult,
+  parseVerifierResult,
+} from "./execution/verifier-result-wire.js";
+export {
   type ActivationDecision,
   type ActivationRequest,
   decideActivation,

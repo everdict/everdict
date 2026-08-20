@@ -20,6 +20,16 @@
 // So the shape marks the defect class, and an entry here is a DESIGN ADMISSION: the type could not say what
 // this call site means. Each one states why, and leaves when the reason expires.
 //
+// ⚠️ AND THE REASON IS THE THING TO READ. This list carried
+//
+//     "the shape is a wire artifact, not a CaseResult"
+//
+// for the verifier entrypoint — a sentence that STATES the defect and files it as the exemption. The value
+// really was not a CaseResult, and it was being printed down a pipe whose reader runs
+// `CaseResultSchema.parse()`, so every verifier verdict died at that parse (arch-review 58). An entry that
+// explains why a value is the WRONG SHAPE has recorded a bug, not an admission; the admission form is "the
+// type cannot express this", and those two read almost alike at 2am. When adding one, ask which it is.
+//
 // Scope is production source only. Tests construct partial fixtures on purpose — that is what a fake is —
 // and rule `testing` owns whether a fixture is honest (it must come from the production builder and reach the
 // predicate). This guard is about code that ships.
@@ -40,10 +50,6 @@ const CONSTRUCTED_CAST = /[}\]]\s*as\s+(never|unknown\s+as\s+[A-Za-z_$][\w$]*)/;
 // Every allowlisted site names why the type could not say it. A site leaves this list by being typed, not by
 // being explained better.
 const ALLOWED = new Map([
-  [
-    "packages/job-runner/src/main.ts",
-    "the ingest-only result envelope has no harness and no case — the shape is a wire artifact, not a CaseResult",
-  ],
   [
     "packages/topology/src/deploy/nomad-topology.ts",
     "OPEN — a ServiceHarnessSpec assembled for a deploy preview; the builder wants the whole registered spec and this path holds only the deployable half",

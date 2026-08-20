@@ -8,6 +8,7 @@ import {
   describeNomadPlacementFailure,
   extractLiveEvents,
   parseResult,
+  parseVerifierResult,
   stripSentinel,
   verifierJobPayload,
 } from "@everdict/contracts";
@@ -970,7 +971,7 @@ export class NomadBackend
             ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
             : "alloc log fetch failed",
         );
-      const result = await this.parseResultOrExplain(logs.text, allocId, ns);
+      const result = await this.parseResultOrExplain(logs.text, allocId, ns, verifierPayload !== undefined);
       // The cluster's own task-event account (with REAL event timestamps) closes the infra record — best-effort:
       // a detail miss just leaves the collector's own marks.
       const detail = await this.allocDetail(allocId);
@@ -1006,8 +1007,34 @@ export class NomadBackend
   // the mushy generic. A bare crash (OOM SIGKILL) bypasses the in-process result guard entirely — the sentinel is
   // simply missing — so an OOM here becomes the fatal-infra OOM_KILLED verdict (never an "agent failure"), and any
   // other death carries its task-event cause. This is the batch-path twin of the topology drive diagnosis (A6).
-  private async parseResultOrExplain(logsText: string, allocId: string, namespace?: string): Promise<CaseResult> {
+  // `verifier: true` reads the VERIFIER envelope instead of the case one (arch-review 58 P0-verifier). The
+  // two are different documents — a verifier has no snapshot, and the case schema requires one — so a shared
+  // parser meant every verifier verdict died at the parse and the case recorded `unmeasured`. Everything
+  // below this line (the failure evidence, the placement events, the log tail) is identical either way,
+  // which is why the branch is here rather than a second copy of this method.
+  private async parseResultOrExplain(
+    logsText: string,
+    allocId: string,
+    namespace?: string,
+    verifier?: boolean,
+  ): Promise<CaseResult> {
     try {
+      if (verifier === true) {
+        const envelope = parseVerifierResult(logsText);
+        // Carried in a `CaseResult` shell ONLY to reach the caller that unwraps it one frame up; nothing
+        // persists this shape. The verifier's real answer is the envelope, and `dispatchVerifier` builds the
+        // invocation from it.
+        return {
+          caseId: envelope.caseId,
+          harness: "verifier",
+          trace: [],
+          scores: envelope.scores,
+          // A verifier ran no environment, so it produced no snapshot of one. `prompt` with empty output is
+          // the honest spelling of "there is nothing here", and nothing persists this shell — the caller one
+          // frame up takes the scores and builds the invocation from the envelope.
+          snapshot: { kind: "prompt", output: "" },
+        };
+      }
       return parseResult(logsText);
     } catch (err) {
       const events = await this.allocTaskEvents(allocId).catch(() => [] as NomadTaskEvent[]);

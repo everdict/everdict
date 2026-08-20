@@ -5,7 +5,9 @@ import {
   VerifierJobSchema,
   encodeLiveEvent,
   encodeResult,
+  encodeVerifierResult,
 } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import { LocalDriver } from "@everdict/drivers";
 import { failureResult, runCaseJob } from "./run.js";
 import { runVerifierJob } from "./verifier-job.js";
@@ -61,9 +63,13 @@ async function main(): Promise<void> {
 // as a result behind the sentinel — because a bare crash surfaces backend-side as "sentinel not found", which
 // erases where it died.
 async function runVerifierEntry(raw: string): Promise<void> {
+  // Parsed OUTSIDE the guarded block, because the envelope needs the job's identity to exist at all. A
+  // payload this process cannot read is not a verdict it can report: it prints nothing and exits non-zero,
+  // and the lane reports the missing sentinel. Inventing a runId and a plan digest for a document nobody
+  // could decode would be manufacturing the very provenance the envelope exists to carry.
+  const job = VerifierJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
   let scores: Score[];
   try {
-    const job = VerifierJobSchema.parse(JSON.parse(Buffer.from(raw, "base64").toString("utf8")));
     // ROOTED AT THE CONTAINER, not at a temp directory (arch-review 57 P0). A container task's world is the
     // image's own `/app`, `/tests` and `/logs/verifier`; a driver rooted in `/tmp` would write the hidden
     // tests to one namespace and run the image's copy from another. `root: "/"` also means this handle did
@@ -83,7 +89,20 @@ async function runVerifierEntry(raw: string): Promise<void> {
       } as Score,
     ];
   }
-  console.log(encodeResult({ caseId: "", harness: "", trace: [], scores } as never));
+  // ITS OWN WIRE (arch-review 58 P0-verifier). This printed a `CaseResult` with a cast and no `snapshot`,
+  // and the reader runs `CaseResultSchema.parse()` — so every verifier verdict died at the parse, and the
+  // case recorded `unmeasured`, which reads as "this deployment cannot judge" rather than "the pipe is
+  // broken". A verifier result is a different document: different sentinel, different schema, and the two
+  // parsers refuse each other.
+  console.log(
+    encodeVerifierResult({
+      runId: job.runId,
+      caseId: job.caseId,
+      planDigest: job.plan.digest,
+      workspaceDigest: contentDigest(job.workspace),
+      scores,
+    }),
+  );
 }
 
 void main();

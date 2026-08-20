@@ -10,6 +10,7 @@ import {
   caseJobPayload,
   extractLiveEvents,
   parseResult,
+  parseVerifierResult,
   stripSentinel,
   verifierJobPayload,
 } from "@everdict/contracts";
@@ -1293,7 +1294,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
           imageProvenance:
             job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
-          scores: parseResult(await api.podLogs(name, ns)).scores,
+          scores: parseVerifierResult(await api.podLogs(name, ns)).scores,
         };
       } finally {
         await api.deleteJob(name, ns);

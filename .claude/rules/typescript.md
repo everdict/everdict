@@ -26,7 +26,12 @@ Non-default rules — see skill `foundation` for rationale.
   green over a call that could never succeed. Removing that one cast then surfaced three more real defects the
   compiler had been holding: a missing `tags`, an optional `tenant` flowing into runtime resolution, and a
   `GradeContext` missing every required field. Type the call; if the type genuinely cannot say it, add an
-  allowlist entry stating why.
+  allowlist entry stating why — and then READ what you wrote. An entry that explains why the value is the
+  WRONG SHAPE has filed a bug as an exemption: this list carried "the shape is a wire artifact, not a
+  CaseResult" for the verifier entrypoint, and the reader on the other side runs `CaseResultSchema.parse()`,
+  so every verifier verdict died at that parse for as long as the entry stood (arch-review 58). The
+  admission form is "the type cannot express this"; the defect form is "this value is not what the type
+  says". They read almost alike, and only one of them is allowed.
 - **A control character in source is written as an ESCAPE, never as a literal byte.** `\u0000` compiles to
   the same byte and keeps the file TEXT; raw, git treats the source as binary — `git diff` says "Binary files
   differ", `git grep` skips it, and every scanner in this repo goes blind to that file. Seven files carried
