@@ -176,9 +176,19 @@ function modelJudgeEvents(calls: JudgeLlmCall[]): TraceEvent[] {
 // inside them, so the judged evidence stays clean (a judge must not read its own account) and billingCharges over
 // the case's trace cannot double-bill the judge's cost as harness cost. Best-effort by contract: evidence, never
 // lifecycle — a meter/seal failure never fails the verdict.
+// Where an invocation records whether its judge's own execution was sealed. A box rather than a return
+// value because the seal happens deep inside whichever branch ran, and threading an answer back through six
+// return points is how one of them ends up forgetting.
+export type JudgeSealOutcome = "sealed" | "unsealed" | "not_applicable";
+export interface SealBox {
+  outcome: JudgeSealOutcome;
+}
+
 async function reportJudgeExecution(
   deps: DefaultJudgeRunnerDeps,
   input: {
+    // Where this invocation records whether the seal happened — see `SealBox`.
+    seal: SealBox;
     spec: JudgeSpec;
     tenant: string;
     events: TraceEvent[];
@@ -220,8 +230,11 @@ async function reportJudgeExecution(
     // thing in a case; authority proved before it started is a statement about a moment that has passed. A
     // trajectory keeps the FIRST segment per emitter, so a displaced driver sealing here would make its judge
     // plane the permanent one and cost the successor's re-drive its own.
+    // A driver that may no longer publish is not a failed seal — it is a seal that must NOT happen, and the
+    // successor's own will be the evidence. Reported as `not_applicable` rather than `unsealed`, because
+    // those are different facts and only one of them is a loss.
     if (input.publishWhen && !(await input.publishWhen().catch(() => false))) return;
-    await deps.trajectories
+    const sealed = await deps.trajectories
       .seal({
         runId: input.runId,
         tenant: input.tenant,
@@ -235,7 +248,11 @@ async function reportJudgeExecution(
         events: input.events,
         t0: input.t0,
       })
-      .catch(() => {});
+      .then(() => true)
+      // STILL best-effort: evidence, never lifecycle. What changed is that the failure is now an ANSWER
+      // rather than a silence, so a verdict whose "how" was lost can be told apart from one that kept it.
+      .catch(() => false);
+    input.seal.outcome = sealed ? "sealed" : "unsealed";
   }
 }
 
@@ -462,6 +479,7 @@ async function runCodeJudge(
   runId?: string,
   publishWhen?: () => Promise<boolean>,
   scope?: JudgeEvidenceScope,
+  seal?: SealBox,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -482,6 +500,7 @@ async function runCodeJudge(
     // sealed whether or not the job failed: a dead judge job's trace IS the diagnosis. Its llm_call cost (if the
     // trace carries any) meters under source "judge" with the case-billing provenance policy.
     await reportJudgeExecution(deps, {
+      seal: seal ?? { outcome: "not_applicable" },
       spec,
       tenant,
       events: result.trace,
@@ -510,244 +529,285 @@ async function runCodeJudge(
 
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
+  // The runner. See the note on `judge` below for why `run` answers an invocation rather than scores.
+  // ── THE EVIDENCE SEAL'S OUTCOME IS AN ANSWER, NOT A SIDE EFFECT (arch-review 58 follow-through) ──
+  //
+  // Sealing a judge's own execution is best-effort by contract — evidence, never lifecycle — and it should
+  // stay that way: losing the seal must not lose a real verdict. What was wrong is that the outcome was
+  // swallowed (`.catch(() => {})`) and the runner answered a bare `Score[]`, so a judgment whose evidence
+  // was lost came back indistinguishable from one whose evidence exists. The reader could not tell that the
+  // "how" behind a number is gone.
+  //
+  // So the seal REPORTS, and `run` answers an invocation. The verdict is unchanged; what it now carries is
+  // whether it can be re-inspected, which `evidenceStatus` turns into the case's judgment plane.
+  const judge = async (
+    spec: Parameters<JudgeRunner["run"]>[0],
+    tenant: Parameters<JudgeRunner["run"]>[1],
+    rawCtx: Parameters<JudgeRunner["run"]>[2],
+    placement: Parameters<JudgeRunner["run"]>[3],
+    submittedBy: Parameters<JudgeRunner["run"]>[4],
+    runId: Parameters<JudgeRunner["run"]>[5],
+    pins: Parameters<JudgeRunner["run"]>[6],
+    publishWhen: Parameters<JudgeRunner["run"]>[7],
+    scoringPass: Parameters<JudgeRunner["run"]>[8],
+    seal: SealBox,
+  ): Promise<Score[]> => {
+    // ONE SHAPE past this line. The seam accepts a bare pass id (a caller whose path invokes a
+    // (case, judge) once per pass) or the full invocation scope (the Temporal path, which retries within
+    // one pass and arbitrates the winner on the claim) — normalized here so the emitter mint below has a
+    // single input and no branch of its own.
+    const scope: JudgeEvidenceScope | undefined =
+      typeof scoringPass === "string" ? { passId: scoringPass } : scoringPass;
+    // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
+    // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
+    // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
+    // context carries no url refs. `ctx` below is the resolved view for every downstream path.
+    // ── WHAT A JUDGE DECLARED, NOT WHAT KIND IT IS ─────────────────────────────────────────────
+    //
+    // The image was resolved only for a MODEL judge naming `screenshot` in `inputs`, so a code judge — which
+    // is the main tier, and routinely calls a vision model from its own script — received
+    // `evidence.screenshot === undefined` and graded on text alone, without recording that it had. `requires`
+    // is the declaration that exists for exactly this, and it belongs to every kind.
+    const requires = spec.requires ?? [];
+    const wantsImage =
+      (spec.kind === "model" && (spec.inputs ?? []).includes("screenshot")) ||
+      requires.some((r) => r.kind === "screenshot");
+    const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
+    // …and a declaration the run cannot satisfy stops the grading rather than colouring it: a judge asked to
+    // answer without the evidence it named answers anyway, and that verdict is indistinguishable downstream
+    // from one made on the real thing. Applied here, before the kind branches, so every tier obeys it.
+    if (requires.length > 0) {
+      const assessment = assessEvidence(requires, ctx);
+      if (assessment.missing.length > 0)
+        return skip(
+          spec,
+          "missing_evidence",
+          `this run is missing evidence the judge declared it needs — ${assessment.warnings.join(" ")}`,
+          true,
+        );
+    }
+    // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
+    if (spec.kind === "code")
+      return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen, scope, seal);
+    // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
+    //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
+    const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
+    if ("skipReason" in rubricResolution) return skip(spec, "unsupported", rubricResolution.skipReason);
+    const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
+
+    // 2) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
+    // Both transports record their execution for the report below: the model tee captures each completion's
+    // usage/verdict text, the harness closure captures the dispatched judge job's whole CaseResult.
+    const judgeStartedAt = new Date().toISOString();
+    const judgeStartMs = Date.now();
+    const modelCalls: JudgeLlmCall[] = [];
+    let dispatchedJudge: CaseResult | undefined;
+    let complete: JudgeCompletion;
+    if (spec.kind === "harness") {
+      if (!deps.dispatch) return skip(spec, "unsupported", "harness judge dispatch not configured");
+      const dispatch = deps.dispatch;
+      const ref = spec.harness;
+      const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref, pins?.harnessDigest);
+      if (resolved.kind === "refused") return skip(spec, "unsupported", resolved.reason);
+      // Placement decision: spec.runtime (explicit) first → else inherit the source run's placement (co-locate, judge next to the observations).
+      // If neither, no placement (default backend). An unregistered runtime makes the dispatcher throw → the try/catch below handles it as skip.
+      const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
+      complete = harnessComplete({
+        dispatch: async (task) => {
+          const evalCase: EvalCase = {
+            id: `judge-${spec.id}-${ctx.case.id}`,
+            env: { kind: "repo", source: { files: {} } },
+            task, // pass the judging prompt (rubric + trace + JSON requirement) straight to the agent
+            graders: [],
+            timeoutSec: 300,
+            tags: ["judge"],
+            ...(judgePlacement ? { placement: judgePlacement } : {}),
+          };
+          const job: CaseJob = {
+            evalCase,
+            harness: { id: ref.id, version: resolved.version },
+            tenant,
+            // Same co-locate ownership contract as the code judge — a self:<runnerId> judge placement needs the submitter.
+            ...(submittedBy ? { submittedBy } : {}),
+            ...(resolved.kind === "resolved" ? { harnessSpec: resolved.spec } : {}),
+            // The delegated agent's OWN model documents ride along, so the dispatcher that turns its
+            // bindings into a provider and a key verifies them exactly as it does a batch's own harness.
+            // Pinning the agent document says WHICH agent judges; this says which model it thinks with.
+            ...(pins?.harnessModelDigest !== undefined || pins?.harnessServiceModelDigests !== undefined
+              ? {
+                  modelPins: {
+                    ...(pins.harnessModelDigest !== undefined ? { model: pins.harnessModelDigest } : {}),
+                    ...(pins.harnessServiceModelDigests !== undefined
+                      ? { serviceModels: pins.harnessServiceModelDigests }
+                      : {}),
+                  },
+                }
+              : {}),
+          };
+          const result = await dispatch(job);
+          dispatchedJudge = result; // the judge agent's own run — this judge's execution evidence
+          return result.trace;
+        },
+      });
+    } else {
+      // Swallowing a secret-decryption failure (e.g. EVERDICT_SECRETS_KEY / encryption-key mismatch) as an empty map would make a secret that
+      // actually exists read as undefined at `secrets[KEY]` below, misjudged as "not configured", silently skipping the judge.
+      // Catch the throw but skip while exposing the real decryption reason, with no empty-map fallback.
+      let secrets: Record<string, string>;
+      try {
+        secrets = await deps.secretsFor(tenant);
+      } catch (err) {
+        return skip(
+          spec,
+          "missing_secret",
+          `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // judge.model is a Model BINDING (registered id/ref | raw string). Resolve a registered Model exactly like a
+      // harness does: its provider/underlying model/baseUrl/apiKeySecret + params carry the whole connection, so one
+      // model definition is the single source of "what to call + how to authenticate" everywhere it's referenced.
+      // A bare string that is not a registered id stays a raw model name (provider-default key, back-compat); an
+      // EXPLICIT ref that can't resolve is a visible skip — never silently sent to the provider as a literal model name.
+      const { ref, version } = normalizeModelBinding(spec.model);
+      const explicitRef = typeof spec.model !== "string";
+      let provider: "anthropic" | "openai" = spec.provider;
+      let model = ref;
+      let modelBaseUrl: string | undefined;
+      let maxTokens: number | undefined;
+      let keyName = provider === "anthropic" ? ANTHROPIC_KEY : OPENAI_KEY;
+      let resolvedModel: ModelSpec | undefined;
+      if (deps.models) {
+        try {
+          resolvedModel = await deps.models.get(tenant, ref, version);
+        } catch {
+          resolvedModel = undefined; // not a registered id
+        }
+      }
+      if (resolvedModel) {
+        // The model document decides the provider, the underlying model, the base URL and which key is used
+        // — everything about who answers the question. Verified at THIS read: the pass verified a copy while
+        // resolving the judge, and a shadow landing since then would be consumed here unseen.
+        const moved = pinnedDocumentMismatch(pins?.modelDigest, resolvedModel, {
+          kind: "model",
+          ref: `${ref}@${resolvedModel.version}`,
+        });
+        if (moved) return skip(spec, "unsupported", moved);
+        provider = resolvedModel.provider;
+        model = resolvedModel.model;
+        modelBaseUrl = resolvedModel.baseUrl;
+        maxTokens = resolvedModel.params?.maxTokens;
+        keyName = modelApiKeySecretName(resolvedModel);
+      } else if (explicitRef) {
+        return skip(
+          spec,
+          "unsupported",
+          `model '${ref}${version === "latest" ? "" : `@${version}`}' is not a registered model in this workspace`,
+        );
+      }
+      const apiKey = secrets[keyName];
+      if (!apiKey) return skip(spec, "missing_secret", `${keyName} secret not configured`);
+      // Same provider-native transport the agent uses (@everdict/llm) — Anthropic Messages / OpenAI, custom baseUrl
+      // for an OpenAI-compatible endpoint. The OPENAI_BASE_URL secret still overrides for the openai provider.
+      const baseUrl =
+        provider === "anthropic"
+          ? (modelBaseUrl ?? deps.anthropicBaseUrl)
+          : (secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl);
+      const transport = transportFor({
+        provider,
+        apiKey,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      });
+      // The tee records each completion's usage/verdict for the execution report — transportComplete alone
+      // discards the transport's usage, which is exactly how judge cost used to vanish.
+      complete = transportComplete(usageTeeTransport(transport, judgeStartMs, modelCalls), {
+        model,
+        ...(maxTokens ? { maxTokens } : {}),
+      });
+    }
+
+    // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
+    try {
+      const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+      const grader: Grader = new JudgeGrader(modelJudge(complete), {
+        id: spec.id,
+        ...(rubricText ? { rubric: rubricText } : {}),
+        ...(criteria?.length ? { criteria } : {}),
+        ...(promptTemplate ? { promptTemplate } : {}),
+        useScreenshot,
+        ...(spec.kind === "model" && spec.inputs?.length ? { modalities: spec.inputs } : {}),
+        ...(spec.requires?.length ? { requires: spec.requires } : {}),
+      });
+      // Artifact URLs (screenshot bytes, url evidence slots) are already resolved to real data at the top of run().
+      const graded = toScores(await grader.grade(ctx));
+      const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
+      // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this
+      // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
+      // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
+      // sanitizeScore: a judge transport returning garbage (NaN score) becomes a visible INVALID score at
+      // THIS collection boundary too — safeGrade guards the in-job path, this guards the control-plane one.
+      // A JUDGE OWNS ITS OWN FAMILY AND NOTHING ELSE (arch-review 17 P0-2). The rewrite below only replaces
+      // a LEADING "judge", so a raw metric of anything else — `state`, say — passed through untouched and
+      // arrived carrying whatever authority that name has in the ladder: a judge escalating itself to
+      // ground truth. Declared to the boundary as a judge producer, which refuses any metric outside
+      // `judge:<id>[:criterion]`.
+      const producer: ScoreProducer = { kind: "judge", id: spec.id };
+      return attachJudgeEvidence(
+        spec,
+        spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
+        graded.map((score) => {
+          const metric = score.metric.replace(/^judge/, metricOf(spec));
+          // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
+          // and no pass to re-decide, so only its identity is rewritten.
+          if (!isMeasured(score)) return sanitizeScore({ ...score, metric }, producer);
+          const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
+          const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
+          return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) }, producer);
+        }),
+      );
+    } catch (err) {
+      // A failed judge still CALLED — the call rides the unmeasured row, which is what makes it diagnosable
+      // (downstream report 1.1). Pre-transport skips never executed, so they rightly carry nothing.
+      return attachJudgeEvidence(
+        spec,
+        spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
+        skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true),
+      );
+    } finally {
+      // The execution happened whether or not the verdict parsed — a failed parse still spent the tokens, so the
+      // report (meter + judge:<id> evidence plane) runs on BOTH exits. Pre-transport skips never reach here.
+      const events = spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls);
+      await reportJudgeExecution(deps, {
+        seal,
+        spec,
+        tenant,
+        events,
+        t0: judgeStartedAt,
+        ...(runId !== undefined ? { runId } : {}),
+        ...(publishWhen ? { publishWhen } : {}),
+        ...(scope !== undefined ? { scope } : {}),
+        ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
+      });
+    }
+  };
   return {
     async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen, scoringPass) {
-      // ONE SHAPE past this line. The seam accepts a bare pass id (a caller whose path invokes a
-      // (case, judge) once per pass) or the full invocation scope (the Temporal path, which retries within
-      // one pass and arbitrates the winner on the claim) — normalized here so the emitter mint below has a
-      // single input and no branch of its own.
-      const scope: JudgeEvidenceScope | undefined =
-        typeof scoringPass === "string" ? { passId: scoringPass } : scoringPass;
-      // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
-      // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
-      // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
-      // context carries no url refs. `ctx` below is the resolved view for every downstream path.
-      // ── WHAT A JUDGE DECLARED, NOT WHAT KIND IT IS ─────────────────────────────────────────────
-      //
-      // The image was resolved only for a MODEL judge naming `screenshot` in `inputs`, so a code judge — which
-      // is the main tier, and routinely calls a vision model from its own script — received
-      // `evidence.screenshot === undefined` and graded on text alone, without recording that it had. `requires`
-      // is the declaration that exists for exactly this, and it belongs to every kind.
-      const requires = spec.requires ?? [];
-      const wantsImage =
-        (spec.kind === "model" && (spec.inputs ?? []).includes("screenshot")) ||
-        requires.some((r) => r.kind === "screenshot");
-      const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
-      // …and a declaration the run cannot satisfy stops the grading rather than colouring it: a judge asked to
-      // answer without the evidence it named answers anyway, and that verdict is indistinguishable downstream
-      // from one made on the real thing. Applied here, before the kind branches, so every tier obeys it.
-      if (requires.length > 0) {
-        const assessment = assessEvidence(requires, ctx);
-        if (assessment.missing.length > 0)
-          return skip(
-            spec,
-            "missing_evidence",
-            `this run is missing evidence the judge declared it needs — ${assessment.warnings.join(" ")}`,
-            true,
-          );
-      }
-      // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code")
-        return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId, publishWhen, scope);
-      // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
-      //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
-      const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec, pins?.rubricDigest);
-      if ("skipReason" in rubricResolution) return skip(spec, "unsupported", rubricResolution.skipReason);
-      const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
-
-      // 2) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
-      // Both transports record their execution for the report below: the model tee captures each completion's
-      // usage/verdict text, the harness closure captures the dispatched judge job's whole CaseResult.
-      const judgeStartedAt = new Date().toISOString();
-      const judgeStartMs = Date.now();
-      const modelCalls: JudgeLlmCall[] = [];
-      let dispatchedJudge: CaseResult | undefined;
-      let complete: JudgeCompletion;
-      if (spec.kind === "harness") {
-        if (!deps.dispatch) return skip(spec, "unsupported", "harness judge dispatch not configured");
-        const dispatch = deps.dispatch;
-        const ref = spec.harness;
-        const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref, pins?.harnessDigest);
-        if (resolved.kind === "refused") return skip(spec, "unsupported", resolved.reason);
-        // Placement decision: spec.runtime (explicit) first → else inherit the source run's placement (co-locate, judge next to the observations).
-        // If neither, no placement (default backend). An unregistered runtime makes the dispatcher throw → the try/catch below handles it as skip.
-        const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
-        complete = harnessComplete({
-          dispatch: async (task) => {
-            const evalCase: EvalCase = {
-              id: `judge-${spec.id}-${ctx.case.id}`,
-              env: { kind: "repo", source: { files: {} } },
-              task, // pass the judging prompt (rubric + trace + JSON requirement) straight to the agent
-              graders: [],
-              timeoutSec: 300,
-              tags: ["judge"],
-              ...(judgePlacement ? { placement: judgePlacement } : {}),
-            };
-            const job: CaseJob = {
-              evalCase,
-              harness: { id: ref.id, version: resolved.version },
-              tenant,
-              // Same co-locate ownership contract as the code judge — a self:<runnerId> judge placement needs the submitter.
-              ...(submittedBy ? { submittedBy } : {}),
-              ...(resolved.kind === "resolved" ? { harnessSpec: resolved.spec } : {}),
-              // The delegated agent's OWN model documents ride along, so the dispatcher that turns its
-              // bindings into a provider and a key verifies them exactly as it does a batch's own harness.
-              // Pinning the agent document says WHICH agent judges; this says which model it thinks with.
-              ...(pins?.harnessModelDigest !== undefined || pins?.harnessServiceModelDigests !== undefined
-                ? {
-                    modelPins: {
-                      ...(pins.harnessModelDigest !== undefined ? { model: pins.harnessModelDigest } : {}),
-                      ...(pins.harnessServiceModelDigests !== undefined
-                        ? { serviceModels: pins.harnessServiceModelDigests }
-                        : {}),
-                    },
-                  }
-                : {}),
-            };
-            const result = await dispatch(job);
-            dispatchedJudge = result; // the judge agent's own run — this judge's execution evidence
-            return result.trace;
-          },
-        });
-      } else {
-        // Swallowing a secret-decryption failure (e.g. EVERDICT_SECRETS_KEY / encryption-key mismatch) as an empty map would make a secret that
-        // actually exists read as undefined at `secrets[KEY]` below, misjudged as "not configured", silently skipping the judge.
-        // Catch the throw but skip while exposing the real decryption reason, with no empty-map fallback.
-        let secrets: Record<string, string>;
-        try {
-          secrets = await deps.secretsFor(tenant);
-        } catch (err) {
-          return skip(
-            spec,
-            "missing_secret",
-            `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        // judge.model is a Model BINDING (registered id/ref | raw string). Resolve a registered Model exactly like a
-        // harness does: its provider/underlying model/baseUrl/apiKeySecret + params carry the whole connection, so one
-        // model definition is the single source of "what to call + how to authenticate" everywhere it's referenced.
-        // A bare string that is not a registered id stays a raw model name (provider-default key, back-compat); an
-        // EXPLICIT ref that can't resolve is a visible skip — never silently sent to the provider as a literal model name.
-        const { ref, version } = normalizeModelBinding(spec.model);
-        const explicitRef = typeof spec.model !== "string";
-        let provider: "anthropic" | "openai" = spec.provider;
-        let model = ref;
-        let modelBaseUrl: string | undefined;
-        let maxTokens: number | undefined;
-        let keyName = provider === "anthropic" ? ANTHROPIC_KEY : OPENAI_KEY;
-        let resolvedModel: ModelSpec | undefined;
-        if (deps.models) {
-          try {
-            resolvedModel = await deps.models.get(tenant, ref, version);
-          } catch {
-            resolvedModel = undefined; // not a registered id
-          }
-        }
-        if (resolvedModel) {
-          // The model document decides the provider, the underlying model, the base URL and which key is used
-          // — everything about who answers the question. Verified at THIS read: the pass verified a copy while
-          // resolving the judge, and a shadow landing since then would be consumed here unseen.
-          const moved = pinnedDocumentMismatch(pins?.modelDigest, resolvedModel, {
-            kind: "model",
-            ref: `${ref}@${resolvedModel.version}`,
-          });
-          if (moved) return skip(spec, "unsupported", moved);
-          provider = resolvedModel.provider;
-          model = resolvedModel.model;
-          modelBaseUrl = resolvedModel.baseUrl;
-          maxTokens = resolvedModel.params?.maxTokens;
-          keyName = modelApiKeySecretName(resolvedModel);
-        } else if (explicitRef) {
-          return skip(
-            spec,
-            "unsupported",
-            `model '${ref}${version === "latest" ? "" : `@${version}`}' is not a registered model in this workspace`,
-          );
-        }
-        const apiKey = secrets[keyName];
-        if (!apiKey) return skip(spec, "missing_secret", `${keyName} secret not configured`);
-        // Same provider-native transport the agent uses (@everdict/llm) — Anthropic Messages / OpenAI, custom baseUrl
-        // for an OpenAI-compatible endpoint. The OPENAI_BASE_URL secret still overrides for the openai provider.
-        const baseUrl =
-          provider === "anthropic"
-            ? (modelBaseUrl ?? deps.anthropicBaseUrl)
-            : (secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl);
-        const transport = transportFor({
-          provider,
-          apiKey,
-          ...(baseUrl ? { baseUrl } : {}),
-          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-        });
-        // The tee records each completion's usage/verdict for the execution report — transportComplete alone
-        // discards the transport's usage, which is exactly how judge cost used to vanish.
-        complete = transportComplete(usageTeeTransport(transport, judgeStartMs, modelCalls), {
-          model,
-          ...(maxTokens ? { maxTokens } : {}),
-        });
-      }
-
-      // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
-      try {
-        const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
-        const grader: Grader = new JudgeGrader(modelJudge(complete), {
-          id: spec.id,
-          ...(rubricText ? { rubric: rubricText } : {}),
-          ...(criteria?.length ? { criteria } : {}),
-          ...(promptTemplate ? { promptTemplate } : {}),
-          useScreenshot,
-          ...(spec.kind === "model" && spec.inputs?.length ? { modalities: spec.inputs } : {}),
-          ...(spec.requires?.length ? { requires: spec.requires } : {}),
-        });
-        // Artifact URLs (screenshot bytes, url evidence slots) are already resolved to real data at the top of run().
-        const graded = toScores(await grader.grade(ctx));
-        const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
-        // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this
-        // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
-        // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
-        // sanitizeScore: a judge transport returning garbage (NaN score) becomes a visible INVALID score at
-        // THIS collection boundary too — safeGrade guards the in-job path, this guards the control-plane one.
-        // A JUDGE OWNS ITS OWN FAMILY AND NOTHING ELSE (arch-review 17 P0-2). The rewrite below only replaces
-        // a LEADING "judge", so a raw metric of anything else — `state`, say — passed through untouched and
-        // arrived carrying whatever authority that name has in the ladder: a judge escalating itself to
-        // ground truth. Declared to the boundary as a judge producer, which refuses any metric outside
-        // `judge:<id>[:criterion]`.
-        const producer: ScoreProducer = { kind: "judge", id: spec.id };
-        return attachJudgeEvidence(
-          spec,
-          spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
-          graded.map((score) => {
-            const metric = score.metric.replace(/^judge/, metricOf(spec));
-            // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
-            // and no pass to re-decide, so only its identity is rewritten.
-            if (!isMeasured(score)) return sanitizeScore({ ...score, metric }, producer);
-            const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
-            const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
-            return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) }, producer);
-          }),
-        );
-      } catch (err) {
-        // A failed judge still CALLED — the call rides the unmeasured row, which is what makes it diagnosable
-        // (downstream report 1.1). Pre-transport skips never executed, so they rightly carry nothing.
-        return attachJudgeEvidence(
-          spec,
-          spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls),
-          skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true),
-        );
-      } finally {
-        // The execution happened whether or not the verdict parsed — a failed parse still spent the tokens, so the
-        // report (meter + judge:<id> evidence plane) runs on BOTH exits. Pre-transport skips never reach here.
-        const events = spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls);
-        await reportJudgeExecution(deps, {
-          spec,
-          tenant,
-          events,
-          t0: judgeStartedAt,
-          ...(runId !== undefined ? { runId } : {}),
-          ...(publishWhen ? { publishWhen } : {}),
-          ...(scope !== undefined ? { scope } : {}),
-          ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
-        });
-      }
+      // One box per invocation — `reportJudgeExecution` writes into it wherever the branch below
+      // happens to seal, so the answer does not have to be threaded back through six return points.
+      const seal: SealBox = { outcome: "not_applicable" };
+      const scores = await judge(
+        spec,
+        tenant,
+        rawCtx,
+        placement,
+        submittedBy,
+        runId,
+        pins,
+        publishWhen,
+        scoringPass,
+        seal,
+      );
+      return { scores, evidence: seal.outcome };
     },
   };
 }

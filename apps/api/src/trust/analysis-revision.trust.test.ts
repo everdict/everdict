@@ -7,6 +7,10 @@ import { InMemoryArtifactStore } from "@everdict/storage";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 
+// The judge port answers an INVOCATION now (arch-review 58 follow-through). These fakes have no
+// trajectory to seal into, which is exactly what `not_applicable` means.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 // Trust suite (docs/trust-certification.md) — TRUST-41.
 //
 // HISTORICAL JUDGMENT IS RE-DERIVABLE, NOT MERELY DETECTABLE. The scoring ledger made a rewritten plane
@@ -64,9 +68,10 @@ describeTrust("TRUST-41 — per-revision analysis artifacts are distinct, immuta
       datasets,
       judges,
       judgeRunner: {
-        run: async (spec) => [
-          { graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: verdict, pass: verdict === 1 },
-        ],
+        run: async (spec) =>
+          judgeInvocation([
+            { graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: verdict, pass: verdict === 1 },
+          ]),
       },
       artifacts,
     });

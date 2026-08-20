@@ -267,6 +267,13 @@ export const CaseResultSchema = z.object({
   // recorded failure is indistinguishable from a complete one unless the producer says so. Absent on legacy
   // rows and on producers that cannot vouch — and `evidenceVersion` above is what tells those two apart.
   traceSealed: z.boolean().optional(),
+  // POSITIVE judgment seal, the same grammar as the trace one above: the scorer VOUCHES that every judge it
+  // ran got its own execution sealed as evidence on this run's trajectory. Sealing is best-effort by
+  // contract — a lost seal must not lose a real verdict — and the loss used to be silent, so a judgment
+  // whose account is gone read exactly like one whose account is on file (arch-review 58 follow-through).
+  // `false` = at least one judgment cannot be re-inspected. Absent = no judge ran, or a producer that
+  // cannot vouch; `evidenceVersion` is what tells those from a demotion.
+  judgmentsSealed: z.boolean().optional(),
   // The absolute instant this result's trace `t` offsets count from, DECLARED by the producer that knows it
   // (the topology backend: the front-door drive's start). The sealer passes it through as the execution
   // segment's `t0`, which is what lets a trace whose events carry only relative `t` (an inline front-door

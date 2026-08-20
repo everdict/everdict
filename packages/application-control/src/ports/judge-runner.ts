@@ -58,5 +58,23 @@ export interface JudgeRunner {
     // judging, whose bare `judge:<id>` emitter is that one shot. `judgeEvidenceEmitter` (@everdict/domain)
     // owns the grammar — never spell it at a call site.
     scoringPass?: string | JudgeEvidenceScope,
-  ): Promise<Score[]>;
+  ): Promise<JudgeInvocation>;
+}
+
+// ── WHAT A JUDGE ANSWERED, AND WHETHER IT CAN BE RE-INSPECTED ───────────────────────────────────────
+//
+// The port answered a bare `Score[]`, and sealing the judge's own execution as evidence is best-effort by
+// contract — evidence, never lifecycle, because losing the seal must not lose a real verdict. That contract
+// is right and the SILENCE around it was not: the seal's failure was swallowed, so a judgment whose "how" is
+// gone came back indistinguishable from one whose "how" is on file.
+//
+// The verifier lane already answers an invocation for the same reason (`VerifierInvocation`). This is its
+// twin, and `evidenceStatus` is what turns it into the case's judgment plane.
+export interface JudgeInvocation {
+  scores: Score[];
+  // "sealed" = the judge's own execution is on the judged run's trajectory and can be re-read.
+  // "unsealed" = it ran and the evidence did not land — the verdict stands, its account does not.
+  // "not_applicable" = there was nothing to seal (no trajectory store, no run id, a skip), or this driver
+  //   may no longer publish and the successor's seal will be the evidence. Not a loss.
+  evidence: "sealed" | "unsealed" | "not_applicable";
 }

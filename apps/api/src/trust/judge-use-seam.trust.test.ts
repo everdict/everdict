@@ -62,7 +62,7 @@ describeTrust("TRUST-109 — the judge runner refuses a document that moved afte
       inputs: ["trace"],
       tags: [],
     };
-    const scores = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, { rubricDigest: sealed });
+    const { scores } = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, { rubricDigest: sealed });
     expect(scores[0]).toMatchObject({ metric: "judge:quality", status: "unmeasured" });
     expect(scores[0]?.detail).toContain("rubric");
     // The provider is never reached: a verdict under an uncertified question is worse than no verdict, and
@@ -92,7 +92,7 @@ describeTrust("TRUST-109 — the judge runner refuses a document that moved afte
       inputs: ["trace"],
       tags: [],
     };
-    const scores = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, { modelDigest: sealed });
+    const { scores } = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, { modelDigest: sealed });
     expect(scores[0]).toMatchObject({ metric: "judge:quality", status: "unmeasured" });
     expect(scores[0]?.detail).toContain("model");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describeTrust("TRUST-109 — the judge runner refuses a document that moved afte
       inputs: ["trace"],
       tags: [],
     };
-    const scores = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, {
+    const { scores } = await runner.run(spec, "acme", ctx, undefined, undefined, undefined, {
       modelDigest: contentDigest(doc),
     });
     expect(scores[0]).toMatchObject({ metric: "judge:quality", pass: true });
@@ -168,7 +168,7 @@ describeTrust("TRUST-116 — an unreadable delegated agent is a refusal, not a r
       },
       dispatched,
     );
-    const scores = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
+    const { scores } = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
       harnessDigest: "sha256:sealed",
     });
     expect(scores[0]).toMatchObject({ metric: "judge:reviewer", status: "unmeasured" });
@@ -185,7 +185,7 @@ describeTrust("TRUST-116 — an unreadable delegated agent is a refusal, not a r
       },
       dispatched,
     );
-    const scores = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
+    const { scores } = await runner.run(harnessJudge(), "acme", ctx, undefined, undefined, undefined, {
       harnessDigest: "sha256:sealed",
     });
     expect(scores[0]).toMatchObject({ status: "unmeasured" });

@@ -11,6 +11,10 @@ import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 
+// The judge port answers an INVOCATION now (arch-review 58 follow-through). This scenario has no
+// trajectory to seal into, which is exactly what `not_applicable` means.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 // Trust suite (docs/trust-certification.md) — TRUST-40.
 //
 // THE SEAL IS THE PIN: WHAT THE MANIFEST RECORDED IS WHAT EXECUTES, EVEN WHEN THE REGISTRY MOVES MID-PASS.
@@ -153,7 +157,7 @@ describeTrust("TRUST-40 — the registry moving mid-pass cannot change what exec
         run: async (spec) => {
           await judgeGate;
           judgedSpecs.push(spec);
-          return [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }];
+          return judgeInvocation([{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }]);
         },
       },
       resolveModelBinding: async (_tenant, binding) => `${binding.ref}@${latest}`,

@@ -210,7 +210,10 @@ export class JudgePreviewService {
       return { ...rendered, runId: run.id };
     }
     if (!this.deps.judgeRunner) throw new BadRequestError("BAD_REQUEST", {}, "judge dry-run is not configured");
-    const scores = await this.deps.judgeRunner.run(cmd.spec, cmd.tenant, ctx);
+    // The preview runs a judge on demand against a chosen trace; it seals no evidence and has no run to seal
+    // it onto, so the invocation's evidence field is `not_applicable` by construction and the verdict is the
+    // whole answer here.
+    const { scores } = await this.deps.judgeRunner.run(cmd.spec, cmd.tenant, ctx);
     return { ...rendered, scores };
   }
 }

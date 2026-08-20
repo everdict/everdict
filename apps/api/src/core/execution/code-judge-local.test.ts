@@ -50,7 +50,7 @@ describe("code judge — real dispatch end-to-end (in-process LocalBackend)", ()
       tags: [],
     };
 
-    const scores = await runner().run(spec, "acme", judgeCtx);
+    const { scores } = await runner().run(spec, "acme", judgeCtx);
 
     expect(scores.map((s) => s.metric)).toEqual(["judge:e2e", "judge:e2e:milestone:login"]);
     expect(scores[0]).toMatchObject({ graderId: "e2e", value: 1, pass: true });
@@ -68,7 +68,7 @@ describe("code judge — real dispatch end-to-end (in-process LocalBackend)", ()
       tags: [],
     };
 
-    const scores = await runner().run(spec, "acme", judgeCtx);
+    const { scores } = await runner().run(spec, "acme", judgeCtx);
 
     // the wrapper's safeGrade turns the grader error into ONE visible UNMEASURED score whose detail carries
     // the output — no value at all, so a crashed judge can never be republished or averaged as a zero

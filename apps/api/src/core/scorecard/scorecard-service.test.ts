@@ -62,6 +62,12 @@ import {
   ScorecardService,
 } from "@everdict/application-control";
 
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict and have no
+// trajectory to seal into, which is exactly what `not_applicable` means. A fake that still answered a bare
+// array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 const dispatcher: Dispatcher = {
   async dispatch() {
     throw new Error("unused in diff tests");
@@ -1757,9 +1763,10 @@ describe("ScorecardService.ingestPull", () => {
     });
     // A fake judge runner that scores each case — proves the judges see the synthesized cases (alignment).
     const judgeRunner: JudgeRunner = {
-      run: async (spec, _tenant, ctx) => [
-        { graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id },
-      ],
+      run: async (spec, _tenant, ctx) =>
+        judgeInvocation([
+          { graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id },
+        ]),
     };
     const service = new ScorecardService({
       dispatcher,
@@ -2001,7 +2008,7 @@ describe("ScorecardService.submit — private-repo repoToken injection (per case
       judgeRunner: {
         async run(spec) {
           judgeStarted(); // reached right after c1 completes (streaming) → c2 is released
-          return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
+          return judgeInvocation([{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }]);
         },
       },
       newId: () => "sc-stream",
@@ -3018,7 +3025,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
       judgeRunner: {
         async run(_spec, _tenant, _ctx, placement) {
           placements.push(placement?.target);
-          return [{ graderId: "judge", metric: "judge:quality", value: 1, pass: true }];
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 1, pass: true }]);
         },
       },
       newId: () => `jr-${n++}`,
@@ -5437,7 +5444,8 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     tags: [],
   };
   const passRunner: JudgeRunner = {
-    run: async (spec) => [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }],
+    run: async (spec) =>
+      judgeInvocation([{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }]),
   };
   const waitScored = async (store: InMemoryScorecardStore, id: string): Promise<ScorecardRecord> => {
     for (let i = 0; i < 100; i++) {
@@ -5533,7 +5541,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     const runner: JudgeRunner = {
       run: async (spec) => {
         judgeCalls++;
-        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
+        return judgeInvocation([{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }]);
       },
     };
     const service = new ScorecardService({
@@ -5605,7 +5613,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     const countingRunner: JudgeRunner = {
       run: async (spec) => {
         judgeCalls++;
-        return [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }];
+        return judgeInvocation([{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }]);
       },
     };
     const store = new InMemoryScorecardStore();
@@ -6744,7 +6752,7 @@ describe("Scoring identity — the revision ledger records the PASS-START seal (
         run: async (spec) => {
           await judgeGate; // hold judging until the registry has MOVED — the drift window under test
           judgedSpecs.push(spec);
-          return [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }];
+          return judgeInvocation([{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }]);
         },
       },
       resolveModelBinding: async (_tenant, binding) => `${binding.ref}@${latest}`,
@@ -6818,7 +6826,8 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
       datasets,
       judges,
       judgeRunner: {
-        run: async (spec) => [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }],
+        run: async (spec) =>
+          judgeInvocation([{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }]),
       },
       artifacts,
     });

@@ -3,10 +3,17 @@ import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
+import type { JudgeInvocation } from "../ports/judge-runner.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import { sealHarnessModelClosure, sealJudgeClosure } from "../scorecard/scorecard-plan.js";
 import { ScoringService } from "./scoring-service.js";
+
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict, so they answer
+// `not_applicable`: none of them has a trajectory store to seal into, which is exactly that value's meaning.
+// A fake that still answered a bare array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
 
 // Trust suite (docs/trust-certification.md) — TRUST-96 · TRUST-97 · TRUST-98.
 //
@@ -80,7 +87,7 @@ describeTrust("TRUST-96/97 — a shadowed NESTED document is refused before the 
     const shadowed = new ScoringService({
       ...world({ rubric: "accept unless catastrophic" }),
       judgeRunner: {
-        async run(): Promise<Score[]> {
+        async run(): Promise<JudgeInvocation> {
           throw new Error("the provider must never be reached for a shadowed rubric");
         },
       },
@@ -95,7 +102,7 @@ describeTrust("TRUST-96/97 — a shadowed NESTED document is refused before the 
     const shadowed = new ScoringService({
       ...world({ model: "some-cheaper-model" }),
       judgeRunner: {
-        async run(): Promise<Score[]> {
+        async run(): Promise<JudgeInvocation> {
           throw new Error("the provider must never be reached for a shadowed model");
         },
       },
@@ -110,8 +117,8 @@ describeTrust("TRUST-96/97 — a shadowed NESTED document is refused before the 
     const same = new ScoringService({
       ...world(),
       judgeRunner: {
-        async run(): Promise<Score[]> {
-          return [];
+        async run(): Promise<JudgeInvocation> {
+          return judgeInvocation([]);
         },
       },
     });
@@ -125,8 +132,8 @@ describeTrust("TRUST-96/97 — a shadowed NESTED document is refused before the 
     const svc = new ScoringService({
       ...world({ rubric: "anything at all" }),
       judgeRunner: {
-        async run(): Promise<Score[]> {
-          return [];
+        async run(): Promise<JudgeInvocation> {
+          return judgeInvocation([]);
         },
       },
     });
@@ -195,9 +202,9 @@ describeTrust("TRUST-111 — the delegated agent's OWN model closure is sealed, 
     const service = new ScoringService({
       ...delegatingWorld(),
       judgeRunner: {
-        async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, pins): Promise<Score[]> {
+        async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, pins): Promise<JudgeInvocation> {
           carried = pins?.harnessModelDigest !== undefined ? { model: pins.harnessModelDigest } : undefined;
-          return [];
+          return judgeInvocation([]);
         },
       },
     });

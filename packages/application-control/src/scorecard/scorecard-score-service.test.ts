@@ -22,6 +22,12 @@ import type { ScoringStageStore, StagedJudgment } from "../ports/scoring-stage-s
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict, so they answer
+// `not_applicable`: none of them has a trajectory store to seal into, which is exactly that value's meaning.
+// A fake that still answered a bare array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 // The Temporal scoring pass (planScore/scoreCase) used to read bare judge-metric PRESENCE as "already
 // judged" — an unmeasured placeholder row (the exact state rescore-unmeasured exists to replace) made the
 // pass skip every case it was invoked for. These tests pin the measured-aware predicate on the service
@@ -354,7 +360,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     const judgeRunner: JudgeRunner = {
       async run(_spec, _tenant, _ctx, _placement, _submittedBy, runId) {
         seenRunIds.push(runId);
-        return [measuredVerdict];
+        return judgeInvocation([measuredVerdict]);
       },
     };
     const record: ScorecardRecord = { ...recordWith([result("c1", [unmeasuredPlaceholder])]), runIds: ["child-c1"] };
@@ -383,7 +389,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     const judgeRunner: JudgeRunner = {
       async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, _pins, _publishWhen, scoringPass) {
         seenScopes.push(scoringPass);
-        return [measuredVerdict];
+        return judgeInvocation([measuredVerdict]);
       },
     };
     const svc = new ScorecardScoreService(deps, {
@@ -408,7 +414,7 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     const judgeRunner: JudgeRunner = {
       async run(_spec, _tenant, _ctx, _placement, _submittedBy, _runId, _pins, _publishWhen, scoringPass) {
         seenScopes.push(scoringPass);
-        return [measuredVerdict];
+        return judgeInvocation([measuredVerdict]);
       },
     };
     const svc = new ScorecardScoreService(deps, {
@@ -1209,7 +1215,7 @@ describe("the scoring stage and EMBED-mode groups (no child runs)", () => {
   };
   const judgeRunner: JudgeRunner = {
     async run() {
-      return [{ graderId: "a", metric: "judge:a", value: 1, pass: true }];
+      return judgeInvocation([{ graderId: "a", metric: "judge:a", value: 1, pass: true }]);
     },
   };
 
@@ -1638,7 +1644,7 @@ describe("ScorecardScoreService carrier selection — the receipt names the row,
     const judgeRunner: JudgeRunner = {
       async run(_spec, _tenant, _ctx, _placement, _submittedBy, runId) {
         judged.push(runId);
-        return [measuredVerdict];
+        return judgeInvocation([measuredVerdict]);
       },
     };
     const record: ScorecardRecord = {

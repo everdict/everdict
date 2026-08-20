@@ -4,10 +4,17 @@ import {
   type JudgeRegistry,
   ScorecardService,
 } from "@everdict/application-control";
+import type { JudgeInvocation } from "@everdict/application-control";
 import type { JudgeSpec, RunRecord, Score, ScorecardRecord, ScoringPass } from "@everdict/contracts";
 import { PgRunStore, PgScorecardStore, PgScoringStageStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
+
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict and have no
+// trajectory to seal into, which is exactly what `not_applicable` means. A fake that still answered a bare
+// array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
 
 // Trust suite (docs/trust-certification.md) — TRUST-53 · TRUST-55 · TRUST-70.
 //
@@ -173,8 +180,8 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-53/55 — the carrier obeys the arbite
         },
       } as unknown as DatasetRegistry,
       judgeRunner: {
-        async run(spec: JudgeSpec): Promise<Score[]> {
-          return [verdict(spec.id, 0)];
+        async run(spec: JudgeSpec): Promise<JudgeInvocation> {
+          return judgeInvocation([verdict(spec.id, 0)]);
         },
       },
       ...(opts.brokenStage ? { scoringStage: broken } : opts.stage ? { scoringStage: opts.stage } : {}),

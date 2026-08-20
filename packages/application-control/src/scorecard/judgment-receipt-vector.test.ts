@@ -19,6 +19,12 @@ import { type JudgmentClaim, type ScoringStageStore, claimSupersedes } from "../
 import type { StagedJudgment } from "../ports/scoring-stage-store.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict, so they answer
+// `not_applicable`: none of them has a trajectory store to seal into, which is exactly that value's meaning.
+// A fake that still answered a bare array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 // ── WHICH INVOCATION'S VERDICT IS THE ONE THIS REVISION CERTIFIES ────────────────────────────────────
 //
 // `JudgmentClaim` already answers "who holds the right to write this (case, judge)": the stage arbitrates on
@@ -202,7 +208,7 @@ function flappingJudgeRunner(): JudgeRunner {
     async run() {
       invocation += 1;
       if (invocation === 1)
-        return [
+        return judgeInvocation([
           {
             graderId: "a",
             metric: "judge:a",
@@ -211,8 +217,8 @@ function flappingJudgeRunner(): JudgeRunner {
             retryable: true,
             detail: "[grader-error] judge transport died",
           },
-        ];
-      return [{ graderId: "a", metric: "judge:a", value: 1, pass: true }];
+        ]);
+      return judgeInvocation([{ graderId: "a", metric: "judge:a", value: 1, pass: true }]);
     },
   };
 }

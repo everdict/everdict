@@ -318,8 +318,11 @@ export class ScoringService {
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
+    // Starts as a vouch and can only be withdrawn: one judgment that could not be sealed makes the case's
+    // judgment plane partial, however many others landed.
+    let judgmentsSealed = true;
     for (const judge of specs) {
-      const scores = await runner.run(
+      const invocation = await runner.run(
         judge.spec,
         tenant,
         ctx,
@@ -330,6 +333,14 @@ export class ScoringService {
         publishWhen,
         scoringPass,
       );
+      const scores = invocation.scores;
+      // ── WHETHER THIS VERDICT CAN BE RE-INSPECTED (arch-review 58 follow-through) ─────────────
+      //
+      // Sealing a judge's own execution is best-effort by contract — a lost seal must not lose a real
+      // verdict — and the loss used to be silent, so a judgment whose account is gone read exactly like one
+      // whose account is on file. The result now VOUCHES, in the same positive-seal grammar `traceSealed`
+      // uses: the flag says "every judgment on this case can be re-read", and its absence is not a claim.
+      if (invocation.evidence === "unsealed") judgmentsSealed = false;
       // ── THE TRANSPORT SLOT IS DRAINED HERE (downstream report 1.1) ─────────────────────────────────
       //
       // A dispatched judge's own execution rides back on Score.traceEvents; the judged case's trace is where
@@ -349,6 +360,9 @@ export class ScoringService {
         }),
       );
     }
+    // Only vouch when a judgment actually happened — a case no judge ran has nothing to claim, and a
+    // blanket `true` would turn silence into evidence.
+    if (specs.length > 0) result.judgmentsSealed = judgmentsSealed;
   }
 
   // Case-streaming scoring — start applying judges the moment a case completes (removes the barrier of waiting for the whole batch).

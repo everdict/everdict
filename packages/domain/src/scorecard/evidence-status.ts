@@ -14,6 +14,21 @@ import { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 export interface EvidenceStatus {
   trace: "complete" | "partial" | "missing" | "deferred";
   snapshot: "complete" | "missing";
+  // ── CAN THE JUDGMENTS ON THIS CASE BE RE-INSPECTED? ──────────────────────────────────────────
+  //
+  // A verdict is a number; the account of how it was reached is what makes it defensible. Two ways that
+  // account goes missing, and until now both were silent:
+  //
+  //   · a JUDGE ran and its own execution could not be sealed onto this run's trajectory (best-effort by
+  //     contract — a lost seal must not lose a real verdict — but the loss used to be swallowed, so a
+  //     judgment whose "how" is gone read exactly like one whose "how" is on file);
+  //   · a VERIFIER produced the deciding verdict in a second container the lane could not name
+  //     (`VerifierReceipt.complete`).
+  //
+  // "not_applicable" = nothing judged this case, so there is no account to be missing. That is different
+  // from "complete", and collapsing them would make a case nobody judged look as well-evidenced as one
+  // whose judges all sealed.
+  judgment: "complete" | "partial" | "not_applicable";
 }
 
 // The empty prompt snapshot is the placeholder failedCaseResult synthesizes — not a captured world.
@@ -24,7 +39,10 @@ function snapshotPresent(result: Pick<CaseResult, "snapshot">): boolean {
 
 export function evidenceStatus(
   result: Pick<CaseResult, "trace" | "snapshot"> &
-    Pick<Partial<CaseResult>, "failure" | "traceRef" | "traceSealed" | "evidenceVersion">,
+    Pick<
+      Partial<CaseResult>,
+      "failure" | "traceRef" | "traceSealed" | "evidenceVersion" | "judgmentsSealed" | "verifier"
+    >,
 ): EvidenceStatus {
   const failure = result.failure;
   // The agent's TRAJECTORY, not the platform's lifecycle marks: a deferred job still carries infra-plane
@@ -56,5 +74,23 @@ export function evidenceStatus(
   } else {
     trace = "missing";
   }
-  return { trace, snapshot: snapshotPresent(result) ? "complete" : "missing" };
+  return { trace, snapshot: snapshotPresent(result) ? "complete" : "missing", judgment: judgmentStatus(result) };
+}
+
+// Whether a judgment happened is read from the PRODUCER'S OWN STATEMENT, never from the scores. The first
+// draft asked whether any metric started with `judge:` — which is deriving identity from a rendered label,
+// the exact re-derivation rule `protocol` L3 forbids, and the raw-scores guard in this package pushed back
+// on it before a human did. `judgmentsSealed` is set by the scorer precisely when it ran judges, and
+// `verifier` is present precisely when a second container decided the case; both are born where the fact is.
+//
+// A row carrying NEITHER makes no statement about judgment, and `not_applicable` is what that says. On a
+// pre-field row that is technically incomplete — it may well have been judged — and it is the honest answer
+// available: the alternative is to infer from output what the producer never recorded.
+function judgmentStatus(result: Pick<Partial<CaseResult>, "judgmentsSealed" | "verifier">): EvidenceStatus["judgment"] {
+  const verifier = result.verifier;
+  // A verdict reached in a container the lane could not name is an account nobody can re-open.
+  if (verifier !== undefined && !verifier.complete) return "partial";
+  if (result.judgmentsSealed === false) return "partial";
+  if (result.judgmentsSealed === true || verifier !== undefined) return "complete";
+  return "not_applicable";
 }

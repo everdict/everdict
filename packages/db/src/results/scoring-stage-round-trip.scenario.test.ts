@@ -174,7 +174,12 @@ describe.skipIf(!DATABASE_URL)("the scoring stage over real Postgres jsonb", () 
       },
     } as unknown as JudgeRegistry;
     // A judge that returns the full variety — the bytes whose survival is the point.
-    const judgeRunner: JudgeRunner = { run: async () => richScores("a") };
+    // The port answers an INVOCATION now (arch-review 58 follow-through): the verdict plus whether the
+    // judge's own execution could be sealed. This scenario is about the SCORE BYTES surviving a round trip,
+    // and it has no trajectory store, which is exactly what `not_applicable` means.
+    const judgeRunner: JudgeRunner = {
+      run: async () => ({ scores: richScores("a"), evidence: "not_applicable" }),
+    };
     const deps = {
       dispatcher: { dispatch: async () => ({}) },
       store,

@@ -9,6 +9,12 @@ import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { ScorecardServiceDeps } from "./scorecard-deps.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict, so they answer
+// `not_applicable`: none of them has a trajectory store to seal into, which is exactly that value's meaning.
+// A fake that still answered a bare array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 // Trust suite (docs/trust-certification.md) — TRUST-36.
 //
 // AN OLD VERSION'S SCORE IS NOT THE NEW VERSION'S COMPLETION. The Temporal scoring pass's worklist
@@ -120,7 +126,9 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
     // The v2 judge's runner — its verdict is DISTINGUISHABLE from v1's, so "re-judged" is observable.
     const judgeRunner: JudgeRunner = {
       async run() {
-        return [{ graderId: "quality", metric: "judge:quality", value: 1, pass: true, detail: "v2 says yes" }];
+        return judgeInvocation([
+          { graderId: "quality", metric: "judge:quality", value: 1, pass: true, detail: "v2 says yes" },
+        ]);
       },
     };
     // The record carries the LIVE PASS its activities run under. Every scoring activity now presents the

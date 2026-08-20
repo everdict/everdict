@@ -17,6 +17,24 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 follow-through. A judge's evidence seal is best-effort BY CONTRACT and its failure was
+    // SILENT, so a judgment whose account is gone read exactly like one whose account is on file. Swallowing
+    // the outcome again must go red.
+    name: "R58 — a lost judge evidence seal is silent again",
+    file: "apps/api/src/core/execution/judge-runner.ts",
+    from: '    input.seal.outcome = sealed ? "sealed" : "unsealed";',
+    to: "",
+    suite: ["--root", "packages/domain", "src/scorecard/judgment-evidence.counterexample.test.ts"],
+  },
+  {
+    // …and the reader half: the case's judgment plane is what turns that answer into something visible.
+    name: "R58 — an unsealed judgment reads as complete",
+    file: "packages/domain/src/scorecard/evidence-status.ts",
+    from: '  if (result.judgmentsSealed === false) return "partial";',
+    to: "",
+    suite: ["--root", "packages/domain", "src/scorecard/judgment-evidence.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 follow-through. `sameResolvedImages` and `VerifierReceipt.complete` were built by two
     // waves and consumed by nobody. The world axis is their consumer, and the gate refuses on it — so a
     // comparison whose two sides ran different image bytes can no longer pass as a clean green.

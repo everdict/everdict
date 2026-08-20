@@ -29,8 +29,13 @@ export function caseResultDigest(result: CaseResult): string {
 // true across every judgment revision. Same parse-first spelling as above, same reason.
 export function caseObservationDigest(result: CaseResult): string {
   const parsed = CaseResultSchema.parse(result);
+  // `judgmentsSealed` is dropped for the same reason `scores` is: it is the SCORER's vouch, written by the
+  // judging pass, and a re-score legally rewrites it. Leaving it in made every re-judged case's observation
+  // digest diverge from its receipt forever — the exact failure this digest exists to prevent, and the test
+  // beside it caught the field on its way in (arch-review 58 follow-through).
+  const { judgmentsSealed: _judgment, ...observation } = parsed;
   return contentDigest({
-    ...parsed,
+    ...observation,
     scores: [],
     trace: parsed.trace.filter((e) => !(e.kind === "span" && e.name.startsWith("judge:"))),
   });

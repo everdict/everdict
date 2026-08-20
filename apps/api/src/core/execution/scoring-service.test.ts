@@ -1,8 +1,15 @@
+import type { JudgeInvocation } from "@everdict/application-control";
 import { ScoringService } from "@everdict/application-control";
 import type { CaseResult, Dataset, GradeContext, JudgeSpec, Placement, Score } from "@everdict/contracts";
 import { InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import type { JudgeRunner } from "./judge-runner.js";
+
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict and have no
+// trajectory to seal into, which is exactly what `not_applicable` means. A fake that still answered a bare
+// array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
 
 const DATASET: Dataset = {
   id: "d",
@@ -35,9 +42,14 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     await judges.register("acme", spec);
     let seenPlacement: Placement | undefined;
     const judgeRunner: JudgeRunner = {
-      async run(_spec: JudgeSpec, _tenant: string, _ctx: GradeContext, placement?: Placement): Promise<Score[]> {
+      async run(
+        _spec: JudgeSpec,
+        _tenant: string,
+        _ctx: GradeContext,
+        placement?: Placement,
+      ): Promise<JudgeInvocation> {
         seenPlacement = placement;
-        return [{ graderId: "judge:j", metric: "judge", value: 1, pass: true }];
+        return judgeInvocation([{ graderId: "judge:j", metric: "judge", value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -73,9 +85,9 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
         _ctx: GradeContext,
         _placement?: Placement,
         submittedBy?: string,
-      ): Promise<Score[]> {
+      ): Promise<JudgeInvocation> {
         seenSubmittedBy = submittedBy;
-        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
+        return judgeInvocation([{ graderId: "j", metric: "judge:j", value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -110,9 +122,9 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
         _placement?: Placement,
         _submittedBy?: string,
         runId?: string,
-      ): Promise<Score[]> {
+      ): Promise<JudgeInvocation> {
         seenRunIds.push(runId);
-        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
+        return judgeInvocation([{ graderId: "j", metric: "judge:j", value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -212,11 +224,13 @@ describe("ScoringService — case streaming / parallel judge application", () =>
       releaseAll = resolve;
     });
     const judgeRunner: JudgeRunner = {
-      async run(spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
+      async run(spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<JudgeInvocation> {
         arrived += 1;
         if (arrived === 2) releaseAll();
         await bothArrived; // wait until the other case's judge has started
-        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id }];
+        return judgeInvocation([
+          { graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true, detail: ctx.case.id },
+        ]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner, caseConcurrency: 2 });
@@ -244,8 +258,8 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     await judges.register("acme", JUDGE("j1"));
     await judges.register("acme", JUDGE("j2"));
     const judgeRunner: JudgeRunner = {
-      async run(spec: JudgeSpec): Promise<Score[]> {
-        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
+      async run(spec: JudgeSpec): Promise<JudgeInvocation> {
+        return judgeInvocation([{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -276,10 +290,10 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     await judges.register("acme", JUDGE("j"));
     const seen: string[] = [];
     const judgeRunner: JudgeRunner = {
-      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
+      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<JudgeInvocation> {
         seen.push(ctx.case.id);
         if (ctx.case.id === "boom") throw new Error("judge boom");
-        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
+        return judgeInvocation([{ graderId: "j", metric: "judge:j", value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -337,9 +351,9 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     await judges.register("acme", JUDGE("j"));
     const judged: string[] = [];
     const judgeRunner: JudgeRunner = {
-      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<Score[]> {
+      async run(_spec: JudgeSpec, _t: string, ctx: GradeContext): Promise<JudgeInvocation> {
         judged.push(ctx.case.id);
-        return [{ graderId: "judge:j", metric: "judge", value: 1, pass: true }];
+        return judgeInvocation([{ graderId: "judge:j", metric: "judge", value: 1, pass: true }]);
       },
     };
     const scoring = new ScoringService({ judges, judgeRunner });
@@ -369,7 +383,7 @@ describe("ScoringService — case streaming / parallel judge application", () =>
     const judges = new InMemoryJudgeRegistry();
     await judges.register("acme", JUDGE("j"));
     const judgeRunner: JudgeRunner = {
-      async run(): Promise<Score[]> {
+      async run(): Promise<JudgeInvocation> {
         throw new Error("judge must not run on a pre-trace failure");
       },
     };

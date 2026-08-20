@@ -19,6 +19,9 @@ describe("evidenceStatus — completeness as a value, derived not self-reported"
     expect(evidenceStatus({ trace: events, snapshot: repoSnapshot })).toEqual({
       trace: "complete",
       snapshot: "complete",
+      // This row states nothing about judgment — no scorer vouch, no verifier receipt — which is exactly
+      // what the plane answers (arch-review 58 follow-through).
+      judgment: "not_applicable",
     });
   });
 
@@ -40,7 +43,7 @@ describe("evidenceStatus — completeness as a value, derived not self-reported"
         snapshot: placeholderSnapshot,
         failure: failure("dispatch"),
       }),
-    ).toEqual({ trace: "missing", snapshot: "missing" }); // infra post-mortem events are not the agent's trajectory
+    ).toEqual({ trace: "missing", snapshot: "missing", judgment: "not_applicable" }); // infra post-mortem events are not the agent's trajectory
   });
 
   it("the positive seal is the only path to complete for sealed-era producers", () => {

@@ -2,6 +2,12 @@ import type { CaseResult, EvalCase, GradeContext, JudgeSpec } from "@everdict/co
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "./scoring-service.js";
 
+// The judge port answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). These fakes are about the verdict, so they answer
+// `not_applicable`: none of them has a trajectory store to seal into, which is exactly that value's meaning.
+// A fake that still answered a bare array would be LESS capable than the port it stands in for.
+const judgeInvocation = (scores: unknown) => ({ scores, evidence: "not_applicable" }) as never;
+
 const CASE: EvalCase = {
   id: "c1",
   env: { kind: "repo", source: { files: {} } },
@@ -35,7 +41,9 @@ describe("ScoringService — applyJudgesToCase", () => {
     const service = new ScoringService({
       judgeRunner: {
         async run() {
-          return [{ graderId: "judge", metric: "judge:quality", value: 1, pass: true, traceEvents: judgeSpans }];
+          return judgeInvocation([
+            { graderId: "judge", metric: "judge:quality", value: 1, pass: true, traceEvents: judgeSpans },
+          ]);
         },
       },
     });
@@ -83,7 +91,7 @@ describe("ScoringService — applyJudgesToCase", () => {
       judgeRunner: {
         async run(_spec, _tenant, ctx) {
           seen.push(ctx);
-          return [{ graderId: "judge", metric: "judge:quality", value: 1 }];
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 1 }]);
         },
       },
     });
@@ -125,7 +133,7 @@ describe("ScoringService — applyJudgesToCase", () => {
       judgeRunner: {
         async run(_spec, _tenant, ctx) {
           seen.push(ctx);
-          return [
+          return judgeInvocation([
             {
               graderId: "judge",
               metric: "judge:quality",
@@ -133,7 +141,7 @@ describe("ScoringService — applyJudgesToCase", () => {
               pass: false,
               traceEvents: [{ t: 50, kind: "span", name: "judge:quality:verdict", attributes: { text: "FAIL" } }],
             },
-          ];
+          ]);
         },
       },
     });
@@ -266,7 +274,7 @@ describe("ScoringService — judge model collection (leaderboard axis + export a
       } as unknown as import("../ports/judge-registry.js").JudgeRegistry,
       judgeRunner: {
         async run() {
-          return [];
+          return judgeInvocation([]);
         },
       },
     });
@@ -328,7 +336,7 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       judgeRunner: {
         async run(spec) {
           seen.push(spec);
-          return [{ graderId: "judge", metric: "judge:quality", value: 1 }];
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 1 }]);
         },
       },
       rubrics: { get: async () => ({ id: "review-rubric", version: "9" }) as never },
@@ -379,7 +387,7 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       judgeRunner: {
         async run(spec) {
           seen.push(spec);
-          return [{ graderId: "judge", metric: "judge:quality", value: 1 }];
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 1 }]);
         },
       },
       rubrics: { get: async () => ({ id: "review-rubric", version: "7" }) as never },
@@ -418,7 +426,7 @@ describe("ScoringService — a pass CONCRETIZES its judges' moving refs once (se
       judgeRunner: {
         async run(spec) {
           seen.push(spec);
-          return [{ graderId: "judge", metric: "judge:agentic", value: 1 }];
+          return judgeInvocation([{ graderId: "judge", metric: "judge:agentic", value: 1 }]);
         },
       },
     });

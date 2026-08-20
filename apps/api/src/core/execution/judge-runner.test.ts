@@ -1,9 +1,20 @@
 import type { SealInput } from "@everdict/application-control";
+import type { JudgeRunner } from "@everdict/application-control";
 import type { CaseJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
 import { RubricSpecSchema, measuredScores } from "@everdict/contracts";
+import type { Score } from "@everdict/contracts";
 import { InMemoryModelRegistry, InMemoryRubricRegistry } from "@everdict/registry";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
+
+// ── THESE CASES ARE ABOUT THE VERDICT ────────────────────────────────────────────────────────────────
+//
+// `JudgeRunner.run` answers an INVOCATION now — the verdict plus whether the judge's own execution could be
+// sealed as evidence (arch-review 58 follow-through). The evidence half has its own counterexample; every
+// case in this file asks what the judge DECIDED, so they read through this helper rather than restating
+// `.scores` at thirty-nine call sites.
+const verdicts = async (r: JudgeRunner, ...a: Parameters<JudgeRunner["run"]>): Promise<Score[]> =>
+  (await r.run(...a)).scores;
 
 const ctx: GradeContext = {
   deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
@@ -45,7 +56,7 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const scores = await runner.run(modelSpec, "acme", ctx);
+    const scores = await verdicts(runner, modelSpec, "acme", ctx);
     expect(scores).toHaveLength(1);
     expect(scores[0]).toMatchObject({ graderId: "correctness", metric: "judge:correctness", value: 0.8, pass: true });
     expect(fetchImpl).toHaveBeenCalledOnce();
@@ -63,7 +74,7 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const [score] = measuredScores(await runner.run({ ...modelSpec, passThreshold: 0.7 }, "acme", ctx));
+    const [score] = measuredScores(await verdicts(runner, { ...modelSpec, passThreshold: 0.7 }, "acme", ctx));
     expect(score?.pass).toBe(false); // 0.6 < 0.7
   });
 
@@ -84,7 +95,7 @@ describe("defaultJudgeRunner", () => {
         { id: "style", description: "is it clean", weight: 1 },
       ],
     };
-    const scores = await runner.run(spec, "acme", ctx);
+    const scores = await verdicts(runner, spec, "acme", ctx);
     expect(scores.map((s) => s.metric)).toEqual([
       "judge:correctness",
       "judge:correctness:accuracy",
@@ -122,7 +133,7 @@ describe("defaultJudgeRunner", () => {
       },
     });
     const evidenceCtx: GradeContext = { ...ctx, evidence: { custom: { confirmation_id: "R-42" } } };
-    const scores = await runner.run(codeSpec, "acme", evidenceCtx, { target: "self:runner-1" });
+    const scores = await verdicts(runner, codeSpec, "acme", evidenceCtx, { target: "self:runner-1" });
 
     // the ORIGINAL case's full judge context is materialized as an env file the code reads (argv[1])
     const env = dispatched?.evalCase.env;
@@ -176,7 +187,7 @@ describe("defaultJudgeRunner", () => {
         } satisfies CaseResult;
       },
     });
-    await runner.run(codeSpec, "acme", ctx, { target: "self:runner-1" }, "user-alice");
+    await verdicts(runner, codeSpec, "acme", ctx, { target: "self:runner-1" }, "user-alice");
     expect(dispatched?.submittedBy).toBe("user-alice");
     expect(dispatched?.evalCase.placement).toEqual({ target: "self:runner-1" }); // still co-located
   });
@@ -219,7 +230,7 @@ describe("defaultJudgeRunner", () => {
       },
     });
     const urlCtx: GradeContext = { ...ctx, evidence: { custom: { run_log: "https://store.example/run.log" } } };
-    await runner.run(codeSpec, "acme", urlCtx);
+    await verdicts(runner, codeSpec, "acme", urlCtx);
     const env = dispatched?.evalCase.env;
     const files = env?.kind === "repo" && "files" in env.source ? env.source.files : {};
     const parsed = JSON.parse(files["judge-context.json"] ?? "{}") as {
@@ -249,14 +260,14 @@ describe("defaultJudgeRunner", () => {
         failure: { stage: "grade", class: "config", code: "UPSTREAM_ERROR", message: "exited 1", retryable: false },
       }),
     });
-    const [score] = await runner.run(codeSpec, "acme", ctx);
+    const [score] = await verdicts(runner, codeSpec, "acme", ctx);
     expect(score?.metric).toBe("judge:e2e");
     expect(String(score?.detail)).toContain("skipped");
     expect(String(score?.detail)).toContain("exited 1");
 
     // and with no dispatcher configured at all
     const noDispatch = defaultJudgeRunner({ secretsFor: async () => ({}) });
-    const [skipScore] = await noDispatch.run(codeSpec, "acme", ctx);
+    const [skipScore] = await verdicts(noDispatch, codeSpec, "acme", ctx);
     expect(String(skipScore?.detail)).toContain("dispatch not configured");
   });
 
@@ -280,7 +291,7 @@ describe("defaultJudgeRunner", () => {
         ],
       },
     };
-    const scores = await runner.run(modelSpec, "acme", milestoneCtx);
+    const scores = await verdicts(runner, modelSpec, "acme", milestoneCtx);
     expect(scores.map((s) => s.metric)).toEqual([
       "judge:correctness",
       "judge:correctness:milestone:login",
@@ -305,7 +316,7 @@ describe("defaultJudgeRunner", () => {
       passThreshold: 0.7,
       criteria: [{ id: "accuracy", description: "d", weight: 1 }],
     };
-    const scores = measuredScores(await runner.run(spec, "acme", ctx));
+    const scores = measuredScores(await verdicts(runner, spec, "acme", ctx));
     expect(scores[0]?.pass).toBe(false); // overall 0.6 < 0.7
     expect(scores[1]?.pass).toBe(true); // criterion untouched by the overall threshold
   });
@@ -316,7 +327,7 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({}),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const [score] = await runner.run(modelSpec, "acme", ctx);
+    const [score] = await verdicts(runner, modelSpec, "acme", ctx);
     // A judge that never ran is UNMEASURED and carries NO value at all — there is no placeholder 0 for an
     // aggregate to average, for the badge to print, or for a trace sink to republish as a real score.
     expect(score).toMatchObject({
@@ -340,7 +351,7 @@ describe("defaultJudgeRunner", () => {
       },
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const [score] = await runner.run(modelSpec, "acme", ctx);
+    const [score] = await verdicts(runner, modelSpec, "acme", ctx);
     expect(score?.metric).toBe("judge:correctness");
     // Swallowing it with an empty-map fallback used to be misjudged as "not configured" — now the real reason shows.
     expect(score?.detail).toContain("decryption failed");
@@ -362,7 +373,7 @@ describe("defaultJudgeRunner", () => {
       secretsFor: async () => ({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "http://litellm/v1" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const [score] = await runner.run({ ...modelSpec, provider: "openai", model: "gpt-5.4-mini" }, "acme", ctx);
+    const [score] = await verdicts(runner, { ...modelSpec, provider: "openai", model: "gpt-5.4-mini" }, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:correctness", value: 0.7, pass: true });
     const url = fetchImpl.mock.calls[0]?.[0];
     expect(url).toMatch(/\/chat\/completions$/);
@@ -419,7 +430,7 @@ describe("defaultJudgeRunner", () => {
       model: "gpt-5.4-mini",
       inputs: ["screenshot", "trace"],
     };
-    const [score] = measuredScores(await runner.run(spec, "acme", browserCtx));
+    const [score] = measuredScores(await verdicts(runner, spec, "acme", browserCtx));
     expect(score?.pass).toBe(true);
     expect(calls.some((c) => c.url.includes("/artifacts/r1.png"))).toBe(true); // the artifact URL was fetched
     const llm = calls.find((c) => c.url.includes("chat/completions"));
@@ -451,7 +462,7 @@ describe("defaultJudgeRunner", () => {
       models,
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const [score] = await runner.run({ ...modelSpec, model: "team-opus" }, "acme", ctx);
+    const [score] = await verdicts(runner, { ...modelSpec, model: "team-opus" }, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:correctness", value: 0.9, pass: true });
     expect(fetchImpl).toHaveBeenCalledOnce(); // resolved via apiKeySecret, not skipped as "not configured"
   });
@@ -466,7 +477,7 @@ describe("defaultJudgeRunner", () => {
       tags: [],
     });
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), models }); // neither key set
-    const [score] = await runner.run({ ...modelSpec, model: "shared-opus" }, "acme", ctx);
+    const [score] = await verdicts(runner, { ...modelSpec, model: "shared-opus" }, "acme", ctx);
     expect(score?.detail).toContain("ANTHROPIC_API_KEY secret not configured");
   });
 
@@ -494,7 +505,7 @@ describe("defaultJudgeRunner", () => {
       models,
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const [score] = await runner.run({ ...modelSpec, model: { ref: "team-opus" } }, "acme", ctx);
+    const [score] = await verdicts(runner, { ...modelSpec, model: { ref: "team-opus" } }, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:correctness", value: 0.9, pass: true });
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://litellm.acme.internal/v1/messages"); // the model's baseUrl, not the provider default
@@ -511,7 +522,7 @@ describe("defaultJudgeRunner", () => {
       models,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const [score] = await runner.run({ ...modelSpec, model: { ref: "ghost" } }, "acme", ctx);
+    const [score] = await verdicts(runner, { ...modelSpec, model: { ref: "ghost" } }, "acme", ctx);
     expect(score?.detail).toContain("not a registered model");
     expect(fetchImpl).not.toHaveBeenCalled(); // an explicit ref MUST resolve — no provider call
   });
@@ -542,7 +553,7 @@ describe("defaultJudgeRunner", () => {
       models,
       fetchImpl: fetchImpl as typeof fetch,
     });
-    await runner.run({ ...modelSpec, model: { ref: "team", version: "1.0.0" } }, "acme", ctx);
+    await verdicts(runner, { ...modelSpec, model: { ref: "team", version: "1.0.0" } }, "acme", ctx);
     const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body)).model).toBe("claude-opus-4-8"); // v1.0.0's model, not v2's "claude-next"
   });
@@ -557,7 +568,7 @@ describe("defaultJudgeRunner", () => {
     };
     const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(result));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
-    const [score] = await runner.run(harnessSpec, "acme", ctx);
+    const [score] = await verdicts(runner, harnessSpec, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:reviewer", value: 0.9, pass: true });
     expect(dispatch).toHaveBeenCalledOnce();
     expect(dispatch.mock.calls[0]?.[0]?.harness).toEqual({ id: "claude-code", version: "latest" });
@@ -565,7 +576,7 @@ describe("defaultJudgeRunner", () => {
 
   it("harness kind + no dispatch → skip", async () => {
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}) });
-    const [score] = await runner.run(harnessSpec, "acme", ctx);
+    const [score] = await verdicts(runner, harnessSpec, "acme", ctx);
     expect(score?.detail).toContain("skipped");
   });
 
@@ -582,14 +593,14 @@ describe("defaultJudgeRunner", () => {
     const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
     // Even with a source placement (rt-run), spec.runtime (rt-judge) wins.
-    await runner.run({ ...harnessSpec, runtime: "rt-judge" }, "acme", ctx, { target: "rt-run" });
+    await verdicts(runner, { ...harnessSpec, runtime: "rt-judge" }, "acme", ctx, { target: "rt-run" });
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-judge" });
   });
 
   it("harness judge: without spec.runtime, inherits the source run's placement (co-locate)", async () => {
     const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
-    await runner.run(harnessSpec, "acme", ctx, { target: "rt-near-store", os: "linux" });
+    await verdicts(runner, harnessSpec, "acme", ctx, { target: "rt-near-store", os: "linux" });
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-near-store", os: "linux" });
   });
 
@@ -597,14 +608,14 @@ describe("defaultJudgeRunner", () => {
     // Same co-locate ownership contract as the code judge — regression against dropping submittedBy on the dispatched job.
     const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
-    await runner.run(harnessSpec, "acme", ctx, { target: "self:runner-7" }, "user-bob");
+    await verdicts(runner, harnessSpec, "acme", ctx, { target: "self:runner-7" }, "user-bob");
     expect(dispatch.mock.calls[0]?.[0]?.submittedBy).toBe("user-bob");
   });
 
   it("harness judge: with neither spec.runtime nor a source placement, no placement (default backend)", async () => {
     const dispatch = vi.fn((_job: CaseJob) => Promise.resolve(harnessResult));
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
-    await runner.run(harnessSpec, "acme", ctx);
+    await verdicts(runner, harnessSpec, "acme", ctx);
     expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toBeUndefined();
   });
 
@@ -635,7 +646,7 @@ describe("defaultJudgeRunner", () => {
       rubrics,
     });
     const spec: JudgeSpec = { ...modelSpec, rubric: { id: "quality", version: "latest" } };
-    const scores = await runner.run(spec, "acme", ctx);
+    const scores = await verdicts(runner, spec, "acme", ctx);
     // criteria from the rubric land as judge:<id>:<criterion> next to the overall
     expect(scores.map((s) => s.metric)).toEqual(["judge:correctness", "judge:correctness:accuracy"]);
     // the resolved rubric text + custom template reached the prompt (one real transport call)
@@ -668,7 +679,7 @@ describe("defaultJudgeRunner", () => {
       rubric: { id: "quality", version: "latest" },
       criteria: [{ id: "own-crit", description: "from the judge", weight: 1 }],
     };
-    const scores = await runner.run(spec, "acme", ctx);
+    const scores = await verdicts(runner, spec, "acme", ctx);
     expect(scores.map((s) => s.metric)).toEqual(["judge:correctness", "judge:correctness:own-crit"]);
     const body = String(fetchImpl.mock.calls[0]?.[1]?.body ?? "");
     expect(body).toContain("own-crit");
@@ -683,7 +694,7 @@ describe("defaultJudgeRunner", () => {
       rubrics: new InMemoryRubricRegistry(), // registry present, rubric missing
     });
     const spec: JudgeSpec = { ...modelSpec, rubric: { id: "nope", version: "latest" } };
-    const [score] = await runner.run(spec, "acme", ctx);
+    const [score] = await verdicts(runner, spec, "acme", ctx);
     expect(score?.metric).toBe("judge:correctness");
     expect(score?.detail).toContain("skipped");
     expect(score?.detail).toContain("nope");
@@ -697,7 +708,7 @@ describe("defaultJudgeRunner", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     const spec: JudgeSpec = { ...modelSpec, rubric: { id: "quality", version: "latest" } };
-    const [score] = await runner.run(spec, "acme", ctx);
+    const [score] = await verdicts(runner, spec, "acme", ctx);
     expect(score?.detail).toContain("skipped");
     expect(score?.detail).toContain("rubric registry not configured");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -751,7 +762,7 @@ describe("judge execution evidence + metering", () => {
       fetchImpl: fetchImpl as typeof fetch,
       ...deps,
     });
-    const scores = measuredScores(await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1"));
+    const scores = measuredScores(await verdicts(runner, modelSpec, "acme", ctx, undefined, undefined, "run-1"));
     expect(scores[0]?.pass).toBe(true);
     // metered: the transport's token usage priced into USD (opus tier: 1000×$15/1M + 50×$75/1M)
     expect(deps.metered).toEqual([
@@ -787,7 +798,7 @@ describe("judge execution evidence + metering", () => {
       fetchImpl: verdictWithUsage('{"pass":false,"score":0.2,"reason":"changed my mind"}') as typeof fetch,
       ...deps,
     });
-    await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, "pass-7");
+    await verdicts(runner, modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, "pass-7");
     expect(deps.seals).toHaveLength(1);
     expect(deps.seals[0]?.emitter).toBe("judge:correctness#pass-7");
   });
@@ -824,7 +835,7 @@ describe("judge execution evidence + metering", () => {
       trajectories,
     });
     const invoke = (generation: number, attempt: number) =>
-      runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, {
+      verdicts(runner, modelSpec, "acme", ctx, undefined, undefined, "run-1", undefined, undefined, {
         passId: "pass-7",
         claim: { generation, attempt },
       });
@@ -847,7 +858,7 @@ describe("judge execution evidence + metering", () => {
       fetchImpl: verdictWithUsage('{"pass":true,"score":0.7,"reason":"ok"}') as typeof fetch,
       ...deps,
     });
-    await runner.run(modelSpec, "acme", ctx);
+    await verdicts(runner, modelSpec, "acme", ctx);
     expect(deps.metered).toHaveLength(1);
     expect(deps.seals).toHaveLength(0);
   });
@@ -859,7 +870,7 @@ describe("judge execution evidence + metering", () => {
       fetchImpl: verdictWithUsage("no json here at all") as typeof fetch,
       ...deps,
     });
-    const [score] = await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-9");
+    const [score] = await verdicts(runner, modelSpec, "acme", ctx, undefined, undefined, "run-9");
     expect(score?.status).toBe("unmeasured"); // the verdict is a visible grader_error skip…
     expect(deps.metered).toHaveLength(1); // …but the provider call happened, so it is billed…
     expect(deps.seals).toHaveLength(1); // …and its account is evidence
@@ -883,7 +894,7 @@ describe("judge execution evidence + metering", () => {
       dispatch: async () => judgeAgentResult,
       ...deps,
     });
-    const [score] = measuredScores(await runner.run(harnessSpec, "acme", ctx, undefined, undefined, "run-2"));
+    const [score] = measuredScores(await verdicts(runner, harnessSpec, "acme", ctx, undefined, undefined, "run-2"));
     expect(score?.pass).toBe(true);
     // metered through the SAME provenance policy a case's own billing uses (managed → the tenant pays)
     expect(deps.metered).toEqual([{ tenant: "acme", model: "claude-sonnet-x", cost: { usd: 0.5, tokens: 15 } }]);
@@ -915,7 +926,7 @@ describe("judge execution evidence + metering", () => {
       }),
       ...deps,
     });
-    const [score] = await runner.run(codeSpec, "acme", ctx, undefined, undefined, "run-3");
+    const [score] = await verdicts(runner, codeSpec, "acme", ctx, undefined, undefined, "run-3");
     expect(String(score?.detail)).toContain("skipped");
     expect(deps.seals).toHaveLength(1);
     expect(deps.seals[0]).toMatchObject({ runId: "run-3", emitter: "judge:e2e" });
@@ -926,7 +937,7 @@ describe("judge execution evidence + metering", () => {
   it("a pre-transport skip (missing key) reports nothing — no execution happened", async () => {
     const deps = captureDeps();
     const runner = defaultJudgeRunner({ secretsFor: async () => ({}), ...deps });
-    const [score] = await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-4");
+    const [score] = await verdicts(runner, modelSpec, "acme", ctx, undefined, undefined, "run-4");
     expect(String(score?.detail)).toContain("skipped");
     expect(deps.metered).toHaveLength(0);
     expect(deps.seals).toHaveLength(0);
@@ -945,7 +956,7 @@ describe("a judge that declares what it needs is not asked to answer without it"
     });
     // Before this fix the run below produced a confident measured verdict — the model was handed a trace with
     // no `submit_order` in it and answered anyway, and that number aggregated like any other.
-    const [score] = await runner.run(needsToolCall, "acme", ctx);
+    const [score] = await verdicts(runner, needsToolCall, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:correctness", status: "unmeasured", reason: "missing_evidence" });
     expect(score?.detail).toContain("submit_order");
     expect(measuredScores(score ? [score] : [])).toHaveLength(0);
@@ -968,7 +979,7 @@ describe("a judge that declares what it needs is not asked to answer without it"
       ...ctx,
       trace: [...ctx.trace, { t: 1, kind: "tool_call", id: "1", name: "submit_order", args: { id: "A-1" } }],
     };
-    const [score] = measuredScores(await runner.run(needsToolCall, "acme", withCall));
+    const [score] = measuredScores(await verdicts(runner, needsToolCall, "acme", withCall));
     expect(score?.value).toBe(1);
   });
 });
@@ -991,7 +1002,7 @@ describe("a judge's inputs come from what it declared, not from its kind", () =>
       requires: [{ kind: "screenshot" }],
       tags: [],
     };
-    const [score] = await runner.run(codeSpec, "acme", ctx);
+    const [score] = await verdicts(runner, codeSpec, "acme", ctx);
     expect(score).toMatchObject({ metric: "judge:pixel-check", status: "unmeasured", reason: "missing_evidence" });
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -1050,7 +1061,7 @@ describe("a judge's inputs come from what it declared, not from its kind", () =>
         console: [],
       },
     };
-    await runner.run(codeSpec, "acme", browserCtx);
+    await verdicts(runner, codeSpec, "acme", browserCtx);
     expect(fetchImpl).toHaveBeenCalled(); // the artifact URL was fetched…
     expect(dispatched).toBeDefined(); // …the declared evidence was satisfied, so the wrapper WAS dispatched…
     expect(JSON.stringify(dispatched)).toContain(pngB64); // …and the context file carries the image bytes
