@@ -516,16 +516,16 @@ const MUTATIONS = [
     // the record sits claimed by a live replica with no driver.
     name: "R56 Wave C — a deferred recovery names no worklist",
     file: "packages/application-control/src/ops/startup-recovery.ts",
-    from: '      owed.push({ kind: "scorecard", id: c.id, authority });',
-    to: "",
+    from: '      owed.push({\n        kind: "scorecard",',
+    to: '      if (false)\n      owed.push({\n        kind: "scorecard",',
     suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
   },
   {
     // …and the retry half: dropping a target that deferred AGAIN is the current defect with more steps.
     name: "R56 Wave C — a still-undecidable target is dropped from the worklist",
     file: "packages/application-control/src/ops/startup-recovery.ts",
-    from: '      if (disposition.kind === "retry_later") stillOwed.push(target);\n      continue;',
-    to: "      continue;",
+    from: "        stillOwed.push({ ...target, attempts: target.attempts + 1, lastReason: disposition.reason });",
+    to: "        void target;",
     suite: ["--root", "packages/application-control", "src/ops/deferred-recovery-owner.counterexample.test.ts"],
   },
   {
