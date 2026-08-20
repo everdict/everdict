@@ -31,11 +31,24 @@ const MUTATIONS = [
     // arch-review 58 P0. `active` was added between `reserved` and the external object's birth without being
     // added to the transition table beside it. Neutralizing it must go red, or a managed dispatch is back to
     // walking reserved → active → (executing REFUSED) → committed with no phase saying it ran.
+    // Aimed at the CONSUMER's guard, not at the shared constant it reads. A mutation in another package's
+    // `src` is invisible to a suite that resolves that package through its built `dist`: the first draft of
+    // this entry edited the contracts list, the suite stayed green, and the mutation runner caught what a
+    // rebuild would have hidden. Neutralize a protocol where the code under test actually reads it.
     name: "R58 — an activated attempt may not report that it started",
-    file: "packages/contracts/src/records/execution-attempt.ts",
-    from: 'export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved", "active"];',
-    to: 'export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved"];',
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: '    if (to === "executing" && !EXECUTING_PREDECESSOR_STATES.includes(current.state)) return false;',
+    to: '    if (to === "executing" && current.state !== "created" && current.state !== "reserved") return false;',
     suite: ["--root", "packages/application-control", "src/ports/executing-after-active.counterexample.test.ts"],
+  },
+  {
+    // …and the Pg twin arbitrates the same question in SQL, so it is neutralized separately. Two twins, two
+    // mutations — a shared constant does not make them one enforcement point.
+    name: "R58 — the Pg twin refuses executing from an activated attempt",
+    file: "packages/db/src/results/pg-execution-attempt-store.ts",
+    from: "const EXECUTING_FROM_LIST = EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(\", \");",
+    to: "const EXECUTING_FROM_LIST = \"'created', 'reserved'\";",
+    suite: ["--root", "packages/db", "src/results/pg-execution-attempt-store.test.ts"],
   },
   {
     // arch-review 58 P0. The activation state machine shipped with no production producer, so every managed
