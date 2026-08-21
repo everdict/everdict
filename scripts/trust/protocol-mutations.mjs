@@ -22,7 +22,7 @@ const MUTATIONS = [
     // paused submitter then created the job. Dropping the read-back must go red.
     name: "R59 — a cancellation certifies zero while a dispatch is authorized to create work",
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
-    from: '      const activeBirths = pending.value.filter((a) => a.state === "active");',
+    from: '      const activeBirths = unborn.filter((a) => a.state === "active");',
     to: "      const activeBirths: typeof pending.value = [];",
     build: "@everdict/application-control",
     suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
@@ -843,15 +843,16 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
   },
   {
-    // arch-review 59 P1-security. The pull Secret named by a namespace-global constant again, so two
-    // dispatches in one tenant namespace holding different grants for a host overwrite each other's object
-    // and a pod pulls under a credential it was never granted.
-    name: "registry auth — one Secret name per namespace, whatever the grant",
-    file: "packages/domain/src/image/image-ref.ts",
-    from: "  return `everdict-registry-${digest}`;",
+    // arch-review 59 P1-security, re-aimed by 60 P1-ops. The pull Secret named by one constant again, so two
+    // dispatches holding different grants for a host overwrite each other's object and a pod pulls under a
+    // credential it was never granted. The name moved from a content digest to the WORK when the lifetime
+    // half was closed — the topology lane keeps the content-addressed form on purpose, so mutating THAT
+    // symbol would neutralize a protocol this suite does not own.
+    name: "registry auth — one Secret name for every dispatch",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "  return `${jobName}-pull`;",
     to: '  return "everdict-registry-auth";',
     suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
-    build: "@everdict/domain",
   },
   {
     // arch-review 59 P1-high. The judging half placed with egress open while the agent was placed offline —
@@ -913,8 +914,8 @@ const MUTATIONS = [
     // a run's boot recovery enumerates — throws, and the whole run answers retry_later on every boot.
     name: "adoption — every container is assumed to print the case wire",
     file: "packages/contracts/src/execution/adopted-result.ts",
-    from: "  if (work.verifier === undefined) return parseResult(stdout);",
-    to: "  return parseResult(stdout);",
+    from: '  if (work.verifier === undefined) return { stage: "case", result: parseResult(stdout) };',
+    to: '  return { stage: "case", result: parseResult(stdout) };',
     suite: ["--root", "packages/contracts", "src/execution/verifier-adoption.counterexample.test.ts"],
   },
   {
@@ -1000,8 +1001,8 @@ const MUTATIONS = [
     // submitter still has an `applyJob` to make.
     name: "started-means-born — the K8s lane reports executing before its Job exists",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "      await requireActivation(job, work, options?.authority);",
-    to: "      await requireActivation(job, work, options?.authority);\n      options?.onStarted?.();",
+    from: "    await requireActivation(job, work, options?.authority);",
+    to: "    await requireActivation(job, work, options?.authority);\n    options?.onStarted?.();",
     suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
   },
   {
@@ -1049,7 +1050,7 @@ const MUTATIONS = [
     // incomplete: partial judgment evidence and a replay that cannot name the job that made the verdict.
     name: "verifier receipt — a verdict cannot say which object produced it",
     file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: "      ...(invocation.work ?? persistedWork ? { work: invocation.work ?? persistedWork } : {}),",
+    from: "      ...((invocation.work ?? persistedWork) ? { work: invocation.work ?? persistedWork } : {}),",
     to: "",
     suite: ["--root", "packages/application-control", "src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
