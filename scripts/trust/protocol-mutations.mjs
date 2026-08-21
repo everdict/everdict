@@ -260,16 +260,6 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/deferred-recovery-sweep.counterexample.test.ts"],
   },
   {
-    // arch-review 58 P0. The job payload stayed in `process.env` after the runner decoded it, and every exec
-    // the runner starts inherits the environment — including the agent under test, which could read the repo
-    // token, the registry passwords, the provider key and its own grading configuration out of it.
-    name: "R58 — the job payload is left in the agent's environment",
-    file: "packages/job-runner/src/job-payload-env.ts",
-    from: "  delete process.env[VERIFIER];",
-    to: "",
-    suite: ["--root", "packages/job-runner", "src/job-payload-env.counterexample.test.ts"],
-  },
-  {
     // arch-review 58 P0. The verifier opened its own row with no parent, so `PARENT_AUTHORIZES` took the run
     // branch on every batch case (an execution id no run row can equal) and the scorecard teardown's worklist
     // could not see the row at all. Dropping the coordinate must go red, or the second unit is orphaned again.
@@ -992,6 +982,11 @@ const MUTATIONS = [
   {
     // …and the runner half: reading the payload without destroying it, so it stays on the tmpfs for the whole
     // case with the agent running beside it.
+    //
+    // This entry INHERITS arch-review 58's claim, which used to live on `delete process.env[VERIFIER]`. That
+    // line is gone with the env transport, and the protocol it enforced — obtaining the payload is the same
+    // act as destroying it — moved here rather than ending. One entry, because two pointed at one protocol is
+    // how a registry starts describing a thing it no longer tests.
     name: "payload transport — the runner reads the payload and leaves it",
     file: "packages/job-runner/src/job-payload-env.ts",
     from: "        unlinkSync(path);",
