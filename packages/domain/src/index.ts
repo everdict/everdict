@@ -486,7 +486,11 @@ export {
   runtimeSpecWithCapabilities,
   topologyNeedsDocker,
 } from "./runtime/capability-requirements.js";
-export { assertHardenedIsolation, isHardenedRuntime } from "./runtime/trust-zone-hardening.js";
+export {
+  UNTRUSTED_POD_IDENTITY,
+  assertHardenedIsolation,
+  isHardenedRuntime,
+} from "./runtime/trust-zone-hardening.js";
 
 // image — image-reference parse/classify/warn rules (from @everdict/core; shapes stay in contracts)
 export {

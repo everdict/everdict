@@ -42,6 +42,7 @@ import type {
   InspectWorkload,
 } from "@everdict/contracts/wire";
 import {
+  UNTRUSTED_POD_IDENTITY,
   assertHardenedIsolation,
   contentDigest,
   dockerAuthConfigJson,
@@ -1132,6 +1133,9 @@ export function buildK8sJob(
         metadata: { labels: { app: "everdict", "everdict.dev/tenant": tenant, [UNIT_LABEL]: name } },
         spec: {
           restartPolicy: "Never",
+          // No cluster identity for the agent under test — see `UNTRUSTED_POD_IDENTITY`. K8s mounts the
+          // default ServiceAccount token unless a spec says otherwise, and this one did not.
+          ...UNTRUSTED_POD_IDENTITY,
           ...(runtimeClassName ? { runtimeClassName } : {}),
           ...(opts.nodeSelector ? { nodeSelector: opts.nodeSelector } : {}),
           ...(opts.tolerations ? { tolerations: opts.tolerations } : {}),

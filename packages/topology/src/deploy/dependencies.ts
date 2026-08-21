@@ -1,4 +1,5 @@
 import type { ServiceHarnessSpec, TopologyDependency } from "@everdict/contracts";
+import { UNTRUSTED_POD_IDENTITY } from "@everdict/domain";
 
 // The structured coordinates of a deployed store — what dependency env injection (dependencies[].inject) renders
 // {field} templates from, and what the conventional connEnv keys are DERIVED from. Built where the endpoint is known
@@ -232,6 +233,8 @@ export function buildSharedStoreManifests(
         template: {
           metadata: { labels },
           spec: {
+            // No cluster identity for a store a harness's own code talks to — see `UNTRUSTED_POD_IDENTITY`.
+            ...UNTRUSTED_POD_IDENTITY,
             containers: [
               {
                 name: store,

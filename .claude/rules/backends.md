@@ -112,6 +112,18 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 - Do NOT run the harness here. Dispatch the `@everdict/job-runner` image with the job as
   `EVERDICT_CASE_JOB` (base64 JSON) env; the agent runs `runCase` and prints the `__EVERDICT_RESULT__`
   sentinel. Parse the CaseResult from job logs (v1) — keep transport swappable (HTTP callback later).
+- **AN UNTRUSTED POD CARRIES NO IDENTITY IN OUR CLUSTER.** K8s mounts the namespace's default ServiceAccount
+  token into every pod unless the spec says otherwise, and nothing here said otherwise — so every eval Job,
+  every topology service and every provisioned dependency came up with a bearer token for our cluster API at
+  `/var/run/secrets/kubernetes.io/serviceaccount/token`, in a container running the tenant's image with the
+  agent under test inside it. What that reaches depends on what the default SA is bound to in whichever
+  cluster an operator pointed a `RuntimeSpec` at, which is precisely why it may not be assumed to be nothing:
+  the hardened runtime above is the KERNEL boundary, and a credential handed in at the front door goes around
+  it. Every pod spec this repo emits for tenant-supplied code spreads `UNTRUSTED_POD_IDENTITY`
+  (`@everdict/domain`, beside `assertHardenedIsolation`) — one owner, because an invariant written at three
+  call sites grows its next exception in two of them. Unconditional, including for a `trusted` zone: a
+  trusted tenant is one we let share a kernel, not one that needs to call our control plane from inside an
+  eval, and no lane has ever used the token — a capability removed, not a policy with a knob.
 - Isolation is the orchestrator's (`Nomad task runtime` / K8s `runtimeClassName`), set via config — never hardcoded.
 - **The control-plane API never uses `LocalBackend` — by default, no toggle.** `LocalBackend` (in-process host,
   no isolation) is dev/CLI only. `main.ts` never registers a `local` backend, and `RunService`/`ScorecardService`

@@ -8,6 +8,7 @@ import {
   serviceIsHostExec,
 } from "@everdict/contracts";
 import {
+  UNTRUSTED_POD_IDENTITY,
   dockerAuthConfigJson,
   pickRegistryAuth,
   registryAuthSecretName,
@@ -131,6 +132,8 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
         template: {
           metadata: { labels },
           spec: {
+            // No cluster identity for a tenant-supplied service image — see `UNTRUSTED_POD_IDENTITY`.
+            ...UNTRUSTED_POD_IDENTITY,
             runtimeClassName: opts.runtimeClass,
             containers: [
               {
@@ -214,6 +217,8 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
         template: {
           metadata: { labels },
           spec: {
+            // No cluster identity for a tenant-supplied service image — see `UNTRUSTED_POD_IDENTITY`.
+            ...UNTRUSTED_POD_IDENTITY,
             runtimeClassName: opts.runtimeClass,
             // Intrinsic OS placement (requires.os) → the standard nodeSelector (kubernetes.io/os = GOOS). This is
             // the K8s realization of the portable os-<x> capability; the whole cross-service data plane (Service DNS)
@@ -311,6 +316,8 @@ export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {
         template: {
           metadata: { labels },
           spec: {
+            // No cluster identity for a tenant-supplied service image — see `UNTRUSTED_POD_IDENTITY`.
+            ...UNTRUSTED_POD_IDENTITY,
             runtimeClassName: opts.runtimeClass,
             containers: [
               {

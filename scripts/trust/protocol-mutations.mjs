@@ -969,6 +969,16 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
+  {
+    // arch-review 59 follow-through. The default ServiceAccount token back in every eval/topology pod, i.e. a
+    // bearer credential for our cluster API inside a container running the tenant's own untrusted code.
+    name: "pod identity — an untrusted pod mounts a token for our cluster API",
+    file: "packages/domain/src/runtime/trust-zone-hardening.ts",
+    from: "export const UNTRUSTED_POD_IDENTITY = { automountServiceAccountToken: false } as const;",
+    to: "export const UNTRUSTED_POD_IDENTITY = {} as { automountServiceAccountToken?: false };",
+    suite: ["--root", "packages/topology", "src/untrusted-pod-identity.counterexample.test.ts"],
+    build: "@everdict/domain",
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
