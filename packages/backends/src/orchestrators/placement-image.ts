@@ -1,4 +1,4 @@
-import type { CaseJob, CaseResult, ProvisionedWorldProof, ResourceRequest } from "@everdict/contracts";
+import type { CaseJob, CaseResult, NetworkPolicy, ProvisionedWorldProof, ResourceRequest } from "@everdict/contracts";
 import { laneImageProvenance, withPlacementImage } from "@everdict/domain";
 
 // ── WHAT THE PLACEMENT RAN, ADDED TO WHAT THE DRIVER SAW (arch-review 57 P1-high) ────────────────────
@@ -34,20 +34,35 @@ export function mergePlacedImage(result: CaseResult, job: CaseJob, lane: string)
 // would be worse than the refusal it replaces: the case would run in a world nobody provided and report an
 // ordinary result.
 //
-// Resources are claimed: both managed lanes translate cpu/memory/gpu into the unit's own request+limit, so
-// the box really is that size. NETWORK IS NOT. Constraining egress needs a NetworkPolicy object on K8s and a
-// task network block on Nomad, neither of which this dispatch writes — so an offline-declared case still
-// reaches the driver's refusal, which is the correct answer until a lane can honestly say otherwise.
+// Resources are claimed by whatever the lane RENDERED — the caller passes its own native answer, never the
+// case's raw declaration, so the proof cannot outrun the manifest (rule `protocol`, "a proof is born from
+// the same builder as the effect"; arch-review 59 P0-world).
+//
+// NETWORK is claimed only where a lane actually writes the object that constrains it. K8s does, for
+// `mode: "none"`, when its operator has said the cluster enforces NetworkPolicy — and the proof had to learn
+// that in the same change, because it did not: the policy was applied, the Job started, and the in-container
+// check then refused the case for lack of a network proof. The feature was inert end to end while every test
+// passed (arch-review 59 P1-high). Nomad still writes nothing, so an offline case there still reaches the
+// refusal, which stays the correct answer until that lane can honestly say otherwise.
 export function withWorldProof(
   job: CaseJob,
   enforcedBy: ProvisionedWorldProof["enforcedBy"],
   resources: ResourceRequest | undefined,
+  // What the lane applied on the NETWORK axis, if anything. Absent = it applied nothing, and silence is what
+  // `worldProofCovers` reads as "not enforced" — the fail-closed direction.
+  network?: NetworkPolicy,
 ): CaseJob {
   const declared = job.evalCase.resources;
-  // Nothing declared, or nothing applied: no claim to make, and the run needs none.
-  if (declared === undefined || resources === undefined) return job;
+  const claimsNetwork = network !== undefined;
+  // Nothing declared and nothing applied: no claim to make, and the run needs none.
+  if ((declared === undefined || resources === undefined) && !claimsNetwork) return job;
   return {
     ...job,
-    worldProof: { os: "linux", enforcedBy, resources },
+    worldProof: {
+      os: "linux",
+      enforcedBy,
+      ...(declared !== undefined && resources !== undefined ? { resources } : {}),
+      ...(claimsNetwork ? { network } : {}),
+    },
   };
 }

@@ -109,7 +109,7 @@ describe("buildNomadJob", () => {
     const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.EVERDICT_JUDGE_MODEL).toBeUndefined();
   });
-  it("job.judgeAuth (per-job resolved credential) wins over the backend's baked secretEnv", () => {
+  it("keeps job.judgeAuth OUT of the task env — the agent's environment is not where a judge key belongs", () => {
     const spec = buildNomadJob(
       {
         ...JOB,
@@ -123,8 +123,16 @@ describe("buildNomadJob", () => {
       },
     );
     const env = spec.Job.TaskGroups[0]?.Tasks[0]?.Env;
-    expect(env?.OPENAI_API_KEY).toBe("personal-key"); // job-level explicit wins
-    expect(env?.OPENAI_BASE_URL).toBe("http://litellm:4000/v1");
+    // This used to assert that the per-job judge credential OVERWROTE the workspace tier here, which was the
+    // point of injecting it — and the reason the agent under test could read it, since the job-runner's
+    // environment is what `LocalDriver` hands its children (arch-review 59 P0-security).
+    //
+    // The precedence did not go away, it moved to where it belongs: the runner builds the judge env from
+    // `job.judgeAuth` on the payload and applies it to the GRADING half's execs, over whatever the container
+    // holds. What stays in the task env is the harness's own key, which is the credential the agent needs.
+    expect(env?.OPENAI_API_KEY).toBe("stale-workspace-key");
+    expect(Object.values(env ?? {}), "the judge's key is in the agent's environment").not.toContain("personal-key");
+    expect(env?.OPENAI_BASE_URL).toBeUndefined();
   });
   it("with evalCase.image, override with the per-case image (e.g. SWE-bench prebuilt)", () => {
     const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };

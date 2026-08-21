@@ -86,6 +86,14 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   broader stop** — a self-hosted lane answers `absent` (its teardown is the lease revocation), a managed lane
   answers `unknown` and the cancellation stays owed. `legacy-case-addressing-guard` is the ratchet: it refuses
   a re-declared case-id method AND a re-added capability interface.
+- **A SPECIALIZED LANE CALLS THE COMMON DISPATCH, IT DOES NOT RE-IMPLEMENT IT.** `dispatchVerifier` is the
+  same protocol as `dispatch` with a different payload — reserve, re-present at the object's birth, submit,
+  parse — and the K8s one was written out longhand. It reserved and then applied the Job, losing the
+  activation the shared path performs, so a scorecard cancellation could probe absent, settle every child,
+  COMPLETE, and the verifier container was then born (arch-review 59 P0-verifier). The Nomad lane reuses
+  `dispatch` and kept the step. A copy of a protocol does not stay a copy: it loses whichever transition is
+  added next, silently, because nothing type-checks "the same sequence". If a lane genuinely needs a variant,
+  the variance is a PARAMETER of the shared function, never a second body.
 - **A stop ANSWERS — `KillOutcome`, never `void`** (arch-review 52 Wave 3). `kill`/`killWork` return
   `{status: "stopped"|"absent"|"unknown"|"failed", reason?}` and still never throw: `stopped`/`absent` are
   convergence (`killConverged`), `unknown`/`failed` mean the compute is probably still burning. "The delete

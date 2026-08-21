@@ -59,16 +59,20 @@ describe("[R58 COUNTEREXAMPLE] an eval container gets model auth, not the worksp
     expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-for-the-agent");
   });
 
-  it("lets the per-job judge credential still win over the tier", () => {
-    // `judgeAuthEnv` is applied after the tier on purpose — a key resolved for THIS dispatch beats a
-    // workspace default. Filtering must not reorder that.
+  it("carries the HARNESS's key and not the judge's — the tier is the agent's, not the grader's", () => {
+    // This asserted the opposite when it was written: that `judgeAuthEnv`, applied after the tier, overwrote
+    // it. That precedence was real and it was in the wrong place — the task env is what the job-runner
+    // process holds and therefore what the agent under test inherits (arch-review 59 P0-security). The judge
+    // credential now reaches the grading half through `graderEnv` at exec time, over whatever the container
+    // holds, so the precedence survives and the exposure does not.
     const withJudge = {
       ...job(),
       judge: { provider: "anthropic", model: "claude-opus-5" },
       judgeAuth: { apiKey: "sk-ant-for-this-dispatch" },
     } as unknown as CaseJob;
     const env = envOf(buildNomadJob(withJudge, { addr: "http://n:4646", image: "runner:1", secretEnv: TIER }));
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-for-this-dispatch");
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-for-the-agent");
+    expect(Object.values(env), "the judge's key reached the agent").not.toContain("sk-ant-for-this-dispatch");
   });
 
   it("passes nothing when the tier holds no model credential at all", () => {

@@ -17,6 +17,45 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 59 P0-world. The manifest and the proof were two expressions, so the Nomad lane requested no
+    // GPU for a case that declared one and attested `gpu: 1` anyway — a false world, which `worldProofCovers`
+    // ACCEPTS. Splitting them again must go red.
+    name: "R59 — the Nomad proof is a copy of the request rather than of the effect",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "    const gpu = job.evalCase.resources?.gpu ?? harness?.gpu ?? opts.gpu;",
+    to: "    const gpu = harness?.gpu ?? opts.gpu;",
+    suite: ["--root", "packages/backends", "src/orchestrators/nomad-world-proof.counterexample.test.ts"],
+  },
+  {
+    // arch-review 59 P0-verifier. `dispatchVerifier` is the shared protocol written out longhand, and the copy
+    // lost the activation the common path gained. Removing it again must go red.
+    name: "R59 — the k8s verifier creates its Job without re-presenting the reservation",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "      await requireActivation(verifierCaseJob(job), work, hooks?.authority);",
+    to: "",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
+  },
+  {
+    // arch-review 59 P0-security. The backend put the judge's provider key into the pod/task environment, so
+    // the job-runner held it and `LocalDriver` handed it to the agent under test. Injecting it again must go
+    // red — the credential must not be in the environment the agent inherits.
+    name: "R59 — the judge's key is injected into the agent's environment again",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "    ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.",
+    to: "    ...judgeEnv(job.judge),\n    ...judgeAuthEnv(job.judge, job.judgeAuth),",
+    suite: ["--root", "packages/backends", "src/orchestrators/managed-judge-key.counterexample.test.ts"],
+  },
+  {
+    // arch-review 59 P1-high. K8s applied a deny-all egress policy and the proof did not learn the axis, so
+    // the in-container check refused every offline case the lane had just enforced. Dropping the claim again
+    // must go red.
+    name: "R59 — the k8s lane enforces a network world it does not attest",
+    file: "packages/backends/src/orchestrators/placement-image.ts",
+    from: "      ...(claimsNetwork ? { network } : {}),",
+    to: "",
+    suite: ["--root", "packages/backends", "src/orchestrators/k8s-network-policy.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 W5 follow-through. A deny-all egress policy that selected `app: everdict` would cut off
     // every other job in the namespace; one that selected nothing would enforce nothing. The per-unit label
     // is the whole difference, and widening it must go red.

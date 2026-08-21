@@ -138,6 +138,49 @@ So, when a comment contains a promise about another component — "the caller ha
 counterexample. Grep for the promised component before writing the sentence; if it does not exist, the change
 is not done, and if it does exist, the test drives it rather than the guard.
 
+## A PROOF IS BORN FROM THE SAME BUILDER AS THE EFFECT
+L3 says provenance is born at the source. Attestation is where that law gets broken by people who believe they
+are obeying it, because the request and the effect are both right there and copying the wrong one type checks.
+
+    request copied into proof   ≠   native effect read back into proof
+
+The Nomad lane computed `Resources.CPU` and `MemoryMB` from the case, computed `Devices` from the HARNESS spec
+only — dropping `evalCase.resources.gpu` — and then stamped `withWorldProof(job, "nomad", job.evalCase.resources)`,
+the WHOLE declaration, as what it had enforced. A case asking for one GPU got a task with no device request and
+an in-container proof saying `gpu: 1` was applied. That is worse than the refusal it replaced: a refusal is
+visible, and a false attestation makes the driver ACCEPT a world nobody provided and report the score as if
+nothing had changed (arch-review 59 P0-world).
+
+So: one function produces the native fields AND the proof, from the same inputs, and the manifest and the
+attestation are two renderings of its single answer. If an axis cannot be rendered natively it is absent from
+BOTH — `worldProofCovers` reads silence as "not enforced", which is the fail-closed direction.
+
+The corollary bites in the other direction too. When a lane starts enforcing an axis, the proof must learn it in
+the SAME change: K8s grew a deny-all egress NetworkPolicy while `withWorldProof` still refused to claim
+`network` (and its comment still said no lane writes one), so every offline case applied the policy, started the
+Job, and was then refused by the in-container check for lack of the proof. The feature was inert end to end and
+every test passed.
+
+## A SECRET IN A PROCESS'S INITIAL ENVIRONMENT IS NOT REVOKED BY A LANGUAGE-LEVEL DELETE
+`delete process.env.X` changes this process's copy and what its future children inherit. It does not change what
+`/proc/<pid>/environ` reports, which is the environment the process was EXECVE'D with, and it does not reach a
+sibling that already inherited it. `clearenv()` moves pointers; it does not scrub the bytes.
+
+Two consequences this repo has already paid for (arch-review 59 P0-security):
+
+- Handing a credential to a narrower CONSUMER in TypeScript is not handing it to a narrower PROCESS. The judge
+  key was moved from the driver wrapper to `runCase`'s `graderEnv` — correct, and inert on the managed lanes,
+  because the backend puts `judgeAuthEnv` into the pod/task environment, so the job-runner already holds it and
+  `LocalDriver` execs the agent with `{ ...process.env, ...opts.env }`.
+- Taking a payload out of `process.env` after reading it bounds child inheritance and proves nothing about the
+  initial environment the kernel still reports.
+
+So a secret-bearing control envelope does not travel as an environment variable at all. The closure is a
+transport the agent's process boundary cannot reach — a file descriptor, a one-shot socket, a separate UID — and
+an EXPLICIT allowlist for what a child is exec'd with, never `{ ...process.env }`. Until that exists, say what
+is actually true: "the agent no longer inherits it from us" is a different sentence from "the agent cannot read
+it", and only one of them was earned.
+
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
 2. `pnpm protocol-mutations` neutralizes the new protocol in the production file and the owning suite goes RED.

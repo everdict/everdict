@@ -10,6 +10,7 @@ import {
   caseJobPayload,
   evalContainerSecretEnv,
   extractLiveEvents,
+  isDefaultNetwork,
   parseResult,
   parseVerifierResult,
   refuseUnenforceableNetwork,
@@ -998,13 +999,39 @@ export function buildK8sJob(
 ): Record<string, unknown> {
   // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
   // in-container check was the right decision at the wrong moment.
+  // ── A COMBINATION THAT MAKES THE POLICY INERT IS A REFUSAL, NOT A DEGRADE (arch-review 59) ──────
+  //
+  // NetworkPolicy behaviour for a hostNetwork pod is undefined in Kubernetes, and the common implementations
+  // simply do not match such a pod against a selector. So `enforcesNetwork` + `hostNetwork` is a lane that
+  // applies a policy, attests the axis, and constrains nothing — the false attestation this whole change
+  // exists to remove, arriving by configuration instead of by code.
+  if (opts.enforcesNetwork && opts.hostNetwork && !isDefaultNetwork(job.evalCase.network))
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { lane: "k8s" },
+      "this runtime enables hostNetwork, where a NetworkPolicy does not apply, so a declared network world cannot be enforced here however the policy is written — run the case on a runtime without hostNetwork, or submit it without a network declaration.",
+    );
   refuseUnenforceableNetwork(job.evalCase.network, "k8s", opts.enforcesNetwork ? { enforces: ["none"] } : undefined);
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
     ...(verifierPayload !== undefined
       ? { EVERDICT_VERIFIER_JOB: verifierPayload }
-      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "k8s", job.evalCase.resources)) }),
+      : {
+          EVERDICT_CASE_JOB: caseJobPayload(
+            // …and the NETWORK axis, when this lane is the one that constrained it. `k8sNetworkPolicyFor`
+            // answers a manifest exactly for the modes this lane renders, so "a policy was built" is the same
+            // question as "may we attest it" — one answer, two uses (arch-review 59 P1-high).
+            withWorldProof(
+              job,
+              "k8s",
+              job.evalCase.resources,
+              opts.enforcesNetwork && k8sNetworkPolicyFor("probe", job.evalCase.network)
+                ? job.evalCase.network
+                : undefined,
+            ),
+          ),
+        }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     // The workspace tier, FILTERED to the model-auth vocabulary — see `evalContainerSecretEnv` for what
     // the whole tier used to hand the agent under test. One function for both lanes, because a tenant's
@@ -1012,7 +1039,19 @@ export function buildK8sJob(
     ...evalContainerSecretEnv(opts.secretEnv),
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
-    ...judgeAuthEnv(job.judge, job.judgeAuth),
+    // ── THE JUDGE'S KEY IS NOT IN THE AGENT'S ENVIRONMENT (arch-review 59 P0-security) ─────────
+    //
+    // `judgeAuthEnv(job.judge, job.judgeAuth)` used to be injected here. The job-runner process then held the
+    // tenant's provider credential in `process.env`, and `LocalDriver` execs the agent under test with
+    // `{ ...process.env, ...opts.env }` — so `env | grep ANTHROPIC_API_KEY` read it, with no bypass. Moving
+    // the key to the grading half in TypeScript (arch-review 58) changed nothing here: a narrower consumer is
+    // not a narrower PROCESS.
+    //
+    // It is also redundant. The runner builds the judge env from `job.judgeAuth`, a field on the payload it
+    // already decodes, and hands it to `runCase` as `graderEnv`. Nothing reads it out of the environment.
+    //
+    // It shared a NAME with the harness's own key, too — so injecting it did not merely add a credential, it
+    // overwrote the one the agent legitimately needs with one meant for somebody else.
   };
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
@@ -1311,13 +1350,17 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
 
     // BEFORE the Job exists (arch-review 57 P0-verifier). The name is already decided, so the ledger can
     // record where this work will be — which is what lets a cancellation find the verifier at all.
-    await hooks?.authority.reserve({
-      tenant: job.tenant,
-      runId: job.runId,
-      externalJobId: name,
-      namespace: ns,
-    });
+    // Built ONCE and used by both seams: a reservation authorizes one external object, so the id the
+    // activation re-presents has to be the id that was reserved. Two literals here is how those drift.
+    const work = { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns };
+    await hooks?.authority.reserve(work);
     return await this.withApi(async (api) => {
+      // …AND RE-PRESENTED, immediately before the Job exists. This step was missing here while the shared
+      // dispatch had it: `dispatchVerifier` is the same protocol with a different payload, and writing it out
+      // longhand meant this copy silently did not receive the transition arch-review 58 added (arch-review 59
+      // P0-verifier). Without it a cancellation could kill the ledger's work, probe it ABSENT because no
+      // object existed yet, settle every child, COMPLETE — and the paused verifier then created the Job.
+      await requireActivation(verifierCaseJob(job), work, hooks?.authority);
       await api.ensureNamespace(ns);
       const manifest = buildK8sJob(
         spec,

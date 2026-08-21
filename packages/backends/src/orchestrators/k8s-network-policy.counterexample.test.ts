@@ -1,5 +1,8 @@
+import { worldProofCovers } from "@everdict/contracts";
+import type { CaseJob } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { UNIT_LABEL, k8sNetworkPolicyFor, ownerReferencePatch } from "./k8s-network-policy.js";
+import { buildK8sJob } from "./k8s.js";
 
 // ── ONE NETWORK MODE A CLUSTER CAN ACTUALLY ENFORCE (arch-review 58, W5 follow-through) ──────────────
 //
@@ -68,5 +71,74 @@ describe("[R58 W5 COUNTEREXAMPLE] deny-all egress is expressed as a policy the c
     // dependent that can stall its owner's removal turns a cleanup into a stuck namespace.
     expect(ref?.controller).toBe(false);
     expect(ref?.blockOwnerDeletion).toBe(false);
+  });
+});
+
+// ── AND THE CONTAINER HAS TO ACCEPT THE WORLD THE LANE BUILT ────────────────────────────────────────
+//
+// The policy object was the easy half. `withWorldProof` still claimed only `resources`, and its own comment
+// still said no lane writes a network object — so the opt-in offline path applied the NetworkPolicy, started
+// the Job, and the in-container `worldProofCovers` then refused the case for lack of a network proof. The
+// feature was inert end to end, and every unit test above passed while it was (arch-review 59 P1-high).
+//
+// Seen RED before the proof learned the axis, observed:
+//   the container refused a world this lane actually built: expected false to be true
+describe("[R59 COUNTEREXAMPLE] an offline world the lane enforced is a world the container accepts", () => {
+  const offlineJob = (): CaseJob =>
+    ({
+      tenant: "acme",
+      runId: "evd-run-r1",
+      harness: { id: "h", version: "1" },
+      evalCase: {
+        id: "c1",
+        task: "t",
+        env: { kind: "prompt" },
+        graders: [],
+        timeoutSec: 60,
+        network: { mode: "none", allowedHosts: [] },
+      },
+    }) as unknown as CaseJob;
+
+  const proofFrom = (spec: unknown): CaseJob["worldProof"] => {
+    const containers = (
+      spec as { spec: { template: { spec: { containers: Array<{ env?: Array<{ name: string; value?: string }> }> } } } }
+    ).spec.template.spec.containers;
+    const payload = containers[0]?.env?.find((e) => e.name === "EVERDICT_CASE_JOB")?.value;
+    if (payload === undefined) throw new Error("no case payload on the pod");
+    return (JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as CaseJob).worldProof;
+  };
+
+  it("attests the network axis when it applied the policy, so the driver runs", () => {
+    const spec = buildK8sJob(offlineJob(), { image: "runner:1", enforcesNetwork: true }, "evd-c1", "ns");
+    const proof = proofFrom(spec);
+    expect(
+      worldProofCovers(proof, undefined, { mode: "none", allowedHosts: [] }),
+      "the container refused a world this lane actually built",
+    ).toBe(true);
+  });
+
+  it("REFUSES rather than attesting, when the operator has not said this cluster enforces it", () => {
+    // The two halves are one decision. Without the opt-in the lane does not build a policy, so it has nothing
+    // to attest — and rather than placing the case with a silent gap it turns it away, because a manifest
+    // applied to a cluster with no policy controller is accepted and inert.
+    expect(() => buildK8sJob(offlineJob(), { image: "runner:1" }, "evd-c1", "ns")).toThrow(/cannot enforce/i);
+  });
+
+  it("does not claim the axis for a mode it cannot render", () => {
+    const allowlist = offlineJob();
+    (allowlist.evalCase as { network: unknown }).network = { mode: "allowlist", allowedHosts: ["api.example.com"] };
+    // The lane refuses this case outright; the point here is that if it ever stopped refusing, the proof
+    // would still not claim what no manifest expresses.
+    expect(k8sNetworkPolicyFor("u", { mode: "allowlist", allowedHosts: ["api.example.com"] })).toBeUndefined();
+  });
+
+  it("REFUSES hostNetwork + enforcesNetwork — a policy that cannot apply must not be attested", () => {
+    // Kubernetes leaves NetworkPolicy behaviour undefined for a hostNetwork pod and the common
+    // implementations do not match one against a selector. That combination is a lane that applies a policy,
+    // claims the axis, and constrains nothing: the false attestation this whole change removes, arriving by
+    // configuration rather than by code.
+    expect(() =>
+      buildK8sJob(offlineJob(), { image: "runner:1", enforcesNetwork: true, hostNetwork: true }, "evd-c1", "ns"),
+    ).toThrow(/hostNetwork/);
   });
 });

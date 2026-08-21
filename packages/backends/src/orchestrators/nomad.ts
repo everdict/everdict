@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  type ResourceRequest,
   type Score,
   type VerifierInvocation,
   type VerifierJob,
@@ -511,6 +512,40 @@ export function nomadCpuMhz(
   return Math.round((declaredMillicores / 1000) * opts.cpuMhzPerCore);
 }
 
+// ── WHAT THIS LANE WILL NATIVELY APPLY, AND THEREFORE MAY ATTEST ────────────────────────────────────
+//
+// One function, two renderings: `cpuMhz`/`memoryMb`/`gpu` go into the Nomad task, and `enforced` is the same
+// answer in the shared vocabulary, which is what the world proof carries into the container. They cannot
+// disagree because there is nothing to keep in step — see rule `protocol`, "a proof is born from the same
+// builder as the effect", for what it cost when they were two expressions.
+//
+// Precedence is the same on every axis: the CASE is the more specific statement about this unit of work, the
+// harness spec is the harness's default, the runtime binding is the operator's. And `enforced` states ONLY
+// what was rendered: an axis this lane cannot express is absent from both, which `worldProofCovers` reads as
+// "not enforced" — the fail-closed direction.
+export function nomadWorld(
+  job: CaseJob,
+  opts: { cpuMhz?: number; cpuMhzPerCore?: number; memMb?: number; gpu?: number },
+): { cpuMhz: number; memoryMb: number; gpu?: number; enforced: ResourceRequest } {
+  const harness = job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined;
+  const cpu = job.evalCase.resources?.cpu ?? harness?.cpu;
+  const memoryMb = job.evalCase.resources?.memoryMb ?? harness?.memoryMb;
+  const gpu = job.evalCase.resources?.gpu ?? harness?.gpu ?? opts.gpu;
+  return {
+    cpuMhz: nomadCpuMhz(cpu, opts),
+    memoryMb: memoryMb ?? opts.memMb ?? 1024,
+    ...(gpu !== undefined ? { gpu } : {}),
+    // The DECLARED vocabulary, restated from what was rendered rather than copied from the request. `cpu` is
+    // reported in millicores because that is what the case declared and what the in-container check compares
+    // against; the MHz above is this cluster's rendering of the same number.
+    enforced: {
+      ...(cpu !== undefined ? { cpu } : {}),
+      ...(memoryMb !== undefined ? { memoryMb } : {}),
+      ...(gpu !== undefined ? { gpu } : {}),
+    },
+  };
+}
+
 // CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
 export function buildNomadJob(
   job: CaseJob,
@@ -523,12 +558,21 @@ export function buildNomadJob(
   // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
   // in-container check was the right decision at the wrong moment.
   refuseUnenforceableNetwork(job.evalCase.network, "nomad");
+  // ── ONE ANSWER, RENDERED TWICE (arch-review 59 P0-world) ────────────────────────────────────────
+  //
+  // The native task fields and the world proof come from the SAME call. They used to be computed apart: CPU
+  // and memory read the case, GPU read the harness spec only — `evalCase.resources.gpu` was simply absent —
+  // and the payload then stamped the WHOLE declaration as the world this placement had enforced. A case
+  // asking for one GPU got a task with no device request and an in-container proof saying `gpu: 1` was
+  // applied, which is worse than the refusal it replaced: `worldProofCovers` ACCEPTS, the driver runs, and
+  // the score is reported as if the declared world had been provided.
+  const world = nomadWorld(job, opts);
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
     ...(verifierPayload !== undefined
       ? { EVERDICT_VERIFIER_JOB: verifierPayload }
-      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "nomad", job.evalCase.resources)) }),
+      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "nomad", world.enforced)) }),
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     // The workspace tier, FILTERED to the model-auth vocabulary — see `evalContainerSecretEnv` for what
     // the whole tier used to hand the agent under test. One function for both lanes, because a tenant's
@@ -536,7 +580,19 @@ export function buildNomadJob(
     ...evalContainerSecretEnv(opts.secretEnv),
     // Judge provider key resolved per-job at dispatch (workspace tier → submitter personal fallback) — AFTER
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
-    ...judgeAuthEnv(job.judge, job.judgeAuth),
+    // ── THE JUDGE'S KEY IS NOT IN THE AGENT'S ENVIRONMENT (arch-review 59 P0-security) ─────────
+    //
+    // `judgeAuthEnv(job.judge, job.judgeAuth)` used to be injected here. The job-runner process then held the
+    // tenant's provider credential in `process.env`, and `LocalDriver` execs the agent under test with
+    // `{ ...process.env, ...opts.env }` — so `env | grep ANTHROPIC_API_KEY` read it, with no bypass. Moving
+    // the key to the grading half in TypeScript (arch-review 58) changed nothing here: a narrower consumer is
+    // not a narrower PROCESS.
+    //
+    // It is also redundant. The runner builds the judge env from `job.judgeAuth`, a field on the payload it
+    // already decodes, and hands it to `runCase` as `graderEnv`. Nothing reads it out of the environment.
+    //
+    // It shared a NAME with the harness's own key, too — so injecting it did not merely add a credential, it
+    // overwrote the one the agent legitimately needs with one meant for somebody else.
   };
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
@@ -552,8 +608,6 @@ export function buildNomadJob(
     Operand: c.operator ?? "=",
     RTarget: c.value,
   }));
-  // Harness-declared GPUs win over the runtime binding's blanket default (same rule as cpu/mem).
-  const gpuCount = (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.gpu : undefined) ?? opts.gpu;
   return {
     Job: {
       ID: jobId ?? nomadJobId(job),
@@ -585,17 +639,9 @@ export function buildNomadJob(
                 // MILLICORES if anything declared a box, converted through the operator's stated per-core
                 // clock; otherwise the lane's own MHz default. The two units never meet in one expression —
                 // see `cpuMhzPerCore` for what it cost when they did.
-                CPU: nomadCpuMhz(
-                  job.evalCase.resources?.cpu ??
-                    (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.cpu : undefined),
-                  opts,
-                ),
-                MemoryMB:
-                  job.evalCase.resources?.memoryMb ??
-                  (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??
-                  opts.memMb ??
-                  1024,
-                ...(gpuCount !== undefined ? { Devices: [{ Name: "nvidia/gpu", Count: gpuCount }] } : {}),
+                CPU: world.cpuMhz,
+                MemoryMB: world.memoryMb,
+                ...(world.gpu !== undefined ? { Devices: [{ Name: "nvidia/gpu", Count: world.gpu }] } : {}),
               },
             },
           ],
