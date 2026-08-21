@@ -1411,13 +1411,23 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         // was previously discarded: which procedure ran (the plan's own digest, carried on the job), what it
         // read (the workspace snapshot's), where it ran, and in which world. A verdict that cannot say those
         // is a number a replay has to take on faith.
-        return {
+        // READ BACK, not copied from the request (arch-review 59 P1). The envelope names the unit it judged;
+        // `parseVerifierResult` refuses one that names a different unit, and the invocation is then built
+        // from the container's own account rather than from what this lane asked for. The two are equal on
+        // the happy path — which is exactly why stamping the request read as correct for as long as it did.
+        const envelope = parseVerifierResult(await api.podLogs(name, ns), {
+          runId: job.runId,
+          caseId: job.caseId,
           planDigest: job.plan.digest,
           workspaceDigest: contentDigest(job.workspace),
+        });
+        return {
+          planDigest: envelope.planDigest,
+          workspaceDigest: envelope.workspaceDigest,
           work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
           imageProvenance:
             job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
-          scores: parseVerifierResult(await api.podLogs(name, ns)).scores,
+          scores: envelope.scores,
         };
       } finally {
         await api.deleteJob(name, ns);

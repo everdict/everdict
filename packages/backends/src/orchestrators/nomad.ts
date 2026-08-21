@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  type ExpectedVerifierIdentity,
   type ResourceRequest,
   type Score,
   type VerifierInvocation,
@@ -973,23 +974,38 @@ export class NomadBackend
     // a guess would record a reservation for work that never exists. Passing the hook down means the id that
     // gets recorded is the one the submit actually uses, which is the whole point of reserving before
     // placing.
-    const result = await this.dispatch(
-      spec,
-      hooks ? { authority: hooks.authority } : undefined,
-      verifierJobPayload(job),
-    );
+    const identity = {
+      runId: job.runId,
+      caseId: job.caseId,
+      planDigest: job.plan.digest,
+      workspaceDigest: contentDigest(job.workspace),
+    };
+    const result = await this.dispatch(spec, hooks ? { authority: hooks.authority } : undefined, {
+      payload: verifierJobPayload(job),
+      identity,
+    });
     // The INVOCATION, not bare numbers (arch-review 57 P1). Which procedure ran, what it read, and in which
     // world — all known here and previously discarded. The image provenance comes off the dispatch's own
     // result, so this lane reports what the placement observed rather than re-deriving it.
+    // VERIFIED rather than assumed (arch-review 59 P1). `parseVerifierResult` refused any envelope naming a
+    // different unit, so these digests are the container's own account and not a copy of the request — the
+    // difference the happy path hides, and the one a replay joins on.
     return {
-      planDigest: job.plan.digest,
-      workspaceDigest: contentDigest(job.workspace),
+      planDigest: identity.planDigest,
+      workspaceDigest: identity.workspaceDigest,
       ...(result.execution?.imageProvenance !== undefined ? { imageProvenance: result.execution.imageProvenance } : {}),
       scores: result.scores,
     };
   }
 
-  async dispatch(job: CaseJob, options?: DispatchOptions, verifierPayload?: string): Promise<CaseResult> {
+  // `verifier` is ONE object on purpose: the payload and the identity the answer must match are two halves of
+  // the same decision, and passing them as two optionals is how one lane ends up with the payload and no check
+  // (rule `protocol` L1 — a required parameter is a protocol, an optional companion is a request).
+  async dispatch(
+    job: CaseJob,
+    options?: DispatchOptions,
+    verifier?: { payload: string; identity: ExpectedVerifierIdentity },
+  ): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
@@ -1040,7 +1056,7 @@ export class NomadBackend
         at: new Date(now).toISOString(),
       });
     };
-    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifierPayload));
+    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload));
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
@@ -1063,7 +1079,7 @@ export class NomadBackend
             ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
             : "alloc log fetch failed",
         );
-      const result = await this.parseResultOrExplain(logs.text, allocId, ns, verifierPayload !== undefined);
+      const result = await this.parseResultOrExplain(logs.text, allocId, ns, verifier?.identity);
       // The cluster's own task-event account (with REAL event timestamps) closes the infra record — best-effort:
       // a detail miss just leaves the collector's own marks.
       const detail = await this.allocDetail(allocId);
@@ -1108,11 +1124,13 @@ export class NomadBackend
     logsText: string,
     allocId: string,
     namespace?: string,
-    verifier?: boolean,
+    // The unit the answer is supposed to be about — not a boolean. A flag says "read the verifier wire"; this
+    // says which verdict may be adopted, which is the question that was never being asked (arch-review 59 P1).
+    verifier?: ExpectedVerifierIdentity,
   ): Promise<CaseResult> {
     try {
-      if (verifier === true) {
-        const envelope = parseVerifierResult(logsText);
+      if (verifier !== undefined) {
+        const envelope = parseVerifierResult(logsText, verifier);
         // Carried in a `CaseResult` shell ONLY to reach the caller that unwraps it one frame up; nothing
         // persists this shape. The verifier's real answer is the envelope, and `dispatchVerifier` builds the
         // invocation from it.

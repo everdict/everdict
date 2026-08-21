@@ -41,7 +41,37 @@ export function encodeVerifierResult(envelope: VerifierResultEnvelope): string {
   return VERIFIER_RESULT_SENTINEL + JSON.stringify(envelope);
 }
 
-export function parseVerifierResult(stdout: string): VerifierResultEnvelope {
+// ── WHOSE VERDICT THIS IS, READ BACK RATHER THAN ASSUMED (arch-review 59 P1) ────────────────────────
+//
+// The envelope names the unit it judged, and both managed lanes took `.scores` off it and then STAMPED the
+// invocation's `planDigest`/`workspaceDigest` from what they had REQUESTED. So the provenance the whole lane
+// exists to produce was a copy of the request, and the container's own account of what it read was parsed and
+// thrown away one expression later.
+//
+// That is the failure rule `protocol` names in full: a proof is born from the same builder as the effect, and
+// `request copied into proof` is not `native effect read back into proof`. The digests are the join key
+// downstream (`verifierReceiptOf`), so a stamped copy is not cosmetic — it is what a replay matches on.
+//
+// Stated exactly, because the guarantee is narrower than it first reads. The container derives its digests
+// from the SAME payload the lane sent, so this cannot detect a container that mounted a tree different from
+// the one its payload declares — that is a real and separate question, and nothing here closes it. What it
+// does catch is an envelope that is about ANOTHER UNIT: a log read that returned a previous case's output
+// (both lanes take "the last sentinel in whole logs", over a recycled pod or a reused alloc dir this repo
+// already documents), and a payload swapped between the dispatch and the container's start. Before this,
+// either of those was silently adopted as this case's verdict, with the request's own digests stamped on it.
+//
+// A REQUIRED PARAMETER, not a separate `assertVerifierEnvelope` a lane can forget — this repo has now twice
+// watched an optional companion check go unwired on one of two lanes (rule `protocol` L1, and the K8s
+// verifier's missing activation one review ago). There is no way to read this wire without saying which unit
+// the answer was supposed to be about.
+export interface ExpectedVerifierIdentity {
+  runId: string;
+  caseId: string;
+  planDigest: string;
+  workspaceDigest: string;
+}
+
+export function parseVerifierResult(stdout: string, expected: ExpectedVerifierIdentity): VerifierResultEnvelope {
   // Last sentinel wins, same as the case wire: a job's logs carry installation noise, trace lines and the
   // harness's own stdout around the one line that matters.
   const idx = stdout.lastIndexOf(VERIFIER_RESULT_SENTINEL);
@@ -52,5 +82,25 @@ export function parseVerifierResult(stdout: string): VerifierResultEnvelope {
       "could not find the verifier result (sentinel) — the verifier job printed no verdict envelope.",
     );
   const line = stdout.slice(idx + VERIFIER_RESULT_SENTINEL.length).split("\n")[0] ?? "";
-  return VerifierResultEnvelopeSchema.parse(JSON.parse(line));
+  const envelope = VerifierResultEnvelopeSchema.parse(JSON.parse(line));
+  // Every coordinate, not the convenient ones. `runId`/`caseId` catch a pod that answered for another unit;
+  // `planDigest`/`workspaceDigest` catch the case this is really about — the same unit judged against a
+  // different procedure or a different tree, which no id comparison can see.
+  const mismatched = (
+    [
+      ["runId", envelope.runId, expected.runId],
+      ["caseId", envelope.caseId, expected.caseId],
+      ["planDigest", envelope.planDigest, expected.planDigest],
+      ["workspaceDigest", envelope.workspaceDigest, expected.workspaceDigest],
+    ] as const
+  ).filter(([, got, want]) => got !== want);
+  if (mismatched.length > 0)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { mismatched: mismatched.map(([field, got, want]) => ({ field, got, want })) },
+      `the verifier answered about a different unit than the one dispatched (${mismatched
+        .map(([field]) => field)
+        .join(", ")}) — its verdict cannot be adopted for this case.`,
+    );
+  return envelope;
 }

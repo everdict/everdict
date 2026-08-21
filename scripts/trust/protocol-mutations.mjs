@@ -898,6 +898,16 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
+  {
+    // arch-review 59 P1. The verifier's answer adopted without asking which unit it was about, so a previous
+    // case's sentinel still in the logs became this case's verdict — with the request's own digests stamped
+    // on it as provenance.
+    name: "verifier identity — an answer about another unit is adopted as this case's verdict",
+    file: "packages/contracts/src/execution/verifier-result-wire.ts",
+    from: "  if (mismatched.length > 0)",
+    to: "  if (false)",
+    suite: ["--root", "packages/contracts", "src/execution/verifier-result-wire.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

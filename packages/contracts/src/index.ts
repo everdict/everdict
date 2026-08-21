@@ -7,6 +7,7 @@ export { evalContainerSecretEnv } from "./execution/eval-container-env.js";
 export { refuseUnenforceableNetwork } from "./execution/network-enforcement.js";
 export * from "./execution/verifier-job.js";
 export {
+  type ExpectedVerifierIdentity,
   VERIFIER_RESULT_SENTINEL,
   type VerifierResultEnvelope,
   VerifierResultEnvelopeSchema,

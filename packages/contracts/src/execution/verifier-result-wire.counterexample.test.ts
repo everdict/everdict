@@ -38,9 +38,18 @@ const envelope = {
   scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
 };
 
+// The unit the dispatch asked about. Reading this wire without saying so is no longer possible — see the
+// [R59] block at the bottom for why that is a required parameter rather than a companion check.
+const EXPECTED = {
+  runId: envelope.runId,
+  caseId: envelope.caseId,
+  planDigest: envelope.planDigest,
+  workspaceDigest: envelope.workspaceDigest,
+};
+
 describe("[R58 COUNTEREXAMPLE] a verifier result crosses the process boundary intact", () => {
   it("round-trips through its own sentinel", () => {
-    const parsed = parseVerifierResult(encodeVerifierResult(envelope));
+    const parsed = parseVerifierResult(encodeVerifierResult(envelope), EXPECTED);
     // The envelope's own fields survive exactly. The SCORES come back normalized (`ScoreSchema` preprocesses
     // through `normalizeScoreShape`), which is the same treatment the case wire gives them — asserting raw
     // equality here would be asserting that the shared score contract does not apply to this pipe.
@@ -58,7 +67,7 @@ describe("[R58 COUNTEREXAMPLE] a verifier result crosses the process boundary in
     // The lane reads whole logs. Trace lines, a harness's stdout and the shell's own chatter sit around the
     // sentinel, and the last one wins — the same rule the case sentinel has.
     const logs = `installing\n${encodeVerifierResult(envelope)}\ncleanup done\n`;
-    expect(parseVerifierResult(logs).scores).toHaveLength(1);
+    expect(parseVerifierResult(logs, EXPECTED).scores).toHaveLength(1);
   });
 
   it("REFUSES a case result — the two documents are not interchangeable", () => {
@@ -66,7 +75,7 @@ describe("[R58 COUNTEREXAMPLE] a verifier result crosses the process boundary in
     // not be readable as a verifier one. Sharing a sentinel is what let a document with no snapshot be sent
     // down a pipe that requires one.
     const caseLine = `__EVERDICT_RESULT__ ${JSON.stringify({ caseId: "c1", harness: "h", trace: [], scores: [] })}`;
-    expect(() => parseVerifierResult(caseLine)).toThrow(/verifier result/i);
+    expect(() => parseVerifierResult(caseLine, EXPECTED)).toThrow(/verifier result/i);
   });
 
   it("is REFUSED BY the case parser — so a verifier can never be mistaken for a case", () => {
@@ -79,11 +88,58 @@ describe("[R58 COUNTEREXAMPLE] a verifier result crosses the process boundary in
     for (const missing of ["planDigest", "workspaceDigest", "runId", "caseId"] as const) {
       const partial: Record<string, unknown> = { ...envelope };
       delete partial[missing];
-      expect(() => parseVerifierResult(`__EVERDICT_VERIFIER_RESULT__ ${JSON.stringify(partial)}`), missing).toThrow();
+      expect(
+        () => parseVerifierResult(`__EVERDICT_VERIFIER_RESULT__ ${JSON.stringify(partial)}`, EXPECTED),
+        missing,
+      ).toThrow();
     }
   });
 
+  // ── AND WHOSE VERDICT IT IS, READ BACK RATHER THAN ASSUMED (arch-review 59 P1) ─────────────────────
+  //
+  // The envelope named the unit it judged, and both managed lanes took `.scores` off it and then stamped the
+  // invocation's `planDigest`/`workspaceDigest` from what they had REQUESTED. So the provenance the lane
+  // exists to produce was a copy of the request, and the container's own account was parsed and discarded one
+  // expression later — `request copied into proof`, which rule `protocol` names as the shape that is not a
+  // proof at all.
+  //
+  // The check is a REQUIRED PARAMETER of the parse rather than an `assertVerifierEnvelope` beside it, because
+  // this repo has twice watched an optional companion go unwired on one of two lanes — most recently the K8s
+  // verifier's missing activation, one review ago.
+  //
+  // Seen RED before the parameter existed: the call compiled with one argument and every mismatch below was
+  // accepted, observed as
+  //   a verifier that judged a different tree was adopted as this case's verdict: expected [Function] to throw
+  it("REFUSES an answer about a different unit than the one dispatched", () => {
+    for (const [field, wrong] of [
+      ["runId", "r2"],
+      ["caseId", "c2"],
+      // The two a replay joins on. The container derives them from the same payload the lane sent, so a
+      // disagreement means the ANSWER came from somewhere else — a previous case's sentinel still in the
+      // logs, a reused alloc dir, a payload swapped before start — not that the container graded wrongly.
+      // That narrower claim is the one this check earns, and the one the wire's own comment makes.
+      ["planDigest", "sha256:other-plan"],
+      ["workspaceDigest", "sha256:other-tree"],
+    ] as const) {
+      expect(
+        () => parseVerifierResult(encodeVerifierResult({ ...envelope, [field]: wrong }), EXPECTED),
+        `a verifier that judged a different ${field} was adopted as this case's verdict`,
+      ).toThrow(/different unit/i);
+    }
+  });
+
+  it("names WHICH coordinate disagreed, so an operator is not left diffing two opaque digests", () => {
+    const err = (() => {
+      try {
+        parseVerifierResult(encodeVerifierResult({ ...envelope, workspaceDigest: "sha256:other" }), EXPECTED);
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err?.message).toMatch(/workspaceDigest/);
+  });
+
   it("refuses an envelope with no scores at all — an absence is not a measurement", () => {
-    expect(() => parseVerifierResult(encodeVerifierResult({ ...envelope, scores: [] }))).toThrow(/score/i);
+    expect(() => parseVerifierResult(encodeVerifierResult({ ...envelope, scores: [] }), EXPECTED)).toThrow(/score/i);
   });
 });
