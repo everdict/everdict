@@ -862,6 +862,24 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
     build: "@everdict/domain",
   },
+  {
+    // arch-review 59 P1-high. The judging half placed with egress open while the agent was placed offline —
+    // in the one container the hidden tests execute and the reward is computed in.
+    name: "verifier world — the judging half is placed with the network open",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "      const netPolicy = k8sNetworkPolicyFor(name, job.network);",
+    to: "      const netPolicy = undefined;",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-network.counterexample.test.ts"],
+  },
+  {
+    // The other half: the declared network not reaching the placement, so the lane's own enforce-or-refuse
+    // decision is made against a world nobody declared and reads it as "no constraint".
+    name: "verifier world — the declared network does not reach the placement",
+    file: "packages/backends/src/orchestrators/verifier-placement.ts",
+    from: "      ...(job.network !== undefined ? { network: job.network } : {}),",
+    to: "",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-network.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

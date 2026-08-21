@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RegistryAuthSchema } from "../infra/image-ref.js";
-import { ResourceRequestSchema } from "../infra/world.js";
+import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 import { RepoSnapshotSchema } from "./environment.js";
 import { GraderSpecSchema } from "./eval-case.js";
 import { ScoreSchema } from "./grader.js";
@@ -78,6 +78,19 @@ export const VerifierJobSchema = z.object({
   // The DECLARED WORLD: a case judged in a different box than it ran in is judged against a different
   // question, and a container task declares one routinely.
   resources: ResourceRequestSchema.optional(),
+  // …and THE SAME NETWORK the agent was held to (arch-review 59 P1-high). `resources` travelled and this did
+  // not, so a case declaring `none` (offline) had its agent placed behind a deny-all egress policy and its VERIFIER
+  // placed with the network wide open. Two things follow, and the second is the one that matters:
+  //
+  //   A verdict reached online about a run that happened offline is a verdict about a different question —
+  //   the same argument `resources` is carried for.
+  //   The verifier container is where the hidden tests execute and where the reward is computed. An offline
+  //   declaration is a constraint on the GRADING procedure too, and leaving egress open there lets a task's
+  //   own verifier scripts reach the network in the one container the agent was deliberately kept out of.
+  //
+  // Carried rather than defaulted: a lane inventing "deny everything for verifiers" would be a different
+  // world from the one the case declared, which is the failure mode in the opposite direction.
+  network: NetworkPolicySchema.optional(),
   // …and the credentials for the task image. A private image the agent could pull and the verifier could
   // not is a verdict that simply never happens.
   registryAuths: z.array(RegistryAuthSchema).optional(),

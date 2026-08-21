@@ -1393,7 +1393,18 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         runtimeClassName,
         verifierJobPayload(job),
       );
+      // THE SAME EGRESS DENIAL THE AGENT GOT, in the same order (arch-review 59 P1-high). `network` now
+      // travels on the job, so the manifest above has already been refused if this lane cannot enforce what
+      // the case declared; what was still missing is the policy itself. Applied BEFORE the Job, because the
+      // reverse order leaves precisely the window the declaration exists to close — and here that window is
+      // the container holding the hidden tests and computing the reward.
+      const netPolicy = k8sNetworkPolicyFor(name, job.network);
+      if (netPolicy) await api.applyJob(netPolicy, ns);
       await api.applyJob(manifest, ns);
+      // …and the ownerRef, so the cluster's GC reclaims the policy with the Job. Best-effort for the reason
+      // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
+      // verifier that graded with the network open.
+      if (netPolicy) await api.patchNetworkPolicy(`${name}-egress`, ns, name).catch(() => undefined);
       try {
         await this.waitForJob(api, name, ns);
         // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and

@@ -38,6 +38,10 @@ export function verifierCaseJob(job: VerifierJob): CaseJob {
       // The world the case declared. A verdict reached in a bigger box than the run had is a verdict about
       // a different question, and `worldProofCovers` refuses a mismatch on the way in.
       ...(job.resources !== undefined ? { resources: job.resources } : {}),
+      // …and the declared network, so the lane's own enforce-or-refuse decision sees the same world the agent
+      // was placed in. Absent here, `k8sNetworkPolicyFor` had nothing to build and the judging half ran with
+      // egress open (arch-review 59 P1-high).
+      ...(job.network !== undefined ? { network: job.network } : {}),
       // The lane the agent ran on. Without it the verifier resolves against nothing and lands on defaults.
       ...(job.placementTarget !== undefined ? { placement: { target: job.placementTarget } } : {}),
     },

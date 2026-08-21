@@ -102,6 +102,8 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     // lane's defaults against a registry it could not authenticate to — a schema field with no producer is a
     // promise the wire does not keep.
     ...(job.evalCase.resources !== undefined ? { resources: job.evalCase.resources } : {}),
+    // …and the declared NETWORK, for the same reason and with a sharper edge — see `network` on the schema.
+    ...(job.evalCase.network !== undefined ? { network: job.evalCase.network } : {}),
     ...(job.registryAuths !== undefined ? { registryAuths: job.registryAuths } : {}),
     // WHOSE second unit this is — see `scorecardId` on the schema for what a parentless row costs. `batchId`
     // already IS the scorecard's id in the batch path, so the coordinate travels as itself rather than being
