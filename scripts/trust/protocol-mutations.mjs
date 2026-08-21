@@ -1019,8 +1019,12 @@ const MUTATIONS = [
     // was a verdict about.
     name: "adoption stage — a verifier's verdict settles as the run's own result",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: '      if (decision.kind === "adopted" && decision.adopted.stage === "case") {',
-    to: '      if (decision.kind === "adopted" && decision.adopted.stage !== "nothing") {',
+    // Neutralized the way the defect actually WAS, not merely by widening the predicate: dropping the stage
+    // check alone leaves `.result` undefined on the verifier arm, which reads as "nothing adopted" and is the
+    // safe path by accident. The defect was the case-shaped SHELL, so the shell comes back with it — that is
+    // the version this suite was seen red against.
+    from: '      if (decision.kind === "adopted" && decision.adopted.stage === "case") {\n        adopted = decision.adopted.result;',
+    to: '      if (decision.kind === "adopted") {\n        adopted = ((decision.adopted as { result?: unknown }).result ?? { caseId: "c1", harness: "verifier", trace: [], scores: [] }) as never;',
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
   {
