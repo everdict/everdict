@@ -83,6 +83,19 @@ export async function verifierOperation(
     caseId: job.caseId,
   };
 
+  // ── WHERE THIS VERDICT WAS PRODUCED, KEPT (arch-review 60 P1-provenance) ────────────────────────────
+  //
+  // `VerifierReceipt.complete` requires `invocation.work`, and the Nomad lane cannot answer it: its job id is
+  // minted inside `dispatch` and the verifier's own return value is built from what the poll saw, so a
+  // digest-pinned Nomad verifier that ran perfectly produced a receipt that read INCOMPLETE — partial
+  // judgment evidence, an unverified `execution_world`, and a replay that cannot say which Nomad job made
+  // the verdict.
+  //
+  // The handle is not missing: it is exactly what the reservation below persisted. Kept here and merged into
+  // whatever the lane answered, so the receipt's coordinate comes from the write that made it durable rather
+  // than from a lane that may not know its own id yet (rule `protocol` L3 — born at the source).
+  let persistedWork: RuntimeWorkRef | undefined;
+
   try {
     const invocation = await dispatch(job, {
       authority: {
@@ -90,8 +103,13 @@ export async function verifierOperation(
         // prints a different document than a case, and adoption had no way to know which one a handle names —
         // see `verifier` on `RuntimeWorkRefSchema` for what a run's recovery did with the wrong parser. Born
         // here, from the job in hand, rather than re-derived from an id suffix at the recovery site.
-        reserve: async (work) =>
-          await attempts.reserveWork(attemptId, { ...work, attemptId, verifier: verifierCoordinate }),
+        reserve: async (work) => {
+          const intent = await attempts.reserveWork(attemptId, { ...work, attemptId, verifier: verifierCoordinate });
+          // The CANONICAL handle — the store's answer, not the offer, because an idempotent re-reservation
+          // hands back the one already on the row and that is the object this verdict belongs to.
+          persistedWork = intent.work;
+          return intent;
+        },
         // The verifier's own re-presentation: its row is opened under the batch's parent, so a cancellation
         // that settled while the container was being created refuses the birth here rather than after it.
         activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),
@@ -120,7 +138,13 @@ export async function verifierOperation(
         `this verifier's attempt could not be settled (it is '${state}'), so the verdict it produced was not made under a live authorization`,
       );
     }
-    return invocation;
+    // The lane's own answer wins when it has one (K8s names its Job before it creates it); otherwise the
+    // reservation's, which every lane has by construction. `attemptId` rides along so a receipt can join the
+    // verdict to the physical row that produced it without re-deriving anything.
+    return {
+      ...invocation,
+      ...((invocation.work ?? persistedWork) ? { work: invocation.work ?? persistedWork } : {}),
+    };
   } catch (err) {
     // …and settled on failure too, for the same reason: an abandoned row is owed forever. The error keeps
     // travelling — `withVerifierPass` turns it into `unmeasured`, which is the honest verdict.

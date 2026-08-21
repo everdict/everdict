@@ -1033,6 +1033,26 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
     build: "@everdict/contracts",
   },
+  {
+    // arch-review 60 P1-high. The verifier's slot never claimed, so a workspace at its concurrent-execution
+    // limit still places every verifier straight at the backend — the judging half doubling the fleet's
+    // container count against limits it never consulted.
+    name: "verifier slots — the judging half draws on no pool at all",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "      holdsPermit = (await verifierSlots.ledger.tryAdmit?.(job.tenant, permitId, quota)) ?? true;",
+    to: "      holdsPermit = true;\n      void quota;",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // arch-review 60 P1-provenance. The reservation's canonical handle not merged into the invocation, so a
+    // Nomad verifier — whose job id is minted inside `dispatch` — produces a receipt that is always
+    // incomplete: partial judgment evidence and a replay that cannot name the job that made the verdict.
+    name: "verifier receipt — a verdict cannot say which object produced it",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "      ...(invocation.work ?? persistedWork ? { work: invocation.work ?? persistedWork } : {}),",
+    to: "",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-receipt-work.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

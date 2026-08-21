@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { lookup as lookupDnsCb } from "node:dns";
 import { promisify } from "node:util";
 import {
@@ -398,14 +399,15 @@ async function main(): Promise<void> {
   // isolated by the same rule rather than several nearby guesses.
   const { trustZones } = buildTrustZones();
 
-  const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas } = buildExecutionScheduling({
-    nomad,
-    k8sContext,
-    image,
-    secretStore,
-    runLedger: store, // the tenant quota is counted from the run ledger, not from this process's maps
-    ...(trustZones ? { trustZones } : {}),
-  });
+  const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas, admissionSlots } =
+    buildExecutionScheduling({
+      nomad,
+      k8sContext,
+      image,
+      secretStore,
+      runLedger: store, // the tenant quota is counted from the run ledger, not from this process's maps
+      ...(trustZones ? { trustZones } : {}),
+    });
   // M2 — runtime.circuit_opened rides the breaker's own closed→open transition (late-bound: the platform event
   // service is built after the scheduler). Key format is `${tenant}:${runtimeId}` — split on the FIRST colon
   // (the runtime half may itself carry colons, e.g. self:ws).
@@ -711,6 +713,14 @@ async function main(): Promise<void> {
     // container count with nothing to 402 against (arch-review 59 P1-high, rule `backends`: anything that
     // takes compute passes admission).
     admitVerifierCompute: budget,
+    // …and a SLOT from the same fleet-wide ledger the Scheduler claims one from, under the same tenant quota.
+    // The budget above limits SPEND; this limits how many containers a workspace holds at once, and a batch
+    // with budget headroom used to place every verifier straight at the backend (arch-review 60 P1-high).
+    verifierSlots: {
+      ledger: admissionSlots.ledger,
+      quotaFor: admissionSlots.quotaFor,
+      newPermitId: () => `verify-${randomUUID()}`,
+    },
   });
   verifierLane.fn = dispatchVerifier;
 

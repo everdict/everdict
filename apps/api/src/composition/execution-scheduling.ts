@@ -118,16 +118,31 @@ export function buildExecutionScheduling(deps: {
   if (!Number.isInteger(maxQueueDepth) || maxQueueDepth <= 0) {
     throw new Error(`EVERDICT_MAX_QUEUE_DEPTH must be a positive integer (got "${rawMaxQueueDepth}").`);
   }
+  // ONE quota function, handed to everything that admits compute (arch-review 60 P1-high). The verifier lane
+  // does not go through this queue — it is dispatched by a different verb with a different payload — but its
+  // containers are the same tenant's, so the limit they draw on has to be the same limit. Two spellings of a
+  // quota is two accountings that must agree.
+  const tenantQuota = (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY;
   const scheduler = new Scheduler(backends, {
     maxQueueDepth,
     ledger: runLedger,
-    tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
+    tenantQuota,
     weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
     ...(tenantQueueDepths
       ? { tenantMaxQueueDepth: (t: string) => tenantQueueDepths.get(t) ?? Number.POSITIVE_INFINITY }
       : {}),
   });
-  return { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas };
+  // …and the pieces the verifier lane admits from: the SAME ledger and the SAME quota, so the two halves of
+  // a case draw on one pool instead of two.
+  return {
+    backends,
+    scheduler,
+    schedulingControl,
+    autoscale,
+    scalingTargets,
+    tenantQuotas,
+    admissionSlots: { ledger: runLedger, quotaFor: tenantQuota },
+  };
 }
 
 // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half)

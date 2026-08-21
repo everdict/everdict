@@ -65,6 +65,103 @@ const access = (b: BudgetTracker) =>
     admitVerifierCompute: b,
   });
 
+// ── …AND A SLOT, NOT ONLY A BUDGET (arch-review 60 P1-high) ─────────────────────────────────────────
+//
+// The budget gate limits SPEND — cumulative usd/tokens/run-count. It says nothing about how many containers a
+// tenant may hold at once, and those are different questions. So a batch with budget headroom placed its
+// agent halves through the Scheduler's capacity and fairness, and then submitted every verifier straight at
+// the backend: the judging half doubled the fleet's container count against limits it never consulted.
+//
+// Not a second queue. `AdmissionLedger` is the fleet-wide atomic per-tenant permit the Scheduler already
+// claims for exactly this, so the two halves draw on ONE pool rather than two accountings that must agree.
+//
+// Seen RED before the slot existed, observed:
+//   a second verifier was placed while the workspace was at its concurrency limit: expected NotFoundError
+//   (it went straight on to resolve a lane) to match { code: 'RATE_LIMITED' }
+
+describe("[R60 COUNTEREXAMPLE] a verifier draws a slot from the same pool the agent's half did", () => {
+  // A ledger with room for exactly one in-flight execution per tenant — the Scheduler's own primitive.
+  function ledgerWithQuotaOne() {
+    const held = new Set<string>();
+    return {
+      held,
+      ledger: {
+        tryAdmit: async (_tenant: string, permitId: string, quota: number) => {
+          if (held.size >= quota) return false;
+          held.add(permitId);
+          return true;
+        },
+        releaseAdmission: async (permitId: string) => {
+          held.delete(permitId);
+        },
+      },
+    };
+  }
+
+  const accessWithSlots = (b: BudgetTracker, slots: ReturnType<typeof ledgerWithQuotaOne>, placed: string[]) =>
+    buildRuntimeAccess({
+      runtimeRegistry: {
+        get: async () => {
+          placed.push("resolve-lane");
+          return undefined;
+        },
+        list: async () => [],
+      } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () => ({}) as never,
+      admitVerifierCompute: b,
+      verifierSlots: {
+        ledger: slots.ledger,
+        quotaFor: () => 1,
+        newPermitId: () => `verify-${placed.length}-${Math.floor(performance.now() * 1000)}`,
+      },
+    });
+
+  it("REFUSES a second verifier while the workspace is at its concurrent-execution limit", async () => {
+    const slots = ledgerWithQuotaOne();
+    const b = budget();
+    // Someone already holds the tenant's only slot — an agent half placed through the Scheduler.
+    await slots.ledger.tryAdmit("acme", "agent-half", 1);
+
+    const placed: string[] = [];
+    await expect(
+      accessWithSlots(b, slots, placed).dispatchVerifier(JOB),
+      "a second verifier was placed while the workspace was at its concurrency limit",
+    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
+
+    // …and it never reached a lane, so no container was created to be limited after the fact.
+    expect(placed, "the verifier resolved a backend despite having no slot").toHaveLength(0);
+    // …and the budget reservation it took on the way in went back, or a refused verifier would 402 the
+    // workspace later for compute it never held.
+    expect(b.reserved(), "a refused verifier kept its budget reservation").toBe(0);
+  });
+
+  it("RELEASES the slot when the dispatch is over", async () => {
+    // A permit held past the container is a tenant limited by its own history. The lane below resolves no
+    // runtime, so nothing is placed at all — which is precisely the path a leak would hide in.
+    const slots = ledgerWithQuotaOne();
+    const placed: string[] = [];
+    await accessWithSlots(budget(), slots, placed)
+      .dispatchVerifier(JOB)
+      .catch(() => undefined);
+    expect(slots.held.size, "the verifier's slot was never given back").toBe(0);
+  });
+
+  it("admits when a deployment has no ledger at all — absence is single-replica, not a bypass", async () => {
+    // The ledger is what makes the limit fleet-wide. A deployment without one is the single-process case and
+    // must keep working; making its absence a refusal would break every local run.
+    const b = budget();
+    await expect(
+      buildRuntimeAccess({
+        runtimeRegistry: { get: async () => undefined, list: async () => [] } as never,
+        runtimeSecretsFor: async () => ({}),
+        runtimeBuildBackend: () => ({}) as never,
+        admitVerifierCompute: b,
+      }).dispatchVerifier(JOB),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describe("[R59 COUNTEREXAMPLE] a verifier's compute is admitted before it exists", () => {
   it("REFUSES to place a verifier for a workspace over its budget", async () => {
     const b = budget({ refuse: true });

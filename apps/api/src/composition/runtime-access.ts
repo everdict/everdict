@@ -11,6 +11,7 @@ import {
 } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
+import type { AdmissionLedger } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
@@ -37,7 +38,7 @@ import type {
   VerifierJob,
   WorkPresence,
 } from "@everdict/contracts";
-import { NotFoundError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
+import { NotFoundError, RateLimitError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { BudgetTracker } from "@everdict/domain";
@@ -72,8 +73,26 @@ export function buildRuntimeAccess(deps: {
   // would mean giving the scheduler a second dispatch verb. What the lanes share is the GATE, which is what
   // the rule says and all this needs.
   admitVerifierCompute?: BudgetTracker;
+  // ── …AND A SLOT, FROM THE SAME LEDGER THE SCHEDULER USES (arch-review 60 P1-high) ────────────────
+  //
+  // The budget gate above limits SPEND — cumulative usd/tokens/run-count. It says nothing about how many
+  // containers a tenant may hold at once, and those are different questions: a batch with budget headroom
+  // placed its agent halves through the Scheduler's capacity and fairness, then submitted every verifier
+  // straight at the backend. The judging half doubled the fleet's container count against limits it never
+  // consulted.
+  //
+  // Not a second queue: `AdmissionLedger` is the fleet-wide, atomic, per-tenant permit the Scheduler already
+  // claims for exactly this, so sharing it means the two halves draw on ONE pool rather than two accountings
+  // that must agree. A deployment without a ledger admits as before — the ledger is what makes the limit
+  // fleet-wide, and its absence is the single-replica case, not a bypass.
+  verifierSlots?: {
+    ledger: Pick<AdmissionLedger, "tryAdmit" | "releaseAdmission">;
+    quotaFor: (tenant: string) => number;
+    newPermitId: () => string;
+  };
 }) {
-  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend, attempts, admitVerifierCompute } = deps;
+  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend, attempts, admitVerifierCompute, verifierSlots } =
+    deps;
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
   // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
@@ -377,6 +396,24 @@ export function buildRuntimeAccess(deps: {
     // `PaymentRequiredError` (402), which `withVerifierPass` records as an owed verdict rather than a
     // fabricated one, so a workspace out of budget gets an unmeasured case and not a free container.
     admitVerifierCompute?.admit(job.tenant);
+    // …and a SLOT in the same pool the agent's half was placed from — see `verifierSlots`. Claimed after the
+    // budget so a tenant over its cap is refused without ever touching fleet accounting, and refused with a
+    // 429 rather than a 402, because "you are at your concurrency limit" is a different fact from "you are
+    // out of money" and a caller retries one of them.
+    const permitId = verifierSlots?.newPermitId();
+    let holdsPermit = false;
+    if (verifierSlots && permitId !== undefined) {
+      const quota = verifierSlots.quotaFor(job.tenant);
+      holdsPermit = (await verifierSlots.ledger.tryAdmit?.(job.tenant, permitId, quota)) ?? true;
+      if (!holdsPermit) {
+        admitVerifierCompute?.release(job.tenant);
+        throw new RateLimitError(
+          "RATE_LIMITED",
+          { tenant: job.tenant, quota },
+          "this workspace is at its concurrent-execution limit, so its verifier cannot be placed yet.",
+        );
+      }
+    }
     try {
       // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
       // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
@@ -411,6 +448,10 @@ export function buildRuntimeAccess(deps: {
       // from committed usage. A reservation never released would 402 the workspace for containers that have
       // long since exited.
       admitVerifierCompute?.release(job.tenant);
+      // The slot goes back the moment this lane stops holding a container, exactly as the budget reservation
+      // does. Idempotent by contract, so a release that races the ledger's own lease reap is harmless.
+      if (holdsPermit && permitId !== undefined)
+        await verifierSlots?.ledger.releaseAdmission?.(permitId).catch(() => undefined);
     }
   };
 
