@@ -90,10 +90,43 @@ export type ExportPayloadSource = z.infer<typeof ExportPayloadSourceSchema>;
 // honest answer is that this deployment cannot publish this settlement, said where it is actionable.
 export const INLINE_EXPORT_PAYLOAD_CAP_BYTES = 512 * 1024;
 
+// ── …AND ON WHAT THOSE BYTES BECOME (arch-review 59 P1-hardening) ────────────────────────────────────
+//
+// The cap above bounds the ROW. It says nothing about the allocation: highly repetitive JSON compresses by
+// orders of magnitude, so a settlement that clears 512 KiB compressed can decompress to hundreds of
+// megabytes — and `readExportPayload` is a synchronous gunzip plus a synchronous parse, run by the
+// publication reconciler in the process every other owed publication is waiting in. The inline path is what
+// a deployment without an object store takes on EVERY export, so this is the ordinary road, not an exotic
+// input.
+//
+// Generous against any real settlement (scores and identifiers) and small enough that one of them cannot
+// stall the loop. Enforced at BOTH ends: at the write, so an oversized settlement is refused at plan time
+// where an operator can act; at the read, because a row written by an older version, a restored backup or
+// anything else this process did not author still gets expanded here.
+export const INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+
 // Read the bytes back. Same shape in, same shape out — the digest guard at drain time is what makes this
 // safe, and it is applied to an inline payload exactly as it is to a frozen one.
 export function readExportPayload(source: Extract<ExportPayloadSource, { kind: "inline" }>): unknown {
-  return JSON.parse(gunzipSync(Buffer.from(source.bytes, "base64")).toString("utf8"));
+  // `maxOutputLength` makes zlib REFUSE rather than allocate — the bound has to be enforced by the
+  // decompressor, because measuring the size afterwards means having already paid for it. Its own error is a
+  // raw runtime one, so it is remapped here: monitoring should read this as our refusal, not as a Buffer
+  // limit somebody has to trace back (rule `typescript`, never propagate a raw error across a boundary).
+  let raw: Buffer;
+  try {
+    raw = gunzipSync(Buffer.from(source.bytes, "base64"), {
+      maxOutputLength: INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES,
+    });
+  } catch (err) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { cap: INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES },
+      `this operation's inline export payload does not decompress within the ${INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES}-byte uncompressed bound, so it is not read: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  return JSON.parse(raw.toString("utf8"));
 }
 
 // …and write them. Throws when the result would exceed the cap, which is the plan-time refusal: an operation
@@ -102,7 +135,16 @@ export function inlineExportPayload(
   payload: unknown,
   reason: string,
 ): Extract<ExportPayloadSource, { kind: "inline" }> {
-  const bytes = gzipSync(Buffer.from(JSON.stringify(payload), "utf8")).toString("base64");
+  const raw = Buffer.from(JSON.stringify(payload), "utf8");
+  // The OUTPUT bound first: a payload that compresses spectacularly would otherwise clear the row cap and
+  // become the reconciler's problem at drain time, where nobody can act on it.
+  if (raw.length > INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { uncompressed: raw.length, cap: INLINE_EXPORT_PAYLOAD_MAX_OUTPUT_BYTES },
+      `this settlement's export payload is ${raw.length} bytes uncompressed (${reason}), past what an operation row may expand to, so the export cannot be published from this deployment without an object store.`,
+    );
+  const bytes = gzipSync(raw).toString("base64");
   if (bytes.length > INLINE_EXPORT_PAYLOAD_CAP_BYTES)
     throw new BadRequestError(
       "BAD_REQUEST",
