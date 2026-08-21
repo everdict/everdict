@@ -5,6 +5,7 @@ import {
   ConflictError,
   type Dataset,
   EXPERIMENT_ADHOC_REF,
+  type ExecutionAttemptRecord,
   ForbiddenError,
   type GateDecision,
   type GatePolicy,
@@ -111,6 +112,7 @@ export type {
   RunScorecardInput,
   SubmitExperimentInput,
 } from "./scorecard-requests.js";
+import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 export type { ScorecardServiceDeps } from "./scorecard-deps.js";
 export type { ScoreGroupInput } from "./scorecard-score-service.js";
 
@@ -1160,6 +1162,48 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
           failures.length > 0 ? `; ${failures.slice(0, 3).join("; ")}${failures.length > 3 ? "; …" : ""}` : ""
         }. The cancellation stays owed and the reconciler retries.`,
       );
+    }
+    // ── AN AUTHORIZED SUBMITTER IS LIVE WORK, EVEN BEFORE ITS OBJECT EXISTS (arch-review 59 P0) ───
+    //
+    // Killing every handle the ledger holds and probing each one absent is "nothing is running". It is not
+    // "nothing can start": a dispatch that reserved and activated has passed its last check and creates the
+    // external object next. Probe it now and the cluster truthfully answers ABSENT, which counted as
+    // convergence — so the certificate said zero, the operation closed, and the paused submitter then made
+    // the job. A cancellation that verified zero, followed by a birth.
+    //
+    // Two moves, and they are different. A RESERVED attempt has not re-presented its proof yet, so revoking
+    // it is enough: `activateWork` requires `state = 'reserved'` and will refuse. An ACTIVE one has already
+    // been told yes and does not ask again, so nothing here can stop it — the only honest answer is that this
+    // teardown has not converged, and the operation stays owed until the row leaves `active` (its submitter
+    // settles it, or aborts). Rule `protocol` L5: "we could not find out" is an escalation, never a terminal.
+    const pending = this.deps.attempts
+      ? await readOrUnknown(
+          () => (this.deps.attempts as ExecutionAttemptStore).listForScorecard(rec.id),
+          `the attempts ${rec.id} may still place work under`,
+        )
+      : ({ kind: "absent" } as ReadResult<ExecutionAttemptRecord[]>);
+    if (pending.kind === "unknown")
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { scorecardId: rec.id },
+        `the attempt ledger could not say whether this batch still has an authorized submitter (${pending.reason}), so its cancellation has not converged.`,
+      );
+    if (pending.kind === "read") {
+      const reserved = pending.value.filter((a) => a.state === "reserved");
+      for (const a of reserved)
+        await attempted(
+          (this.deps.attempts as ExecutionAttemptStore).revokeReservation(a.attemptId).then(() => ({
+            status: "stopped" as const,
+          })),
+          `revoke ${a.attemptId}`,
+        );
+      const activeBirths = pending.value.filter((a) => a.state === "active");
+      if (activeBirths.length > 0)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { scorecardId: rec.id, active: activeBirths.length },
+          `${activeBirths.length} dispatch(es) under this batch are authorized and have not yet reported an external object, so certifying zero now would be certifying it before they are born. The cancellation stays owed and the reconciler retries.`,
+        );
     }
     // …AND WHAT THE READ-BACK SAW IS RECORDED (arch-review 52, Wave 3). The operation row used to close on
     // "the teardown function returned"; it closes on this instead — the population the zero-live-children

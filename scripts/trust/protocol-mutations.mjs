@@ -17,6 +17,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 59 P0. A dispatch that reserved and ACTIVATED has passed its last check; probing it now
+    // answers absent, truthfully, and that counted as convergence — so the certificate said zero and the
+    // paused submitter then created the job. Dropping the read-back must go red.
+    name: "R59 — a cancellation certifies zero while a dispatch is authorized to create work",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: '      const activeBirths = pending.value.filter((a) => a.state === "active");',
+    to: "      const activeBirths: typeof pending.value = [];",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
+  },
+  {
     // arch-review 59 P0-verifier. `PARENT_AUTHORIZES` compares the parent's epoch only when the attempt has
     // one, so a verifier row opened without it satisfies the predicate under ANY owner — a displaced replica
     // could still reserve and burn tenant compute. Dropping the coordinate must go red.
