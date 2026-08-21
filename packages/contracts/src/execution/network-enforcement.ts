@@ -17,10 +17,26 @@ import { type NetworkPolicy, isDefaultNetwork } from "../infra/world.js";
 // Enforcement is deliberately NOT what this provides. CNI policies on K8s and per-task network config on
 // Nomad are deployment-shaped work; what belongs here is that a lane which does not do them says so before
 // it acts, rather than after.
-export function refuseUnenforceableNetwork(network: NetworkPolicy | undefined, lane: string): void {
+// What a lane can actually apply. `none` on a K8s cluster whose operator has confirmed NetworkPolicy is
+// enforced there is a deny-all egress manifest; nothing else is expressible without an egress proxy, and no
+// Nomad lane expresses any of it. An OPT-IN rather than a default, because a NetworkPolicy on a cluster with
+// no policy controller installed is silently inert — the manifest applies, nothing changes, and the lane
+// would then be claiming an axis it did not enforce, which is the failure this whole contract exists to
+// prevent one level up.
+export interface NetworkEnforcement {
+  // Modes this lane will actually apply. Empty (the default) = it enforces nothing and refuses everything.
+  enforces: readonly NetworkPolicy["mode"][];
+}
+
+export function refuseUnenforceableNetwork(
+  network: NetworkPolicy | undefined,
+  lane: string,
+  enforcement?: NetworkEnforcement,
+): void {
   // `public` with no hosts is what every workload got before this axis existed — the one shape a lane
   // satisfies by doing nothing, and the one whose absence and presence mean the same thing.
   if (isDefaultNetwork(network)) return;
+  if (network !== undefined && enforcement?.enforces.includes(network.mode)) return;
   throw new BadRequestError(
     "BAD_REQUEST",
     { lane, mode: network?.mode },

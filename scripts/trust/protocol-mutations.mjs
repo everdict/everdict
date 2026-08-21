@@ -17,6 +17,25 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 58 W5 follow-through. A deny-all egress policy that selected `app: everdict` would cut off
+    // every other job in the namespace; one that selected nothing would enforce nothing. The per-unit label
+    // is the whole difference, and widening it must go red.
+    name: "R58 W5 — the egress policy selects the whole app instead of this unit",
+    file: "packages/backends/src/orchestrators/k8s-network-policy.ts",
+    from: "      podSelector: { matchLabels: { [UNIT_LABEL]: unit } },",
+    to: '      podSelector: { matchLabels: { app: "everdict" } },',
+    suite: ["--root", "packages/backends", "src/orchestrators/k8s-network-policy.counterexample.test.ts"],
+  },
+  {
+    // …and the lifetime: `ttlSecondsAfterFinished` deletes the Job and knows nothing about a policy beside
+    // it, so without an owner reference the policy outlives every case that ever declared one.
+    name: "R58 W5 — the egress policy outlives the Job it was written for",
+    file: "packages/backends/src/orchestrators/k8s-network-policy.ts",
+    from: '        { apiVersion: "batch/v1", kind: "Job", name: jobName, uid, controller: false, blockOwnerDeletion: false },',
+    to: '        { apiVersion: "batch/v1", kind: "Pod", name: jobName, uid, controller: false, blockOwnerDeletion: false },',
+    suite: ["--root", "packages/backends", "src/orchestrators/k8s-network-policy.counterexample.test.ts"],
+  },
+  {
     // arch-review 58 W4. `retry_later` always carried a reason and every consumer dropped it, so a debt
     // could sit in the worklist forever with nothing saying why. Removing the escalation must go red.
     name: "R58 W4 — an undecidable debt is held in silence again",

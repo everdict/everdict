@@ -77,6 +77,7 @@ import {
   WORKLOAD_CAP,
   classifyWorkloadRole,
 } from "./inspect-common.js";
+import { UNIT_LABEL, k8sNetworkPolicyFor, ownerReferencePatch } from "./k8s-network-policy.js";
 import { mergePlacedImage, withWorldProof } from "./placement-image.js";
 import { verifierCaseJob } from "./verifier-placement.js";
 
@@ -95,6 +96,10 @@ export interface K8sApi {
   // exits 0 for "nothing matched" too, which is why the answer is read off stdout: kubectl names what it
   // deleted, and an empty listing with a zero exit is genuinely `absent`.
   deleteJob(name: string, ns: string): Promise<KillOutcome>;
+  // Give a NetworkPolicy the Job as its owner, so the cluster's garbage collector removes it whenever the
+  // Job goes — including the `ttlSecondsAfterFinished` path, where nothing of ours runs again. Reads the
+  // Job's uid first, because an owner reference is not a name (arch-review 58 W5).
+  patchNetworkPolicy(policy: string, ns: string, ownerJob: string): Promise<void>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
   deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
@@ -398,6 +403,27 @@ export function kubectlApi(
       } catch {
         return undefined;
       }
+    },
+    async patchNetworkPolicy(policy, ns, ownerJob) {
+      const read = await run(bin, [...ctx, "-n", ns, "get", "job", ownerJob, "-o", "jsonpath={.metadata.uid}"]);
+      const uid = read.stdout.trim();
+      // No uid, no owner — and no silent half-measure: a reference to nothing would be accepted and would
+      // collect nothing, so an unpatched policy (visible, inert, selecting pods that are gone) is the honest
+      // outcome of a read that did not answer.
+      if (read.code !== 0 || uid === "") return;
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "patch",
+        "networkpolicy",
+        policy,
+        "--type",
+        "merge",
+        "-p",
+        JSON.stringify(ownerReferencePatch(ownerJob, uid)),
+      ]);
+      if (res.code !== 0) throw new Error(`patch networkpolicy ${policy}: ${res.stderr || res.stdout}`);
     },
     async deleteJob(name, ns) {
       return deleteOutcome(
@@ -715,6 +741,15 @@ export interface K8sBackendOptions {
   // Takes precedence over context/server/apiToken. Being a cluster credential, it never enters the job (agent) env.
   kubeconfig?: string;
   secretEnv?: Record<string, string>; // auth to inject into the job (default when secrets is absent)
+  // ── DOES THIS CLUSTER ACTUALLY ENFORCE NetworkPolicy? (arch-review 58, W5 follow-through) ──────
+  //
+  // A deny-all egress NetworkPolicy is the one network declaration a manifest can express, and applying one
+  // to a cluster with no policy controller installed changes NOTHING — the object is accepted and silently
+  // inert. So this is an OPERATOR'S statement, not a capability we infer: with it set, a case declaring
+  // `network.mode: "none"` is placed behind the policy and the lane may claim the axis; without it, the case
+  // is refused exactly as before. Claiming an axis on the strength of an accepted manifest would be the
+  // failure this contract exists to prevent, one level up.
+  enforcesNetwork?: boolean;
   secrets?: SecretProvider; // per-tenant secret scoping
   namespace?: string; // default namespace (when there's no tenant zone)
   runtimeClass?: string; // explicit runtimeClassName (gVisor=gvisor etc.). trustZones takes precedence.
@@ -963,7 +998,7 @@ export function buildK8sJob(
 ): Record<string, unknown> {
   // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
   // in-container check was the right decision at the wrong moment.
-  refuseUnenforceableNetwork(job.evalCase.network, "k8s");
+  refuseUnenforceableNetwork(job.evalCase.network, "k8s", opts.enforcesNetwork ? { enforces: ["none"] } : undefined);
   const env: Record<string, string> = {
     // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
     // this lane would hand to the agent along with the job.
@@ -1031,7 +1066,10 @@ export function buildK8sJob(
       backoffLimit: 0,
       ttlSecondsAfterFinished: opts.ttlSecondsAfterFinished ?? 300,
       template: {
-        metadata: { labels: { app: "everdict", "everdict.dev/tenant": tenant } },
+        // …and the PER-UNIT label. `app: everdict` is what a namespace-wide selector would match, so a
+        // NetworkPolicy written against it would cut off every other job in the namespace rather than this
+        // one's world (arch-review 58 W5).
+        metadata: { labels: { app: "everdict", "everdict.dev/tenant": tenant, [UNIT_LABEL]: name } },
         spec: {
           restartPolicy: "Never",
           ...(runtimeClassName ? { runtimeClassName } : {}),
@@ -1723,7 +1761,11 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     // then a reservation has been spent and an activation burned on a case that will never place — a
     // refusal that arrives after an effect is the shape this whole series keeps finding. It is a pure,
     // total decision, so it belongs at the first moment it can be made.
-    refuseUnenforceableNetwork(job.evalCase.network, "k8s");
+    refuseUnenforceableNetwork(
+      job.evalCase.network,
+      "k8s",
+      this.opts.enforcesNetwork ? { enforces: ["none"] } : undefined,
+    );
     if (job.runId !== undefined) await requireReservation(job, work, options?.authority);
     // …and the reservation is re-presented HERE, immediately before the Job exists (arch-review 57 P0). A
     // proof with no lifetime let a paused driver create work after a cancellation had verified there was
@@ -1742,8 +1784,25 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       const payload = auth
         ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
         : manifest;
+      // ── THE WORLD BEFORE THE POD (arch-review 58, W5 follow-through) ────────────────────────
+      //
+      // Applied FIRST, so there is never an instant where a pod is running and its egress is not yet denied.
+      // The reverse order would leave exactly the window the declaration exists to close, and it would be
+      // invisible: the case would run, mostly offline, and score as if it had been.
+      //
+      // Only when the operator has SAID this cluster enforces NetworkPolicy — see `enforcesNetwork`. Without
+      // that, `refuseUnenforceableNetwork` above has already turned the case away, so this is unreachable
+      // rather than skipped.
+      const netPolicy = k8sNetworkPolicyFor(name, job.evalCase.network);
+      if (netPolicy) await api.applyJob(netPolicy, ns);
       const t0 = Date.now();
       await api.applyJob(payload, ns);
+      // …and now the policy learns whose dependent it is. `ttlSecondsAfterFinished` deletes the Job on the
+      // ordinary path and knows nothing about a policy beside it, so the cluster's own garbage collector is
+      // what cleans up — which needs the uid the Job only has once it exists. Best-effort: a failed patch
+      // leaks an inert policy selecting pods that are gone, where a failed ORDER would have leaked a case
+      // that ran with the network open.
+      if (netPolicy) await api.patchNetworkPolicy(`${name}-egress`, ns, name).catch(() => undefined);
       try {
         await this.waitForJob(api, name, ns, options?.signal);
         const result = parseResult(await api.podLogs(name, ns));
