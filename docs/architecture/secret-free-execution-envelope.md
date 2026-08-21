@@ -1,7 +1,8 @@
 # The secret-free execution envelope
 
-> Status: **designed, not implemented.** The exposure below is open on `main` today. This document exists so
-> the transport change is made deliberately, against a cluster, rather than improvised.
+> Status: **implemented and verified against a live cluster.** The design below is what shipped; the
+> verification results are at the bottom. Kept as a design record because the constraints are what make the
+> obvious alternatives wrong, and a future change to this path needs to know them.
 
 A dispatched eval case carries its whole job into the container as one base64 environment variable. That
 payload holds the workspace's repo token, its registry passwords, the judge's provider key resolved for this
@@ -68,8 +69,15 @@ that stays open.
 **The environment carries a path. The payload is a file the runner deletes before it starts anything.**
 
 ```
-EVERDICT_JOB_FILE=/run/everdict/job     # not a secret; worthless once read
+EVERDICT_CASE_JOB_FILE=/run/everdict/case          # K8s
+EVERDICT_VERIFIER_JOB_FILE=/local/verifier         # Nomad — same names, the lane's own path
 ```
+
+Two names, kept from the env transport, because they are what tells the runner WHICH document it has and
+because a container carrying both must lose both. The NAMES are the contract and the PATHS are the lane's:
+Nomad renders into the task directory its docker driver mounts at `/local`, K8s into an emptyDir this lane
+chooses the mount for. Fixing one path in the contract would have made one lane lie, and a runner that
+searched both places would be the same question asked twice.
 
 - **Nomad** — a `template` stanza renders the payload into the task's own writable directory
   (`${NOMAD_TASK_DIR}`). No extra container, no `sh`. The payload lives in the job spec, which is exactly
@@ -78,14 +86,14 @@ EVERDICT_JOB_FILE=/run/everdict/job     # not a secret; worthless once read
   present) that holds the payload in its environment and writes it into the volume. The initContainer has
   TERMINATED before the main container starts, so its `/proc` is gone with it; the main container gets only
   the path. Works with a distroless tenant image because nothing in the main container needs a shell.
-- **Docker / self-hosted / `everdict run`** — the driver writes the file directly; it is already the parent
-  process and has a writable path.
+- **Docker / self-hosted / `everdict run`** — untouched. These lanes never used the env contract: they call
+  `runCaseJob` in-process rather than dispatching a container that has to be told what to run.
 
 The runner reads and unlinks in one act, behind the seam that already exists:
 
 ```ts
 // packages/job-runner/src/job-payload-env.ts
-takeJobPayload()   // reads EVERDICT_JOB_FILE, unlinks it, removes the directory
+takeJobPayload()   // reads the path in the env, UNLINKS the file, and drops the variable
 ```
 
 `takeJobPayload` is why this is a contained change: every lane already obtains its payload through one
@@ -116,13 +124,29 @@ Local, before anything is deployed:
 
 Against a cluster, because a manifest that type-checks is not a pod that starts:
 
-- `scripts/live/` checks for both lanes: dispatch a case, and from inside the container assert
-  `/proc/1/environ` contains no payload and `EVERDICT_JOB_FILE` names a path that no longer exists.
+- Both lanes: dispatch a case, and from inside the container assert `/proc/1/environ` contains no payload and
+  the named path no longer exists.
 - The K8s initContainer ordering is the part that cannot be proven locally: an initContainer that fails leaves
   the Job pending rather than running a case with no payload, which is the fail-closed direction, but it has
   to be seen.
 
-Then, and only then, the env transport is deleted rather than kept as a fallback.
+## What was actually observed
+
+A `kind` cluster, the pod rendered by the PRODUCTION builder (`buildK8sJob`) rather than a hand-written
+manifest, with a probe command in place of the runner:
+
+| question | answer |
+|---|---|
+| does the agent's env carry a path? | `EVERDICT_CASE_JOB_FILE=/run/everdict/case` |
+| can the runner read the payload there? | yes — the real base64 bytes |
+| is a payload secret anywhere in the agent container's own environ? | **no** |
+| is it in `/proc/1/environ` — the exposure this whole change is about? | **no** |
+| is a ServiceAccount token mounted? | absent (the sibling wave, holding in a real pod) |
+
+…and separately, that the main container can `unlink` the file at all, which is what rules out a K8s Secret
+volume: on the emptyDir it succeeded and the file was gone; a Secret volume is read-only tmpfs.
+
+The env transport was then deleted rather than kept as a fallback.
 
 ## Related
 

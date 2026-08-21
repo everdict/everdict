@@ -43,7 +43,9 @@ const taskOf = (spec: ReturnType<typeof buildNomadJob>) => {
 
 // What the agent's container is told about the world it was given.
 const proofOf = (spec: ReturnType<typeof buildNomadJob>) => {
-  const payload = taskOf(spec).Env?.EVERDICT_CASE_JOB;
+  // From the TEMPLATE, not the env: the payload stopped travelling in the environment (arch-review 59
+  // follow-through), which is exactly where a reader must look for it now.
+  const payload = taskOf(spec).Templates?.[0]?.EmbeddedTmpl;
   if (payload === undefined) throw new Error("no case payload on the task");
   return (JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as CaseJob).worldProof;
 };

@@ -31,6 +31,7 @@ export * from "./execution/trace-sink.js";
 export * from "./execution/trace-source.js";
 export * from "./execution/image-registry-probe.js";
 export * from "./execution/adopted-result.js";
+export * from "./execution/job-payload-transport.js";
 export * from "./execution/image-provenance.js";
 export * from "./execution/trace-probe.js";
 export * from "./execution/compute.js";

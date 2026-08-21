@@ -4,6 +4,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  JOB_PAYLOAD_DIR,
+  JOB_PAYLOAD_FILE_ENV,
+  JOB_PAYLOAD_VOLUME,
   type Score,
   type VerifierInvocation,
   type VerifierJob,
@@ -12,6 +15,7 @@ import {
   evalContainerSecretEnv,
   extractLiveEvents,
   isDefaultNetwork,
+  jobPayloadWriteCommand,
   parseResult,
   parseVerifierResult,
   refuseUnenforceableNetwork,
@@ -1003,6 +1007,9 @@ export function k8sRegistryAuthSecret(auth: RegistryAuth | RegistryAuth[], ns: s
   };
 }
 
+// The variable the INIT container is exec'd with. Never on the agent's container — that is the point.
+const PAYLOAD_ENV = "EVERDICT_JOB_PAYLOAD";
+
 // CaseJob → K8s batch Job. The payload is the EVERDICT_CASE_JOB(base64) env. Isolation is runtimeClassName.
 export function buildK8sJob(
   job: CaseJob,
@@ -1031,13 +1038,18 @@ export function buildK8sJob(
       "this runtime enables hostNetwork, where a NetworkPolicy does not apply, so a declared network world cannot be enforced here however the policy is written — run the case on a runtime without hostNetwork, or submit it without a network declaration.",
     );
   refuseUnenforceableNetwork(job.evalCase.network, "k8s", opts.enforcesNetwork ? { enforces: ["none"] } : undefined);
-  const env: Record<string, string> = {
-    // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
-    // this lane would hand to the agent along with the job.
-    ...(verifierPayload !== undefined
-      ? { EVERDICT_VERIFIER_JOB: verifierPayload }
+  // ── THE PAYLOAD, AND WHERE IT DOES NOT GO (arch-review 59 follow-through) ──────────────────────────
+  //
+  // Serialized here — THE ONE SERIALIZER (arch-review 56, Wave B) refuses a case whose grading depends on
+  // material this lane would hand to the agent — and then handed to the INIT container rather than to the
+  // agent's. See `JOB_PAYLOAD_FILE_ENV`: an env var is readable out of `/proc/<pid>/environ` for the life of the
+  // process that was exec'd with it, and the agent under test is a child of exactly that process.
+  const payload =
+    verifierPayload !== undefined
+      ? { kind: "verifier" as const, value: verifierPayload }
       : {
-          EVERDICT_CASE_JOB: caseJobPayload(
+          kind: "case" as const,
+          value: caseJobPayload(
             // …and the NETWORK axis, when this lane is the one that constrained it. `k8sNetworkPolicyFor`
             // answers a manifest exactly for the modes this lane renders, so "a policy was built" is the same
             // question as "may we attest it" — one answer, two uses (arch-review 59 P1-high).
@@ -1050,7 +1062,11 @@ export function buildK8sJob(
                 : undefined,
             ),
           ),
-        }),
+        };
+  // WHERE the runner will find it — a path, which is what the agent's environment is allowed to carry.
+  const payloadPath = `${JOB_PAYLOAD_DIR}/${payload.kind}`;
+  const env: Record<string, string> = {
+    [JOB_PAYLOAD_FILE_ENV[payload.kind]]: payloadPath,
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     // The workspace tier, FILTERED to the model-auth vocabulary — see `evalContainerSecretEnv` for what
     // the whole tier used to hand the agent under test. One function for both lanes, because a tenant's
@@ -1143,12 +1159,33 @@ export function buildK8sJob(
           // The Secret THIS dispatch applies, by the grant it carries — the two are one name from one
           // function, so a pod can never reference an object nobody applied.
           ...(pullAuth ? { imagePullSecrets: [{ name: registryAuthSecretName(pullAuth) }] } : {}),
+          // A tmpfs the payload lives on for as long as it takes the runner to read and unlink it. `Memory`
+          // rather than the default disk-backed emptyDir: an unlink on tmpfs IS the erasure, while a file on
+          // a node's disk leaves its blocks until something else overwrites them.
+          volumes: [{ name: JOB_PAYLOAD_VOLUME, emptyDir: { medium: "Memory" } }],
+          // The step that holds the payload in an environment. It has TERMINATED before the agent's container
+          // starts, so the process whose `/proc/<pid>/environ` carries it no longer exists — which is the
+          // whole repair, and the reason this is an initContainer rather than a line in the entrypoint.
+          //
+          // It runs the RUNNER image (ours, always present) even when the agent's container runs the tenant's
+          // own: nothing here may depend on a shell existing in an image somebody else built.
+          initContainers: [
+            {
+              name: "payload",
+              image: opts.image,
+              imagePullPolicy: opts.imagePullPolicy ?? "IfNotPresent",
+              command: jobPayloadWriteCommand(payloadPath, PAYLOAD_ENV),
+              env: [{ name: PAYLOAD_ENV, value: payload.value }],
+              volumeMounts: [{ name: JOB_PAYLOAD_VOLUME, mountPath: JOB_PAYLOAD_DIR }],
+            },
+          ],
           containers: [
             {
               name: "agent",
               image,
               imagePullPolicy: opts.imagePullPolicy ?? "IfNotPresent",
               env: Object.entries(env).map(([n, value]) => ({ name: n, value })),
+              volumeMounts: [{ name: JOB_PAYLOAD_VOLUME, mountPath: JOB_PAYLOAD_DIR }],
               ...(resources ? { resources } : {}),
             },
           ],

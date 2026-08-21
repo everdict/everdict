@@ -100,10 +100,14 @@ describe("[R59 COUNTEREXAMPLE] an offline world the lane enforced is a world the
     }) as unknown as CaseJob;
 
   const proofFrom = (spec: unknown): CaseJob["worldProof"] => {
-    const containers = (
-      spec as { spec: { template: { spec: { containers: Array<{ env?: Array<{ name: string; value?: string }> }> } } } }
-    ).spec.template.spec.containers;
-    const payload = containers[0]?.env?.find((e) => e.name === "EVERDICT_CASE_JOB")?.value;
+    // From the INIT container, not the agent's: the payload stopped travelling in the agent's environment
+    // (arch-review 59 follow-through), and the step that still holds it has terminated before the agent runs.
+    const init = (
+      spec as {
+        spec: { template: { spec: { initContainers?: Array<{ env?: Array<{ name: string; value?: string }> }> } } };
+      }
+    ).spec.template.spec.initContainers;
+    const payload = init?.[0]?.env?.[0]?.value;
     if (payload === undefined) throw new Error("no case payload on the pod");
     return (JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as CaseJob).worldProof;
   };

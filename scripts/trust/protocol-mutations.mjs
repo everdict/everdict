@@ -979,6 +979,25 @@ const MUTATIONS = [
     suite: ["--root", "packages/topology", "src/untrusted-pod-identity.counterexample.test.ts"],
     build: "@everdict/domain",
   },
+  {
+    // arch-review 59 follow-through. The job payload back in the agent's container environment, where
+    // `/proc/<pid>/environ` hands it to the thing being measured — repo token, registry passwords, the
+    // resolved judge key, and the grading configuration, which in an evaluation product is the answer key.
+    name: "payload transport — the agent's container is exec'd with the job payload",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "    [JOB_PAYLOAD_FILE_ENV[payload.kind]]: payloadPath,",
+    to: "    EVERDICT_CASE_JOB: payload.value,",
+    suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
+  },
+  {
+    // …and the runner half: reading the payload without destroying it, so it stays on the tmpfs for the whole
+    // case with the agent running beside it.
+    name: "payload transport — the runner reads the payload and leaves it",
+    file: "packages/job-runner/src/job-payload-env.ts",
+    from: "        unlinkSync(path);",
+    to: "        void path;",
+    suite: ["--root", "packages/job-runner", "src/job-payload-env.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   type ExpectedVerifierIdentity,
+  JOB_PAYLOAD_FILE_ENV,
   type ResourceRequest,
   type Score,
   type VerifierInvocation,
@@ -183,6 +184,9 @@ interface NomadTask {
   // auth = docker registry auth (the JSON API representation of the HCL auth block = an array) — when case.image is a workspace registry.
   Config: { image: string; runtime?: string; auth?: Array<{ username: string; password: string }> };
   Env: Record<string, string>;
+  // Rendered FILES in the task's own directory (mounted at `/local` by the docker driver). This is how the
+  // job payload arrives — see `JOB_PAYLOAD_FILE_ENV` for why it may not arrive in `Env`.
+  Templates?: Array<{ EmbeddedTmpl: string; DestPath: string; ChangeMode: string; Perms: string }>;
   Resources: { CPU: number; MemoryMB: number; Devices?: Array<{ Name: string; Count: number }> };
 }
 export interface NomadJobSpec {
@@ -567,12 +571,22 @@ export function buildNomadJob(
   // applied, which is worse than the refusal it replaced: `worldProofCovers` ACCEPTS, the driver runs, and
   // the score is reported as if the declared world had been provided.
   const world = nomadWorld(job, opts);
+  // ── THE PAYLOAD, AND WHERE IT DOES NOT GO (arch-review 59 follow-through) ──────────────────────────
+  //
+  // Serialized here — THE ONE SERIALIZER (arch-review 56, Wave B) refuses a case whose grading depends on
+  // material this lane would hand to the agent — and rendered into the task's own directory rather than into
+  // its environment. See `JOB_PAYLOAD_FILE_ENV`: an env var is readable out of `/proc/<pid>/environ` for the life
+  // of the process exec'd with it, and the agent under test is a child of exactly that process.
+  const payload =
+    verifierPayload !== undefined
+      ? { kind: "verifier" as const, value: verifierPayload }
+      : { kind: "case" as const, value: caseJobPayload(withWorldProof(job, "nomad", world.enforced)) };
+  // Nomad renders templates into the ALLOC's task directory, which the docker driver mounts at `/local`
+  // inside the container. So the destination and the in-container path are two spellings of one place, and
+  // both are stated here rather than assumed anywhere else.
+  const payloadDest = `local/${payload.kind}`;
   const env: Record<string, string> = {
-    // THE ONE SERIALIZER (arch-review 56, Wave B) — it refuses a case whose grading depends on material
-    // this lane would hand to the agent along with the job.
-    ...(verifierPayload !== undefined
-      ? { EVERDICT_VERIFIER_JOB: verifierPayload }
-      : { EVERDICT_CASE_JOB: caseJobPayload(withWorldProof(job, "nomad", world.enforced)) }),
+    [JOB_PAYLOAD_FILE_ENV[payload.kind]]: `/local/${payload.kind}`,
     ...judgeEnv(job.judge), // per-run judge model config. The inline judge grader judges with this model.
     // The workspace tier, FILTERED to the model-auth vocabulary — see `evalContainerSecretEnv` for what
     // the whole tier used to hand the agent under test. One function for both lanes, because a tenant's
@@ -630,6 +644,22 @@ export function buildNomadJob(
                 ...(auth ? { auth } : {}),
               },
               Env: env,
+              // The payload as a rendered FILE, not an environment variable — see `payload` above. Nomad
+              // writes templates into the task's own directory, which the docker driver mounts writable at
+              // `/local`, so the runner can unlink it; a K8s Secret volume, by contrast, is read-only and
+              // would leave the bytes readable for the whole case.
+              //
+              // `EmbeddedTmpl` is rendered by consul-template, which interprets `{{ }}`. The payload is
+              // base64 (`A-Za-z0-9+/=`), so there is no delimiter in it to interpret — stated because a
+              // future payload encoding that is not base64 would silently become a template injection.
+              Templates: [
+                {
+                  EmbeddedTmpl: payload.value,
+                  DestPath: payloadDest,
+                  ChangeMode: "noop",
+                  Perms: "0600",
+                },
+              ],
               // Harness-declared resources win over the runtime default (heavier harnesses get real bin-packing;
               // starvation reads as infra) — and the CASE's own declaration wins over both, because it is the
               // more specific statement about this unit of work. Only `harnessSpec` was read before, so a box

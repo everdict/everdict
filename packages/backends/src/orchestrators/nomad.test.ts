@@ -69,7 +69,7 @@ describe("buildNomadJob", () => {
     expect(task?.Config.image).toBe("reg/everdict-job-runner:1");
     expect(task?.Config.runtime).toBe("runsc");
     expect(task?.Env.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok");
-    const decoded = JSON.parse(Buffer.from(task?.Env.EVERDICT_CASE_JOB ?? "", "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(task?.Templates?.[0]?.EmbeddedTmpl ?? "", "base64").toString("utf8"));
     expect(decoded.evalCase.id).toBe("c1");
     expect(decoded.harness.id).toBe("claude-code");
   });

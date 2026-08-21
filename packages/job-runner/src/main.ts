@@ -29,16 +29,17 @@ async function main(): Promise<void> {
   // image and one result contract — and keeps the two payload names the only thing that differs, which is
   // what makes "the agent's container never held the plan" checkable.
   //
-  // TAKEN, not read: the call that returns the payload is the call that deletes it. See
-  // `job-payload-env.ts` for what the variable was handing to the agent for as long as it stood — the
-  // decision is made here, before anything else in this process can start a child.
+  // TAKEN, not read: the call that returns the payload is the call that UNLINKS it. See
+  // `job-payload-env.ts` for what the env variable was handing to the agent for as long as it stood, and why
+  // deleting it was not enough — the decision is made here, before anything else in this process can start a
+  // child.
   const payload = takeJobPayload();
   if (payload.kind === "verifier") {
     await runVerifierEntry(payload.payload);
     return;
   }
   if (payload.kind === "absent") {
-    console.error("✗ EVERDICT_CASE_JOB (env) is missing.");
+    console.error("✗ the job payload file is missing — see EVERDICT_CASE_JOB_FILE / EVERDICT_VERIFIER_JOB_FILE.");
     process.exitCode = 1;
     return;
   }

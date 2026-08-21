@@ -1,3 +1,6 @@
+import { readFileSync, unlinkSync } from "node:fs";
+import { JOB_PAYLOAD_FILE_ENV } from "@everdict/contracts";
+
 // ── READING THE JOB PAYLOAD IS THE SAME ACT AS REMOVING IT (arch-review 58 P0) ───────────────────────
 //
 // The control plane dispatches a unit of work by base64-ing the whole job into an env var on the container.
@@ -31,27 +34,59 @@
 // out of the parent just the same. So no amount of care at the exec site closes this; the payload must not
 // arrive in the initial environment at all.
 //
-// The repair is a transport change, not a discipline: the payload is written where the runner can DELETE it
-// (a Nomad `template` into the task dir, a K8s initContainer into an emptyDir) and the environment carries
-// only a path. Designed in `docs/architecture/secret-free-execution-envelope.md`; this function is the seam
-// it lands behind, which is why the seam exists.
+// THAT IS WHY THE PAYLOAD NO LONGER ARRIVES IN THE ENVIRONMENT AT ALL. It is a FILE — rendered by a Nomad
+// template into the task directory, or written by a K8s initContainer into a tmpfs emptyDir — and the
+// environment carries only the PATH, which is not a secret and is worthless once the file is gone. The
+// process that held the payload in its environment is the init step, and it has terminated before the agent's
+// container starts, so there is no `/proc` left to read it out of. See
+// `docs/architecture/secret-free-execution-envelope.md` and `JOB_PAYLOAD_FILE_ENV`.
 //
-// Until then the honest sentence is the narrow one: the agent no longer INHERITS the payload from us. That
-// is a different claim from "the agent cannot read it", and only one of them is earned (rule `protocol`,
-// "a secret in a process's initial environment").
+// This function is still the one seam, and it still cannot be half-done — the only way to obtain the payload
+// is a call that has already unlinked it. What changed is what "already deleted" means: `delete process.env`
+// bounded inheritance, `unlink` removes the bytes.
+//
+// SYNCHRONOUS unlink on purpose. This runs before anything else in the process, and the whole property is
+// that no child can exist between the read and the removal; an `await` here is a window, however short, and
+// a window is what the previous version was.
 export type JobPayload = { kind: "case"; payload: string } | { kind: "verifier"; payload: string } | { kind: "absent" };
 
-const CASE = "EVERDICT_CASE_JOB";
-const VERIFIER = "EVERDICT_VERIFIER_JOB";
-
 export function takeJobPayload(): JobPayload {
-  const verifier = process.env[VERIFIER];
-  const caseJob = process.env[CASE];
-  // BOTH names go, whichever one answers. A container that carried the other must not keep it because a
-  // branch happened not to look at it.
-  delete process.env[VERIFIER];
-  delete process.env[CASE];
-  if (verifier) return { kind: "verifier", payload: verifier };
-  if (caseJob) return { kind: "case", payload: caseJob };
-  return { kind: "absent" };
+  // BOTH names, whichever answers. A container that carried the other must not keep it because a branch
+  // happened not to look at it — the discipline the env version had, applied to files.
+  const found: Array<{ kind: "case" | "verifier"; payload: string }> = [];
+  for (const kind of ["verifier", "case"] as const) {
+    const path = process.env[JOB_PAYLOAD_FILE_ENV[kind]];
+    if (path === undefined || path === "") continue;
+    // The path itself goes too. It is not a secret, but a stale name pointing at nothing is a thing a future
+    // reader has to reason about, and this process has no further use for it.
+    delete process.env[JOB_PAYLOAD_FILE_ENV[kind]];
+    let payload: string;
+    try {
+      payload = readFileSync(path, "utf8");
+    } catch {
+      // A path that names nothing is `absent`, not a crash: an operator reading "the payload is missing" is
+      // being told the truth, and a lane that rendered no file is the same failure as one that set no
+      // variable. Nothing is left behind either way.
+      continue;
+    } finally {
+      // Removed WHATEVER the read did. A read that threw halfway still leaves bytes on the tmpfs, and this
+      // process is about to start the thing they are being kept from.
+      //
+      // `unlink`, not a recursive remove, and swallowed: this variable is set by our own lane, but a lane
+      // that set it wrong would hand a recursive delete a path nobody checked — and the failure mode of
+      // getting that wrong is unbounded, while the failure mode of refusing is a payload that was never a
+      // file. Refusing to remove something that is not a file is the safe direction, and it must not take
+      // the process down: this runs before the case has started, so a throw here is a dispatch that dies
+      // with no result rather than a case that reports one.
+      try {
+        unlinkSync(path);
+      } catch {
+        // Already gone, or never a file. Neither leaves payload bytes behind.
+      }
+    }
+    if (payload !== "") found.push({ kind, payload });
+  }
+  // Verifier first, as the loop order says: a container carrying both is a lane bug, and the judging half is
+  // the one whose disclosure matters more.
+  return found[0] ?? { kind: "absent" };
 }
