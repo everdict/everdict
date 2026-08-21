@@ -1,4 +1,4 @@
-import type { ExecutionAttemptStore, OpenAttemptInput } from "@everdict/application-control";
+import type { ExecutionAttemptStore, OpenAttemptInput, RevocationOutcome } from "@everdict/application-control";
 import {
   type ActivationDecision,
   ConflictError,
@@ -263,14 +263,27 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
 
   // Idempotent, and never revives a settled attempt: a cancellation sweeping a batch must not fail on an
   // attempt that already finished on its own.
-  async revokeReservation(attemptId: string): Promise<void> {
-    await this.client.query(
-      `UPDATE everdict_execution_attempts
-          SET state = 'revoked', updated_at = now()
-        WHERE attempt_id = $1
-          AND state NOT IN (${TERMINAL_LIST})`,
+  // …and it ANSWERS (arch-review 59). `RETURNING` the pre-image, so "revoked", "already settled" and "no such
+  // row" are told apart by the row itself rather than by a caller's hope — a teardown's convergence rests on
+  // this write (rule `protocol` L1). One statement: a SELECT beside the UPDATE would be a second read of a
+  // row the UPDATE may have just moved.
+  async revokeReservation(attemptId: string): Promise<RevocationOutcome> {
+    const { rows } = await this.client.query<{ before: ExecutionAttemptState; revoked: boolean }>(
+      `WITH pre AS (
+         SELECT attempt_id, state FROM everdict_execution_attempts WHERE attempt_id = $1
+       ), upd AS (
+         UPDATE everdict_execution_attempts
+            SET state = 'revoked', updated_at = now()
+          WHERE attempt_id = $1
+            AND state NOT IN (${TERMINAL_LIST})
+          RETURNING attempt_id
+       )
+       SELECT pre.state AS before, (SELECT count(*) FROM upd) > 0 AS revoked FROM pre`,
       [attemptId],
     );
+    const row = rows[0];
+    if (!row) return { kind: "absent" };
+    return row.revoked ? { kind: "revoked", from: row.before } : { kind: "settled", state: row.before };
   }
 
   async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {

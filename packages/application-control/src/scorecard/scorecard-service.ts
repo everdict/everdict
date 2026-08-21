@@ -145,6 +145,13 @@ function assertJudgeSelection(judges: ReadonlyArray<{ id: string }> | undefined)
   );
 }
 
+// How long an ACTIVATED dispatch may go without reporting an external object before its authorization is
+// treated as abandoned. It bounds the gap between `activateWork` returning and the orchestrator submit — one
+// API call — so five minutes is not a guess at a distribution, it is far past any of it. Deliberately not
+// configurable: an operator who could shorten it could turn a live submitter into a revoked one, which is the
+// race the activation exists to close.
+export const ACTIVATION_LEASE_MS = 5 * 60 * 1000;
+
 export class ScorecardService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -1197,12 +1204,44 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
           })),
           `revoke ${a.attemptId}`,
         );
+      // ── AN AUTHORIZATION IS A LEASE, NOT A STANDING PERMISSION (arch-review 59) ─────────────────
+      //
+      // The paragraph above is right and it has no liveness: a submitter that DIES between its activation and
+      // the `applyJob` never settles its row, so the operation is owed forever and escalates to an operator
+      // who can only look at a row nobody will ever move. Which is the same defect one level up — "cannot
+      // find out" must be an escalation, and an escalation that can never resolve is a terminal state wearing
+      // a different word.
+      //
+      // What makes this decidable is that the answer is already in hand. Every handle the LEDGER says this
+      // batch placed — including this row's, recorded at the reservation, before any object existed — was
+      // killed and probed on this pass, and the `failures`/`live` check above THREW unless every one of them
+      // converged. So reaching this line means an aged submitter's external id has been verified absent, by
+      // the same read-back that certifies every other unit. Waiting longer asks nobody a new question.
+      //
+      // Inside the window the probe is genuinely not authoritative — the container may be milliseconds from
+      // existing — which is why the debt stays. The window is what separates "may still be born" from
+      // "nothing is coming", and it is generous: the interval it bounds is one API call.
       const activeBirths = pending.value.filter((a) => a.state === "active");
-      if (activeBirths.length > 0)
+      const at = Date.parse(this.now());
+      const abandoned = activeBirths.filter((a) => at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS);
+      for (const a of abandoned)
+        await attempted(
+          (this.deps.attempts as ExecutionAttemptStore).revokeReservation(a.attemptId).then((outcome) => ({
+            // The store's OWN answer, not a hope (rule `protocol` L1). `settled` is convergence too — the
+            // submitter finished on its own while this swept, which is the ordinary race. Anything else means
+            // the row is still able to act and this teardown has NOT converged over it.
+            status:
+              outcome.kind === "revoked" || outcome.kind === "settled" ? ("stopped" as const) : ("unknown" as const),
+            ...(outcome.kind === "absent" ? { reason: "the ledger has no such attempt to take back" } : {}),
+          })),
+          `revoke abandoned activation ${a.attemptId}`,
+        );
+      const stillLive = activeBirths.length - abandoned.length;
+      if (stillLive > 0)
         throw new UpstreamError(
           "UPSTREAM_ERROR",
-          { scorecardId: rec.id, active: activeBirths.length },
-          `${activeBirths.length} dispatch(es) under this batch are authorized and have not yet reported an external object, so certifying zero now would be certifying it before they are born. The cancellation stays owed and the reconciler retries.`,
+          { scorecardId: rec.id, active: stillLive },
+          `${stillLive} dispatch(es) under this batch are authorized and have not yet reported an external object, so certifying zero now would be certifying it before they are born. The cancellation stays owed and the reconciler retries.`,
         );
     }
     // …AND WHAT THE READ-BACK SAW IS RECORDED (arch-review 52, Wave 3). The operation row used to close on

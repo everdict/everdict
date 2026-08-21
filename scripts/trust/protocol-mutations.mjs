@@ -948,6 +948,26 @@ const MUTATIONS = [
       "src/execution/judgment-evidence-ownership.counterexample.test.ts",
     ],
   },
+  {
+    // arch-review 59. The activation lease removed, so a submitter that died between being told yes and its
+    // submit leaves the cancellation owed for the life of the deployment.
+    name: "activation lease — an abandoned authorization is waited on forever",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: "      const abandoned = activeBirths.filter((a) => at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS);",
+    to: "      const abandoned: typeof activeBirths = [];",
+    suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
+  {
+    // …and the other direction, which is the one that would be worse than the defect: the lease ignored, so a
+    // submitter milliseconds from creating its object is revoked on a probe that is not yet authoritative.
+    name: "activation lease — a live submitter is revoked inside its own window",
+    file: "packages/application-control/src/scorecard/scorecard-service.ts",
+    from: "at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS",
+    to: "true",
+    suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
+    build: "@everdict/application-control",
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

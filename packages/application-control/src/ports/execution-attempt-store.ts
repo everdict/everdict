@@ -80,6 +80,13 @@ export interface OpenAttemptInput {
 // rule over its own table, now CLAIMS the coordinate it is handed (RecordingStore.open's `generation`
 // parameter). Two independent MAX+1 computations over two tables agree only while both tables see exactly
 // the same attempts — and the recording table is the one that is conditional, prunable and evidence-lifetime.
+// What taking a reservation back actually did. `settled` is not a failure — an attempt that finished on its
+// own while a cancellation swept is the ordinary race, and it is equally "this row can no longer be born".
+export type RevocationOutcome =
+  | { kind: "revoked"; from: ExecutionAttemptState }
+  | { kind: "settled"; state: ExecutionAttemptState }
+  | { kind: "absent" };
+
 export interface ExecutionAttemptStore {
   // Mint the next attempt for this execution and INSERT it, state "created". Returns the coordinate — the
   // generation and the joined `attemptId` — because that coordinate is what every downstream stamp uses.
@@ -157,7 +164,12 @@ export interface ExecutionAttemptStore {
   activateWork(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision>;
   // Take a reservation BACK. What a cancellation calls so a paused holder fails at activation instead of
   // creating work after the sweep certified there was none. Idempotent, and never revives a settled attempt.
-  revokeReservation(attemptId: string): Promise<void>;
+  //
+  // …AND IT SAYS WHAT HAPPENED (arch-review 59). This answered `void`, and a teardown's convergence rests on
+  // it: rule `protocol` L1 — every mutating store method a decision rests on returns evidence it happened,
+  // never `Promise<void>`. "Revoked", "somebody settled it first" and "no such row" are three different
+  // facts, and only the first of them is this cancellation having done something.
+  revokeReservation(attemptId: string): Promise<RevocationOutcome>;
   // The attempt ran with no fence raised — the recording coordinate it minted could not be claimed. Its own
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
@@ -308,13 +320,17 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     return decision;
   }
 
-  async revokeReservation(attemptId: string): Promise<void> {
+  async revokeReservation(attemptId: string): Promise<RevocationOutcome> {
     const current = this.attempts.get(attemptId);
     // A settled attempt is not revived into `revoked`, and a missing row needs nothing taken back. Both are
     // no-ops rather than errors: a cancellation sweeping a batch must not fail on an attempt that already
-    // finished on its own.
-    if (!current || isTerminalAttemptState(current.state)) return;
+    // finished on its own. They are REPORTED now, because a caller deciding convergence has to tell them
+    // apart from a revocation it performed.
+    if (!current) return { kind: "absent" };
+    if (isTerminalAttemptState(current.state)) return { kind: "settled", state: current.state };
+    const from = current.state;
     this.attempts.set(attemptId, { ...current, state: "revoked", updatedAt: this.now() });
+    return { kind: "revoked", from };
   }
 
   private async assertParentStillAuthorizes(attemptId: string, current: ExecutionAttemptRecord): Promise<void> {

@@ -95,6 +95,7 @@ export {
   type ExecutionAttemptStore,
   InMemoryExecutionAttemptStore,
   type OpenAttemptInput,
+  type RevocationOutcome,
 } from "./ports/execution-attempt-store.js";
 export {
   type CancellationCertificate,
@@ -664,7 +665,7 @@ export {
 } from "./ports/publication-operation-store.js";
 export type { ScorecardServiceDeps } from "./scorecard/scorecard-deps.js";
 export { applyGradingPlan, caseReason, childKey, selectSubsetCases } from "@everdict/domain";
-export { ScorecardService } from "./scorecard/scorecard-service.js";
+export { ACTIVATION_LEASE_MS, ScorecardService } from "./scorecard/scorecard-service.js";
 export { ScorecardBatchService } from "./scorecard/scorecard-batch-service.js";
 export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js";
 export { ScorecardAnalyticsService } from "./scorecard/scorecard-analytics-service.js";
