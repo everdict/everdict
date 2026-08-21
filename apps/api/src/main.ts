@@ -706,6 +706,11 @@ async function main(): Promise<void> {
     // …so a verifier's compute gets an attempt row like every other managed unit, which is what makes it
     // visible to the cancellation sweep (arch-review 57 P0-verifier).
     ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),
+    // …and the SAME tenant budget gate the agent's half passes through the Scheduler. A verifier is a second
+    // container per case, running the tenant's own task image — a batch's fan-out doubled a workspace's
+    // container count with nothing to 402 against (arch-review 59 P1-high, rule `backends`: anything that
+    // takes compute passes admission).
+    admitVerifierCompute: budget,
   });
   verifierLane.fn = dispatchVerifier;
 

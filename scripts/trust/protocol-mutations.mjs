@@ -880,6 +880,24 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "packages/backends", "src/orchestrators/verifier-network.counterexample.test.ts"],
   },
+  {
+    // arch-review 59 P1-high. The verifier's compute placed with no admission, so a batch's fan-out doubled a
+    // workspace's container count with nothing to 402 against.
+    name: "verifier admission — a second container per case, admitted by nobody",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "    admitVerifierCompute?.admit(job.tenant);",
+    to: "",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // …and the half that turns the gate into a leak: a reservation held for a container that never existed
+    // eventually 402s the workspace for compute it never took.
+    name: "verifier admission — the reservation is never released",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "      admitVerifierCompute?.release(job.tenant);",
+    to: "",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

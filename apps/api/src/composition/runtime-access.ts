@@ -39,6 +39,7 @@ import type {
 import { NotFoundError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
+import type { BudgetTracker } from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
 // Per-runtime backend access for already-dispatched cases: adoption/kill (boot recovery, supersede) + the
@@ -55,8 +56,23 @@ export function buildRuntimeAccess(deps: {
   // (arch-review 57 P0-verifier). Optional: a deployment without one records nothing and still judges —
   // refusing there would make the ledger a prerequisite for a verdict rather than a record of one.
   attempts?: ExecutionAttemptStore;
+  // ── THE VERIFIER TAKES COMPUTE, SO IT PASSES ADMISSION (arch-review 59 P1-high) ──────────────────
+  //
+  // Rule `backends`: anything that takes compute passes the admission gate BEFORE a container is
+  // provisioned, and releases on any failure that produced nothing. The agent's half does, through
+  // `Scheduler.dispatch`. This lane resolves a backend and calls it directly, so a batch of 500 private-
+  // verifier cases placed 500 further containers — each one running the tenant's own task image, for a
+  // time bounded by the case's own `timeoutSec` — with no budget reservation and nothing to 402 against.
+  // A workspace at its cap could not submit another run and was, at that moment, doubling its container
+  // count anyway.
+  //
+  // Admission, not the queue: `Scheduler.dispatch` is task-shaped over `Backend.dispatch`, and a verifier
+  // is dispatched through `VerifierDispatchable` with a different payload — routing it through the queue
+  // would mean giving the scheduler a second dispatch verb. What the lanes share is the GATE, which is what
+  // the rule says and all this needs.
+  admitVerifierCompute?: BudgetTracker;
 }) {
-  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend, attempts } = deps;
+  const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend, attempts, admitVerifierCompute } = deps;
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a
   // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
@@ -353,31 +369,45 @@ export function buildRuntimeAccess(deps: {
   // deployment cannot judge this case away from its agent".
   const dispatchVerifier = async (job: VerifierJob): Promise<VerifierInvocation> => {
     let invocation: VerifierInvocation | undefined;
-    // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
-    // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
-    // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
-    // private-verifier case (arch-review 57 P0). The verifier also MUST NOT roam — it reads this tenant's task
-    // image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
-    await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
-      if (!isVerifierDispatchable(backend)) return false;
-      // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
-      // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
-      // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
-      // otherwise certify zero live work over it.
-      invocation = await verifierOperation({ ...(attempts ? { attempts } : {}) }, job, (j, hooks) =>
-        backend.dispatchVerifier(j, hooks),
-      );
-      return true; // the first lane that can judge is the answer
-    });
-    if (invocation === undefined)
-      throw new NotFoundError(
-        "NOT_FOUND",
-        { caseId: job.caseId },
-        job.placementTarget === undefined
-          ? "this case was placed on no named runtime, so there is no lane to resolve a verifier against."
-          : `runtime '${job.placementTarget}' cannot run a verifier away from the agent's container — the case cannot be judged here.`,
-      );
-    return invocation;
+    // BEFORE any lane is resolved — see `admitVerifierCompute`. Over the cap this throws
+    // `PaymentRequiredError` (402), which `withVerifierPass` records as an owed verdict rather than a
+    // fabricated one, so a workspace out of budget gets an unmeasured case and not a free container.
+    admitVerifierCompute?.admit(job.tenant);
+    try {
+      // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
+      // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
+      // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
+      // private-verifier case (arch-review 57 P0). The verifier also MUST NOT roam — it reads this tenant's
+      // task image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
+      await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
+        if (!isVerifierDispatchable(backend)) return false;
+        // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
+        // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
+        // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
+        // otherwise certify zero live work over it.
+        invocation = await verifierOperation({ ...(attempts ? { attempts } : {}) }, job, (j, hooks) =>
+          backend.dispatchVerifier(j, hooks),
+        );
+        return true; // the first lane that can judge is the answer
+      });
+      if (invocation === undefined)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { caseId: job.caseId },
+          job.placementTarget === undefined
+            ? "this case was placed on no named runtime, so there is no lane to resolve a verifier against."
+            : `runtime '${job.placementTarget}' cannot run a verifier away from the agent's container — the case cannot be judged here.`,
+        );
+      return invocation;
+    } finally {
+      // The reservation is held for exactly as long as this lane may be holding a container, and released
+      // once it is not — including on the paths that created nothing (no lane could judge, the placement
+      // refused, the tenant's runtime is gone). Not settled: a verifier's real cost is not measured here, and
+      // reserving-then-releasing is what stops a batch's fan-out from overshooting a cap that is computed
+      // from committed usage. A reservation never released would 402 the workspace for containers that have
+      // long since exited.
+      admitVerifierCompute?.release(job.tenant);
+    }
   };
 
   // ── THE POSTCONDITION READ (arch-review 53, Wave E) ────────────────────────────────────────────────
