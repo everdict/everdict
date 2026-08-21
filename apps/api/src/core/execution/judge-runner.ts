@@ -1,4 +1,4 @@
-import type { JudgeRunner, TrajectoryStore } from "@everdict/application-control";
+import type { JudgeEvidenceOutcome, JudgeRunner, TrajectoryStore } from "@everdict/application-control";
 import type {
   CaseJob,
   CaseResult,
@@ -179,7 +179,7 @@ function modelJudgeEvents(calls: JudgeLlmCall[]): TraceEvent[] {
 // Where an invocation records whether its judge's own execution was sealed. A box rather than a return
 // value because the seal happens deep inside whichever branch ran, and threading an answer back through six
 // return points is how one of them ends up forgetting.
-export type JudgeSealOutcome = "sealed" | "unsealed" | "not_applicable";
+export type JudgeSealOutcome = JudgeEvidenceOutcome;
 export interface SealBox {
   outcome: JudgeSealOutcome;
 }
@@ -234,7 +234,8 @@ async function reportJudgeExecution(
     // successor's own will be the evidence. Reported as `not_applicable` rather than `unsealed`, because
     // those are different facts and only one of them is a loss.
     if (input.publishWhen && !(await input.publishWhen().catch(() => false))) return;
-    const sealed = await deps.trajectories
+    const emitter = judgeEvidenceEmitter(input.spec.id, input.scope);
+    const outcome = await deps.trajectories
       .seal({
         runId: input.runId,
         tenant: input.tenant,
@@ -244,15 +245,32 @@ async function reportJudgeExecution(
         // verdict eventually wins. The bare name dropped every revision after the first; the pass-scoped name
         // dropped every retry within a pass. `judgeEvidenceEmitter` (@everdict/domain) owns the grammar and
         // documents all three forms — the format is never spelled here.
-        emitter: judgeEvidenceEmitter(input.spec.id, input.scope),
+        emitter,
         events: input.events,
         t0: input.t0,
       })
-      .then(() => true)
+      // …AND WHAT THE STORE ANSWERED, WHICH USED TO BE `.then(() => true)` (arch-review 59 P1). `created`
+      // is false when a segment already holds this emitter — the trajectory keeps the FIRST per emitter, so
+      // THIS execution's events were discarded and an earlier one's stand. Reporting that as `sealed` told a
+      // re-reader the verdict's account was on file when what is on file belongs to a different execution,
+      // and it silently swallowed the one signal that detects a slip in the invocation-scoped emitter
+      // grammar this very comment block explains.
+      .then(
+        (meta): JudgeEvidenceOutcome => ({
+          status: meta.created ? "sealed" : "superseded",
+          runId: meta.runId,
+          emitter,
+        }),
+      )
       // STILL best-effort: evidence, never lifecycle. What changed is that the failure is now an ANSWER
       // rather than a silence, so a verdict whose "how" was lost can be told apart from one that kept it.
-      .catch(() => false);
-    input.seal.outcome = sealed ? "sealed" : "unsealed";
+      .catch(
+        (err: unknown): JudgeEvidenceOutcome => ({
+          status: "unsealed",
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    input.seal.outcome = outcome;
   }
 }
 
@@ -500,7 +518,7 @@ async function runCodeJudge(
     // sealed whether or not the job failed: a dead judge job's trace IS the diagnosis. Its llm_call cost (if the
     // trace carries any) meters under source "judge" with the case-billing provenance policy.
     await reportJudgeExecution(deps, {
-      seal: seal ?? { outcome: "not_applicable" },
+      seal: seal ?? { outcome: { status: "not_applicable" } },
       spec,
       tenant,
       events: result.trace,
@@ -794,7 +812,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
     async run(spec, tenant, rawCtx, placement, submittedBy, runId, pins, publishWhen, scoringPass) {
       // One box per invocation — `reportJudgeExecution` writes into it wherever the branch below
       // happens to seal, so the answer does not have to be threaded back through six return points.
-      const seal: SealBox = { outcome: "not_applicable" };
+      const seal: SealBox = { outcome: { status: "not_applicable" } };
       const scores = await judge(
         spec,
         tenant,

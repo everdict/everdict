@@ -178,7 +178,7 @@ describe.skipIf(!DATABASE_URL)("the scoring stage over real Postgres jsonb", () 
     // judge's own execution could be sealed. This scenario is about the SCORE BYTES surviving a round trip,
     // and it has no trajectory store, which is exactly what `not_applicable` means.
     const judgeRunner: JudgeRunner = {
-      run: async () => ({ scores: richScores("a"), evidence: "not_applicable" }),
+      run: async () => ({ scores: richScores("a"), evidence: { status: "not_applicable" } }),
     };
     const deps = {
       dispatcher: { dispatch: async () => ({}) },

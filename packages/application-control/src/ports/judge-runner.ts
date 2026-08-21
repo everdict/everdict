@@ -72,9 +72,36 @@ export interface JudgeRunner {
 // twin, and `evidenceStatus` is what turns it into the case's judgment plane.
 export interface JudgeInvocation {
   scores: Score[];
-  // "sealed" = the judge's own execution is on the judged run's trajectory and can be re-read.
-  // "unsealed" = it ran and the evidence did not land — the verdict stands, its account does not.
-  // "not_applicable" = there was nothing to seal (no trajectory store, no run id, a skip), or this driver
-  //   may no longer publish and the successor's seal will be the evidence. Not a loss.
-  evidence: "sealed" | "unsealed" | "not_applicable";
+  evidence: JudgeEvidenceOutcome;
 }
+
+// ── AND EXACTLY WHICH EVIDENCE, NOT JUST WHETHER THERE IS SOME (arch-review 59 P1) ───────────────────
+//
+// The first version of this answered a bare word, and the seal it reports on returns
+// `TrajectoryMeta & { created: boolean }` — every bit of which was discarded by `.then(() => true)`. Two
+// things followed, and the second is a wrong claim rather than a missing one:
+//
+//   NO JOIN KEY. A consumer wanting to re-read the judge's own execution had to REBUILD the emitter tag
+//   (`judge:<id>#<pass>.<gen>.<attempt>`) from the pieces — the downstream re-derivation rule `protocol` L3
+//   forbids, and the reason `VerifierInvocation`, this type's declared twin, carries its digests instead.
+//
+//   `created: false` READ AS SEALED. A trajectory keeps the FIRST segment per emitter, so when one already
+//   exists this execution's events are DISCARDED and the earlier execution's stand. That is precisely what
+//   the invocation-scoped emitter grammar exists to prevent — and the one signal that detects a slip in it
+//   was thrown away, so `judgmentsSealed` stayed true while pointing a re-reader at somebody else's account.
+//   (The store returns `created: false` for a cross-tenant id collision too, where it deliberately touches
+//   nothing at all.)
+//
+// So the outcome is a union carrying the coordinate, and `superseded` is its own arm: the evidence on file is
+// real and re-readable, it is simply not THIS execution's, which is a different fact from both "sealed" and
+// "the seal failed".
+export type JudgeEvidenceOutcome =
+  // On the judged run's trajectory, under this emitter, put there by this execution.
+  | { status: "sealed"; runId: string; emitter: string }
+  // A segment already held this emitter, so what is on file is an earlier execution's. Re-readable, not ours.
+  | { status: "superseded"; runId: string; emitter: string }
+  // It ran and the evidence did not land — the verdict stands, its account does not.
+  | { status: "unsealed"; reason: string }
+  // Nothing to seal (no trajectory store, no run id, a skip), or this driver may no longer publish and the
+  // successor's seal will be the evidence. Not a loss.
+  | { status: "not_applicable" };

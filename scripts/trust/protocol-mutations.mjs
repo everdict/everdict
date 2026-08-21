@@ -926,6 +926,28 @@ const MUTATIONS = [
     to: "  return parseResult(stdout);",
     suite: ["--root", "packages/contracts", "src/execution/verifier-adoption.counterexample.test.ts"],
   },
+  {
+    // arch-review 59 P1, producer half. `created` discarded again, so a seal that stored nothing because an
+    // earlier segment already held this emitter reports as this execution's own evidence.
+    name: "judgment evidence — an earlier execution's account is reported as this judgment's",
+    file: "apps/api/src/core/execution/judge-runner.ts",
+    from: '        status: meta.created ? "sealed" : "superseded",',
+    to: '        status: "sealed",',
+    suite: ["--root", "apps/api", "src/core/execution/judge-seal-outcome.counterexample.test.ts"],
+  },
+  {
+    // …and the consumer half, which stayed green under the producer's own mutation until it had a test: the
+    // case keeps vouching that every judgment can be re-read while one judgment's account is somebody else's.
+    name: "judgment evidence — the vouch survives evidence that is not this execution's",
+    file: "packages/application-control/src/execution/scoring-service.ts",
+    from: '      if (invocation.evidence.status === "unsealed" || invocation.evidence.status === "superseded")',
+    to: '      if (invocation.evidence.status === "unsealed")',
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/judgment-evidence-ownership.counterexample.test.ts",
+    ],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

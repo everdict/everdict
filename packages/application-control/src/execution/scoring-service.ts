@@ -340,7 +340,12 @@ export class ScoringService {
       // verdict — and the loss used to be silent, so a judgment whose account is gone read exactly like one
       // whose account is on file. The result now VOUCHES, in the same positive-seal grammar `traceSealed`
       // uses: the flag says "every judgment on this case can be re-read", and its absence is not a claim.
-      if (invocation.evidence === "unsealed") judgmentsSealed = false;
+      // Anything that is not THIS execution's own evidence breaks the claim. `superseded` is the arm that
+      // used to read as `sealed`: the segment on file is real and re-readable and belongs to a different
+      // execution, so "every judgment on this case can be re-read" is false about the judgment that ran here
+      // (arch-review 59 P1).
+      if (invocation.evidence.status === "unsealed" || invocation.evidence.status === "superseded")
+        judgmentsSealed = false;
       // ── THE TRANSPORT SLOT IS DRAINED HERE (downstream report 1.1) ─────────────────────────────────
       //
       // A dispatched judge's own execution rides back on Score.traceEvents; the judged case's trace is where
