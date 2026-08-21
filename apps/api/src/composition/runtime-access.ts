@@ -592,12 +592,23 @@ export async function runStartupRecovery(deps: {
 // A boolean is enough, but it has to live with the list rather than beside the timer: the two are one state.
 // Holding them in an object also gives the property somewhere to be tested, which a closure inside `main.ts`
 // did not have.
-// How many passes may fail to decide a target before it stops being ordinary. Ten minutes of 60-second ticks:
-// long enough that a blinking ledger never pages anyone, short enough that a stuck one does not sit for hours.
-const ESCALATE_AFTER_ATTEMPTS = 10;
+// How many passes may fail to decide a target before it stops being ordinary. Counted in ATTEMPTS, not
+// ticks, because the retries are now spaced: with the doubling schedule below, a fifth undecided attempt is
+// about eight minutes in — long enough that a blinking ledger never pages anyone, short enough that a stuck
+// one is named while somebody could still act on it. Ten attempts would be two hours under that schedule,
+// which is a report rather than an alert.
+const ESCALATE_AFTER_ATTEMPTS = 5;
+
+// How many ticks between retries of a target that has deferred this many times: 1, 1, 2, 4, 8, 16, 32 —
+// capped, so a stuck target is still asked about roughly every half hour on a 60-second timer. See `tick`.
+function retryEvery(attempts: number): number {
+  return Math.min(2 ** Math.max(0, attempts - 1), 32);
+}
 
 export class DeferredRecoverySweep {
   private running = false;
+  // The sweep's own timer is the clock, so the retry schedule is a count of ticks rather than a wall time.
+  private ticks = 0;
   constructor(
     private readonly deps: Parameters<typeof runStartupRecovery>[0],
     private owed: readonly RecoveryTarget[],
@@ -614,8 +625,26 @@ export class DeferredRecoverySweep {
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    this.ticks += 1;
     try {
-      this.owed = await sweepDeferredRecovery(this.deps, this.owed).catch(() => this.owed);
+      // ── A DEBT THAT KEEPS DEFERRING IS ASKED ABOUT LESS OFTEN ────────────────────────────────
+      //
+      // Every tick used to retry EVERY owed target. That is right for the case the worklist exists for — a
+      // ledger blinked, the next minute decides it — and wrong for the case it converges to: an outage that
+      // lasts, with N targets, is N store reads a minute forever, against the store that is already the
+      // thing failing. The retry then adds load to the outage it is waiting out.
+      //
+      // So the attempt count that already rides each target is what schedules it: doubling, capped, so a
+      // fresh deferral is retried immediately and a stuck one is asked about roughly every half hour. It
+      // never STOPS being asked — starvation would turn a transient hold into a silent tombstone, which is
+      // the failure this whole union exists to prevent.
+      //
+      // Tick-based rather than clock-based on purpose: the sweep's own timer is the clock, so the schedule
+      // is deterministic and testable without a fake clock. It is not the DURABLE `nextAttemptAt` a restart
+      // would preserve — a restart re-derives the worklist from the boot pass anyway.
+      const due = this.owed.filter((t) => this.ticks % retryEvery(t.attempts) === 0);
+      const waiting = this.owed.filter((t) => this.ticks % retryEvery(t.attempts) !== 0);
+      this.owed = [...waiting, ...(await sweepDeferredRecovery(this.deps, due).catch(() => due))];
       // ── A DEBT THAT WILL NOT DECIDE IS AN ESCALATION, NOT A QUIET HOLD (arch-review 58, W4) ────
       //
       // `retry_later` always carried a REASON — "the attempt ledger would not answer", "the cluster did not

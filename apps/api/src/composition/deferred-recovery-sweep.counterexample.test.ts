@@ -132,9 +132,12 @@ describe("[R58 COUNTEREXAMPLE] the deferred-recovery sweep does not overlap itse
         },
         service: { resume: async () => ({ kind: "resumed" }) },
       } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];
-      const sweep = new DeferredRecoverySweep(deps, [target("a", 9)]);
-      await sweep.tick();
-      expect(said.join("\n"), "a debt that will not decide was held in silence").toMatch(/undecidable for 10 passes/);
+      // Attempts 4 → the next undecided pass is the fifth, which is where a hold stops being ordinary. The
+      // retry is SPACED now (see `retryEvery`), so the tick that is due for it has to be reached rather than
+      // assumed — a test that ticked once would pass or fail on the schedule instead of on the escalation.
+      const sweep = new DeferredRecoverySweep(deps, [target("a", 4)]);
+      for (let i = 0; i < 16; i++) await sweep.tick();
+      expect(said.join("\n"), "a debt that will not decide was held in silence").toMatch(/undecidable for 5 passes/);
       expect(said.join("\n"), "the escalation does not say what the last pass saw").toMatch(/ledger would not answer/);
     } finally {
       console.error = spy;
@@ -160,5 +163,54 @@ describe("[R58 COUNTEREXAMPLE] the deferred-recovery sweep does not overlap itse
     } finally {
       console.error = spy;
     }
+  });
+
+  it("stops asking a stuck target on EVERY tick — the retry must not feed the outage it waits out", async () => {
+    // The worklist exists for a ledger that blinked, and it converges to a ledger that is down. With N owed
+    // targets, retrying all of them every minute is N reads a minute against the store that IS the failure.
+    // The attempt count each target already carries is what schedules it.
+    const asked: number[] = [];
+    const deps = {
+      scorecardStore: {
+        get: async () => {
+          asked.push(1);
+          return { id: "a", status: "running", ownerReplica: "r1", ownerEpoch: 1 };
+        },
+      },
+      store: { get: async () => undefined },
+      owner: { ownerReplica: "r1", epoch: 1 },
+      scorecardService: { resume: async () => ({ kind: "retry_later", reason: "ledger down" }) },
+      service: { resume: async () => ({ kind: "resumed" }) },
+    } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];
+
+    const sweep = new DeferredRecoverySweep(deps, [target("a")]);
+    for (let i = 0; i < 20; i++) await sweep.tick();
+
+    expect(asked.length, "a target that keeps deferring was retried on every single tick").toBeLessThan(10);
+    // …and it is STILL retried. Starvation would turn a transient hold into a silent tombstone, which is the
+    // outcome this whole union exists to prevent.
+    expect(asked.length, "a stuck target stopped being asked about at all").toBeGreaterThan(2);
+    expect(sweep.outstanding, "the debt was discharged rather than held").toHaveLength(1);
+  });
+
+  it("retries a FRESH deferral immediately — backoff must not delay the ordinary case", async () => {
+    const asked: number[] = [];
+    const deps = {
+      scorecardStore: {
+        get: async () => {
+          asked.push(1);
+          return undefined; // gone → discharged on the first look
+        },
+      },
+      store: { get: async () => undefined },
+      owner: { ownerReplica: "r1", epoch: 1 },
+      scorecardService: { resume: async () => ({ kind: "resumed" }) },
+      service: { resume: async () => ({ kind: "resumed" }) },
+    } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];
+
+    const sweep = new DeferredRecoverySweep(deps, [target("a")]);
+    await sweep.tick();
+    expect(asked, "a first deferral waited instead of being retried at once").toHaveLength(1);
+    expect(sweep.outstanding).toHaveLength(0);
   });
 });
