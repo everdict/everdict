@@ -189,6 +189,9 @@ export async function runCaseJob(
     // `runCase` hands it to the graders' view of the compute instead. Same consumer, same value; the harness's
     // environment no longer contains a credential it never needed.
     ...(Object.keys(jobEnv).length > 0 ? { graderEnv: jobEnv } : {}),
+    // The lane's attestation, onto the manifest `runCase` writes — the same value the driver above checks the
+    // declaration against, so what gets recorded is what was verified (arch-review 59 P1-high).
+    ...(job.worldProof ? { worldProof: job.worldProof } : {}),
     // Per-case timeout (EvalCase.timeoutSec) flows into the run context so a long agent case is not killed at the old
     // hardcoded default; EVERDICT_TIMEOUT_SEC still overrides. Container-task dataset adapters capture the
     // task's own timeout here, previously dropped at execution.

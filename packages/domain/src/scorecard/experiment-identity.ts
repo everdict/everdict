@@ -1,4 +1,10 @@
-import { type CaseResult, EXPERIMENT_AXES, type ExperimentAxis, type ScorecardManifest } from "@everdict/contracts";
+import {
+  type CaseResult,
+  EXPERIMENT_AXES,
+  type ExperimentAxis,
+  type ProvisionedWorldProof,
+  type ScorecardManifest,
+} from "@everdict/contracts";
 import { imageProvenanceOf, sameResolvedImages } from "../image/image-provenance.js";
 
 // Experiment identity — the right to call a diff a REGRESSION.
@@ -445,6 +451,27 @@ function harnessModelAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReadi
 // side that recorded an execution and could not. When every compared case on both sides is silent, it
 // abstains — and when the lanes all record provenance, the silence stops happening and the abstention
 // stops with it.
+// Two attested worlds are the same world only if every axis either side names agrees — including the LANE, an
+// axis in its own right: "nomad enforced 2 cpu" and "k8s enforced 2 cpu" are two enforcement mechanisms with
+// different semantics, and a benchmark comparing across them is comparing across them whether or not the
+// numbers match. Exactly the discipline `worldProofCovers` uses on the way in, applied to the way out.
+function sameEnforcedWorld(a: ProvisionedWorldProof, b: ProvisionedWorldProof): boolean {
+  return (
+    a.os === b.os &&
+    a.enforcedBy === b.enforcedBy &&
+    a.resources?.cpu === b.resources?.cpu &&
+    a.resources?.memoryMb === b.resources?.memoryMb &&
+    a.resources?.gpu === b.resources?.gpu &&
+    a.network?.mode === b.network?.mode &&
+    sameHosts(a.network?.allowedHosts, b.network?.allowedHosts)
+  );
+}
+
+function sameHosts(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const [x, y] = [[...(a ?? [])].sort(), [...(b ?? [])].sort()];
+  return x.length === y.length && x.every((h, i) => h === y[i]);
+}
+
 function worldAxis(baseline: readonly CaseResult[], candidate: readonly CaseResult[]): AxisReading | undefined {
   const byCase = new Map(candidate.map((r) => [r.caseId, r]));
   const shared = baseline.flatMap((b) => {
@@ -494,11 +521,33 @@ function worldAxis(baseline: readonly CaseResult[], candidate: readonly CaseResu
         detail: `case ${b.caseId} could not pin the image it ran from on ${bp.kind !== "resolved" ? "the baseline" : "the candidate"} (${bp.kind !== "resolved" ? bp.kind : cp.kind}), so sameness cannot be verified either way`,
       };
     if (!sameResolvedImages(bp, cp)) differences.push(b.caseId);
+
+    // ── AND THE REST OF THE BOX (arch-review 59 P1-high) ────────────────────────────────────────────
+    //
+    // Same image bytes is not the same world. Two sides could hold this axis while one ran with a GPU and the
+    // other without, or one behind a deny-all egress policy and the other online — differences
+    // `worldProofCovers` refuses at admission and this axis then reported as `held`. A regression measured
+    // across them is not evidence about the change under test, which is the only claim this axis makes.
+    //
+    // Same rollout discipline as the image half, and for the same reason: silence on BOTH sides adds nothing
+    // (that pair is exactly as verifiable as it was yesterday, and `POST /scorecards/ingest` has no world to
+    // record by construction). Once EITHER side attests one, a missing counterpart is `unverified` — the shape
+    // the image check above already uses one branch up.
+    const [bw, cw] = [b.execution?.world, c.execution?.world];
+    if (bw !== undefined || cw !== undefined) {
+      if (bw === undefined || cw === undefined)
+        return {
+          state: "unverified",
+          reason: "unsealed",
+          detail: `case ${b.caseId} recorded the world it was placed in on ${bw === undefined ? "the candidate" : "the baseline"} only, so the two sides' worlds cannot be compared beyond their image bytes`,
+        };
+      if (!sameEnforcedWorld(bw, cw)) differences.push(b.caseId);
+    }
   }
   if (differences.length > 0)
     return {
       state: "confound",
-      detail: `${differences.length} compared case(s) ran different image bytes on the two sides (${differences
+      detail: `${differences.length} compared case(s) ran in a different world on the two sides — different image bytes, or a different enforced box (${differences
         .slice(0, 5)
         .join(
           ", ",

@@ -908,6 +908,15 @@ const MUTATIONS = [
     to: "  if (false)",
     suite: ["--root", "packages/contracts", "src/execution/verifier-result-wire.counterexample.test.ts"],
   },
+  {
+    // arch-review 59 P1-high. The execution_world axis back to comparing image bytes alone, so two sides could
+    // hold it while one ran with a GPU and the other without, or one offline and one online.
+    name: "experiment identity — the world axis compares only the image",
+    file: "packages/domain/src/scorecard/experiment-identity.ts",
+    from: "      if (!sameEnforcedWorld(bw, cw)) differences.push(b.caseId);",
+    to: "",
+    suite: ["--root", "packages/domain", "src/scorecard/enforced-world-axis.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

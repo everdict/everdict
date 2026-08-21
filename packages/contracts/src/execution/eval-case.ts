@@ -4,6 +4,7 @@ import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
 import { ImageProvenanceSchema } from "./image-provenance.js";
+import { ProvisionedWorldProofSchema } from "./provisioned-world.js";
 import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
@@ -206,6 +207,23 @@ export const ExecutionManifestSchema = z.object({
   // Which image bytes this case actually ran from. Required at era 2 — the reader enforces it, because the
   // stored blob must keep parsing rows written before the field existed.
   imageProvenance: ImageProvenanceSchema.optional(),
+  // ── AND THE REST OF THE WORLD, NOT JUST ITS IMAGE (arch-review 59 P1-high) ──────────────────────────
+  //
+  // The `execution_world` axis compared image BYTES and nothing else, so two sides of a comparison could hold
+  // that axis while one ran with a GPU and the other without, or one behind a deny-all egress policy and the
+  // other online. Those are different worlds by every definition this repo uses — `worldProofCovers` refuses
+  // an inexact match on exactly these fields at admission — and a regression measured across them is not
+  // evidence about the change under test, which is the whole thing the axis exists to say.
+  //
+  // The proof already existed and simply had no reader downstream: the lane attests what it ENFORCED, the
+  // in-container driver refuses a declaration the proof does not cover, and then nobody wrote it down. This
+  // is the attested value, recorded by the site that consumed it — not the case's declaration, which is what
+  // was ASKED for and is exactly the copy rule `protocol` forbids stamping as proof.
+  //
+  // Absent means what it means everywhere else on this axis: this placement constrained nothing it can name.
+  // Two such sides are not "the same world", they are two worlds nobody stated — which the axis reports as
+  // unverified rather than held.
+  world: ProvisionedWorldProofSchema.optional(),
 });
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 

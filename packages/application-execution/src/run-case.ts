@@ -16,6 +16,7 @@ import type {
   Grader,
   LiveScreenCapture,
   LiveTraceReport,
+  ProvisionedWorldProof,
   RunContext,
   Score,
   TraceEvent,
@@ -55,6 +56,11 @@ export interface RunCaseDeps {
   // Applied to the compute the GRADERS are handed, and to any compute they provision for themselves. The
   // harness's compute is untouched, so the key is not in the environment of the process being evaluated.
   graderEnv?: Record<string, string>;
+  // What the LANE that built this container says it enforced — carried here so the manifest can record it.
+  // `runCase` is the site that writes the manifest, and the world is as much a part of "which box did this
+  // run in" as the image bytes are (arch-review 59 P1-high). The in-container driver has already REFUSED a
+  // declaration this proof does not cover, so a recorded proof is a checked one rather than a claim.
+  worldProof?: ProvisionedWorldProof;
 }
 
 // The grading half's view of the compute: the same handle, with `graderEnv` on every exec. Wrapping the
@@ -494,6 +500,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
         // let a release gate find two batches identical on every sealed axis and green-light a comparison
         // between two different images.
         imageProvenance: compute.image,
+        // …and the rest of the world, as ATTESTED by the lane and already checked by the driver. See `world`
+        // on `ExecutionManifestSchema` for why comparing image bytes alone let two different worlds hold the
+        // `execution_world` axis.
+        ...(deps.worldProof ? { world: deps.worldProof } : {}),
       },
       trace,
       // The positive seal: this producer ran the collection path to completion (deferred collection is NOT
