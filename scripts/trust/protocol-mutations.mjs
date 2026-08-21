@@ -841,6 +841,27 @@ const MUTATIONS = [
     suite: ["--root", "packages/domain", "src/image/image-provenance.test.ts"],
     build: "@everdict/domain",
   },
+  {
+    // arch-review 59 P1-security. The digest appended to a truncated label, back to the 32 bits whose own
+    // comment called it "collision-free at any batch size we place" — a birthday bound, not a guarantee, on
+    // the selector a sibling sweep KILLS by.
+    name: "label identity — a destructive selector spends a 32-bit digest",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "const LABEL_DIGEST_LEN = 32;",
+    to: "const LABEL_DIGEST_LEN = 8;",
+    suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
+  },
+  {
+    // arch-review 59 P1-security. The pull Secret named by a namespace-global constant again, so two
+    // dispatches in one tenant namespace holding different grants for a host overwrite each other's object
+    // and a pod pulls under a credential it was never granted.
+    name: "registry auth — one Secret name per namespace, whatever the grant",
+    file: "packages/domain/src/image/image-ref.ts",
+    from: "  return `everdict-registry-${digest}`;",
+    to: '  return "everdict-registry-auth";',
+    suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
+    build: "@everdict/domain",
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

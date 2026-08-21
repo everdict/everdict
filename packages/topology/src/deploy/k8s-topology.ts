@@ -7,7 +7,12 @@ import {
   type TopologyService,
   serviceIsHostExec,
 } from "@everdict/contracts";
-import { dockerAuthConfigJson, pickRegistryAuth, registryAuthsForImages } from "@everdict/domain";
+import {
+  dockerAuthConfigJson,
+  pickRegistryAuth,
+  registryAuthSecretName,
+  registryAuthsForImages,
+} from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
   type StoreValues,
@@ -88,8 +93,9 @@ export interface K8sTopologyOptions {
   hostGatewayAddr?: string;
 }
 
-// Name of the Secret referenced by imagePullSecrets — one per namespace, apply upserts it idempotently.
-export const REGISTRY_AUTH_SECRET_NAME = "everdict-registry-auth";
+// Name of the Secret referenced by imagePullSecrets. CONTENT-ADDRESSED (`registryAuthSecretName`), so an apply
+// can only replace it with identical bytes — a namespace-global name made this a destructive upsert between
+// topologies holding different grants for one host.
 
 // Workspace registry credentials → a kubernetes.io/dockerconfigjson Secret. buildK8sManifests includes it only when
 // some service image's host matches (avoids scattering irrelevant credentials across the cluster).
@@ -97,7 +103,7 @@ export function registryAuthSecretManifest(auth: RegistryAuth | RegistryAuth[], 
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: REGISTRY_AUTH_SECRET_NAME, namespace: ns, labels: { app: "everdict" } },
+    metadata: { name: registryAuthSecretName(auth), namespace: ns, labels: { app: "everdict" } },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   } as K8sManifest & { type: string; data: Record<string, string> };
@@ -218,7 +224,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
               : {}),
             // Image auth — reference the Secret above only when a credential covers THIS service's image.
             ...(pickRegistryAuth(auths, svcImage(svc))
-              ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }
+              ? { imagePullSecrets: [{ name: registryAuthSecretName(auths) }] }
               : {}),
             // host.docker.internal parity (gap 5) — opt-in: only when a concrete gateway IP is configured (the Docker
             // "host-gateway" keyword is not a valid K8s hostAliases IP, so it is skipped).

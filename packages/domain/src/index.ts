@@ -506,6 +506,7 @@ export {
   pinDigest,
   registryAuthsForImages,
   registryAuthsOf,
+  registryAuthSecretName,
 } from "./image/image-ref.js";
 
 // image — which BYTES a case ran from: the manifest reader, the driver/placement merge, and the comparison

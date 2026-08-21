@@ -1,9 +1,9 @@
 import type { ServiceHarnessSpec, TrustZone } from "@everdict/contracts";
+import { registryAuthSecretName } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 import { K8sTopologyRuntime } from "./deploy/k8s-runtime.js";
 import {
-  REGISTRY_AUTH_SECRET_NAME,
   browserDeployName,
   buildBrowserManifests,
   buildK8sManifests,
@@ -85,14 +85,16 @@ describe("buildK8sManifests — workspace-registry pull auth (registryAuth)", ()
       type: string;
       data: Record<string, string>;
     };
-    expect(secret.metadata.name).toBe(REGISTRY_AUTH_SECRET_NAME);
+    expect(secret.metadata.name).toBe(registryAuthSecretName([AUTH]));
     expect(secret.type).toBe("kubernetes.io/dockerconfigjson");
     const config = JSON.parse(Buffer.from(secret.data[".dockerconfigjson"] ?? "", "base64").toString());
     expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:pull-tok");
     const deploy = manifests.find((m) => m.kind === "Deployment") as unknown as {
       spec: { template: { spec: { imagePullSecrets?: Array<{ name: string }> } } };
     };
-    expect(deploy.spec.template.spec.imagePullSecrets).toEqual([{ name: REGISTRY_AUTH_SECRET_NAME }]);
+    // The pod references the object THIS render applied, not a well-known name a sibling topology may have
+    // rewritten with a different grant.
+    expect(deploy.spec.template.spec.imagePullSecrets).toEqual([{ name: secret.metadata.name }]);
   });
 
   it("renders neither Secret nor imagePullSecrets when no image matches (no scattering of irrelevant credentials)", () => {

@@ -8,11 +8,10 @@ import {
   type RuntimeWorkRef,
   UpstreamError,
 } from "@everdict/contracts";
-import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
+import { perTenantTrustZones, registryAuthSecretName, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
 import {
-  K8S_REGISTRY_AUTH_SECRET,
   type K8sApi,
   K8sBackend,
   buildK8sJob,
@@ -242,7 +241,9 @@ describe("buildK8sJob / k8sJobName", () => {
       registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
     };
     const m = buildK8sJob(withAuth, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
-    expect(m.spec.template.spec.imagePullSecrets).toEqual([{ name: K8S_REGISTRY_AUTH_SECRET }]);
+    expect(m.spec.template.spec.imagePullSecrets).toEqual([
+      { name: registryAuthSecretName({ host: "ghcr.io", username: "bot", password: "pull-tok" }) },
+    ]);
     // On a host mismatch (the default job-runner image), not rendered.
     const off = buildK8sJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },

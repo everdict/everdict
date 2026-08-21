@@ -164,6 +164,18 @@ export function dockerAuthConfigJson(auth: RegistryAuth | RegistryAuth[]): strin
   return JSON.stringify({ auths });
 }
 
+// The name of the Secret that holds those bytes, DERIVED FROM THEM. A shared name ("everdict-registry-auth")
+// makes an apply a destructive upsert: two dispatches in one namespace holding different grants for the same
+// host write the same object, and whichever lands second silently re-credentials the other's pods — which is a
+// cross-run credential swap inside a tenant, not merely a race (arch-review 59 P1-security). Content-addressing
+// it means an apply can only ever REPLACE a Secret with identical content, so the operation is genuinely
+// idempotent rather than merely repeatable, and a grant that is still referenced cannot be overwritten by a
+// different one. One owner for both k8s lanes (dispatch + topology) so the two names can never drift.
+export function registryAuthSecretName(auth: RegistryAuth | RegistryAuth[]): string {
+  const digest = createHash("sha256").update(dockerAuthConfigJson(auth)).digest("hex").slice(0, 32);
+  return `everdict-registry-${digest}`;
+}
+
 // A single-segment repository name INSIDE a workspace namespace — the rule the managed store enforces at
 // resolve() and the rule a sandbox world id must satisfy to BE a repository (agent worlds W1: the world id
 // doubles as its snapshot repository). One authority so the two can never drift.

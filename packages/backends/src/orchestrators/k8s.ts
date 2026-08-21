@@ -47,6 +47,7 @@ import {
   dockerAuthConfigJson,
   laneImageProvenance,
   pickRegistryAuth,
+  registryAuthSecretName,
   registryAuthsOf,
 } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
@@ -936,7 +937,16 @@ export function caseSlug(caseId: string, max = 50): string {
 // unchanged already distinguishes itself, and leaving those values byte-identical keeps every job dispatched
 // under the previous spelling addressable by the same selector.
 const LABEL_VALUE_MAX = 63; // K8s label values: ≤63 chars, alphanumeric at both ends, [-_.] inside
-const LABEL_DIGEST_LEN = 8; // 32 bits of the id's sha256 — collision-free at any batch size we place
+// ── A DESTRUCTIVE SELECTOR DOES NOT SPEND A PROBABLY-UNIQUE NAME (arch-review 59 P2) ────────────────
+//
+// 32 chars of hex = 128 bits. This was 8 — 32 bits — under a comment calling it "collision-free at any batch
+// size we place", which is not a property 32 bits has: it is a birthday bound, and the sibling sweep SELECTS
+// ON THIS LABEL TO KILL. A collision puts another run's jobs inside a stop's blast radius. The exact
+// `RuntimeWorkRef.externalJobId` is the primary coordinate, which is why this was never a P0 and is exactly
+// why it was easy to leave: the weaker identifier is only reached on the paths nobody exercises.
+//
+// Still a legal label value (≤63 chars, alphanumeric at both ends), which is what made it short to begin with.
+const LABEL_DIGEST_LEN = 32;
 
 function labelValue(raw: string): string {
   const lossless = caseSlug(raw, LABEL_VALUE_MAX);
@@ -969,16 +979,24 @@ function dispatchSuffix(): string {
   return Math.random().toString(36).slice(2, 7);
 }
 
-// The Secret name imagePullSecrets references — one per namespace, apply idempotently upserts it (kept independent of job deletion).
-export const K8S_REGISTRY_AUTH_SECRET = "everdict-registry-auth";
-
+// ── …AND NEITHER DOES A CREDENTIAL (arch-review 59 P1-security) ─────────────────────────────────────
+//
+// This used to be ONE name per namespace, so two dispatches in a tenant's namespace carrying different
+// registry grants overwrote each other's Secret. The pod that pulled after the other's update pulled with the
+// other's credential: the image fails, or it succeeds under an account that was never granted it, and the
+// recipient isolation a short-lived grant exists to provide is gone. Verifier fan-out doubles the dispatch
+// rate against one namespace, which makes that ordinary rather than rare.
+//
+// CONTENT-ADDRESSED: the same grant is the same Secret, so an idempotent apply stays idempotent and a
+// concurrent dispatch with the same credential is not a race at all; a different grant is a different object.
+// The digest is over the docker config the Secret carries, which IS what makes two grants different.
 // Image credentials (transient job.registryAuths) → a dockerconfigjson Secret. When a credential covers case.image,
 // dispatch applies it together with the Job as a List. Takes one or many — one docker config can hold several hosts.
 export function k8sRegistryAuthSecret(auth: RegistryAuth | RegistryAuth[], ns: string): Record<string, unknown> {
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: K8S_REGISTRY_AUTH_SECRET, namespace: ns, labels: { app: "everdict" } },
+    metadata: { name: registryAuthSecretName(auth), namespace: ns, labels: { app: "everdict" } },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   };
@@ -1056,7 +1074,10 @@ export function buildK8sJob(
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
   // imagePullSecrets (dispatch applies the Secret above together) — only when a credential covers this image's host.
-  const pullAuth = Boolean(pickRegistryAuth(registryAuthsOf(job), image));
+  // The GRANT itself, not a boolean: the Secret's name is derived from it, and the dispatch applies the
+  // Secret from the same value — one name from one function, so a pod can never reference an object nobody
+  // applied (arch-review 59 P1-security).
+  const pullAuth = pickRegistryAuth(registryAuthsOf(job), image);
   const tenant = job.tenant ?? "default";
   // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
   // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
@@ -1115,7 +1136,9 @@ export function buildK8sJob(
           ...(opts.nodeSelector ? { nodeSelector: opts.nodeSelector } : {}),
           ...(opts.tolerations ? { tolerations: opts.tolerations } : {}),
           ...(opts.hostNetwork ? { hostNetwork: true } : {}),
-          ...(pullAuth ? { imagePullSecrets: [{ name: K8S_REGISTRY_AUTH_SECRET }] } : {}),
+          // The Secret THIS dispatch applies, by the grant it carries — the two are one name from one
+          // function, so a pod can never reference an object nobody applied.
+          ...(pullAuth ? { imagePullSecrets: [{ name: registryAuthSecretName(pullAuth) }] } : {}),
           containers: [
             {
               name: "agent",
