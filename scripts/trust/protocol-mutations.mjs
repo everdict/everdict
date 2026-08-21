@@ -183,11 +183,12 @@ const MUTATIONS = [
   {
     // arch-review 58 follow-through. A judge's evidence seal is best-effort BY CONTRACT and its failure was
     // SILENT, so a judgment whose account is gone read exactly like one whose account is on file. Swallowing
-    // the outcome again must go red.
+    // the outcome again must go red. Re-aimed by arch-review 59, which replaced the assignment with the
+    // union the store's own answer is read into — the failure arm is the same claim, one expression over.
     name: "R58 — a lost judge evidence seal is silent again",
     file: "apps/api/src/core/execution/judge-runner.ts",
-    from: '    input.seal.outcome = sealed ? "sealed" : "unsealed";',
-    to: "",
+    from: '          status: "unsealed",',
+    to: '          status: "sealed" as never,',
     suite: ["--root", "apps/api", "src/core/execution/judge-seal-outcome.counterexample.test.ts"],
   },
   {
