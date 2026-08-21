@@ -133,8 +133,17 @@ export class RecoveryPlanner {
             );
             // Exhaustive: `unknown` means this case's job may still be running, so it is neither adopted nor
             // re-dispatched — it waits.
-            if (decision?.kind === "adopted") {
-              adoptable = decision.result;
+            // STAGE-EXHAUSTIVE (arch-review 60 P0). A case's agent half and its private verifier are two
+            // handles under one execution id, and this loop takes the first that answers. A verifier's
+            // invocation is a verdict ABOUT an execution, not the execution's own result: adopting it here
+            // would terminalize the child carrying `harness: "verifier"`, an empty snapshot and the verifier's
+            // scores as though they were the agent's raw evidence — and then judge that.
+            //
+            // Skipped rather than treated as absent: the verifier's own row settles on its own path, and this
+            // handle says nothing about whether the AGENT's half is recoverable. Falling through leaves the
+            // case to the re-drive, which is the honest answer when the agent's evidence is gone.
+            if (decision?.kind === "adopted" && decision.adopted.stage === "case") {
+              adoptable = decision.adopted.result;
               break;
             }
             if (decision?.kind === "unknown") {

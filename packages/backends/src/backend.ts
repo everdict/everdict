@@ -83,6 +83,7 @@ import type {
   ManagedDispatchAuthority,
   VerifierDispatchHooks,
 } from "@everdict/application-control";
+import type { AdoptedWork } from "@everdict/contracts";
 
 // The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler
 // already rejects queued entries with, so callers classify it the same way).
@@ -105,7 +106,10 @@ export interface Backend extends Dispatcher {
 // (safe to re-dispatch) with "couldn't determine" (re-dispatching may double-spend a job that is actually still
 // live). The old `CaseResult | undefined` collapsed both into undefined and quietly risked double compute.
 export type AdoptOutcome =
-  | { status: "adopted"; result: CaseResult } // harvested a finished job's result → do NOT re-dispatch
+  // Harvested a finished job's answer → do NOT re-dispatch. The STAGE travels with it (arch-review 60 P0):
+  // a case's agent half and its private verifier are two handles under one execution id, and a caller that
+  // takes "the first adopted answer" must be unable to settle the wrong one as the case's result.
+  | { status: "adopted"; adopted: AdoptedWork }
   | { status: "absent" } // the listing succeeded and there is definitively no job for this case → safe to re-dispatch
   | { status: "unknown" }; // an API/parse failure left it ambiguous → re-dispatch MAY double-spend a live job
 

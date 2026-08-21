@@ -7,6 +7,7 @@ import {
   type VerifierInvocation,
   type VerifierJob,
   type WorkPresence,
+  adoptedResultFrom,
   caseJobPayload,
   describeNomadPlacementFailure,
   evalContainerSecretEnv,
@@ -1284,24 +1285,16 @@ export class NomadBackend
         `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
       );
       if (logs.status >= 300) return { status: "unknown" };
-      // The handle says which document this container printed — see `adoptedResultFrom`. Passing the
-      // verifier's identity through is what lets a verdict be adopted after a restart AND checked by the same
-      // rule as one read in-line (arch-review 59 P1).
+      // The handle says which document this container printed — see `adoptedResultFrom`, which is the ONE
+      // reader and now answers a STAGE (arch-review 59 P1 · 60 P0). A verifier's answer is a verifier
+      // invocation, not a case-shaped shell of one: the shell is what let a recovery settle a verdict as a
+      // whole run's result.
+      if (work.verifier !== undefined) return { status: "adopted", adopted: adoptedResultFrom(logs.text, work) };
+      // The case branch keeps `parseResultOrExplain`, which turns a failed parse into a CLASSIFIED result
+      // carrying this alloc's placement events — evidence the raw reader has no way to collect.
       return {
         status: "adopted",
-        result: await this.parseResultOrExplain(
-          logs.text,
-          allocId,
-          ns,
-          work.verifier
-            ? {
-                runId: work.runId,
-                caseId: work.verifier.caseId,
-                planDigest: work.verifier.planDigest,
-                workspaceDigest: work.verifier.workspaceDigest,
-              }
-            : undefined,
-        ),
+        adopted: { stage: "case", result: await this.parseResultOrExplain(logs.text, allocId, ns) },
       };
     } catch {
       return { status: "unknown" };

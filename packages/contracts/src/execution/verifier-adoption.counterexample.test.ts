@@ -52,11 +52,18 @@ const verifierLogs = (over: Record<string, unknown> = {}) =>
   } as never)}\ncleanup\n`;
 
 describe("[R59 COUNTEREXAMPLE] a verifier's verdict is adoptable after a restart", () => {
-  it("reads the verifier wire when the handle names a verifier", () => {
-    const result = adoptedResultFrom(verifierLogs(), VERIFIER_WORK);
-    expect(result.scores, "a verifier's verdict could not be adopted after a restart").toHaveLength(1);
-    expect(result.scores[0]).toMatchObject({ metric: "tests_pass", value: 1 });
-    expect(result.caseId).toBe("c1");
+  it("reads the verifier wire when the handle names a verifier, TAGGED as a verifier", () => {
+    const adopted = adoptedResultFrom(verifierLogs(), VERIFIER_WORK);
+    // The stage, first: a verifier's answer shaped as a `CaseResult` is what let a recovery settle a verdict
+    // as a whole run's result (arch-review 60 P0). The scores below are worth nothing without it.
+    expect(adopted.stage, "a verifier's answer is indistinguishable from a case's").toBe("verifier");
+    if (adopted.stage !== "verifier") throw new Error("unreachable");
+    expect(adopted.invocation.scores, "a verifier's verdict could not be adopted after a restart").toHaveLength(1);
+    expect(adopted.invocation.scores[0]).toMatchObject({ metric: "tests_pass", value: 1 });
+    // …and it carries the coordinates a receipt joins on, because it IS the lane's own return type now
+    // rather than a shell of somebody else's.
+    expect(adopted.invocation).toMatchObject({ planDigest: "sha256:plan", workspaceDigest: "sha256:ws" });
+    expect(adopted.invocation.work?.externalJobId).toBe(VERIFIER_WORK.externalJobId);
   });
 
   it("still reads the CASE wire for an ordinary handle", () => {
@@ -68,7 +75,10 @@ describe("[R59 COUNTEREXAMPLE] a verifier's verdict is adoptable after a restart
       scores: [],
       snapshot: { kind: "prompt", output: "done" },
     });
-    expect(adoptedResultFrom(logs, AGENT_WORK).harness).toBe("agent@1");
+    const adopted = adoptedResultFrom(logs, AGENT_WORK);
+    expect(adopted.stage).toBe("case");
+    if (adopted.stage !== "case") throw new Error("unreachable");
+    expect(adopted.result.harness).toBe("agent@1");
   });
 
   it("REFUSES a verdict about a different unit, exactly as the in-line path does", () => {

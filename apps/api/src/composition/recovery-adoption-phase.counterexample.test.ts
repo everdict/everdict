@@ -51,7 +51,10 @@ function world(opts: { adopt: "adopted" | "unknown"; phases: string[] }) {
     adoptWorkFn: async () => {
       phases.push("adopt");
       return opts.adopt === "adopted"
-        ? { kind: "adopted", result: { caseId: "c1", harness: "h@1", trace: [], scores: [] } }
+        ? {
+            kind: "adopted",
+            adopted: { stage: "case", result: { caseId: "c1", harness: "h@1", trace: [], scores: [] } },
+          }
         : { kind: "unknown", reason: "the cluster would not say" };
     },
   } as unknown as ConstructorParameters<typeof DeferredRecoverySweep>[0];

@@ -22,6 +22,7 @@ import {
   isWorkControllable,
 } from "@everdict/backends";
 import type {
+  AdoptedWork,
   AdoptionDecision,
   CaseResult,
   KillOutcome,
@@ -139,19 +140,22 @@ export function buildRuntimeAccess(deps: {
     runtimeList: string | undefined,
     work: RuntimeWorkRef,
   ): Promise<AdoptionDecision> => {
-    let harvested: CaseResult | undefined;
+    let harvested: AdoptedWork | undefined;
     let unresolved: string | undefined;
     const { unresolved: lanes } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isWorkControllable(backend)) return false;
       const outcome = await backend.adoptWork(work);
       if (outcome.status === "adopted") {
-        harvested = outcome.result;
+        // The STAGE travels — this seam does not decide what an answer means, it carries what it is
+        // (arch-review 60 P0). Collapsing it to a `CaseResult` here is what let a verifier's verdict reach
+        // `Run.adopt` as a run's whole result.
+        harvested = outcome.adopted;
         return true;
       }
       if (outcome.status === "unknown") unresolved = "a runtime could not say whether this work is still live";
       return false;
     });
-    if (harvested !== undefined) return { kind: "adopted", result: harvested };
+    if (harvested !== undefined) return { kind: "adopted", adopted: harvested };
     // A lane we could not even resolve is the same fact as a cluster that would not answer: nothing about
     // this work's liveness was established, so nothing may be decided from it.
     if (unresolved !== undefined) return { kind: "unknown", reason: unresolved };
@@ -538,8 +542,21 @@ export async function recoverStandaloneRun(
         }),
       );
       // Exhaustive: the third case is the one the previous shape allowed a caller to skip.
-      if (decision.kind === "adopted") {
-        adopted = decision.result;
+      // ── ONLY THE AGENT'S OWN HALF SETTLES THIS RUN (arch-review 60 P0) ──────────────────────────
+      //
+      // A run with a private verifier holds TWO handles under one execution id, and this loop takes the
+      // first that answers. `adoptWork` used to answer a `CaseResult` for both, so when the agent's Job had
+      // been reaped and the verifier's was still there, the verifier's shell — `harness: "verifier"`, empty
+      // trace, empty snapshot — went to `Run.adopt`, which writes `status: "succeeded"` with that value as
+      // the run's result and asks nothing about where it came from. The final record was a verdict standing
+      // in for the execution it was a verdict about.
+      //
+      // Skipped rather than treated as absent or unknown: this handle says nothing about whether the AGENT's
+      // half is recoverable, and the verifier's own row settles on its own path. Falling through to the
+      // no-adoption path is the honest answer — the agent's evidence is gone, so the run re-drives or
+      // tombstones under its own fence, which is what it already does when nothing adopts.
+      if (decision.kind === "adopted" && decision.adopted.stage === "case") {
+        adopted = decision.adopted.result;
         break;
       }
       if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };

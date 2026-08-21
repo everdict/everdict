@@ -1310,7 +1310,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         // document, and adopting it with the case parser is what made a run defer forever (arch-review 59 P1).
         const result = adoptedResultFrom(await api.podLogs(work.externalJobId, ns), work);
         await api.deleteJob(work.externalJobId, ns).catch(() => {});
-        return { status: "adopted", result };
+        return { status: "adopted", adopted: result };
       });
     } catch {
       return { status: "unknown" };

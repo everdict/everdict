@@ -1,4 +1,4 @@
-import type { CaseResult } from "./eval-case.js";
+import type { AdoptedWork } from "./adopted-result.js";
 // ── A READ THAT FAILED IS NOT AN EMPTY SET (arch-review 53, Wave A.5) ────────────────────────────────
 //
 // The system kept converting "I could not find out" into "there is nothing", by one idiom in several
@@ -61,6 +61,6 @@ export function readEstablished<T>(result: ReadResult<T>): boolean {
 // `unknown` is not an error and not an absence. It is a decision NOT to decide, and the only correct response
 // is to leave the record for the next sweep.
 export type AdoptionDecision =
-  | { kind: "adopted"; result: CaseResult }
-  | { kind: "absent" }
-  | { kind: "unknown"; reason: string };
+  // The STAGE, not a bare result (arch-review 60 P0): a case has two halves under one execution id, and a
+  // recovery that takes "the first adopted answer" will take whichever one answered. See `AdoptedWork`.
+  { kind: "adopted"; adopted: AdoptedWork } | { kind: "absent" } | { kind: "unknown"; reason: string };
