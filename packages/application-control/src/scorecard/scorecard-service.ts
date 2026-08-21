@@ -27,7 +27,7 @@ import {
   killConverged,
   presenceConverged,
 } from "@everdict/contracts";
-import { CANCELLED_ERROR_CODE, JudgeIdSchema, readOrUnknown } from "@everdict/contracts";
+import { CANCELLED_ERROR_CODE, JudgeIdSchema, mayStillCreateWork, readOrUnknown } from "@everdict/contracts";
 import type { CaseRunRef } from "@everdict/contracts/wire";
 import {
   type AnalysisConfig,
@@ -1196,7 +1196,15 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         `the attempt ledger could not say whether this batch still has an authorized submitter (${pending.reason}), so its cancellation has not converged.`,
       );
     if (pending.kind === "read") {
-      const reserved = pending.value.filter((a) => a.state === "reserved");
+      // THE OWNED LIST, not a spelling of it (arch-review 60 P0). This read `state === "reserved"` and, below,
+      // `state === "active"` — a subset of a state machine that had grown, so an attempt already stamped
+      // `executing` fell through both guards while its submitter had still created nothing. `executing` now
+      // means the object EXISTS (the lanes stamp it after the create returns), so it is covered by the handle
+      // kill+probe above; what is left is every state that can still cause a birth, and that set has one owner.
+      const unborn = pending.value.filter((a) => mayStillCreateWork(a.state));
+      // A row with no reservation yet cannot be activated once revoked — `reserveWork` admits only `created`,
+      // so taking it back is what stops the dispatch that has not asked for a handle yet.
+      const reserved = unborn.filter((a) => a.state === "created" || a.state === "reserved");
       for (const a of reserved)
         await attempted(
           (this.deps.attempts as ExecutionAttemptStore).revokeReservation(a.attemptId).then(() => ({
@@ -1221,7 +1229,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       // Inside the window the probe is genuinely not authoritative — the container may be milliseconds from
       // existing — which is why the debt stays. The window is what separates "may still be born" from
       // "nothing is coming", and it is generous: the interval it bounds is one API call.
-      const activeBirths = pending.value.filter((a) => a.state === "active");
+      const activeBirths = unborn.filter((a) => a.state === "active");
       const at = Date.parse(this.now());
       const abandoned = activeBirths.filter((a) => at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS);
       for (const a of abandoned)

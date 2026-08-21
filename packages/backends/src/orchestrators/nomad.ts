@@ -1064,10 +1064,6 @@ export class NomadBackend
       // no lifetime let a paused driver create work after a cancellation had verified there was none.
       await requireActivation(job, work, options?.authority);
     }
-    // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire above, before the
-    // reservation and before the submit, so a reservation failure left a record marked `running` with no
-    // cluster object anywhere and nothing to reconcile it against. `running` means the orchestrator was asked.
-    options?.onStarted?.();
     // The infra-plane record of THIS dispatch (submission, blocked verdicts, placement) — appended to the
     // result's trace so the sealed trajectory keeps the orchestrator's account after the job is GC'd.
     const t0 = Date.now();
@@ -1090,6 +1086,14 @@ export class NomadBackend
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
+    // ── AND ONLY NOW IS THIS RUN "STARTED" (arch-review 54 Phase 1 · 60 P0) ──────────────────────────
+    //
+    // 54 moved this below the reservation, so a reservation failure could not leave a record marked `running`
+    // with no cluster object. It still fired BEFORE the submit, and the attempt stamp that rides it is
+    // `executing` — a state the cancellation's birth guard does not cover, so a submitter paused between the
+    // stamp and this POST created its job after the certificate said zero. Rule `protocol`: a lifecycle stamp
+    // names an observed fact, never an intended one.
+    options?.onStarted?.();
     try {
       const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting, mark);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";

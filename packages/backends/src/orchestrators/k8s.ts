@@ -1903,7 +1903,6 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     await requireActivation(job, work, options?.authority);
     // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire before both the
     // reservation and the apply, so a reservation failure left a record marked `running` with no Job anywhere.
-    options?.onStarted?.();
     // With kubeconfig auth, the temp kubeconfig lives only for the one job (removed after completion/failure). cleanup after deleteJob.
     return this.withApi(async (api) => {
       await api.ensureNamespace(ns);
@@ -1927,6 +1926,16 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       if (netPolicy) await api.applyJob(netPolicy, ns);
       const t0 = Date.now();
       await api.applyJob(payload, ns);
+      // ── STARTED MEANS THE OBJECT EXISTS (arch-review 60 P0) ──────────────────────────────────────
+      //
+      // This fired before `ensureNamespace`, so the run flipped to `running` and the attempt was stamped
+      // `executing` while nothing had been created. The cancellation reads state to decide what may still be
+      // born, and `executing` is in neither of its guards — probe absent, certificate zero, and the paused
+      // submitter then created the Job. Rule `protocol`: a lifecycle stamp names an observed fact.
+      //
+      // After the apply, so the ledger's `executing` is a statement about an object a teardown can address,
+      // and the states that can still cause a birth are exactly the ones `mayStillCreateWork` names.
+      options?.onStarted?.();
       // …and now the policy learns whose dependent it is. `ttlSecondsAfterFinished` deletes the Job on the
       // ordinary path and knows nothing about a policy beside it, so the cluster's own garbage collector is
       // what cleans up — which needs the uid the Job only has once it exists. Best-effort: a failed patch

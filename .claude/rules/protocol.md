@@ -181,6 +181,65 @@ an EXPLICIT allowlist for what a child is exec'd with, never `{ ...process.env }
 is actually true: "the agent no longer inherits it from us" is a different sentence from "the agent cannot read
 it", and only one of them was earned.
 
+## A LIFECYCLE STAMP NAMES AN OBSERVED FACT, NEVER AN INTENDED ONE
+`executing` was stamped by the `onStarted` hook, and both managed lanes fired that hook BEFORE the external
+object existed:
+
+    reserve → activate → onStarted (→ executing) → ensureNamespace → NetworkPolicy → applyJob
+
+So the ledger said a case was executing while nothing had been created, and the cancellation that reads state
+to decide what may still be born read a lie. The teardown's birth guard covers `reserved` (revoke it) and
+`active` (stay owed), and an attempt that had already been stamped `executing` fell through both — probe says
+absent, certificate says zero, and the paused submitter then creates the Job (arch-review 60 P0).
+
+The stamp was not wrong about the future; it was wrong about the tense. A state a guard consumes must be a
+statement about what HAS happened, so:
+
+- The transition that means "the effect exists" is written after the effect returns, not beside the intent to
+  cause it. A hook fired at the top of a function names the function's start, which is not an event anybody
+  outside this process can observe.
+- **The set of states from which an effect may still be created is ONE exported list**, consumed by every
+  guard. Spelling `state === "reserved" || state === "active"` at the teardown is a subset somebody has to
+  keep in sync with a state machine that grows — and it grew, and nobody did. Adding a state to the machine
+  must break the guard's compile, not silently narrow it.
+
+## A TIME-BASED LEASE IS NOT A FENCE
+An expiry says "the holder has probably died". It does not say "the holder can no longer act", and the two
+differ exactly when it matters: a process paused past its lease wakes up holding an activation it was granted
+and never re-reads, so revoking the row changes nothing it will look at. Adding an age comparison bought
+liveness for the teardown and bought the submitter nothing (arch-review 60 P0).
+
+A fence is read BY THE THING BEING FENCED. So an authorization whose revocation must actually stop an effect
+needs one of:
+
+- the holder re-proves at the moment of the effect (`requireActivation` immediately before the create — this
+  narrows the window to one call, it does not remove it);
+- the holder UNDOES its own effect when it learns the authorization is gone (create, re-verify, delete what
+  it just made) — the shape available when the effect is addressable and reversible;
+- the object is created INERT and a later transition makes it runnable, so a cancellation always has
+  something to address and never has to reason about a birth that has not happened yet.
+
+Clock skew is the smaller half of this and still real: an age computed from an application's `now()` against a
+store's `updated_at` is two clocks. Say which one is authoritative, or compare within one.
+
+## AN ADOPTED RESULT CARRIES WHICH STAGE PRODUCED IT
+Adoption recovers an answer from work this process did not dispatch. When a case has two halves — the agent's
+and the private verifier's — both are handles under one execution id, and a recovery that iterates handles and
+takes the first `adopted` will take whichever answered.
+
+`adoptedResultFrom` returned a `CaseResult` for both, because the verifier's scores had to reach a caller that
+wanted that shape. The shell it built (`harness: "verifier"`, empty trace, empty snapshot) was documented as
+"nothing persists this", and then `Run.adopt` persisted it: a run whose agent Job had been reaped settled
+`succeeded` carrying the verifier's document as the case's whole evidence (arch-review 60 P0).
+
+A value shaped like the final document IS the final document to every caller that does not ask. So:
+
+- Adoption returns a **stage-tagged union** (`{kind: "case", result}` | `{kind: "verifier", invocation}`), and
+  the settle path names the case it handles. A shell that type-checks as the outcome will be settled as one.
+- A two-phase case makes its FIRST phase durable before starting the second, or a crash between them leaves
+  the only copy of the agent's half in a dead process's memory and the recovery has nothing to merge into.
+- "The caller only takes the scores" is a claim about a caller; write it as a type or it is a hope.
+
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
 2. `pnpm protocol-mutations` neutralizes the new protocol in the production file and the owning suite goes RED.

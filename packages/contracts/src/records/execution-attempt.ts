@@ -79,6 +79,27 @@ export function isTerminalAttemptState(state: ExecutionAttemptState): boolean {
 // A new state is not shipped until every guard that mentions its NEIGHBOURS has been re-read.
 export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved", "active"];
 
+// ── THE STATES FROM WHICH AN EXTERNAL OBJECT MAY STILL BE BORN (arch-review 60 P0) ───────────────────
+//
+// A cancellation certifies zero by killing every handle the ledger holds and reading each one back absent.
+// That is "nothing is running"; it is not "nothing can start", and the difference is exactly the attempts
+// whose submitter has not created its object yet. The teardown spelled that set inline as
+// `state === "reserved"` and `state === "active"` — a subset of a state machine that had grown, so an
+// attempt already stamped `executing` fell through both guards, and a submitter paused between the stamp and
+// `applyJob` created its Job after the certificate said zero.
+//
+// It is deliberately the SAME list as the one above, and not by coincidence: `executing` is the report that
+// the object exists, so every state that can still reach it is a state that can still cause a birth. Derived
+// rather than copied, because two lists that must agree are two lists that will not.
+//
+// A guard consumes THIS. Adding a state to the machine then breaks the guard's exhaustiveness rather than
+// silently narrowing it, which is the failure this constant exists to make impossible.
+export const MAY_STILL_CREATE_WORK: readonly ExecutionAttemptState[] = EXECUTING_PREDECESSOR_STATES;
+
+export function mayStillCreateWork(state: ExecutionAttemptState): boolean {
+  return MAY_STILL_CREATE_WORK.includes(state);
+}
+
 // ONE PHYSICAL EXECUTION, as the ledger holds it.
 export const ExecutionAttemptRecordSchema = z.object({
   // `<executionId>#g<generation>` — the SAME spelling the receipt and the sealed trajectory use (attemptIdOf).

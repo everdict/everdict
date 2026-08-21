@@ -993,6 +993,34 @@ const MUTATIONS = [
     to: "        void path;",
     suite: ["--root", "packages/job-runner", "src/job-payload-env.counterexample.test.ts"],
   },
+  {
+    // arch-review 60 P0. `executing` stamped before the object exists, so the cancellation's birth guard —
+    // which covers only the pre-birth states — sees nothing to wait for and certifies zero while a paused
+    // submitter still has an `applyJob` to make.
+    name: "started-means-born — the K8s lane reports executing before its Job exists",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "      await requireActivation(job, work, options?.authority);",
+    to: "      await requireActivation(job, work, options?.authority);\n      options?.onStarted?.();",
+    suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
+  },
+  {
+    // …and the Nomad lane, whose stamp sat between the reservation and the submit for the same reason.
+    name: "started-means-born — the Nomad lane reports executing before its job exists",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '    const submit = await this.http.request("POST", "/v1/jobs"',
+    to: '    options?.onStarted?.();\n    const submit = await this.http.request("POST", "/v1/jobs"',
+    suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
+  },
+  {
+    // arch-review 60 P0. Adoption's stage ignored, so a verifier's verdict is settled as the whole run's
+    // result — `harness: "verifier"`, no agent trace, no snapshot, a verdict standing in for the execution it
+    // was a verdict about.
+    name: "adoption stage — a verifier's verdict settles as the run's own result",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: '      if (decision.kind === "adopted" && decision.adopted.stage === "case") {',
+    to: '      if (decision.kind === "adopted" && decision.adopted.stage !== "nothing") {',
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
