@@ -1251,7 +1251,25 @@ export class NomadBackend
         `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
       );
       if (logs.status >= 300) return { status: "unknown" };
-      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId, ns) };
+      // The handle says which document this container printed — see `adoptedResultFrom`. Passing the
+      // verifier's identity through is what lets a verdict be adopted after a restart AND checked by the same
+      // rule as one read in-line (arch-review 59 P1).
+      return {
+        status: "adopted",
+        result: await this.parseResultOrExplain(
+          logs.text,
+          allocId,
+          ns,
+          work.verifier
+            ? {
+                runId: work.runId,
+                caseId: work.verifier.caseId,
+                planDigest: work.verifier.planDigest,
+                workspaceDigest: work.verifier.workspaceDigest,
+              }
+            : undefined,
+        ),
+      };
     } catch {
       return { status: "unknown" };
     }

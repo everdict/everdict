@@ -41,6 +41,28 @@ export const RuntimeWorkRefSchema = z.object({
   // The namespace the work was placed in. Absent means "the runtime's default"; it never means "search them
   // all" — the sweep across namespaces is precisely the defect this handle replaces.
   namespace: z.string().optional(),
+  // ── WHICH PROTOCOL READS THIS WORK'S ANSWER (arch-review 59 P1) ──────────────────────────────────
+  //
+  // A verifier's container prints a DIFFERENT document than a case's — its own sentinel, its own schema,
+  // deliberately unreadable as the other (arch-review 58). Adoption did not know that. Boot recovery
+  // enumerates a run's handles and adopts each with the case parser, and a standalone run's verifier row
+  // carries the same `executionId`, so its handle is in that list: the case parser finds no sentinel, throws,
+  // and the whole run answers `retry_later` — forever, escalating after five attempts, while its agent's
+  // compute sat perfectly adoptable one handle away.
+  //
+  // Present ONLY on a verifier's handle, and it carries the identity the answer must match, because
+  // `parseVerifierResult` requires it: a verdict adopted after a restart is exactly as much this case's as
+  // one adopted in-line, and the coordinates cannot be re-derived at the recovery site without becoming the
+  // downstream re-derivation rule `protocol` L3 forbids. It rides the HANDLE rather than a new ledger column
+  // because the handle is already the persisted coordinate (`runtime_work` jsonb) and is already what a
+  // control call is addressed by — one object, so the two halves cannot come apart in storage.
+  verifier: z
+    .object({
+      planDigest: z.string().min(1),
+      workspaceDigest: z.string().min(1),
+      caseId: z.string().min(1),
+    })
+    .optional(),
 });
 export type RuntimeWorkRef = z.infer<typeof RuntimeWorkRefSchema>;
 

@@ -917,6 +917,15 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "packages/domain", "src/scorecard/enforced-world-axis.counterexample.test.ts"],
   },
+  {
+    // arch-review 59 P1. Adoption back to one document, so a verifier's handle — which sits in the same list
+    // a run's boot recovery enumerates — throws, and the whole run answers retry_later on every boot.
+    name: "adoption — every container is assumed to print the case wire",
+    file: "packages/contracts/src/execution/adopted-result.ts",
+    from: "  if (work.verifier === undefined) return parseResult(stdout);",
+    to: "  return parseResult(stdout);",
+    suite: ["--root", "packages/contracts", "src/execution/verifier-adoption.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

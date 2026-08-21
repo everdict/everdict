@@ -5,6 +5,7 @@ import {
   type VerifierInvocation,
   type VerifierJob,
 } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 
@@ -74,11 +75,23 @@ export async function verifierOperation(
     ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),
   });
   const attemptId = opened.attemptId;
+  // The identity a verdict for this unit must carry, exactly as `parseVerifierResult` demands it — so a
+  // container adopted after a restart is checked by the same rule as one read in-line.
+  const verifierCoordinate = {
+    planDigest: job.plan.digest,
+    workspaceDigest: contentDigest(job.workspace),
+    caseId: job.caseId,
+  };
 
   try {
     const invocation = await dispatch(job, {
       authority: {
-        reserve: async (work) => await attempts.reserveWork(attemptId, { ...work, attemptId }),
+        // …and WHICH PROTOCOL reads this work's answer, stamped where the handle becomes durable. A verifier
+        // prints a different document than a case, and adoption had no way to know which one a handle names —
+        // see `verifier` on `RuntimeWorkRefSchema` for what a run's recovery did with the wrong parser. Born
+        // here, from the job in hand, rather than re-derived from an id suffix at the recovery site.
+        reserve: async (work) =>
+          await attempts.reserveWork(attemptId, { ...work, attemptId, verifier: verifierCoordinate }),
         // The verifier's own re-presentation: its row is opened under the batch's parent, so a cancellation
         // that settled while the container was being created refuses the birth here rather than after it.
         activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),

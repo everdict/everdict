@@ -7,6 +7,7 @@ import {
   type Score,
   type VerifierInvocation,
   type VerifierJob,
+  adoptedResultFrom,
   caseJobPayload,
   evalContainerSecretEnv,
   extractLiveEvents,
@@ -1265,7 +1266,9 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         if (jobs === undefined) return { status: "unknown" };
         if (!jobs.some((j) => j.name === work.externalJobId)) return { status: "absent" };
         await this.waitForJob(api, work.externalJobId, ns);
-        const result = parseResult(await api.podLogs(work.externalJobId, ns));
+        // The ONE reader, which chooses the protocol from the handle — a verifier prints a different
+        // document, and adopting it with the case parser is what made a run defer forever (arch-review 59 P1).
+        const result = adoptedResultFrom(await api.podLogs(work.externalJobId, ns), work);
         await api.deleteJob(work.externalJobId, ns).catch(() => {});
         return { status: "adopted", result };
       });
