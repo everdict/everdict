@@ -22,8 +22,8 @@ const MUTATIONS = [
     // ACCEPTS. Splitting them again must go red.
     name: "R59 — the Nomad proof is a copy of the request rather than of the effect",
     file: "packages/backends/src/orchestrators/nomad.ts",
-    from: "    const gpu = job.evalCase.resources?.gpu ?? harness?.gpu ?? opts.gpu;",
-    to: "    const gpu = harness?.gpu ?? opts.gpu;",
+    from: "  const gpu = job.evalCase.resources?.gpu ?? harness?.gpu ?? opts.gpu;",
+    to: "  const gpu = harness?.gpu ?? opts.gpu;",
     suite: ["--root", "packages/backends", "src/orchestrators/nomad-world-proof.counterexample.test.ts"],
   },
   {
