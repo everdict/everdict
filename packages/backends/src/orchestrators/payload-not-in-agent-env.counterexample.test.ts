@@ -1,5 +1,5 @@
 import type { CaseJob } from "@everdict/contracts";
-import { JOB_PAYLOAD_FILE_ENV } from "@everdict/contracts";
+import { JOB_PAYLOAD_FILE_ENV, JOB_PAYLOAD_FS_GROUP } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { buildK8sJob } from "./k8s.js";
 import { buildNomadJob } from "./nomad.js";
@@ -109,6 +109,39 @@ describe("[R59 COUNTEREXAMPLE] no lane hands the agent's container the job paylo
     const nomad = buildNomadJob(JOB(), { addr: "http://n:4646", image: "runner:1" }, "j1", "dmVyaWZpZXItcGF5bG9hZA==");
     expect(agentEnvNomad(nomad).EVERDICT_VERIFIER_JOB).toBeUndefined();
     expect(nomad.Job.TaskGroups[0]?.Tasks[0]?.Templates?.[0]?.DestPath).toBe("local/verifier");
+  });
+
+  it("the payload is readable by a container running a DIFFERENT user than the writer", () => {
+    // The init step runs the runner image and the agent's container may run the TENANT's own, so the two have
+    // whatever `USER` their Dockerfiles declare and nothing makes them agree. At 0600 owned by the writer, a
+    // task image running as 1000 could not read a file an init image running as 0 had written, and every such
+    // pairing failed at startup for want of a payload it was looking straight at (arch-review 60 P1).
+    //
+    // Verified on a real cluster both ways before this was written: with the fsGroup, `uid=1000 gid=3000
+    // groups=3000 20250` reads `-rw-r----- root 20250`; without it, the same pod reads EACCES off
+    // `-rw------- root root`. This pins the two manifest facts that produced that.
+    const spec = (
+      buildK8sJob(JOB(), { image: "runner:1" }, "evd-c1", "ns") as {
+        spec: {
+          template: {
+            spec: {
+              securityContext?: { fsGroup?: number };
+              initContainers?: Array<{ command?: string[] }>;
+            };
+          };
+        };
+      }
+    ).spec.template.spec;
+
+    // The pod joins one group, so K8s chowns the volume to it and adds it to every container.
+    expect(spec.securityContext?.fsGroup, "nothing makes the two images' users agree on this volume").toBe(
+      JOB_PAYLOAD_FS_GROUP,
+    );
+    // …and the file is written group-readable, or the group would grant nothing. `others` still get nothing:
+    // the agent under test is inside the recipient, not outside it.
+    expect(spec.initContainers?.[0]?.command?.[2], "the payload is written owner-only across a UID boundary").toContain(
+      "umask 027",
+    );
   });
 
   it("the fixture really does carry secrets — otherwise every assertion above is vacuous", () => {

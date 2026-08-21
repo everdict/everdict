@@ -40,5 +40,19 @@ export const JOB_PAYLOAD_VOLUME = "everdict-job-payload";
 // for as long as it lived, which is the same disclosure one layer down. The value is a quoted expansion of a
 // base64 string (`A-Za-z0-9+/=`), so there is nothing for the shell to split or interpret.
 export function jobPayloadWriteCommand(destPath: string, envName: string): string[] {
-  return ["sh", "-c", `umask 077; printf %s "$${envName}" > ${destPath}`];
+  // 0640, not 0600 — the recipient is a DIFFERENT container (arch-review 60 P1). The init step runs the
+  // runner image and the agent's container may run the tenant's own, so the two have whatever `USER` their
+  // Dockerfiles declare and nothing made them agree. At 0600 owned by the writer, a task image running as
+  // 1000 could not read a file an init image running as 0 had written, and every such pairing failed at
+  // startup for want of a payload it was looking straight at.
+  //
+  // Group-readable plus a pod `fsGroup` is what makes the two agree without dictating either image's user:
+  // Kubernetes chowns the volume to that GID and adds it as a supplementary group to every container, so the
+  // recipient reads by GROUP whatever UID it runs as. Others still get nothing, which is the part that
+  // matters — the agent under test is inside the recipient, not outside it.
+  return ["sh", "-c", `umask 027; printf %s "$${envName}" > ${destPath}`];
 }
+
+// The GID the payload volume is chowned to and every container joins. A fixed, unprivileged, non-overlapping
+// value: it names a group that exists only for this handoff, so granting it grants nothing else.
+export const JOB_PAYLOAD_FS_GROUP = 20250;

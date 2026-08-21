@@ -1,4 +1,4 @@
-import { readFileSync, unlinkSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { JOB_PAYLOAD_FILE_ENV } from "@everdict/contracts";
 
 // ── READING THE JOB PAYLOAD IS THE SAME ACT AS REMOVING IT (arch-review 58 P0) ───────────────────────
@@ -61,28 +61,38 @@ export function takeJobPayload(): JobPayload {
     // reader has to reason about, and this process has no further use for it.
     delete process.env[JOB_PAYLOAD_FILE_ENV[kind]];
     let payload: string;
+    // ── UNLINK FIRST, THEN READ THE FD (arch-review 60 P1-security) ───────────────────────────────
+    //
+    // The previous shape read the file and unlinked it in a `finally` with the failure swallowed. A read that
+    // SUCCEEDED and an unlink that failed — a read-only mount, a permission the lane got wrong, an ENOSPC on
+    // the metadata write — returned the payload and left the bytes exactly where the agent could reach them,
+    // while the contract this function exists to keep says the only way to obtain it is a call that has
+    // already destroyed it. The swallow's own comment guessed the failure was always "already gone or never a
+    // file"; ordinary unlink failures are neither.
+    //
+    // So the directory entry goes FIRST and its failure is fatal, and the bytes are then read through the
+    // descriptor that is already open — which is what makes this atomic rather than ordered: after the
+    // unlink there is no name left for anything else to open, and the content is still reachable to us alone.
+    let fd: number;
     try {
-      payload = readFileSync(path, "utf8");
+      fd = openSync(path, "r");
     } catch {
-      // A path that names nothing is `absent`, not a crash: an operator reading "the payload is missing" is
-      // being told the truth, and a lane that rendered no file is the same failure as one that set no
-      // variable. Nothing is left behind either way.
+      // A path that names nothing readable is `absent`, not a crash: a lane that rendered no file is the same
+      // failure as one that set no variable, and neither leaves bytes behind.
       continue;
+    }
+    try {
+      // A path that is not a regular file holds no payload bytes, so there is nothing here to leak and
+      // nothing to refuse over — a lane that pointed the variable at a directory is a dispatch that will fail
+      // for want of a payload, not a process that should die trying to unlink a directory.
+      if (!fstatSync(fd).isFile()) continue;
+      // Fatal on purpose, and only from here: the bytes exist. A payload whose NAME cannot be removed must
+      // not be handed on — refusing is a dispatch that dies before the agent starts, which is the fail-closed
+      // direction and the only reading under which this function's contract is true.
+      unlinkSync(path);
+      payload = readFileSync(fd, "utf8");
     } finally {
-      // Removed WHATEVER the read did. A read that threw halfway still leaves bytes on the tmpfs, and this
-      // process is about to start the thing they are being kept from.
-      //
-      // `unlink`, not a recursive remove, and swallowed: this variable is set by our own lane, but a lane
-      // that set it wrong would hand a recursive delete a path nobody checked — and the failure mode of
-      // getting that wrong is unbounded, while the failure mode of refusing is a payload that was never a
-      // file. Refusing to remove something that is not a file is the safe direction, and it must not take
-      // the process down: this runs before the case has started, so a throw here is a dispatch that dies
-      // with no result rather than a case that reports one.
-      try {
-        unlinkSync(path);
-      } catch {
-        // Already gone, or never a file. Neither leaves payload bytes behind.
-      }
+      closeSync(fd);
     }
     if (payload !== "") found.push({ kind, payload });
   }

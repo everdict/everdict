@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   JOB_PAYLOAD_DIR,
   JOB_PAYLOAD_FILE_ENV,
+  JOB_PAYLOAD_FS_GROUP,
   JOB_PAYLOAD_VOLUME,
   type Score,
   type VerifierInvocation,
@@ -1152,6 +1153,11 @@ export function buildK8sJob(
           // No cluster identity for the agent under test — see `UNTRUSTED_POD_IDENTITY`. K8s mounts the
           // default ServiceAccount token unless a spec says otherwise, and this one did not.
           ...UNTRUSTED_POD_IDENTITY,
+          // …and the group that makes the payload readable ACROSS the two images (arch-review 60 P1). K8s
+          // chowns the payload volume to this GID and adds it as a supplementary group to every container in
+          // the pod, so the recipient reads by group whatever UID its image declares — see
+          // `jobPayloadWriteCommand` for why 0600-owned-by-the-writer could not work here.
+          securityContext: { fsGroup: JOB_PAYLOAD_FS_GROUP },
           ...(runtimeClassName ? { runtimeClassName } : {}),
           ...(opts.nodeSelector ? { nodeSelector: opts.nodeSelector } : {}),
           ...(opts.tolerations ? { tolerations: opts.tolerations } : {}),

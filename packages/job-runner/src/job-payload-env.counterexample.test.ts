@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JOB_PAYLOAD_FILE_ENV } from "@everdict/contracts";
@@ -120,6 +120,36 @@ describe("[R58/R59 COUNTEREXAMPLE] the job payload does not survive into the age
       expect(existsSync(dir), "a directory the lane named was recursively deleted").toBe(true);
     } finally {
       delete process.env[JOB_PAYLOAD_FILE_ENV.case];
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("REFUSES to hand on a payload whose name it could not remove", async () => {
+    // The contract this function exists to keep is "the only way to obtain it is a call that has already
+    // destroyed it". The first version read the file and unlinked it in a `finally` with the failure
+    // SWALLOWED — so a read that succeeded and an unlink that failed (a read-only mount, a permission the
+    // lane got wrong, ENOSPC on the metadata write) returned the payload and left the bytes exactly where the
+    // agent could reach them (arch-review 60 P1-security).
+    //
+    // Made to fail the way a real deployment fails: the payload sits in a directory this process may read and
+    // traverse but not WRITE, which is what an unlink needs. Skipped as root, where no mode denies anything.
+    const dir = mkdtempSync(join(tmpdir(), "everdict-payload-"));
+    const path = join(dir, "case");
+    writeFileSync(path, "cGF5bG9hZA==", { mode: 0o600 });
+    chmodSync(dir, 0o500);
+    process.env[JOB_PAYLOAD_FILE_ENV.case] = path;
+    try {
+      if (process.getuid?.() === 0) return; // root ignores the directory's write bit; the claim is untestable here
+      expect(() => takeJobPayload(), "a payload whose name could not be removed was handed on anyway").toThrow(
+        /EACCES|EPERM/,
+      );
+      // …and it is still there, which is the point: refusing is the only honest answer once it cannot be
+      // destroyed. A dispatch that dies here dies before the agent starts.
+      chmodSync(dir, 0o700);
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      delete process.env[JOB_PAYLOAD_FILE_ENV.case];
+      chmodSync(dir, 0o700);
       rmSync(dir, { recursive: true, force: true });
     }
   });

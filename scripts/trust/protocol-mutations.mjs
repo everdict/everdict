@@ -980,8 +980,9 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
   },
   {
-    // …and the runner half: reading the payload without destroying it, so it stays on the tmpfs for the whole
-    // case with the agent running beside it.
+    // …and the runner half, back to the pre-arch-review-60 order: read the bytes, then unlink with the
+    // failure swallowed. A read that succeeded and an unlink that failed then hands the payload on and leaves
+    // it exactly where the agent can reach it.
     //
     // This entry INHERITS arch-review 58's claim, which used to live on `delete process.env[VERIFIER]`. That
     // line is gone with the env transport, and the protocol it enforced — obtaining the payload is the same
@@ -989,8 +990,8 @@ const MUTATIONS = [
     // how a registry starts describing a thing it no longer tests.
     name: "payload transport — the runner reads the payload and leaves it",
     file: "packages/job-runner/src/job-payload-env.ts",
-    from: "        unlinkSync(path);",
-    to: "        void path;",
+    from: '      unlinkSync(path);\n      payload = readFileSync(fd, "utf8");',
+    to: '      payload = readFileSync(fd, "utf8");\n      try {\n        unlinkSync(path);\n      } catch {}',
     suite: ["--root", "packages/job-runner", "src/job-payload-env.counterexample.test.ts"],
   },
   {
@@ -1020,6 +1021,17 @@ const MUTATIONS = [
     from: '      if (decision.kind === "adopted" && decision.adopted.stage === "case") {',
     to: '      if (decision.kind === "adopted" && decision.adopted.stage !== "nothing") {',
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
+  {
+    // arch-review 60 P1. The payload written owner-only across a UID boundary — the init step runs the runner
+    // image, the agent's container may run the tenant's own, and a task image with a different USER then
+    // cannot read a payload it is looking straight at. Verified EACCES on a real cluster.
+    name: "payload permissions — written owner-only across two images",
+    file: "packages/contracts/src/execution/job-payload-transport.ts",
+    from: "umask 027;",
+    to: "umask 077;",
+    suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
+    build: "@everdict/contracts",
   },
 ];
 
