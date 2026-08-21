@@ -92,6 +92,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/environment-image-store.md](architecture/environment-image-store.md) — managed eval-environment images as store assets
 - [architecture/managed-image-store.md](architecture/managed-image-store.md) — the managed image store
 - [architecture/workspace-image-registry.md](architecture/workspace-image-registry.md) — classify + publish harness images (BYO registry)
+- [architecture/secret-free-execution-envelope.md](architecture/secret-free-execution-envelope.md) — taking the job payload out of the container's environment (designed, not implemented)
 - [sandbox-auth.md](sandbox-auth.md) — how `claude` authenticates across backends (subscription / token injection)
 
 ## Observability

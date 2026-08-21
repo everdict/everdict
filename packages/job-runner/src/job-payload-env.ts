@@ -16,6 +16,29 @@
 //
 // "Unset it after parsing" is a discipline, and a discipline is what was missing. This is the shape that
 // cannot be half-done: the only way to obtain the payload is a call that has already deleted it.
+//
+// ── WHAT THIS EARNS, AND WHAT IT DOES NOT (arch-review 59) ───────────────────────────────────────────
+//
+// It closes INHERITANCE. It does not close `/proc`, and the difference is the whole remaining exposure:
+// `delete process.env.X` edits this process's copy and what its future children inherit, while
+// `/proc/<pid>/environ` reports the environment this process was EXECVE'd with and keeps reporting it. The
+// agent under test runs as a child, same uid, same PID namespace, so:
+//
+//     tr '\0' '\n' < /proc/1/environ | grep EVERDICT_CASE_JOB
+//
+// still yields the payload. Verified by execution, not by reading the man page — and the sharp part is that
+// a child exec'd with a COMPLETELY clean environment (an explicit allowlist, no inheritance at all) reads it
+// out of the parent just the same. So no amount of care at the exec site closes this; the payload must not
+// arrive in the initial environment at all.
+//
+// The repair is a transport change, not a discipline: the payload is written where the runner can DELETE it
+// (a Nomad `template` into the task dir, a K8s initContainer into an emptyDir) and the environment carries
+// only a path. Designed in `docs/architecture/secret-free-execution-envelope.md`; this function is the seam
+// it lands behind, which is why the seam exists.
+//
+// Until then the honest sentence is the narrow one: the agent no longer INHERITS the payload from us. That
+// is a different claim from "the agent cannot read it", and only one of them is earned (rule `protocol`,
+// "a secret in a process's initial environment").
 export type JobPayload = { kind: "case"; payload: string } | { kind: "verifier"; payload: string } | { kind: "absent" };
 
 const CASE = "EVERDICT_CASE_JOB";
