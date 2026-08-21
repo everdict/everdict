@@ -448,8 +448,8 @@ const MUTATIONS = [
     // The CALLER's arm, which is what the counterexample drives (it injects its own adoptWorkFn, so the fold
     // above it never runs). Mutating the fold tested nothing — a mutation must target the line the suite
     // actually reaches.
-    from: '            if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };',
-    to: "            // MUTATED: an unestablished adoption is treated as an absence",
+    from: '      if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };',
+    to: "      // MUTATED: an unestablished adoption is treated as an absence",
     suite: ["--root", "apps/api", "src/composition/adoption-unknown-recovery.counterexample.test.ts"],
   },
   {
