@@ -43,7 +43,7 @@ const JOB = (mode?: "none"): VerifierJob =>
 function world(order: string[]) {
   return {
     async ensureNamespace() {},
-    async patchNetworkPolicy() {},
+    async patchOwnedByJob() {},
     async applyJob(m: { kind?: string }) {
       if (m.kind === "NetworkPolicy") {
         order.push("apply(networkpolicy)");

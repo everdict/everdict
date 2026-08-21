@@ -1,7 +1,6 @@
 import type { CaseJob, RegistryAuth } from "@everdict/contracts";
-import { registryAuthSecretName } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
-import { buildK8sJob, k8sRegistryAuthSecret, runLabelValue } from "./k8s.js";
+import { buildK8sJob, k8sRegistryAuthSecret, runLabelValue, workPullSecretName } from "./k8s.js";
 
 // ── AN IDENTIFIER THAT DECIDES A DESTRUCTIVE OR CREDENTIAL SCOPE IS INJECTIVE (arch-review 59) ───────
 //
@@ -58,22 +57,37 @@ describe("[R59 COUNTEREXAMPLE] a destructive or credential scope is named by wha
     expect(runLabelValue(`${LONG}-a`)).not.toBe(runLabelValue(`${LONG}-b`));
   });
 
-  it("names the pull Secret after the GRANT, so two dispatches cannot overwrite each other", () => {
-    const a: RegistryAuth = { host: "ghcr.io", username: "u", password: "grant-a" };
-    const b: RegistryAuth = { host: "ghcr.io", username: "u", password: "grant-b" };
-    expect(registryAuthSecretName(a), "two dispatches with different grants share one Secret").not.toBe(
-      registryAuthSecretName(b),
-    );
-    // …and the same grant is the same Secret, so an idempotent apply stays idempotent.
-    expect(registryAuthSecretName(a)).toBe(registryAuthSecretName({ ...a }));
+  it("names the pull Secret after the WORK, so two dispatches cannot overwrite each other", () => {
+    // R59 content-addressed this name, which closed the collision and left the LIFETIME open: nothing owned
+    // the object, so a managed grant with a short-lived password minted a new digest per dispatch and the
+    // namespace's Secret count grew without bound, expired credentials sitting in etcd (arch-review 60
+    // P1-ops). Per-WORK is both properties at once — two grants can no more collide than two Jobs can, and
+    // the Secret has an owner the cluster can collect it by.
+    expect(
+      workPullSecretName("everdict-c1-aaaa"),
+      "two dispatches share one Secret, so a later grant re-credentials an earlier pod",
+    ).not.toBe(workPullSecretName("everdict-c1-bbbb"));
+    // …and it is still a legal object name derived only from the Job's, so one function answers on both sides.
+    expect(workPullSecretName("everdict-c1-aaaa")).toMatch(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/);
   });
 
-  it("makes the Job reference the Secret its own grant produced", () => {
-    // The two halves have to agree, or the pod references a Secret nobody applied — which is a pull failure
-    // rather than a wrong credential, but it is the same defect: a name decided in two places.
+  it("makes the Job reference the Secret its own dispatch applies", () => {
+    // The two halves have to agree, or the pod references a Secret nobody applied — a pull failure rather
+    // than a wrong credential, but the same defect: a name decided in two places.
     const auth: RegistryAuth = { host: "ghcr.io", username: "u", password: "grant-a" };
     const spec = buildK8sJob(job(auth), { image: "runner:1" }, "evd-c1", "ns");
-    const applied = k8sRegistryAuthSecret(auth, "ns") as { metadata: { name: string } };
+    const applied = k8sRegistryAuthSecret(auth, "ns", workPullSecretName("evd-c1")) as { metadata: { name: string } };
     expect(pullSecretOf(spec), "the pod references a Secret this dispatch did not apply").toBe(applied.metadata.name);
+  });
+
+  it("resolves a pull credential for the INIT image too, not only the agent's", () => {
+    // The pod pulls two images: the agent's (possibly the tenant's own task image) and the init step's, which
+    // is the runner image. Only the main one was consulted, so a private runner beside a private task image
+    // left the init container in ImagePullBackOff and the case never started (arch-review 60 P1-ops).
+    const runnerOnly = job({ host: "internal.reg", username: "u", password: "runner-grant" });
+    const spec = buildK8sJob(runnerOnly, { image: "internal.reg/everdict/runner:1" }, "evd-c1", "ns");
+    expect(pullSecretOf(spec), "the init container's registry was never resolved a credential").toBe(
+      workPullSecretName("evd-c1"),
+    );
   });
 });

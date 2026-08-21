@@ -97,6 +97,11 @@ export interface K8sTopologyOptions {
 // Name of the Secret referenced by imagePullSecrets. CONTENT-ADDRESSED (`registryAuthSecretName`), so an apply
 // can only replace it with identical bytes — a namespace-global name made this a destructive upsert between
 // topologies holding different grants for one host.
+//
+// Deliberately NOT the per-work form the eval lane moved to (arch-review 60 P1-ops). That lane mints a Job
+// per dispatch, so a content-addressed Secret nobody owns accumulates; here the owner is a long-lived
+// Deployment re-applied on ensure, which is the opposite churn. Sharing one Secret between topologies that
+// hold the same grant is the desirable outcome for this lane, not a leak.
 
 // Workspace registry credentials → a kubernetes.io/dockerconfigjson Secret. buildK8sManifests includes it only when
 // some service image's host matches (avoids scattering irrelevant credentials across the cluster).

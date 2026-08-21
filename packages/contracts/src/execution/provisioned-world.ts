@@ -32,6 +32,21 @@ export const ProvisionedWorldProofSchema = z.object({
   // is why a partial proof cannot cover a full declaration.
   resources: ResourceRequestSchema.optional(),
   network: NetworkPolicySchema.optional(),
+  // ── THE ISOLATION THIS PLACEMENT APPLIED (arch-review 60 P2) ────────────────────────────────────────
+  //
+  // The K8s `runtimeClassName` / the Nomad task runtime — gVisor, Kata, or the shared-kernel default. Two
+  // executions with the same image, the same box and the same network are still two different worlds when
+  // one ran under runsc and the other under runc, and `enforcedBy: "k8s"` reads identically for both. It is
+  // also the axis `assertHardenedIsolation` exists to police, so a comparison that cannot see it cannot see
+  // whether a batch was measured under the isolation its tenant is owed.
+  //
+  // Absent means the lane applied no explicit runtime — the orchestrator's default — which is a real state
+  // and not a missing one: it is what `assertHardenedIsolation` refuses for an untrusted zone.
+  //
+  // Deliberately NOT the namespace or the trust zone. Those name WHOSE the execution was, not what box it
+  // ran in, and a field this lane cannot populate the same way on every orchestrator would claim more than
+  // it enforces — which is the whole failure this proof exists to avoid.
+  isolation: z.string().min(1).optional(),
 });
 export type ProvisionedWorldProof = z.infer<typeof ProvisionedWorldProofSchema>;
 

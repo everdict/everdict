@@ -53,7 +53,6 @@ import {
   dockerAuthConfigJson,
   laneImageProvenance,
   pickRegistryAuth,
-  registryAuthSecretName,
   registryAuthsOf,
 } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
@@ -107,7 +106,11 @@ export interface K8sApi {
   // Give a NetworkPolicy the Job as its owner, so the cluster's garbage collector removes it whenever the
   // Job goes — including the `ttlSecondsAfterFinished` path, where nothing of ours runs again. Reads the
   // Job's uid first, because an owner reference is not a name (arch-review 58 W5).
-  patchNetworkPolicy(policy: string, ns: string, ownerJob: string): Promise<void>;
+  // Give a dependent object the Job as its OWNER, so the cluster's GC reclaims it with the Job. Takes the
+  // KIND because two dependents need it now: the egress NetworkPolicy and the per-work pull Secret — an
+  // object created beside a Job and owned by nobody accumulates for as long as the namespace lives
+  // (arch-review 60 P1-ops).
+  patchOwnedByJob(kind: "networkpolicy" | "secret", name: string, ns: string, ownerJob: string): Promise<void>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
   deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
@@ -412,7 +415,7 @@ export function kubectlApi(
         return undefined;
       }
     },
-    async patchNetworkPolicy(policy, ns, ownerJob) {
+    async patchOwnedByJob(kind, name, ns, ownerJob) {
       const read = await run(bin, [...ctx, "-n", ns, "get", "job", ownerJob, "-o", "jsonpath={.metadata.uid}"]);
       const uid = read.stdout.trim();
       // No uid, no owner — and no silent half-measure: a reference to nothing would be accepted and would
@@ -424,14 +427,14 @@ export function kubectlApi(
         "-n",
         ns,
         "patch",
-        "networkpolicy",
-        policy,
+        kind,
+        name,
         "--type",
         "merge",
         "-p",
         JSON.stringify(ownerReferencePatch(ownerJob, uid)),
       ]);
-      if (res.code !== 0) throw new Error(`patch networkpolicy ${policy}: ${res.stderr || res.stdout}`);
+      if (res.code !== 0) throw new Error(`patch ${kind} ${name}: ${res.stderr || res.stdout}`);
     },
     async deleteJob(name, ns) {
       return deleteOutcome(
@@ -998,11 +1001,35 @@ function dispatchSuffix(): string {
 // The digest is over the docker config the Secret carries, which IS what makes two grants different.
 // Image credentials (transient job.registryAuths) → a dockerconfigjson Secret. When a credential covers case.image,
 // dispatch applies it together with the Job as a List. Takes one or many — one docker config can hold several hosts.
-export function k8sRegistryAuthSecret(auth: RegistryAuth | RegistryAuth[], ns: string): Record<string, unknown> {
+// ── A PULL SECRET BELONGS TO THE WORK THAT NEEDS IT (arch-review 60 P1-ops) ─────────────────────────
+//
+// arch-review 59 content-addressed this name so two dispatches holding different grants for one host could
+// not overwrite each other's Secret. That fixed the collision and left the LIFETIME open: nothing owned the
+// object, the dispatch's `finally` deletes only the Job, and a managed grant whose password is short-lived
+// mints a new digest every time. Namespace Secret count then grows without bound, expired credentials sit in
+// etcd, and the window in which a namespace read discloses them keeps widening.
+//
+// Per-WORK is both properties at once, and simpler than reference-counting a shared object: the name comes
+// from the Job's own name, so two grants can no more collide than two Jobs can, and the Secret is patched
+// with that Job as its OWNER right after it exists — the cluster's GC then reclaims it exactly when the work
+// it belonged to goes.
+//
+// Derived from `name` on both sides rather than passed between them: `buildK8sJob` and the dispatch each hold
+// the Job's name already, and one function over one input is what stops a pod referencing an object nobody
+// applied (the defect arch-review 59 closed the other way round).
+export function workPullSecretName(jobName: string): string {
+  return `${jobName}-pull`;
+}
+
+export function k8sRegistryAuthSecret(
+  auth: RegistryAuth | RegistryAuth[],
+  ns: string,
+  name: string,
+): Record<string, unknown> {
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: registryAuthSecretName(auth), namespace: ns, labels: { app: "everdict" } },
+    metadata: { name, namespace: ns, labels: { app: "everdict" } },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   };
@@ -1061,6 +1088,8 @@ export function buildK8sJob(
               opts.enforcesNetwork && k8sNetworkPolicyFor("probe", job.evalCase.network)
                 ? job.evalCase.network
                 : undefined,
+              // The runtimeClass this pod actually gets — the trust zone's, resolved before this call.
+              runtimeClassName,
             ),
           ),
         };
@@ -1095,7 +1124,12 @@ export function buildK8sJob(
   // The GRANT itself, not a boolean: the Secret's name is derived from it, and the dispatch applies the
   // Secret from the same value — one name from one function, so a pod can never reference an object nobody
   // applied (arch-review 59 P1-security).
-  const pullAuth = pickRegistryAuth(registryAuthsOf(job), image);
+  // BOTH images (arch-review 60 P1-ops). The pod pulls the agent's image AND the init step's — which is the
+  // runner image, `opts.image`, and may live in a different registry than the tenant's task image. Only the
+  // main one was consulted, so a private runner beside a private task image left the init container in
+  // ImagePullBackOff and the case never started.
+  const auths = registryAuthsOf(job);
+  const pullAuth = pickRegistryAuth(auths, image) ?? pickRegistryAuth(auths, opts.image);
   const tenant = job.tenant ?? "default";
   // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
   // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
@@ -1164,7 +1198,7 @@ export function buildK8sJob(
           ...(opts.hostNetwork ? { hostNetwork: true } : {}),
           // The Secret THIS dispatch applies, by the grant it carries — the two are one name from one
           // function, so a pod can never reference an object nobody applied.
-          ...(pullAuth ? { imagePullSecrets: [{ name: registryAuthSecretName(pullAuth) }] } : {}),
+          ...(pullAuth ? { imagePullSecrets: [{ name: workPullSecretName(name) }] } : {}),
           // A tmpfs the payload lives on for as long as it takes the runner to read and unlink it. `Memory`
           // rather than the default disk-backed emptyDir: an unlink on tmpfs IS the erasure, while a file on
           // a node's disk leaves its blocks until something else overwrites them.
@@ -1453,7 +1487,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // …and the ownerRef, so the cluster's GC reclaims the policy with the Job. Best-effort for the reason
       // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
       // verifier that graded with the network open.
-      if (netPolicy) await api.patchNetworkPolicy(`${name}-egress`, ns, name).catch(() => undefined);
+      if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
       try {
         await this.waitForJob(api, name, ns);
         // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and
@@ -1915,9 +1949,13 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       const manifest = buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName);
       // For a workspace-registry image, apply the dockerconfigjson Secret together with the Job (List) — fixed name, idempotent upsert.
       const image = job.evalCase.image ?? this.opts.image;
-      const auth = pickRegistryAuth(registryAuthsOf(job), image);
+      // The same two images the manifest resolves against — see `pullAuth` in `buildK8sJob`. One answer here
+      // and there, or the pod references an object this dispatch did not apply.
+      const jobAuths = registryAuthsOf(job);
+      const auth = pickRegistryAuth(jobAuths, image) ?? pickRegistryAuth(jobAuths, this.opts.image);
+      const workSecret = workPullSecretName(name);
       const payload = auth
-        ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
+        ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns, workSecret), manifest] }
         : manifest;
       // ── THE WORLD BEFORE THE POD (arch-review 58, W5 follow-through) ────────────────────────
       //
@@ -1947,7 +1985,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // what cleans up — which needs the uid the Job only has once it exists. Best-effort: a failed patch
       // leaks an inert policy selecting pods that are gone, where a failed ORDER would have leaked a case
       // that ran with the network open.
-      if (netPolicy) await api.patchNetworkPolicy(`${name}-egress`, ns, name).catch(() => undefined);
+      if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
       try {
         await this.waitForJob(api, name, ns, options?.signal);
         const result = parseResult(await api.podLogs(name, ns));

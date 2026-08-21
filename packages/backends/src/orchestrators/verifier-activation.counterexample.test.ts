@@ -44,7 +44,7 @@ const JOB: VerifierJob = {
 function world(order: string[]) {
   return {
     async ensureNamespace() {},
-    async patchNetworkPolicy() {},
+    async patchOwnedByJob() {},
     async applyJob() {
       order.push("apply");
       // Stops here on purpose: what this file is about is the ORDER up to the object's birth, and letting the

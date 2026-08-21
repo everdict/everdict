@@ -8,7 +8,7 @@ import {
   type RuntimeWorkRef,
   UpstreamError,
 } from "@everdict/contracts";
-import { perTenantTrustZones, registryAuthSecretName, staticTrustZones } from "@everdict/domain";
+import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
 import {
@@ -25,6 +25,7 @@ import {
   parseJobStatusOutput,
   podResourceAsk,
   usageByNode,
+  workPullSecretName,
 } from "./k8s.js";
 
 // The dispatch AUTHORITY, as one capability (arch-review 58 W2). These cases exercise the reservation half,
@@ -111,7 +112,7 @@ function mockApi(
     async ensureNamespace() {},
     // The lane ties a network policy to its Job when the case declares an offline world (arch-review 58 W5);
     // these cases declare none, so the patch is never reached.
-    async patchNetworkPolicy() {},
+    async patchOwnedByJob() {},
     async applyJob(m) {
       applied.push(m as JobManifest);
     },
@@ -241,9 +242,7 @@ describe("buildK8sJob / k8sJobName", () => {
       registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
     };
     const m = buildK8sJob(withAuth, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
-    expect(m.spec.template.spec.imagePullSecrets).toEqual([
-      { name: registryAuthSecretName({ host: "ghcr.io", username: "bot", password: "pull-tok" }) },
-    ]);
+    expect(m.spec.template.spec.imagePullSecrets).toEqual([{ name: workPullSecretName("n") }]);
     // On a host mismatch (the default job-runner image), not rendered.
     const off = buildK8sJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
@@ -253,7 +252,11 @@ describe("buildK8sJob / k8sJobName", () => {
     ) as unknown as JobManifest;
     expect(off.spec.template.spec.imagePullSecrets).toBeUndefined();
     // The Secret manifest itself is in dockerconfigjson format.
-    const secret = k8sRegistryAuthSecret({ host: "ghcr.io", username: "bot", password: "pull-tok" }, "ns") as {
+    const secret = k8sRegistryAuthSecret(
+      { host: "ghcr.io", username: "bot", password: "pull-tok" },
+      "ns",
+      workPullSecretName("n"),
+    ) as {
       type: string;
       data: Record<string, string>;
     };

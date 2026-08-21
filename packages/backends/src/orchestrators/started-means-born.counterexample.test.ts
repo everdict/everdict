@@ -47,7 +47,7 @@ const AUTHORITY = {
 function k8sApi(order: string[]) {
   return {
     async ensureNamespace() {},
-    async patchNetworkPolicy() {},
+    async patchOwnedByJob() {},
     async applyJob(m: { kind?: string }) {
       if (m.kind === "NetworkPolicy") return;
       order.push("apply(job)");

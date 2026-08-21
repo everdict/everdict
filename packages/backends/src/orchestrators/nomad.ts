@@ -581,7 +581,10 @@ export function buildNomadJob(
   const payload =
     verifierPayload !== undefined
       ? { kind: "verifier" as const, value: verifierPayload }
-      : { kind: "case" as const, value: caseJobPayload(withWorldProof(job, "nomad", world.enforced)) };
+      : {
+          kind: "case" as const,
+          value: caseJobPayload(withWorldProof(job, "nomad", world.enforced, undefined, opts.runtime)),
+        };
   // Nomad renders templates into the ALLOC's task directory, which the docker driver mounts at `/local`
   // inside the container. So the destination and the in-container path are two spellings of one place, and
   // both are stated here rather than assumed anywhere else.

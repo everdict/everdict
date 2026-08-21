@@ -459,6 +459,11 @@ function sameEnforcedWorld(a: ProvisionedWorldProof, b: ProvisionedWorldProof): 
   return (
     a.os === b.os &&
     a.enforcedBy === b.enforcedBy &&
+    // …and WHAT ISOLATED IT (arch-review 60 P2). `enforcedBy: "k8s"` reads identically for a pod under gVisor
+    // and one under the shared-kernel default, and those are two different worlds — it is also the axis
+    // `assertHardenedIsolation` polices, so a comparison blind to it cannot see whether both sides were
+    // measured under the isolation their tenant is owed.
+    a.isolation === b.isolation &&
     a.resources?.cpu === b.resources?.cpu &&
     a.resources?.memoryMb === b.resources?.memoryMb &&
     a.resources?.gpu === b.resources?.gpu &&

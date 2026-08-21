@@ -102,6 +102,26 @@ describe("[R59 COUNTEREXAMPLE] the execution_world axis compares the box, not on
     expect(id.confounds.map((c) => c.axis)).toContain("execution_world");
   });
 
+  it("is a CONFOUND when the two sides ran under different ISOLATION runtimes", () => {
+    // `enforcedBy: "k8s"` reads identically for a pod under gVisor and one under the shared-kernel default,
+    // so the axis held across a difference that changes what the workload could do — and it is the axis
+    // `assertHardenedIsolation` polices, so a comparison blind to it cannot see whether both sides were
+    // measured under the isolation their tenant is owed (arch-review 60 P2).
+    const id = axisOf(caseWith(world({ isolation: "runsc" })), caseWith(world({ isolation: "runc" })));
+    expect(id.held, "a batch measured under gVisor was compared with one on a shared kernel").not.toContain(
+      "execution_world",
+    );
+    expect(id.confounds.map((c) => c.axis)).toContain("execution_world");
+  });
+
+  it("distinguishes an explicit runtime from the lane's DEFAULT", () => {
+    // Absent means the lane applied no explicit runtime, which is a real state rather than a missing one —
+    // it is exactly what `assertHardenedIsolation` refuses for an untrusted zone, so it must not read as
+    // equal to a hardened one.
+    const id = axisOf(caseWith(world({ isolation: "runsc" })), caseWith(world()));
+    expect(id.confounds.map((c) => c.axis)).toContain("execution_world");
+  });
+
   it("is UNVERIFIED when only one side recorded the world it was placed in", () => {
     // Not a confound: nobody said the worlds differ. The pair simply cannot compare beyond image bytes, and
     // "we could not find out" must not be upgraded into either answer.

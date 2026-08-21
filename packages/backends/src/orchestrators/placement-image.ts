@@ -51,11 +51,18 @@ export function withWorldProof(
   // What the lane applied on the NETWORK axis, if anything. Absent = it applied nothing, and silence is what
   // `worldProofCovers` reads as "not enforced" — the fail-closed direction.
   network?: NetworkPolicy,
+  // What ACTUALLY isolated it — the runtimeClass / task runtime this placement set, when it set one.
+  isolation?: string,
 ): CaseJob {
   const declared = job.evalCase.resources;
   const claimsNetwork = network !== undefined;
+  // …and the ISOLATION is a claim on its own (arch-review 60 P2). A case that declared no box still ran under
+  // some runtime, and two runs of it under runsc and runc are two different worlds that the axis read as one
+  // because neither side had a proof to compare. `worldProofCovers` is unaffected: a proof carrying no
+  // resources and no network still covers a declaration that asks for neither.
+  const claimsIsolation = isolation !== undefined;
   // Nothing declared and nothing applied: no claim to make, and the run needs none.
-  if ((declared === undefined || resources === undefined) && !claimsNetwork) return job;
+  if ((declared === undefined || resources === undefined) && !claimsNetwork && !claimsIsolation) return job;
   return {
     ...job,
     worldProof: {
@@ -63,6 +70,7 @@ export function withWorldProof(
       enforcedBy,
       ...(declared !== undefined && resources !== undefined ? { resources } : {}),
       ...(claimsNetwork ? { network } : {}),
+      ...(claimsIsolation ? { isolation } : {}),
     },
   };
 }
