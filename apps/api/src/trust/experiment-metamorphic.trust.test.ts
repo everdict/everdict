@@ -2,7 +2,7 @@ import { ScorecardService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { Dataset, JudgeSpec } from "@everdict/contracts";
 import { InMemoryScorecardStore } from "@everdict/db";
-import { experimentIdentity } from "@everdict/domain";
+import { EXPERIMENT_AXES, experimentIdentity } from "@everdict/domain";
 import { InMemoryDatasetRegistry, InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
@@ -117,14 +117,18 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
 
     // Vary NOTHING — the same submit twice is the same experiment on every axis.
     const twin = identity(base, await submit());
-    expect(twin.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
+    // Derived, not restated. "Every axis holds" is a claim about the VOCABULARY, and a hand-copied list turns
+    // "an axis was added" into a failure that says nothing about this scenario — which is exactly what
+    // happened when `execution_world` joined (arch-review 58): this file typechecked, was never run locally
+    // because trust scenarios SKIP without a database, and went red on the required check instead.
+    expect([...twin.held].sort()).toEqual([...EXPERIMENT_AXES].sort());
     expect(twin.confounds).toEqual([]);
     expect(twin.unverified).toEqual([]);
 
     // Vary ONLY the treatment (harness version) — deliberately not an identity axis.
     const treatment = identity(base, await submit({ harness: { id: "scripted", version: "1" } }));
     expect(treatment.confounds).toEqual([]);
-    expect(treatment.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
+    expect([...treatment.held].sort()).toEqual([...EXPERIMENT_AXES].sort());
 
     // Vary ONLY the selection (a deliberate 1-of-2 subset) — coverage's business, NO axis confounds.
     // Pre-H5 this was the defect: the selection-keyed grading composite read as a grading confound.

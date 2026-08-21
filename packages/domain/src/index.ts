@@ -44,6 +44,7 @@ export {
   type ExperimentIdentity,
   type ExperimentUnverified,
   experimentIdentity,
+  EXPERIMENT_AXES,
 } from "./scorecard/experiment-identity.js";
 export { flakeIndex } from "./scorecard/flake.js";
 export {
