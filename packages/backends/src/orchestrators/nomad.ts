@@ -33,7 +33,6 @@ import {
   type RuntimeWorkRef,
   type TraceEvent,
   UpstreamError,
-  judgeAuthEnv,
   judgeEnv,
   worstKillOutcome,
 } from "@everdict/contracts";
@@ -583,7 +582,7 @@ export function buildNomadJob(
     // secretEnv so the job-level credential wins over the backend's baked workspace tier.
     // ── THE JUDGE'S KEY IS NOT IN THE AGENT'S ENVIRONMENT (arch-review 59 P0-security) ─────────
     //
-    // `judgeAuthEnv(job.judge, job.judgeAuth)` used to be injected here. The job-runner process then held the
+    // A judgeAuthEnv(job.judge, job.judgeAuth) spread used to be injected here. The job-runner process then held the
     // tenant's provider credential in `process.env`, and `LocalDriver` execs the agent under test with
     // `{ ...process.env, ...opts.env }` — so `env | grep ANTHROPIC_API_KEY` read it, with no bypass. Moving
     // the key to the grading half in TypeScript (arch-review 58) changed nothing here: a narrower consumer is
