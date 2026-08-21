@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 59 P0-verifier. `PARENT_AUTHORIZES` compares the parent's epoch only when the attempt has
+    // one, so a verifier row opened without it satisfies the predicate under ANY owner — a displaced replica
+    // could still reserve and burn tenant compute. Dropping the coordinate must go red.
+    name: "R59 — a verifier attempt is opened with no parent epoch",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "    ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),",
+    to: "",
+    suite: ["--root", "packages/application-control", "src/execution/verifier-parent-authority.counterexample.test.ts"],
+  },
+  {
     // arch-review 59 P0-lifecycle. The periodic sweep was wired to the LAST LINE of boot's recovery
     // transition, so a run deferred because the cluster would not say whether its job was live came back and
     // skipped the question — re-dispatching compute that was still running.

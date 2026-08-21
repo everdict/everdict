@@ -52,6 +52,7 @@ const batchJob = (): CaseJob =>
     tenant: "acme",
     batchId: "sc-1",
     trial: 0,
+    driverEpoch: 5,
     evalCase: privateCase(),
     harness: { id: "h", version: "1" },
     registryAuths: [{ registry: "ghcr.io", username: "u", password: "p" }],
@@ -127,5 +128,41 @@ describe("[R58 COUNTEREXAMPLE] a batch case's verifier is recorded under the bat
       memoryMb: 4096,
     });
     expect(verified[0]?.registryAuths, "the verifier cannot pull the image it is meant to judge").toHaveLength(1);
+  });
+
+  it("names the EPOCH its parent was being driven under", async () => {
+    // arch-review 59 P0-verifier. `PARENT_AUTHORIZES` compares the parent's epoch only when the attempt has
+    // one: `a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch`. A verifier row opened without it
+    // therefore satisfies the predicate under ANY owner — so a replica that was displaced mid-case (its batch
+    // taken over at a higher epoch) can still reserve and activate, and burn tenant compute with the tenant's
+    // image and the verifier's secrets. The child settle is refused later by a different fence, which is why
+    // this reads as harmless right up until the bill.
+    //
+    // The coordinate travels as itself, like the scorecard id beside it: the batch driver knows the epoch it
+    // is driving under, so it is carried rather than re-derived from whatever the row holds by then.
+    const { verified } = await passFor(batchJob());
+    expect(verified[0]?.driverEpoch, "the verifier job carries no parent epoch").toBe(5);
+  });
+
+  it("opens the attempt under that epoch, where the SQL predicate can see it", async () => {
+    const attempts = new InMemoryExecutionAttemptStore();
+    const { verified } = await passFor(batchJob());
+    const job = verified[0];
+    if (!job) throw new Error("no verifier job");
+
+    await verifierOperation({ attempts }, job, async (_j, hooks) => {
+      await hooks.authority.reserve({ tenant: "acme", runId: job.runId, externalJobId: "verify-e" });
+      return INVOCATION;
+    });
+
+    const owned = await attempts.listForScorecard("sc-1");
+    expect(owned[0]?.driverEpoch, "the epoch reached the job and stopped there").toBe(5);
+  });
+
+  it("leaves it absent when the lane genuinely drives under none", async () => {
+    // A single run has no batch epoch, and stamping one it does not have would make the predicate look for an
+    // owner that never existed — the same way a stamped scorecard id would on a run.
+    const { verified } = await passFor({ ...batchJob(), driverEpoch: undefined } as CaseJob);
+    expect(verified[0]?.driverEpoch).toBeUndefined();
   });
 });

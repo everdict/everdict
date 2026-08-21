@@ -97,6 +97,18 @@ export const VerifierJobSchema = z.object({
   // Which trial of a pass@k fan-out this judged. An attempt that cannot say is one a re-drive cannot tell
   // apart from its predecessor.
   trial: z.number().int().nonnegative().optional(),
+  // ── WHICH DRIVE OF THE PARENT THIS UNIT BELONGS TO (arch-review 59 P0-verifier) ────────────────
+  //
+  // The batch's owner epoch, as it stood when this case was dispatched. `PARENT_AUTHORIZES` compares it only
+  // when the attempt HAS one — `a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch` — so a row opened
+  // without it satisfies the predicate under any owner. A replica displaced mid-case (its batch taken over at
+  // a higher epoch) could therefore still reserve and activate its verifier, and burn tenant compute with the
+  // tenant's image and the verifier's credentials. A later fence refuses the child settle, which is exactly
+  // why it reads as harmless until the bill arrives.
+  //
+  // Carried as itself rather than re-derived: the driver knows the epoch it is driving under, and reading it
+  // back off the row would be adopting whatever the successor now holds (rule `protocol` L3).
+  driverEpoch: z.number().int().nonnegative().optional(),
 });
 export type VerifierJob = z.infer<typeof VerifierJobSchema>;
 

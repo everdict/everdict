@@ -56,13 +56,14 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST — a batch's verifier reserves under 
 
   // The verifier's row, as `verifierOperation` opens one: the batch's execution id, the batch as parent, and
   // the `#verify` case suffix that keeps the two units distinguishable in a ledger read.
-  const openVerifierAttempt = async (batchId: string, opts: { withParent: boolean }) => {
+  const openVerifierAttempt = async (batchId: string, opts: { withParent: boolean; driverEpoch?: number }) => {
     const executionId = `evd-${batchId}-c1-t0`;
     const { attemptId } = await attempts.open({
       executionId,
       tenant: "acme",
       caseId: "c1#verify",
       ...(opts.withParent ? { scorecardId: batchId } : {}),
+      ...(opts.driverEpoch !== undefined ? { driverEpoch: opts.driverEpoch } : {}),
     });
     return { attemptId, executionId };
   };
@@ -133,5 +134,44 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST — a batch's verifier reserves under 
     const owned = await attempts.listForScorecard(batchId);
     expect(owned, "a scorecard teardown cannot see its own verifier attempt").toHaveLength(1);
     expect(owned[0]?.runtimeWork?.externalJobId).toBe("verify-4");
+  });
+
+  it("REFUSES a verifier whose drive was taken over — the epoch is what says so", async () => {
+    // arch-review 59 P0-verifier. `PARENT_AUTHORIZES` compares the parent's epoch only when the attempt has
+    // one: `a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch`. Opened without it, a displaced
+    // replica's verifier satisfies the predicate under ANY owner and can still burn tenant compute with the
+    // tenant's image and the verifier's credentials — the child settle is refused later by a different fence,
+    // which is exactly why it reads as harmless until the bill.
+    //
+    // This is the half no unit test can reach: the comparison is a SQL predicate against a real row.
+    const batchId = trustId("sc-verify-epoch");
+    await openBatch(batchId, "running");
+    // The batch is now owned at a higher epoch than the replica that opened this attempt was driving under.
+    await pg.client.query("UPDATE everdict_scorecards SET owner_epoch = 6 WHERE id = $1", [batchId]);
+    const { attemptId } = await openVerifierAttempt(batchId, { withParent: true, driverEpoch: 5 });
+
+    await expect(
+      attempts.reserveWork(attemptId, {
+        tenant: "acme",
+        runId: `evd-${batchId}-c1-t0`,
+        externalJobId: "verify-stale",
+        attemptId,
+      }),
+      "a displaced replica reserved compute under a batch it no longer drives",
+    ).rejects.toThrow();
+  });
+
+  it("still reserves when the epoch is the one the parent is being driven under", async () => {
+    const batchId = trustId("sc-verify-epoch-ok");
+    await openBatch(batchId, "running");
+    await pg.client.query("UPDATE everdict_scorecards SET owner_epoch = 5 WHERE id = $1", [batchId]);
+    const { attemptId } = await openVerifierAttempt(batchId, { withParent: true, driverEpoch: 5 });
+    const intent = await attempts.reserveWork(attemptId, {
+      tenant: "acme",
+      runId: `evd-${batchId}-c1-t0`,
+      externalJobId: "verify-live",
+      attemptId,
+    });
+    expect(intent.attemptId).toBe(attemptId);
   });
 });

@@ -457,6 +457,10 @@ export class WorkflowBatchDriver {
         // claim was refused, which is the case the generation cannot cover: it is how a self-hosted park
         // records which attempt it parked, and how an unisolated attempt stays addressable at all.
         ...(attemptId !== undefined ? { attemptId } : {}),
+        // …and the epoch this batch is being driven under, so the verifier its case spawns is fenced to the
+        // same drive (arch-review 59 P0-verifier). The in-process lane got this first; a lane that did not
+        // would leave its verifier reservable by a replica the takeover had already displaced.
+        ...(ctx.driverEpoch !== undefined ? { driverEpoch: ctx.driverEpoch } : {}),
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
         ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),

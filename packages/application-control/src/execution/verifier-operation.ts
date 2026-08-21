@@ -71,6 +71,7 @@ export async function verifierOperation(
     caseId: `${job.caseId}#verify`,
     ...(job.scorecardId !== undefined ? { scorecardId: job.scorecardId } : {}),
     ...(job.trial !== undefined ? { trial: job.trial } : {}),
+    ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),
   });
   const attemptId = opened.attemptId;
 

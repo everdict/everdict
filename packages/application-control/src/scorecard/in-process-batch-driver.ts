@@ -456,6 +456,9 @@ export class InProcessBatchDriver {
           // recording claim was refused, which is what makes an unisolated attempt addressable and what lets
           // a self-hosted park record which attempt it parked (runner_jobs.current_attempt_id).
           ...(openedAttemptId !== undefined ? { attemptId: openedAttemptId } : {}),
+          // …and the epoch this batch is being driven under, so the verifier its case spawns is
+          // fenced to the same drive (arch-review 59 P0-verifier).
+          ...(epoch !== undefined ? { driverEpoch: epoch } : {}),
         };
         const reattempt = this.cases.reattemptOf({
           tenant,

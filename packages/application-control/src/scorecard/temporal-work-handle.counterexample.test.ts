@@ -68,4 +68,18 @@ describe("[R53 WAVE-A COUNTEREXAMPLE #13 — CLOSED] a lost handle is not a succ
       "the attempt ledger's work stamp is still swallowed",
     ).toBe(false);
   });
+
+  it("both lanes fence their case's verifier to the epoch they are driving under", () => {
+    // arch-review 59 P0-verifier, and a live demonstration of why this file exists: the in-process lane got
+    // `driverEpoch` on its CaseJob and the Temporal one did not, in the same change, because the two build
+    // the job in two places. Without it `PARENT_AUTHORIZES` skips the epoch comparison entirely, and a
+    // replica the takeover displaced can still reserve and activate its verifier.
+    const workflow = driverSource("workflow-batch-driver.ts");
+    const inProcess = driverSource("in-process-batch-driver.ts");
+    expect(inProcess.includes("driverEpoch"), "the reference lane does not fence its verifier").toBe(true);
+    expect(
+      workflow.includes("driverEpoch"),
+      "the durable lane dispatches cases whose verifier any displaced replica may still activate",
+    ).toBe(true);
+  });
 });

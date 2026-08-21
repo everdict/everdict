@@ -108,6 +108,7 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     // parsed back out of the execution id (rule `protocol` L3).
     ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
     ...(job.trial !== undefined ? { trial: job.trial } : {}),
+    ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),
   };
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
