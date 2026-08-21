@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type DriverAuthority,
   type RecoveryTarget,
   type ReplicaRegistry,
   type ResumeResult,
@@ -26,6 +27,7 @@ import type {
   KillOutcome,
   ReadResult,
   RegistryAuth,
+  RunRecord,
   RuntimeSpec,
   RuntimeWorkRef,
   Score,
@@ -461,6 +463,79 @@ export function buildRuntimeAccess(deps: {
 // queued/running record is a ghost with no one to resume it. Interrupted BATCHES are resumed from their finished
 // child results (unfinished cases re-dispatched); unresumable records fall back to failed(INTERRUPTED).
 // docs/architecture/batch-resilience.md
+// ── RECOVERING A STANDALONE RUN IS A PHASE, AND BOTH OWNERS RUN ALL OF IT (arch-review 59 P0-lifecycle) ──
+//
+// Read the ledger's work handles, adopt each one EXACTLY, then resume — with `retry_later` at every step
+// where the answer was "we could not find out". Boot composed all three; the periodic sweep was wired to the
+// last line, `service.resume(r, undefined, authority)`, and `undefined` is the adopted result.
+//
+// So a run deferred BECAUSE the cluster would not say whether its job was live came back a minute later and
+// skipped the question, entering the non-adopt path — which re-dispatches. The compute that was live the
+// whole time then runs twice, bills twice and writes competing evidence, and the ledger records the retry as
+// a success. Two owners assembling the same transition is how they came apart; this is the transition, and
+// it has one owner now.
+export async function recoverStandaloneRun(
+  deps: Pick<Parameters<typeof runStartupRecovery>[0], "service" | "adoptWorkFn" | "workHandlesFor">,
+  r: RunRecord,
+  authority: DriverAuthority,
+): Promise<ResumeResult> {
+  const { service, adoptWorkFn, workHandlesFor } = deps;
+
+  // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
+  // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
+  // that mints none) falls back to "the newest job of this case", which can be another run's.
+  //
+  // …AND AN UNREADABLE LEDGER IS NOT AN EMPTY ONE (arch-review 54, Phase 2). `.catch(() => [])` here
+  // turned "the attempt ledger is down" into "this run placed no compute", which routed straight to the
+  // re-dispatch below. The read answers three ways now, and only a genuine `absent` may be acted on.
+  const handlesRead = workHandlesFor
+    ? await readOrUnknown(() => workHandlesFor(`evd-run-${r.id}`), "the run's runtime work handles")
+    : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
+  if (handlesRead.kind === "unknown")
+    // DEFERRED, AND THE SWEEP IS TOLD (arch-review 55). This used to `return` out of a fire-and-forget
+    // task while the caller had already answered `true`: the run stayed claimed by this replica,
+    // `running`, with no driver and no durable retry — a zombie the next booting replica reads as
+    // "another live replica is driving it".
+    return { kind: "retry_later", reason: handlesRead.reason };
+  const handles = handlesRead.kind === "read" ? handlesRead.value : [];
+  let adopted: CaseResult | undefined;
+  if (handles.length > 0 && adoptWorkFn) {
+    for (const work of handles) {
+      const decision = await adoptWorkFn(r.tenant, r.runtime, work).catch(
+        (err: unknown): AdoptionDecision => ({
+          kind: "unknown",
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      // Exhaustive: the third case is the one the previous shape allowed a caller to skip.
+      if (decision.kind === "adopted") {
+        adopted = decision.result;
+        break;
+      }
+      if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };
+    }
+  }
+  // No handle = nothing this system can name, so nothing to adopt. `service.resume` then re-dispatches
+  // (safe for the dispatch that died before reserving, which is the only way a post-Wave-A row gets
+  // here) or tombstones under its own fence. What it no longer does is harvest "the newest job of this
+  // case", which could be another run's.
+  // A resume that THREW told us nothing — which is `retry_later`, not `unresumable` (arch-review 55,
+  // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
+  // "this run failed", and the sweep wrote a tombstone on the strength of it.
+  const outcome = await service.resume(r, adopted, authority).catch(
+    (err: unknown): ResumeResult => ({
+      kind: "retry_later",
+      reason: err instanceof Error ? err.message : String(err),
+    }),
+  );
+  if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
+  // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
+  // fire-and-forget leg whose caller had already answered `true` — so the one place that knew the
+  // outcome was also the one place nobody was waiting on. `recoverInterrupted` already tombstones an
+  // `unresumable` disposition under the epoch it claimed; saying so once is the whole change.
+  return { kind: "unresumable" };
+}
+
 export async function runStartupRecovery(deps: {
   scorecardStore: ScorecardStore;
   store: RunStore;
@@ -500,63 +575,8 @@ export async function runStartupRecovery(deps: {
     // finish) was recorded as an infrastructure failure. Two things were wrong and both are fixed: the
     // service now says WHICH of the two happened, and the write goes through `settleRun`, which cannot be
     // called without the terminal fence.
-    resumeRun: async (r, authority) => {
-      return await (async (): Promise<ResumeResult> => {
-        // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
-        // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
-        // that mints none) falls back to "the newest job of this case", which can be another run's.
-        //
-        // …AND AN UNREADABLE LEDGER IS NOT AN EMPTY ONE (arch-review 54, Phase 2). `.catch(() => [])` here
-        // turned "the attempt ledger is down" into "this run placed no compute", which routed straight to the
-        // re-dispatch below. The read answers three ways now, and only a genuine `absent` may be acted on.
-        const handlesRead = workHandlesFor
-          ? await readOrUnknown(() => workHandlesFor(`evd-run-${r.id}`), "the run's runtime work handles")
-          : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
-        if (handlesRead.kind === "unknown")
-          // DEFERRED, AND THE SWEEP IS TOLD (arch-review 55). This used to `return` out of a fire-and-forget
-          // task while the caller had already answered `true`: the run stayed claimed by this replica,
-          // `running`, with no driver and no durable retry — a zombie the next booting replica reads as
-          // "another live replica is driving it".
-          return { kind: "retry_later", reason: handlesRead.reason };
-        const handles = handlesRead.kind === "read" ? handlesRead.value : [];
-        let adopted: CaseResult | undefined;
-        if (handles.length > 0 && adoptWorkFn) {
-          for (const work of handles) {
-            const decision = await adoptWorkFn(r.tenant, r.runtime, work).catch(
-              (err: unknown): AdoptionDecision => ({
-                kind: "unknown",
-                reason: err instanceof Error ? err.message : String(err),
-              }),
-            );
-            // Exhaustive: the third case is the one the previous shape allowed a caller to skip.
-            if (decision.kind === "adopted") {
-              adopted = decision.result;
-              break;
-            }
-            if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };
-          }
-        }
-        // No handle = nothing this system can name, so nothing to adopt. `service.resume` then re-dispatches
-        // (safe for the dispatch that died before reserving, which is the only way a post-Wave-A row gets
-        // here) or tombstones under its own fence. What it no longer does is harvest "the newest job of this
-        // case", which could be another run's.
-        // A resume that THREW told us nothing — which is `retry_later`, not `unresumable` (arch-review 55,
-        // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
-        // "this run failed", and the sweep wrote a tombstone on the strength of it.
-        const outcome = await service.resume(r, adopted, authority).catch(
-          (err: unknown): ResumeResult => ({
-            kind: "retry_later",
-            reason: err instanceof Error ? err.message : String(err),
-          }),
-        );
-        if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
-        // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
-        // fire-and-forget leg whose caller had already answered `true` — so the one place that knew the
-        // outcome was also the one place nobody was waiting on. `recoverInterrupted` already tombstones an
-        // `unresumable` disposition under the epoch it claimed; saying so once is the whole change.
-        return { kind: "unresumable" };
-      })();
-    },
+    // ONE function, called by boot AND by the periodic sweep — see `recoverStandaloneRun`.
+    resumeRun: (r, authority) => recoverStandaloneRun(deps, r, authority),
   });
   if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed + recovered.sessions > 0)
     console.error(
@@ -680,7 +700,10 @@ export async function sweepDeferredRecovery(
       runs: deps.store,
       owner: deps.owner,
       resume: (id, authority) => deps.scorecardService.resume(id, authority),
-      resumeRun: (r, authority) => deps.service.resume(r, undefined, authority),
+      // THE SAME transition boot runs, not its last line (arch-review 59 P0-lifecycle). Wiring this to
+      // `service.resume(r, undefined, …)` meant a run deferred because the cluster would not say whether its
+      // job was live came back and skipped the question, re-dispatching compute that was still running.
+      resumeRun: (r, authority) => recoverStandaloneRun(deps, r, authority),
     },
     owed,
   );

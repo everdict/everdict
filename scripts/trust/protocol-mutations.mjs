@@ -17,6 +17,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
+    // arch-review 59 P0-lifecycle. The periodic sweep was wired to the LAST LINE of boot's recovery
+    // transition, so a run deferred because the cluster would not say whether its job was live came back and
+    // skipped the question — re-dispatching compute that was still running.
+    name: "R59 — the periodic recovery skips the adoption phase",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "      resumeRun: (r, authority) => recoverStandaloneRun(deps, r, authority),",
+    to: "      resumeRun: (r, authority) => deps.service.resume(r, undefined, authority),",
+    suite: ["--root", "apps/api", "src/composition/recovery-adoption-phase.counterexample.test.ts"],
+  },
+  {
     // arch-review 59 P0-world. The manifest and the proof were two expressions, so the Nomad lane requested no
     // GPU for a case that declared one and attested `gpu: 1` anyway — a false world, which `worldProofCovers`
     // ACCEPTS. Splitting them again must go red.
