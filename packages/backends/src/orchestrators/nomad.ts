@@ -559,6 +559,9 @@ export function buildNomadJob(
   // THE JUDGING HALF (arch-review 56, Wave K) — see the K8s twin. The case payload is NOT set alongside it,
   // which is what keeps "the agent's container never held the plan" a property of the spec.
   verifierPayload?: string,
+  // Render the group at zero, so registering it creates something a teardown can address and nothing that
+  // runs. The authority decides whether it is ever re-registered at one — see `Count` below.
+  inert = false,
 ): NomadJobSpec {
   // Enforce-or-refuse, decided while this is still pure — see `refuseUnenforceableNetwork` for why the
   // in-container check was the right decision at the wrong moment.
@@ -635,7 +638,17 @@ export function buildNomadJob(
       TaskGroups: [
         {
           Name: "eval",
-          Count: 1,
+          // ── BORN INERT (arch-review 61 P0) ────────────────────────────────────────────────────────
+          //
+          // `Count: 0` registers a job that EXISTS, is addressable by the same id `killWork` deletes and
+          // `probeWork` reads, and schedules no allocation at all. Verified against a live Nomad: inert is
+          // zero allocs, re-registering at 1 runs it to completion, and deleting while inert leaves none.
+          //
+          // The K8s lane got this in arch-review 60 (`suspend: true`); this lane kept `activate → submit`,
+          // so a submitter paused across that call could still create its job after a cancellation had
+          // killed nothing, probed absent and certified zero. Two lanes, one protocol — the variance is a
+          // parameter, never a second body (rule `backends`).
+          Count: inert ? 0 : 1,
           ...(constraints && constraints.length > 0 ? { Constraints: constraints } : {}),
           RestartPolicy: { Attempts: 0, Mode: "fail" },
           Tasks: [
@@ -1048,6 +1061,15 @@ export class NomadBackend
     // submit (Nomad accepted it, the response never arrived) is precisely the case where the handle matters
     // most, and the old post-submit hook guaranteed there was none. A hook that RESOLVED having written
     // nothing was the same hole one layer in, so the store's answer is required rather than assumed.
+    // Built ONCE, outside the reservation block, because the ACTIVATION now happens after the inert
+    // registration and re-presents the very same id (arch-review 61 P0). Two literals is how those drift.
+    const work: RuntimeWorkRef = {
+      tenant: job.tenant ?? "default",
+      runId: job.runId ?? "",
+      externalJobId: jobId,
+      ...(ns !== undefined ? { namespace: ns } : {}),
+      ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
+    };
     if (job.runId !== undefined) {
       // BEFORE the reservation, not after (arch-review 58 W5). The spec builder refuses this too, but by
       // then a reservation has been spent and an activation burned on a case that will never place — a
@@ -1056,17 +1078,7 @@ export class NomadBackend
       refuseUnenforceableNetwork(job.evalCase.network, "nomad");
       // Built ONCE and used by both seams: a reservation authorizes one external object, so the id the
       // activation re-presents has to be the id that was reserved. Two literals here is how those drift.
-      const work = {
-        tenant: job.tenant ?? "default",
-        runId: job.runId,
-        externalJobId: jobId,
-        ...(ns !== undefined ? { namespace: ns } : {}),
-        ...(job.attemptId !== undefined ? { attemptId: job.attemptId } : {}),
-      };
       await requireReservation(job, work, options?.authority);
-      // …and the reservation is re-presented immediately before the submit (arch-review 57 P0). A proof with
-      // no lifetime let a paused driver create work after a cancellation had verified there was none.
-      await requireActivation(job, work, options?.authority);
     }
     // The infra-plane record of THIS dispatch (submission, blocked verdicts, placement) — appended to the
     // result's trace so the sealed trajectory keeps the orchestrator's account after the job is GC'd.
@@ -1085,9 +1097,38 @@ export class NomadBackend
         at: new Date(now).toISOString(),
       });
     };
-    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload));
+    // ── THE OBJECT COMES FIRST, INERT (arch-review 61 P0) ───────────────────────────────────────────
+    //
+    // Registered at `Count: 0`: the job exists, `killWork` can delete exactly it and `probeWork` can read it,
+    // and Nomad schedules no allocation. So a cancellation racing this dispatch can no longer kill nothing,
+    // probe absent and certify zero while a submission is still pending — the race the K8s lane closed with
+    // `suspend: true` in arch-review 60 and this one kept.
+    const submit = await this.http.request(
+      "POST",
+      "/v1/jobs",
+      buildNomadJob(job, opts, jobId, verifier?.payload, true),
+    );
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
+    }
+    mark("registered", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""} (inert)`);
+    // …and the reservation is re-presented against an object that already exists (arch-review 57 P0 · 61).
+    // A refusal removes what this dispatch registered, so the cancellation's certificate stays true: the only
+    // thing that existed was a job with no allocations, purged by its own creator.
+    if (job.runId !== undefined) {
+      try {
+        await requireActivation(job, work, options?.authority);
+      } catch (err) {
+        await this.http
+          .request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns ? `&namespace=${ns}` : ""}`)
+          .catch(() => undefined);
+        throw err;
+      }
+    }
+    // …and only an authorized dispatch scales it to one, which is what makes it run.
+    const start = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload));
+    if (start.status >= 300) {
+      throw new UpstreamError("UPSTREAM_ERROR", { status: start.status }, "Nomad job could not be started");
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
     // ── AND ONLY NOW IS THIS RUN "STARTED" (arch-review 54 Phase 1 · 60 P0) ──────────────────────────

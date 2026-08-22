@@ -113,9 +113,12 @@ describe("[R60 COUNTEREXAMPLE] a run is 'started' only once its external object 
       addr: "http://nomad:4646",
       image: "runner:1",
       http: {
-        request: async (method: string, path: string) => {
+        request: async (method: string, path: string, body?: unknown) => {
           if (method === "POST" && path === "/v1/jobs") {
-            order.push("apply(job)");
+            // The COUNT is what says whether this registration can run anything — see the Nomad half of the
+            // inert protocol (arch-review 61 P0).
+            const count = (body as { Job: { TaskGroups: Array<{ Count: number }> } }).Job.TaskGroups[0]?.Count;
+            order.push(count === 0 ? "register(inert)" : "start");
             return { status: 200, text: "{}" };
           }
           // Whatever the poll asks next, this dispatch is over as far as the ordering question goes.
@@ -125,11 +128,19 @@ describe("[R60 COUNTEREXAMPLE] a run is 'started' only once its external object 
     } as never);
 
     await backend
-      .dispatch(JOB(), { authority: AUTHORITY, onStarted: () => order.push("started") })
+      .dispatch(JOB(), { authority: recordingAuthority(order), onStarted: () => order.push("started") })
       .catch(() => undefined);
 
+    // ── AND THE OBJECT COMES FIRST HERE TOO (arch-review 61 P0) ────────────────────────────────────
+    //
+    // This lane kept `activate → submit` when K8s moved to inert-first, so a submitter paused across that
+    // call could still create its job after a cancellation had killed nothing, probed absent and certified
+    // zero. Registered at `Count: 0` now — the job exists, `killWork` can delete exactly it, and Nomad
+    // schedules no allocation — and only an authorized dispatch re-registers it at one.
     expect(order, "the ledger said this attempt was executing before any object existed").toEqual([
-      "apply(job)",
+      "register(inert)",
+      "activate",
+      "start",
       "started",
     ]);
   });

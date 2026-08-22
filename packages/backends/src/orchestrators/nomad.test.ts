@@ -264,9 +264,17 @@ describe("NomadBackend.dispatch", () => {
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
     const result = await backend.dispatch(JOB);
     const infra = result.trace.filter((e) => e.kind === "infra");
-    expect(infra.map((e) => (e.kind === "infra" ? e.event : undefined))).toEqual(["submitted", "placed", "Started"]);
-    expect(infra[1]).toMatchObject({ scope: "placement", unit: "alloc1", node: "worker-7" });
-    expect(infra[2]).toMatchObject({ message: "Task started by client", unit: "alloc1", node: "worker-7" });
+    // `registered` is the INERT registration and `submitted` the start — two events because the object now
+    // exists before the authority decides whether it runs (arch-review 61 P0).
+    expect(infra.map((e) => (e.kind === "infra" ? e.event : undefined))).toEqual([
+      "registered",
+      "submitted",
+      "placed",
+      "Started",
+    ]);
+    // Indices shift by one: `registered` precedes `submitted` now.
+    expect(infra[2]).toMatchObject({ scope: "placement", unit: "alloc1", node: "worker-7" });
+    expect(infra[3]).toMatchObject({ message: "Task started by client", unit: "alloc1", node: "worker-7" });
   });
 
   it("a blocked placement fires onWaiting ONCE with the verdict (visible waiting, not a silent 'queued')", async () => {
@@ -606,8 +614,12 @@ describe("NomadBackend.dispatch", () => {
     await backend.dispatch({ ...JOB, tenant: "acme" });
     await backend.dispatch({ ...JOB, tenant: "globex" });
 
-    expect(posted[0]?.ANTHROPIC_API_KEY).toBe("sk-acme");
-    expect(posted[1]?.ANTHROPIC_API_KEY).toBe("sk-globex"); // acme's key doesn't leak into globex's job
+    // Asserted as a SET, not by position: a dispatch registers its job twice now — inert, then at Count 1
+    // once the authority has re-presented (arch-review 61 P0) — so an index is a statement about how many
+    // POSTs a dispatch happens to make rather than about whose key went where.
+    const keys = posted.map((e) => e.ANTHROPIC_API_KEY);
+    expect(new Set(keys), "a tenant's key reached another tenant's job").toEqual(new Set(["sk-acme", "sk-globex"]));
+    expect(keys.length, "the two dispatches posted nothing at all").toBeGreaterThanOrEqual(2);
   });
 });
 
