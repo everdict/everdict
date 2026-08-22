@@ -1,7 +1,7 @@
 import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
 import { MAY_STILL_CREATE_WORK, mayStillCreateWork } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { K8sBackend } from "./k8s.js";
+import { K8sBackend, buildK8sJob } from "./k8s.js";
 import { NomadBackend } from "./nomad.js";
 
 // ── A LIFECYCLE STAMP NAMES AN OBSERVED FACT (arch-review 60 P0) ─────────────────────────────────────
@@ -132,6 +132,14 @@ describe("[R60 COUNTEREXAMPLE] a run is 'started' only once its external object 
       "apply(job)",
       "started",
     ]);
+  });
+
+  it("the Job is APPLIED inert — the ordering is worth nothing if the object can already run", () => {
+    // The mutation that found this gap: flipping `suspend` in the manifest leaves the call ORDER untouched,
+    // so a test that only watches apply/activate/resume stays green over a Job that was runnable the moment
+    // it existed. The order and the inertness are two claims and both need asserting.
+    const spec = buildK8sJob(JOB(), { image: "runner:1" }, "evd-c1", "ns") as { spec: { suspend?: boolean } };
+    expect(spec.spec.suspend, "the Job could create pods before its authority was re-presented").toBe(true);
   });
 
   it("the birth guard's state set has ONE owner, and it includes every pre-birth state", () => {

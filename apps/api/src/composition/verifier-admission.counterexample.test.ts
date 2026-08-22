@@ -79,6 +79,114 @@ const access = (b: BudgetTracker) =>
 //   a second verifier was placed while the workspace was at its concurrency limit: expected NotFoundError
 //   (it went straight on to resolve a lane) to match { code: 'RATE_LIMITED' }
 
+// ── …AND THE DEFAULT DEPLOYMENT IS THE ONE THAT MUST WORK (arch-review 61 P0) ───────────────────────
+//
+// `quotaFor` answers `Number.POSITIVE_INFINITY` when no tenant quota is configured — the default. The
+// verifier lane bound that straight into the Pg ledger's `in_flight < $3` against an `integer` column, and
+// Postgres answers `invalid input syntax for type integer: "Infinity"` (verified against a real one). The
+// acquisition sat OUTSIDE the try, so the throw skipped the release:
+//
+//     budget.admit()      runs +1
+//     tryAdmit(Infinity)  THROWS
+//     budget.release()    never runs
+//     verifier            never dispatched → tests_pass: unmeasured
+//
+// On Postgres, with no `EVERDICT_TENANT_QUOTAS` set, that was EVERY private-verifier case: the verdict lost
+// and the workspace's run count permanently incremented, so a run budget eventually 402s it for verifiers
+// that never existed. The Scheduler never had this — it asks `Number.isFinite(quota)` first — and two
+// admission paths spelling one precondition differently is the shape rule `backends` names.
+//
+// Seen RED before the finite question and the single `finally`, observed:
+//   a default deployment could not place a verifier at all: expected [Error: invalid input syntax for type
+//   integer: "Infinity"] to be undefined
+
+describe("[R61 COUNTEREXAMPLE] the default deployment places a verifier, and releases what it took", () => {
+  // The Pg ledger's own precondition, as a fake: an integer column cannot be compared with Infinity.
+  const integerColumnLedger = () => {
+    const held = new Set<string>();
+    return {
+      held,
+      ledger: {
+        tryAdmit: async (_t: string, permitId: string, quota: number) => {
+          if (!Number.isInteger(quota)) throw new Error(`invalid input syntax for type integer: "${quota}"`);
+          if (held.size >= quota) return false;
+          held.add(permitId);
+          return true;
+        },
+        releaseAdmission: async (permitId: string) => {
+          held.delete(permitId);
+        },
+      },
+    };
+  };
+
+  const access = (b: BudgetTracker, slots: ReturnType<typeof integerColumnLedger>, quota: number) =>
+    buildRuntimeAccess({
+      runtimeRegistry: { get: async () => undefined, list: async () => [] } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () => ({}) as never,
+      admitVerifierCompute: b,
+      verifierSlots: { ledger: slots.ledger, quotaFor: () => quota, newPermitId: () => "p1" },
+    });
+
+  it("claims NO fleet slot when the workspace has no quota — the default", async () => {
+    const slots = integerColumnLedger();
+    const b = budget();
+    const err = await access(b, slots, Number.POSITIVE_INFINITY)
+      .dispatchVerifier(JOB)
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+
+    // It gets as far as resolving a lane — which finds none in this fixture — rather than dying on the quota.
+    expect((err as { code?: string })?.code, "a default deployment could not place a verifier at all").toBe(
+      "NOT_FOUND",
+    );
+    expect(slots.held.size, "an unlimited quota still claimed a fleet permit").toBe(0);
+    expect(b.reserved(), "the budget reservation leaked on the default path").toBe(0);
+  });
+
+  it("RELEASES the budget when the ledger throws", async () => {
+    // A transient ledger failure is neither a refusal nor an admission. What must not happen is the budget
+    // staying held for a verifier that never ran (rule `protocol` L2 — and L1 on what a failed acquisition
+    // owes back).
+    const slots = integerColumnLedger();
+    const b = budget();
+    // A FINITE quota, so the guard does consult the ledger, and a ledger that will not answer.
+    const outage = {
+      held: slots.held,
+      ledger: {
+        tryAdmit: async () => {
+          throw new Error("could not connect to the admission ledger");
+        },
+        releaseAdmission: async () => undefined,
+      },
+    } as unknown as ReturnType<typeof integerColumnLedger>;
+    const err = await access(b, outage, 5)
+      .dispatchVerifier(JOB)
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+
+    expect((err as { code?: string })?.code, "a ledger outage was reported as a quota refusal").toBe("UPSTREAM_ERROR");
+    expect(b.reserved(), "a verifier that never ran kept its budget reservation").toBe(0);
+    expect(slots.held.size).toBe(0);
+  });
+
+  it("still REFUSES at a real limit, and still releases", async () => {
+    // The finite path must keep working: the fix is about unlimited quotas and unwinding, not about admitting
+    // everything.
+    const slots = integerColumnLedger();
+    const b = budget();
+    await slots.ledger.tryAdmit("acme", "agent-half", 1);
+    const err = await access(b, slots, 1)
+      .dispatchVerifier(JOB)
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+
+    expect((err as { code?: string })?.code).toBe("RATE_LIMITED");
+    expect(b.reserved(), "a refused verifier kept its budget reservation").toBe(0);
+  });
+});
+
 describe("[R60 COUNTEREXAMPLE] a verifier draws a slot from the same pool the agent's half did", () => {
   // A ledger with room for exactly one in-flight execution per tenant — the Scheduler's own primitive.
   function ledgerWithQuotaOne() {

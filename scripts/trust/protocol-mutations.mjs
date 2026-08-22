@@ -1104,6 +1104,44 @@ const MUTATIONS = [
     to: "    ...opts.secretEnv,",
     suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P0. The finite question removed, so a DEFAULT deployment (no tenant quota) binds
+    // `Infinity` into the Pg ledger's `in_flight < $3` against an integer column and every private-verifier
+    // case dies before its lane is resolved.
+    name: "verifier admission — an unlimited quota is bound into an integer comparison",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "quota !== undefined && Number.isFinite(quota)",
+    to: "quota !== undefined",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // …and the unwinding: a budget reservation held for a verifier that never ran, which permanently inflates
+    // the workspace's run count and eventually 402s it for compute that does not exist.
+    name: "verifier admission — the budget is never released",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "      if (budgetHeld) admitVerifierCompute?.release(job.tenant);",
+    to: "",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // arch-review 61 P0. The Nomad group registered runnable, so the first external object a dispatch makes
+    // is one that already schedules an allocation — and a cancellation racing it kills nothing, probes
+    // absent, and certifies zero while the submission is still pending.
+    name: "inert birth — the Nomad group is registered runnable",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "          Count: inert ? 0 : 1,",
+    to: "          Count: 1,",
+    suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
+  },
+  {
+    // …and the lane asking for a runnable registration, which is the same defect one layer up: the builder
+    // can render inert and nobody requests it.
+    name: "inert birth — the Nomad lane never asks for an inert registration",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "      buildNomadJob(job, opts, jobId, verifier?.payload, true),",
+    to: "      buildNomadJob(job, opts, jobId, verifier?.payload),",
+    suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

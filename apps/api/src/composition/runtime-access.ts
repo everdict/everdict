@@ -39,7 +39,7 @@ import type {
   VerifierJob,
   WorkPresence,
 } from "@everdict/contracts";
-import { NotFoundError, RateLimitError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
+import { NotFoundError, RateLimitError, UpstreamError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { BudgetTracker } from "@everdict/domain";
@@ -396,26 +396,52 @@ export function buildRuntimeAccess(deps: {
     // BEFORE any lane is resolved — see `admitVerifierCompute`. Over the cap this throws
     // `PaymentRequiredError` (402), which `withVerifierPass` records as an owed verdict rather than a
     // fabricated one, so a workspace out of budget gets an unmeasured case and not a free container.
-    admitVerifierCompute?.admit(job.tenant);
-    // …and a SLOT in the same pool the agent's half was placed from — see `verifierSlots`. Claimed after the
-    // budget so a tenant over its cap is refused without ever touching fleet accounting, and refused with a
-    // 429 rather than a 402, because "you are at your concurrency limit" is a different fact from "you are
-    // out of money" and a caller retries one of them.
+    // ── EVERY ADMISSION THIS LANE TAKES IS RELEASED BY ONE `finally` (arch-review 61 P0) ─────────────
+    //
+    // The budget was claimed here and the permit below it, both OUTSIDE the try — so anything that threw
+    // between them left the budget reservation held forever. And something did throw, on the DEFAULT
+    // deployment: `quotaFor` answers `Number.POSITIVE_INFINITY` when no tenant quota is configured, and the
+    // Pg ledger binds that straight into `in_flight < $3` against an `integer` column. Postgres answers
+    // `invalid input syntax for type integer: "Infinity"` — verified against a real one — so on Postgres,
+    // with no `EVERDICT_TENANT_QUOTAS` set, EVERY private-verifier case threw before its lane was resolved,
+    // recorded `tests_pass: unmeasured`, and permanently incremented the workspace's run count. A workspace
+    // with a run budget is then 402'd for verifiers that never existed.
+    //
+    // The Scheduler never had this: it asks `Number.isFinite(quota)` first and claims no permit at all when
+    // the quota is unlimited. Two admission paths spelling the same precondition differently is the shape
+    // rule `backends` names — so this asks the same question, and every acquisition is unwound by the same
+    // `finally` regardless of which step failed.
     const permitId = verifierSlots?.newPermitId();
-    let holdsPermit = false;
-    if (verifierSlots && permitId !== undefined) {
-      const quota = verifierSlots.quotaFor(job.tenant);
-      holdsPermit = (await verifierSlots.ledger.tryAdmit?.(job.tenant, permitId, quota)) ?? true;
-      if (!holdsPermit) {
-        admitVerifierCompute?.release(job.tenant);
-        throw new RateLimitError(
-          "RATE_LIMITED",
-          { tenant: job.tenant, quota },
-          "this workspace is at its concurrent-execution limit, so its verifier cannot be placed yet.",
-        );
-      }
-    }
+    let budgetHeld = false;
+    let permitHeld = false;
     try {
+      admitVerifierCompute?.admit(job.tenant);
+      budgetHeld = true;
+      const quota = verifierSlots?.quotaFor(job.tenant);
+      // No ledger, no quota, or an UNLIMITED one: there is no fleet-wide slot to claim, and claiming one
+      // would be inventing a limit nobody configured.
+      if (verifierSlots && permitId !== undefined && quota !== undefined && Number.isFinite(quota)) {
+        // REFUSED and COULD-NOT-CHECK are different facts (rule `protocol` L2). `false` is the tenant at its
+        // limit — a 429 a caller retries. A throw is a ledger that would not answer, which is neither a
+        // refusal nor an admission: it becomes an UpstreamError, and `withVerifierPass` records it as
+        // `unmeasured` naming the infrastructure rather than telling a workspace it is over a cap.
+        const admitted = await verifierSlots.ledger.tryAdmit?.(job.tenant, permitId, quota).catch((err: unknown) => {
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { tenant: job.tenant },
+            `the admission ledger could not say whether this workspace has room for a verifier: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
+        if (admitted === false)
+          throw new RateLimitError(
+            "RATE_LIMITED",
+            { tenant: job.tenant, quota },
+            "this workspace is at its concurrent-execution limit, so its verifier cannot be placed yet.",
+          );
+        permitHeld = admitted === true;
+      }
       // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
       // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
       // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
@@ -448,11 +474,12 @@ export function buildRuntimeAccess(deps: {
       // reserving-then-releasing is what stops a batch's fan-out from overshooting a cap that is computed
       // from committed usage. A reservation never released would 402 the workspace for containers that have
       // long since exited.
-      admitVerifierCompute?.release(job.tenant);
-      // The slot goes back the moment this lane stops holding a container, exactly as the budget reservation
-      // does. Idempotent by contract, so a release that races the ledger's own lease reap is harmless.
-      if (holdsPermit && permitId !== undefined)
+      // Both, and only what was actually taken. The slot goes back the moment this lane stops holding a
+      // container, exactly as the budget reservation does; idempotent by contract, so a release racing the
+      // ledger's own lease reap is harmless.
+      if (permitHeld && permitId !== undefined)
         await verifierSlots?.ledger.releaseAdmission?.(permitId).catch(() => undefined);
+      if (budgetHeld) admitVerifierCompute?.release(job.tenant);
     }
   };
 
