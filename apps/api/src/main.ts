@@ -720,6 +720,8 @@ async function main(): Promise<void> {
     // The budget above limits SPEND; this limits how many containers a workspace holds at once, and a batch
     // with budget headroom used to place every verifier straight at the backend (arch-review 60 P1-high).
     verifierSlots: {
+      // The WHOLE ledger, not two of its verbs: a permit is a 30-minute lease and a holder that cannot renew
+      // is a holder that loses its slot while its container runs (arch-review 61 P1).
       ledger: admissionSlots.ledger,
       quotaFor: admissionSlots.quotaFor,
       newPermitId: () => `verify-${randomUUID()}`,

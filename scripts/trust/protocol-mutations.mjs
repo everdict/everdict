@@ -1192,6 +1192,24 @@ const MUTATIONS = [
     to: "  if (false)",
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P1. The backend's own envelope ignored, so several tenants each inside their own quota
+    // still put a lane past its `maxConcurrent` — which a batch's verifier fan-out does routinely.
+    name: "verifier capacity — the runtime's envelope is not consulted",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        if (room !== undefined && room.used >= room.total)",
+    to: "        if (false)",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // …and the LEASE: the ledger's permit expires after 30 minutes, so a verifier that never renews has its
+    // slot reaped while its container keeps running and another execution claims it.
+    name: "verifier permit — the lease is never renewed",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        if (permitHeld) renewal = startRenewal(verifierSlots, permitId, verifierSlots.renewEveryMs);",
+    to: "",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

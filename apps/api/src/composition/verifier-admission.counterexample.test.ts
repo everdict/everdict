@@ -100,6 +100,98 @@ const access = (b: BudgetTracker) =>
 //   a default deployment could not place a verifier at all: expected [Error: invalid input syntax for type
 //   integer: "Infinity"] to be undefined
 
+// ── …AND THE BACKEND'S ENVELOPE, AND A LEASE IT KEEPS (arch-review 61 P1) ───────────────────────────
+//
+// The tenant permit limits how many executions ONE workspace holds. Two things it does not do:
+//
+//   BACKEND CAPACITY. `maxConcurrent` is what stops a cluster being handed more work than it has slots, and
+//   several tenants each inside their own quota can still put a lane past its total. A batch's verifier
+//   fan-out is exactly the shape that does it.
+//
+//   THE LEASE. The ledger's permit expires after 30 minutes and the Scheduler renews the ones it holds every
+//   ten. This lane was handed only `tryAdmit`/`releaseAdmission`, so a verifier running past the lease had
+//   its permit reaped while its container kept going, and another execution could claim the slot it still
+//   occupied. A capability a holder is not given is a lease it cannot keep.
+//
+// Seen RED before either, observed:
+//   a verifier was placed on a runtime with no free slots: expected 'NOT_FOUND' to be 'RATE_LIMITED'
+//   a verifier held a slot it never renewed: expected [] to deeply equal [ 'p1' ]
+
+describe("[R61 COUNTEREXAMPLE] a verifier respects the backend's envelope and keeps its lease", () => {
+  const backendAt = (used: number, total: number) => ({
+    id: "rt-1",
+    capacity: async () => ({ used, total }),
+    dispatchVerifier: async () => ({ planDigest: "p", workspaceDigest: "w", scores: [] }),
+  });
+
+  const accessWith = (backend: unknown, slots?: unknown) =>
+    buildRuntimeAccess({
+      runtimeRegistry: {
+        get: async () => ({ id: "rt-1", version: "1", kind: "k8s" }),
+        list: async () => [],
+      } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () => backend as never,
+      admitVerifierCompute: budget(),
+      ...(slots ? { verifierSlots: slots as never } : {}),
+    });
+
+  it("REFUSES when the runtime has no free slot, even inside the tenant's quota", async () => {
+    const err = await accessWith(backendAt(20, 20))
+      .dispatchVerifier(JOB)
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect((err as { code?: string })?.code, "a verifier was placed on a runtime with no free slots").toBe(
+      "RATE_LIMITED",
+    );
+  });
+
+  it("places when the runtime has room", async () => {
+    // The control: refusing a full lane must not cost the ordinary one.
+    const out = await accessWith(backendAt(1, 20))
+      .dispatchVerifier(JOB)
+      .then(() => "placed")
+      .catch(() => "refused");
+    expect(out).toBe("placed");
+  });
+
+  it("RENEWS its permit while the container runs", async () => {
+    const renewed: string[] = [];
+    let release!: () => void;
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
+    const slots = {
+      ledger: {
+        tryAdmit: async () => true,
+        releaseAdmission: async () => undefined,
+        renewAdmissions: async (ids: string[]) => {
+          renewed.push(...ids);
+        },
+      },
+      quotaFor: () => 5,
+      newPermitId: () => "p1",
+      renewEveryMs: 5, // the lane's own interval, compressed so the test does not wait ten minutes
+    };
+    const backend = {
+      ...backendAt(1, 20),
+      dispatchVerifier: async () => {
+        await slow;
+        return { planDigest: "p", workspaceDigest: "w", scores: [] };
+      },
+    };
+
+    const inflight = accessWith(backend, slots)
+      .dispatchVerifier(JOB)
+      .catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 40));
+    release();
+    await inflight;
+
+    expect(renewed, "a verifier held a slot it never renewed").toContain("p1");
+  });
+});
+
 describe("[R61 COUNTEREXAMPLE] the default deployment places a verifier, and releases what it took", () => {
   // The Pg ledger's own precondition, as a fake: an integer column cannot be compared with Infinity.
   const integerColumnLedger = () => {

@@ -48,6 +48,22 @@ import type { RuntimeRegistry } from "@everdict/registry";
 // Per-runtime backend access for already-dispatched cases: adoption/kill (boot recovery, supersede) + the
 // live-observability reads (logs / one-shot exec / terminal stream / browser frame). Resolves the recorded
 // runtime lane (possibly a comma shard list) to live backends via the shared runtime builder/auth path.
+// Keep a permit alive for as long as its container runs. Exactly the Scheduler's shape — a timer that lives
+// only while a permit is held and never pins the process — because a second renewal policy is a second answer
+// to "how long may a holder go silent" (arch-review 61 P1).
+function startRenewal(
+  slots: { ledger: Pick<AdmissionLedger, "renewAdmissions"> },
+  permitId: string,
+  everyMs = 600_000,
+): { stop: () => void } {
+  if (slots.ledger.renewAdmissions === undefined) return { stop: () => undefined };
+  const timer = setInterval(() => {
+    void slots.ledger.renewAdmissions?.([permitId])?.catch?.(() => undefined);
+  }, everyMs);
+  timer.unref?.();
+  return { stop: () => clearInterval(timer) };
+}
+
 export function buildRuntimeAccess(deps: {
   runtimeRegistry: RuntimeRegistry;
   runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
@@ -87,7 +103,15 @@ export function buildRuntimeAccess(deps: {
   // that must agree. A deployment without a ledger admits as before — the ledger is what makes the limit
   // fleet-wide, and its absence is the single-replica case, not a bypass.
   verifierSlots?: {
-    ledger: Pick<AdmissionLedger, "tryAdmit" | "releaseAdmission">;
+    // …including RENEWAL (arch-review 61 P1). The ledger's permit is a 30-minute LEASE and the Scheduler
+    // renews the ones it holds every ten; this lane was handed only `tryAdmit`/`releaseAdmission`, so a
+    // verifier running longer than the lease had its permit reaped while its container kept going — another
+    // execution could then claim the slot it was still occupying, and the fleet quietly exceeded the quota
+    // by that verifier's share. A capability a holder is not given is a lease it cannot keep.
+    ledger: Pick<AdmissionLedger, "tryAdmit" | "releaseAdmission" | "renewAdmissions">;
+    // How often to renew, matching the Scheduler's default. A verifier is bounded by the case's own
+    // `timeoutSec`, which a tenant may set well past the lease.
+    renewEveryMs?: number;
     quotaFor: (tenant: string) => number;
     newPermitId: () => string;
   };
@@ -414,6 +438,7 @@ export function buildRuntimeAccess(deps: {
     const permitId = verifierSlots?.newPermitId();
     let budgetHeld = false;
     let permitHeld = false;
+    let renewal: ReturnType<typeof startRenewal> | undefined;
     try {
       admitVerifierCompute?.admit(job.tenant);
       budgetHeld = true;
@@ -441,6 +466,9 @@ export function buildRuntimeAccess(deps: {
             "this workspace is at its concurrent-execution limit, so its verifier cannot be placed yet.",
           );
         permitHeld = admitted === true;
+        // …and KEPT. The lease outlives nothing on its own: a holder that stops renewing is reaped, and this
+        // one holds its slot for as long as the container runs.
+        if (permitHeld) renewal = startRenewal(verifierSlots, permitId, verifierSlots.renewEveryMs);
       }
       // The AGENT'S lane, carried on the job — not `undefined`. `eachRuntimeBackend` splits a comma list and
       // drops the empties, so `undefined` is an empty target set rather than "every runtime": it visited no
@@ -449,6 +477,23 @@ export function buildRuntimeAccess(deps: {
       // task image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
       await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
         if (!isVerifierDispatchable(backend)) return false;
+        // ── AND THE BACKEND'S OWN ENVELOPE (arch-review 61 P1) ─────────────────────────────────────
+        //
+        // The tenant permit above limits how many executions ONE workspace holds. It says nothing about the
+        // backend's `maxConcurrent`, which is what stops a cluster being handed more work than it has slots:
+        // several tenants each inside their own quota could still put the lane past its total, and a batch's
+        // verifier fan-out is exactly the shape that does it.
+        //
+        // Asked with the probe the Scheduler gates on, and refused with a 429 rather than queued — this lane
+        // has no queue, and inventing one here would be the second scheduler rule `backends` forbids. A
+        // caller retries; a container that should not exist does not get created.
+        const room = await backend.capacity().catch(() => undefined);
+        if (room !== undefined && room.used >= room.total)
+          throw new RateLimitError(
+            "RATE_LIMITED",
+            { tenant: job.tenant, total: room.total, used: room.used },
+            "this runtime is at its concurrent-execution limit, so the verifier cannot be placed yet.",
+          );
         // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
         // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
@@ -477,6 +522,7 @@ export function buildRuntimeAccess(deps: {
       // Both, and only what was actually taken. The slot goes back the moment this lane stops holding a
       // container, exactly as the budget reservation does; idempotent by contract, so a release racing the
       // ledger's own lease reap is harmless.
+      renewal?.stop();
       if (permitHeld && permitId !== undefined)
         await verifierSlots?.ledger.releaseAdmission?.(permitId).catch(() => undefined);
       if (budgetHeld) admitVerifierCompute?.release(job.tenant);
