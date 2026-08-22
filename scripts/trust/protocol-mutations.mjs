@@ -224,8 +224,12 @@ const MUTATIONS = [
     // the one signal for "this verdict is not fully attributed" said yes for the two cases it exists to flag.
     name: "R58 — a receipt calls unresolved provenance complete",
     file: "packages/domain/src/execution/verifier-receipt.ts",
-    from: '    complete: invocation.work !== undefined && invocation.imageProvenance?.kind === "resolved",',
-    to: "    complete: invocation.work !== undefined && invocation.imageProvenance !== undefined,",
+    from: [
+      "      invocation.work?.attemptId !== undefined &&",
+      "      invocation.work.verifier !== undefined &&",
+      '      invocation.imageProvenance?.kind === "resolved",',
+    ].join("\n"),
+    to: "      invocation.work !== undefined &&",
     suite: ["--root", "packages/domain", "src/execution/verifier-receipt-completeness.counterexample.test.ts"],
   },
   {
@@ -445,10 +449,30 @@ const MUTATIONS = [
   },
   {
     // …and the adapter half: a cluster that could not be asked reported as "the job is gone".
+    //
+    // RE-AIMED (arch-review 62). The lane grew a SECOND unreadable-cluster arm — the birth-phase read — and
+    // it answers `unknown` for the same outage, so removing the listing's arm alone left the protocol
+    // enforced by its neighbour and this mutation went green over a defect it could no longer create.
+    // Defence in depth is good and it means no single line IS the protocol any more: the neutralization has
+    // to remove every arm that reaches the same answer, or it is testing the line next to the one it names.
     name: "Phase 2 — a failed cluster listing reads as absence again",
     file: "packages/backends/src/orchestrators/nomad.ts",
-    from: '      if (found.kind === "unknown") return { status: "unknown" };',
-    to: "      // MUTATED: a failed read is an absence",
+    from: [
+      '      if (found.kind === "unknown") return { status: "unknown" };',
+      '      if (found.kind === "absent") return { status: "absent" };',
+      "      // \u2500\u2500 A REGISTRATION STILL IN ITS BIRTH PHASE IS RECLAIMED, NOT AWAITED (arch-review 62 P0) \u2500\u2500\u2500\u2500\u2500\u2500",
+      "      //",
+      "      // This lane registers at `Count: 0` first so a cancellation always has an object to address, and only",
+      "      // an authorized dispatch scales it to one. A crash in between leaves a job that Nomad will never",
+      "      // schedule an allocation for \u2014 and `waitForAlloc` below is a poll for exactly that allocation, so it",
+      "      // ran out and the run deferred forever on every boot. The K8s half of this is `suspend: true`.",
+      "      const phase = await this.jobBirthPhase(work.externalJobId, ns);",
+      '      if (phase.kind === "unknown") return { status: "unknown" };',
+    ].join("\n"),
+    to: [
+      '      if (found.kind === "absent") return { status: "absent" };',
+      "      const phase = await this.jobBirthPhase(work.externalJobId, ns);",
+    ].join("\n"),
     suite: ["--root", "packages/backends", "src/orchestrators/adoption-unknown.counterexample.test.ts"],
   },
   {
@@ -1040,21 +1064,11 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
-    // arch-review 60 P1-provenance. The reservation's canonical handle not merged into the invocation, so a
-    // Nomad verifier — whose job id is minted inside `dispatch` — produces a receipt that is always
-    // incomplete: partial judgment evidence and a replay that cannot name the job that made the verdict.
-    name: "verifier receipt — a verdict cannot say which object produced it",
-    file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: "      ...((invocation.work ?? persistedWork) ? { work: invocation.work ?? persistedWork } : {}),",
-    to: "",
-    suite: ["--root", "packages/application-control", "src/execution/verifier-receipt-work.counterexample.test.ts"],
-  },
-  {
     // arch-review 60 follow-through. The recovered verdict discarded again, so a run that crashed between its
     // two halves loses the judgment its verifier already produced and re-runs the whole case.
     name: "two-phase case — a recovered verdict is thrown away",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: '        if (half.kind === "read") {',
+    from: '        if (half.kind === "merged") {',
     to: "        if (false) {",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
@@ -1082,8 +1096,12 @@ const MUTATIONS = [
     // dispatch stops cleaning up after itself, which is how a namespace fills with objects nobody owns.
     name: "inert birth — a refused activation leaves its object behind",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "      } finally {\n        // The reclaim for EVERYTHING this dispatch created, whichever step failed. The Secret and the policy\n        // go with the Job through their owner references.\n        await api.deleteJob(name, ns);\n      }",
-    to: "      } finally {\n        void name;\n      }",
+    from: [
+      "        const reclaimed = await api.deleteJob(name, ns);",
+      "        if (verifierAuths.length > 0 && !killConverged(reclaimed))",
+      '          await api.deleteDependent("secret", verifierSecret, ns).catch(() => undefined);',
+    ].join("\n"),
+    to: "        void name;",
     suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
   },
   {
@@ -1134,15 +1152,6 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
   },
   {
-    // arch-review 61 P1-high. The verifier applying only its Job again, so a private task image's pod
-    // references a `<job>-pull` Secret nothing created and sits in ImagePullBackOff.
-    name: "verifier pull secret — the manifest references an object nobody applied",
-    file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "        verifierAuths.length > 0",
-    to: "        false",
-    suite: ["--root", "packages/backends", "src/orchestrators/verifier-network.counterexample.test.ts"],
-  },
-  {
     // …and only the main image resolved for credentials, so a private task image beside a private runner
     // image leaves the init container unable to pull.
     name: "pull credentials — only the agent's image is resolved",
@@ -1165,16 +1174,6 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
   },
   {
-    // arch-review 61 P1-high. The staged half keyed by the LOGICAL execution again, so a retry or a
-    // speculative second attempt overwrites the first's object and a recovery merges one attempt's verdict
-    // onto another's evidence.
-    name: "agent half — two attempts of one execution stage to the same object",
-    file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  return `agent-half/${tenant}/${runId}/${workspaceDigest}.json`;",
-    to: "  void workspaceDigest;\n  return `agent-half/${tenant}/${runId}.json`;",
-    suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
-  },
-  {
     // …and the check that does not depend on the key: a verdict attached to a workspace it was never about
     // is a fabricated case, not a lost one.
     name: "agent half — a verdict is merged onto evidence it was never about",
@@ -1188,7 +1187,7 @@ const MUTATIONS = [
     // still put a lane past its `maxConcurrent` — which a batch's verifier fan-out does routinely.
     name: "verifier capacity — the runtime's envelope is not consulted",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: "        if (room !== undefined && room.used >= room.total)",
+    from: "        if (room.value.used + held >= room.value.total)",
     to: "        if (false)",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
