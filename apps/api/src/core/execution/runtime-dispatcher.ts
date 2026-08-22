@@ -264,7 +264,14 @@ export class RuntimeDispatcher implements Dispatcher {
           // Image pull credentials — bake the ones covering this job's images into the backend (the backend is built
           // once per runtime and reused, so it carries the first build job's credentials; a documented limit of baking
           // credentials into a long-lived backend rather than passing them per dispatch).
-          const images = jobImages(job);
+          // ── INCLUDING THE RUNNER IMAGE THIS RUNTIME DECLARES (arch-review 62 P1) ──────────────────
+          //
+          // `jobImages` enumerates what the JOB pulls — the case image and any service images. The other
+          // image every managed pod pulls is the job-runner itself, and a `RuntimeSpec` names it precisely so
+          // a tenant can host it in their own registry. It was never in this list, so the consumer's support
+          // for a second credential had no producer: a public task image beside a private runner minted
+          // nothing, and the init container sat in ImagePullBackOff with the case blaming the harness.
+          const images = [...jobImages(job), ...("image" in spec && spec.image ? [spec.image] : [])];
           const auths = (await this.deps.registryAuthsFor?.(tenant, images).catch(() => [])) ?? [];
           const registryAuths = registryAuthsForImages(auths, images);
           const build = this.deps.buildBackend ?? buildRuntimeBackend;

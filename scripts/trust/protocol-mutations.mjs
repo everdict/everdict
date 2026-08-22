@@ -1360,6 +1360,46 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P1. The pull Secret was applied beside the Job and owned one call later, so a uid that
+    // could not be read left a credential nothing would collect — and `patchOwnedByJob` had no way to say so.
+    // Remove the refusal and the lane creates an orphan credential again.
+    // PER LANE, because this file holds two dispatches spelled almost alike and a single `from` neutralizes
+    // whichever appears first — which is how the first draft of this entry passed while the agent lane was
+    // untested (arch-review 61's sibling-lane lesson, hit again).
+    name: "k8s pull secret (agent lane) — a credential is created that nothing will reclaim",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "          // that did not happen, and the reclaim below removes the inert Job this attempt made.\n          const uid = await api.jobUid(name, ns);",
+    to: '          const uid = (await api.jobUid(name, ns)) ?? "x";',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/pull-secret-lifecycle.counterexample.test.ts"],
+  },
+  {
+    name: "k8s pull secret (verifier lane) — a credential is created that nothing will reclaim",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        if (verifierAuths.length > 0) {\n          const uid = await api.jobUid(name, ns);",
+    to: '        if (verifierAuths.length > 0) {\n          const uid = (await api.jobUid(name, ns)) ?? "x";',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/pull-secret-lifecycle.counterexample.test.ts"],
+  },
+  {
+    // …and the other half: owner-GC only runs when the owner goes, so a delete that did not converge leaves
+    // the dependents with nobody to collect them. Ignore the outcome and the credential stays.
+    name: "k8s pull secret (agent lane) — the reclaim ignores whether the delete converged",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        if (auth.length > 0 && !killConverged(reclaimed))",
+    to: "        if (false && !killConverged(reclaimed))",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/pull-secret-lifecycle.counterexample.test.ts"],
+  },
+  {
+    name: "k8s pull secret (verifier lane) — the reclaim ignores whether the delete converged",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        if (verifierAuths.length > 0 && !killConverged(reclaimed))",
+    to: "        if (false && !killConverged(reclaimed))",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/pull-secret-lifecycle.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

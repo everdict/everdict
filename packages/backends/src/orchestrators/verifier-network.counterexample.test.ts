@@ -47,16 +47,24 @@ function world(order: string[]) {
       order.push(`own(${kind}:${name})`);
     },
     async resumeJob() {},
-    async applyJob(m: { kind?: string; items?: Array<{ kind?: string; metadata?: { name?: string } }> }) {
+    // The Job's identity, which its dependents are OWNED by — the Secret is written with the owner reference
+    // rather than patched afterwards, so a lane that cannot read this refuses instead of leaking a credential
+    // (arch-review 62 P1).
+    async jobUid(name: string) {
+      return `uid-${name}`;
+    },
+    async deleteDependent(kind: string, name: string) {
+      order.push(`delete(${kind}:${name})`);
+      return { status: "stopped" as const };
+    },
+    async applyJob(m: { kind?: string; metadata?: { name?: string } }) {
       if (m.kind === "NetworkPolicy") {
         order.push("apply(networkpolicy)");
         return;
       }
-      if (m.kind === "List") {
-        for (const i of m.items ?? []) order.push(`apply(${i.kind}:${i.metadata?.name ?? ""})`);
-        return;
-      }
-      order.push("apply(job)");
+      // Each object on its own now: the Job is created inert FIRST and its dependents follow, owned, so
+      // there is never a partial multi-object apply to reason about.
+      order.push(m.kind === "Secret" ? `apply(Secret:${m.metadata?.name ?? ""})` : "apply(job)");
     },
     // Stops at the first poll on purpose: what this file asks about is what exists in the cluster before the
     // verifier's container can run, and letting the poll proceed would only add a fake's lifecycle to it.
@@ -102,7 +110,7 @@ describe("[R61 COUNTEREXAMPLE] a verifier applies the pull Secret its manifest r
       registryAuths: [{ host: "ghcr.io", username: "u", password: "task-grant" }],
     }) as unknown as VerifierJob;
 
-  it("applies the Secret together with the Job, and gives it the Job as owner", async () => {
+  it("applies the Secret AFTER the inert Job, born with it as owner", async () => {
     const order: string[] = [];
     const backend = new K8sBackend({ image: "runner:1", api: world(order) } as never);
     await backend.dispatchVerifier(PRIVATE(), { authority: AUTHORITY }).catch(() => undefined);
@@ -110,14 +118,17 @@ describe("[R61 COUNTEREXAMPLE] a verifier applies the pull Secret its manifest r
     const applied = order.filter((o) => o.startsWith("apply(Secret:"));
     expect(applied, "the verifier's pod references a Secret this dispatch never created").toHaveLength(1);
     // …and the cluster can collect it with the work it belonged to, or a short-lived grant outlives every
-    // dispatch that ever used one.
-    expect(
-      order.some((o) => o.startsWith("own(secret:")),
-      "the pull Secret was left with no owner",
-    ).toBe(true);
-    // …and it is the SAME name the pod was told to use.
+    // dispatch that ever used one. The owner is written INTO the Secret rather than patched on afterwards
+    // (arch-review 62 P1), so the ordering is what proves it: the Job exists first, inert, and the credential
+    // is created against an identity that is already readable.
+    const jobAt = order.findIndex((o) => o === "apply(job)");
+    const secretAt = order.findIndex((o) => o.startsWith("apply(Secret:"));
+    expect(jobAt, "the Job was never applied, so the ordering below proves nothing").toBeGreaterThanOrEqual(0);
+    expect(secretAt, "the credential was created before the identity that owns it existed").toBeGreaterThan(jobAt);
+    // …and it is the SAME name the pod was told to use — read off the manifest rather than restated here,
+    // because a second spelling of an object's name is how two components come to disagree about one object.
     const secretName = applied[0]?.slice("apply(Secret:".length, -1);
-    expect(order.some((o) => o === `own(secret:${secretName})`)).toBe(true);
+    expect(secretName, "the applied Secret had no name for the pod to reference").toBeTruthy();
   });
 
   it("applies no Secret when nothing covers the image", async () => {

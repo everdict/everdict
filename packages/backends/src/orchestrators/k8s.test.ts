@@ -114,6 +114,15 @@ function mockApi(
     // these cases declare none, so the patch is never reached.
     async patchOwnedByJob() {},
     async resumeJob() {},
+    // The Job's identity, which its dependents are owned BY. A fake that could not answer would make every
+    // private-image dispatch refuse — see the refusal in `dispatch` (arch-review 62 P1).
+    async jobUid(name: string) {
+      return `uid-${name}`;
+    },
+    async deleteDependent(kind: string, name: string) {
+      deleted.push(`${kind}/${name}`);
+      return { status: "stopped" as const };
+    },
     async applyJob(m) {
       applied.push(m as JobManifest);
     },

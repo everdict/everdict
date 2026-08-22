@@ -116,6 +116,14 @@ export interface K8sApi {
   // Make an INERT Job runnable. A Job created `suspend: true` exists and is addressable and creates no pods
   // at all; this is the transition that lets it run — see `dispatch` for why the object comes first.
   resumeJob(name: string, ns: string): Promise<void>;
+  // The Job's uid, which is what an owner reference is made of. Read on its own now, because the caller has
+  // to be able to REFUSE when it cannot be had: `patchOwnedByJob` answered `void` for a failed read, so a
+  // dispatch went on believing its credential was owned (arch-review 62 P1). `undefined` = could not be
+  // established, never "there is no uid".
+  jobUid(name: string, ns: string): Promise<string | undefined>;
+  // Remove a dependent directly, for the one case owner-GC cannot cover: the Job's own delete did not
+  // converge, so nothing is going to collect what it owns (arch-review 62 P1).
+  deleteDependent(kind: "networkpolicy" | "secret", name: string, ns: string): Promise<KillOutcome>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
   deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
@@ -427,6 +435,19 @@ export function kubectlApi(
     async resumeJob(name, ns) {
       const res = await run(bin, [...ctx, "-n", ns, "patch", "job", name, "--type", "merge", "-p", SUSPEND_OFF]);
       if (res.code !== 0) throw new Error(`resume job ${name}: ${res.stderr || res.stdout}`);
+    },
+    async deleteDependent(kind, name, ns) {
+      return deleteOutcome(
+        `${kind} ${name}`,
+        await run(bin, [...ctx, "-n", ns, "delete", kind, name, "--ignore-not-found", "--wait=false"]),
+      );
+    },
+    async jobUid(name, ns) {
+      const read = await run(bin, [...ctx, "-n", ns, "get", "job", name, "-o", "jsonpath={.metadata.uid}"]);
+      const uid = read.stdout.trim();
+      // A read that failed and a Job with no uid are the same thing to a caller that needs one: it cannot be
+      // established. What it must NOT be is a silent success, which is what the owner patch used to answer.
+      return read.code !== 0 || uid === "" ? undefined : uid;
     },
     async patchOwnedByJob(kind, name, ns, ownerJob) {
       const read = await run(bin, [...ctx, "-n", ns, "get", "job", ownerJob, "-o", "jsonpath={.metadata.uid}"]);
@@ -1053,11 +1074,27 @@ export function k8sRegistryAuthSecret(
   auth: RegistryAuth | RegistryAuth[],
   ns: string,
   name: string,
+  // ── BORN OWNED, NOT PATCHED AFTERWARDS (arch-review 62 P1) ───────────────────────────────────────
+  //
+  // The Secret used to be applied beside the Job and given an owner one call later, which left two windows:
+  // a partial multi-object apply could create the credential and not the Job, and a UID read that failed
+  // returned silently, so the caller believed an owner was attached and the dockerconfigjson outlived
+  // everything that would have collected it. A leaked policy is inert; a leaked credential is a credential.
+  //
+  // The Job is created INERT (`suspend: true`) and creates no pods, so it can exist BEFORE its dependents —
+  // which means the owner reference is available at the moment the Secret is written, and there is never an
+  // instant where the credential exists unowned.
+  owner?: { name: string; uid: string },
 ): Record<string, unknown> {
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name, namespace: ns, labels: { app: "everdict" } },
+    metadata: {
+      name,
+      namespace: ns,
+      labels: { app: "everdict" },
+      ...(owner ? (ownerReferencePatch(owner.name, owner.uid).metadata as Record<string, unknown>) : {}),
+    },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   };
@@ -1550,28 +1587,32 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // verifier for a private task image referenced `<job>-pull`, nothing had created it, and the pod sat
       // in ImagePullBackOff — the judging half of every private-image case unable to start, on the lane whose
       // whole point is that the verdict happens somewhere the agent was not.
+      // …and BORN OWNED, after the inert Job rather than beside it (arch-review 62 P1) — see the agent lane
+      // for why: a multi-object apply that created the credential and then failed left it with nothing to
+      // reclaim it, and the owner patch that followed could not report a failed uid read.
       const verifierAuths = pullCredentialsFor(job, job.image ?? this.opts.image, this.opts.image);
       const verifierSecret = workPullSecretName(name);
-      await api.applyJob(
-        verifierAuths.length > 0
-          ? {
-              apiVersion: "v1",
-              kind: "List",
-              items: [k8sRegistryAuthSecret(verifierAuths, ns, verifierSecret), manifest],
-            }
-          : manifest,
-        ns,
-      );
+      await api.applyJob(manifest, ns);
       // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
       // The same boundary the agent lane got: a resume that threw left a suspended Job forever (suspended is
       // not finished, so the TTL never collects it), and a resume the API server applied whose response was
       // lost left a running one the caller believed had failed.
       try {
-        // …and the Secret learns the Job as its OWNER, so the cluster's GC reclaims a credential with the work
-        // it belonged to (arch-review 61 P1-ops). NOT best-effort, unlike the policy below: a leaked policy is
-        // inert, a leaked credential is a credential.
-        if (verifierAuths.length > 0) await api.patchOwnedByJob("secret", verifierSecret, ns, name);
+        // …and the Secret is WRITTEN owned, so the cluster's GC reclaims a credential with the work it
+        // belonged to (arch-review 61 P1-ops, closed properly by 62). NOT best-effort, unlike the policy
+        // below: a leaked policy is inert, a leaked credential is a credential — so an identity that cannot
+        // be read is a refusal, and the reclaim removes the inert Job this attempt made.
+        if (verifierAuths.length > 0) {
+          const uid = await api.jobUid(name, ns);
+          if (uid === undefined)
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { job: name, ns },
+              "the Job's identity could not be read, so this verifier cannot create a pull credential anything would reclaim",
+            );
+          await api.applyJob(k8sRegistryAuthSecret(verifierAuths, ns, verifierSecret, { name, uid }), ns);
+        }
         // …and the ownerRef, so the cluster's GC reclaims the policy with the Job. Best-effort for the reason
         // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
         // verifier that graded with the network open.
@@ -1616,8 +1657,14 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         }
       } finally {
         // The reclaim for EVERYTHING this dispatch created, whichever step failed. The Secret and the policy
-        // go with the Job through their owner references.
-        await api.deleteJob(name, ns);
+        // go with the Job through their owner references, which they carry from birth.
+        //
+        // …and the ANSWER is read (arch-review 62 P1): a delete that did not converge means owner-GC will not
+        // run for the dependents either, so the credential is removed directly instead of being left to an
+        // owner that is still there.
+        const reclaimed = await api.deleteJob(name, ns);
+        if (verifierAuths.length > 0 && !killConverged(reclaimed))
+          await api.deleteDependent("secret", verifierSecret, ns).catch(() => undefined);
       }
     });
   }
@@ -2055,10 +2102,6 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // list, or the pod references a Secret whose contents were decided elsewhere.
       const auth = pullCredentialsFor(job, image, this.opts.image);
       const workSecret = workPullSecretName(name);
-      const payload =
-        auth.length > 0
-          ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns, workSecret), manifest] }
-          : manifest;
       // ── THE WORLD BEFORE THE POD (arch-review 58, W5 follow-through) ────────────────────────
       //
       // Applied FIRST, so there is never an instant where a pod is running and its egress is not yet denied.
@@ -2071,7 +2114,17 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       const netPolicy = k8sNetworkPolicyFor(name, job.evalCase.network);
       if (netPolicy) await api.applyJob(netPolicy, ns);
       const t0 = Date.now();
-      await api.applyJob(payload, ns);
+      // ── THE JOB FIRST, ITS DEPENDENTS AFTER IT AND OWNED BY IT (arch-review 62 P1) ────────────────
+      //
+      // The Secret used to ride along in a `List` with the Job and get its owner one call later. A
+      // multi-object apply that created the credential and then failed left it behind with nothing to
+      // reclaim it, and a failed UID read left it unowned while reporting success.
+      //
+      // The Job is INERT, so it creates no pods until the resume below — which means it can safely exist
+      // before the Secret its pod will reference, and the owner reference is available at the moment the
+      // credential is written. Nothing is ever unowned, so there is nothing for a compensating delete to
+      // get wrong.
+      await api.applyJob(manifest, ns);
       // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
       // The reclaim used to open below `resumeJob`, so two failures escaped it. A resume that THREW left a
@@ -2109,7 +2162,18 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         // patched, so every dispatch that pulled a private image left a dockerconfigjson behind — short-lived
         // grants accumulating in etcd and the namespace's Secret count climbing per case. Not best-effort: a
         // leaked policy is inert, a leaked credential is a credential.
-        if (auth.length > 0) await api.patchOwnedByJob("secret", workSecret, ns, name);
+        if (auth.length > 0) {
+          // REFUSED rather than created unowned: a credential nothing will collect is worse than a dispatch
+          // that did not happen, and the reclaim below removes the inert Job this attempt made.
+          const uid = await api.jobUid(name, ns);
+          if (uid === undefined)
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { job: name, ns },
+              "the Job's identity could not be read, so this dispatch cannot create a pull credential anything would reclaim",
+            );
+          await api.applyJob(k8sRegistryAuthSecret(auth, ns, workSecret, { name, uid }), ns);
+        }
         await requireActivation(job, work, options?.authority);
         // …and only an authorized dispatch makes it runnable.
         await api.resumeJob(name, ns);
@@ -2140,8 +2204,15 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       } finally {
         // The reclaim for EVERYTHING this dispatch created, whichever step failed: an aborted wait, a refused
         // activation, a resume that threw, or a resume whose response was lost. The Secret and the policy go
-        // with the Job through their owner references.
-        await api.deleteJob(name, ns);
+        // with the Job through their owner references — which they carry from birth, so this is a delete of
+        // one object rather than a delete plus two hopes.
+        //
+        // …and the ANSWER is read (arch-review 62 P1). `deleteJob` reports what it did, and a delete that did
+        // not converge means the cluster's garbage collector will not run for these dependents either — so
+        // the credential is removed directly rather than left to an owner that is still there.
+        const reclaimed = await api.deleteJob(name, ns);
+        if (auth.length > 0 && !killConverged(reclaimed))
+          await api.deleteDependent("secret", workSecret, ns).catch(() => undefined);
       }
     });
   }
