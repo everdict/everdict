@@ -1,6 +1,6 @@
 import type { CaseJob, RegistryAuth } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { buildK8sJob, k8sRegistryAuthSecret, runLabelValue, workPullSecretName } from "./k8s.js";
+import { buildK8sJob, k8sRegistryAuthSecret, pullCredentialsFor, runLabelValue, workPullSecretName } from "./k8s.js";
 
 // ── AN IDENTIFIER THAT DECIDES A DESTRUCTIVE OR CREDENTIAL SCOPE IS INJECTIVE (arch-review 59) ───────
 //
@@ -78,6 +78,33 @@ describe("[R59 COUNTEREXAMPLE] a destructive or credential scope is named by wha
     const spec = buildK8sJob(job(auth), { image: "runner:1" }, "evd-c1", "ns");
     const applied = k8sRegistryAuthSecret(auth, "ns", workPullSecretName("evd-c1")) as { metadata: { name: string } };
     expect(pullSecretOf(spec), "the pod references a Secret this dispatch did not apply").toBe(applied.metadata.name);
+  });
+
+  it("carries BOTH registries' credentials, not the first that matched", () => {
+    // `pickRegistryAuth(a, main) ?? pickRegistryAuth(a, runner)` kept exactly ONE, so a private task image on
+    // registry A beside a private runner image on registry B produced a docker config covering A only and an
+    // init container in ImagePullBackOff (arch-review 61 P1). One docker config authenticates several hosts —
+    // that is what `k8sRegistryAuthSecret` has always accepted and what this now hands it.
+    const both = pullCredentialsFor(
+      {
+        registryAuths: [
+          { host: "ghcr.io", username: "u", password: "task-grant" },
+          { host: "internal.reg", username: "u", password: "runner-grant" },
+        ],
+      },
+      "ghcr.io/acme/task:1",
+      "internal.reg/everdict/runner:1",
+    );
+    expect(both.map((a) => a.host).sort(), "one registry's credential was dropped").toEqual([
+      "ghcr.io",
+      "internal.reg",
+    ]);
+    // …and the Secret really carries both hosts, or the pod authenticates to one of them.
+    const secret = k8sRegistryAuthSecret(both, "ns", workPullSecretName("n")) as {
+      data: Record<string, string>;
+    };
+    const config = JSON.parse(Buffer.from(secret.data[".dockerconfigjson"] ?? "", "base64").toString());
+    expect(Object.keys(config.auths).sort()).toEqual(["ghcr.io", "internal.reg"]);
   });
 
   it("resolves a pull credential for the INIT image too, not only the agent's", () => {

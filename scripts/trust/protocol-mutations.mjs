@@ -1142,6 +1142,24 @@ const MUTATIONS = [
     to: "      buildNomadJob(job, opts, jobId, verifier?.payload),",
     suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P1-high. The verifier applying only its Job again, so a private task image's pod
+    // references a `<job>-pull` Secret nothing created and sits in ImagePullBackOff.
+    name: "verifier pull secret — the manifest references an object nobody applied",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        verifierAuths.length > 0",
+    to: "        false",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-network.counterexample.test.ts"],
+  },
+  {
+    // …and only the main image resolved for credentials, so a private task image beside a private runner
+    // image leaves the init container unable to pull.
+    name: "pull credentials — only the agent's image is resolved",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "  return registryAuthsForImages(registryAuthsOf(job), [mainImage, runnerImage]);",
+    to: "  return registryAuthsForImages(registryAuthsOf(job), [mainImage]);",
+    suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

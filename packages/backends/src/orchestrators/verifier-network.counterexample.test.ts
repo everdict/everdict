@@ -43,20 +43,25 @@ const JOB = (mode?: "none"): VerifierJob =>
 function world(order: string[]) {
   return {
     async ensureNamespace() {},
-    async patchOwnedByJob() {},
+    async patchOwnedByJob(kind: string, name: string) {
+      order.push(`own(${kind}:${name})`);
+    },
     async resumeJob() {},
-    async applyJob(m: { kind?: string }) {
+    async applyJob(m: { kind?: string; items?: Array<{ kind?: string; metadata?: { name?: string } }> }) {
       if (m.kind === "NetworkPolicy") {
         order.push("apply(networkpolicy)");
         return;
       }
+      if (m.kind === "List") {
+        for (const i of m.items ?? []) order.push(`apply(${i.kind}:${i.metadata?.name ?? ""})`);
+        return;
+      }
       order.push("apply(job)");
-      // Stops at the Job on purpose: what this file asks about is what exists in the cluster before the
-      // verifier's container can run, and letting the poll proceed would only add a fake's lifecycle to it.
-      throw new Error("stop after the birth");
     },
-    async jobStatus() {
-      return { status: "succeeded" as const };
+    // Stops at the first poll on purpose: what this file asks about is what exists in the cluster before the
+    // verifier's container can run, and letting the poll proceed would only add a fake's lifecycle to it.
+    async jobStatus(): Promise<{ status: "succeeded" }> {
+      throw new Error("stop after the birth");
     },
     async podLogs() {
       return "";
@@ -78,6 +83,52 @@ const AUTHORITY = {
   activate: async () => ({ kind: "activate" as const }),
 };
 
+// ── …AND IT CREATES THE SECRET ITS OWN MANIFEST REFERENCES (arch-review 61 P1-high) ─────────────────
+//
+// `buildK8sJob` renders `imagePullSecrets: [{ name: <job>-pull }]` for BOTH lanes when a credential covers
+// the image. This lane applied only the Job. So a verifier for a private task image referenced a Secret
+// nothing had created and its pod sat in ImagePullBackOff — the judging half of every private-image case
+// unable to start, on the lane whose whole point is that the verdict happens where the agent was not.
+//
+// Seen RED before the Secret was applied, observed:
+//   the verifier's pod references a Secret this dispatch never created: expected [ 'apply(job)' ] to contain
+//   'apply(Secret:everdict-verify-…-pull)'
+
+describe("[R61 COUNTEREXAMPLE] a verifier applies the pull Secret its manifest references", () => {
+  const PRIVATE = (): VerifierJob =>
+    ({
+      ...(JOB() as unknown as Record<string, unknown>),
+      image: "ghcr.io/acme/task:1",
+      registryAuths: [{ host: "ghcr.io", username: "u", password: "task-grant" }],
+    }) as unknown as VerifierJob;
+
+  it("applies the Secret together with the Job, and gives it the Job as owner", async () => {
+    const order: string[] = [];
+    const backend = new K8sBackend({ image: "runner:1", api: world(order) } as never);
+    await backend.dispatchVerifier(PRIVATE(), { authority: AUTHORITY }).catch(() => undefined);
+
+    const applied = order.filter((o) => o.startsWith("apply(Secret:"));
+    expect(applied, "the verifier's pod references a Secret this dispatch never created").toHaveLength(1);
+    // …and the cluster can collect it with the work it belonged to, or a short-lived grant outlives every
+    // dispatch that ever used one.
+    expect(
+      order.some((o) => o.startsWith("own(secret:")),
+      "the pull Secret was left with no owner",
+    ).toBe(true);
+    // …and it is the SAME name the pod was told to use.
+    const secretName = applied[0]?.slice("apply(Secret:".length, -1);
+    expect(order.some((o) => o === `own(secret:${secretName})`)).toBe(true);
+  });
+
+  it("applies no Secret when nothing covers the image", async () => {
+    // A public image needs no credential, and inventing an empty one would be an object nobody asked for.
+    const order: string[] = [];
+    const backend = new K8sBackend({ image: "runner:1", api: world(order) } as never);
+    await backend.dispatchVerifier(JOB(), { authority: AUTHORITY }).catch(() => undefined);
+    expect(order.filter((o) => o.startsWith("apply(Secret:"))).toHaveLength(0);
+  });
+});
+
 describe("[R59 COUNTEREXAMPLE] a verifier is placed in the network world its case declared", () => {
   it("carries the declared network onto the placement the lane decides from", () => {
     // The field has to reach the synthetic case job, or the lane's own enforce-or-refuse decision is made
@@ -98,10 +149,14 @@ describe("[R59 COUNTEREXAMPLE] a verifier is placed in the network world its cas
 
     await backend.dispatchVerifier(JOB("none"), { authority: AUTHORITY }).catch(() => undefined);
 
-    expect(order, "the verifier ran with egress open while the agent was placed offline").toEqual([
-      "apply(networkpolicy)",
-      "apply(job)",
-    ]);
+    // The POLICY comes first — that is this file's claim. What follows it (the Job, and the ownerRef the
+    // policy needs so the cluster collects it) is other waves' business, so the assertion pins the ORDER of
+    // the two that matter rather than a total that every later step has to be added to.
+    expect(
+      order.indexOf("apply(networkpolicy)"),
+      "the verifier ran with egress open while the agent was placed offline",
+    ).toBe(0);
+    expect(order.indexOf("apply(job)")).toBe(1);
   });
 
   it("REFUSES rather than grading in a world it cannot constrain", async () => {
@@ -122,6 +177,6 @@ describe("[R59 COUNTEREXAMPLE] a verifier is placed in the network world its cas
     const backend = new K8sBackend({ image: "runner:1", api: world(order), enforcesNetwork: true } as never);
 
     await backend.dispatchVerifier(JOB(), { authority: AUTHORITY }).catch(() => undefined);
-    expect(order).toEqual(["apply(job)"]);
+    expect(order.filter((o) => o.startsWith("apply("))).toEqual(["apply(job)"]);
   });
 });
