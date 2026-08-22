@@ -109,7 +109,7 @@ describe("PgExecutionAttemptStore", () => {
     // predecessor set right beside it was spelled by hand, so when arch-review 58 added `active` the twins
     // drifted and this assertion pinned the drift rather than catching it.
     expect(text).toContain(
-      `($2 <> 'executing' OR state IN (${EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ")}))`,
+      `($2 <> 'executing' OR a.state IN (${EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ")}))`,
     );
     // The set is a WHITELIST, not a formality: a terminal state may never appear in it.
     expect(EXECUTING_PREDECESSOR_STATES.some((s) => TERMINAL_ATTEMPT_STATES.includes(s))).toBe(false);
@@ -129,7 +129,7 @@ describe("PgExecutionAttemptStore", () => {
       error: { code: "INTERNAL", message: "boom" },
     });
     // A terminal stamp that carries only an error must not erase the child run id an earlier transition set.
-    expect(calls[0]?.text).toContain("child_run_id = COALESCE($3, child_run_id)");
+    expect(calls[0]?.text).toContain("child_run_id = COALESCE($3, a.child_run_id)");
     expect(calls[0]?.params?.[5]).toBe(JSON.stringify({ code: "INTERNAL", message: "boom" }));
   });
 

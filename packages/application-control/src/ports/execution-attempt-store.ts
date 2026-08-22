@@ -237,6 +237,24 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     // contracts because the Pg twin arbitrates on the same question.
     if (to === "executing" && !EXECUTING_PREDECESSOR_STATES.includes(current.state)) return false;
     if (to === "created") return false; // an attempt is opened into "created"; nothing transitions back to it
+    // ── `committed` CLAIMS A RESULT, SO IT ANSWERS TO THE PARENT (arch-review 62 P1) ────────────────
+    //
+    // The other terminal states close a row; this one says "this attempt's result is the case's answer".
+    // Reserving and activating have always re-asked whether the parent still authorizes them, and this write
+    // — the one that actually claims the outcome — did not. So a verifier that produced its verdict while a
+    // cancellation settled the batch underneath it stamped `committed` anyway, and the ledger recorded a
+    // result for a settlement that had already closed without it.
+    //
+    // ONLY `committed`. A `failed`, `revoked` or `superseded` row under a terminal parent must still be able
+    // to settle — refusing there would leave attempts reading live forever, which is the debt L5 is about,
+    // and none of those three asserts that anything was measured.
+    if (to === "committed") {
+      const stillOurs = await this.assertParentStillAuthorizes(attemptId, current).then(
+        () => true,
+        () => false,
+      );
+      if (!stillOurs) return false; // the caller reads `false` and says what it means; this layer stays silent
+    }
     this.attempts.set(attemptId, {
       ...current,
       state: to,

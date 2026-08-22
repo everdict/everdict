@@ -1296,6 +1296,49 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/ops/quota-grammar.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P1. `committed` says this attempt's result is the case's answer; reserving and
+    // activating re-ask whether the parent still authorizes them, and the write that claims the outcome did
+    // not. Remove the question and a verdict produced under a settlement that already closed is recorded as
+    // that settlement's answer.
+    name: "attempt ledger — committed does not answer to the parent that settled",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: '    if (to === "committed") {',
+    to: "    if (false) {",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/committed-means-settled.counterexample.test.ts"],
+  },
+  {
+    // …and the other direction: gating the states that merely CLOSE a row would leave attempts reading live
+    // forever under a cancelled parent, which is a worse defect than the one above.
+    name: "attempt ledger — a closing transition is gated like a claiming one",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: '    if (to === "committed") {',
+    to: "    if (isTerminalAttemptState(to)) {",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/committed-means-settled.counterexample.test.ts"],
+  },
+  {
+    // arch-review 62 P1-provenance. `complete` asked only whether a handle was present, so the K8s lane —
+    // which answers {tenant, runId, externalJobId, namespace} — produced receipts reading complete that no
+    // query could join to the attempt row that made them.
+    name: "verifier receipt — presence of a handle passes for a join to the attempt",
+    file: "packages/domain/src/execution/verifier-receipt.ts",
+    from: "      invocation.work?.attemptId !== undefined &&\n      invocation.work.verifier !== undefined &&",
+    to: "      invocation.work !== undefined &&",
+    build: "@everdict/domain",
+    suite: ["packages/domain/src/execution/verifier-receipt.counterexample.test.ts"],
+  },
+  {
+    // …and the operation half: the lane's own answer used to win over the ledger's canonical row, which is
+    // the reason the receipt could not be joined in the first place.
+    name: "verifier operation — the lane's handle wins over the row's canonical one",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "    return { ...invocation, work: persistedWork };",
+    to: "    return { ...invocation, work: invocation.work ?? persistedWork };",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

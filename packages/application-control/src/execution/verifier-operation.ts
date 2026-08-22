@@ -138,13 +138,34 @@ export async function verifierOperation(
         `this verifier's attempt could not be settled (it is '${state}'), so the verdict it produced was not made under a live authorization`,
       );
     }
-    // The lane's own answer wins when it has one (K8s names its Job before it creates it); otherwise the
-    // reservation's, which every lane has by construction. `attemptId` rides along so a receipt can join the
-    // verdict to the physical row that produced it without re-deriving anything.
-    return {
-      ...invocation,
-      ...((invocation.work ?? persistedWork) ? { work: invocation.work ?? persistedWork } : {}),
-    };
+    // ── THE CANONICAL HANDLE IS THE ROW'S, NOT THE LANE'S (arch-review 62 P1-provenance) ───────────
+    //
+    // The previous version preferred `invocation.work` and fell back to the reservation, with a comment
+    // saying `attemptId` rides along so a receipt can join the verdict to the physical row. It does not: the
+    // K8s lane answers `{tenant, runId, externalJobId, namespace}` and nothing else, so on that whole lane a
+    // digest-pinned verifier produced a receipt reading `complete` — `work` is present, provenance is
+    // resolved — that no query can join to the attempt that made it. A promise about another component,
+    // three frames away, and the component did not keep it.
+    //
+    // The row's handle is not a weaker version of the lane's: `reserveWork` stored the lane's own named
+    // object PLUS the coordinates only the ledger has, so it is the same object described completely. It
+    // wins for that reason rather than by preference.
+    if (persistedWork === undefined)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { attemptId },
+        "this verifier produced a verdict without a reserved handle, so nothing can say which container made it",
+      );
+    // …and a lane naming a DIFFERENT object than the one it reserved is not a richer answer, it is two
+    // objects. Refused rather than reconciled: the alternative is a receipt whose external id and whose
+    // attempt row describe different containers, which is exactly the join this is here to make trustworthy.
+    if (invocation.work !== undefined && invocation.work.externalJobId !== persistedWork.externalJobId)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { attemptId, reserved: persistedWork.externalJobId, reported: invocation.work.externalJobId },
+        "this verifier reported a different container than the one it reserved, so its verdict cannot be attributed",
+      );
+    return { ...invocation, work: persistedWork };
   } catch (err) {
     // …and settled on failure too, for the same reason: an abandoned row is owed forever. The error keeps
     // travelling — `withVerifierPass` turns it into `unmeasured`, which is the honest verdict.

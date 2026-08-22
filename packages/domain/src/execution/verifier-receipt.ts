@@ -51,6 +51,20 @@ export function verifierReceiptOf(invocation: VerifierInvocation): VerifierRecei
     // both used to read as complete — the one signal a consumer has for "this verdict is not fully
     // attributed" said yes for exactly the two cases it exists to flag (rule `protocol` L3: provenance
     // states COVERAGE, and a consumer that only asks whether something is there accepts zero).
-    complete: invocation.work !== undefined && invocation.imageProvenance?.kind === "resolved",
+    // …and PRESENCE IS NOT A JOIN (arch-review 62 P1-provenance). `work !== undefined` was satisfied by any
+    // handle at all, including one a lane built from what its poll saw — the K8s verifier answered
+    // `{tenant, runId, externalJobId, namespace}`, so a digest-pinned verdict on that whole lane read
+    // `complete` while no query could reach the attempt row that produced it. And a deployment with no
+    // ledger reserved nothing yet still offered a handle, so its receipts claimed the same completeness with
+    // no physical row existing at all.
+    //
+    // What makes a verdict attributable is the coordinate the LEDGER holds: which attempt ran it, and which
+    // unit it was a verdict about. Both are on the canonical handle `verifierOperation` now returns; asking
+    // for them is the difference between "there is a handle" and "this verdict can be joined to the
+    // container that made it".
+    complete:
+      invocation.work?.attemptId !== undefined &&
+      invocation.work.verifier !== undefined &&
+      invocation.imageProvenance?.kind === "resolved",
   };
 }

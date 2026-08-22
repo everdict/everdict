@@ -92,10 +92,28 @@ describe("[R57 COUNTEREXAMPLE] a verifier verdict says what produced it", () => 
         }),
       ).complete,
     ).toBe(false);
+    // …nor is a BARE handle the completing half (arch-review 62). `{tenant, runId, externalJobId}` is what a
+    // lane knows about its own container; what makes the verdict attributable is the ledger's coordinate —
+    // which attempt ran it, which unit it judged. Without those, `complete` said yes over a receipt no query
+    // could join to the row that produced it.
     expect(
       verifierReceiptOf(
         invocation({
           work: { tenant: "acme", runId: "r1", externalJobId: "j" },
+          imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "t:1", digest: "sha256:img" }] },
+        }),
+      ).complete,
+    ).toBe(false);
+    expect(
+      verifierReceiptOf(
+        invocation({
+          work: {
+            tenant: "acme",
+            runId: "r1",
+            externalJobId: "j",
+            attemptId: "a-verify",
+            verifier: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", caseId: "c1" },
+          },
           imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "t:1", digest: "sha256:img" }] },
         }),
       ).complete,

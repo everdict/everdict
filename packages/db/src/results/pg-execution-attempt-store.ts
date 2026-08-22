@@ -174,18 +174,26 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
     },
   ): Promise<boolean> {
     const { rows } = await this.client.query<{ attempt_id: string }>(
-      `UPDATE everdict_execution_attempts SET
+      `UPDATE everdict_execution_attempts a SET
          state = $2,
-         child_run_id = COALESCE($3, child_run_id),
-         lease_epoch = COALESCE($4::int, lease_epoch),
-         unisolated = COALESCE($5::boolean, unisolated),
-         error = COALESCE($6::jsonb, error),
+         child_run_id = COALESCE($3, a.child_run_id),
+         lease_epoch = COALESCE($4::int, a.lease_epoch),
+         unisolated = COALESCE($5::boolean, a.unisolated),
+         error = COALESCE($6::jsonb, a.error),
          updated_at = now()
-       WHERE attempt_id = $1
-         AND state NOT IN (${TERMINAL_LIST})
+       WHERE a.attempt_id = $1
+         AND a.state NOT IN (${TERMINAL_LIST})
          AND $2 <> 'created'
-         AND ($2 <> 'executing' OR state IN (${EXECUTING_FROM_LIST}))
-       RETURNING attempt_id`,
+         AND ($2 <> 'executing' OR a.state IN (${EXECUTING_FROM_LIST}))
+         -- ── \`committed\` CLAIMS A RESULT, SO IT ANSWERS TO THE PARENT (arch-review 62 P1) ──────────
+         --
+         -- Reserving and activating have always carried this predicate; the write that actually claims the
+         -- outcome did not. So a verifier finishing while a cancellation settled its batch underneath it
+         -- stamped \`committed\` anyway, and the ledger recorded a result for a settlement already closed
+         -- without it. ONLY this state: \`failed\`/\`revoked\`/\`superseded\` must still settle under a terminal
+         -- parent, or rows read live forever — and none of them asserts that anything was measured.
+         AND ($2 <> 'committed' OR ${PARENT_AUTHORIZES})
+       RETURNING a.attempt_id`,
       [
         attemptId,
         to,

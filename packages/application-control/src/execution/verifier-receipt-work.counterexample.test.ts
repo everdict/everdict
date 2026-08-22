@@ -67,9 +67,15 @@ describe("[R60 COUNTEREXAMPLE] a verifier invocation carries the object that pro
     expect(invocation.work?.attemptId).toBeDefined();
   });
 
-  it("does NOT overwrite a lane that named its own object", async () => {
-    // K8s decides the Job's name before it creates it and reports it on the invocation. That answer is the
-    // lane's own observation and wins — the reservation is the fallback, not a correction.
+  it("answers the ROW's handle for a lane that named its own object (arch-review 62)", async () => {
+    // K8s decides the Job's name before it creates it and reports it on the invocation, and the earlier
+    // version preferred that answer outright. It is not richer — it is the same object described with less:
+    // `{tenant, runId, externalJobId, namespace}` and nothing that joins to the ledger. `reserveWork` stored
+    // the lane's own named object PLUS the attempt and the verifier coordinate, so the row's handle names
+    // exactly what the lane named and can also be looked up.
+    //
+    // Asserting only the external id here is what let that preference survive a review: both answers agree
+    // on it, and the property the receipt actually needs was never checked.
     const { attempts } = await open();
     const k8sShaped = async (job: VerifierJob, hooks?: { authority: { reserve: (w: RuntimeWorkRef) => unknown } }) => {
       const named = { tenant: job.tenant, runId: job.runId, externalJobId: "everdict-verify-named" };
@@ -84,6 +90,34 @@ describe("[R60 COUNTEREXAMPLE] a verifier invocation carries the object that pro
 
     const invocation = await verifierOperation({ attempts }, JOB, k8sShaped as never);
     expect(invocation.work?.externalJobId).toBe("everdict-verify-named");
+    expect(
+      invocation.work?.attemptId,
+      "the lane's bare handle won, so this verdict cannot be joined to the attempt that produced it",
+    ).toBeDefined();
+    // …and the coordinate that says which unit this container was judging, which is the other half of what
+    // makes a receipt `complete` (see `verifierReceiptOf`).
+    expect(invocation.work?.verifier?.caseId).toBe(JOB.caseId);
+  });
+
+  it("REFUSES a lane that reports a different container than the one it reserved", async () => {
+    // Not reconciled, refused: the alternative is a receipt whose external id and whose attempt row describe
+    // two different containers, which is precisely the join this file exists to make trustworthy.
+    const { attempts } = await open();
+    const liar = async (job: VerifierJob, hooks?: { authority: { reserve: (w: RuntimeWorkRef) => unknown } }) => {
+      await hooks?.authority.reserve({
+        tenant: job.tenant,
+        runId: job.runId,
+        externalJobId: "everdict-verify-reserved",
+      } as RuntimeWorkRef);
+      return {
+        planDigest: job.plan.digest,
+        workspaceDigest: "sha256:ws",
+        work: { tenant: job.tenant, runId: job.runId, externalJobId: "everdict-verify-somewhere-else" },
+        scores: SCORES,
+      } as VerifierInvocation;
+    };
+
+    await expect(verifierOperation({ attempts }, JOB, liar as never)).rejects.toThrow(/different container/i);
   });
 
   it("still answers the verdict itself — the merge must not cost the scores", async () => {

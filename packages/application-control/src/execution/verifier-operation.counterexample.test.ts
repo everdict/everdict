@@ -55,7 +55,13 @@ const work = (id: string): RuntimeWorkRef => ({ tenant: "acme", runId: "r1", ext
 describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can find", () => {
   it("opens its OWN attempt row — the agent's is already committed by then", async () => {
     const attempts = new InMemoryExecutionAttemptStore();
-    await verifierOperation({ attempts }, job(), async () => invocation);
+    // The lane RESERVES, because `ManagedDispatchAuthority.reserve` is required of every one of them — a
+    // fake that skips it is more permissive than any real lane, and the verdict it returns is one nothing
+    // can attribute (arch-review 62).
+    await verifierOperation({ attempts }, job(), async (_j, hooks) => {
+      await hooks.authority.reserve(work("everdict-verify-1"));
+      return invocation;
+    });
 
     const rows = await attempts.list("r1");
     expect(rows, "the verifier placed compute the ledger has no row for").toHaveLength(1);

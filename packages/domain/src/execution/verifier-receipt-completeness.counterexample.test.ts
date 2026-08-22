@@ -36,7 +36,16 @@ const invocation = (over: Partial<VerifierInvocation> = {}): VerifierInvocation 
     ...over,
   }) as unknown as VerifierInvocation;
 
-const WORK = { tenant: "acme", runId: "r1", externalJobId: "job-1" };
+// The handle `verifierOperation` actually returns: the ledger's canonical row, carrying which attempt ran
+// this container and which unit it was judging. A bare {tenant, runId, externalJobId} is what a LANE knows,
+// and a receipt built on one cannot be joined to the attempt that produced it (arch-review 62).
+const WORK = {
+  tenant: "acme",
+  runId: "r1",
+  externalJobId: "job-1",
+  attemptId: "a-verify",
+  verifier: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", caseId: "c1" },
+};
 const RESOLVED = { kind: "resolved", by: "driver", images: [{ ref: "tasks/repro:1", digest: "sha256:img" }] };
 
 describe("[R58 COUNTEREXAMPLE] a receipt is complete only when its provenance resolved", () => {
