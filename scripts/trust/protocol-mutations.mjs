@@ -1210,6 +1210,15 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P2-audit. The attempt row left open after a recovery adopted its answer and deleted its
+    // Job, so the physical ledger reads `active`/`executing` for a container that no longer exists.
+    name: "adoption — the adopted attempt is left reading as live work",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: '    await deps.attempts.transition(work.attemptId, "committed").catch(() => undefined);',
+    to: "    void work;",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

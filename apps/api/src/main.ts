@@ -888,6 +888,9 @@ async function main(): Promise<void> {
     // …and where `withVerifierPass` staged the agent's half, so a run that crashed between its two halves is
     // MERGED rather than losing the verdict its verifier already produced (arch-review 60 follow-through).
     ...(artifacts ? { agentHalves: artifacts } : {}),
+    // …and the physical ledger, so an attempt this recovery adopted stops reading as live work
+    // (arch-review 61 P2-audit).
+    ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),
   };
   const owedRecovery = await runStartupRecovery(recoveryDeps);
   // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────

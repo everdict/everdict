@@ -625,6 +625,8 @@ export function buildRuntimeAccess(deps: {
 // it has one owner now.
 export async function recoverStandaloneRun(
   deps: Pick<Parameters<typeof runStartupRecovery>[0], "service" | "adoptWorkFn" | "workHandlesFor"> & {
+    // The physical ledger, so an adopted attempt stops reading as live work — see `closeAdopted`.
+    attempts?: Pick<ExecutionAttemptStore, "transition">;
     // Where `withVerifierPass` staged the agent's half — see the verifier branch below. Absent means this
     // deployment cannot merge a recovered verdict, which is exactly what it could not do before.
     agentHalves?: AgentHalfStore;
@@ -633,6 +635,22 @@ export async function recoverStandaloneRun(
   authority: DriverAuthority,
 ): Promise<ResumeResult> {
   const { service, adoptWorkFn, workHandlesFor } = deps;
+  // ── AN ADOPTED ATTEMPT IS CLOSED (arch-review 61 P2-audit) ──────────────────────────────────────────
+  //
+  // Adoption reads a finished container's answer and DELETES its Job. On the in-line path `verifierOperation`
+  // then settles the attempt row; after a restart that code never runs, so a recovery could settle the run
+  // `succeeded`, remove the external object, and leave the physical row saying `active` or `executing`
+  // forever. Nothing produces a wrong verdict from that — which is why it is an audit finding and not a P0 —
+  // but the ledger is the record of what physically ran, a teardown keeps chasing work that is already gone,
+  // and an operator reading it is told a container is running when none is.
+  //
+  // Closed for the handle that ANSWERED, under the same decision that adopted it. Best-effort: a ledger that
+  // will not take the stamp must not cost a recovery that has a real result in hand — the sweep still has
+  // the row, which is strictly better than the run being lost.
+  const closeAdopted = async (work: RuntimeWorkRef): Promise<void> => {
+    if (work.attemptId === undefined || deps.attempts === undefined) return;
+    await deps.attempts.transition(work.attemptId, "committed").catch(() => undefined);
+  };
 
   // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
   // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
@@ -676,6 +694,7 @@ export async function recoverStandaloneRun(
       // tombstones under its own fence, which is what it already does when nothing adopts.
       if (decision.kind === "adopted" && decision.adopted.stage === "case") {
         adopted = decision.adopted.result;
+        await closeAdopted(work);
         break;
       }
       // ── A RECOVERED VERDICT IS MERGED, NOT DISCARDED (arch-review 60 follow-through) ────────────
@@ -703,6 +722,9 @@ export async function recoverStandaloneRun(
         if (half.kind === "unknown") return { kind: "retry_later", reason: half.reason };
         if (half.kind === "read") {
           adopted = mergeVerifierPass(half.result, decision.adopted.invocation);
+          // The VERIFIER's row, which is the one this handle names — the agent's was committed before its
+          // half was staged, so the two halves close on their own rows rather than one standing for both.
+          await closeAdopted(work);
           break;
         }
         // `absent` — nothing was staged (an older writer, no artifact store, a staging failure). The agent's

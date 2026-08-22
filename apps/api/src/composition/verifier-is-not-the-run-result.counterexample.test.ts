@@ -134,6 +134,33 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
     expect(adopted?.verifier, "the verifier's receipt did not reach the merged result").toBeDefined();
   });
 
+  it("CLOSES the attempt row it adopted, so the ledger stops reading as live work", async () => {
+    // Adoption reads a finished container's answer and deletes its Job. On the in-line path
+    // `verifierOperation` settles the attempt row; after a restart that code never runs, so a recovery could
+    // settle the run `succeeded`, remove the external object, and leave the physical row saying `active` or
+    // `executing` forever — a teardown chasing work that is gone, and an operator told a container is
+    // running when none is (arch-review 61 P2-audit).
+    const resumedWith: Array<unknown> = [];
+    const closed: Array<[string, string]> = [];
+    const halves = staged(new TextEncoder().encode(JSON.stringify(AGENT_HALF)));
+    const w = {
+      ...(verifierWorld(resumedWith, halves) as unknown as Record<string, unknown>),
+      attempts: {
+        transition: async (id: string, to: string) => {
+          closed.push([id, to]);
+          return true;
+        },
+      },
+      workHandlesFor: async () => [
+        { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-verify-c1", attemptId: "a-verify" },
+      ],
+    } as unknown as Parameters<typeof recoverStandaloneRun>[0];
+
+    await recoverStandaloneRun(w, RECORD as never, { ownerReplica: "r1", epoch: 1 } as never);
+
+    expect(closed, "the adopted attempt was left reading as live work").toEqual([["a-verify", "committed"]]);
+  });
+
   it("STAYS OWED when the store cannot say whether a half was staged", async () => {
     // Deciding either way from a failed read is how a verdict became a settled result in the first place: an
     // unreadable store is not a case with no agent half (rule `protocol` L2).
