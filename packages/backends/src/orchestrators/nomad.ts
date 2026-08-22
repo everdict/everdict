@@ -190,7 +190,31 @@ interface NomadTask {
   Templates?: Array<{ EmbeddedTmpl: string; DestPath: string; ChangeMode: string; Perms: string }>;
   Resources: { CPU: number; MemoryMB: number; Devices?: Array<{ Name: string; Count: number }> };
 }
+// The version Nomad assigned a registration, read from the register response. Absent or unparseable is
+// `undefined` rather than a guessed 0: zero is the index of a job that does NOT exist, so defaulting to it
+// would turn the fence below into permission to create exactly the object the fence forbids.
+export function jobModifyIndexOf(responseText: string): number | undefined {
+  try {
+    const index = (JSON.parse(responseText) as { JobModifyIndex?: unknown }).JobModifyIndex;
+    return typeof index === "number" && Number.isInteger(index) ? index : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface NomadJobSpec {
+  // ── A START IS A TRANSITION, NEVER A CREATE (arch-review 62 P0) ──────────────────────────────────
+  //
+  // `POST /v1/jobs` is Nomad's REGISTER, and register is create-or-update. This lane's second call — the one
+  // that scales the inert registration to one and makes it run — therefore recreated the job whenever a
+  // cancellation had deleted it in between, which is precisely the interleaving the inert phase exists to
+  // close. The K8s twin is a patch and fails on an absent Job; identical call order, opposite effect.
+  //
+  // Nomad's own fence closes it: with `EnforceIndex`, the register applies only if the job's current
+  // `JobModifyIndex` equals the one the caller carries. A purged job has no index to match, so the refusal
+  // comes from the cluster rather than from a check of ours that a paused process can straddle.
+  EnforceIndex?: boolean;
+  JobModifyIndex?: number;
   Job: {
     ID: string;
     Type: string;
@@ -1112,6 +1136,21 @@ export class NomadBackend
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     mark("registered", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""} (inert)`);
+    // The version this dispatch created. The start below carries it so Nomad refuses to apply the update to
+    // anything else — a job somebody deleted, or one a different dispatch re-registered under the same id.
+    // Unreadable is a REFUSAL, not an unfenced start: a start that cannot name which object it is starting is
+    // the create this whole protocol exists to prevent.
+    const bornAt = jobModifyIndexOf(submit.text);
+    if (bornAt === undefined) {
+      await this.http
+        .request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns ? `&namespace=${ns}` : ""}`)
+        .catch(() => undefined);
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { job: jobId },
+        "Nomad did not report the registration's version, so this dispatch cannot start exactly the job it made.",
+      );
+    }
     // …and the reservation is re-presented against an object that already exists (arch-review 57 P0 · 61).
     // A refusal removes what this dispatch registered, so the cancellation's certificate stays true: the only
     // thing that existed was a job with no allocations, purged by its own creator.
@@ -1125,10 +1164,22 @@ export class NomadBackend
         throw err;
       }
     }
-    // …and only an authorized dispatch scales it to one, which is what makes it run.
-    const start = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload));
+    // …and only an authorized dispatch scales it to one, which is what makes it run — applied to THIS
+    // registration or to nothing at all (see `EnforceIndex` on `NomadJobSpec`).
+    const start = await this.http.request("POST", "/v1/jobs", {
+      ...buildNomadJob(job, opts, jobId, verifier?.payload),
+      EnforceIndex: true,
+      JobModifyIndex: bornAt,
+    });
     if (start.status >= 300) {
-      throw new UpstreamError("UPSTREAM_ERROR", { status: start.status }, "Nomad job could not be started");
+      // A refusal here is the ordinary outcome of losing the race to a cancellation, and it is a refusal to
+      // CREATE — the job is gone and stays gone, so nothing needs reclaiming and the certificate of zero the
+      // teardown issued is still true.
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: start.status, job: jobId },
+        "Nomad job could not be started — the registration this dispatch made is no longer the one on the cluster",
+      );
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
     // ── AND ONLY NOW IS THIS RUN "STARTED" (arch-review 54 Phase 1 · 60 P0) ──────────────────────────

@@ -207,7 +207,7 @@ describe("NomadBackend.dispatch", () => {
     // blocked-eval patience window it must surface nomad's own placement verdict quickly instead.
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations")) return { status: 200, text: "[]" }; // never any alloc
         if (path.includes("/evaluations"))
           return {
@@ -237,7 +237,7 @@ describe("NomadBackend.dispatch", () => {
     // job is GC'd, the live placement read has nothing left to answer with.
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return {
             status: 200,
@@ -280,7 +280,7 @@ describe("NomadBackend.dispatch", () => {
   it("a blocked placement fires onWaiting ONCE with the verdict (visible waiting, not a silent 'queued')", async () => {
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations")) return { status: 200, text: "[]" };
         if (path.includes("/evaluations"))
           return {
@@ -310,7 +310,7 @@ describe("NomadBackend.dispatch", () => {
     const http: NomadHttp = {
       async request(method, path) {
         calls.push(`${method} ${path}`);
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
         if (path.includes("/logs/"))
@@ -345,7 +345,7 @@ describe("NomadBackend.dispatch", () => {
     const http: NomadHttp = {
       async request(method, path) {
         calls.push(`${method} ${path}`);
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
         if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
@@ -411,7 +411,7 @@ describe("NomadBackend.dispatch", () => {
     const http: NomadHttp = {
       async request(method, path) {
         calls.push(`${method} ${path}`);
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
         if (path.includes("/logs/")) return { status: 404, text: "" }; // alloc dir already GC'd
@@ -435,7 +435,7 @@ describe("NomadBackend.dispatch", () => {
     const http: NomadHttp = {
       async request(method, path) {
         calls.push(`${method} ${path}`);
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
         if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
@@ -452,7 +452,7 @@ describe("NomadBackend.dispatch", () => {
     const http: NomadHttp = {
       async request(method, path) {
         calls.push(`${method} ${path}`);
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
         if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
@@ -477,7 +477,7 @@ describe("NomadBackend.dispatch", () => {
   it("a failed alloc's error message carries the task-event cause (image pull denial is not a mushy 'alloc failed')", async () => {
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "failed" }]) };
         if (path.startsWith("/v1/allocation/alloc1"))
@@ -510,7 +510,7 @@ describe("NomadBackend.dispatch", () => {
     // one-line message — the evidence must be captured AT THROW TIME and ride the error's extra.
     const http: NomadHttp = {
       async request(_method, path) {
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations"))
           return {
             status: 200,
@@ -550,7 +550,7 @@ describe("NomadBackend.dispatch", () => {
       async request(method, path, body) {
         if (method === "POST" && path.startsWith("/v1/jobs")) {
           posted = body as typeof posted;
-          return { status: 200, text: "{}" };
+          return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         }
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
@@ -595,7 +595,7 @@ describe("NomadBackend.dispatch", () => {
           const env = (body as { Job: { TaskGroups: Array<{ Tasks: Array<{ Env: Record<string, string> }> }> } }).Job
             .TaskGroups[0]?.Tasks[0]?.Env;
           posted.push(env ?? {});
-          return { status: 200, text: "{}" };
+          return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         }
         if (path.includes("/allocations"))
           return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
@@ -807,7 +807,8 @@ describe("NomadBackend.dispatch cancellation (AbortSignal)", () => {
     const deletes: string[] = [];
     const http: NomadHttp = {
       async request(method, path) {
-        if (method === "POST" && path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (method === "POST" && path === "/v1/jobs")
+          return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (method === "DELETE") {
           deletes.push(path);
           return { status: 200, text: "" };

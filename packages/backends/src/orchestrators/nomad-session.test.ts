@@ -38,7 +38,7 @@ function fakeCluster(opts: { allocStatuses?: string[] } = {}): {
     http: {
       async request(method, path, body) {
         calls.push({ method, path, ...(body !== undefined ? { body } : {}) });
-        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path === "/v1/jobs") return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
         if (path.includes("/allocations")) {
           const next = statuses.shift() ?? "running";
           return { status: 200, text: JSON.stringify([{ ID: "alloc-1", ClientStatus: next }]) };

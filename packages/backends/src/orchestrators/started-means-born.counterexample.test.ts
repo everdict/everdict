@@ -119,7 +119,11 @@ describe("[R60 COUNTEREXAMPLE] a run is 'started' only once its external object 
             // inert protocol (arch-review 61 P0).
             const count = (body as { Job: { TaskGroups: Array<{ Count: number }> } }).Job.TaskGroups[0]?.Count;
             order.push(count === 0 ? "register(inert)" : "start");
-            return { status: 200, text: "{}" };
+            // A register REPORTS the version it produced, as the real cluster does — the start carries it
+            // back as `EnforceIndex` so it can never create the job it is meant to be starting
+            // (arch-review 62 P0). A fake that answered `{}` was more permissive than Nomad, which is the
+            // shape that leaves a production branch unverified.
+            return { status: 200, text: JSON.stringify({ JobModifyIndex: 1 }) };
           }
           // Whatever the poll asks next, this dispatch is over as far as the ordering question goes.
           throw new Error("stop after the birth");

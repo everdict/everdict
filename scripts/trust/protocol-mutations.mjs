@@ -1242,6 +1242,18 @@ const MUTATIONS = [
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P0. `POST /v1/jobs` is Nomad's register, and register is create-or-update — so the
+    // start that scales the inert registration to one recreated the job whenever a cancellation had deleted
+    // it in between. Verified on a live Nomad: unfenced the job comes back 200 and runs; fenced the cluster
+    // answers "Enforcing job modify index N: job does not exist". Drop the fence and the race is back.
+    name: "nomad start — the start can create the job a cancellation deleted",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "      EnforceIndex: true,\n      JobModifyIndex: bornAt,",
+    to: "      JobModifyIndex: bornAt,",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/start-cannot-create.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
