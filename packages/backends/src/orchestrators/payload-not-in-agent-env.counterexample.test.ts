@@ -1,5 +1,5 @@
 import type { CaseJob } from "@everdict/contracts";
-import { JOB_PAYLOAD_FILE_ENV, JOB_PAYLOAD_FS_GROUP } from "@everdict/contracts";
+import { HARNESS_AUTH_ENV_VARS, JOB_PAYLOAD_FILE_ENV, JOB_PAYLOAD_FS_GROUP } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { buildK8sJob } from "./k8s.js";
 import { buildNomadJob } from "./nomad.js";
@@ -142,6 +142,52 @@ describe("[R59 COUNTEREXAMPLE] no lane hands the agent's container the job paylo
     expect(spec.initContainers?.[0]?.command?.[2], "the payload is written owner-only across a UID boundary").toContain(
       "umask 027",
     );
+  });
+
+  it("the agent's environment is a CLOSED vocabulary, not merely free of today's secrets", () => {
+    // The ratchet (arch-review 60 follow-through). Every assertion above says a particular secret is absent,
+    // which is a statement about the values this repo happens to put there today. What keeps it true is a
+    // closed list: a future change that adds a secret-bearing variable to the agent's container goes RED here
+    // rather than being noticed by the next review.
+    //
+    // This is also why the "run the agent under a different uid" step was reassessed rather than shipped. Its
+    // purpose was to stop the agent reading the runner's `/proc/<pid>/environ` — and after the payload left
+    // the environment, what remains there is a worthless PATH, the judge's MODEL (configuration), and the
+    // workspace's model-auth keys, which `evalContainerSecretEnv` already filters to and which the agent
+    // legitimately receives anyway. A uid boundary would defend against a secret that is not there, at the
+    // cost of breaking every harness whose `install` needs root. The list below is the durable version of
+    // that defence: it makes the absence a rule instead of a fact.
+    const env = agentEnvK8s(
+      // The workspace's WHOLE tier, as `secretsFor(tenant)` returns it: a model key the agent legitimately
+      // needs, and beside it the things it must never see. A fixture holding only allowed names would pass
+      // this list with the filter deleted, which is a green over the exact defect (rule `testing`).
+      buildK8sJob(
+        JOB(),
+        {
+          image: "runner:1",
+          secretEnv: {
+            ANTHROPIC_API_KEY: "sk-harness",
+            GITHUB_APP_TOKEN: "ghs-must-not-leak",
+            EVERDICT_REGISTRY_PASSWORD: "reg-must-not-leak",
+            MATTERMOST_BOT_TOKEN: "mm-must-not-leak",
+          },
+        },
+        "n",
+        "ns",
+      ),
+    );
+    const ALLOWED = new Set([
+      JOB_PAYLOAD_FILE_ENV.case, // a path, worthless once the runner has unlinked the file
+      JOB_PAYLOAD_FILE_ENV.verifier,
+      ...HARNESS_AUTH_ENV_VARS, // the model keys the agent under test legitimately calls a provider with
+      "EVERDICT_JUDGE_MODEL", // configuration: which model a code judge was told to use
+      "EVERDICT_JUDGE_PROVIDER",
+      "EVERDICT_JUDGE_BASE_URL",
+    ]);
+    const unexpected = Object.keys(env).filter((k) => !ALLOWED.has(k));
+    expect(unexpected, "a variable reached the agent's container that nobody decided it should have").toEqual([]);
+    // …and non-empty, or this is a closed list over nothing (rule `testing`).
+    expect(Object.keys(env).length).toBeGreaterThan(1);
   });
 
   it("the fixture really does carry secrets — otherwise every assertion above is vacuous", () => {

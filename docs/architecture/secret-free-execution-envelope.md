@@ -107,8 +107,21 @@ later run as. There is no concurrent reader — the runner unlinks at startup an
 `runCase` afterwards — so the window contains no adversary. It is written down because "no window" would be
 the stronger sentence and it is not the true one.
 
-Running the agent under a different uid would close both this window and the `/proc` channel structurally.
-That is the next step after this one, not a substitute for it.
+Running the agent under a different uid was listed here as the next step. It was reassessed once this shipped
+and is NOT being done, for a reason worth writing down rather than leaving as a stale plan:
+
+Its purpose was to stop the agent reading the runner's `/proc/<pid>/environ`. After the payload left that
+environment, what remains in it is a worthless PATH, the judge's MODEL (configuration, not a credential), and
+the workspace's model-auth keys — which `evalContainerSecretEnv` already filters to and which the agent
+legitimately receives anyway. So the boundary would defend against a secret that is not there, at the cost of
+breaking every harness whose `install` needs root, which is ordinary.
+
+What the boundary was really defending against is a FUTURE secret arriving in that environment, and the
+durable form of that defence is a ratchet rather than a uid: the agent container's environment is asserted
+against a CLOSED vocabulary (`payload-not-in-agent-env.counterexample.test.ts`), so a change that adds a
+secret-bearing variable goes red at the commit that adds it instead of at the next review. The uid split
+becomes worth its cost the day something has to be in the runner's environment that the agent may not read —
+and that is a different design conversation, not a deferred task.
 
 ## Verification plan
 
