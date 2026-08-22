@@ -643,7 +643,15 @@ export async function recoverStandaloneRun(
       // document as one that finished normally, and both are `CaseResult`s, so any difference would be
       // invisible (rule `protocol` L5 — one wrapper, request path and reconciler).
       if (decision.kind === "adopted" && decision.adopted.stage === "verifier") {
-        const half = await readAgentHalf(deps.agentHalves, r.tenant, `evd-run-${r.id}`);
+        // WHICH half — the digest this verdict was produced against (arch-review 61 P1-high). `runId` alone
+        // is the logical execution, so a retry or a speculative attempt staged to the same object and a
+        // recovery could merge one attempt's verdict onto another's evidence.
+        const half = await readAgentHalf(
+          deps.agentHalves,
+          r.tenant,
+          `evd-run-${r.id}`,
+          decision.adopted.invocation.workspaceDigest,
+        );
         // A store that would not answer is not a case with no agent half. Deciding either way from a failed
         // read is how this became a settled verdict in the first place (rule `protocol` L2).
         if (half.kind === "unknown") return { kind: "retry_later", reason: half.reason };

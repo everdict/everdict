@@ -1,6 +1,7 @@
 import type { CaseJob, CaseResult, VerifierInvocation } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
-import { agentHalfKey, readAgentHalf } from "./agent-half.js";
+import { agentHalfKey, mergeVerifierPass, readAgentHalf } from "./agent-half.js";
 import { withVerifierPass } from "./verifier-pass.js";
 
 // ── THE FIRST PHASE IS DURABLE BEFORE THE SECOND EXISTS (arch-review 60 follow-through) ──────────────
@@ -63,7 +64,7 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
         order.push("dispatch-verifier");
         return {
           planDigest: "sha256:plan",
-          workspaceDigest: "sha256:ws",
+          workspaceDigest: contentDigest(RESULT.snapshot),
           scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
         } as unknown as VerifierInvocation;
       },
@@ -75,12 +76,53 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
       "dispatch-verifier",
     ]);
     // …under the key the RECOVERY derives from a work handle, which is the only coordinate it holds.
-    expect([...written.keys()]).toEqual([agentHalfKey("acme", "evd-run-r1")]);
+    // Keyed by the WORKSPACE too, so a second attempt of the same logical execution cannot overwrite this
+    // one's half (arch-review 61 P1-high).
+    const digest = contentDigest(RESULT.snapshot);
+    expect([...written.keys()]).toEqual([agentHalfKey("acme", "evd-run-r1", digest)]);
 
     // …and it reads back as the agent's own result, through the contract rather than a cast.
-    const half = await readAgentHalf(halves, "acme", "evd-run-r1");
+    const half = await readAgentHalf(halves, "acme", "evd-run-r1", digest);
     expect(half.kind).toBe("read");
     expect(half.kind === "read" && half.result.harness).toBe("agent@1");
+  });
+
+  it("cannot be OVERWRITTEN by another attempt of the same execution", () => {
+    // `runId` is the LOGICAL execution — the same across a retry, a speculative second attempt and a
+    // re-lease — and an object store's write replaces what is at a key. Two attempts staging to one object
+    // meant a recovery could merge attempt A's VERDICT onto attempt B's EVIDENCE: a case that never happened,
+    // assembled from two that did, with no seam a downstream reader can see (arch-review 61 P1-high).
+    const a = contentDigest({ kind: "repo", diff: "A", changedFiles: ["a"], headSha: "sha-a" });
+    const b = contentDigest({ kind: "repo", diff: "B", changedFiles: ["b"], headSha: "sha-b" });
+    expect(a, "two different trees digested the same, so this test proves nothing").not.toBe(b);
+    expect(agentHalfKey("acme", "evd-run-r1", a), "two attempts of one execution stage to the same object").not.toBe(
+      agentHalfKey("acme", "evd-run-r1", b),
+    );
+  });
+
+  it("REFUSES to merge a verdict produced against a different workspace", () => {
+    // The check that does not depend on the key being right. A verdict is a statement ABOUT a workspace, and
+    // attaching it to another one is not a lost result — it is a fabricated one.
+    expect(
+      () =>
+        mergeVerifierPass(RESULT, {
+          planDigest: "sha256:plan",
+          workspaceDigest: "sha256:some-other-tree",
+          scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+        } as never),
+      "a verdict was merged onto evidence it was never about",
+    ).toThrow(/different workspace/i);
+  });
+
+  it("MERGES when the two halves are about the same tree", () => {
+    // The control: refusing a mismatch must not cost the merge it exists to protect.
+    const merged = mergeVerifierPass(RESULT, {
+      planDigest: "sha256:plan",
+      workspaceDigest: contentDigest(RESULT.snapshot),
+      scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+    } as never);
+    expect(merged.verifier).toBeDefined();
+    expect(merged.scores?.some((sc) => sc.metric === "tests_pass")).toBe(true);
   });
 
   it("does not fail the case when staging fails — it costs the RECOVERY, not the run", async () => {
@@ -92,7 +134,7 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
       dispatchVerifier: async (): Promise<VerifierInvocation> =>
         ({
           planDigest: "sha256:plan",
-          workspaceDigest: "sha256:ws",
+          workspaceDigest: contentDigest(RESULT.snapshot),
           scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
         }) as unknown as VerifierInvocation,
       agentHalves: {
@@ -115,7 +157,7 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
       dispatchVerifier: async (): Promise<VerifierInvocation> =>
         ({
           planDigest: "sha256:plan",
-          workspaceDigest: "sha256:ws",
+          workspaceDigest: contentDigest(RESULT.snapshot),
           scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
         }) as unknown as VerifierInvocation,
     });

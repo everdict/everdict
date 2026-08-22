@@ -1,5 +1,5 @@
-import { type CaseResult, CaseResultSchema, type VerifierInvocation } from "@everdict/contracts";
-import { type VerifierReceipt, verifierReceiptOf } from "@everdict/domain";
+import { type CaseResult, CaseResultSchema, UpstreamError, type VerifierInvocation } from "@everdict/contracts";
+import { type VerifierReceipt, contentDigest, verifierReceiptOf } from "@everdict/domain";
 
 // ── A TWO-PHASE CASE MAKES ITS FIRST PHASE DURABLE (arch-review 60 P0 follow-through) ────────────────
 //
@@ -26,8 +26,25 @@ import { type VerifierReceipt, verifierReceiptOf } from "@everdict/domain";
 // Derived from the execution, at both ends. The recovery site holds a `RuntimeWorkRef` and nothing else, so a
 // key it cannot compute from that is a key it cannot use (rule `protocol` L3 — no re-derivation from
 // rendered output; this is the same coordinate on both sides, not a parse of one).
-export function agentHalfKey(tenant: string, runId: string): string {
-  return `agent-half/${tenant}/${runId}.json`;
+// ── …AND WHICH ATTEMPT'S HALF IT IS (arch-review 61 P1-high) ────────────────────────────────────────
+//
+// The first version keyed on `(tenant, runId)` alone. `runId` is the LOGICAL execution — it is the same
+// across a retry, a speculative second attempt and a re-lease — and an object store's write replaces what is
+// at a key. So two attempts of one execution staged to the same object:
+//
+//     attempt A stages → K          verifier A dispatched
+//     attempt B stages → K          (overwrites)      verifier B dispatched
+//     crash · recovery adopts verifier A → reads K → merges A's VERDICT onto B's EVIDENCE
+//
+// The result carries B's trace and snapshot, A's `tests_pass`, and a receipt whose `workspaceDigest` is A's:
+// a case that never happened, assembled from two that did, and no downstream reader can see the seam.
+//
+// The `workspaceDigest` is the discriminator that was already in hand — it is what the verifier judged and
+// what its invocation carries, so keying on it means an attempt can only ever read back the half its own
+// verdict is about. Content, not a counter: two attempts that genuinely produced the same tree are the same
+// half, and there is nothing to tell apart.
+export function agentHalfKey(tenant: string, runId: string, workspaceDigest: string): string {
+  return `agent-half/${tenant}/${runId}/${workspaceDigest}.json`;
 }
 
 export interface AgentHalfStore {
@@ -42,8 +59,11 @@ export async function stageAgentHalf(
   result: CaseResult,
 ): Promise<void> {
   if (!store) return;
+  // The SAME digest the verifier will carry, computed from the same snapshot by the same function — this is
+  // the coordinate, not a label beside it.
+  const key = agentHalfKey(tenant, runId, contentDigest(result.snapshot));
   await store
-    .put(agentHalfKey(tenant, runId), new TextEncoder().encode(JSON.stringify(result)), "application/json")
+    .put(key, new TextEncoder().encode(JSON.stringify(result)), "application/json")
     .then(() => undefined)
     // Swallowed HERE and nowhere else: this is the one call whose failure genuinely costs nothing the case
     // needs, and the comment above says what it does cost. Every other read in this file answers three ways.
@@ -63,11 +83,14 @@ export async function readAgentHalf(
   store: AgentHalfStore | undefined,
   tenant: string,
   runId: string,
+  // WHICH half — the digest the verifier's invocation carries. A read that cannot name it is a read that
+  // would take whichever attempt wrote last.
+  workspaceDigest: string,
 ): Promise<StagedAgentHalf> {
   if (!store) return { kind: "absent" };
   let bytes: Uint8Array | undefined;
   try {
-    bytes = await store.get(agentHalfKey(tenant, runId));
+    bytes = await store.get(agentHalfKey(tenant, runId, workspaceDigest));
   } catch (err) {
     return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
   }
@@ -88,6 +111,18 @@ export async function readAgentHalf(
 // recovered after a crash is a different document than one that finished normally — and the difference would
 // be invisible, because both are `CaseResult`s. One function, called by both.
 export function mergeVerifierPass(result: CaseResult, invocation: VerifierInvocation): CaseResult {
+  // …and the two halves are ABOUT THE SAME TREE (arch-review 61 P1-high). The key already keeps a recovery
+  // from reading another attempt's half, and this is the check that does not depend on the key being right:
+  // a verdict is a statement about a workspace, and attaching it to a different one produces a case that
+  // never happened out of two that did. Refused, never merged — rule `protocol` L3, identity is not a label
+  // you may re-attach.
+  const staged = contentDigest(result.snapshot);
+  if (staged !== invocation.workspaceDigest)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { staged, judged: invocation.workspaceDigest },
+      "this verdict was produced against a different workspace than the agent half it would be merged into.",
+    );
   const receipt: VerifierReceipt = verifierReceiptOf(invocation);
   return { ...result, scores: [...(result.scores ?? []), ...receipt.scores], verifier: receipt };
 }

@@ -1173,6 +1173,25 @@ const MUTATIONS = [
     to: "      // lost left a running one the caller believed had failed.\n      await api.resumeJob(name, ns);\n      try {",
     suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P1-high. The staged half keyed by the LOGICAL execution again, so a retry or a
+    // speculative second attempt overwrites the first's object and a recovery merges one attempt's verdict
+    // onto another's evidence.
+    name: "agent half — two attempts of one execution stage to the same object",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  return `agent-half/${tenant}/${runId}/${workspaceDigest}.json`;",
+    to: "  void workspaceDigest;\n  return `agent-half/${tenant}/${runId}.json`;",
+    suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
+  },
+  {
+    // …and the check that does not depend on the key: a verdict attached to a workspace it was never about
+    // is a fabricated case, not a lost one.
+    name: "agent half — a verdict is merged onto evidence it was never about",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  if (staged !== invocation.workspaceDigest)",
+    to: "  if (false)",
+    suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

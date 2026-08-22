@@ -1,4 +1,5 @@
 import type { RecoveryTarget } from "@everdict/application-control";
+import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { recoverStandaloneRun } from "./runtime-access.js";
 
@@ -63,7 +64,7 @@ function world(resumedWith: Array<unknown>, verdict: Array<Record<string, unknow
             kind: "adopted",
             adopted: {
               stage: "verifier",
-              invocation: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", scores: verdict },
+              invocation: { planDigest: "sha256:plan", workspaceDigest: AGENT_TREE, scores: verdict },
             },
           }
         : { kind: "absent" },
@@ -92,6 +93,10 @@ const AGENT_HALF = {
   scores: [],
   snapshot: { kind: "prompt", output: "x" },
 };
+
+// The verdict must be ABOUT the tree the staged half left, or the merge refuses it — which is the check
+// arch-review 61 added and which this fixture has to satisfy to reach the behaviour it is testing.
+const AGENT_TREE = contentDigest(AGENT_HALF.snapshot);
 
 describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the staged agent half", () => {
   const staged = (bytes?: Uint8Array) => ({
