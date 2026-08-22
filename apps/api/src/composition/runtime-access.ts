@@ -123,10 +123,18 @@ export function buildRuntimeAccess(deps: {
   // comma shard list) to a live backend and use its optional adopt/kill. A LANE that cannot be resolved is
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
   // silence as success — see `killWork`/`killUnhandled`.
+  //
+  // Verifier containers THIS PROCESS is currently holding, per backend. `capacity()` reports what the cluster
+  // can see, and a placement is not visible there until its object exists — so without this, concurrent
+  // verifiers all read the same free slot and all take it. Exactly the Scheduler's own local accounting
+  // (`inFlight`, subtracted from the capacity snapshot), in the lane that dispatches around it.
+  const verifiersHeld = new Map<string, number>();
   const eachRuntimeBackend = async (
     tenant: string,
     runtimeList: string | undefined,
-    fn: (backend: Backend) => Promise<boolean>, // return true to stop iterating (handled)
+    // The resolved TARGET travels with the backend: `Backend` has no identity member, and a caller that
+    // keeps per-runtime state (the verifier lane counts the slots it is holding) needs a stable key.
+    fn: (backend: Backend, target: string) => Promise<boolean>, // return true to stop iterating (handled)
   ): Promise<{ unresolved: string[] }> => {
     const targets = (runtimeList ?? "")
       .split(",")
@@ -152,7 +160,7 @@ export function buildRuntimeAccess(deps: {
       if (!spec) continue;
       const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
       const backend = runtimeBuildBackend(spec, { secretEnv });
-      if (await fn(backend)) return { unresolved };
+      if (await fn(backend, target)) return { unresolved };
     }
     return { unresolved };
   };
@@ -445,6 +453,9 @@ export function buildRuntimeAccess(deps: {
     let budgetHeld = false;
     let permitHeld = false;
     let renewal: ReturnType<typeof startRenewal> | undefined;
+    // Which backend, if any, this lane is holding a slot against — so the `finally` gives back exactly what
+    // it took, and nothing when the placement never got that far.
+    let laneHolding: string | undefined;
     try {
       admitVerifierCompute?.admit(job.tenant);
       budgetHeld = true;
@@ -481,7 +492,7 @@ export function buildRuntimeAccess(deps: {
       // backend, threw NOT_FOUND, and `withVerifierPass` turned that into `tests_pass: unmeasured` on every
       // private-verifier case (arch-review 57 P0). The verifier also MUST NOT roam — it reads this tenant's
       // task image with this tenant's credentials, so the lane that ran the agent is the only correct answer.
-      await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend) => {
+      await eachRuntimeBackend(job.tenant, job.placementTarget, async (backend, target) => {
         if (!isVerifierDispatchable(backend)) return false;
         // ── AND THE BACKEND'S OWN ENVELOPE (arch-review 61 P1) ─────────────────────────────────────
         //
@@ -493,13 +504,40 @@ export function buildRuntimeAccess(deps: {
         // Asked with the probe the Scheduler gates on, and refused with a 429 rather than queued — this lane
         // has no queue, and inventing one here would be the second scheduler rule `backends` forbids. A
         // caller retries; a container that should not exist does not get created.
-        const room = await backend.capacity().catch(() => undefined);
-        if (room !== undefined && room.used >= room.total)
+        //
+        // ── A PROBE THAT FAILED IS NOT HEADROOM (arch-review 62 P1) ────────────────────────────────
+        //
+        // `.catch(() => undefined)` followed by `room !== undefined &&` made an unreadable cluster mean
+        // "place it": the same physical limit was fail-CLOSED on the Scheduler's path (a backend whose probe
+        // throws is absent from its capacity map, so nothing goes there this pump) and fail-OPEN here. An
+        // outage that stops us asking is exactly when a lane is most likely to be full.
+        const room = await readOrUnknown(() => backend.capacity(), `capacity of runtime '${target}'`);
+        if (room.kind !== "read")
           throw new RateLimitError(
             "RATE_LIMITED",
-            { tenant: job.tenant, total: room.total, used: room.used },
+            { tenant: job.tenant, runtime: target, reason: room.kind === "unknown" ? room.reason : "no answer" },
+            "this runtime could not say whether it has room for a verifier, so one was not placed.",
+          );
+        // ── …AND A READING IS NOT A RESERVATION (arch-review 62 P1) ───────────────────────────────
+        //
+        // Between this answer and the dispatch below, every other verifier this replica is placing reads the
+        // same headroom and spends it too: at 19/20, three concurrent verifiers all saw one free slot and all
+        // three went. The Scheduler does not have that gap because it counts its OWN in-flight placements
+        // locally and subtracts them from the snapshot, so a pump cannot hand out the same slot twice.
+        //
+        // The same accounting, in the lane that had none. This is a per-PROCESS bound, exactly like the
+        // Scheduler's: what makes the limit fleet-wide is the tenant permit above, and no claim beyond that
+        // is made here (rule `protocol` L1 — observing room is not reserving room; this reserves the part
+        // this process can).
+        const held = verifiersHeld.get(target) ?? 0;
+        if (room.value.used + held >= room.value.total)
+          throw new RateLimitError(
+            "RATE_LIMITED",
+            { tenant: job.tenant, runtime: target, total: room.value.total, used: room.value.used, held },
             "this runtime is at its concurrent-execution limit, so the verifier cannot be placed yet.",
           );
+        verifiersHeld.set(target, held + 1);
+        laneHolding = target;
         // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
         // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
@@ -532,6 +570,14 @@ export function buildRuntimeAccess(deps: {
       if (permitHeld && permitId !== undefined)
         await verifierSlots?.ledger.releaseAdmission?.(permitId).catch(() => undefined);
       if (budgetHeld) admitVerifierCompute?.release(job.tenant);
+      // …and the backend slot this lane was counting against its own snapshot. Released here with the rest,
+      // for the same reason: a count never given back would refuse verifiers for containers that exited long
+      // ago, which is the failure mode a cap is supposed to prevent rather than cause.
+      if (laneHolding !== undefined) {
+        const remaining = (verifiersHeld.get(laneHolding) ?? 1) - 1;
+        if (remaining > 0) verifiersHeld.set(laneHolding, remaining);
+        else verifiersHeld.delete(laneHolding);
+      }
     }
   };
 

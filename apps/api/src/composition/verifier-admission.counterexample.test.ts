@@ -414,3 +414,99 @@ describe("[R59 COUNTEREXAMPLE] a verifier's compute is admitted before it exists
     expect(b.reserved(), "a reservation for a verifier that never ran was never released").toBe(0);
   });
 });
+
+// ── …AND A READING IS NOT A RESERVATION, NOR IS SILENCE HEADROOM (arch-review 62 P1) ───────────────
+//
+// The envelope check above was written as
+//
+//     const room = await backend.capacity().catch(() => undefined);
+//     if (room !== undefined && room.used >= room.total) refuse;
+//
+// which makes an unreadable cluster mean PLACE IT. The Scheduler answers the same question the other way: a
+// backend whose probe throws is simply absent from its capacity map, so nothing is placed there this pump.
+// One physical limit, fail-closed on one path and fail-open on the other — and the moment we cannot ask is
+// exactly the moment a lane is most likely to be full (rule `protocol` L2).
+//
+// The second half is that reading room is not taking it. `capacity()` reports what the CLUSTER can see, and
+// a placement is invisible there until its object exists, so at 19/20 every verifier this replica starts
+// concurrently sees the same one free slot and takes it. The Scheduler does not have that gap because it
+// subtracts its own in-flight placements from the snapshot; this lane kept no such count.
+//
+// Seen RED before both, observed:
+//   an unreadable capacity probe was read as room to place a verifier: expected undefined to be
+//   'RATE_LIMITED'
+//   three verifiers were placed into one free slot: expected 3 to be 1
+describe("[R62 COUNTEREXAMPLE] a verifier is not placed on capacity nobody established", () => {
+  const accessTo = (backend: unknown) =>
+    buildRuntimeAccess({
+      runtimeRegistry: {
+        get: async () => ({ id: "rt-1", version: "1", kind: "k8s" }),
+        list: async () => [],
+      } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () => backend as never,
+      admitVerifierCompute: budget(),
+    });
+
+  it("REFUSES when the runtime could not say whether it has room", async () => {
+    const err = await accessTo({
+      id: "rt-1",
+      capacity: async () => {
+        throw new Error("the cluster API is unreachable");
+      },
+      dispatchVerifier: async () => ({ planDigest: "p", workspaceDigest: "w", scores: [] }),
+    })
+      .dispatchVerifier(JOB)
+      .then(() => undefined)
+      .catch((e: unknown) => (e as { code?: string })?.code);
+
+    expect(err, "an unreadable capacity probe was read as room to place a verifier").toBe("RATE_LIMITED");
+  });
+
+  it("does not hand the SAME free slot to concurrent verifiers", async () => {
+    // The cluster reports 19/20 throughout, because none of these placements is visible to it yet — which is
+    // the whole reason a reading cannot stand in for a reservation.
+    let placed = 0;
+    let release!: () => void;
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const access = accessTo({
+      id: "rt-1",
+      capacity: async () => ({ used: 19, total: 20 }),
+      dispatchVerifier: async () => {
+        placed += 1;
+        await inFlight;
+        return { planDigest: "p", workspaceDigest: "w", scores: [] };
+      },
+    });
+
+    const attempts = [access.dispatchVerifier(JOB), access.dispatchVerifier(JOB), access.dispatchVerifier(JOB)].map(
+      (p) => p.then(() => "placed").catch((e: unknown) => (e as { code?: string })?.code ?? "error"),
+    );
+    // Let the three race to the gate before any of them finishes holding its slot.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(placed, "three verifiers were placed into one free slot").toBe(1);
+    release();
+    const outcomes = await Promise.all(attempts);
+    expect(outcomes.filter((o) => o === "placed")).toHaveLength(1);
+    expect(outcomes.filter((o) => o === "RATE_LIMITED")).toHaveLength(2);
+  });
+
+  it("GIVES THE SLOT BACK, so the next verifier is not refused for a container that exited", async () => {
+    // The other half of any counter: one never decremented turns a cap into a permanent refusal, which is a
+    // worse outage than the overshoot it was added to stop.
+    const access = accessTo({
+      id: "rt-1",
+      capacity: async () => ({ used: 19, total: 20 }),
+      dispatchVerifier: async () => ({ planDigest: "p", workspaceDigest: "w", scores: [] }),
+    });
+    for (let i = 0; i < 3; i++) {
+      const out = await access
+        .dispatchVerifier(JOB)
+        .then(() => "placed")
+        .catch(() => "refused");
+      expect(out, `verifier ${i + 1} was refused a slot the previous one had already given back`).toBe("placed");
+    }
+  });
+});

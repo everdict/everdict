@@ -1266,6 +1266,36 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/run/revocation-coordinate.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P1. `.catch(() => undefined)` then `room !== undefined &&` made an unreadable cluster
+    // mean "place it", while the Scheduler answers the same question fail-closed. Restore the permissive
+    // read and the refusal disappears.
+    name: "verifier admission — an unreadable capacity probe reads as headroom",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        const room = await readOrUnknown(() => backend.capacity(), `capacity of runtime '${target}'`);\n        if (room.kind !== \"read\")",
+    to: '        const room = { kind: "read", value: await backend.capacity().catch(() => ({ used: 0, total: 1 })) };\n        if (false)',
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // …and the other half: a reading is not a reservation. Without the lane's own in-flight count, concurrent
+    // verifiers all see the same free slot in a snapshot none of them is visible in yet.
+    name: "verifier admission — the lane does not count the slots it is holding",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        const held = verifiersHeld.get(target) ?? 0;",
+    to: "        const held = 0;",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // arch-review 62 P1. A per-tenant COUNT is compared against an integer column by Postgres, which parses
+    // the driver's text form: `invalid input syntax for type integer: "1.5"`. Accept fractions again and the
+    // config that breaks one tenant's admissions boots clean.
+    name: "scheduling config — a fractional count is accepted for a whole-number ledger",
+    file: "packages/application-control/src/ops/scheduling-config.ts",
+    from: '      (kind === "weight" || (Number.isInteger(value) && value <= PG_INT_MAX));',
+    to: "      true;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/ops/quota-grammar.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

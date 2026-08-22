@@ -587,7 +587,8 @@ export { weightedTargets } from "./ops/shard-weights.js";
 export {
   type AutoscaleConfig,
   parseAutoscale,
-  parseTenantMap,
+  parseTenantCounts,
+  parseTenantWeights,
   type TenantValueMap,
 } from "./ops/scheduling-config.js";
 export { type LeaderElector, soleLeader, whenLeader } from "./ops/leadership.js";

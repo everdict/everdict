@@ -3,7 +3,8 @@ import {
   type AdmissionLedger,
   type AutoscaleConfig,
   parseAutoscale,
-  parseTenantMap,
+  parseTenantCounts,
+  parseTenantWeights,
 } from "@everdict/application-control";
 import { BackendRegistry, K8sBackend, NomadBackend, Scheduler, isPoolReporting } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
@@ -82,9 +83,9 @@ export function buildExecutionScheduling(deps: {
   // (For dev/single-host in-process runs use apps/cli's `everdict run` — the API only does managed/remote execution.)
   // Operator fairness dials (docs/execution-backends.md): per-tenant concurrent caps + WFQ weights. Unset = the
   // previous defaults (unlimited quota, weight 1) — the fairness machinery is always on; these are just the dials.
-  const tenantQuotas = parseTenantMap(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
-  const tenantWeights = parseTenantMap(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
-  const tenantQueueDepths = parseTenantMap(process.env.EVERDICT_TENANT_QUEUE_DEPTHS, "EVERDICT_TENANT_QUEUE_DEPTHS");
+  const tenantQuotas = parseTenantCounts(process.env.EVERDICT_TENANT_QUOTAS, "EVERDICT_TENANT_QUOTAS");
+  const tenantWeights = parseTenantWeights(process.env.EVERDICT_TENANT_WEIGHTS, "EVERDICT_TENANT_WEIGHTS");
+  const tenantQueueDepths = parseTenantCounts(process.env.EVERDICT_TENANT_QUEUE_DEPTHS, "EVERDICT_TENANT_QUEUE_DEPTHS");
   // Runtime-adjustable fairness dials (PUT /internal/scheduling) layered OVER the env defaults — env keeps
   // being the boot baseline, overrides live in memory (a restart falls back to env; documented).
   const quotaOverrides = new Map<string, number>();
