@@ -512,6 +512,9 @@ async function main(): Promise<void> {
     // need is wired further down — an absent lane still means `unmeasured`, never grading in the agent's
     // own container (arch-review 56, Wave K).
     dispatchVerifier: (job) => verifierLane.fn(job),
+    // The agent's half is staged here, before the verifier's container exists — the backend deletes the
+    // agent's Job as soon as it has parsed the result, so until this write it lives only in memory.
+    ...(artifacts ? { agentHalves: artifacts } : {}),
     ...(workspaceImages ? { images: workspaceImages } : {}),
     ...(trustZones ? { trustZones } : {}),
     callbackStore,
@@ -880,6 +883,9 @@ async function main(): Promise<void> {
       (await executionAttemptStore.list(executionId)).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])),
     owner: REPLICA_ID,
     replicas,
+    // …and where `withVerifierPass` staged the agent's half, so a run that crashed between its two halves is
+    // MERGED rather than losing the verdict its verifier already produced (arch-review 60 follow-through).
+    ...(artifacts ? { agentHalves: artifacts } : {}),
   };
   const owedRecovery = await runStartupRecovery(recoveryDeps);
   // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────

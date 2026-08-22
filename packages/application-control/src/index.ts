@@ -73,6 +73,14 @@ export {
   subscriptionReactionConsumer,
 } from "./platform-event/subscription-reaction-consumer.js";
 export type { AdmissionLedger } from "./ports/admission-ledger.js";
+export {
+  type AgentHalfStore,
+  type StagedAgentHalf,
+  agentHalfKey,
+  mergeVerifierPass,
+  readAgentHalf,
+  stageAgentHalf,
+} from "./execution/agent-half.js";
 export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type {

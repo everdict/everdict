@@ -39,7 +39,7 @@ const RECORD = { id: "r1", tenant: "acme", status: "running", ownerReplica: "r1"
 
 // A crashed run whose agent Job is gone and whose verifier Job is still there — the shape the whole file is
 // about. `resumedWith` records what the settle path was actually handed.
-function world(resumedWith: Array<unknown>) {
+function world(resumedWith: Array<unknown>, verdict: Array<Record<string, unknown>> = []) {
   return {
     scorecardStore: { get: async () => undefined },
     store: { get: async () => RECORD },
@@ -63,12 +63,110 @@ function world(resumedWith: Array<unknown>) {
             kind: "adopted",
             adopted: {
               stage: "verifier",
-              invocation: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", scores: [] },
+              invocation: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", scores: verdict },
             },
           }
         : { kind: "absent" },
   } as unknown as Parameters<typeof recoverStandaloneRun>[0];
 }
+
+// ── …AND IS MERGED WHEN THE AGENT'S HALF WAS STAGED (arch-review 60 follow-through) ─────────────────
+//
+// Refusing to settle the verifier's document was the safety half and it threw the verdict away: the agent's
+// evidence lived in the dead process's memory, so there was nothing to merge into and the case re-drove.
+//
+// `withVerifierPass` stages the agent's result as immutable bytes BEFORE it dispatches the second container —
+// which is the moment the backend has already deleted the agent's Job — so a recovery can read that half back
+// and finish the SAME merge the in-line path would have. Two spellings of "combine these halves" would make a
+// case recovered after a crash a different document from one that finished normally, and both are
+// `CaseResult`s, so the difference would be invisible.
+//
+// Seen RED before the stage existed, observed:
+//   a recovered verdict was thrown away even though the agent's half was on file: expected undefined to be
+//   'agent@1'
+
+const AGENT_HALF = {
+  caseId: "c1",
+  harness: "agent@1",
+  trace: [],
+  scores: [],
+  snapshot: { kind: "prompt", output: "x" },
+};
+
+describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the staged agent half", () => {
+  const staged = (bytes?: Uint8Array) => ({
+    put: async () => "ref",
+    get: async () => bytes,
+  });
+
+  // A REAL verdict: `verifierReceiptOf` refuses an empty one ("an empty verdict is not a measurement"), and
+  // a fixture that never reaches the merge would make every assertion below vacuous.
+  const VERDICT = [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }];
+
+  const verifierWorld = (resumedWith: Array<unknown>, halves?: ReturnType<typeof staged>) =>
+    ({
+      ...(world(resumedWith, VERDICT) as unknown as Record<string, unknown>),
+      ...(halves ? { agentHalves: halves } : {}),
+    }) as unknown as Parameters<typeof recoverStandaloneRun>[0];
+
+  it("MERGES the verdict onto the agent's own result", async () => {
+    const resumedWith: Array<unknown> = [];
+    const halves = staged(new TextEncoder().encode(JSON.stringify(AGENT_HALF)));
+    await recoverStandaloneRun(
+      verifierWorld(resumedWith, halves),
+      RECORD as never,
+      {
+        ownerReplica: "r1",
+        epoch: 1,
+      } as never,
+    );
+
+    const adopted = resumedWith[0] as { harness?: string; verifier?: unknown } | undefined;
+    expect(adopted?.harness, "a recovered verdict was thrown away even though the agent's half was on file").toBe(
+      "agent@1",
+    );
+    // …and the verdict really is attached, or this is just the agent half by itself.
+    expect(adopted?.verifier, "the verifier's receipt did not reach the merged result").toBeDefined();
+  });
+
+  it("STAYS OWED when the store cannot say whether a half was staged", async () => {
+    // Deciding either way from a failed read is how a verdict became a settled result in the first place: an
+    // unreadable store is not a case with no agent half (rule `protocol` L2).
+    const resumedWith: Array<unknown> = [];
+    const halves = {
+      put: async () => "ref",
+      get: async () => {
+        throw new Error("artifact store unavailable");
+      },
+    } as unknown as ReturnType<typeof staged>;
+    const outcome = await recoverStandaloneRun(
+      verifierWorld(resumedWith, halves),
+      RECORD as never,
+      {
+        ownerReplica: "r1",
+        epoch: 1,
+      } as never,
+    );
+
+    expect(outcome.kind, "an unreadable store was read as 'there is no agent half'").toBe("retry_later");
+    expect(resumedWith, "the run was settled on the strength of a read that failed").toHaveLength(0);
+  });
+
+  it("falls through to the re-drive when nothing was staged", async () => {
+    // `absent` is the ordinary case for an older writer or a deployment with no artifact store: the agent's
+    // evidence is genuinely gone, so the run re-drives exactly as it did before.
+    const resumedWith: Array<unknown> = [];
+    await recoverStandaloneRun(
+      verifierWorld(resumedWith, staged(undefined)),
+      RECORD as never,
+      {
+        ownerReplica: "r1",
+        epoch: 1,
+      } as never,
+    );
+    expect(resumedWith[0]).toBeUndefined();
+  });
+});
 
 describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict never becomes the run's result", () => {
   it("does NOT settle the run with the verifier's answer", async () => {

@@ -1,5 +1,6 @@
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
+import { type AgentHalfStore, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -26,6 +27,10 @@ export interface VerifierPassDeps {
   // Answers the INVOCATION, not bare numbers (arch-review 57 P1) — which procedure ran, what it read, and
   // where. `verifierReceiptOf` seals that into the receipt this pass attaches to the result.
   dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
+  // Where the agent's half is STAGED before the second container exists — see `stageAgentHalf`. Absent means
+  // this deployment cannot recover a case that crashed between the halves, which is what it could do before;
+  // it never changes what a case that completes normally produces.
+  agentHalves?: AgentHalfStore;
 }
 
 // The verdict a case owes but did not get. `unmeasured` rather than a zero, for the reason the reward-file
@@ -50,6 +55,17 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   if (!plan) return await deps.dispatch(job);
 
   const result = await deps.dispatch({ ...job, evalCase: plan.remainder });
+  // ── THE FIRST PHASE, MADE DURABLE BEFORE THE SECOND EXISTS (arch-review 60 follow-through) ────────
+  //
+  // The backend deletes the agent's Job as soon as it has parsed this result, so from here until the merge
+  // below the agent's evidence lives in exactly one place: this variable. A control plane that dies here
+  // leaves a recovery with a live verifier Job and nothing to attach its verdict to — which is why arch-review
+  // 60 had to make the recovery SKIP a recovered verdict rather than merge it.
+  //
+  // Staged now, keyed by the execution, so that recovery can read it back and finish the same merge. See
+  // `stageAgentHalf` for why its failure is swallowed and what that costs.
+  if (job.runId !== undefined && job.tenant !== undefined)
+    await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
 
   // A verdict this deployment cannot reach is stated, never omitted. An omitted one leaves a CaseResult whose
   // scores are the observation-only ones, which reads downstream as "graded, and it scored nothing".
@@ -126,11 +142,13 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   //
   // A receipt that cannot be sealed (an empty verdict) is `unmeasured`, not a silently dropped receipt: a
   // case that was never judged must not read as one that was.
-  let receipt: VerifierReceipt;
+  //
+  // …and the merge itself is ONE function, shared with the recovery (rule `protocol` L5). Two spellings of
+  // "combine these halves" would make a case recovered after a crash a different document from one that
+  // finished normally, and both are `CaseResult`s, so the difference would be invisible.
   try {
-    receipt = verifierReceiptOf(invocation as VerifierInvocation);
+    return mergeVerifierPass(result, invocation as VerifierInvocation);
   } catch (err) {
     return owed("grader_error", err instanceof Error ? err.message : String(err));
   }
-  return { ...result, scores: [...(result.scores ?? []), ...receipt.scores], verifier: receipt };
 }

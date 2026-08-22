@@ -1,4 +1,5 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
+import type { AgentHalfStore } from "@everdict/application-control";
 import { withVerifierPass } from "@everdict/application-control";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 
@@ -19,12 +20,16 @@ export class VerifierAwareDispatcher implements Dispatcher {
   constructor(
     private readonly inner: Dispatcher,
     private readonly dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>,
+    // Where the agent's half is staged before the second container exists (arch-review 60 follow-through).
+    // Absent means a crash between the two halves loses the agent's evidence, which is what it did before.
+    private readonly agentHalves?: AgentHalfStore,
   ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     return await withVerifierPass(job, {
       dispatch: (agentJob: CaseJob) => this.inner.dispatch(agentJob, opts),
       ...(this.dispatchVerifier ? { dispatchVerifier: this.dispatchVerifier } : {}),
+      ...(this.agentHalves ? { agentHalves: this.agentHalves } : {}),
     });
   }
 }

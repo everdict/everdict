@@ -11,7 +11,8 @@ import {
 } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
-import type { AdmissionLedger } from "@everdict/application-control";
+import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
+import { mergeVerifierPass, readAgentHalf } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
@@ -550,7 +551,11 @@ export function buildRuntimeAccess(deps: {
 // a success. Two owners assembling the same transition is how they came apart; this is the transition, and
 // it has one owner now.
 export async function recoverStandaloneRun(
-  deps: Pick<Parameters<typeof runStartupRecovery>[0], "service" | "adoptWorkFn" | "workHandlesFor">,
+  deps: Pick<Parameters<typeof runStartupRecovery>[0], "service" | "adoptWorkFn" | "workHandlesFor"> & {
+    // Where `withVerifierPass` staged the agent's half — see the verifier branch below. Absent means this
+    // deployment cannot merge a recovered verdict, which is exactly what it could not do before.
+    agentHalves?: AgentHalfStore;
+  },
   r: RunRecord,
   authority: DriverAuthority,
 ): Promise<ResumeResult> {
@@ -599,6 +604,29 @@ export async function recoverStandaloneRun(
       if (decision.kind === "adopted" && decision.adopted.stage === "case") {
         adopted = decision.adopted.result;
         break;
+      }
+      // ── A RECOVERED VERDICT IS MERGED, NOT DISCARDED (arch-review 60 follow-through) ────────────
+      //
+      // arch-review 60 stopped a verifier's verdict being settled AS the run's result — a verdict standing in
+      // for the execution it was about — and could only SKIP it, because the agent's half lived in the dead
+      // process's memory and there was nothing to merge into. `withVerifierPass` stages that half before it
+      // dispatches the second container, so there is now.
+      //
+      // The merge is the SAME function the in-line path uses: a case recovered after a crash must be the same
+      // document as one that finished normally, and both are `CaseResult`s, so any difference would be
+      // invisible (rule `protocol` L5 — one wrapper, request path and reconciler).
+      if (decision.kind === "adopted" && decision.adopted.stage === "verifier") {
+        const half = await readAgentHalf(deps.agentHalves, r.tenant, `evd-run-${r.id}`);
+        // A store that would not answer is not a case with no agent half. Deciding either way from a failed
+        // read is how this became a settled verdict in the first place (rule `protocol` L2).
+        if (half.kind === "unknown") return { kind: "retry_later", reason: half.reason };
+        if (half.kind === "read") {
+          adopted = mergeVerifierPass(half.result, decision.adopted.invocation);
+          break;
+        }
+        // `absent` — nothing was staged (an older writer, no artifact store, a staging failure). The agent's
+        // evidence is genuinely gone, so this falls through to the no-adoption path exactly as before: the
+        // run re-drives or tombstones under its own fence, which is the honest answer.
       }
       if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };
     }

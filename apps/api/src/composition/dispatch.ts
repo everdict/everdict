@@ -1,5 +1,5 @@
 import { ImageRegistryService } from "@everdict/application-control";
-import type { Metrics } from "@everdict/application-control";
+import type { AgentHalfStore, Metrics } from "@everdict/application-control";
 import {
   type ExecutionAttemptStore,
   type OpenLeaseAttempt,
@@ -84,6 +84,7 @@ export function buildDispatch(deps: {
   // deployment has none, and `withVerifierPass` records such a case's verdict as `unmeasured` rather than
   // grading it in the agent's own container.
   dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
+  agentHalves?: AgentHalfStore;
 }) {
   const {
     callbackStore,
@@ -429,7 +430,13 @@ export function buildDispatch(deps: {
   //
   // With no verifier lane wired the pass records the verdict as `unmeasured` rather than omitting it — a case
   // whose verdict never happened must not read downstream as a case that was graded.
-  const verifierAwareDispatcher = new VerifierAwareDispatcher(resolvingDispatcher, deps.dispatchVerifier);
+  const verifierAwareDispatcher = new VerifierAwareDispatcher(
+    resolvingDispatcher,
+    deps.dispatchVerifier,
+    // …and where the agent's half is staged, so a crash between the two halves is recoverable rather than a
+    // lost case (arch-review 60 follow-through).
+    deps.agentHalves,
+  );
   // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
   // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's
   // `runtime` lane. Resolves the SAME tenant-runtime build/auth path dispatch uses; a target whose backend cannot

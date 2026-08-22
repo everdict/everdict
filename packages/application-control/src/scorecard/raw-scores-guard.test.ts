@@ -27,6 +27,12 @@ const ALLOWED = new Set([
   // `unmeasured` verdict instead. Never a zero and never nothing: a case whose verdict never happened must
   // not read downstream as one that was graded.
   "execution/verifier-pass.ts",
+  // …and the MERGE itself, which moved here so the in-line path and the RECOVERY produce the same document
+  // from the same two halves (arch-review 60 follow-through). It concatenates the verifier's scores onto the
+  // agent half's exactly as `verifier-pass.ts` did — the role did not change, its owner did, and a case
+  // recovered after a crash being a different document from one that finished normally is precisely what
+  // having one function prevents.
+  "execution/agent-half.ts",
 ]);
 
 function tsFilesUnder(dir: string, prefix = ""): string[] {

@@ -1,0 +1,93 @@
+import { type CaseResult, CaseResultSchema, type VerifierInvocation } from "@everdict/contracts";
+import { type VerifierReceipt, verifierReceiptOf } from "@everdict/domain";
+
+// ── A TWO-PHASE CASE MAKES ITS FIRST PHASE DURABLE (arch-review 60 P0 follow-through) ────────────────
+//
+// A case with a private verifier is two units: the agent runs, then a SECOND container judges what it left.
+// `withVerifierPass` held the agent's `CaseResult` in a local variable across the second dispatch, and the
+// backend deletes the agent's Job in its own `finally` as soon as it has parsed that result. So between the
+// two halves the agent's evidence existed in exactly one place — this process's memory — and a control plane
+// that died there left a recovery with a live verifier Job and no execution to attach its verdict to.
+//
+// arch-review 60 stopped the worst of it: a recovered verdict is no longer settled AS the run's result, which
+// was a verdict standing in for the execution it was about. What it could not do was recover the case, and
+// the reason is stated in that commit — there was nothing to merge into.
+//
+// This is the missing half. The agent's result is STAGED as immutable bytes before the verifier is dispatched,
+// keyed by the execution, so a recovery that adopts the verifier's verdict can read the agent's half back and
+// finish the same merge the in-line path would have (rule `protocol` L4: a settlement references frozen
+// payloads by key; L5: one wrapper shared by the request path and the reconciler).
+//
+// Best-effort by contract, and deliberately so. A staging failure must not fail a case that ran — it costs
+// the RECOVERY, not the run, and the honest consequence of an absent stage is what the recovery already does
+// with a verifier it cannot attribute: skip it. Refusing the case instead would trade a real result for a
+// store hiccup.
+
+// Derived from the execution, at both ends. The recovery site holds a `RuntimeWorkRef` and nothing else, so a
+// key it cannot compute from that is a key it cannot use (rule `protocol` L3 — no re-derivation from
+// rendered output; this is the same coordinate on both sides, not a parse of one).
+export function agentHalfKey(tenant: string, runId: string): string {
+  return `agent-half/${tenant}/${runId}.json`;
+}
+
+export interface AgentHalfStore {
+  put(key: string, data: Uint8Array, contentType: string): Promise<string>;
+  get(key: string): Promise<Uint8Array | undefined>;
+}
+
+export async function stageAgentHalf(
+  store: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  result: CaseResult,
+): Promise<void> {
+  if (!store) return;
+  await store
+    .put(agentHalfKey(tenant, runId), new TextEncoder().encode(JSON.stringify(result)), "application/json")
+    .then(() => undefined)
+    // Swallowed HERE and nowhere else: this is the one call whose failure genuinely costs nothing the case
+    // needs, and the comment above says what it does cost. Every other read in this file answers three ways.
+    .catch(() => undefined);
+}
+
+// Three answers, not two (rule `protocol` L2). `absent` is a case that never staged — an older writer, a
+// deployment with no artifact store, a staging failure — and it is the ordinary reason a recovery cannot
+// merge. `unknown` is a store that would not say, which must not be read as "there is no agent half": that
+// would settle a case on the verifier's document alone, which is the defect this whole file follows from.
+export type StagedAgentHalf =
+  | { kind: "read"; result: CaseResult }
+  | { kind: "absent" }
+  | { kind: "unknown"; reason: string };
+
+export async function readAgentHalf(
+  store: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+): Promise<StagedAgentHalf> {
+  if (!store) return { kind: "absent" };
+  let bytes: Uint8Array | undefined;
+  try {
+    bytes = await store.get(agentHalfKey(tenant, runId));
+  } catch (err) {
+    return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
+  }
+  if (bytes === undefined) return { kind: "absent" };
+  try {
+    // Parsed through the CONTRACT, not cast: these bytes crossed a process boundary and a restart, and a
+    // shape that no longer validates is a stage this version cannot honour — which is `unknown`, because
+    // something IS there and we could not use it.
+    return { kind: "read", result: CaseResultSchema.parse(JSON.parse(new TextDecoder().decode(bytes))) };
+  } catch (err) {
+    return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── THE MERGE, ONCE (rule `protocol` L5) ─────────────────────────────────────────────────────────────
+//
+// The in-line path and the recovery must produce the SAME case result from the same two halves, or a case
+// recovered after a crash is a different document than one that finished normally — and the difference would
+// be invisible, because both are `CaseResult`s. One function, called by both.
+export function mergeVerifierPass(result: CaseResult, invocation: VerifierInvocation): CaseResult {
+  const receipt: VerifierReceipt = verifierReceiptOf(invocation);
+  return { ...result, scores: [...(result.scores ?? []), ...receipt.scores], verifier: receipt };
+}
