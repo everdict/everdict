@@ -1058,6 +1058,52 @@ const MUTATIONS = [
     to: "",
     suite: ["--root", "packages/application-control", "src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
+  {
+    // arch-review 60 follow-through. The recovered verdict discarded again, so a run that crashed between its
+    // two halves loses the judgment its verifier already produced and re-runs the whole case.
+    name: "two-phase case — a recovered verdict is thrown away",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: '        if (half.kind === "read") {',
+    to: "        if (false) {",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
+  {
+    // …and the staging half: without it there is nothing on file to merge INTO, which is the state
+    // arch-review 60 could only skip.
+    name: "two-phase case — the agent's half is never staged",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: "    await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);",
+    to: "    void deps.agentHalves;",
+    suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
+  },
+  {
+    // arch-review 60 follow-through. The Job born RUNNABLE again, so the object only exists once it can
+    // already create pods — and a cancellation probing between the reservation and the apply truthfully
+    // answers ABSENT while a birth is pending.
+    name: "inert birth — the K8s Job is created runnable",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "      suspend: true,",
+    to: "      suspend: false,",
+    suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
+  },
+  {
+    // …and the refusal path: an inert object left behind when the authority says no. Nothing runs, but the
+    // dispatch stops cleaning up after itself, which is how a namespace fills with objects nobody owns.
+    name: "inert birth — a refused activation leaves its object behind",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        await api.deleteJob(name, ns).catch(() => undefined);\n        throw err;",
+    to: "        throw err;",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
+  },
+  {
+    // arch-review 60 follow-through. The workspace's WHOLE secret tier reaching the agent's container again —
+    // its GitHub App token, its registry passwords, whatever a member saved for an integration.
+    name: "agent env — the whole workspace tier reaches the agent's container",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "    ...evalContainerSecretEnv(opts.secretEnv),",
+    to: "    ...opts.secretEnv,",
+    suite: ["--root", "packages/backends", "src/orchestrators/payload-not-in-agent-env.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
