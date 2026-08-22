@@ -44,6 +44,7 @@ function world(order: string[]) {
   return {
     async ensureNamespace() {},
     async patchOwnedByJob() {},
+    async resumeJob() {},
     async applyJob(m: { kind?: string }) {
       if (m.kind === "NetworkPolicy") {
         order.push("apply(networkpolicy)");

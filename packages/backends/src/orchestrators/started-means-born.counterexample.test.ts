@@ -43,6 +43,15 @@ const AUTHORITY = {
   activate: async () => ({ kind: "activate" as const }),
 };
 
+// The K8s authority, recording the transition so the ORDER around the inert object is observable.
+const recordingAuthority = (order: string[]) => ({
+  reserve: async (work: RuntimeWorkRef) => ({ attemptId: "a1", work, persistedAt: new Date(0).toISOString() }),
+  activate: async () => {
+    order.push("activate");
+    return { kind: "activate" as const };
+  },
+});
+
 // A cluster that records the order of everything, and stops right after the object is born.
 function k8sApi(order: string[]) {
   return {
@@ -50,7 +59,10 @@ function k8sApi(order: string[]) {
     async patchOwnedByJob() {},
     async applyJob(m: { kind?: string }) {
       if (m.kind === "NetworkPolicy") return;
-      order.push("apply(job)");
+      order.push("apply(inert)");
+    },
+    async resumeJob() {
+      order.push("resume");
     },
     // The object now exists, which is the whole precondition under test; the dispatch stops at the first poll
     // rather than here, because an apply that THREW must not report started and would hide the ordering.
@@ -78,11 +90,19 @@ describe("[R60 COUNTEREXAMPLE] a run is 'started' only once its external object 
     const backend = new K8sBackend({ image: "runner:1", api: k8sApi(order) } as never);
 
     await backend
-      .dispatch(JOB(), { authority: AUTHORITY, onStarted: () => order.push("started") })
+      .dispatch(JOB(), { authority: recordingAuthority(order), onStarted: () => order.push("started") })
       .catch(() => undefined);
 
+    // ── AND THE OBJECT COMES FIRST (arch-review 60 P0 follow-through) ──────────────────────────────
+    //
+    // Activating immediately before the apply narrowed the window to one call and did not remove it. The Job
+    // is created INERT (`suspend: true` — it exists, it is addressable, it creates no pods), the reservation
+    // is re-presented against an object a teardown can already find, and only then is it made runnable. A
+    // cancellation probing in that window can no longer truthfully answer ABSENT.
     expect(order, "the ledger said this attempt was executing before any object existed").toEqual([
-      "apply(job)",
+      "apply(inert)",
+      "activate",
+      "resume",
       "started",
     ]);
   });

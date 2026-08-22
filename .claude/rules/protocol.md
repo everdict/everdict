@@ -217,7 +217,12 @@ needs one of:
 - the holder UNDOES its own effect when it learns the authorization is gone (create, re-verify, delete what
   it just made) — the shape available when the effect is addressable and reversible;
 - the object is created INERT and a later transition makes it runnable, so a cancellation always has
-  something to address and never has to reason about a birth that has not happened yet.
+  something to address and never has to reason about a birth that has not happened yet. **This is what the
+  K8s lane does** (`suspend: true` → re-present the reservation → `suspend: false`), verified on a live
+  cluster: suspended is zero pods, deleted-while-suspended is a pod that never existed, and a refused
+  activation deletes what the dispatch made. A lane whose orchestrator has no inert form keeps the narrower
+  order and says so — Nomad does — because claiming the stronger property without the mechanism is the
+  failure this whole rule is about.
 
 Clock skew is the smaller half of this and still real: an age computed from an application's `now()` against a
 store's `updated_at` is two clocks. Say which one is authoritative, or compare within one.

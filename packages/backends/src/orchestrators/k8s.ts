@@ -111,6 +111,9 @@ export interface K8sApi {
   // object created beside a Job and owned by nobody accumulates for as long as the namespace lives
   // (arch-review 60 P1-ops).
   patchOwnedByJob(kind: "networkpolicy" | "secret", name: string, ns: string, ownerJob: string): Promise<void>;
+  // Make an INERT Job runnable. A Job created `suspend: true` exists and is addressable and creates no pods
+  // at all; this is the transition that lets it run — see `dispatch` for why the object comes first.
+  resumeJob(name: string, ns: string): Promise<void>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
   deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
@@ -414,6 +417,10 @@ export function kubectlApi(
       } catch {
         return undefined;
       }
+    },
+    async resumeJob(name, ns) {
+      const res = await run(bin, [...ctx, "-n", ns, "patch", "job", name, "--type", "merge", "-p", SUSPEND_OFF]);
+      if (res.code !== 0) throw new Error(`resume job ${name}: ${res.stderr || res.stdout}`);
     },
     async patchOwnedByJob(kind, name, ns, ownerJob) {
       const read = await run(bin, [...ctx, "-n", ns, "get", "job", ownerJob, "-o", "jsonpath={.metadata.uid}"]);
@@ -1038,6 +1045,9 @@ export function k8sRegistryAuthSecret(
 // The variable the INIT container is exec'd with. Never on the agent's container — that is the point.
 const PAYLOAD_ENV = "EVERDICT_JOB_PAYLOAD";
 
+// The one-field patch that makes an inert Job runnable — see `suspend: true` in the manifest.
+const SUSPEND_OFF = '{"spec":{"suspend":false}}';
+
 // CaseJob → K8s batch Job. The payload is the EVERDICT_CASE_JOB(base64) env. Isolation is runtimeClassName.
 export function buildK8sJob(
   job: CaseJob,
@@ -1177,6 +1187,17 @@ export function buildK8sJob(
     spec: {
       backoffLimit: 0,
       ttlSecondsAfterFinished: opts.ttlSecondsAfterFinished ?? 300,
+      // ── BORN INERT (arch-review 60 P0 follow-through) ────────────────────────────────────────────
+      //
+      // `suspend: true` makes a Job that EXISTS, is addressable by the same selector a teardown kills with,
+      // and creates no pods whatsoever. Verified on a live cluster: suspended = zero pods, unsuspended = it
+      // runs, deleted while suspended = no pod is ever created.
+      //
+      // That is what closes the last window: the activation used to be the only thing standing between a
+      // paused submitter and a running Job, and a cancellation probing in that window truthfully saw ABSENT
+      // because nothing had been created yet. Now the object comes FIRST, so there is always something for a
+      // teardown to find, and the authority check decides whether it is ever allowed to run.
+      suspend: true,
       template: {
         // …and the PER-UNIT label. `app: everdict` is what a namespace-wide selector would match, so a
         // NetworkPolicy written against it would cut off every other job in the namespace rather than this
@@ -1466,7 +1487,6 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // longhand meant this copy silently did not receive the transition arch-review 58 added (arch-review 59
       // P0-verifier). Without it a cancellation could kill the ledger's work, probe it ABSENT because no
       // object existed yet, settle every child, COMPLETE — and the paused verifier then created the Job.
-      await requireActivation(verifierCaseJob(job), work, hooks?.authority);
       await api.ensureNamespace(ns);
       const manifest = buildK8sJob(
         spec,
@@ -1488,6 +1508,24 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
       // verifier that graded with the network open.
       if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
+      // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
+      //
+      // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
+      // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
+      // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
+      // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
+      //
+      // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
+      // A refusal here deletes what this dispatch made, so the cancellation's certificate stays true — the
+      // only thing that ever existed was an object with no pods, removed by its own creator.
+      try {
+        await requireActivation(verifierCaseJob(job), work, hooks?.authority);
+      } catch (err) {
+        await api.deleteJob(name, ns).catch(() => undefined);
+        throw err;
+      }
+      // …and only an authorized dispatch makes it runnable.
+      await api.resumeJob(name, ns);
       try {
         await this.waitForJob(api, name, ns);
         // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and
@@ -1937,10 +1975,6 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       this.opts.enforcesNetwork ? { enforces: ["none"] } : undefined,
     );
     if (job.runId !== undefined) await requireReservation(job, work, options?.authority);
-    // …and the reservation is re-presented HERE, immediately before the Job exists (arch-review 57 P0). A
-    // proof with no lifetime let a paused driver create work after a cancellation had verified there was
-    // none; this is the transition that makes such a driver fail instead.
-    await requireActivation(job, work, options?.authority);
     // …and ONLY NOW is this run "started" (arch-review 54, Phase 1). The flip used to fire before both the
     // reservation and the apply, so a reservation failure left a record marked `running` with no Job anywhere.
     // With kubeconfig auth, the temp kubeconfig lives only for the one job (removed after completion/failure). cleanup after deleteJob.
@@ -1979,6 +2013,24 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       //
       // After the apply, so the ledger's `executing` is a statement about an object a teardown can address,
       // and the states that can still cause a birth are exactly the ones `mayStillCreateWork` names.
+      // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
+      //
+      // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
+      // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
+      // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
+      // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
+      //
+      // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
+      // A refusal deletes what this dispatch made, so the cancellation's certificate stays true — the only
+      // thing that ever existed was an object with no pods, removed by its own creator.
+      try {
+        await requireActivation(job, work, options?.authority);
+      } catch (err) {
+        await api.deleteJob(name, ns).catch(() => undefined);
+        throw err;
+      }
+      // …and only an authorized dispatch makes it runnable.
+      await api.resumeJob(name, ns);
       options?.onStarted?.();
       // …and now the policy learns whose dependent it is. `ttlSecondsAfterFinished` deletes the Job on the
       // ordinary path and knows nothing about a policy beside it, so the cluster's own garbage collector is

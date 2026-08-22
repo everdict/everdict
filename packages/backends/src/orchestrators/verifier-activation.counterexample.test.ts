@@ -28,6 +28,17 @@ import { K8sBackend } from "./k8s.js";
 // Seen RED before the activation was added, observed:
 //   the k8s verifier created its Job without re-presenting the reservation: expected [ 'reserve', 'apply' ]
 //   to deeply equal [ 'reserve', 'activate', 'apply' ]
+//
+// ── …AND THE ORDER GOT STRONGER (arch-review 60 P0 follow-through) ─────────────────────────────────
+//
+// Activating immediately BEFORE the apply narrowed the window to one call and did not remove it: a submitter
+// paused across that call holds an activation it never re-reads. The Job is created INERT now (`suspend:
+// true` — it exists, it is addressable, it creates no pods), the reservation is re-presented against an
+// object a teardown can already find, and only then is it made runnable. So the sequence this file pins is
+//
+//     reserve · apply(inert) · activate · resume
+//
+// and a REFUSED activation deletes what this dispatch made rather than leaving it.
 
 const JOB: VerifierJob = {
   runId: "evd-sc-1-c1-t0",
@@ -46,10 +57,13 @@ function world(order: string[]) {
     async ensureNamespace() {},
     async patchOwnedByJob() {},
     async applyJob() {
-      order.push("apply");
-      // Stops here on purpose: what this file is about is the ORDER up to the object's birth, and letting the
-      // poll run would only add a fake cluster's lifecycle to a test that does not ask about it.
-      throw new Error("stop after the birth");
+      order.push("apply(inert)");
+    },
+    async resumeJob() {
+      order.push("resume");
+      // Stops here on purpose: what this file is about is the ORDER up to the moment the object may RUN, and
+      // letting the poll proceed would only add a fake cluster's lifecycle to a test that does not ask.
+      throw new Error("stop after it becomes runnable");
     },
     async jobStatus() {
       return { status: "succeeded" as const };
@@ -64,6 +78,7 @@ function world(order: string[]) {
       })}`;
     },
     async deleteJob() {
+      order.push("delete");
       return { status: "stopped" as const };
     },
     async podsForJob() {
@@ -96,10 +111,11 @@ describe("[R59 COUNTEREXAMPLE] the k8s verifier re-presents its reservation befo
       })
       .catch(() => undefined);
 
-    expect(order, "the k8s verifier created its Job without re-presenting the reservation").toEqual([
+    expect(order, "the k8s verifier made its Job runnable without re-presenting the reservation").toEqual([
       "reserve",
+      "apply(inert)",
       "activate",
-      "apply",
+      "resume",
     ]);
   });
 
@@ -122,6 +138,12 @@ describe("[R59 COUNTEREXAMPLE] the k8s verifier re-presents its reservation befo
       }),
     ).rejects.toThrow(/cancelled|may no longer/i);
 
-    expect(order, "a refused activation still produced a container").toEqual(["reserve"]);
+    // The inert object was created — that is the point, a teardown could always find it — and then REMOVED
+    // by its own creator, so nothing that could run ever existed and the cancellation's certificate holds.
+    expect(order, "a refused activation left an object behind, or made one runnable").toEqual([
+      "reserve",
+      "apply(inert)",
+      "delete",
+    ]);
   });
 });

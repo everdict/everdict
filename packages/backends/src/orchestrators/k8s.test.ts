@@ -113,6 +113,7 @@ function mockApi(
     // The lane ties a network policy to its Job when the case declares an offline world (arch-review 58 W5);
     // these cases declare none, so the patch is never reached.
     async patchOwnedByJob() {},
+    async resumeJob() {},
     async applyJob(m) {
       applied.push(m as JobManifest);
     },
