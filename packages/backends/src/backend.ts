@@ -111,7 +111,47 @@ export type AdoptOutcome =
   // takes "the first adopted answer" must be unable to settle the wrong one as the case's result.
   | { status: "adopted"; adopted: AdoptedWork }
   | { status: "absent" } // the listing succeeded and there is definitively no job for this case → safe to re-dispatch
+  // ── THE OBJECT EXISTS AND CAN NEVER FINISH (arch-review 62 P0) ────────────────────────────────────
+  //
+  // Both managed lanes create their external object INERT — a K8s Job at `suspend: true`, a Nomad job at
+  // `Count: 0` — so a cancellation racing a dispatch always has something to address. A crash between that
+  // creation and the activation leaves the object in that phase with nobody to move it, and the three
+  // answers above had no word for it: the object is present, so adoption waited for it to complete, and a
+  // suspended Job does not complete. The timeout became `unknown`, `unknown` is `retry_later` by design,
+  // and every later sweep repeated it over an orphan no owner would ever resume or delete.
+  //
+  // Not a rename of `unknown`: that arm means compute MAY be burning, which is why re-dispatching over it
+  // can double-spend. Inert means NOTHING has been spent — zero pods, zero allocations, both verified on
+  // live clusters — so the caller re-drives exactly as it does for `absent`. The lane reports this only
+  // after reclaiming the object and READING THE DELETE BACK (L5); a delete it could not confirm is
+  // `unknown`, because a submitter paused across the crash could still resume what is still there.
+  | { status: "inert" }
   | { status: "unknown" }; // an API/parse failure left it ambiguous → re-dispatch MAY double-spend a live job
+
+// What a recovery DOES with one lane's answer. Exported and pure because the fold that consumes it lives in a
+// composition root, where no counterexample can reach it — and this is the decision the new arm exists to
+// make, so it has to be assertable. Exhaustive by construction: a status added later stops compiling here
+// instead of falling through to whichever arm happens to be last (arch-review 62 P0).
+export type AdoptionStep =
+  | { kind: "harvest"; adopted: AdoptedWork } // a finished container's answer — settle it, never re-dispatch
+  | { kind: "redrive" } // established that nothing of this work is live or can become live — safe to re-place
+  | { kind: "unresolved" }; // nobody could tell us — decide nothing, the sweep comes back
+
+export function adoptionStep(outcome: AdoptOutcome): AdoptionStep {
+  switch (outcome.status) {
+    case "adopted":
+      return { kind: "harvest", adopted: outcome.adopted };
+    case "unknown":
+      return { kind: "unresolved" };
+    // An object still in its birth phase was found AND reclaimed by the lane, which read the delete back
+    // before reporting it. Nothing was ever spent on it and it is gone, so this run stands exactly where one
+    // whose object was never created stands. Joined to `absent` HERE, in one place a test can point at,
+    // rather than by a fall-through nobody wrote down.
+    case "inert":
+    case "absent":
+      return { kind: "redrive" };
+  }
+}
 
 // WorkAddressable — CONTROL ADDRESSED BY THE EXACT WORK, not by what the work was about (arch-review 52,
 // Wave 2). The backend minted the handle when it created the external object (`DispatchOptions.onWork`); the

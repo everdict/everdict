@@ -1,5 +1,7 @@
 export {
   type AdoptOutcome,
+  type AdoptionStep,
+  adoptionStep,
   type Backend,
   type BackendCapacity,
   type CaseCapacityAware,

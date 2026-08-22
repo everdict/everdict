@@ -16,6 +16,7 @@ import { mergeVerifierPass, readAgentHalf } from "@everdict/application-control"
 import {
   type Backend,
   type LogStream,
+  adoptionStep,
   isScreenAttachable,
   isScreenCapturable,
   isTopologyInspectable,
@@ -189,14 +190,19 @@ export function buildRuntimeAccess(deps: {
     const { unresolved: lanes } = await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
       if (!isWorkControllable(backend)) return false;
       const outcome = await backend.adoptWork(work);
-      if (outcome.status === "adopted") {
+      // `adoptionStep` owns what one lane's answer MEANS — exhaustive there, so a status added later stops
+      // compiling instead of falling through to whichever arm happens to be last. That is precisely how
+      // `inert` arrived: the lanes learned to report it, the compiler was happy, every suite was green, and
+      // what a recovery did with it was nobody's decision (arch-review 62 P0).
+      const step = adoptionStep(outcome);
+      if (step.kind === "harvest") {
         // The STAGE travels — this seam does not decide what an answer means, it carries what it is
         // (arch-review 60 P0). Collapsing it to a `CaseResult` here is what let a verifier's verdict reach
         // `Run.adopt` as a run's whole result.
-        harvested = outcome.adopted;
+        harvested = step.adopted;
         return true;
       }
-      if (outcome.status === "unknown") unresolved = "a runtime could not say whether this work is still live";
+      if (step.kind === "unresolved") unresolved = "a runtime could not say whether this work is still live";
       return false;
     });
     if (harvested !== undefined) return { kind: "adopted", adopted: harvested };

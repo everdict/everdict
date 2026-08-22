@@ -37,6 +37,7 @@ import {
   UpstreamError,
   type WorkPresence,
   judgeEnv,
+  killConverged,
   worstKillOutcome,
 } from "@everdict/contracts";
 import type {
@@ -118,9 +119,13 @@ export interface K8sApi {
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). No wait.
   deleteJobsByLabel(selector: string): Promise<KillOutcome>;
   // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
+  // `suspended` is the BIRTH PHASE, reported by the same read that finds the Job: this lane creates every
+  // Job `suspend: true` and resumes it only once its authority is re-presented, so a Job still carrying it
+  // is one whose dispatch never got that far. Adoption needs it here rather than in a second round-trip
+  // because the listing is the answer it already holds (arch-review 62 P0).
   jobsByLabel(
     selector: string,
-  ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string }> | undefined>;
+  ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string; suspended?: boolean }> | undefined>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
   // The job's pods with their live placement status (phase/node/restarts + the waiting|terminated reason, plus
@@ -482,6 +487,7 @@ export function kubectlApi(
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string; namespace?: string; creationTimestamp?: string };
+          spec?: { suspend?: boolean };
         }>;
         return items
           .filter((j) => j.metadata?.name && j.metadata.namespace)
@@ -489,6 +495,9 @@ export function kubectlApi(
             name: j.metadata?.name as string,
             namespace: j.metadata?.namespace as string,
             ...(j.metadata?.creationTimestamp ? { creationTimestamp: j.metadata.creationTimestamp } : {}),
+            // The cluster's own field, carried verbatim — never re-derived from "it has no pods yet", which
+            // is also true of a Job that is merely still scheduling (rule `protocol` L3).
+            ...(j.spec?.suspend === true ? { suspended: true } : {}),
           }));
       } catch {
         return undefined;
@@ -1380,7 +1389,24 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         // what `unknown` exists to prevent. A 404 for this exact name is `absent`, and safe to re-dispatch.
         const jobs = await api.jobsByLabel(`everdict.dev/run=${caseLabelValue(work.runId)}`);
         if (jobs === undefined) return { status: "unknown" };
-        if (!jobs.some((j) => j.name === work.externalJobId)) return { status: "absent" };
+        const found = jobs.find((j) => j.name === work.externalJobId);
+        if (found === undefined) return { status: "absent" };
+        // ── A JOB STILL IN ITS BIRTH PHASE IS RECLAIMED, NOT AWAITED (arch-review 62 P0) ─────────────
+        //
+        // The dispatch that made this Job crashed before it re-presented its authority, so the Job is
+        // suspended and no owner will ever resume it. Waiting is what this used to do, and a suspended Job
+        // never reports `succeeded` or `failed`, so the wait ran out and the whole run deferred forever.
+        //
+        // Nothing has been spent on it — a suspended Job creates no pods at all — so removing it and letting
+        // the caller re-drive costs the case nothing, which is exactly why `inert` is a different answer
+        // from `unknown` rather than a politer spelling of it.
+        if (found.suspended === true) {
+          // …and the answer is only `inert` if the object is actually GONE. An unconfirmed delete leaves it
+          // resumable by a submitter paused across the crash, and certifying over that is the shape L5
+          // exists to forbid.
+          const removed = await api.deleteJob(work.externalJobId, ns);
+          return killConverged(removed) ? { status: "inert" } : { status: "unknown" };
+        }
         await this.waitForJob(api, work.externalJobId, ns);
         // The ONE reader, which chooses the protocol from the handle — a verifier prints a different
         // document, and adopting it with the case parser is what made a run defer forever (arch-review 59 P1).

@@ -1322,6 +1322,23 @@ export class NomadBackend
       // has told us nothing about whether the job is running, and re-dispatching on that double-spends.
       if (found.kind === "unknown") return { status: "unknown" };
       if (found.kind === "absent") return { status: "absent" };
+      // ── A REGISTRATION STILL IN ITS BIRTH PHASE IS RECLAIMED, NOT AWAITED (arch-review 62 P0) ──────
+      //
+      // This lane registers at `Count: 0` first so a cancellation always has an object to address, and only
+      // an authorized dispatch scales it to one. A crash in between leaves a job that Nomad will never
+      // schedule an allocation for — and `waitForAlloc` below is a poll for exactly that allocation, so it
+      // ran out and the run deferred forever on every boot. The K8s half of this is `suspend: true`.
+      const phase = await this.jobBirthPhase(work.externalJobId, ns);
+      if (phase.kind === "unknown") return { status: "unknown" };
+      if (phase.kind === "read" && phase.value === 0) {
+        // Purged, and the purge is READ: `inert` claims nothing can come of this object, which is false
+        // while it is still there for a paused submitter to scale up (rule `protocol` L5).
+        const purge = await this.http.request(
+          "DELETE",
+          `/v1/job/${encodeURIComponent(work.externalJobId)}?purge=true${ns ? `&namespace=${encodeURIComponent(ns)}` : ""}`,
+        );
+        return purge.status < 300 ? { status: "inert" } : { status: "unknown" };
+      }
       const allocId = await this.waitForAlloc(work.externalJobId, ns);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
@@ -1599,6 +1616,28 @@ export class NomadBackend
   // K8s already distinguished them. Two implementations of one contract disagreeing about what a failure MEANS
   // is precisely what the shared conformance suite has to assert — and it did not, because it asked whether
   // the method existed rather than what it answers when the cluster errors.
+  // The registration's own count — 0 means this job is still in the INERT phase this lane creates first, so
+  // Nomad will schedule no allocation for it and nothing is waiting to be harvested (arch-review 62 P0).
+  // Read from the job document rather than inferred from "it has no allocations", which is equally true of a
+  // job whose allocation is still being placed (rule `protocol` L3). A listing that FAILED is `unknown` —
+  // treating an unreadable cluster as "not inert" would send adoption back to the poll that never converges.
+  private async jobBirthPhase(name: string, namespace?: string): Promise<ReadResult<number>> {
+    const nsq = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
+    const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(name)}${nsq}`);
+    if (res.status >= 300) return { kind: "unknown", reason: `the Nomad job read returned ${res.status}` };
+    try {
+      const doc = JSON.parse(res.text) as { TaskGroups?: Array<{ Count?: number }> };
+      const counts = (doc.TaskGroups ?? []).map((g) => g.Count ?? 0);
+      // No groups at all is not a phase this lane can produce, so it is not a claim it should make.
+      if (counts.length === 0) return { kind: "unknown", reason: "the Nomad job document declared no task groups" };
+      // Inert only if EVERY group is zero: a topology job whose agent group is scaled down while a dependency
+      // still runs has compute in it, and reclaiming that would be a stop dressed as a recovery.
+      return { kind: "read", value: Math.max(...counts) };
+    } catch {
+      return { kind: "unknown", reason: "the Nomad job document could not be parsed" };
+    }
+  }
+
   private async findJob(name: string, namespace?: string): Promise<ReadResult<{ ID?: string; Namespace?: string }>> {
     const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(name)}&namespace=*`);
     if (res.status >= 300) return { kind: "unknown", reason: `the Nomad job listing returned ${res.status}` };

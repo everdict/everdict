@@ -1210,6 +1210,38 @@ const MUTATIONS = [
     to: "    void work;",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P0. Both managed lanes create their object INERT so a cancellation always has something
+    // to address. A crash before the activation leaves that object with no owner, and adoption used to wait
+    // for it to finish — a suspended Job never does, so the run deferred on every boot forever. Neutralize
+    // the K8s lane's ability to SEE the phase and the recovery goes back to waiting.
+    name: "adoption — an inert K8s Job is waited on instead of reclaimed",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "        if (found.suspended === true) {",
+    to: "        if (false) {",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
+  },
+  {
+    // The Nomad half of the same phase: a registration at `Count: 0` schedules no allocation, so the poll
+    // for one never converges.
+    name: "adoption — an inert Nomad registration is waited on instead of reclaimed",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      if (phase.kind === "read" && phase.value === 0) {',
+    to: "      if (false) {",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
+  },
+  {
+    // …and the READER half. Teaching the lanes a phase closes nothing while the fold that consumes their
+    // answers treats anything it was not taught as "nothing to do here".
+    name: "adoption — the fold absorbs a phase it was never taught",
+    file: "packages/backends/src/backend.ts",
+    from: '    case "inert":\n    case "absent":\n      return { kind: "redrive" };',
+    to: '    case "absent":\n      return { kind: "redrive" };\n    case "inert":\n      return { kind: "unresolved" };',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
