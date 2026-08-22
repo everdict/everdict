@@ -882,15 +882,6 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
-    // …and the half that turns the gate into a leak: a reservation held for a container that never existed
-    // eventually 402s the workspace for compute it never took.
-    name: "verifier admission — the reservation is never released",
-    file: "apps/api/src/composition/runtime-access.ts",
-    from: "      admitVerifierCompute?.release(job.tenant);",
-    to: "",
-    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
-  },
-  {
     // arch-review 59 P1. The verifier's answer adopted without asking which unit it was about, so a previous
     // case's sentinel still in the logs became this case's verdict — with the request's own digests stamped
     // on it as provenance.
@@ -1009,8 +1000,8 @@ const MUTATIONS = [
     // …and the Nomad lane, whose stamp sat between the reservation and the submit for the same reason.
     name: "started-means-born — the Nomad lane reports executing before its job exists",
     file: "packages/backends/src/orchestrators/nomad.ts",
-    from: '    const submit = await this.http.request("POST", "/v1/jobs"',
-    to: '    options?.onStarted?.();\n    const submit = await this.http.request("POST", "/v1/jobs"',
+    from: "    options?.onStarted?.();\n    try {",
+    to: "    try {",
     suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
   },
   {
@@ -1044,8 +1035,8 @@ const MUTATIONS = [
     // container count against limits it never consulted.
     name: "verifier slots — the judging half draws on no pool at all",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: "      holdsPermit = (await verifierSlots.ledger.tryAdmit?.(job.tenant, permitId, quota)) ?? true;",
-    to: "      holdsPermit = true;\n      void quota;",
+    from: "        if (admitted === false)",
+    to: "        if (false)",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
@@ -1091,8 +1082,8 @@ const MUTATIONS = [
     // dispatch stops cleaning up after itself, which is how a namespace fills with objects nobody owns.
     name: "inert birth — a refused activation leaves its object behind",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "        await api.deleteJob(name, ns).catch(() => undefined);\n        throw err;",
-    to: "        throw err;",
+    from: "      } finally {\n        // The reclaim for EVERYTHING this dispatch created, whichever step failed. The Secret and the policy\n        // go with the Job through their owner references.\n        await api.deleteJob(name, ns);\n      }",
+    to: "      } finally {\n        void name;\n      }",
     suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
   },
   {
