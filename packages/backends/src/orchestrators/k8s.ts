@@ -1536,64 +1536,61 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           : manifest,
         ns,
       );
-      // …and the Secret learns the Job as its OWNER, so the cluster's GC reclaims a credential with the work
-      // it belonged to (arch-review 61 P1-ops). NOT best-effort, unlike the policy below: a leaked policy is
-      // inert, a leaked credential is a credential.
-      if (verifierAuths.length > 0) {
-        try {
-          await api.patchOwnedByJob("secret", verifierSecret, ns, name);
-        } catch (err) {
-          await api.deleteJob(name, ns).catch(() => undefined);
-          throw err;
-        }
-      }
-      // …and the ownerRef, so the cluster's GC reclaims the policy with the Job. Best-effort for the reason
-      // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
-      // verifier that graded with the network open.
-      if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
-      // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
+      // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
-      // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
-      // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
-      // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
-      // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
-      //
-      // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
-      // A refusal here deletes what this dispatch made, so the cancellation's certificate stays true — the
-      // only thing that ever existed was an object with no pods, removed by its own creator.
+      // The same boundary the agent lane got: a resume that threw left a suspended Job forever (suspended is
+      // not finished, so the TTL never collects it), and a resume the API server applied whose response was
+      // lost left a running one the caller believed had failed.
       try {
+        // …and the Secret learns the Job as its OWNER, so the cluster's GC reclaims a credential with the work
+        // it belonged to (arch-review 61 P1-ops). NOT best-effort, unlike the policy below: a leaked policy is
+        // inert, a leaked credential is a credential.
+        if (verifierAuths.length > 0) await api.patchOwnedByJob("secret", verifierSecret, ns, name);
+        // …and the ownerRef, so the cluster's GC reclaims the policy with the Job. Best-effort for the reason
+        // the agent lane gives: a failed patch leaks an inert policy, a failed ORDER would have leaked a
+        // verifier that graded with the network open.
+        if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
+        // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
+        //
+        // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
+        // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
+        // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
+        // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
+        //
+        // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
+        // A refusal here deletes what this dispatch made, so the cancellation's certificate stays true — the
+        // only thing that ever existed was an object with no pods, removed by its own creator.
         await requireActivation(verifierCaseJob(job), work, hooks?.authority);
-      } catch (err) {
-        await api.deleteJob(name, ns).catch(() => undefined);
-        throw err;
-      }
-      // …and only an authorized dispatch makes it runnable.
-      await api.resumeJob(name, ns);
-      try {
-        await this.waitForJob(api, name, ns);
-        // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and
-        // was previously discarded: which procedure ran (the plan's own digest, carried on the job), what it
-        // read (the workspace snapshot's), where it ran, and in which world. A verdict that cannot say those
-        // is a number a replay has to take on faith.
-        // READ BACK, not copied from the request (arch-review 59 P1). The envelope names the unit it judged;
-        // `parseVerifierResult` refuses one that names a different unit, and the invocation is then built
-        // from the container's own account rather than from what this lane asked for. The two are equal on
-        // the happy path — which is exactly why stamping the request read as correct for as long as it did.
-        const envelope = parseVerifierResult(await api.podLogs(name, ns), {
-          runId: job.runId,
-          caseId: job.caseId,
-          planDigest: job.plan.digest,
-          workspaceDigest: contentDigest(job.workspace),
-        });
-        return {
-          planDigest: envelope.planDigest,
-          workspaceDigest: envelope.workspaceDigest,
-          work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
-          imageProvenance:
-            job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
-          scores: envelope.scores,
-        };
+        // …and only an authorized dispatch makes it runnable.
+        await api.resumeJob(name, ns);
+        {
+          await this.waitForJob(api, name, ns);
+          // The INVOCATION, not bare numbers (arch-review 57 P1). Everything below is known right here and
+          // was previously discarded: which procedure ran (the plan's own digest, carried on the job), what it
+          // read (the workspace snapshot's), where it ran, and in which world. A verdict that cannot say those
+          // is a number a replay has to take on faith.
+          // READ BACK, not copied from the request (arch-review 59 P1). The envelope names the unit it judged;
+          // `parseVerifierResult` refuses one that names a different unit, and the invocation is then built
+          // from the container's own account rather than from what this lane asked for. The two are equal on
+          // the happy path — which is exactly why stamping the request read as correct for as long as it did.
+          const envelope = parseVerifierResult(await api.podLogs(name, ns), {
+            runId: job.runId,
+            caseId: job.caseId,
+            planDigest: job.plan.digest,
+            workspaceDigest: contentDigest(job.workspace),
+          });
+          return {
+            planDigest: envelope.planDigest,
+            workspaceDigest: envelope.workspaceDigest,
+            work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
+            imageProvenance:
+              job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
+            scores: envelope.scores,
+          };
+        }
       } finally {
+        // The reclaim for EVERYTHING this dispatch created, whichever step failed. The Secret and the policy
+        // go with the Job through their owner references.
         await api.deleteJob(name, ns);
       }
     });
@@ -2049,72 +2046,75 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       if (netPolicy) await api.applyJob(netPolicy, ns);
       const t0 = Date.now();
       await api.applyJob(payload, ns);
-      // ── STARTED MEANS THE OBJECT EXISTS (arch-review 60 P0) ──────────────────────────────────────
+      // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
-      // This fired before `ensureNamespace`, so the run flipped to `running` and the attempt was stamped
-      // `executing` while nothing had been created. The cancellation reads state to decide what may still be
-      // born, and `executing` is in neither of its guards — probe absent, certificate zero, and the paused
-      // submitter then created the Job. Rule `protocol`: a lifecycle stamp names an observed fact.
+      // The reclaim used to open below `resumeJob`, so two failures escaped it. A resume that THREW left a
+      // suspended Job forever — suspended is not finished, so `ttlSecondsAfterFinished` never collects it
+      // either. And a resume the API server APPLIED whose response was lost left a RUNNING Job the caller
+      // believed had failed, so a retry placed a second one: live duplicate compute writing competing
+      // evidence for one case.
       //
-      // After the apply, so the ledger's `executing` is a statement about an object a teardown can address,
-      // and the states that can still cause a birth are exactly the ones `mayStillCreateWork` names.
-      // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
-      //
-      // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
-      // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
-      // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
-      // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
-      //
-      // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
-      // A refusal deletes what this dispatch made, so the cancellation's certificate stays true — the only
-      // thing that ever existed was an object with no pods, removed by its own creator.
-      //
-      // …and before any of that, the pull Secret learns the same owner (arch-review 61 P1-ops). arch-review
-      // 60 made the name per-work and SAID the Secret would be owned by its Job; only the policy was ever
-      // patched, so every dispatch that pulled a private image left a dockerconfigjson behind — short-lived
-      // grants accumulating in etcd and the namespace's Secret count climbing per case. Not best-effort: a
-      // leaked policy is inert, a leaked credential is a credential.
-      if (auth.length > 0) {
-        try {
-          await api.patchOwnedByJob("secret", workSecret, ns, name);
-        } catch (err) {
-          await api.deleteJob(name, ns).catch(() => undefined);
-          throw err;
-        }
-      }
+      // Everything after the apply is inside it now, and the hand-rolled deletes on the refusal paths go
+      // with it — one owner for "this dispatch made an object, so this dispatch removes it", rather than a
+      // delete per failure mode and a gap wherever the next one forgets.
       try {
-        await requireActivation(job, work, options?.authority);
-      } catch (err) {
-        await api.deleteJob(name, ns).catch(() => undefined);
-        throw err;
-      }
-      // …and only an authorized dispatch makes it runnable.
-      await api.resumeJob(name, ns);
-      options?.onStarted?.();
-      // …and now the policy learns whose dependent it is. `ttlSecondsAfterFinished` deletes the Job on the
-      // ordinary path and knows nothing about a policy beside it, so the cluster's own garbage collector is
-      // what cleans up — which needs the uid the Job only has once it exists. Best-effort: a failed patch
-      // leaks an inert policy selecting pods that are gone, where a failed ORDER would have leaked a case
-      // that ran with the network open.
-      if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
-      try {
-        await this.waitForJob(api, name, ns, options?.signal);
-        const result = parseResult(await api.podLogs(name, ns));
-        // The infra-plane record of this dispatch (pod identity/node + the namespace events with their REAL
-        // timestamps) — appended to the trace so the sealed trajectory keeps the orchestrator's account after
-        // the Job is deleted in the finally below. Best-effort: a read miss just leaves the record shorter.
-        result.trace = [...result.trace, ...(await this.infraEvents(api, name, ns, t0))];
-        // The image THIS lane placed, added to what the in-container driver could see — which is nothing,
-        // since it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
+        // ── STARTED MEANS THE OBJECT EXISTS (arch-review 60 P0) ──────────────────────────────────────
         //
-        // From the REFERENCE, not yet from the pod: `status.containerStatuses[].imageID` carries the digest
-        // the kubelet actually pulled, which is an observation rather than an inference and strictly better
-        // for a mutable tag. Reading it is a separate API round trip on a path that is already deleting the
-        // Job, so it is left for the wave that gives this lane a PlacementReceipt; until then an unpinned tag
-        // is honestly `unresolved{lane_cannot_report}` rather than dishonestly `none`.
-        return mergePlacedImage(result, job, "the Kubernetes API");
+        // This fired before `ensureNamespace`, so the run flipped to `running` and the attempt was stamped
+        // `executing` while nothing had been created. The cancellation reads state to decide what may still be
+        // born, and `executing` is in neither of its guards — probe absent, certificate zero, and the paused
+        // submitter then created the Job. Rule `protocol`: a lifecycle stamp names an observed fact.
+        //
+        // After the apply, so the ledger's `executing` is a statement about an object a teardown can address,
+        // and the states that can still cause a birth are exactly the ones `mayStillCreateWork` names.
+        // ── THE AUTHORITY DECIDES WHETHER THE INERT OBJECT RUNS (arch-review 60 P0 follow-through) ────
+        //
+        // This used to sit immediately BEFORE the apply, which narrowed the window to one call and did not
+        // remove it: a submitter paused across that call held an activation it never re-read, so a cancellation
+        // could probe absent, certify zero, and watch the Job appear afterwards. A time-based lease bought the
+        // teardown liveness and bought the submitter nothing — a fence is read by the thing being fenced.
+        //
+        // The object exists by now and runs nothing, so the order is inverted: create inert, THEN re-present.
+        // A refusal deletes what this dispatch made, so the cancellation's certificate stays true — the only
+        // thing that ever existed was an object with no pods, removed by its own creator.
+        //
+        // …and before any of that, the pull Secret learns the same owner (arch-review 61 P1-ops). arch-review
+        // 60 made the name per-work and SAID the Secret would be owned by its Job; only the policy was ever
+        // patched, so every dispatch that pulled a private image left a dockerconfigjson behind — short-lived
+        // grants accumulating in etcd and the namespace's Secret count climbing per case. Not best-effort: a
+        // leaked policy is inert, a leaked credential is a credential.
+        if (auth.length > 0) await api.patchOwnedByJob("secret", workSecret, ns, name);
+        await requireActivation(job, work, options?.authority);
+        // …and only an authorized dispatch makes it runnable.
+        await api.resumeJob(name, ns);
+        options?.onStarted?.();
+        // …and now the policy learns whose dependent it is. `ttlSecondsAfterFinished` deletes the Job on the
+        // ordinary path and knows nothing about a policy beside it, so the cluster's own garbage collector is
+        // what cleans up — which needs the uid the Job only has once it exists. Best-effort: a failed patch
+        // leaks an inert policy selecting pods that are gone, where a failed ORDER would have leaked a case
+        // that ran with the network open.
+        if (netPolicy) await api.patchOwnedByJob("networkpolicy", `${name}-egress`, ns, name).catch(() => undefined);
+        {
+          await this.waitForJob(api, name, ns, options?.signal);
+          const result = parseResult(await api.podLogs(name, ns));
+          // The infra-plane record of this dispatch (pod identity/node + the namespace events with their REAL
+          // timestamps) — appended to the trace so the sealed trajectory keeps the orchestrator's account after
+          // the Job is deleted in the finally below. Best-effort: a read miss just leaves the record shorter.
+          result.trace = [...result.trace, ...(await this.infraEvents(api, name, ns, t0))];
+          // The image THIS lane placed, added to what the in-container driver could see — which is nothing,
+          // since it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
+          //
+          // From the REFERENCE, not yet from the pod: `status.containerStatuses[].imageID` carries the digest
+          // the kubelet actually pulled, which is an observation rather than an inference and strictly better
+          // for a mutable tag. Reading it is a separate API round trip on a path that is already deleting the
+          // Job, so it is left for the wave that gives this lane a PlacementReceipt; until then an unpinned tag
+          // is honestly `unresolved{lane_cannot_report}` rather than dishonestly `none`.
+          return mergePlacedImage(result, job, "the Kubernetes API");
+        }
       } finally {
-        // On an aborted wait this finally is exactly the reclaim — the submitted Job is deleted, not left running.
+        // The reclaim for EVERYTHING this dispatch created, whichever step failed: an aborted wait, a refused
+        // activation, a resume that threw, or a resume whose response was lost. The Secret and the policy go
+        // with the Job through their owner references.
         await api.deleteJob(name, ns);
       }
     });

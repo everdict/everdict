@@ -1160,6 +1160,19 @@ const MUTATIONS = [
     to: "  return registryAuthsForImages(registryAuthsOf(job), [mainImage]);",
     suite: ["--root", "packages/backends", "src/orchestrators/destructive-identity.counterexample.test.ts"],
   },
+  {
+    // arch-review 61 P1-high. The resume moved back OUTSIDE the reclaim, so a resume that throws leaves a
+    // suspended Job forever (suspended is not finished, so the TTL never collects it) and a resume the API
+    // server applied whose response was lost leaves a running one the caller believed had failed.
+    name: "cleanup scope — a failed resume leaks its object",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    // Neutralized the way the defect WAS — the resume hoisted above the reclaim — not by rewriting the
+    // lines near it. A mutation that only moves a comment tests nothing, which this suite said out loud the
+    // first time it was tried.
+    from: "      // lost left a running one the caller believed had failed.\n      try {",
+    to: "      // lost left a running one the caller believed had failed.\n      await api.resumeJob(name, ns);\n      try {",
+    suite: ["--root", "packages/backends", "src/orchestrators/verifier-activation.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

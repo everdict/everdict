@@ -90,6 +90,12 @@ function world(order: string[]) {
   };
 }
 
+const RESERVE = async (work: RuntimeWorkRef) => ({
+  attemptId: "a1",
+  work,
+  persistedAt: new Date(0).toISOString(),
+});
+
 describe("[R59 COUNTEREXAMPLE] the k8s verifier re-presents its reservation before the Job exists", () => {
   it("activates between reserving and applying", async () => {
     const order: string[] = [];
@@ -111,12 +117,42 @@ describe("[R59 COUNTEREXAMPLE] the k8s verifier re-presents its reservation befo
       })
       .catch(() => undefined);
 
-    expect(order, "the k8s verifier made its Job runnable without re-presenting the reservation").toEqual([
+    // The PREFIX, not the total: everything this dispatch created is reclaimed in one `finally` now
+    // (arch-review 61 P1-high), so a delete follows on every path including this one. What this file pins is
+    // that the object exists before the authority is asked, and runs only after it answers.
+    expect(order.slice(0, 4), "the k8s verifier made its Job runnable without re-presenting the reservation").toEqual([
       "reserve",
       "apply(inert)",
       "activate",
       "resume",
     ]);
+  });
+
+  it("removes the object when the RESUME fails — suspended is not finished, so nothing else collects it", () => {
+    // arch-review 61 P1-high. The reclaim used to open below `resumeJob`, so a resume that threw left a
+    // suspended Job forever: suspended is not a terminal state, so `ttlSecondsAfterFinished` never collects
+    // it either. And a resume the API server APPLIED whose response was lost left a RUNNING Job the caller
+    // believed had failed, so a retry placed a second one — live duplicate compute writing competing
+    // evidence for one case.
+    const order: string[] = [];
+    const api = {
+      ...world(order),
+      resumeJob: async () => {
+        order.push("resume");
+        throw new Error("the API server did not answer");
+      },
+    };
+    const backend = new K8sBackend({ image: "runner:1", api } as never);
+
+    return backend
+      .dispatchVerifier(JOB, { authority: { reserve: RESERVE, activate: async () => ({ kind: "activate" as const }) } })
+      .then(
+        () => expect.unreachable("a resume that failed should not produce a verdict"),
+        () => {
+          expect(order, "a suspended Job was left behind when its resume failed").toContain("delete");
+          expect(order.indexOf("delete")).toBeGreaterThan(order.indexOf("resume"));
+        },
+      );
   });
 
   it("REFUSES to create the Job when the activation is refused", async () => {
@@ -145,5 +181,11 @@ describe("[R59 COUNTEREXAMPLE] the k8s verifier re-presents its reservation befo
       "apply(inert)",
       "delete",
     ]);
+    // …and the delete came from the ONE reclaim rather than a hand-rolled catch, which is what makes it fire
+    // for a resume that threw as well as for a refusal.
+    expect(
+      order.filter((o) => o === "delete"),
+      "the object was removed more than once",
+    ).toHaveLength(1);
   });
 });
