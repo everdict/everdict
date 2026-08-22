@@ -81,6 +81,11 @@ export async function verifierOperation(
     planDigest: job.plan.digest,
     workspaceDigest: contentDigest(job.workspace),
     caseId: job.caseId,
+    // …and WHICH physical agent half this verdict belongs to, so a recovery that adopts this container's
+    // answer addresses the exact staged bytes rather than whatever is at a key two attempts share
+    // (arch-review 62 P1). Absent for a deployment that stages nothing, which is the case a recovery already
+    // handles by skipping.
+    ...(job.agentResultDigest !== undefined ? { agentResultDigest: job.agentResultDigest } : {}),
   };
 
   // ── WHERE THIS VERDICT WAS PRODUCED, KEPT (arch-review 60 P1-provenance) ────────────────────────────

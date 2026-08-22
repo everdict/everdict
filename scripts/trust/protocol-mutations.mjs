@@ -1339,6 +1339,27 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P1. The staged half was keyed by the workspace, which two attempts of one case can
+    // share — so the later write replaced the earlier and a recovered verdict could be merged onto another
+    // execution's evidence. Key by the tree again and the two attempts collide.
+    name: "agent half — the staged half is keyed by something two attempts share",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  return contentDigest(result);",
+    to: "  return contentDigest(result.snapshot);",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/agent-half.counterexample.test.ts"],
+  },
+  {
+    // …and the batch recovery owner, which skipped a completed verifier and re-drove the whole case while
+    // the standalone owner merged. One protocol, two behaviours.
+    name: "batch recovery — a completed verifier is discarded instead of finished",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: '            if (decision?.kind === "adopted" && decision.adopted.stage === "verifier") {',
+    to: "            if (false) {",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

@@ -1,4 +1,10 @@
-import { type CaseResult, CaseResultSchema, UpstreamError, type VerifierInvocation } from "@everdict/contracts";
+import {
+  type CaseResult,
+  CaseResultSchema,
+  type RuntimeWorkRef,
+  UpstreamError,
+  type VerifierInvocation,
+} from "@everdict/contracts";
 import { type VerifierReceipt, contentDigest, verifierReceiptOf } from "@everdict/domain";
 
 // ── A TWO-PHASE CASE MAKES ITS FIRST PHASE DURABLE (arch-review 60 P0 follow-through) ────────────────
@@ -43,8 +49,26 @@ import { type VerifierReceipt, contentDigest, verifierReceiptOf } from "@everdic
 // what its invocation carries, so keying on it means an attempt can only ever read back the half its own
 // verdict is about. Content, not a counter: two attempts that genuinely produced the same tree are the same
 // half, and there is nothing to tell apart.
-export function agentHalfKey(tenant: string, runId: string, workspaceDigest: string): string {
-  return `agent-half/${tenant}/${runId}/${workspaceDigest}.json`;
+// ── …AND WHICH PHYSICAL HALF, NOT MERELY WHICH TREE (arch-review 62 P1) ────────────────────────────
+//
+// Keying on the workspace closed the wrong-tree merge and left the wrong-EXECUTION one open. Two attempts of
+// one case can leave byte-identical workspaces — a deterministic task, a re-lease, a speculative duplicate —
+// and differ in trace, observation scores, runtime and image provenance, timing and retry history. Same key,
+// so the later write replaced the earlier, and a recovery adopting the first attempt's verdict merged it onto
+// the second attempt's evidence: a document assembled from two executions, describing neither, with the
+// verdict's own `workspaceDigest` check passing because the trees really were the same.
+//
+// The RESULT digest is the physical discriminator, and it makes the object immutable as well as distinct —
+// one key, one set of bytes, forever (rule `protocol` L4). The verifier carries it so the recovery addresses
+// the exact half its verdict came from instead of whatever is at the tree's key now.
+export function agentHalfKey(tenant: string, runId: string, agentResultDigest: string): string {
+  return `agent-half/${tenant}/${runId}/${agentResultDigest}.json`;
+}
+
+// The digest of a staged half, computed at both ends by the same function over the same document — the
+// coordinate itself, never a label beside it.
+export function agentHalfDigest(result: CaseResult): string {
+  return contentDigest(result);
 }
 
 export interface AgentHalfStore {
@@ -59,9 +83,8 @@ export async function stageAgentHalf(
   result: CaseResult,
 ): Promise<void> {
   if (!store) return;
-  // The SAME digest the verifier will carry, computed from the same snapshot by the same function — this is
-  // the coordinate, not a label beside it.
-  const key = agentHalfKey(tenant, runId, contentDigest(result.snapshot));
+  // The SAME digest the verifier will carry, over the SAME document, by the same function.
+  const key = agentHalfKey(tenant, runId, agentHalfDigest(result));
   await store
     .put(key, new TextEncoder().encode(JSON.stringify(result)), "application/json")
     .then(() => undefined)
@@ -83,14 +106,14 @@ export async function readAgentHalf(
   store: AgentHalfStore | undefined,
   tenant: string,
   runId: string,
-  // WHICH half — the digest the verifier's invocation carries. A read that cannot name it is a read that
-  // would take whichever attempt wrote last.
-  workspaceDigest: string,
+  // WHICH half — the result digest the verifier's handle carries. A read keyed by anything the two attempts
+  // share is a read that takes whichever of them wrote last.
+  agentResultDigest: string,
 ): Promise<StagedAgentHalf> {
   if (!store) return { kind: "absent" };
   let bytes: Uint8Array | undefined;
   try {
-    bytes = await store.get(agentHalfKey(tenant, runId, workspaceDigest));
+    bytes = await store.get(agentHalfKey(tenant, runId, agentResultDigest));
   } catch (err) {
     return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
   }
@@ -103,6 +126,37 @@ export async function readAgentHalf(
   } catch (err) {
     return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ── AND THE LOOKUP, ONCE TOO (arch-review 62 P1) ─────────────────────────────────────────────────────
+//
+// `mergeVerifierPass` was shared and the way you REACH it was not: the standalone recovery read a staged half
+// and merged, while the batch's `RecoveryPlanner` handled only `stage === "case"` and let a completed
+// verifier fall through to a full re-drive. Same two-phase protocol, two recovery owners, two behaviours —
+// safer than producing a wrong verdict, and still a case re-run at full cost because the code that knew how
+// to finish it lived somewhere else.
+//
+// One entry point for "I adopted a verdict; give me the case it completes", so a lane that learns the
+// protocol learns all of it. Three answers, for the reason `readAgentHalf` has three.
+export type RecoveredCase =
+  | { kind: "merged"; result: CaseResult }
+  | { kind: "absent" } // nothing staged — an older writer, no artifact store, a staging failure: re-drive
+  | { kind: "unknown"; reason: string }; // the store would not say — decide nothing, come back
+
+export async function recoverVerifiedCase(
+  store: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  // The handle this verdict was adopted from: it carries WHICH physical half the verifier judged. A verdict
+  // whose handle cannot name one is not merged against a guess — that is the defect this coordinate closes.
+  work: RuntimeWorkRef,
+  invocation: VerifierInvocation,
+): Promise<RecoveredCase> {
+  const digest = work.verifier?.agentResultDigest;
+  if (digest === undefined) return { kind: "absent" };
+  const half = await readAgentHalf(store, tenant, runId, digest);
+  if (half.kind !== "read") return half;
+  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };
 }
 
 // ── THE MERGE, ONCE (rule `protocol` L5) ─────────────────────────────────────────────────────────────

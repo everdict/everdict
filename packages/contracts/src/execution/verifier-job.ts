@@ -107,6 +107,14 @@ export const VerifierJobSchema = z.object({
   // Absent for a SINGLE run, and that is not an omission: its execution id already names its parent, and
   // stamping a scorecard id it does not have would break the branch that works.
   scorecardId: z.string().optional(),
+  // ── WHICH PHYSICAL AGENT HALF THIS UNIT IS JUDGING (arch-review 62 P1) ────────────────────────────
+  //
+  // The agent's result is staged as immutable bytes before this container is dispatched, so a recovery can
+  // read it back and finish the same merge the in-line path would. It used to be keyed by the workspace
+  // digest — which two attempts of one case can share — so the later attempt's write replaced the earlier
+  // one's and a recovered verdict could be merged onto another execution's evidence. This is the coordinate
+  // of the exact half, carried to the lane so it reaches the handle a recovery reads.
+  agentResultDigest: z.string().min(1).optional(),
   // Which trial of a pass@k fan-out this judged. An attempt that cannot say is one a re-drive cannot tell
   // apart from its predecessor.
   trial: z.number().int().nonnegative().optional(),

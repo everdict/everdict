@@ -1,6 +1,6 @@
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
-import { type AgentHalfStore, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
+import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -66,6 +66,9 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // `stageAgentHalf` for why its failure is swallowed and what that costs.
   if (job.runId !== undefined && job.tenant !== undefined)
     await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
+  // …and WHICH half it is, computed over the document that was staged, so the verifier job below can carry
+  // the coordinate rather than have a recovery guess it from something two attempts share (arch-review 62).
+  const stagedDigest = agentHalfDigest(result);
 
   // A verdict this deployment cannot reach is stated, never omitted. An omitted one leaves a CaseResult whose
   // scores are the observation-only ones, which reads downstream as "graded, and it scored nothing".
@@ -124,6 +127,8 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     // WHOSE second unit this is — see `scorecardId` on the schema for what a parentless row costs. `batchId`
     // already IS the scorecard's id in the batch path, so the coordinate travels as itself rather than being
     // parsed back out of the execution id (rule `protocol` L3).
+    // WHICH physical agent half this verdict will be merged into — see `agentResultDigest` on the schema.
+    agentResultDigest: stagedDigest,
     ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
     ...(job.trial !== undefined ? { trial: job.trial } : {}),
     ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),

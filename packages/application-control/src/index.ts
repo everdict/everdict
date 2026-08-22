@@ -78,7 +78,9 @@ export {
   type StagedAgentHalf,
   agentHalfKey,
   mergeVerifierPass,
+  agentHalfDigest,
   readAgentHalf,
+  recoverVerifiedCase,
   stageAgentHalf,
 } from "./execution/agent-half.js";
 export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js";

@@ -250,6 +250,11 @@ export function buildScorecard(deps: {
     // to abort the in-flight run (freeing the runtime mid-case); the managed force-kill is killWork below.
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     adoptWork: adoptWorkFn,
+    // …and where `withVerifierPass` staged the agent's half, so a batch that crashed between a case's two
+    // halves FINISHES the verdict its verifier already produced rather than re-driving the whole case. The
+    // standalone recovery has had this since arch-review 61; this owner did not, which is how one protocol
+    // ended up with two behaviours (arch-review 62 P1).
+    ...(artifacts ? { agentHalves: artifacts } : {}),
     killUnhandled,
     killWork,
     ...(temporalDriver

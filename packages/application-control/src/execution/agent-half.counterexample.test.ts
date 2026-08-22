@@ -1,7 +1,7 @@
 import type { CaseJob, CaseResult, VerifierInvocation } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
-import { agentHalfKey, mergeVerifierPass, readAgentHalf } from "./agent-half.js";
+import { agentHalfDigest, agentHalfKey, mergeVerifierPass, readAgentHalf } from "./agent-half.js";
 import { withVerifierPass } from "./verifier-pass.js";
 
 // ── THE FIRST PHASE IS DURABLE BEFORE THE SECOND EXISTS (arch-review 60 follow-through) ──────────────
@@ -75,10 +75,10 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
       "stage",
       "dispatch-verifier",
     ]);
-    // …under the key the RECOVERY derives from a work handle, which is the only coordinate it holds.
-    // Keyed by the WORKSPACE too, so a second attempt of the same logical execution cannot overwrite this
-    // one's half (arch-review 61 P1-high).
-    const digest = contentDigest(RESULT.snapshot);
+    // …under the key the RECOVERY addresses, which the verifier's handle carries. Keyed by the RESULT, not
+    // the workspace: two attempts of one case can leave byte-identical trees and differ in everything else,
+    // and the tree's key is one object (arch-review 61 P1-high, narrowed by 62 P1).
+    const digest = agentHalfDigest(RESULT);
     expect([...written.keys()]).toEqual([agentHalfKey("acme", "evd-run-r1", digest)]);
 
     // …and it reads back as the agent's own result, through the contract rather than a cast.
@@ -92,9 +92,26 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
     // re-lease — and an object store's write replaces what is at a key. Two attempts staging to one object
     // meant a recovery could merge attempt A's VERDICT onto attempt B's EVIDENCE: a case that never happened,
     // assembled from two that did, with no seam a downstream reader can see (arch-review 61 P1-high).
-    const a = contentDigest({ kind: "repo", diff: "A", changedFiles: ["a"], headSha: "sha-a" });
-    const b = contentDigest({ kind: "repo", diff: "B", changedFiles: ["b"], headSha: "sha-b" });
-    expect(a, "two different trees digested the same, so this test proves nothing").not.toBe(b);
+    // …AND BY ANOTHER ATTEMPT THAT LEFT THE SAME TREE (arch-review 62 P1). Keying on the workspace closed
+    // the wrong-tree merge and left this one open: a deterministic task re-run, a re-lease or a speculative
+    // duplicate produces byte-identical files and a completely different execution — different trace,
+    // observation scores, runtime and image provenance, timings. Same key, so the later write replaced the
+    // earlier, and a verdict from the first attempt merged onto the second attempt's evidence with the
+    // workspace check passing because the trees really were the same.
+    const sameTree: CaseResult["snapshot"] = { kind: "repo", diff: "A", changedFiles: ["a"], headSha: "sha-a" };
+    const attemptA = agentHalfDigest({ ...RESULT, snapshot: sameTree, trace: [{ t: 1 } as never] });
+    const attemptB = agentHalfDigest({ ...RESULT, snapshot: sameTree, trace: [{ t: 2 } as never] });
+    expect(contentDigest(sameTree), "the two attempts did not share a tree, so this proves nothing").toBe(
+      contentDigest(sameTree),
+    );
+    expect(
+      agentHalfKey("acme", "evd-run-r1", attemptA),
+      "two executions leaving the same tree stage to the same object",
+    ).not.toBe(agentHalfKey("acme", "evd-run-r1", attemptB));
+
+    const a = agentHalfDigest({ ...RESULT, snapshot: { kind: "repo", diff: "A", changedFiles: ["a"], headSha: "a" } });
+    const b = agentHalfDigest({ ...RESULT, snapshot: { kind: "repo", diff: "B", changedFiles: ["b"], headSha: "b" } });
+    expect(a, "two different halves digested the same, so this test proves nothing").not.toBe(b);
     expect(agentHalfKey("acme", "evd-run-r1", a), "two attempts of one execution stage to the same object").not.toBe(
       agentHalfKey("acme", "evd-run-r1", b),
     );

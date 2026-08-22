@@ -12,7 +12,7 @@ import {
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import { mergeVerifierPass, readAgentHalf } from "@everdict/application-control";
+import { recoverVerifiedCase } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
@@ -760,20 +760,22 @@ export async function recoverStandaloneRun(
       // document as one that finished normally, and both are `CaseResult`s, so any difference would be
       // invisible (rule `protocol` L5 — one wrapper, request path and reconciler).
       if (decision.kind === "adopted" && decision.adopted.stage === "verifier") {
-        // WHICH half — the digest this verdict was produced against (arch-review 61 P1-high). `runId` alone
-        // is the logical execution, so a retry or a speculative attempt staged to the same object and a
-        // recovery could merge one attempt's verdict onto another's evidence.
-        const half = await readAgentHalf(
+        // ONE lookup protocol, shared with the batch planner (arch-review 62 P1): reaching the merge was
+        // spelled here and nowhere else, so the other recovery owner discarded completed verifier work and
+        // re-drove the case at full cost. The handle names WHICH physical half this verdict is about —
+        // `workspaceDigest` is the tree, which two attempts of one case can share.
+        const half = await recoverVerifiedCase(
           deps.agentHalves,
           r.tenant,
           `evd-run-${r.id}`,
-          decision.adopted.invocation.workspaceDigest,
+          work,
+          decision.adopted.invocation,
         );
         // A store that would not answer is not a case with no agent half. Deciding either way from a failed
         // read is how this became a settled verdict in the first place (rule `protocol` L2).
         if (half.kind === "unknown") return { kind: "retry_later", reason: half.reason };
-        if (half.kind === "read") {
-          adopted = mergeVerifierPass(half.result, decision.adopted.invocation);
+        if (half.kind === "merged") {
+          adopted = half.result;
           // The VERIFIER's row, which is the one this handle names — the agent's was committed before its
           // half was staged, so the two halves close on their own rows rather than one standing for both.
           await closeAdopted(work);

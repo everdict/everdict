@@ -22,6 +22,7 @@ import type {
   ScoringStageParity,
   UsageMeter,
 } from "@everdict/domain";
+import type { AgentHalfStore } from "../execution/agent-half.js";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { CancellationStore } from "../ports/cancellation-store.js";
@@ -153,6 +154,11 @@ export interface ScorecardServiceDeps {
   // live, a resume could adopt another run's job and attribute its verdict here, which is a decision, not an
   // observation. A child with no recorded handle has nothing this system can name, and is re-dispatched.
   adoptWork?: (tenant: string, runtime: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
+  // Where the agent half of a two-phase case was staged, so a recovery that adopts a completed verifier can
+  // finish the SAME merge the in-line path would (arch-review 62 P1). The standalone recovery has had this
+  // since arch-review 61; the batch planner did not, so it discarded a verdict whose container had already
+  // run and re-drove the case at full cost — one protocol, two owners, two behaviours.
+  agentHalves?: AgentHalfStore;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //
@@ -324,6 +330,7 @@ export type ScorecardBatchDeps = Pick<
   | "envelopes"
   | "temporalBatches"
   | "adoptWork"
+  | "agentHalves"
   | "cancelQueued"
   | "queueDepth"
   | "queuePressure"

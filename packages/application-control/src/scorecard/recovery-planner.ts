@@ -2,6 +2,7 @@ import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef 
 import { UpstreamError, readOrUnknown } from "@everdict/contracts";
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
+import { recoverVerifiedCase } from "../execution/agent-half.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
@@ -18,7 +19,10 @@ import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 // It DECIDES nothing about authority: the fence a recovery holds is the driver's, so the parent token and
 // the "do I still hold this batch" probe are handed in per call rather than re-derived here.
 
-type RecoveryPlannerDeps = Pick<ScorecardBatchDeps, "runStore" | "caseReceipts" | "adoptWork" | "attempts">;
+type RecoveryPlannerDeps = Pick<
+  ScorecardBatchDeps,
+  "runStore" | "caseReceipts" | "adoptWork" | "attempts" | "agentHalves"
+>;
 
 export class RecoveryPlanner {
   private readonly now: () => string;
@@ -145,6 +149,40 @@ export class RecoveryPlanner {
             if (decision?.kind === "adopted" && decision.adopted.stage === "case") {
               adoptable = decision.adopted.result;
               break;
+            }
+            // ── …AND A COMPLETED VERIFIER IS FINISHED, NOT THROWN AWAY (arch-review 62 P1) ───────────
+            //
+            // The paragraph above is right that a verdict is not the execution's own result. What it did was
+            // SKIP — correct when there was nothing to merge into, and stale since the agent's half started
+            // being staged before the second container is dispatched. The standalone recovery has merged for
+            // a wave; this owner kept re-driving the case, agent container and all, over evidence that was
+            // already on file and a verdict that had already been paid for.
+            //
+            // Same lookup, same merge, same three answers — `recoverVerifiedCase` is the one entry point, so
+            // the two owners cannot drift again.
+            if (decision?.kind === "adopted" && decision.adopted.stage === "verifier") {
+              const recovered = await recoverVerifiedCase(
+                this.deps.agentHalves,
+                tenant,
+                // The SAME coordinate the handles above were read by, not a lookalike computed here — a
+                // teardown four lines apart from its own execution id is how arch-review 62 P1 started.
+                c.id,
+                work,
+                decision.adopted.invocation,
+              );
+              // A store that would not answer is not a case with no half: deciding either way from a failed
+              // read is what this whole protocol exists to stop (rule `protocol` L2). It joins the same
+              // `unestablished` arm the adoption's own `unknown` uses — the batch waits.
+              if (recovered.kind === "unknown") {
+                unestablished = recovered.reason;
+                break;
+              }
+              if (recovered.kind === "merged") {
+                adoptable = recovered.result;
+                break;
+              }
+              // `absent` — nothing staged, so the agent's evidence is genuinely gone and the case re-drives,
+              // exactly as it did before this branch existed.
             }
             if (decision?.kind === "unknown") {
               unestablished = decision.reason;

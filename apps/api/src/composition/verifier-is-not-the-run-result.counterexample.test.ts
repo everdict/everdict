@@ -1,4 +1,6 @@
 import type { RecoveryTarget } from "@everdict/application-control";
+import { agentHalfDigest } from "@everdict/application-control";
+import type { CaseResult } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { recoverStandaloneRun } from "./runtime-access.js";
@@ -56,7 +58,20 @@ function world(resumedWith: Array<unknown>, verdict: Array<Record<string, unknow
     workHandlesFor: async () => [
       // The agent's handle first, exactly as the ledger holds them, and it is gone.
       { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-c1-agent" },
-      { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-verify-c1" },
+      // …and the verifier's, carrying WHICH physical half it judged (arch-review 62 P1). The workspace
+      // digest says which tree; two attempts of one case can share one, so the recovery addresses the
+      // staged bytes by the result digest the lane recorded.
+      {
+        tenant: "acme",
+        runId: "evd-run-r1",
+        externalJobId: "everdict-verify-c1",
+        verifier: {
+          planDigest: "sha256:plan",
+          workspaceDigest: AGENT_TREE,
+          caseId: "c1",
+          agentResultDigest: agentHalfDigest(AGENT_HALF),
+        },
+      },
     ],
     adoptWorkFn: async (_t: string, _rt: unknown, work: { externalJobId: string }) =>
       work.externalJobId.includes("verify")
@@ -86,7 +101,7 @@ function world(resumedWith: Array<unknown>, verdict: Array<Record<string, unknow
 //   a recovered verdict was thrown away even though the agent's half was on file: expected undefined to be
 //   'agent@1'
 
-const AGENT_HALF = {
+const AGENT_HALF: CaseResult = {
   caseId: "c1",
   harness: "agent@1",
   trace: [],
@@ -152,7 +167,18 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
         },
       },
       workHandlesFor: async () => [
-        { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-verify-c1", attemptId: "a-verify" },
+        {
+          tenant: "acme",
+          runId: "evd-run-r1",
+          externalJobId: "everdict-verify-c1",
+          attemptId: "a-verify",
+          verifier: {
+            planDigest: "sha256:plan",
+            workspaceDigest: AGENT_TREE,
+            caseId: "c1",
+            agentResultDigest: agentHalfDigest(AGENT_HALF),
+          },
+        },
       ],
     } as unknown as Parameters<typeof recoverStandaloneRun>[0];
 

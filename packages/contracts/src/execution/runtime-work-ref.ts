@@ -61,6 +61,18 @@ export const RuntimeWorkRefSchema = z.object({
       planDigest: z.string().min(1),
       workspaceDigest: z.string().min(1),
       caseId: z.string().min(1),
+      // ── WHICH PHYSICAL HALF THIS VERDICT IS ABOUT (arch-review 62 P1) ────────────────────────────
+      //
+      // `workspaceDigest` says which TREE was judged, which is not the same question as which EXECUTION
+      // produced it. Two attempts of one case can leave byte-identical workspaces and differ in everything
+      // else — trace, observation scores, runtime and image provenance, retries — and the staged agent half
+      // was keyed by the tree, so the second attempt's write replaced the first's. A recovery adopting
+      // attempt A's verdict then read attempt B's evidence and merged them into a document describing a case
+      // that never happened, with no seam any reader could see.
+      //
+      // The RESULT digest is that discriminator, minted where the result is (rule `protocol` L3) and carried
+      // here so the recovery site can address the exact object rather than whatever is at the tree's key.
+      agentResultDigest: z.string().min(1).optional(),
     })
     .optional(),
 });
