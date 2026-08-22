@@ -10,6 +10,7 @@ import {
   ConflictError,
   type DomainFact,
   type EvalCase,
+  type ExecutionAttemptRecord,
   type ExecutionAttemptState,
   type HarnessSpec,
   InternalError,
@@ -1581,8 +1582,19 @@ export class RunService {
     // reintroduce the blast radius the handles exist to remove. Runs with no handle are the legacy ones
     // (attempts opened before this column existed) and the lanes that mint none (self-hosted leases, which
     // arm (3) above already revoked).
-    const worksRead = await this.workHandles(executionId);
-    const works = worksRead.kind === "read" ? worksRead.value : [];
+    // ── ONE READ, SO THE TWO ARMS CANNOT BE ABOUT DIFFERENT ROWS (arch-review 62 P1) ─────────────────
+    //
+    // The handles this teardown kills and the reservations it revokes are the SAME attempt rows, and they
+    // were fetched by two calls taking a coordinate nothing types. One got `executionId`, the other got
+    // `rec.id` — four lines apart — so `attempts.list("r1")` matched nothing, the revocation loop never had
+    // a body, and the arm arch-review 57 added to stop a paused submitter placing after a certified zero was
+    // inert for every standalone run while looking present at a glance.
+    //
+    // Read once and derive both. A coordinate used twice is a coordinate that can differ; used once, it
+    // cannot (rule `protocol` L3, a predicate written twice has already diverged).
+    const rowsRead = await this.attemptRows(executionId);
+    const works = rowsRead.kind === "read" ? rowsRead.value.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])) : [];
+    const worksRead: ReadResult<RuntimeWorkRef[]> = rowsRead.kind === "read" ? readOk(works) : rowsRead;
     // ── A STOP THAT COULD NOT BE CONFIRMED IS NOT A STOP (arch-review 52, Wave 3) ────────────────────
     //
     // Both arms used to be `.catch(failure)` over a `Promise<void>`, and the seam underneath swallowed the
@@ -1611,12 +1623,12 @@ export class RunService {
     // Best-effort and idempotent per attempt: a settled attempt is left alone, and an unreadable ledger has
     // already made `worksRead` unknown, which keeps the whole cancellation owed anyway.
     const attemptsStore = this.deps.attempts;
-    if (attemptsStore && worksRead.kind === "read")
+    if (attemptsStore && rowsRead.kind === "read")
       // A revocation that FAILED leaves a reservation somebody may still spend, so it is an `unknown`
       // outcome and not a swallowed error: the cancellation stays owed and the reconciler comes back. It
       // joins the same outcome list the kills use, because it is the same question — is there anything
       // that could still be running for this run?
-      for (const attemptId of await this.revocableAttempts(rec.id))
+      for (const { attemptId } of rowsRead.value.filter((a) => !isTerminalAttemptState(a.state)))
         await attemptsStore.revokeReservation(attemptId).catch((err: unknown) => {
           outcomes.push({
             status: "unknown",
@@ -1735,20 +1747,17 @@ export class RunService {
     return read.kind === "read" ? read.value.at(-1) : undefined;
   }
 
-  // The attempts a cancellation must take the reservation back from: everything not already settled. A
-  // ledger that cannot be read yields none here, and the caller is already `unknown` for that reason.
-  private async revocableAttempts(executionId: string): Promise<string[]> {
+  // This execution's physical attempt rows — the ONE ledger read a teardown works from. Both of the things
+  // a cancellation needs are derived from it (which external objects to stop, which reservations to take
+  // back), because two reads meant two coordinates and the two drifted (arch-review 62 P1).
+  private async attemptRows(executionId: string): Promise<ReadResult<ExecutionAttemptRecord[]>> {
     const attempts = this.deps.attempts;
-    if (!attempts) return [];
-    const read = await readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
-    if (read.kind !== "read") return [];
-    return read.value.filter((a) => !isTerminalAttemptState(a.state)).map((a) => a.attemptId);
+    if (!attempts) return readOk([]); // no ledger wired at all — this deployment records no handles, established
+    return readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
   }
 
   private async workHandles(executionId: string): Promise<ReadResult<RuntimeWorkRef[]>> {
-    const attempts = this.deps.attempts;
-    if (!attempts) return readOk([]); // no ledger wired at all — this deployment records no handles, established
-    const read = await readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
+    const read = await this.attemptRows(executionId);
     if (read.kind !== "read") return read;
     return readOk(read.value.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])));
   }

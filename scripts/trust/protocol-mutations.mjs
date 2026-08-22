@@ -1254,6 +1254,18 @@ const MUTATIONS = [
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/start-cannot-create.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 P1. The arm that takes reservations back before stopping anything was asking the ledger
+    // for `rec.id` while the rest of the teardown used `evd-run-${rec.id}` — so it matched no row and a
+    // paused submitter could still place after the cancellation certified zero. Read once, derive both;
+    // point the derivation at a different list and the counterexample goes red again.
+    name: "cancellation — the revocation arm is about different rows than the kill",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: "      for (const { attemptId } of rowsRead.value.filter((a) => !isTerminalAttemptState(a.state)))",
+    to: "      for (const { attemptId } of [].filter((a) => !isTerminalAttemptState(a.state)))",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/run/revocation-coordinate.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
