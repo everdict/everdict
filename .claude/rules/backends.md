@@ -137,8 +137,14 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   in-flight complement to handle-addressed `killWork`, for work this process is still awaiting. Pollers stop the poll on abort (`abortableDelay`) and reclaim the orchestrator job;
   in-process/pull backends refuse a not-yet-started run. Reject with the shared `dispatchAborted(job)` (`CANCELLED`).
   Thread `opts` through every `Dispatcher` wrapper (Router/Scheduler + the apps/api chain); the `Scheduler` also
-  drops a signal that aborts while QUEUED. `AdoptOutcome` (`adopted|absent|unknown`) keeps "no job" distinct from
-  "couldn't determine" so boot recovery never re-dispatches (double-spends) a possibly-live job on a transient error.
+  drops a signal that aborts while QUEUED. `AdoptOutcome` keeps "no job" distinct from "couldn't determine" so
+  boot recovery never re-dispatches (double-spends) a possibly-live job on a transient error — and, now that
+  both managed lanes create their objects INERT, distinct from **"exists and can never finish"**. An object
+  still in its birth phase is reclaimed and reported as such: nothing has been spent on it, so a re-drive is
+  free of the double-spend hazard `unknown` exists to prevent, whereas leaving it unnamed made every sweep
+  answer `unknown` forever over a Job no owner would ever resume or delete (arch-review 62 P0). A lane that
+  creates an inert object implements that arm, and only after a delete it READ BACK — see rule `protocol`,
+  the phase-readers law.
 - Inject auth via `collectAuthEnv()` (`@everdict/job-runner`) into the job env; never log or commit it.
 - Map orchestrator failures to `UpstreamError`; never leak a raw HTTP/SDK error.
 - Placement: `Router` = static (pin/default, dev); `Scheduler` = capacity-aware + **tenant-fair** (WFQ via

@@ -14,7 +14,10 @@ swallowed, re-derived, or advisory at the one seam where the next effect begins.
 No external effect (cluster submit, sink call, spend, publish) until a store has **RETURNED PROOF** that the
 effect's identity is durable.
 - Computing a name is not reserving it. `UPDATE` returning is not a row changed. A callback resolving is not
-  anything persisted.
+  anything persisted. **Observing room is not reserving room**: `capacity()` is a probe, and between the read
+  and the submit any number of other submitters read the same headroom and spent it. A limit enforced by
+  reading it is enforced for exactly one caller at a time — which is never the shape that overruns it. An
+  admission token is a value some store handed out and can hand out only once.
 - **A persistence hook that no-ops when its id is missing LIES to its caller.** `if (!store || id === undefined) return;`
   inside a pre-effect hook reports success and the effect proceeds unrecorded. A caller that cannot record
   where the work will be must not get the work — refuse the dispatch.
@@ -244,6 +247,53 @@ A value shaped like the final document IS the final document to every caller tha
 - A two-phase case makes its FIRST phase durable before starting the second, or a crash between them leaves
   the only copy of the agent's half in a dead process's memory and the recovery has nothing to merge into.
 - "The caller only takes the scores" is a claim about a caller; write it as a type or it is a hope.
+
+## A PHASE ADDED TO AN OBJECT'S LIFE IS A NEW ARM FOR EVERY READER OF THAT OBJECT
+The previous review closed a birth race by giving external objects an INERT phase — a K8s Job at
+`suspend: true`, a Nomad job at `Count: 0`. It exists, it is addressable, it runs nothing. That was the right
+mechanism and it was verified on live clusters. What it was not is a phase anybody else had been told about.
+
+`AdoptOutcome` says `adopted | absent | unknown`. Boot recovery holds the durable handle, finds the object
+present, and calls `waitForJob` — and a suspended Job does not finish, so the wait times out into `unknown`,
+which is `retry_later`, which is the same answer on the next sweep and every sweep after it. No owner resumes
+it, no transition removes it, and the dependents (Secret, NetworkPolicy) stay with it. A phase the writer
+introduced and no reader can name is not a state; it is a leak with a comment (arch-review 62 P0).
+
+    the object is born inert   ≠   every owner of that object can recover it
+
+So, when a change gives an object a phase it did not have:
+
+- **Enumerate the readers before the writers.** Adoption, cancellation, probing, reconciliation, the
+  operator's view — each one folds the world into its own vocabulary, and a vocabulary with no word for the
+  new phase does not fail loudly, it MISFILES. `unknown` is where a misfiled phase lands, and `unknown` is
+  designed never to be terminal, so the leak is permanent by construction.
+- **The new arm carries what makes it decidable.** `inert` is not merely "not running": it is *nothing has
+  been spent*, which is precisely why re-driving after reclaiming it is safe where re-driving an `unknown` is
+  a double-spend. That difference is the whole reason the arm earns its place — an arm that only renames
+  `unknown` has moved the problem.
+- **Reclaiming is still L5.** Answering `inert` after a delete that was not confirmed is a certificate over
+  compute you did not observe gone. Delete, read back, and answer `unknown` when the readback did not.
+
+## THE SAME CALL SEQUENCE IS NOT THE SAME EFFECT SEMANTICS
+Both managed lanes end up spelled `create inert → activate → start`, and a test asserted exactly that order on
+both, and both were green. They do not mean the same thing:
+
+    K8s   start = PATCH an existing Job   → a deleted Job makes the patch FAIL
+    Nomad start = POST /v1/jobs           → a deleted job is silently RE-CREATED, and runs
+
+So a cancellation that revoked the reservation, deleted the job, probed absent and certified zero was followed
+by the paused submitter's start call bringing the job back — the exact race the inert phase was introduced to
+close, reopened one call later on one lane only (arch-review 62 P0).
+
+- **An order assertion is not an effect assertion.** `expect(order).toEqual([...])` pins the sequence and says
+  nothing about what each call DOES to an object that has changed underneath it. The counterexample that finds
+  this has to mutate the world between two steps — delete the object after activation — and then assert what
+  exists, not what was called.
+- **A write that can also create is not a transition.** Where the orchestrator offers a version fence
+  (Nomad `EnforceIndex` + `JobModifyIndex`, K8s `resourceVersion`), the second phase carries the version the
+  first phase returned, so "the object I am starting" is the object this dispatch made. Where it does not, the
+  lane may not claim the transition — see the lease law above: claiming the stronger property without the
+  mechanism is the failure, not the workaround.
 
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
