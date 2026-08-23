@@ -33,3 +33,11 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   drafts here were green over their own target. A guard nobody saw fail is a comment.
 - Cover the DEGRADED read too, not only the happy and the absent one: store throws, cluster 5xx, ledger
   unreadable. Those are the paths that produce a wrong decision rather than a visible error.
+- **A double for a GUARDED write answers the way the real one would.** `transition` returns `false` when it
+  refuses; a double hard-coded to `true` turns a guard that rejects every real call into a green test, and
+  the assertion "we recorded the close" then proves only that we ASKED. Where an `InMemory*` implementation
+  exists, use it — it is cheap and it is the same decision production makes. And assert the row's STATE, not
+  that the call happened (rule `protocol`, the always-succeeds-double law).
+- **A fixture whose ids all match is not the production shape.** A scorecard child's `id` is a random row id
+  and its `executionId` is a different string; a test that sets them equal cannot see a lookup using the
+  wrong one, which is how a recovery that finds no handles at all stayed green (arch-review 63 P0).

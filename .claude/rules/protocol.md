@@ -295,6 +295,68 @@ close, reopened one call later on one lane only (arch-review 62 P0).
   lane may not claim the transition — see the lease law above: claiming the stronger property without the
   mechanism is the failure, not the workaround.
 
+## TIGHTENING A GUARD AND MOVING A CALLER PAST IT ARE ONE CHANGE, NOT TWO
+Two changes, each correct, each with its own counterexample, each shipped green:
+
+- `committed` was made to require that the parent is still open — a verdict may not claim a settlement that
+  already closed without it.
+- the standalone recovery was made to stamp `committed` AFTER the settle, so the attempt does not claim an
+  answer the run has not recorded.
+
+A successful settle makes the run terminal. So the stamp now runs when the parent is by definition closed, is
+refused every time, and every successful recovery leaves its attempt `reserved` — the exact defect the wave
+before had closed. Neither change is wrong. Their COMPOSITION is, and nothing in either change's own
+counterexample could see it (arch-review 63 P1-high).
+
+So when a change tightens a precondition, the change is not done at the guard:
+
+- **Walk every caller, and specifically every caller some other change MOVED relative to that guard.** The
+  dangerous pair is a guard that got stricter and a call site that got later — each reviewed alone, each
+  fine alone.
+- **State the guard's precondition as a question about the world at the moment of the call**, not as a rule
+  about the row. "Is the parent open?" and "is this the result the parent settled with?" are different
+  questions, and after a settlement only the second one has an answer.
+- The suite cannot catch this with two separate tests. The counterexample has to drive the two changed
+  things in the order production runs them, against the real store.
+
+## A DOUBLE THAT ALWAYS SUCCEEDS IS NOT A STORE
+The recovery test above passed because its ledger double was
+
+    transition: async (id, to) => { closed.push([id, to]); return true; }
+
+`transition` is a CONDITIONAL write whose whole purpose is to answer `false`, and this double cannot. So a
+guard that refuses every real call read as a green test, and the assertion "the attempt was closed" recorded
+that we had ASKED, not that anything had happened.
+
+This is the fake-more-permissive rule (rule `testing`) at its sharpest, because the permissiveness is in the
+return value rather than in a missing branch:
+
+- **A double for a guarded write returns what the real one would.** If the production store can say `false`,
+  the double decides `false` from the same inputs — or the test uses the real in-memory implementation,
+  which exists precisely so this is cheap.
+- **Assert the OUTCOME, not the call.** `closed` recording a call proves an attempt was made; the row's state
+  proves the write landed. Where an in-memory store exists, read it back.
+- A `Promise<boolean>` double that never returns `false`, or a `Promise<void>` double over a method that
+  throws, is a green light wired to nothing.
+
+## AN INTERMEDIATE ARTIFACT'S WINDOW ENDS AT THE SETTLEMENT, NOT AT THE STEP THAT USED IT
+The staged agent half was given a retention owner, and the owner was placed at the merge — the step that
+consumes the half. That is one step too early. After the merge the case still collects its deferred trace,
+runs its observation graders, assembles its evidence and commits; a crash anywhere in there now finds the
+verifier's container gone, the agent's container gone AND the staged half deleted, so the case re-runs from
+nothing (arch-review 63 P0).
+
+The rule the first version got wrong: **an artifact that exists so a crash can be recovered from is owed
+until the thing it would recover is durable.** Not until its value has been read — a value in memory is
+exactly what it was staged to survive.
+
+- The window closes at the CANONICAL settlement (the write that makes the outcome the record's answer), and
+  the GC is that settlement's, not the consuming step's.
+- A separate sweep for abandoned intermediates is a safety net for operations that died, never the primary
+  owner — the same relationship the reconciler has to a request-path teardown (L5).
+- A counterexample that asserts the earlier deletion is asserting the defect. Rewrite the invariant; do not
+  keep the test green by keeping the behaviour.
+
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
 2. `pnpm protocol-mutations` neutralizes the new protocol in the production file and the owning suite goes RED.
