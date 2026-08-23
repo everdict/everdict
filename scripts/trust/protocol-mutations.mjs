@@ -1077,8 +1077,10 @@ const MUTATIONS = [
     // arch-review 60 could only skip.
     name: "two-phase case — the agent's half is never staged",
     file: "packages/application-control/src/execution/verifier-pass.ts",
-    from: "    await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);",
-    to: "    void deps.agentHalves;",
+    // RE-AIMED (arch-review 62 follow-through): the stage moved to where the window actually opens —
+    // immediately before the second container — so it no longer runs for cases refused two lines later.
+    from: "  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);",
+    to: "  void deps.agentHalves;",
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
   {
@@ -1183,15 +1185,6 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
   {
-    // arch-review 61 P1. The backend's own envelope ignored, so several tenants each inside their own quota
-    // still put a lane past its `maxConcurrent` — which a batch's verifier fan-out does routinely.
-    name: "verifier capacity — the runtime's envelope is not consulted",
-    file: "apps/api/src/composition/runtime-access.ts",
-    from: "        if (room.value.used + held >= room.value.total)",
-    to: "        if (false)",
-    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
-  },
-  {
     // …and the LEASE: the ledger's permit expires after 30 minutes, so a verifier that never renews has its
     // slot reaped while its container keeps running and another execution claims it.
     name: "verifier permit — the lease is never renewed",
@@ -1248,8 +1241,10 @@ const MUTATIONS = [
     // answers "Enforcing job modify index N: job does not exist". Drop the fence and the race is back.
     name: "nomad start — the start can create the job a cancellation deleted",
     file: "packages/backends/src/orchestrators/nomad.ts",
-    from: "      EnforceIndex: true,\n      JobModifyIndex: bornAt,",
-    to: "      JobModifyIndex: bornAt,",
+    // RE-AIMED (arch-review 62 follow-through): the start moved inside the dispatch's one cleanup scope, so
+    // the block is indented one level deeper. The protocol is unchanged.
+    from: "        EnforceIndex: true,\n        JobModifyIndex: bornAt,",
+    to: "        JobModifyIndex: bornAt,",
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/start-cannot-create.counterexample.test.ts"],
   },
@@ -1280,8 +1275,11 @@ const MUTATIONS = [
     // verifiers all see the same free slot in a snapshot none of them is visible in yet.
     name: "verifier admission — the lane does not count the slots it is holding",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: "        const held = verifiersHeld.get(target) ?? 0;",
-    to: "        const held = 0;",
+    // RE-AIMED (arch-review 62 follow-through): what the lane holds is three numbers now, not a count, so
+    // the shared fit decision can see memory and CPU too. The protocol is unchanged — neutralizing it still
+    // hands the same free slot to every concurrent verifier.
+    from: "        const held = verifiersHeld.get(target) ?? { count: 0, memoryMb: 0, cpu: 0 };",
+    to: "        const held = { count: 0, memoryMb: 0, cpu: 0 };",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
@@ -1333,8 +1331,11 @@ const MUTATIONS = [
     // the reason the receipt could not be joined in the first place.
     name: "verifier operation — the lane's handle wins over the row's canonical one",
     file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: "    return { ...invocation, work: persistedWork };",
-    to: "    return { ...invocation, work: invocation.work ?? persistedWork };",
+    // RE-AIMED (arch-review 62 follow-through): the return grew the judged execution's attempt, so it is a
+    // multi-line object now. The protocol is unchanged — prefer the lane's bare handle and the receipt
+    // stops joining to the row that produced it.
+    from: "      work: persistedWork,",
+    to: "      work: invocation.work ?? persistedWork,",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
