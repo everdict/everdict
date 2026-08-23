@@ -118,6 +118,11 @@ interface QueueEntry {
 }
 
 export interface SchedulerOptions {
+  // What THIS PROCESS is already holding on each backend, shared with any other lane placing on the same
+  // ones (arch-review 63 P1-high). Absent = this scheduler is the only placer, which is every single-lane
+  // deployment and every test; present = the verifier lane reserves against the same object, so an agent
+  // placed a moment ago is not invisible to it.
+  admission?: Admission;
   policy?: PlacementPolicy;
   maxQueueDepth?: number; // backpressure: RateLimitError(429) once the queue fills to this
   // A custom hook to restrict candidates (e.g. harness↔backend matching) — if unset, the pin or all backends.
@@ -163,7 +168,18 @@ class FleetInFlight {
 // In-flight accounting for the Scheduler: reserve on placement, release on completion. One object keeps the four
 // dimensions (backend slots / memory / cpu, tenant count) in lockstep, so the reserve/release invariant lives in one
 // place instead of four parallel maps diddled at two call sites.
-class Admission {
+// ── ONE OWNER OF WHAT THIS PROCESS IS HOLDING (arch-review 63 P1-high) ───────────────────────────────
+//
+// Exported because the verifier lane places containers on the SAME backends and kept its own map of what it
+// held. The two lanes shared a fit PREDICATE and not the state it reads, so an agent the Scheduler had just
+// placed — invisible to the cluster probe until its object exists — was invisible to the verifier lane too,
+// and the same memory envelope was spent twice.
+//
+// A shared predicate over separate state is not shared admission. This is the narrow half of "generalize the
+// Scheduler's admission primitive": one object both lanes reserve against, without giving the queue a second
+// dispatch verb. It is per PROCESS — what makes the tenant bound fleet-wide is the admission ledger, and no
+// claim beyond that is made here.
+export class Admission {
   private readonly backendCounts = new Map<string, number>();
   private readonly backendMemMb = new Map<string, number>();
   private readonly backendCpu = new Map<string, number>();
@@ -254,7 +270,7 @@ export class Scheduler {
   private readonly policy: PlacementPolicy;
   // In-flight accounting across backend slots / memory / cpu and per-tenant count — reserved on placement, released
   // on completion (see Admission), replacing four parallel maps.
-  private readonly admission = new Admission();
+  private readonly admission: Admission;
   private readonly queue: FairQueue<QueueEntry>;
   private pumping = false;
   private entrySeq = 0; // mints the stable per-entry snapshot handle (q<seq>)
@@ -269,6 +285,9 @@ export class Scheduler {
     private readonly opts: SchedulerOptions = {},
   ) {
     this.policy = opts.policy ?? leastLoadedPolicy;
+    // Shared when the composition root has another lane placing on the same backends — see `Admission`. Its
+    // own when nobody else is holding anything, which is every single-lane deployment and every test.
+    this.admission = opts.admission ?? new Admission();
     this.queue = new FairQueue<QueueEntry>({
       tenantOf: (e) => tenantOf(e.job),
       weightFor: opts.weightFor,

@@ -6,7 +6,7 @@ import {
   parseTenantCounts,
   parseTenantWeights,
 } from "@everdict/application-control";
-import { BackendRegistry, K8sBackend, NomadBackend, Scheduler, isPoolReporting } from "@everdict/backends";
+import { Admission, BackendRegistry, K8sBackend, NomadBackend, Scheduler, isPoolReporting } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
 import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots, type TrustZonePolicy } from "@everdict/domain";
 import { collectAuthEnv } from "@everdict/job-runner";
@@ -124,7 +124,16 @@ export function buildExecutionScheduling(deps: {
   // containers are the same tenant's, so the limit they draw on has to be the same limit. Two spellings of a
   // quota is two accountings that must agree.
   const tenantQuota = (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY;
+  // ── ONE ACCOUNTING FOR BOTH LANES (arch-review 63 P1-high) ──────────────────────────────────────
+  //
+  // The verifier lane places containers on these same backends, and it kept its own map of what it held. So
+  // an agent this scheduler had just placed — invisible to the cluster probe until its object exists — was
+  // invisible to that lane too, and one memory envelope was spent twice. Built here and handed to both, for
+  // the same reason `tenantQuota` above is one function: two accountings that must agree are one accounting
+  // that sometimes does not.
+  const admission = new Admission();
   const scheduler = new Scheduler(backends, {
+    admission,
     maxQueueDepth,
     ledger: runLedger,
     tenantQuota,
@@ -143,6 +152,9 @@ export function buildExecutionScheduling(deps: {
     scalingTargets,
     tenantQuotas,
     admissionSlots: { ledger: runLedger, quotaFor: tenantQuota },
+    // What this process holds on each backend — handed to the verifier lane so the two lanes reserve against
+    // ONE object (arch-review 63 P1-high).
+    admission,
   };
 }
 

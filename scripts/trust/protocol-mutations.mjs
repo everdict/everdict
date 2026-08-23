@@ -1539,6 +1539,38 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/agent-half.counterexample.test.ts"],
   },
+  {
+    // arch-review 63 P1-high. The Scheduler and the verifier lane shared a fit predicate and held separate
+    // maps, so an agent placed a moment ago — invisible to the cluster probe until its object exists — was
+    // invisible to the verifier lane, and one envelope was spent twice. Give the lane its own accounting
+    // again and the two stop seeing each other.
+    name: "admission — the two lanes account for what they hold separately",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "  const verifiersHeld = deps.admission ?? new Admission();",
+    to: "  const verifiersHeld = new Admission();",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63 P1-high. The runtime's own runner-image credential was resolved and handed to a builder
+    // whose options do not carry it. It rides the job now, where both lanes read image credentials and where
+    // they are per-dispatch.
+    name: "runtime credentials — the runner image's grant never reaches the dispatch",
+    file: "apps/api/src/core/execution/runtime-dispatcher.ts",
+    from: "          ...(runnerAuths.length > 0 ? { registryAuths: [...(job.registryAuths ?? []), ...runnerAuths] } : {}),",
+    to: "",
+    suite: ["--root", "apps/api", "src/core/execution/runtime-dispatcher.test.ts"],
+  },
+  {
+    // arch-review 63 P1-adapter. `reserveWork` reads, awaits the parent check, then writes — so two callers
+    // both passed and both were handed an authorization while the map kept one. Postgres admits exactly one;
+    // a dev store that can reach a state production cannot lets the suite certify behaviour we do not have.
+    name: "reservation — one attempt hands out two work authorizations",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "    return this.perAttempt(attemptId, () => this.reserveWorkUnsafe(attemptId, work));",
+    to: "    return this.reserveWorkUnsafe(attemptId, work);",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/ports/reservation-atomicity.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

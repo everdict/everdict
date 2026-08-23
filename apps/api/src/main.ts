@@ -410,7 +410,7 @@ async function main(): Promise<void> {
   // isolated by the same rule rather than several nearby guesses.
   const { trustZones } = buildTrustZones();
 
-  const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas, admissionSlots } =
+  const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas, admissionSlots, admission } =
     buildExecutionScheduling({
       nomad,
       k8sContext,
@@ -719,6 +719,10 @@ async function main(): Promise<void> {
     runtimeRegistry,
     runtimeSecretsFor,
     runtimeBuildBackend,
+    // ONE accounting for both lanes: the verifier places containers on the same backends the Scheduler does,
+    // and a placement is invisible to the cluster probe until its object exists — so two separate maps meant
+    // one envelope spent twice (arch-review 63 P1-high).
+    admission,
     // …so a verifier's compute gets an attempt row like every other managed unit, which is what makes it
     // visible to the cancellation sweep (arch-review 57 P0-verifier).
     ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),

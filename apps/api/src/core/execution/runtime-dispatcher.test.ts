@@ -543,3 +543,95 @@ describe("RuntimeDispatcher — a cluster serves a service topology and a plain 
     expect(ctx.backends.has("rt:acme:dev-cluster@1.0.0")).toBe(true);
   });
 });
+
+// ── THE RUNNER IMAGE'S CREDENTIAL RIDES THE JOB (arch-review 63 P1-high) ────────────────────────────
+//
+// The last wave added the runtime's own job-runner image to the credential resolution and handed the result
+// to `buildRuntimeBackend`, whose options are `{secretEnv, trustZones}`. It was dropped on the floor, so a
+// public task image beside a PRIVATE runner still reached the cluster with nothing to pull the init
+// container with — a producer fix that never reached a consumer, which is the same shape as a lane that
+// learned a phase no reader knows.
+//
+// It travels on the JOB now, which is where both managed lanes already read image credentials from
+// (`registryAuthsOf`) and — the part that matters more — where they are PER-DISPATCH. A backend is built
+// once per runtime and reused, so baking credentials into it hands the first job's short-lived grants to
+// every job after it and keeps them long past their expiry.
+//
+// Seen RED before it travelled, observed:
+//   the runner image's credential never reached the dispatch: expected undefined to have length 1
+describe("[R63 COUNTEREXAMPLE] a private runner image's credential reaches the dispatch", () => {
+  const k8sRuntime: RuntimeSpec = {
+    kind: "k8s",
+    id: "myk8s",
+    version: "1.0.0",
+    tags: [],
+    image: "private.registry/job-runner:9",
+  } as unknown as RuntimeSpec;
+
+  const RUNNER_GRANT = { host: "private.registry", username: "u", password: "p" };
+
+  const dispatcherFor = async (asked: string[][]) => {
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const runtimes = new InMemoryRuntimeRegistry();
+    await runtimes.register("acme", k8sRuntime);
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes,
+      secretsFor: async () => ({}),
+      // A registry that grants only for the host the RUNNER lives on — the case image here is public, which
+      // is the combination that produced ImagePullBackOff with the case blaming the harness.
+      registryAuthsFor: async (_tenant: string, images: string[]) => {
+        asked.push(images);
+        return images.some((i) => i.startsWith("private.registry/")) ? [RUNNER_GRANT] : [];
+      },
+      buildBackend: () => ({ dispatch: async () => ({}) }) as never,
+    } as never);
+    return { d, seen };
+  };
+
+  it("attaches it to the job the lane will read", async () => {
+    const asked: string[][] = [];
+    const { d, seen } = await dispatcherFor(asked);
+    await d.dispatch(job("myk8s"));
+
+    expect(
+      asked.some((imgs) => imgs.includes("private.registry/job-runner:9")),
+      "the runner image was never asked about",
+    ).toBe(true);
+    expect(seen[0]?.registryAuths, "the runner image's credential never reached the dispatch").toEqual([RUNNER_GRANT]);
+  });
+
+  it("resolves it on EVERY dispatch, not once per backend", async () => {
+    // The reason it does not ride the backend: a backend is built once and reused, so a credential baked in
+    // at build time is the first job's grant handed to every job after it, expiry included.
+    const asked: string[][] = [];
+    const { d, seen } = await dispatcherFor(asked);
+    await d.dispatch(job("myk8s"));
+    await d.dispatch(job("myk8s")); // the backend is cached by now
+
+    expect(seen[1]?.registryAuths, "a second dispatch inherited the first one's credentials").toEqual([RUNNER_GRANT]);
+    expect(
+      asked.filter((imgs) => imgs.includes("private.registry/job-runner:9")).length,
+      "the credential was resolved once and reused rather than per dispatch",
+    ).toBe(2);
+  });
+
+  it("does not invent one when the runtime declares no image", async () => {
+    // A `local` runtime has no runner image to pull, and a credential for nothing is needless exposure.
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const runtimes = new InMemoryRuntimeRegistry();
+    await runtimes.register("acme", localRuntime);
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes,
+      secretsFor: async () => ({}),
+      registryAuthsFor: async () => [RUNNER_GRANT],
+    } as never);
+    await d.dispatch(job("mylocal"));
+    expect(seen[0]?.registryAuths).toBeUndefined();
+  });
+});

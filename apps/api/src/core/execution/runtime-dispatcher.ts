@@ -259,6 +259,25 @@ export class RuntimeDispatcher implements Dispatcher {
         // one got — the second shape either evicted it or silently inherited the wrong backend.
         const flavour = jobFlavour(job);
         const name = `rt:${tenant}:${spec.id}@${spec.version}${flavour ? `#${flavour}` : ""}`;
+        // ── THE RUNNER IMAGE'S CREDENTIAL, RESOLVED PER DISPATCH (arch-review 63 P1-high) ────────────
+        //
+        // The last wave added the runtime's own runner image to the credential resolution and handed the
+        // result to `buildRuntimeBackend`, whose options are `{secretEnv, trustZones}` — it was dropped, so
+        // a public task image beside a PRIVATE runner still reached the cluster with nothing to pull the
+        // init container with. A producer fix that never reached a consumer.
+        //
+        // Resolved OUTSIDE the backend cache, because this credential belongs to the DISPATCH: baking it
+        // into a backend that is built once and reused hands the first job's short-lived grants to every job
+        // after it, and keeps them past their expiry. It rides the job below, which is where both lanes
+        // already read image credentials from and where they are per-dispatch by construction.
+        const runnerImage = "image" in spec && spec.image ? [spec.image] : [];
+        const runnerAuths =
+          runnerImage.length > 0
+            ? registryAuthsForImages(
+                (await this.deps.registryAuthsFor?.(tenant, runnerImage).catch(() => [])) ?? [],
+                runnerImage,
+              )
+            : [];
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
           // Image pull credentials — bake the ones covering this job's images into the backend (the backend is built
@@ -271,7 +290,7 @@ export class RuntimeDispatcher implements Dispatcher {
           // a tenant can host it in their own registry. It was never in this list, so the consumer's support
           // for a second credential had no producer: a public task image beside a private runner minted
           // nothing, and the init container sat in ImagePullBackOff with the case blaming the harness.
-          const images = [...jobImages(job), ...("image" in spec && spec.image ? [spec.image] : [])];
+          const images = jobImages(job); // the runner's credential travels on the job — see above
           const auths = (await this.deps.registryAuthsFor?.(tenant, images).catch(() => [])) ?? [];
           const registryAuths = registryAuthsForImages(auths, images);
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
@@ -285,7 +304,24 @@ export class RuntimeDispatcher implements Dispatcher {
             }),
           );
         }
-        routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };
+        // ── AND THE RUNNER CREDENTIAL RIDES THE JOB, NOT THE BACKEND (arch-review 63 P1-high) ────────
+        //
+        // The credential for the runtime's own job-runner image was resolved above and handed to
+        // `buildRuntimeBackend`, whose options are `{secretEnv, trustZones}` — it was dropped on the floor,
+        // so a public task image beside a PRIVATE runner still reached the cluster with nothing to pull the
+        // init container with. The producer fix from the last wave never reached a consumer.
+        //
+        // It travels on the JOB, which is where both lanes already read image credentials from
+        // (`registryAuthsOf`) and, more importantly, where they are PER-DISPATCH. Baking them into a backend
+        // that is built once and reused hands the first job's short-lived grants to every job after it, and
+        // outlives their expiry.
+        //
+        // Merged, never replaced: the job's own case/service credentials are still its own.
+        routed = {
+          ...job,
+          ...(runnerAuths.length > 0 ? { registryAuths: [...(job.registryAuths ?? []), ...runnerAuths] } : {}),
+          evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
+        };
       }
       // If the spec isn't found, keep target as-is → the Scheduler fails NOT_FOUND on the unregistered backend (explicit failure).
     }

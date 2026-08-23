@@ -1,3 +1,4 @@
+import { Admission } from "@everdict/backends";
 import type { VerifierJob } from "@everdict/contracts";
 import { PaymentRequiredError } from "@everdict/contracts";
 import type { BudgetTracker } from "@everdict/domain";
@@ -584,5 +585,105 @@ describe("[R62-followup COUNTEREXAMPLE] a verifier fits the whole envelope, not 
       await place(laneWith({ total: 20, used: 1, memoryBudgetMb: 1 }), bare),
       "a verifier that declared nothing was refused by an envelope it never entered",
     ).toBe("placed");
+  });
+});
+
+// ── …AND ONE ACCOUNTING, NOT TWO THAT AGREE (arch-review 63 P1-high) ────────────────────────────────
+//
+// The previous wave shared the fit PREDICATE between the Scheduler and this lane and left them holding
+// separate maps of what each had placed. A shared predicate over separate state is not shared admission:
+//
+//     Scheduler places an agent asking 4 GiB      the cluster probe has not seen its object yet
+//     verifier lane reads capacity()               the same stale snapshot
+//     verifier lane's own map                      empty — it has placed nothing
+//     verifier asking 2 GiB is admitted            6 GiB against a 4 GiB envelope
+//
+// One object now, injected by the composition root that wires both lanes — the same reason `tenantQuota` is
+// one function rather than two spellings that must agree.
+//
+// This is per PROCESS and says so. What makes the TENANT bound fleet-wide is the admission ledger; a
+// fleet-wide backend permit would need a ledger-backed claim per backend, and that is not what this is.
+//
+// Seen RED before the sharing, observed:
+//   a verifier was admitted into an envelope the scheduler had already spent: expected 'placed' to be
+//   'RATE_LIMITED'
+describe("[R63 COUNTEREXAMPLE] the verifier lane sees what the scheduler is already holding", () => {
+  const HEAVY = { ...JOB, resources: { memoryMb: 2048 } } as unknown as VerifierJob;
+
+  const laneSharing = (admission: Admission) =>
+    buildRuntimeAccess({
+      runtimeRegistry: {
+        get: async () => ({ id: "rt-1", version: "1", kind: "k8s" }),
+        list: async () => [],
+      } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () =>
+        ({
+          id: "rt-1",
+          // The cluster's reading is STALE: the agent's object does not exist yet, which is the whole window.
+          capacity: async () => ({ total: 20, used: 0, memoryBudgetMb: 4096 }),
+          dispatchVerifier: async () => ({ planDigest: "p", workspaceDigest: "w", scores: [] }),
+        }) as never,
+      admitVerifierCompute: budget(),
+      admission,
+    });
+
+  it("REFUSES a verifier into an envelope the scheduler already spent", async () => {
+    const admission = new Admission();
+    // The scheduler places an agent asking for the whole envelope — exactly what `Scheduler.dispatch` does
+    // before its object is visible to any probe.
+    admission.reserve("rt-1", "acme", 4096, 0, "h@1");
+
+    const out = await laneSharing(admission)
+      .dispatchVerifier(HEAVY)
+      .then(() => "placed")
+      .catch((e: unknown) => (e as { code?: string })?.code ?? "error");
+
+    expect(out, "a verifier was admitted into an envelope the scheduler had already spent").toBe("RATE_LIMITED");
+  });
+
+  it("PLACES it once the scheduler releases", async () => {
+    // The control: refusing forever would satisfy the assertion above and stop every verifier.
+    const admission = new Admission();
+    admission.reserve("rt-1", "acme", 4096, 0, "h@1");
+    admission.release("rt-1", "acme", 4096, 0, "h@1");
+
+    const out = await laneSharing(admission)
+      .dispatchVerifier(HEAVY)
+      .then(() => "placed")
+      .catch(() => "refused");
+    expect(out).toBe("placed");
+  });
+
+  it("makes the verifier's OWN hold visible to the scheduler too", async () => {
+    // The other direction, which is the half a separate map could never give: what this lane places has to
+    // count against the next agent placement as well.
+    const admission = new Admission();
+    let release!: () => void;
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const lane = buildRuntimeAccess({
+      runtimeRegistry: { get: async () => ({ id: "rt-1", version: "1", kind: "k8s" }), list: async () => [] } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () =>
+        ({
+          id: "rt-1",
+          capacity: async () => ({ total: 20, used: 0, memoryBudgetMb: 4096 }),
+          dispatchVerifier: async () => {
+            await inFlight;
+            return { planDigest: "p", workspaceDigest: "w", scores: [] };
+          },
+        }) as never,
+      admitVerifierCompute: budget(),
+      admission,
+    });
+
+    const running = lane.dispatchVerifier(HEAVY).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(admission.memMbFor("rt-1"), "the verifier's hold is invisible to the scheduler").toBe(2048);
+    release();
+    await running;
+    expect(admission.memMbFor("rt-1"), "the verifier never gave its hold back").toBe(0);
   });
 });

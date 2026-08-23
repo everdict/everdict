@@ -44,6 +44,7 @@ export {
   binPackPolicy,
   type PlacementPolicy,
   type BackendSlot,
+  Admission,
   backendSlotOf,
   slotAdmits,
   type SchedulerOptions,

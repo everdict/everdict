@@ -14,6 +14,7 @@ import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
 import { agentHalfKey, discardAgentHalf, recoverVerifiedCase } from "@everdict/application-control";
 import {
+  Admission,
   type Backend,
   type LogStream,
   adoptionStep,
@@ -106,6 +107,10 @@ export function buildRuntimeAccess(deps: {
   // claims for exactly this, so sharing it means the two halves draw on ONE pool rather than two accountings
   // that must agree. A deployment without a ledger admits as before — the ledger is what makes the limit
   // fleet-wide, and its absence is the single-replica case, not a bypass.
+  // What this PROCESS is holding on each backend, shared with the Scheduler so the two lanes cannot spend
+  // one envelope twice (arch-review 63 P1-high). Absent = this lane accounts for itself, which is correct
+  // for a deployment with no scheduler beside it.
+  admission?: Admission;
   verifierSlots?: {
     // …including RENEWAL (arch-review 61 P1). The ledger's permit is a 30-minute LEASE and the Scheduler
     // renews the ones it holds every ten; this lane was handed only `tryAdmit`/`releaseAdmission`, so a
@@ -127,11 +132,16 @@ export function buildRuntimeAccess(deps: {
   // silent here by design (adoption falls back to re-dispatch); the KILL paths below no longer treat that
   // silence as success — see `killWork`/`killUnhandled`.
   //
-  // Verifier containers THIS PROCESS is currently holding, per backend. `capacity()` reports what the cluster
-  // can see, and a placement is not visible there until its object exists — so without this, concurrent
-  // verifiers all read the same free slot and all take it. Exactly the Scheduler's own local accounting
-  // (`inFlight`, subtracted from the capacity snapshot), in the lane that dispatches around it.
-  const verifiersHeld = new Map<string, { count: number; memoryMb: number; cpu: number }>();
+  // ── ONE OWNER OF WHAT THIS PROCESS HOLDS (arch-review 63 P1-high) ────────────────────────────────
+  //
+  // This lane kept its own map. The Scheduler keeps `Admission`. They shared a fit PREDICATE and not the
+  // state it reads, so an agent the Scheduler had just placed — invisible to the cluster probe until its
+  // object exists — was invisible here too, and the same memory envelope was spent twice by the two lanes.
+  //
+  // A shared predicate over separate state is not shared admission. Injected rather than constructed, so a
+  // deployment that wires both lanes gives them ONE object; absent, this lane accounts for itself exactly as
+  // it did, which is correct for a deployment with no scheduler beside it.
+  const verifiersHeld = deps.admission ?? new Admission();
   const eachRuntimeBackend = async (
     tenant: string,
     runtimeList: string | undefined,
@@ -554,7 +564,11 @@ export function buildRuntimeAccess(deps: {
         // reaches the other. What is NOT shared is the harness POOL (`capacityFor`): it answers about a
         // harness's warm sessions and a verifier is a batch container, so consulting it would refuse for a
         // reason that is not about this unit. Said here rather than left as an unexplained gap.
-        const held = verifiersHeld.get(target) ?? { count: 0, memoryMb: 0, cpu: 0 };
+        const held = {
+          count: verifiersHeld.countFor(target),
+          memoryMb: verifiersHeld.memMbFor(target),
+          cpu: verifiersHeld.cpuFor(target),
+        };
         // SUMMED with the cluster's reading, not maxed: this lane has no pump to correct itself, and the
         // window it counts is exactly the one before a placement is visible to the probe (see
         // `backendSlotOf`). Refusing slightly early is the safe direction for a cap.
@@ -570,11 +584,8 @@ export function buildRuntimeAccess(deps: {
             { tenant: job.tenant, runtime: target, slot, need },
             "this runtime has no room for the verifier — its slots, memory or CPU envelope are full.",
           );
-        verifiersHeld.set(target, {
-          count: held.count + 1,
-          memoryMb: held.memoryMb + (need.memoryMb ?? 0),
-          cpu: held.cpu + (need.cpu ?? 0),
-        });
+        // Reserved on the SHARED accounting, so the Scheduler's next placement sees this verifier too.
+        verifiersHeld.reserve(target, job.tenant, need.memoryMb ?? 0, need.cpu ?? 0, `verify:${job.caseId}`);
         laneHolding = { target, need };
         // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
@@ -611,16 +622,14 @@ export function buildRuntimeAccess(deps: {
       // …and the backend slot this lane was counting against its own snapshot. Released here with the rest,
       // for the same reason: a count never given back would refuse verifiers for containers that exited long
       // ago, which is the failure mode a cap is supposed to prevent rather than cause.
-      if (laneHolding !== undefined) {
-        const cur = verifiersHeld.get(laneHolding.target);
-        const rest = {
-          count: (cur?.count ?? 1) - 1,
-          memoryMb: Math.max(0, (cur?.memoryMb ?? 0) - (laneHolding.need.memoryMb ?? 0)),
-          cpu: Math.max(0, (cur?.cpu ?? 0) - (laneHolding.need.cpu ?? 0)),
-        };
-        if (rest.count > 0) verifiersHeld.set(laneHolding.target, rest);
-        else verifiersHeld.delete(laneHolding.target);
-      }
+      if (laneHolding !== undefined)
+        verifiersHeld.release(
+          laneHolding.target,
+          job.tenant,
+          laneHolding.need.memoryMb ?? 0,
+          laneHolding.need.cpu ?? 0,
+          `verify:${job.caseId}`,
+        );
     }
   };
 
