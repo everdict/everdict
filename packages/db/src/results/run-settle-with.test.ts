@@ -38,6 +38,7 @@ function stampOf(
 ): AttemptStamp {
   return {
     attempts,
+    attemptId,
     apply: async (bound) => {
       opts?.seen?.push("stamp");
       if (opts?.throws) throw new Error("attempt ledger down");
@@ -76,7 +77,7 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
     return { client, events, txStatements };
   }
 
-  it("stamps the attempt inside the SAME transaction as the terminal write, and after it", async () => {
+  it("stamps the attempt inside the SAME transaction as the terminal write, and BEFORE it", async () => {
     const { client, events, txStatements } = fakeTxClient();
     const settled = await new PgRunStore(client).settleWith(
       "r1",
@@ -90,10 +91,17 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
     expect(settled?.status).toBe("succeeded");
     expect(events).toEqual(["BEGIN", "COMMIT"]);
     const at = (fragment: string): number => txStatements.findIndex((s) => s.sql.includes(fragment));
-    // AFTER the settle, never before: a refused fence must not have said "committed" about an attempt whose
-    // run it never settled.
-    expect(at("UPDATE everdict_runs")).toBe(0);
-    expect(at("UPDATE everdict_execution_attempts")).toBeGreaterThan(at("UPDATE everdict_runs"));
+    // ── BEFORE the settle (arch-review 63 P1-high) ────────────────────────────────────────────────
+    //
+    // This asserted the opposite, and the opposite is what made the ledger refuse its own settlement:
+    // `committed` requires the parent to be OPEN, and the terminal write is the thing that closes it, so a
+    // stamp ordered after it was rejected every time — inside the transaction too, because the guard reads
+    // the row as this transaction has left it. Being atomic is not the same as being ordered.
+    //
+    // What kept the old order honest — a refused fence must not leave a `committed` attempt behind a run it
+    // never settled — is now ROLLBACK's job, which the test below asserts.
+    expect(at("UPDATE everdict_execution_attempts")).toBe(0);
+    expect(at("UPDATE everdict_runs")).toBeGreaterThan(at("UPDATE everdict_execution_attempts"));
   });
 
   it("a stamp that THROWS rolls the terminal write back — no settled run behind a row the ledger could not write", async () => {
@@ -107,9 +115,10 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
         stampOf(new InMemoryExecutionAttemptStore(), "evd-run-r1#g1", { throws: true }),
       ),
     ).rejects.toThrow("attempt ledger down");
-    // The run's terminal write was attempted and un-happened with the stamp — the run stays open, which is
-    // the state boot recovery re-drives.
-    expect(txStatements.some((s) => s.sql.includes("UPDATE everdict_runs"))).toBe(true);
+    // The stamp threw before the terminal write was reached, so the run stays open — which is the state boot
+    // recovery re-drives, and the reason a ledger fault must not leave a settled run behind a row nobody
+    // could write.
+    expect(txStatements.some((s) => s.sql.includes("UPDATE everdict_runs"))).toBe(false);
     expect(events).toEqual(["BEGIN", "ROLLBACK"]);
   });
 
@@ -124,9 +133,11 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
       stampOf(new InMemoryExecutionAttemptStore(), "evd-run-r1#g1", { seen }),
     );
     expect(settled).toBeUndefined();
-    expect(seen).toEqual([]); // the attempt that LOST is superseded by its caller, never committed here
-    expect(txStatements.some((s) => s.sql.includes("everdict_execution_attempts"))).toBe(false);
-    expect(events).toEqual(["BEGIN", "COMMIT"]); // no rollback poison for a write that never landed
+    // The stamp RAN — it has to, because it is what the fence below is being asked about — and then the
+    // refusal rolled it back with everything else. What matters is not that nothing was attempted but that
+    // nothing LANDED: an attempt that lost its settlement must not read `committed` (arch-review 63).
+    expect(seen).toEqual(["stamp"]);
+    expect(events).toEqual(["BEGIN", "ROLLBACK"]);
   });
 
   it("commits under the SAME fence the ordinary settlement does — one condition, not a second spelling", async () => {
@@ -149,8 +160,13 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
       FENCE,
       stampOf(new InMemoryExecutionAttemptStore(), "evd-run-r1#g1"),
     );
-    expect(txStatements[0]?.sql).toBe(plain[0]?.sql);
-    expect(txStatements[0]?.params).toEqual(plain[0]?.params);
+    // The run's own statement, wherever it now sits in the transaction — the claim is that the CONDITION is
+    // one spelling, not that it is the first thing the transaction does (the stamp precedes it since
+    // arch-review 63).
+    const runUpdate = txStatements.find((st) => st.sql.includes("UPDATE everdict_runs"));
+    expect(runUpdate?.sql, "the atomic path did not settle the run at all").toBeDefined();
+    expect(runUpdate?.sql).toBe(plain[0]?.sql);
+    expect(runUpdate?.params).toEqual(plain[0]?.params);
   });
 
   it("FAILS CLOSED on a client that cannot open a transaction — never a settlement without its stamp", async () => {
@@ -183,7 +199,7 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
       updatedAt: "2026-08-14T00:00:00.000Z",
     }) as RunRecord;
 
-  it("stamps the attempt only after a settlement that COMMITTED", async () => {
+  it("stamps the attempt BEFORE the settlement, and keeps it when that settlement commits", async () => {
     const runs = new InMemoryRunStore();
     const attempts = new InMemoryExecutionAttemptStore();
     await runs.create(queued("r1"));
@@ -195,10 +211,12 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
       { expectNonTerminal: true },
       {
         attempts,
+        attemptId,
         apply: async (bound) => {
-          // The run is already terminal by the time the stamp runs — the settle goes first, exactly as it does
-          // inside the Pg transaction.
-          expect((await runs.get("r1"))?.status).toBe("succeeded");
+          // The run is still OPEN while the stamp runs, exactly as it is inside the Pg transaction — which is
+          // the whole point: `committed` asks whether the parent may still be claimed, and the terminal write
+          // is what closes it (arch-review 63 P1-high).
+          expect((await runs.get("r1"))?.status).toBe("running");
           await bound.transition(attemptId, "committed", { childRunId: "r1" });
         },
       },
@@ -207,7 +225,7 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
     expect((await attempts.list("evd-run-r1")).map((a) => a.state)).toEqual(["committed"]);
   });
 
-  it("a refused fence runs no stamp — the attempt that lost is not the one that committed", async () => {
+  it("a refused fence TAKES THE STAMP BACK — the attempt that lost is not the one that committed", async () => {
     const runs = new InMemoryRunStore();
     const attempts = new InMemoryExecutionAttemptStore();
     await runs.create({ ...queued("r1"), status: "succeeded" }); // somebody else settled it first
@@ -220,14 +238,21 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
       { expectNonTerminal: true },
       {
         attempts,
+        attemptId,
         apply: async () => {
           stamped = true;
         },
       },
     );
     expect(settled).toBeUndefined();
-    expect(stamped).toBe(false);
-    expect((await attempts.list("evd-run-r1"))[0]?.state).toBe("created");
+    // The stamp RAN, because it has to run before the fence can be asked — and the refusal then took it back.
+    // Without a transaction this store compensates explicitly; what must never happen either way is a
+    // `committed` attempt behind a settlement that did not land (arch-review 63 P1-high).
+    expect(stamped).toBe(true);
+    expect(
+      (await attempts.list("evd-run-r1"))[0]?.state,
+      "an attempt that lost its settlement was left claiming the answer",
+    ).not.toBe("committed");
     expect(attemptId).toBe("evd-run-r1#g1");
   });
 });

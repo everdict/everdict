@@ -162,10 +162,16 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
     const halves = staged(new TextEncoder().encode(JSON.stringify(AGENT_HALF)));
     const w = {
       ...(verifierWorld(resumedWith, halves) as unknown as Record<string, unknown>),
-      attempts: {
-        transition: async (id: string, to: string) => {
-          closed.push([id, to]);
-          return true;
+      // ── THE LANE HANDS THE ATTEMPT TO THE SETTLEMENT (arch-review 63 P1-high) ────────────────────
+      //
+      // This used to assert that the LANE stamped the row. It did — and the stamp was refused every time,
+      // because `committed` requires the parent to be open and the settle that precedes it is what closes
+      // it. The stamp is part of `settleRun` now, so what this lane owes is WHICH attempt answered.
+      service: {
+        resume: async (_r: unknown, adopted: unknown, _a: unknown, attemptId?: string) => {
+          resumedWith.push(adopted);
+          if (attemptId !== undefined) closed.push([attemptId, "committed"]);
+          return { kind: "resumed" };
         },
       },
       workHandlesFor: async () => [
@@ -292,7 +298,15 @@ describe("[R62-followup COUNTEREXAMPLE] an adopted attempt is stamped only once 
       owner: "r1",
       replicas: { alive: async () => [] },
       scorecardService: { resume: async () => ({ kind: "resumed" }) },
-      service: { resume: async () => resume() },
+      // The settlement is what stamps now, so this stands in for it: the outcome decides, and the id the
+      // lane handed over is what would be stamped (arch-review 63 P1-high).
+      service: {
+        resume: async (_r: unknown, _adopted: unknown, _a: unknown, attemptId?: string) => {
+          const outcome = resume();
+          if (outcome.kind === "resumed" && attemptId !== undefined) closed.push([attemptId, "committed"]);
+          return outcome;
+        },
+      },
       agentHalves: halves,
       attempts: {
         transition: async (id: string, to: string) => {

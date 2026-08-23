@@ -1476,6 +1476,27 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/recovery-coordinate.counterexample.test.ts"],
   },
+  {
+    // arch-review 63 P1-high. `committed` requires the parent to be OPEN and the terminal write is what
+    // closes it, so a stamp ordered after the settle is refused every time — inside the transaction too,
+    // because the guard reads the row as this transaction has left it. Put the settle back in front and
+    // every successful settlement leaves its attempt open again.
+    name: "settlement — the terminal write closes the door its own stamp walks through",
+    file: "packages/db/src/results/run-store.ts",
+    from: "    await stamp.apply(stamp.attempts);\n    const settled = await this.update(id, patch, events, guard);",
+    to: "    const settled = await this.update(id, patch, events, guard);\n    await stamp.apply(stamp.attempts);",
+    build: "@everdict/db",
+    suite: ["packages/db/src/results/settle-stamp-order.counterexample.test.ts"],
+  },
+  {
+    // …and the recovery half: the lane must hand the settlement WHICH attempt answered, or the stamp has
+    // nothing to name and the row stays open.
+    name: "recovery — the settlement is not told which attempt produced the result",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "  const outcome = await service.resume(r, adopted, authority, adoptedFrom?.attemptId).catch(",
+    to: "  const outcome = await service.resume(r, adopted, authority).catch(",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

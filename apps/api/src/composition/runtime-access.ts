@@ -727,27 +727,16 @@ export async function recoverStandaloneRun(
   // but the ledger is the record of what physically ran, a teardown keeps chasing work that is already gone,
   // and an operator reading it is told a container is running when none is.
   //
-  // Closed for the handle that ANSWERED, under the same decision that adopted it. Best-effort: a ledger that
-  // will not take the stamp must not cost a recovery that has a real result in hand — the sweep still has
-  // the row, which is strictly better than the run being lost.
-  // ── …AND ONLY ONCE THE SETTLEMENT TOOK IT (arch-review 62 follow-through) ────────────────────────
+  // ── …AND THE SETTLEMENT IS WHAT CLOSES IT (arch-review 63 P1-high) ──────────────────────────────
   //
-  // `committed` says this attempt's result IS the case's answer, and this closed the row BEFORE handing the
-  // result to `service.resume`. A crash in between, or a resume that lost to a concurrent settlement, left
-  // the ledger claiming an answer the run never recorded — the same statement the batch path stopped making
-  // when `commitCase` bound the receipt, the child's terminal write and the attempt stamp into one
-  // transaction (arch-review 43).
+  // This lane used to make the stamp itself — first before `service.resume`, then after it. Both were wrong
+  // for the same reason and the second was worse: `committed` requires the parent to be OPEN, and a
+  // successful resume is precisely what closes it, so the stamp was refused every single time and every
+  // recovered attempt stayed `reserved`.
   //
-  // This lane has no such transaction to join: the run store and the ledger are settled by different calls.
-  // What it can do is stop asserting the stronger thing first, so the stamp follows the settlement instead of
-  // preceding it. The residual window is the reverse one — a settled run whose attempt row is still open —
-  // and that is the direction the sweep already handles, because an open row is work it re-examines rather
-  // than a claim it believes.
-  const closeAdopted = async (work: RuntimeWorkRef): Promise<void> => {
-    if (work.attemptId === undefined || deps.attempts === undefined) return;
-    await deps.attempts.transition(work.attemptId, "committed").catch(() => undefined);
-  };
-  // The handle whose answer this recovery is settling, remembered so the stamp can follow the settlement.
+  // The seam for this has existed since arch-review 45: `settleRun` takes the stamp, the store binds it into
+  // the settlement's own transaction, and the two writes are one decision — ordered so the guard's question
+  // still has an answer when it is asked. All this lane owes is WHICH attempt answered.
   let adoptedFrom: RuntimeWorkRef | undefined;
 
   // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
@@ -841,17 +830,16 @@ export async function recoverStandaloneRun(
   // A resume that THREW told us nothing — which is `retry_later`, not `unresumable` (arch-review 55,
   // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
   // "this run failed", and the sweep wrote a tombstone on the strength of it.
-  const outcome = await service.resume(r, adopted, authority).catch(
+  const outcome = await service.resume(r, adopted, authority, adoptedFrom?.attemptId).catch(
     (err: unknown): ResumeResult => ({
       kind: "retry_later",
       reason: err instanceof Error ? err.message : String(err),
     }),
   );
-  // …and NOW the attempt is closed, if the settlement actually took this result (arch-review 62
-  // follow-through). `resumed` means the run recorded it. `already_settled` means somebody else's result won,
-  // so this attempt did NOT produce the case's answer and must not say it did — its row stays open for the
-  // sweep, which is the honest weaker statement. `retry_later` decided nothing at all.
-  if (outcome.kind === "resumed" && adoptedFrom !== undefined) await closeAdopted(adoptedFrom);
+  // …and the attempt is closed BY that settlement, not after it (arch-review 63 P1-high). Stamping here was
+  // refused every single time: `committed` requires the parent to be open and a successful resume closes it,
+  // so the previous version of this line left every recovered attempt `reserved` — the defect arch-review 61
+  // had closed. The stamp rides `settleRun` now, ordered inside the same decision.
   if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
   // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
   // fire-and-forget leg whose caller had already answered `true` — so the one place that knew the

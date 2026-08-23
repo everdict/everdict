@@ -157,6 +157,10 @@ export interface RunUpdateGuard {
 // the lane whose outcome record IS the run row, so there is no receipt to claim, only a fenced terminal write
 // to ride.
 export interface AttemptStamp {
+  // WHICH attempt this settlement is about. Named rather than hidden inside `apply`, because a settlement
+  // that is refused has to be able to take the stamp back, and a store without a transaction cannot roll one
+  // back for free (arch-review 63 P1-high).
+  attemptId: string;
   // The caller's AMBIENT ledger. An implementation that can open a transaction ignores it and hands `apply` a
   // transaction-bound twin instead (exactly as `commitCase` does for the run store); one that cannot hands
   // this back. Passed by the caller rather than wired at construction, so the store the stamp lands in can

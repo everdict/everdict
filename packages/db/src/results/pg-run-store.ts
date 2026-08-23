@@ -156,6 +156,8 @@ function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
 }
 
 // Postgres-backed result store. Same RunStore contract as in-memory — apps/api just swaps the two.
+class UnsettledRunSignal extends Error {}
+
 export class PgRunStore implements RunStore {
   // `replicaId` = the process this store belongs to; every row it inserts is stamped with it so boot recovery
   // can tell a dead driver's work from a live one's (docs/architecture/multi-replica.md).
@@ -221,6 +223,8 @@ export class PgRunStore implements RunStore {
   // undefined WITHOUT a rollback — nothing was written, and there is no claim to un-happen (the difference
   // from `commitCase`, whose claim lands before the settle and must be taken back). A stamp that throws
   // aborts the transaction, so the run stays open for recovery rather than settled behind an unwritable row.
+  // Module-private control-flow signal: a refused fence must ROLL BACK the stamp written above it, and
+  // `withTransaction` rolls back on a throw. Unwrapped below into the `undefined` the contract promises.
   async settleWith(
     id: string,
     patch: Partial<RunRecord>,
@@ -230,11 +234,22 @@ export class PgRunStore implements RunStore {
     // the SAME transaction as the write, so a transaction-bound twin is handed to it instead.
     stamp: AttemptStamp,
   ): Promise<RunRecord | undefined> {
-    return withTransaction(this.client, "the run settlement (terminal write + attempt stamp)", async (tx) => {
-      const settled = await this.updateOn(tx, id, patch, events, guard);
-      if (settled === undefined) return undefined;
+    return withTransaction(this.client, "the run settlement (attempt stamp + terminal write)", async (tx) => {
+      // ── THE STAMP GOES FIRST (arch-review 63 P1-high) ──────────────────────────────────────────────
+      //
+      // `committed` asks whether the parent may still be claimed, and `updateOn` below is the thing that
+      // closes it. Inside one transaction the two writes commit together, but the GUARD still reads the row
+      // as this transaction has left it — so settling first made the ledger refuse its own settlement, every
+      // time. Being atomic is not the same as being ordered.
       await stamp.apply(new PgExecutionAttemptStore(tx));
+      const settled = await this.updateOn(tx, id, patch, events, guard);
+      // …and a refused fence takes the stamp with it. Thrown rather than returned, because ROLLBACK is this
+      // helper's contract for a throw — the same shape `commitCase` uses for its own refused child write.
+      if (settled === undefined) throw new UnsettledRunSignal();
       return settled;
+    }).catch((err: unknown) => {
+      if (err instanceof UnsettledRunSignal) return undefined; // the fence refused; nothing was written
+      throw err; // a store fault is reported as one — never converted into "somebody else settled it"
     });
   }
 

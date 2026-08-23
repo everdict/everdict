@@ -881,7 +881,15 @@ export class RunService {
   // finished it while I was asking". A caller reading `false` as the first meaning tombstones the second —
   // and one did, over a run that had SUCCEEDED, with no CAS to stop it. The distinction is the whole point,
   // so it is in the type: only `unresumable` may be settled by the caller.
-  async resume(record: RunRecord, adopted?: CaseResult, authority?: DriverAuthority): Promise<ResumeResult> {
+  async resume(
+    record: RunRecord,
+    adopted?: CaseResult,
+    authority?: DriverAuthority,
+    // WHICH physical attempt produced `adopted`, so this settlement can stamp it as part of its own decision
+    // (arch-review 63 P1-high). The recovery holds it on the handle it adopted from; nothing here can derive
+    // it, and deriving it would be the re-derivation rule `protocol` L3 forbids.
+    adoptedAttemptId?: string,
+  ): Promise<ResumeResult> {
     // The epoch this recovery WON, or — for a caller with no claim behind it — the record's own. Every write
     // below proves it, adoption included: `settleRun` has taken an epoch since mig 0170 and this branch was
     // the one caller that never passed one, so a replica that had already been displaced could still decide
@@ -905,12 +913,31 @@ export class RunService {
       // durable callback exists for: the ones whose original process died.
       const adoption = run.adopt(adopted, this.now());
       const stampedAdoption = this.stampFacts(record.tenant, adoption.facts);
+      // ── AND THE ADOPTED ATTEMPT IS STAMPED BY THIS SETTLEMENT (arch-review 63 P1-high) ─────────────
+      //
+      // The recovery used to close the attempt itself, after this call returned. `committed` requires the
+      // parent to be open and a successful settle closes it, so that stamp was refused every time and every
+      // successful recovery left its attempt `reserved`. The seam for exactly this has existed since
+      // arch-review 45: hand the stamp to the settlement and the two writes are one decision, ordered so the
+      // guard's question still has an answer.
+      const adoptedAttempt = adoptedAttemptId;
       const claimed = await settleRun(
         this.deps.store,
         record.id,
         adoption.patch,
         stampedAdoption.map((f) => f.record),
-        { epoch },
+        {
+          epoch,
+          ...(adoptedAttempt !== undefined && this.deps.attempts !== undefined
+            ? {
+                stamp: {
+                  attempts: this.deps.attempts,
+                  attemptId: adoptedAttempt,
+                  apply: async (ledger) => void (await ledger.transition(adoptedAttempt, "committed")),
+                },
+              }
+            : {}),
+        },
       );
       if (claimed !== undefined && stampedAdoption.length > 0) void this.deps.events?.pushPersisted?.(stampedAdoption);
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
@@ -1967,6 +1994,7 @@ export class RunService {
     if (!attempts || attemptId === undefined || this.deps.store.settleWith === undefined) return undefined;
     return {
       attempts,
+      attemptId,
       apply: async (bound) => {
         // The transition's own answer is deliberately unread: a refusal is a silent no-op by contract (an
         // already-terminal row meeting a late stamp is ordinary), and only a throw aborts the settlement.

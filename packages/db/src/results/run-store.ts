@@ -158,11 +158,22 @@ export class InMemoryRunStore implements RunStore {
     guard: RunUpdateGuard,
     stamp: AttemptStamp,
   ): Promise<RunRecord | undefined> {
-    const settled = await this.update(id, patch, events, guard);
-    if (settled === undefined) return undefined;
-    // Handed straight back, like `commitCase` hands back the run store: there is no transaction to bind a
-    // twin to, so the stamp lands in the caller's own ledger.
+    // ── THE STAMP GOES FIRST (arch-review 63 P1-high) ────────────────────────────────────────────────
+    //
+    // `committed` asks whether the parent may still be claimed, and the terminal write below is the thing
+    // that closes it. Settling first made the guard refuse its own settlement, every time — being atomic is
+    // not the same as being ordered. Handed the caller's own ledger, since there is no transaction to bind a
+    // twin to.
     await stamp.apply(stamp.attempts);
+    const settled = await this.update(id, patch, events, guard);
+    if (settled === undefined) {
+      // …and the stamp is TAKEN BACK when the fence refuses. A refusal means somebody else settled this run,
+      // so this attempt did not produce the answer. The Pg twin gets this from ROLLBACK; here it is an
+      // explicit compensation, and it is best-effort for the same reason the rest of this store is a dev
+      // store: what it must not do is leave a `committed` row behind a settlement that never happened.
+      await stamp.attempts.transition(stamp.attemptId, "superseded").catch(() => undefined);
+      return undefined;
+    }
     return settled;
   }
 
