@@ -22,7 +22,7 @@ See skill `ci`.
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
-  **`pnpm constructed-casts`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
+  **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
   **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
@@ -49,6 +49,12 @@ See skill `ci`.
   same change. A bulk translation would be the wrong repair — those comments carry the REASON a piece of code
   is what it is, and precision is exactly what a sweep trades away. The debt is repaid where someone is
   already reading the file.
+- **`pnpm guarded-doubles` is the always-succeeds-double law, enforced instead of stated** (arch-review 64).
+  A conditional write exists to refuse; a hand-written double whose only outcome is the success value turns a
+  guard that rejects every real call into a green test. The prose law was written and broken in the same wave,
+  which is what moved it here. Every allowlist entry names whether the granted call is the test's PREMISE or
+  an `OPEN` defect, and an entry whose site stopped hard-coding a success FAILS — a reason that outlived its
+  subject reads as permission, and an unremoved `OPEN` reads as a defect still open when it was fixed.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A

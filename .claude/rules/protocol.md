@@ -319,6 +319,72 @@ So when a change tightens a precondition, the change is not done at the guard:
 - The suite cannot catch this with two separate tests. The counterexample has to drive the two changed
   things in the order production runs them, against the real store.
 
+## AN OPTIONAL DEPENDENCY WITH NO PRODUCER IS A PLAN, AND ITS TEST IS A DRAWING OF ONE
+The wave that wrote the always-succeeds-double law below also shipped this, as the fix for a ledger that
+claimed a refused verdict had contributed:
+
+    // VerifierPassDeps
+    attempts?: Pick<ExecutionAttemptStore, "transition">;
+    …
+    await deps.attempts?.transition(verifierAttempt, "superseded").catch(() => undefined);
+
+`VerifierAwareDispatcher`'s constructor is `(inner, dispatchVerifier, agentHalves)`. There is no parameter to
+pass a ledger through, so `deps.attempts` is `undefined` in every production dispatch and the correction is a
+no-op — while its counterexample, which hands `withVerifierPass` a deps object of its own making, passes
+(arch-review 64).
+
+An optional dep is the shape that makes this invisible. A REQUIRED one fails to compile at the composition
+root, which is the whole reason L1 prefers a required proof parameter to an optional hook; declared optional,
+the missing wiring is indistinguishable from a deployment that legitimately has no ledger.
+
+- **A capability a protocol depends on is REQUIRED at the seam that decides, or its absence is a named,
+  tested outcome** — never a silent `?.` that reads as success.
+- **A counterexample for a protocol drives the PRODUCTION COMPOSITION**, not the helper with a hand-made deps
+  bag. The helper's test proves the helper; only the composition proves the wire. Where the composition root
+  is too big to construct, the test asserts the constructor SIGNATURE carries the dependency — a fixture
+  cannot pass what production has no parameter for.
+- Grep for the producer before writing the consumer. `deps.x?.y()` with zero production writers of `x` is
+  dead code wearing a comment.
+
+## A SUB-STEP'S TERMINAL IS NOT THE CANONICAL TERMINAL
+`committed` means "this attempt's result is the case's answer". The verifier lane stamped it the moment its
+container returned scores — before the merge decides whether the verdict is USED, before the deferred trace
+is collected, before the settlement writes anything. So the row said a verdict had been adopted while three
+later steps could still discard it, and the compensating `committed → superseded` could never run: the store
+is first-terminal-wins and `committed` is terminal (arch-review 64).
+
+Two states, two words. A phase that means "this sub-step produced bytes" is NOT terminal, because work that
+follows it can still refuse those bytes; only the write that makes the outcome the record's answer may write
+the terminal that claims it.
+
+- The canonical terminal is written **by the settlement transaction and by nothing else**. A lane that
+  produces evidence stamps a pre-terminal phase (`verdict_produced`) and stops there.
+- **A compensation that a state machine's own rules forbid is not a compensation.** Before writing "and if it
+  turns out wrong we correct it to X", check that the transition X is reachable from where the row will be.
+- Adding the phase is a vocabulary change: re-walk `TERMINAL_ATTEMPT_STATES`, `EXECUTING_PREDECESSOR_STATES`,
+  `MAY_STILL_CREATE_WORK`, both stores' transition tables, the cancellation's revocable filter and every
+  reader — see the phase-readers law above, which is the same law from the writer's side.
+
+## A HOST-KEYED RENDERING COLLAPSES REPOSITORY-SCOPED GRANTS
+Two mint calls produced two credentials for one registry — one covering the task image's repository, one the
+runner image's — and both were appended to a single `RegistryAuth[]`. Then:
+
+    dockerAuthConfigJson   auths[entry.host] = …      → the LAST entry for a host wins
+    pickRegistryAuth       auths.find(…)              → the FIRST entry for a host wins
+
+Two consumers of one list resolving it in opposite directions, and the rendered docker config carries exactly
+one token per host, so the other image gets a 401 that reads as a registry problem. `registryAuthsForImages`'s
+own comment claimed "Deduplicated by host: one entry per registry" and its body is a plain filter
+(arch-review 64).
+
+- **A list keyed downstream by a coarser identity than it was minted for is not a list, it is a race.** When
+  the consumer's shape is `Record<host, credential>`, the producer owes ONE credential per host covering every
+  repository that host serves — collect the refs first, mint once.
+- Enumerate by the **physical consumer**: what this pod will pull, not what this layer happens to know about.
+  The runner/init image is pulled by the same kubelet as the task image, and a lane that never sees the
+  runtime spec (the verifier's) is a lane whose pod pulls images nobody minted a grant for.
+- A comment describing a merge, over a body performing a filter, is the comment-is-a-claim law in miniature.
+
 ## A DOUBLE THAT ALWAYS SUCCEEDS IS NOT A STORE
 The recovery test above passed because its ledger double was
 
@@ -334,6 +400,12 @@ return value rather than in a missing branch:
 - **A double for a guarded write returns what the real one would.** If the production store can say `false`,
   the double decides `false` from the same inputs — or the test uses the real in-memory implementation,
   which exists precisely so this is cheap.
+- **This one is MACHINE-CHECKED now** (`pnpm guarded-doubles`, CI-required), because the prose version did
+  not hold: the wave that wrote this law shipped `transition: async (id, to) => { moved.push(…); return true }`
+  as its own counterexample, on the same day, for a correction production could not even reach. A rule its
+  author broke while writing it is a note. The scanner flags a hand-written double for a conditional write
+  whose only outcome is the success value; an allowlist entry says whether granting is the test's PREMISE
+  (fine) or an `OPEN` defect with an owner (not fine, and removed by that owner's change).
 - **Assert the OUTCOME, not the call.** `closed` recording a call proves an attempt was made; the row's state
   proves the write landed. Where an in-memory store exists, read it back.
 - A `Promise<boolean>` double that never returns `false`, or a `Promise<void>` double over a method that

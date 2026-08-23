@@ -69,6 +69,7 @@ run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
+run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);
 run("pnpm language-policy", "pnpm", ["language-policy"]);
 run("pnpm source-bytes", "pnpm", ["source-bytes"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);

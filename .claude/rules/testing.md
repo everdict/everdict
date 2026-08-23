@@ -38,6 +38,12 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   the assertion "we recorded the close" then proves only that we ASKED. Where an `InMemory*` implementation
   exists, use it — it is cheap and it is the same decision production makes. And assert the row's STATE, not
   that the call happened (rule `protocol`, the always-succeeds-double law).
+- **A counterexample for a PROTOCOL drives the production composition, not the helper.** A test that builds
+  its own deps bag proves the helper behaves when wired; it cannot see that production has no parameter to
+  wire it through. `VerifierPassDeps.attempts` was optional, the composition root had no argument for it, and
+  the correction was a no-op in every real dispatch while its test passed (arch-review 64). Where the root is
+  too large to construct, assert the CONSTRUCTOR SIGNATURE carries the dependency — a fixture cannot pass what
+  production cannot.
 - **A fixture whose ids all match is not the production shape.** A scorecard child's `id` is a random row id
   and its `executionId` is a different string; a test that sets them equal cannot see a lookup using the
   wrong one, which is how a recovery that finds no handles at all stayed green (arch-review 63 P0).
