@@ -1,4 +1,5 @@
 import { InMemoryExecutionAttemptStore } from "@everdict/application-control";
+import { runExecutionId, storedExecutionId } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunStore } from "./run-store.js";
@@ -51,7 +52,7 @@ describe("[R63 COUNTEREXAMPLE] a settlement stamps the attempt that produced it"
         return row !== undefined && (row.status === "queued" || row.status === "running") ? { epoch: 1 } : undefined;
       },
     });
-    const { attemptId } = await attempts.open({ executionId: `evd-run-${runId}`, tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: storedExecutionId(`evd-run-${runId}`), tenant: "acme" });
     await attempts.reserveWork(attemptId, { tenant: "acme", runId: `evd-run-${runId}`, externalJobId: "j-1" });
     return { runs, attempts, attemptId };
   };
@@ -68,7 +69,7 @@ describe("[R63 COUNTEREXAMPLE] a settlement stamps the attempt that produced it"
     );
 
     expect(settled?.status, "the settlement itself did not land, so this test measured nothing").toBe("succeeded");
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.state, "a successful settlement left its attempt open").toBe("committed");
   });
 
@@ -89,7 +90,7 @@ describe("[R63 COUNTEREXAMPLE] a settlement stamps the attempt that produced it"
     );
 
     expect(settled, "the terminal write was not refused, so the assertion below is vacuous").toBeUndefined();
-    const [row] = await attempts.list("evd-run-r2");
+    const [row] = await attempts.list(runExecutionId("r2"));
     expect(row?.state, "a losing settlement stamped its attempt anyway").not.toBe("committed");
   });
 

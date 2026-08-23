@@ -1,4 +1,5 @@
 import { InMemoryCaseReceiptStore, ScorecardService, settleRun } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseCommitReceipt, CaseJob, CaseResult, RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { Run, caseResultDigest } from "@everdict/domain";
@@ -127,7 +128,7 @@ describeTrust("TRUST-174 ① — two drivers, one case, every interleaving: the 
       else for (const op of ops) await op();
 
       // ── the absolute invariants ──
-      const committed = await receipts.list("sc");
+      const committed = await receipts.list(storedExecutionId("sc"));
       expect(committed.length, `seed ${seed}: at most one receipt per (case, trial)`).toBeLessThanOrEqual(1);
       for (const r of committed) {
         const row = await runs.get(r.childRunId);

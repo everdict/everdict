@@ -1,3 +1,4 @@
+import { runExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 
@@ -34,7 +35,7 @@ function parentThat(open: () => boolean) {
 describe("[R62 COUNTEREXAMPLE] an attempt cannot claim the answer of a settlement that closed without it", () => {
   const opened = async (parentOpen: () => boolean) => {
     const attempts = new InMemoryExecutionAttemptStore(undefined, parentThat(parentOpen));
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme" });
     await attempts.reserveWork(attemptId, { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-verify-1" });
     return { attempts, attemptId };
   };
@@ -46,7 +47,7 @@ describe("[R62 COUNTEREXAMPLE] an attempt cannot claim the answer of a settlemen
 
     const claimed = await attempts.transition(attemptId, "committed");
     expect(claimed, "an attempt claimed the case's answer after its parent had already settled without it").toBe(false);
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.state, "the row was moved anyway, so the refusal was only a return value").toBe("reserved");
   });
 
@@ -61,7 +62,7 @@ describe("[R62 COUNTEREXAMPLE] an attempt cannot claim the answer of a settlemen
       await attempts.transition(attemptId, "failed", { error: { code: "UPSTREAM_ERROR", message: "gone" } }),
       "an attempt under a settled parent could not close, so it reads as live work forever",
     ).toBe(true);
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.state).toBe("failed");
   });
 
@@ -76,7 +77,7 @@ describe("[R62 COUNTEREXAMPLE] an attempt cannot claim the answer of a settlemen
     // The control: a guard that refused every commit would satisfy the first assertion and stop the product.
     const { attempts, attemptId } = await opened(() => true);
     expect(await attempts.transition(attemptId, "committed"), "an ordinary verdict could not be settled").toBe(true);
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.state).toBe("committed");
   });
 
@@ -84,7 +85,7 @@ describe("[R62 COUNTEREXAMPLE] an attempt cannot claim the answer of a settlemen
     // A deployment that supplies no parent reader is the single-store case, not a deployment where every
     // commit is refused. Absence of a check is not a failed check.
     const attempts = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r2", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r2"), tenant: "acme" });
     expect(await attempts.transition(attemptId, "committed")).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { attemptIdOf } from "@everdict/contracts";
+import { attemptIdOf, runExecutionId, storedExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "./execution-attempt-store.js";
 
@@ -8,10 +8,10 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
     const store = new InMemoryExecutionAttemptStore();
 
     // When three attempts of one execution open, and one of a different execution
-    const first = await store.open({ executionId: "evd-sc1-c1", tenant: "acme" });
-    const second = await store.open({ executionId: "evd-sc1-c1", tenant: "acme" });
-    const third = await store.open({ executionId: "evd-sc1-c1", tenant: "acme" });
-    const other = await store.open({ executionId: "evd-sc1-c2", tenant: "acme" });
+    const first = await store.open({ executionId: storedExecutionId("evd-sc1-c1"), tenant: "acme" });
+    const second = await store.open({ executionId: storedExecutionId("evd-sc1-c1"), tenant: "acme" });
+    const third = await store.open({ executionId: storedExecutionId("evd-sc1-c1"), tenant: "acme" });
+    const other = await store.open({ executionId: storedExecutionId("evd-sc1-c2"), tenant: "acme" });
 
     // Then the ordinal counts per execution and starts at 1 — generation 0 is what a producer that was never
     // told a number stamps, and it must never be a real attempt's coordinate.
@@ -19,14 +19,14 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
     expect(other.generation).toBe(1);
     // …and the id is the one spelling every other ledger uses.
     expect(second.attemptId).toBe(attemptIdOf("evd-sc1-c1", 2));
-    expect((await store.list("evd-sc1-c1")).map((a) => a.generation)).toEqual([1, 2, 3]);
+    expect((await store.list(storedExecutionId("evd-sc1-c1"))).map((a) => a.generation)).toEqual([1, 2, 3]);
   });
 
   it("records the attempt as `created` with the coordinate its opener knew", async () => {
     // Given an attempt opened with a batch coordinate
     const store = new InMemoryExecutionAttemptStore();
     const { attemptId } = await store.open({
-      executionId: "evd-sc1-c1-t2",
+      executionId: storedExecutionId("evd-sc1-c1-t2"),
       tenant: "acme",
       scorecardId: "sc1",
       caseId: "c1",
@@ -50,7 +50,7 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
   it("FIRST TERMINAL WINS — a second terminal transition is a silent no-op", async () => {
     // Given a committed attempt
     const store = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await store.open({ executionId: "evd-sc1-c1", tenant: "acme" });
+    const { attemptId } = await store.open({ executionId: storedExecutionId("evd-sc1-c1"), tenant: "acme" });
     expect(await store.transition(attemptId, "committed", { childRunId: "run-1" })).toBe(true);
 
     // When a late supersede (or a late failure report) arrives for the same attempt
@@ -61,7 +61,7 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
     // state can be rewritten afterwards answers "which row was touched last", not "how did this attempt end".
     expect(superseded).toBe(false);
     expect(failed).toBe(false);
-    const [row] = await store.list("evd-sc1-c1");
+    const [row] = await store.list(storedExecutionId("evd-sc1-c1"));
     expect(row?.state).toBe("committed");
     expect(row?.childRunId).toBe("run-1");
     expect(row?.error).toBeUndefined();
@@ -70,7 +70,7 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
   it("`executing` is reachable only from `created` — an attempt cannot start twice, or after it has ended", async () => {
     // Given an attempt that has already started
     const store = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await store.open({ executionId: "evd-run-0", tenant: "acme" });
+    const { attemptId } = await store.open({ executionId: runExecutionId("0"), tenant: "acme" });
     expect(await store.transition(attemptId, "executing")).toBe(true);
 
     // When a second "compute started" report arrives (the self-hosted lane's reports are fire-and-forget, so
@@ -79,19 +79,19 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
     expect(await store.transition(attemptId, "executing")).toBe(false);
 
     // …and the same holds once the attempt has ENDED — a late start report must not rewind a settled row.
-    const ended = await store.open({ executionId: "evd-run-1", tenant: "acme" });
+    const ended = await store.open({ executionId: runExecutionId("1"), tenant: "acme" });
     await store.transition(ended.attemptId, "superseded");
     expect(await store.transition(ended.attemptId, "executing")).toBe(false);
-    expect((await store.list("evd-run-1"))[0]?.state).toBe("superseded");
+    expect((await store.list(runExecutionId("1")))[0]?.state).toBe("superseded");
   });
 
   it("an attempt executes, then commits — the ordinary life of a row", async () => {
     const store = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await store.open({ executionId: "evd-run-2", tenant: "acme" });
+    const { attemptId } = await store.open({ executionId: runExecutionId("2"), tenant: "acme" });
 
     expect(await store.transition(attemptId, "executing", { childRunId: "run-2" })).toBe(true);
     expect(await store.transition(attemptId, "committed")).toBe(true);
-    const [row] = await store.list("evd-run-2");
+    const [row] = await store.list(runExecutionId("2"));
     expect(row?.state).toBe("committed");
     expect(row?.childRunId).toBe("run-2"); // the patch from the earlier transition survives
   });
@@ -99,19 +99,19 @@ describe("InMemoryExecutionAttemptStore — the physical execution ledger", () =
   it("markUnisolated is not a transition — the attempt goes on to commit from wherever it was", async () => {
     // Given an attempt whose recording coordinate could not be claimed
     const store = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await store.open({ executionId: "evd-run-3", tenant: "acme" });
+    const { attemptId } = await store.open({ executionId: runExecutionId("3"), tenant: "acme" });
     await store.markUnisolated(attemptId);
 
     // Then the attempt is still `created` — "no fence was raised" says nothing about where in its life the
     // attempt is — and it commits normally, carrying the flag onto its terminal row.
-    expect((await store.list("evd-run-3"))[0]).toMatchObject({ state: "created", unisolated: true });
+    expect((await store.list(runExecutionId("3")))[0]).toMatchObject({ state: "created", unisolated: true });
     expect(await store.transition(attemptId, "committed")).toBe(true);
-    expect((await store.list("evd-run-3"))[0]).toMatchObject({ state: "committed", unisolated: true });
+    expect((await store.list(runExecutionId("3")))[0]).toMatchObject({ state: "committed", unisolated: true });
   });
 
   it("a transition against an attempt nobody opened is refused, never invented", async () => {
     const store = new InMemoryExecutionAttemptStore();
     expect(await store.transition(attemptIdOf("evd-run-9", 1), "committed")).toBe(false);
-    expect(await store.list("evd-run-9")).toEqual([]);
+    expect(await store.list(runExecutionId("9"))).toEqual([]);
   });
 });

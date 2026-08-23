@@ -1,6 +1,6 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { ConflictError, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { ConflictError, NotFoundError, UpstreamError, storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, EvalCase } from "@everdict/contracts";
 import { InMemoryPlatformEventStore, InMemoryRunStore } from "@everdict/db";
 import { Run } from "@everdict/domain";
@@ -73,7 +73,7 @@ describe("RunService.cancel — the standalone run's user stop", () => {
     expect(cancelled.error?.code).toBe("CANCELLED");
 
     // …the terminal fact rode the settle (E0 outbox — a cancelled run is workspace news like any ending)
-    const emitted = (await facts.list("acme")).filter((e) => e.kind === "run.failed");
+    const emitted = (await facts.list(storedExecutionId("acme"))).filter((e) => e.kind === "run.failed");
     expect(emitted).toHaveLength(1);
     expect(emitted[0]?.subject).toEqual({ type: "run", id: "r1" });
 

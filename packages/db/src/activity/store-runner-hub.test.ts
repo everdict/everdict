@@ -4,6 +4,7 @@ import {
   type SelfHostedKey,
   StoreRunnerHub,
 } from "@everdict/application-control";
+import { runExecutionId, storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunnerJobStore } from "./runner-job-store.js";
@@ -438,7 +439,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
         });
       const { runId, tenant } = job;
       if (runId === undefined || tenant === undefined) throw new Error("the fixture job carries both");
-      const opened = await store.open({ executionId: runId, tenant });
+      const opened = await store.open({ executionId: storedExecutionId(runId), tenant });
       return {
         generation: opened.generation,
         attemptId: opened.attemptId,
@@ -461,7 +462,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
 
     const first = await hub.leaseWait(keyA, 200, ["repo"]);
     expect(first?.job.recordingGeneration).toBe(7); // the first lease runs the attempt the DISPATCH opened
-    expect(await ledger.list("evd-run-1")).toEqual([]); // …so the lease lane mints nothing at all
+    expect(await ledger.list(runExecutionId("1"))).toEqual([]); // …so the lease lane mints nothing at all
     const second = await hub.leaseWait(keyA, 200, ["repo"]);
     expect(second?.job.recordingGeneration).toBe(1); // its OWN attempt, minted by the ledger
     const third = await hub.leaseWait(keyA, 200, ["repo"]);
@@ -469,7 +470,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
 
     // The row told the third claim what the second one opened — the id no replica-local handle could carry.
     expect(priors).toEqual([undefined, "evd-run-1#g1"]);
-    expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state, a.leaseEpoch])).toEqual([
+    expect((await ledger.list(runExecutionId("1"))).map((a) => [a.attemptId, a.state, a.leaseEpoch])).toEqual([
       ["evd-run-1#g1", "superseded", 2], // ended by the claim that replaced it, not left `executing` for ever
       ["evd-run-1#g2", "executing", 3], // …under the lease epoch that authorized it
     ]);
@@ -485,7 +486,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
     const store = new InMemoryRunnerJobStore();
     const ledger = new InMemoryExecutionAttemptStore();
     // The attempt the dispatch opened before the job was ever parked, executing on the runner that went silent.
-    const dispatched = await ledger.open({ executionId: "evd-run-1", tenant: "acme" });
+    const dispatched = await ledger.open({ executionId: runExecutionId("1"), tenant: "acme" });
     await ledger.transition(dispatched.attemptId, "executing");
     const { priors, openLeaseAttempt } = seam(ledger);
     const hub = new StoreRunnerHub(store, opts({ leaseTtlMs: 0, openLeaseAttempt }));
@@ -503,7 +504,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
 
     // The claim was told what the PARK recorded, not merely what a previous mint left behind.
     expect(priors).toEqual([dispatched.attemptId]);
-    expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state])).toEqual([
+    expect((await ledger.list(runExecutionId("1"))).map((a) => [a.attemptId, a.state])).toEqual([
       ["evd-run-1#g1", "superseded"], // the dispatch's attempt, ended by the lease that replaced it
       ["evd-run-1#g2", "executing"],
     ]);

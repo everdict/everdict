@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { GithubAppService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubAppGateway } from "../../infrastructure/github/app-gateway.js";
@@ -230,7 +230,7 @@ describe("GithubAppService", () => {
   });
 
   it("list reports the configured providers (github.com + enterprise, both operator env) with no per-workspace registrations", async () => {
-    const view = await svc.list("acme");
+    const view = await svc.list(storedExecutionId("acme"));
     expect(view.providers).toEqual({ githubCom: true, enterprise: { host: ENTERPRISE_HOST } });
     expect(view.installations).toEqual([]);
   });
@@ -270,7 +270,7 @@ describe("GithubAppService", () => {
     expect(redirectTo).toContain("/acme/settings?tab=integrations");
     expect(redirectTo).toContain("githubApp=installed");
 
-    const view = await svc.list("acme");
+    const view = await svc.list(storedExecutionId("acme"));
     expect(view.installations).toEqual([
       { installationId: 42, account: "acme-org", connectedBy: "u-admin", connectedAt: NOW.toISOString() },
     ]);
@@ -279,7 +279,7 @@ describe("GithubAppService", () => {
   it("a bad/expired state callback → error redirect (no install recorded)", async () => {
     const { redirectTo } = await svc.callback({ installationId: 42, state: "nope" });
     expect(redirectTo).toContain("error=invalid_state");
-    expect((await svc.list("acme")).installations).toEqual([]);
+    expect((await svc.list(storedExecutionId("acme"))).installations).toEqual([]);
   });
 
   it("an enterprise callback confirms the account with the operator env enterprise App creds (no SecretStore)", async () => {
@@ -292,7 +292,7 @@ describe("GithubAppService", () => {
     );
 
     await svc.callback({ installationId: 7, state: "st-ghe" });
-    const view = await svc.list("acme");
+    const view = await svc.list(storedExecutionId("acme"));
     expect(view.installations[0]).toMatchObject({ installationId: 7, account: "ghe-team", host: ENTERPRISE_HOST });
   });
 

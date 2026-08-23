@@ -3,6 +3,7 @@ import {
   InMemoryExecutionAttemptStore,
   ScorecardService,
 } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseResult, KillOutcome, RuntimeWorkRef, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
@@ -75,7 +76,7 @@ async function twoAttempts(
   // The LEDGER of what this batch placed — the list a debt should be built from. It does not change when a
   // child row is settled, which is the whole point.
   const opened = await attempts.open({
-    executionId: "evd-sc-wd-c1",
+    executionId: storedExecutionId("evd-sc-wd-c1"),
     tenant: "acme",
     scorecardId: "sc-wd",
     caseId: "c1",

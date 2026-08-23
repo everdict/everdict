@@ -6,6 +6,7 @@ import {
   type HarnessInstanceSpec,
   type HarnessTemplateSpec,
   NotFoundError,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -54,7 +55,7 @@ describe("deleteHarnessVersion (creator-or-admin, tombstone)", () => {
     expect(res).toEqual({ workspace: "acme", id: "h", version: "2.0.0", deleted: true });
     expect(await instances.versions("acme", "h")).toEqual(["1.0.0"]); // the deleted version is excluded
     await expect(instances.get("acme", "h", "2.0.0")).rejects.toBeInstanceOf(NotFoundError);
-    expect((await instances.list("acme")).find((e) => e.id === "h")?.versions).toEqual(["1.0.0"]);
+    expect((await instances.list(storedExecutionId("acme"))).find((e) => e.id === "h")?.versions).toEqual(["1.0.0"]);
   });
 
   it("a workspace admin can delete others' versions too", async () => {
@@ -135,7 +136,7 @@ describe("harnessVisibleTo (private = latest-version owner)", () => {
   });
 
   it("the list entry carries latestCreatedBy so list filters agree with detail visibility", async () => {
-    const entry = (await instances.list("acme")).find((e) => e.id === "h");
+    const entry = (await instances.list(storedExecutionId("acme"))).find((e) => e.id === "h");
     expect(entry?.private).toBe(true);
     expect(entry?.latestCreatedBy).toBe("alice");
     expect(entry?.createdBy).toBeUndefined(); // earliest version had no stamp — the old filter key

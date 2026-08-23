@@ -1,4 +1,5 @@
 import type { ExecutionAttemptStore, OpenAttemptInput, RevocationOutcome } from "@everdict/application-control";
+import type { ExecutionId } from "@everdict/contracts";
 import {
   type ActivationDecision,
   ConflictError,
@@ -375,7 +376,7 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
     );
   }
 
-  async list(executionId: string): Promise<ExecutionAttemptRecord[]> {
+  async list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]> {
     const { rows } = await this.client.query<AttemptRow>(
       "SELECT * FROM everdict_execution_attempts WHERE execution_id = $1 ORDER BY generation",
       [executionId],

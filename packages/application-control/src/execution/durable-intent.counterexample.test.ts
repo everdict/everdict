@@ -1,3 +1,4 @@
+import { runExecutionId } from "@everdict/contracts";
 import type { RuntimeWorkRef } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -49,7 +50,7 @@ const WORK = (over: Partial<RuntimeWorkRef> = {}): RuntimeWorkRef => ({
 });
 
 const INPUT: OpenAttemptInput = {
-  executionId: "evd-run-1",
+  executionId: runExecutionId("1"),
   tenant: "acme",
   kind: "run",
 } as OpenAttemptInput;

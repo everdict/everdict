@@ -4,6 +4,7 @@ import {
   EXECUTING_PREDECESSOR_STATES,
   type ExecutionAttemptRecord,
   type ExecutionAttemptState,
+  type ExecutionId,
   NotFoundError,
   OPEN_RUN_STATUSES,
   OPEN_SCORECARD_STATUSES,
@@ -24,7 +25,7 @@ export interface AttemptParentAuthority {
 }
 
 export interface OpenAttemptInput {
-  executionId: string;
+  executionId: ExecutionId;
   tenant: string;
   scorecardId?: string;
   caseId?: string;
@@ -175,7 +176,7 @@ export interface ExecutionAttemptStore {
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
   markUnisolated(attemptId: string): Promise<void>;
   // Every physical attempt of one logical execution, oldest first — "what actually ran for this case".
-  list(executionId: string): Promise<ExecutionAttemptRecord[]>;
+  list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]>;
   // Every attempt under one batch: the compute a scorecard actually spent, which its receipts (one per case)
   // structurally cannot report.
   listForScorecard(scorecardId: string): Promise<ExecutionAttemptRecord[]>;
@@ -413,7 +414,7 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     this.attempts.set(attemptId, { ...current, unisolated: true, updatedAt: this.now() });
   }
 
-  async list(executionId: string): Promise<ExecutionAttemptRecord[]> {
+  async list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]> {
     return [...this.attempts.values()]
       .filter((a) => a.executionId === executionId)
       .sort((a, b) => a.generation - b.generation);

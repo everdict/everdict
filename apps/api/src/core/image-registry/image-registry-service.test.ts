@@ -1,5 +1,5 @@
 import { ImageRegistryService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, UpstreamError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,7 +42,7 @@ describe("ImageRegistryService — multiple registries", () => {
     await service.upsert("acme", { name: "ghcr", host: "ghcr.io", namespace: "acme" });
     await service.upsert("acme", { name: "corp", host: "registry.acme.dev:5000" });
     await service.upsert("acme", { name: "ghcr", host: "ghcr.io", namespace: "acme2" }); // replace
-    const list = await service.list("acme");
+    const list = await service.list(storedExecutionId("acme"));
     expect(list.map((r) => r.name).sort()).toEqual(["corp", "ghcr"]);
     expect(list.find((r) => r.name === "ghcr")?.imagePrefix).toBe("ghcr.io/acme2/");
     // classification coordinates span all registries.
@@ -56,12 +56,12 @@ describe("ImageRegistryService — multiple registries", () => {
     const { settings, service } = svc();
     // Given: a singular config registered before the plural model.
     await settings.set("acme", { imageRegistry: { host: "ghcr.io", namespace: "acme", pullSecretName: "PULL" } });
-    const before = await service.list("acme");
+    const before = await service.list(storedExecutionId("acme"));
     expect(before).toHaveLength(1);
     expect(before[0]?.name).toBe("default");
     // When: adding a new registry — the legacy joins the list and the singular field is cleared.
     await service.upsert("acme", { name: "corp", host: "registry.acme.dev:5000" });
-    const after = await service.list("acme");
+    const after = await service.list(storedExecutionId("acme"));
     expect(after.map((r) => r.name).sort()).toEqual(["corp", "default"]);
     expect((await settings.get("acme"))?.imageRegistry).toBeNull();
   });
@@ -129,7 +129,7 @@ describe("ImageRegistryService — multiple registries", () => {
     await service.upsert("acme", { name: "a", host: "reg-a.io" });
     await service.upsert("acme", { name: "b", host: "reg-b.io" });
     await service.remove("acme", "a");
-    expect((await service.list("acme")).map((r) => r.name)).toEqual(["b"]);
+    expect((await service.list(storedExecutionId("acme"))).map((r) => r.name)).toEqual(["b"]);
   });
 });
 

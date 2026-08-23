@@ -1,6 +1,7 @@
 import { CiLinkService, type GithubAppRepoAccess } from "@everdict/application-control";
 import { installGithubWorkspaceRunner } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import { InMemoryRunnerStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 
@@ -42,7 +43,7 @@ describe("installGithubWorkspaceRunner — GitHub Actions runner self-registrati
     expect(res.runtimeTarget).toBe(`self:ws:${res.runner.id}`);
     expect(res.githubRunnerLabel).toBe(`everdict-${res.runner.id}`);
     expect(res.registrationExpiresAt).toBe("2026-07-04T12:00:00Z");
-    const owned = await runnerStore.list("ws:acme");
+    const owned = await runnerStore.list(storedExecutionId("ws:acme"));
     expect(owned.map((r) => r.id)).toContain(res.runner.id);
 
     // Install script: both the GitHub runner (config.sh + registration token) and the Everdict runner (everdict runner --pair + rnr_ token).
@@ -66,7 +67,7 @@ describe("installGithubWorkspaceRunner — GitHub Actions runner self-registrati
         { workspace: "acme", repository: "not-a-repo", label: "x", apiUrl: "u" },
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(await runnerStore.list("ws:acme")).toHaveLength(0); // no runner is created on invalid input
+    expect(await runnerStore.list(storedExecutionId("ws:acme"))).toHaveLength(0); // no runner is created on invalid input
   });
 
   it("org level (org given): config.sh --url is the org URL (shared by all repos in that org)", async () => {

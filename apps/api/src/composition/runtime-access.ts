@@ -32,6 +32,7 @@ import type {
   AdoptionDecision,
   CaseResult,
   EvalCase,
+  ExecutionId,
   KillOutcome,
   ReadResult,
   RegistryAuth,
@@ -44,7 +45,14 @@ import type {
   VerifierJob,
   WorkPresence,
 } from "@everdict/contracts";
-import { NotFoundError, RateLimitError, UpstreamError, readOrUnknown, worstKillOutcome } from "@everdict/contracts";
+import {
+  NotFoundError,
+  RateLimitError,
+  UpstreamError,
+  readOrUnknown,
+  recordExecutionId,
+  worstKillOutcome,
+} from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { BudgetTracker } from "@everdict/domain";
@@ -780,7 +788,7 @@ export async function recoverStandaloneRun(
   // turned "the attempt ledger is down" into "this run placed no compute", which routed straight to the
   // re-dispatch below. The read answers three ways now, and only a genuine `absent` may be acted on.
   const handlesRead = workHandlesFor
-    ? await readOrUnknown(() => workHandlesFor(`evd-run-${r.id}`), "the run's runtime work handles")
+    ? await readOrUnknown(() => workHandlesFor(recordExecutionId(r)), "the run's runtime work handles")
     : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
   if (handlesRead.kind === "unknown")
     // DEFERRED, AND THE SWEEP IS TOLD (arch-review 55). This used to `return` out of a fire-and-forget
@@ -918,7 +926,7 @@ export async function runStartupRecovery(deps: {
   // composition that wires no attempt ledger keeps today's behavior — with the case-id resolution and its
   // documented blast radius, which is what the pre-handle rows have anyway.
   adoptWorkFn?: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
-  workHandlesFor?: (executionId: string) => Promise<RuntimeWorkRef[]>;
+  workHandlesFor?: (executionId: ExecutionId) => Promise<RuntimeWorkRef[]>;
 }): Promise<RecoveryTarget[]> {
   const { scorecardStore, store, scorecardService, service, adoptWorkFn, workHandlesFor, owner, replicas } = deps;
   const recovered = await recoverInterrupted({

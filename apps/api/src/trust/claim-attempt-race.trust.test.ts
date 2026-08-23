@@ -5,6 +5,7 @@ import {
   openPhysicalAttempt,
   requiredRunnerCapabilities,
 } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseJob } from "@everdict/contracts";
 import {
   PgExecutionAttemptStore,
@@ -56,7 +57,7 @@ function productionOpener(): OpenLeaseAttempt {
       await attempts.transition(prior, "superseded", {
         error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
       });
-    const opened = await openPhysicalAttempt({ attempts }, { executionId: runId, tenant });
+    const opened = await openPhysicalAttempt({ attempts }, { executionId: storedExecutionId(runId), tenant });
     const attemptId = opened.attemptId;
     if (attemptId === undefined) throw new Error("the ledger is wired, so the open carries a row id");
     return {
@@ -198,7 +199,7 @@ describeTrust("TRUST-176 — a re-lease's claim and its attempt ledger commit as
     // THE CLAIM'S OTHER HALF: the attempt it replaced is ENDED, by the claim that replaced it. This is the
     // sentence the three-step path structurally could not say — the predecessor's id reached no replica —
     // and the one a losing claimer must not have written a second copy of.
-    const attempts = await ledger(pg.client).list(runId);
+    const attempts = await ledger(pg.client).list(storedExecutionId(runId));
     expect(attempts.map((attempt) => [attempt.attemptId, attempt.state, attempt.leaseEpoch])).toEqual([
       [`${runId}#g1`, "superseded", 2],
       [`${runId}#g2`, "executing", 3],
@@ -241,13 +242,16 @@ describeTrust("TRUST-176 — a re-lease's claim and its attempt ledger commit as
     });
     // …and the ledger never heard about any of it. The predecessor is LIVE: its supersede rolled back with
     // the claim that wrote it, because an attempt is not ended by a lease that never happened.
-    const attempts = await ledger(pg.client).list(runId);
+    const attempts = await ledger(pg.client).list(storedExecutionId(runId));
     expect(attempts.map((attempt) => [attempt.attemptId, attempt.state])).toEqual([[`${runId}#g1`, "executing"]]);
 
     // And the job is genuinely claimable again — a rollback that left the row unwritable would be the same
     // outage in a quieter form.
     const recovered = await replica({ leaseTtlMs: 600_000, now: () => Date.now() }).leaseWait(key, 400);
     expect(recovered?.attempt.leaseEpoch).toBe(3);
-    expect((await ledger(pg.client).list(runId)).map((attempt) => attempt.state)).toEqual(["superseded", "executing"]);
+    expect((await ledger(pg.client).list(storedExecutionId(runId))).map((attempt) => attempt.state)).toEqual([
+      "superseded",
+      "executing",
+    ]);
   }, 60_000);
 });

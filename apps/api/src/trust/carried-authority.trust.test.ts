@@ -5,6 +5,7 @@ import {
   ScorecardService,
   recoverInterrupted,
 } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult, RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
@@ -750,7 +751,7 @@ describeTrust("TRUST-154 — a recovered run's ending is announced, and its call
     expect((await store.get(submitted.id))?.webhookUrl).toBe("https://hook.example/cb-with-secret");
     // …and absent from what a reader gets, because the URL is frequently the credential.
     expect((await service.get(submitted.id))?.webhookUrl).toBeUndefined();
-    expect((await service.list("acme")).every((r) => r.webhookUrl === undefined)).toBe(true);
+    expect((await service.list(storedExecutionId("acme"))).every((r) => r.webhookUrl === undefined)).toBe(true);
   }, 20_000);
 
   it("a callback pointing inside our own network is refused rather than dialled", async () => {

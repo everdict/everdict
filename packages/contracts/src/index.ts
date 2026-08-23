@@ -2,6 +2,7 @@
 // Every contract is paired with a Zod schema (the schema is the source of truth; the type is z.infer).
 export * from "./errors.js";
 export * from "./version.js";
+export * from "./execution/execution-id.js";
 export * from "./job-result-wire.js";
 export { evalContainerSecretEnv } from "./execution/eval-container-env.js";
 export { refuseUnenforceableNetwork } from "./execution/network-enforcement.js";

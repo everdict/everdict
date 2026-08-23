@@ -1,4 +1,5 @@
 import type { ClaimAttemptMint } from "@everdict/application-control";
+import { runExecutionId } from "@everdict/contracts";
 import type { CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -236,7 +237,7 @@ const mint: ClaimAttemptMint = async (claimed, ledger) => {
     await attempts.transition(ledger.prior, "superseded", {
       error: { code: "LEASE_SUPERSEDED", message: "re-leased to another runner" },
     });
-  const opened = await attempts.open({ executionId: "evd-run-1", tenant: "acme" });
+  const opened = await attempts.open({ executionId: runExecutionId("1"), tenant: "acme" });
   await attempts.transition(opened.attemptId, "executing", { leaseEpoch: claimed.leaseEpoch });
   return { job: { ...claimed.job, recordingGeneration: opened.generation }, attemptId: opened.attemptId };
 };

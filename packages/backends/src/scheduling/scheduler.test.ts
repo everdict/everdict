@@ -1,5 +1,5 @@
 import type { AdmissionLedger } from "@everdict/application-control";
-import { type CaseJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, PaymentRequiredError, runExecutionId } from "@everdict/contracts";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import type { Backend, DispatchOptions } from "../backend.js";
@@ -658,7 +658,11 @@ describe("Scheduler", () => {
     const p = sched.dispatch(job(), { onAttempt: (attempt) => seen.push(attempt.attemptId) });
     await flush();
 
-    received?.onAttempt?.({ attemptId: "evd-run-1#g41", executionId: "evd-run-1", recording: { generation: 41 } });
+    received?.onAttempt?.({
+      attemptId: "evd-run-1#g41",
+      executionId: runExecutionId("1"),
+      recording: { generation: 41 },
+    });
     expect(seen).toEqual(["evd-run-1#g41"]);
 
     b.releaseAll();

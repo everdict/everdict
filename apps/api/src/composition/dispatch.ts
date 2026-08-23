@@ -23,7 +23,13 @@ import {
 } from "@everdict/backends";
 import type { Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import type { RuntimeWorkRef } from "@everdict/contracts";
-import { BadRequestError, type CaseJob, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type RegistryAuth,
+  type RuntimeSpec,
+  storedExecutionId,
+} from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { TrustZonePolicy } from "@everdict/domain";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
@@ -191,7 +197,7 @@ export function buildDispatch(deps: {
     const opened = await openPhysicalAttempt(
       { ...(ledger ? { attempts: ledger } : {}), recordings: recordingStore },
       {
-        executionId: job.runId,
+        executionId: storedExecutionId(job.runId),
         tenant: job.tenant,
         ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
         caseId: job.evalCase.id,

@@ -1,5 +1,6 @@
 import { ApprovalService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { storedExecutionId } from "@everdict/contracts";
 import type { ApprovalRecord } from "@everdict/contracts";
 import { InMemoryApprovalStore, InMemoryPlatformEventStore, InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
@@ -83,7 +84,7 @@ describe("durable agent approvals (/approvals + internal bridges — A6)", () =>
     expect(again.statusCode).toBe(409);
 
     // Facts rode the outbox: requested at the park, decided at the settle.
-    const kinds = (await events.list("acme")).map((e) => e.kind);
+    const kinds = (await events.list(storedExecutionId("acme"))).map((e) => e.kind);
     expect(kinds).toEqual(["approval.requested", "approval.decided"]);
   });
 

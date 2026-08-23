@@ -1603,6 +1603,23 @@ const MUTATIONS = [
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/ambiguous-create.counterexample.test.ts"],
   },
+  {
+    // arch-review 63, found by the ExecutionId brand. Four display lookups spelled `evd-run-<row id>` by
+    // hand, which is the standalone derivation — so every scorecard child's live view found no handle and
+    // fell back to the case-id resolution, i.e. another concurrent trial's container. The derivation has
+    // one owner now; neutralizing it back to the standalone form is what those call sites were doing.
+    name: "record execution id — a child's coordinate collapses to the standalone one",
+    file: "packages/contracts/src/execution/execution-id.ts",
+    from: [
+      "  if (record.executionId) return storedExecutionId(record.executionId);",
+      "  return record.parentScorecardId",
+      "    ? caseExecutionId(record.parentScorecardId, record.caseId)",
+      "    : runExecutionId(record.id);",
+    ].join("\n"),
+    to: "  return runExecutionId(record.id);",
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/application-control", "src/run/child-display-coordinate.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

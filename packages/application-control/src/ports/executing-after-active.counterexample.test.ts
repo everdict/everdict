@@ -1,3 +1,4 @@
+import { runExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "./execution-attempt-store.js";
 
@@ -29,7 +30,7 @@ import { InMemoryExecutionAttemptStore } from "./execution-attempt-store.js";
 describe("[R58 COUNTEREXAMPLE] an activated attempt can still report that it started", () => {
   const opened = async () => {
     const attempts = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme" });
     return { attempts, attemptId };
   };
 
@@ -47,7 +48,7 @@ describe("[R58 COUNTEREXAMPLE] an activated attempt can still report that it sta
       await attempts.transition(attemptId, "executing"),
       "an attempt that had authorized its work could not report that it started",
     ).toBe(true);
-    expect((await attempts.list("evd-run-r1"))[0]?.state).toBe("executing");
+    expect((await attempts.list(runExecutionId("r1")))[0]?.state).toBe("executing");
   });
 
   it("still moves reserved → executing, for a lane that reports no activation", async () => {

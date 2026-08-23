@@ -5,7 +5,7 @@ import {
   type WorkspaceRunnerRoster,
   renderCiWorkflow,
 } from "@everdict/application-control";
-import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, UpstreamError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { githubRepoWriterFactory } from "../../infrastructure/github/repo-writer.js";
@@ -56,7 +56,7 @@ describe("CiLinkService — link CRUD (one record per repository, case-insensiti
   it("upsert replaces the same repository (stamps createdBy), and remove severs the trust too", async () => {
     await svc.upsert("acme", "alice", { repository: "Acme/App", harness: "bu", slots: { planner: {} } });
     await svc.upsert("acme", "bob", { repository: "acme/app", harness: "bu", dataset: "pinch", slots: {} });
-    const links = await svc.list("acme");
+    const links = await svc.list(storedExecutionId("acme"));
     expect(links).toHaveLength(1); // case-insensitive replace
     expect(links[0]).toMatchObject({ repository: "acme/app", harness: "bu", dataset: "pinch", createdBy: "bob" });
     expect(await svc.remove("acme", "ACME/APP")).toEqual([]);
@@ -64,7 +64,7 @@ describe("CiLinkService — link CRUD (one record per repository, case-insensiti
 
   it("the trigger knob (auto|comment|both) is stored on the link — how the setup-PR workflow's PR fires", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, trigger: "comment" });
-    expect((await svc.list("acme"))[0]?.trigger).toBe("comment");
+    expect((await svc.list(storedExecutionId("acme")))[0]?.trigger).toBe("comment");
   });
 
   it("personal-runner runtime (self / self:<id>) is BadRequest — a CI principal cannot lease a personal runner (block the fire-time failure at save)", async () => {
@@ -81,7 +81,7 @@ describe("CiLinkService — link CRUD (one record per repository, case-insensiti
 
   it("does not touch another workspace's settings (workspace scope)", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
-    expect(await svc.list("beta")).toEqual([]);
+    expect(await svc.list(storedExecutionId("beta"))).toEqual([]);
   });
 
   it("link key is (host, repository) — the same owner/name coexists as separate links on github.com and a GHE", async () => {
@@ -92,7 +92,7 @@ describe("CiLinkService — link CRUD (one record per repository, case-insensiti
       harness: "bu-ghe",
       slots: {},
     });
-    expect(await svc.list("acme")).toHaveLength(2);
+    expect(await svc.list(storedExecutionId("acme"))).toHaveLength(2);
 
     // Only an upsert on the same host replaces (host comparison ignores case/trailing slash).
     await svc.upsert("acme", "bob", {
@@ -101,7 +101,7 @@ describe("CiLinkService — link CRUD (one record per repository, case-insensiti
       harness: "bu-ghe-v2",
       slots: {},
     });
-    const links = await svc.list("acme");
+    const links = await svc.list(storedExecutionId("acme"));
     expect(links).toHaveLength(2);
     expect(links.find((l) => l.host !== undefined)?.harness).toBe("bu-ghe-v2");
     expect(links.find((l) => l.host === undefined)?.harness).toBe("bu");

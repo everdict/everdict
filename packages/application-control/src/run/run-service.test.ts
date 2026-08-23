@@ -1,4 +1,4 @@
-import { type CaseResult, type RunRecord, UpstreamError } from "@everdict/contracts";
+import { type CaseResult, type RunRecord, UpstreamError, runExecutionId } from "@everdict/contracts";
 import { type PolicyResolution, composeVerdictPolicy } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -450,7 +450,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     const ok = standalone({ dispatch: async () => passing });
     const okRecord = await submit(ok.service);
     expect((await settledRun(ok.store, okRecord.id)).status).toBe("succeeded");
-    const okRows = await ok.attempts.list(`evd-run-${okRecord.id}`);
+    const okRows = await ok.attempts.list(runExecutionId(okRecord.id));
     expect(okRows.map((r) => r.state)).toEqual(["committed"]);
     // The first physical execution owns generation 1 — g0 is what an untold producer stamps — and the row
     // names the run it drove, so the two planes join with no derivation.
@@ -464,7 +464,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     });
     const failedRecord = await submit(boom.service);
     expect((await settledRun(boom.store, failedRecord.id)).status).toBe("failed");
-    const failedRows = await boom.attempts.list(`evd-run-${failedRecord.id}`);
+    const failedRows = await boom.attempts.list(runExecutionId(failedRecord.id));
     expect(failedRows.map((r) => r.state)).toEqual(["failed"]);
     // …carrying the exit's own code onto the ledger, not a flattened INTERNAL.
     expect(failedRows[0]?.error?.code).toBe("UPSTREAM_ERROR");
@@ -478,7 +478,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     const record = await submit(service);
     expect((await settledRun(store, record.id)).status).toBe("succeeded");
 
-    const rows = await attempts.list(`evd-run-${record.id}`);
+    const rows = await attempts.list(runExecutionId(record.id));
     expect(rows.map((r) => r.state)).toEqual(["committed"]);
     expect(rows[0]?.unisolated).toBe(true); // …and it still says its replay was never claimed
   });
@@ -512,7 +512,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     // afterwards that a crash could sit in front of.
     expect(order).toEqual(["settleWith:succeeded", "stamp:committed"]);
     expect(order).not.toContain("update:succeeded");
-    expect((await attempts.list(`evd-run-${record.id}`)).map((r) => r.state)).toEqual(["committed"]);
+    expect((await attempts.list(runExecutionId(record.id))).map((r) => r.state)).toEqual(["committed"]);
   });
 
   it("a stamp that FAILS takes the settlement with it — the run is left open for recovery, not settled behind a ledger that could not record it", async () => {
@@ -552,7 +552,7 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
     expect((await settledRun(store, record.id)).status).toBe("succeeded");
 
     expect(order).toEqual(["update:succeeded", "stamp:committed"]);
-    expect((await attempts.list(`evd-run-${record.id}`)).map((r) => r.state)).toEqual(["committed"]);
+    expect((await attempts.list(runExecutionId(record.id))).map((r) => r.state)).toEqual(["committed"]);
   });
 
   it("a stamp that fails on the two-step path never disturbs the run — the audit plane decides no outcomes", async () => {

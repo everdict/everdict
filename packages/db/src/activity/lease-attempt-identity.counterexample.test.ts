@@ -5,6 +5,7 @@ import {
   type SelfHostedKey,
   StoreRunnerHub,
 } from "@everdict/application-control";
+import { runExecutionId, storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunnerJobStore } from "./runner-job-store.js";
@@ -54,7 +55,7 @@ describe("a self-hosted re-lease reports the attempt it actually ran, even with 
     // Given a job parked under the attempt the DISPATCH opened (A), with its recording generation
     const store = new InMemoryRunnerJobStore();
     const ledger = new InMemoryExecutionAttemptStore();
-    const dispatched = await ledger.open({ executionId: "evd-run-1", tenant: "acme" });
+    const dispatched = await ledger.open({ executionId: runExecutionId("1"), tenant: "acme" });
     await ledger.transition(dispatched.attemptId, "executing");
 
     // …and a claim-lane seam whose RECORDING claim is refused: the ledger row is opened and marked unisolated,
@@ -67,7 +68,7 @@ describe("a self-hosted re-lease reports the attempt it actually ran, even with 
         });
       const { runId, tenant } = leased;
       if (runId === undefined || tenant === undefined) throw new Error("the fixture job carries both");
-      const opened = await attemptStore.open({ executionId: runId, tenant });
+      const opened = await attemptStore.open({ executionId: storedExecutionId(runId), tenant });
       await attemptStore.markUnisolated(opened.attemptId);
       return {
         attemptId: opened.attemptId, // …the row exists; the fence does not
@@ -103,7 +104,7 @@ describe("a self-hosted re-lease reports the attempt it actually ran, even with 
     expect(enqueued.generation).toBeUndefined(); // …the channel that existed before is empty exactly when it is needed
 
     // …and the ledger already agrees about which execution was live: A ended, B ran.
-    expect((await ledger.list("evd-run-1")).map((a) => [a.attemptId, a.state, a.unisolated])).toEqual([
+    expect((await ledger.list(runExecutionId("1"))).map((a) => [a.attemptId, a.state, a.unisolated])).toEqual([
       ["evd-run-1#g1", "superseded", false],
       ["evd-run-1#g2", "executing", true],
     ]);

@@ -1,3 +1,4 @@
+import { runExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "./execution-attempt-store.js";
 
@@ -27,7 +28,7 @@ import { InMemoryExecutionAttemptStore } from "./execution-attempt-store.js";
 describe("[R63 COUNTEREXAMPLE] one attempt hands out one work authorization", () => {
   const opened = async () => {
     const attempts = new InMemoryExecutionAttemptStore(undefined, { authorityOf: async () => ({ epoch: 1 }) });
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme" });
     return { attempts, attemptId };
   };
 
@@ -42,7 +43,7 @@ describe("[R63 COUNTEREXAMPLE] one attempt hands out one work authorization", ()
     expect(granted, "two callers were authorized to create work for one attempt").toHaveLength(1);
     // …and the row holds exactly what the winner was told it holds, or the authorization names an object
     // nothing can address.
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.runtimeWork?.externalJobId).toBe(
       (granted[0] as PromiseFulfilledResult<{ work: { externalJobId: string } }>).value.work.externalJobId,
     );
@@ -69,7 +70,7 @@ describe("[R63 COUNTEREXAMPLE] one attempt hands out one work authorization", ()
     ).rejects.toThrow();
 
     // …and the store still answers afterwards.
-    expect((await attempts.list("evd-run-r1"))[0]?.runtimeWork?.externalJobId).toBe("job-A");
+    expect((await attempts.list(runExecutionId("r1")))[0]?.runtimeWork?.externalJobId).toBe("job-A");
     expect(await attempts.transition(attemptId, "committed")).toBe(true);
   });
 
@@ -87,6 +88,6 @@ describe("[R63 COUNTEREXAMPLE] one attempt hands out one work authorization", ()
       "activate",
       "already_active",
     ]);
-    expect((await attempts.list("evd-run-r1"))[0]?.state).toBe("active");
+    expect((await attempts.list(runExecutionId("r1")))[0]?.state).toBe("active");
   });
 });

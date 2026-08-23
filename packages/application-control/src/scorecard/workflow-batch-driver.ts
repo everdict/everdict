@@ -15,10 +15,11 @@ import {
   type Scorecard,
   type ScorecardStep,
   type VerdictPolicy,
+  caseExecutionId,
   caseKeyOf,
   encodeCaseKey,
 } from "@everdict/contracts";
-import type { JudgmentClaim } from "@everdict/contracts";
+import type { ExecutionId, JudgmentClaim } from "@everdict/contracts";
 import {
   type CircuitBreaker,
   type HarnessSecretMaps,
@@ -52,8 +53,8 @@ import { jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-at
 // `executionIdOf` produces, so the frames, logs, live trajectory and replay of a case land under one id
 // whichever driver ran it. It used to be `evd-<batch>-<case>` here with a comment saying the Temporal path
 // has no trial fan-out; it does now, and two trials sharing a correlation id would interleave into one replay.
-function executionIdFor(batchId: string, key: CaseKey): string {
-  return `evd-${batchId}-${key.caseId}${key.trial !== undefined ? `-t${key.trial}` : ""}`;
+function executionIdFor(batchId: string, key: CaseKey): ExecutionId {
+  return caseExecutionId(batchId, key.caseId, key.trial);
 }
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { weightedTargets } from "../ops/shard-weights.js";

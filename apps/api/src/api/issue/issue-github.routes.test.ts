@@ -1,6 +1,7 @@
 import { GithubIssueSync, IssueService, RunService } from "@everdict/application-control";
 import type { GithubIssue, GithubRepoWriter, GithubRepoWriterFactory } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { storedExecutionId } from "@everdict/contracts";
 import { InMemoryIssueStore, InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -141,7 +142,7 @@ describe("issue GitHub sync routes", () => {
     await app.inject({ method: "POST", url: "/issues/import", headers: H, payload });
     const again = await app.inject({ method: "POST", url: "/issues/import", headers: H, payload });
     expect(again.json().skipped).toEqual([{ number: 1, reason: "already_imported" }]);
-    expect(await store.list("acme")).toHaveLength(1);
+    expect(await store.list(storedExecutionId("acme"))).toHaveLength(1);
   });
 
   it("toggles the sync direction and detaches the copy while keeping the local issue", async () => {

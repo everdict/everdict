@@ -1,5 +1,6 @@
 import { InMemoryExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { runExecutionId } from "@everdict/contracts";
 import type { EvalCase, RuntimeWorkRef } from "@everdict/contracts";
 import { InMemoryRunStore } from "@everdict/db";
 import { Run } from "@everdict/domain";
@@ -55,7 +56,7 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     const store = new InMemoryRunStore();
     await store.create(runningRun());
     const attempts = new InMemoryExecutionAttemptStore(() => now);
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme", caseId: "c1" });
     await attempts.reserveWork(attemptId, WORK);
     const killWork = vi.fn(async () => ({ status: "stopped" as const }));
     const killUnhandled = vi.fn(async () => ({ status: "stopped" as const }));
@@ -84,7 +85,7 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     const store = new InMemoryRunStore();
     await store.create(runningRun());
     const attempts = new InMemoryExecutionAttemptStore(() => now);
-    await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
+    await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme", caseId: "c1" });
     const killWork = vi.fn(async () => ({ status: "stopped" as const }));
     const killUnhandled = vi.fn(async () => ({ status: "stopped" as const }));
     const service = new RunService({
@@ -111,7 +112,7 @@ describe("a cancelled run's teardown addresses the work its dispatch created", (
     const store = new InMemoryRunStore();
     await store.create(runningRun());
     const attempts = new InMemoryExecutionAttemptStore(() => now);
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", caseId: "c1" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme", caseId: "c1" });
     await attempts.reserveWork(attemptId, WORK);
     const service = new RunService({
       dispatcher: unusedDispatcher,

@@ -4,6 +4,7 @@ import {
   InMemoryExecutionAttemptStore,
   ScorecardService,
 } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseResult, KillOutcome, RuntimeWorkRef } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
@@ -79,7 +80,7 @@ async function teardownWith(state: "reserved" | "active", opts: { activatedAgoMs
   await store.create(record("sc-ab"));
 
   const opened = await attempts.open({
-    executionId: "evd-sc-ab-c1",
+    executionId: storedExecutionId("evd-sc-ab-c1"),
     tenant: "acme",
     scorecardId: "sc-ab",
     caseId: "c1",

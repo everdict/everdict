@@ -1,4 +1,5 @@
 import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { caseResultDigest, contentDigest } from "@everdict/domain";
@@ -41,7 +42,7 @@ describeTrust("TRUST-166 — one case, one canonical commit", () => {
         caseId: "c1",
         trial: 0,
         childRunId,
-        executionId: "evd-sc-1-c1",
+        executionId: storedExecutionId("evd-sc-1-c1"),
         generation: 1,
         resultDigest: `digest-of-${childRunId}`,
         committedAt: "2026-08-14T00:00:00.000Z",
@@ -54,7 +55,7 @@ describeTrust("TRUST-166 — one case, one canonical commit", () => {
     // case's. What the loser is told is WHOSE it is, so it never has to re-read (which would be racing again).
     expect(second.kind).toBe("already_committed");
     expect(second.receipt.childRunId).toBe("child-A");
-    expect(await receipts.list("sc-1")).toHaveLength(1);
+    expect(await receipts.list(storedExecutionId("sc-1"))).toHaveLength(1);
   });
 
   it("a trialled case commits once PER TRIAL — N trials are N cases, here as everywhere else", async () => {
@@ -71,7 +72,7 @@ describeTrust("TRUST-166 — one case, one canonical commit", () => {
     expect((await claim(0, "child-t0")).kind).toBe("committed");
     expect((await claim(1, "child-t1")).kind).toBe("committed");
     expect((await claim(1, "child-t1-dup")).kind).toBe("already_committed");
-    expect(await receipts.list("sc-1")).toHaveLength(2);
+    expect(await receipts.list(storedExecutionId("sc-1"))).toHaveLength(2);
   });
 
   it("a batch commits exactly one receipt per case through the real driver", async () => {
@@ -455,7 +456,9 @@ describeTrust("TRUST-171 — the case-completed fact is persisted with the child
     await new Promise((r) => setTimeout(r, 2000));
 
     expect((await store.get(record.id))?.status).toBe("succeeded");
-    const completed = (await facts.list("acme")).filter((e) => e.kind === "scorecard.case.completed");
+    const completed = (await facts.list(storedExecutionId("acme"))).filter(
+      (e) => e.kind === "scorecard.case.completed",
+    );
     expect(completed).toHaveLength(1);
     expect(completed[0]?.subject).toEqual({ type: "scorecard", id: record.id });
     expect(completed[0]?.payload).toMatchObject({ caseId: "c1" });

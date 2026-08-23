@@ -1,3 +1,4 @@
+import { runExecutionId } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -87,7 +88,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
   // reservation for an object it has not created yet.
   const paused = async () => {
     const attempts = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme" });
     await attempts.reserveWork(attemptId, { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-c1-aaaa" });
     return { attempts, attemptId };
   };
@@ -103,7 +104,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
 
     await service.cancel({ tenant: "acme", id: "r1" });
 
-    const [row] = await attempts.list("evd-run-r1");
+    const [row] = await attempts.list(runExecutionId("r1"));
     expect(row?.state, "a cancellation certified zero with a live reservation still spendable").toBe("revoked");
   });
 
@@ -112,7 +113,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
     // coordinate nothing uses, both the broken and the fixed code would find nothing and this file would be
     // green over the defect. The handles the teardown kills come from the same list.
     const { attempts } = await paused();
-    const rows = await attempts.list("evd-run-r1");
+    const rows = await attempts.list(runExecutionId("r1"));
     expect(rows, "the fixture recorded no attempt, so every assertion here is vacuous").toHaveLength(1);
     expect(rows[0]?.runtimeWork?.externalJobId).toBe("everdict-c1-aaaa");
   });
@@ -121,7 +122,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
     // Revocation is for reservations somebody may still spend. An attempt that already committed is history,
     // and rewriting it would make the ledger disagree with the evidence it settled.
     const attempts = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r2", tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r2"), tenant: "acme" });
     await attempts.reserveWork(attemptId, { tenant: "acme", runId: "evd-run-r2", externalJobId: "everdict-c2-bbbb" });
     await attempts.transition(attemptId, "committed");
 
@@ -133,7 +134,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
     });
     await service.cancel({ tenant: "acme", id: "r2" });
 
-    const [row] = await attempts.list("evd-run-r2");
+    const [row] = await attempts.list(runExecutionId("r2"));
     expect(row?.state).toBe("committed");
   });
 });

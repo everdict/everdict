@@ -56,6 +56,7 @@ import {
 import type {
   CaseResult,
   EvalCase,
+  ExecutionId,
   ProductSeries,
   RegistryAuth,
   Score,
@@ -896,7 +897,7 @@ async function main(): Promise<void> {
     // (arch-review 53, legacy removal): adoption decides what a receipt vouches for, and "the newest job of
     // this case" could be another run's. A row with no handle is re-dispatched or tombstoned instead.
     adoptWorkFn,
-    workHandlesFor: async (executionId: string) =>
+    workHandlesFor: async (executionId: ExecutionId) =>
       (await executionAttemptStore.list(executionId)).flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])),
     owner: REPLICA_ID,
     replicas,

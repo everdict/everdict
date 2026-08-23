@@ -35,9 +35,12 @@ import {
   killConverged,
   readOk,
   readOrUnknown,
+  recordExecutionId,
+  runExecutionId,
   worstKillOutcome,
 } from "@everdict/contracts";
 // Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
+import type { ExecutionId } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import {
   type BudgetTracker,
@@ -606,7 +609,7 @@ export class RunService {
             record.runtime,
             record.caseId,
             command,
-            await this.displayWork(`evd-run-${record.id}`),
+            await this.displayWork(RunService.runIdFor(record)),
           )
           .catch(() => undefined)
       : undefined;
@@ -723,7 +726,7 @@ export class RunService {
             record.tenant,
             record.runtime,
             record.caseId,
-            await this.displayWork(`evd-run-${record.id}`),
+            await this.displayWork(RunService.runIdFor(record)),
           )
           .catch(() => undefined)
       : undefined;
@@ -788,7 +791,7 @@ export class RunService {
             record.runtime,
             record.caseId,
             stream,
-            await this.displayWork(`evd-run-${record.id}`),
+            await this.displayWork(RunService.runIdFor(record)),
           )
           .catch(() => undefined)
       : undefined;
@@ -809,7 +812,12 @@ export class RunService {
     const pushed = this.deps.liveTraceEvents?.(RunService.runIdFor(record)) ?? [];
     const pulled = this.deps.readCaseEvents
       ? ((await this.deps
-          .readCaseEvents(record.tenant, record.runtime, record.caseId, await this.displayWork(`evd-run-${record.id}`))
+          .readCaseEvents(
+            record.tenant,
+            record.runtime,
+            record.caseId,
+            await this.displayWork(RunService.runIdFor(record)),
+          )
           .catch(() => undefined)) ?? [])
       : [];
     // Disjoint sources (a runner pushes, a managed job prints — never both), so concatenation is the merge; the
@@ -864,12 +872,11 @@ export class RunService {
   // CP-minted correlation id — the same derivation the dispatch stamps on CaseJob.runId (evd-run-<id> for a single
   // run, evd-<batchId>-<caseId> for a scorecard child). Shared by the pushed-frame + pushed-log lookups (both keyed by
   // the runId the runner reports with).
-  private static runIdFor(record: RunRecord): string {
+  private static runIdFor(record: RunRecord): ExecutionId {
     // The STAMPED id first (mig 0172). The derivation below is the fallback for rows written before the
     // column, and it is lossy where it matters: a multi-trial case dispatches `…-c1-t0/-t1/-t2` and all three
     // rows derive `…-c1`, so two of them read evidence that belongs to a sibling.
-    if (record.executionId) return record.executionId;
-    return record.parentScorecardId ? `evd-${record.parentScorecardId}-${record.caseId}` : `evd-run-${record.id}`;
+    return recordExecutionId(record);
   }
 
   // Boot recovery for an interrupted standalone run. adopted = a result harvested from the still-alive backend
@@ -1082,11 +1089,11 @@ export class RunService {
     // no replay — on the first execution only, the one every run has. Attempt opening is a dispatch
     // primitive, not a recovery privilege. An open that fails leaves the map unset (the case still runs;
     // its replay is simply not claimed), which is the same fail-closed reading the batch dispatch has.
-    if (this.attempt.get(`evd-run-${id}`) === undefined) {
+    if (this.attempt.get(runExecutionId(id)) === undefined) {
       const attempt = await openPhysicalAttempt(
         { attempts: this.deps.attempts, recordings: this.deps.recordingStore },
         {
-          executionId: `evd-run-${id}`,
+          executionId: runExecutionId(id),
           tenant: input.tenant,
           childRunId: id,
           ...(epoch !== undefined ? { driverEpoch: epoch } : {}),
@@ -1589,7 +1596,10 @@ export class RunService {
   // record is already terminal, so the retry costs nothing and re-runs the whole teardown.
   private async stopRun(rec: RunRecord): Promise<CancellationCertificate> {
     this.inFlight.get(rec.id)?.abort();
-    const executionId = `evd-run-${rec.id}`;
+    // …through the ONE owner of this derivation. Spelled inline, a child row's teardown would look under
+    // `evd-run-<row id>` while its attempts live under `evd-<batch>-<case>` — the same coordinate confusion
+    // the brand exists to surface (rule `protocol` L3).
+    const executionId = RunService.runIdFor(rec);
     this.deps.cancelQueued?.((j) => j.runId === executionId);
     const leasesSignalled = (await Promise.resolve(this.deps.cancelLeased?.((j) => j.runId === executionId))) ?? 0;
     // UNCONDITIONAL, not gated on `status === "running"`. Two reasons, and the second is the one that bites:
@@ -1769,7 +1779,7 @@ export class RunService {
   // holds none or could not be read: a display read then falls back to the case-id resolution, which is a
   // possibly-wrong panel rather than a possibly-wrong record (arch-review 53, Wave B). Decisions do not use
   // this; they use `workHandles`, which reports `unknown` instead of guessing.
-  private async displayWork(executionId: string): Promise<RuntimeWorkRef | undefined> {
+  private async displayWork(executionId: ExecutionId): Promise<RuntimeWorkRef | undefined> {
     const read = await this.workHandles(executionId);
     return read.kind === "read" ? read.value.at(-1) : undefined;
   }
@@ -1777,13 +1787,13 @@ export class RunService {
   // This execution's physical attempt rows — the ONE ledger read a teardown works from. Both of the things
   // a cancellation needs are derived from it (which external objects to stop, which reservations to take
   // back), because two reads meant two coordinates and the two drifted (arch-review 62 P1).
-  private async attemptRows(executionId: string): Promise<ReadResult<ExecutionAttemptRecord[]>> {
+  private async attemptRows(executionId: ExecutionId): Promise<ReadResult<ExecutionAttemptRecord[]>> {
     const attempts = this.deps.attempts;
     if (!attempts) return readOk([]); // no ledger wired at all — this deployment records no handles, established
     return readOrUnknown(() => attempts.list(executionId), `attempt ledger for ${executionId}`);
   }
 
-  private async workHandles(executionId: string): Promise<ReadResult<RuntimeWorkRef[]>> {
+  private async workHandles(executionId: ExecutionId): Promise<ReadResult<RuntimeWorkRef[]>> {
     const read = await this.attemptRows(executionId);
     if (read.kind !== "read") return read;
     return readOk(read.value.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])));

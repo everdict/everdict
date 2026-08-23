@@ -1,3 +1,4 @@
+import { storedExecutionId } from "@everdict/contracts";
 import type { ExecutionAttemptRecord, RuntimeWorkRef, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
@@ -63,7 +64,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
       return invocation;
     });
 
-    const rows = await attempts.list("r1");
+    const rows = await attempts.list(storedExecutionId("r1"));
     expect(rows, "the verifier placed compute the ledger has no row for").toHaveLength(1);
     expect(rows[0]?.caseId, "the verifier's row is indistinguishable from the agent's").toContain("verify");
   });
@@ -77,7 +78,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
       return invocation;
     });
 
-    const rows = await attempts.list("r1");
+    const rows = await attempts.list(storedExecutionId("r1"));
     expect(rows[0]?.runtimeWork?.externalJobId).toBe("everdict-verify-1");
     expect(seen).toEqual(["dispatch"]);
   });
@@ -90,7 +91,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
       await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
-    const handles = (await attempts.list("r1")).flatMap((a: ExecutionAttemptRecord) =>
+    const handles = (await attempts.list(storedExecutionId("r1"))).flatMap((a: ExecutionAttemptRecord) =>
       a.runtimeWork ? [a.runtimeWork] : [],
     );
     expect(handles.map((h) => h.externalJobId)).toContain("everdict-verify-1");
@@ -102,7 +103,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
       await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
-    expect((await attempts.list("r1"))[0]?.state).toBe("committed");
+    expect((await attempts.list(storedExecutionId("r1")))[0]?.state).toBe("committed");
   });
 
   it("settles it on FAILURE too — an abandoned row is owed forever", async () => {
@@ -112,7 +113,7 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
         throw new Error("cluster refused the verifier job");
       }),
     ).rejects.toThrow(/cluster refused/);
-    expect((await attempts.list("r1"))[0]?.state).toBe("failed");
+    expect((await attempts.list(storedExecutionId("r1")))[0]?.state).toBe("failed");
   });
 
   it("still dispatches where no ledger is wired — the CLI has no attempt store", async () => {

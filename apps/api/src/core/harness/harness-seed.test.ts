@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { storedExecutionId } from "@everdict/contracts";
 import { loadDatasetDir, loadHarnessTaxonomyDir, loadRuntimeDir } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
@@ -12,7 +13,7 @@ const RUNTIME_DIR = fileURLToPath(new URL("../../../../../examples/runtimes", im
 describe("first-party harness taxonomy seed", () => {
   it("templates+instances in examples/harness-templates load into _shared and resolve", async () => {
     const { instances } = await loadHarnessTaxonomyDir(HARNESS_DIR);
-    const list = await instances.list("any-tenant"); // _shared fallback
+    const list = await instances.list(storedExecutionId("any-tenant")); // _shared fallback
     const ids = list.map((h) => h.id).sort();
     expect(ids).toContain("aider"); // command instance (declarative CLI agent)
     expect(ids).toContain("bu"); // service instance (topology)

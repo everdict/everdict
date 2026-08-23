@@ -16,6 +16,7 @@ import {
   TRACE_EVAL_REF,
   type TraceEvent,
   UpstreamError,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { MANIFEST_IDENTITY_VERSION, measuredScores } from "@everdict/contracts";
 import {
@@ -303,7 +304,7 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
     const rec = await waitTerminal(store, "sc-jdig");
     const sealed = rec.manifest?.judges;
     if (!sealed) throw new Error("expected the manifest to seal the judge closure");
-    const committed = await receipts.list("sc-jdig");
+    const committed = await receipts.list(storedExecutionId("sc-jdig"));
     expect(committed).toHaveLength(1);
     expect(committed[0]?.judgeClosureDigest).toBe(contentDigest([...sealed].sort((a, b) => (a.id < b.id ? -1 : 1))));
   });
@@ -471,7 +472,7 @@ describe("ScorecardService.moveToTeam — evidence is re-filed, and both teams a
       teamId: "team_platform",
     });
 
-    const moved = (await log.list("acme")).find((e) => e.kind === "scorecard.moved");
+    const moved = (await log.list(storedExecutionId("acme"))).find((e) => e.kind === "scorecard.moved");
     expect(moved).toMatchObject({
       kind: "scorecard.moved",
       subject: { type: "scorecard", id: "sc1" },
@@ -2371,7 +2372,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     expect(hydrated?.scorecard?.results[0]?.scores[0]?.metric).toBe("tests_pass");
 
     // The activity list (default) hides children, but by scorecardId those batch children are visible.
-    expect(await runStore.list("acme")).toEqual([]);
+    expect(await runStore.list(storedExecutionId("acme"))).toEqual([]);
     expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-2"]);
   });
 
@@ -3553,7 +3554,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       updatedAt: "2026-07-08T00:00:01.000Z",
     });
 
-    const opened = await attempts.open({ executionId: "child-c2", tenant: "acme", caseId: "c2" });
+    const opened = await attempts.open({ executionId: storedExecutionId("child-c2"), tenant: "acme", caseId: "c2" });
     await attempts.reserveWork(opened.attemptId, {
       tenant: "acme",
       runId: "child-c2",
@@ -3614,7 +3615,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       status: "running",
       runtime: "nomad-local",
       parentScorecardId: "sc-adopt-receipt",
-      executionId: "evd-sc-adopt-receipt-c2",
+      executionId: storedExecutionId("evd-sc-adopt-receipt-c2"),
       createdAt: "2026-07-08T00:00:01.000Z",
       updatedAt: "2026-07-08T00:00:01.000Z",
     });
@@ -3623,7 +3624,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     // — this fixture used the row id, so it matched the lookup that arch-review 63 found reading the wrong
     // coordinate. Two wrongs agreeing is what kept that defect green.
     const opened = await attempts.open({
-      executionId: "evd-sc-adopt-receipt-c2",
+      executionId: storedExecutionId("evd-sc-adopt-receipt-c2"),
       tenant: "acme",
       caseId: "c2",
     });
@@ -3638,7 +3639,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
 
     // Every case the batch counted has a receipt — the adopted one included, so the parity check has nothing
     // to report about a batch that recovered normally.
-    const committed = await receipts.list("sc-adopt-receipt");
+    const committed = await receipts.list(storedExecutionId("sc-adopt-receipt"));
     expect(committed.map((r) => r.caseId).sort()).toEqual(["c1", "c2", "c3"]);
     const adopted = committed.find((r) => r.caseId === "c2");
     expect(adopted?.childRunId).toBe("child-adopted");
@@ -5971,7 +5972,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     const rec = await store.get("cand");
     expect(rec?.gates?.map((g) => g.id)).toEqual([decision.id]);
     // The fact persisted in the same write (E0 outbox).
-    expect((await log.list("acme")).map((e) => e.kind)).toContain("scorecard.gate.decided");
+    expect((await log.list(storedExecutionId("acme"))).map((e) => e.kind)).toContain("scorecard.gate.decided");
   });
 
   it("override forces a BLOCK through with who and why — pass/not_comparable refuse (409)", async () => {
@@ -5989,7 +5990,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
       by: "admin-user",
     });
     expect(forced.override).toMatchObject({ by: "admin-user", reason: "known flake, ships with issue EV-12" });
-    expect((await log.list("acme")).map((e) => e.kind)).toContain("scorecard.gate.overridden");
+    expect((await log.list(storedExecutionId("acme"))).map((e) => e.kind)).toContain("scorecard.gate.overridden");
 
     // A second override of the same decision refuses.
     await expect(

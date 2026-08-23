@@ -7,6 +7,7 @@ import {
   type EvalCase,
   type HarnessSpec,
   UpstreamError,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { InMemoryRecordingStore, InMemoryRunStore, InMemoryTrajectoryStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
@@ -191,7 +192,7 @@ describe("RunService", () => {
     await expect(svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE })).rejects.toBeInstanceOf(
       BadRequestError,
     );
-    expect(await svc.list("t")).toHaveLength(0);
+    expect(await svc.list(storedExecutionId("t"))).toHaveLength(0);
     // A registered runtime id or self:<runner> → passes the gate, normally queued
     const ok = await svc.submit({
       tenant: "t",
@@ -215,7 +216,7 @@ describe("RunService", () => {
     await store.create({ ...base, id: "solo", caseId: "c" });
     await store.create({ ...base, id: "ch1", caseId: "c1", parentScorecardId: "sc1", trigger: "scorecard" });
     await store.create({ ...base, id: "ch2", caseId: "c2", parentScorecardId: "sc2", trigger: "scorecard" });
-    expect((await svc.list("t")).map((r) => r.id)).toEqual(["solo"]); // default: children hidden
+    expect((await svc.list(storedExecutionId("t"))).map((r) => r.id)).toEqual(["solo"]); // default: children hidden
     expect((await svc.list("t", { scorecardId: "sc1" })).map((r) => r.id)).toEqual(["ch1"]); // batch drilldown
   });
 

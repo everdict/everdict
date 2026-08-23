@@ -4,7 +4,7 @@ import {
   type RecordingStore,
   ScorecardService,
 } from "@everdict/application-control";
-import { type AttemptRef, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type AttemptRef, type CaseJob, type CaseResult, UpstreamError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
   InMemoryDatasetRegistry,
@@ -219,13 +219,13 @@ describe("the physical attempt travels by name, so every execution can be ended"
         const runId = job.runId;
         if (runId !== undefined) {
           const leased = await ledger.open({
-            executionId: runId,
+            executionId: storedExecutionId(runId),
             tenant: "acme",
             ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}), // as the lease lane opens it
           });
           opts?.onAttempt?.({
             attemptId: leased.attemptId,
-            executionId: runId,
+            executionId: storedExecutionId(runId),
             recording: { generation: leased.generation },
           });
         }

@@ -4,6 +4,7 @@ import {
   UpstreamError,
   type VerifierInvocation,
   type VerifierJob,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
@@ -67,7 +68,9 @@ export async function verifierOperation(
   // `PARENT_AUTHORIZES` on every batch case and invisible to the scorecard teardown's worklist — see
   // `scorecardId` on `VerifierJobSchema` for both halves of what that cost.
   const opened = await attempts.open({
-    executionId: job.runId,
+    // `VerifierJob.runId` IS the execution id — the caller built it (`evd-<sc>-<case>[-t<n>]` for a batch,
+    // `evd-run-<id>` for a standalone), and this row opens under the same one the agent's half did.
+    executionId: storedExecutionId(job.runId),
     tenant: job.tenant,
     caseId: `${job.caseId}#verify`,
     ...(job.scorecardId !== undefined ? { scorecardId: job.scorecardId } : {}),
@@ -134,7 +137,7 @@ export async function verifierOperation(
     // case was not judged — where a `1` would have said it passed.
     if (!(await attempts.transition(attemptId, "committed"))) {
       const state = await attempts
-        .list(job.runId)
+        .list(storedExecutionId(job.runId))
         .then((rows) => rows.find((r) => r.attemptId === attemptId)?.state ?? "absent")
         // A ledger that cannot say whether the attempt settled has not said that it did (rule `protocol` L2).
         .catch(() => "unreadable");

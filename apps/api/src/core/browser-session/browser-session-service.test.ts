@@ -1,5 +1,5 @@
 import type { RunStore } from "@everdict/application-control";
-import { AppError, PaymentRequiredError, RateLimitError } from "@everdict/contracts";
+import { AppError, PaymentRequiredError, RateLimitError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import type {
@@ -97,8 +97,8 @@ describe("BrowserSessionService", () => {
     await s.create({ tenant: "acme", createdBy: "alice" });
     await s.create({ tenant: "acme", createdBy: "bob" });
     expect(p.disposed).toHaveLength(0); // bob's session does not evict alice's
-    expect(s.list("alice")).toHaveLength(1);
-    expect(s.list("bob")).toHaveLength(1);
+    expect(s.list(storedExecutionId("alice"))).toHaveLength(1);
+    expect(s.list(storedExecutionId("bob"))).toHaveLength(1);
   });
 
   it("scopes reads to the owner — another subject cannot see or resolve the session", async () => {
@@ -221,7 +221,7 @@ describe("BrowserSessionService", () => {
     await s.create({ tenant: "acme", createdBy: "alice" });
     // alice is the only session and the cap is 1; her own re-create frees her session first, so it must not 429.
     await expect(s.create({ tenant: "acme", createdBy: "alice" })).resolves.toMatchObject({ status: "active" });
-    expect(s.list("alice")).toHaveLength(1);
+    expect(s.list(storedExecutionId("alice"))).toHaveLength(1);
   });
 
   it("frees capacity when a session is closed or swept", async () => {

@@ -1,4 +1,5 @@
 import type { ScorecardService } from "@everdict/application-control";
+import { storedExecutionId } from "@everdict/contracts";
 import { InMemoryScheduleStore } from "@everdict/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduleServiceRef, wireScheduleService } from "./schedule.js";
@@ -45,7 +46,7 @@ describe("wireScheduleService — report-runner adapter wire shape", () => {
       cron: "0 9 * * 1",
       runTemplate: { report: { view: "v-1", compare: "previous-period" }, judges: [] },
     });
-    const created = (await service.list("acme"))[0];
+    const created = (await service.list(storedExecutionId("acme")))[0];
     if (!created) throw new Error("schedule missing");
 
     const res = await service.fire("acme", created.id);
@@ -112,7 +113,7 @@ describe("wireScheduleService — the reserved 'everdict' source windows the OWN
       cron: "0 * * * *",
       runTemplate: { pull: { source: "everdict", windowHours: 24 }, judges: [] },
     });
-    const created = (await service.list("acme"))[0];
+    const created = (await service.list(storedExecutionId("acme")))[0];
     if (!created) throw new Error("schedule missing");
     await service.fire("acme", created.id);
 

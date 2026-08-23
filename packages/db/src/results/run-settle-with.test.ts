@@ -1,4 +1,5 @@
 import { type AttemptStamp, InMemoryExecutionAttemptStore, type RunUpdateGuard } from "@everdict/application-control";
+import { runExecutionId } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -203,7 +204,7 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
     const runs = new InMemoryRunStore();
     const attempts = new InMemoryExecutionAttemptStore();
     await runs.create(queued("r1"));
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", childRunId: "r1" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme", childRunId: "r1" });
     const settled = await runs.settleWith(
       "r1",
       TERMINAL,
@@ -222,14 +223,14 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
       },
     );
     expect(settled?.status).toBe("succeeded");
-    expect((await attempts.list("evd-run-r1")).map((a) => a.state)).toEqual(["committed"]);
+    expect((await attempts.list(runExecutionId("r1"))).map((a) => a.state)).toEqual(["committed"]);
   });
 
   it("a refused fence TAKES THE STAMP BACK — the attempt that lost is not the one that committed", async () => {
     const runs = new InMemoryRunStore();
     const attempts = new InMemoryExecutionAttemptStore();
     await runs.create({ ...queued("r1"), status: "succeeded" }); // somebody else settled it first
-    const { attemptId } = await attempts.open({ executionId: "evd-run-r1", tenant: "acme", childRunId: "r1" });
+    const { attemptId } = await attempts.open({ executionId: runExecutionId("r1"), tenant: "acme", childRunId: "r1" });
     let stamped = false;
     const settled = await runs.settleWith(
       "r1",
@@ -250,7 +251,7 @@ describe("InMemoryRunStore.settleWith — the ordering and the refusal, without 
     // `committed` attempt behind a settlement that did not land (arch-review 63 P1-high).
     expect(stamped).toBe(true);
     expect(
-      (await attempts.list("evd-run-r1"))[0]?.state,
+      (await attempts.list(runExecutionId("r1")))[0]?.state,
       "an attempt that lost its settlement was left claiming the answer",
     ).not.toBe("committed");
     expect(attemptId).toBe("evd-run-r1#g1");

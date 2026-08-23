@@ -1,3 +1,4 @@
+import { storedExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { RecoveryPlanner } from "./recovery-planner.js";
@@ -34,7 +35,7 @@ import { RecoveryPlanner } from "./recovery-planner.js";
 describe("[R63 COUNTEREXAMPLE] a child's attempts are found by the id the ledger was written with", () => {
   // The production shape, which is the whole point: the two ids DIFFER. A fixture that sets them equal
   // cannot see a lookup using the wrong one — see rule `testing`.
-  const CHILD = { id: "child-9f2a3b", executionId: "evd-sc-1-c1", caseId: "c1" };
+  const CHILD = { id: "child-9f2a3b", executionId: storedExecutionId("evd-sc-1-c1"), caseId: "c1" };
 
   const ledgerWithWork = async () => {
     const attempts = new InMemoryExecutionAttemptStore();
@@ -49,7 +50,7 @@ describe("[R63 COUNTEREXAMPLE] a child's attempts are found by the id the ledger
 
   it("finds the handle under the EXECUTION id", async () => {
     const attempts = await ledgerWithWork();
-    const rows = await attempts.list(CHILD.executionId);
+    const rows = await attempts.list(storedExecutionId(CHILD.executionId));
     expect(rows, "the fixture recorded no attempt, so every assertion here is vacuous").toHaveLength(1);
     expect(rows[0]?.runtimeWork?.externalJobId).toBe("everdict-c1-aaaa");
   });
@@ -58,7 +59,7 @@ describe("[R63 COUNTEREXAMPLE] a child's attempts are found by the id the ledger
     // This is not a hypothetical: it is what the recovery did for every child of every batch.
     const attempts = await ledgerWithWork();
     expect(
-      await attempts.list(CHILD.id),
+      await attempts.list(storedExecutionId(CHILD.id)),
       "the row id happened to match the ledger, so this file proves nothing about the defect",
     ).toHaveLength(0);
   });
@@ -78,10 +79,10 @@ describe("[R63 COUNTEREXAMPLE] a child's attempts are found by the id the ledger
     // The control for the control: if `list` matched loosely, both directions would answer and neither of
     // the assertions above would mean anything.
     const attempts = new InMemoryExecutionAttemptStore();
-    const { attemptId } = await attempts.open({ executionId: CHILD.id, tenant: "acme" });
+    const { attemptId } = await attempts.open({ executionId: storedExecutionId(CHILD.id), tenant: "acme" });
     await attempts.reserveWork(attemptId, { tenant: "acme", runId: CHILD.id, externalJobId: "j" });
-    expect(await attempts.list(CHILD.executionId)).toHaveLength(0);
-    expect(await attempts.list(CHILD.id)).toHaveLength(1);
+    expect(await attempts.list(storedExecutionId(CHILD.executionId))).toHaveLength(0);
+    expect(await attempts.list(storedExecutionId(CHILD.id))).toHaveLength(1);
   });
 });
 
@@ -103,7 +104,7 @@ describe("[R63 COUNTEREXAMPLE] the planner reaches adoption for a child whose id
   const SCORECARD = "sc-1";
   const CHILD = {
     id: "child-9f2a3b",
-    executionId: "evd-sc-1-c1",
+    executionId: storedExecutionId("evd-sc-1-c1"),
     caseId: "c1",
     tenant: "acme",
     status: "running" as const,

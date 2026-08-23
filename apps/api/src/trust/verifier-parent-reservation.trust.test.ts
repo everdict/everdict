@@ -1,3 +1,4 @@
+import { caseExecutionId } from "@everdict/contracts";
 import { PgExecutionAttemptStore, PgScorecardStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
@@ -57,7 +58,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST — a batch's verifier reserves under 
   // The verifier's row, as `verifierOperation` opens one: the batch's execution id, the batch as parent, and
   // the `#verify` case suffix that keeps the two units distinguishable in a ledger read.
   const openVerifierAttempt = async (batchId: string, opts: { withParent: boolean; driverEpoch?: number }) => {
-    const executionId = `evd-${batchId}-c1-t0`;
+    const executionId = caseExecutionId(batchId, "c1", 0);
     const { attemptId } = await attempts.open({
       executionId,
       tenant: "acme",

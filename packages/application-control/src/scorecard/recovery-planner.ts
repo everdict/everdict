@@ -1,5 +1,5 @@
 import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef } from "@everdict/contracts";
-import { UpstreamError, readOrUnknown } from "@everdict/contracts";
+import { UpstreamError, readOrUnknown, storedExecutionId } from "@everdict/contracts";
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import { recoverVerifiedCase } from "../execution/agent-half.js";
@@ -112,7 +112,7 @@ export class RecoveryPlanner {
           //
           // Nothing types a string as an execution id, which is why this survived review while looking
           // consistent — the verifier lookup below used `c.id` too, and a comment said so approvingly.
-          const executionId = c.executionId ?? c.id;
+          const executionId = storedExecutionId(c.executionId ?? c.id);
           const handlesRead = this.deps.attempts
             ? await readOrUnknown(
                 () =>

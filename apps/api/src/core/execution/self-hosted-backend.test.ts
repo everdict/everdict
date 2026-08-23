@@ -1,4 +1,5 @@
 import { RunnerHub, type SelfHostedKey } from "@everdict/application-control";
+import { runExecutionId } from "@everdict/contracts";
 import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
@@ -67,7 +68,7 @@ describe("SelfHostedBackend", () => {
     // back a bare generation, so the ref's name is the coordinate that generation spells — the one documented
     // fallback left (attemptRefOf), and exact: `open` mints the ordinal the row's id is built from.
     expect(seen).toEqual([
-      { attemptId: "evd-run-1#g41", executionId: "evd-run-1", recording: { generation: 41 } },
+      { attemptId: "evd-run-1#g41", executionId: runExecutionId("1"), recording: { generation: 41 } },
     ] satisfies AttemptRef[]);
   });
 
@@ -98,7 +99,7 @@ describe("SelfHostedBackend", () => {
     hub.complete(key, { jobId: "j1", leaseEpoch: 2 }, result);
 
     await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
-    expect(seen).toEqual([{ attemptId: "evd-run-1#g2", executionId: "evd-run-1" }] satisfies AttemptRef[]);
+    expect(seen).toEqual([{ attemptId: "evd-run-1#g2", executionId: runExecutionId("1") }] satisfies AttemptRef[]);
   });
 
   it("capacity is total=maxConcurrent, used=0 (parking uses no real resources)", async () => {

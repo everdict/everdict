@@ -1,6 +1,6 @@
 import type { PullIngestInput, RunScorecardInput } from "@everdict/application-control";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "@everdict/application-control";
-import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, ForbiddenError, NotFoundError, UpstreamError, storedExecutionId } from "@everdict/contracts";
 import { InMemoryScheduleStore, type ScheduleRunTemplate, type ScheduleStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 
@@ -56,8 +56,8 @@ describe("ScheduleService", () => {
     const s = svc();
     await s.create(base);
     await expect(s.get("beta", "sch-1")).rejects.toBeInstanceOf(NotFoundError);
-    expect(await s.list("beta")).toEqual([]);
-    expect(await s.list("acme")).toHaveLength(1);
+    expect(await s.list(storedExecutionId("beta"))).toEqual([]);
+    expect(await s.list(storedExecutionId("acme"))).toHaveLength(1);
   });
 
   it("update pauses (enabled=false) and reschedules (cron)", async () => {
@@ -181,7 +181,7 @@ describe("ScheduleService — Temporal driver sync (slice 2)", () => {
     };
     const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
     await expect(s.create(base)).rejects.toThrow("temporal down");
-    expect(await store.list("acme")).toEqual([]); // rolled back
+    expect(await store.list(storedExecutionId("acme"))).toEqual([]); // rolled back
   });
 
   // Regression (rich-domain-core S4): the rollback used to be `.catch(() => {})` — an orphaned record
@@ -220,7 +220,7 @@ describe("ScheduleService — Temporal driver sync (slice 2)", () => {
     expect((err as Error).message).toContain("rollback also failed");
     expect((err as Error).message).toContain("schedule 'sch-1' is orphaned");
     expect((err as Error).message).toContain("db down");
-    expect(await inner.list("acme")).toHaveLength(1); // the orphan remains in the store
+    expect(await inner.list(storedExecutionId("acme"))).toHaveLength(1); // the orphan remains in the store
   });
 
   it("regression: an AppError ensure failure keeps its class/code/message and gains rollbackFailed in the envelope data", async () => {
@@ -607,7 +607,7 @@ describe("ScheduleService — attaching Temporal-authoritative next fire times (
     await s.create({ ...base }); // sch-1 enabled
     await s.create({ ...base, enabled: false }); // sch-2 paused → excluded from describe
 
-    const list = await s.list("acme");
+    const list = await s.list(storedExecutionId("acme"));
     expect(list.find((r) => r.id === "sch-1")?.nextFireTimes).toEqual([
       "2026-07-04T03:00:00.000Z",
       "2026-07-05T03:00:00.000Z",
@@ -627,7 +627,7 @@ describe("ScheduleService — attaching Temporal-authoritative next fire times (
       now: () => "t",
     });
     await s.create({ ...base });
-    expect((await s.list("acme"))[0]?.nextFireTimes).toBeUndefined();
+    expect((await s.list(storedExecutionId("acme")))[0]?.nextFireTimes).toBeUndefined();
     expect((await s.get("acme", "sch-1")).nextFireTimes).toBeUndefined();
   });
 
@@ -646,7 +646,7 @@ describe("ScheduleService — attaching Temporal-authoritative next fire times (
       now: () => "t",
     });
     await s.create({ ...base });
-    const list = await s.list("acme");
+    const list = await s.list(storedExecutionId("acme"));
     expect(list).toHaveLength(1);
     expect(list[0]?.nextFireTimes).toBeUndefined();
   });

@@ -1,3 +1,4 @@
+import { storedExecutionId } from "@everdict/contracts";
 import type { AttemptRef, CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef } from "@everdict/contracts";
 import { type CircuitBreaker, type HarnessSecretMaps, resolveHarnessSecrets } from "@everdict/domain";
 import { executeCase } from "../execution/execute-case.js";
@@ -61,8 +62,10 @@ export class ResilientCaseRunner {
     // spill/boost/duplicate left no row while the dispatch lanes beside it were writing theirs.
     if (!store && !this.deps.attempts) return undefined;
     return async (job: CaseJob): Promise<CaseJob> => {
-      const executionId = job.runId;
-      if (!executionId) return job;
+      if (!job.runId) return job;
+      // The dispatch stamped it (`CaseJob.runId`), one of the constructors built it. This attempt opens under
+      // the same execution the first one did — which is the whole point of a re-drive having its own row.
+      const executionId = storedExecutionId(job.runId);
       // …and each of these re-dispatches is a PHYSICAL EXECUTION with its own ledger row (arch-review 42).
       // These are precisely the attempts that used to leave no trace: a spillover duplicate or a speculation
       // loser spends full compute and, unless it happened to record something, was invisible afterwards.

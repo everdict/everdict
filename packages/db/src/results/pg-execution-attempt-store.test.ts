@@ -5,6 +5,8 @@ import {
   TERMINAL_ATTEMPT_STATES,
   TERMINAL_RUN_STATUSES,
   TERMINAL_SCORECARD_STATUSES,
+  runExecutionId,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -31,7 +33,7 @@ describe("PgExecutionAttemptStore", () => {
     const store = new PgExecutionAttemptStore(client);
 
     const opened = await store.open({
-      executionId: "evd-sc1-c1",
+      executionId: storedExecutionId("evd-sc1-c1"),
       tenant: "acme",
       scorecardId: "sc1",
       caseId: "c1",
@@ -62,7 +64,9 @@ describe("PgExecutionAttemptStore", () => {
       return { rows: [{ attempt_id: "evd-run-1#g2", generation: 2 }] };
     });
 
-    expect(await new PgExecutionAttemptStore(client).open({ executionId: "evd-run-1", tenant: "acme" })).toEqual({
+    expect(
+      await new PgExecutionAttemptStore(client).open({ executionId: runExecutionId("1"), tenant: "acme" }),
+    ).toEqual({
       attemptId: "evd-run-1#g2",
       generation: 2,
     });
@@ -78,7 +82,7 @@ describe("PgExecutionAttemptStore", () => {
       throw err;
     });
     await expect(
-      new PgExecutionAttemptStore(client).open({ executionId: "evd-run-1", tenant: "acme" }),
+      new PgExecutionAttemptStore(client).open({ executionId: runExecutionId("1"), tenant: "acme" }),
     ).rejects.toThrow("duplicate key");
   });
 
@@ -86,7 +90,7 @@ describe("PgExecutionAttemptStore", () => {
     // Nothing deletes attempts, so an insert returning no row is a store fault, not a number to make up.
     const { client } = fakeClient(() => ({ rows: [] }));
     await expect(
-      new PgExecutionAttemptStore(client).open({ executionId: "evd-run-1", tenant: "acme" }),
+      new PgExecutionAttemptStore(client).open({ executionId: runExecutionId("1"), tenant: "acme" }),
     ).rejects.toThrow("was not opened");
   });
 
@@ -144,7 +148,7 @@ describe("PgExecutionAttemptStore", () => {
   it("list reads one execution's attempts oldest-first; listForScorecard reads a whole batch's", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     const store = new PgExecutionAttemptStore(client);
-    await store.list("evd-run-1");
+    await store.list(runExecutionId("1"));
     await store.listForScorecard("sc1");
     expect(calls[0]?.text).toContain("WHERE execution_id = $1 ORDER BY generation");
     expect(calls[1]?.text).toContain("WHERE scorecard_id = $1 ORDER BY execution_id, generation");

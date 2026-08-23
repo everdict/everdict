@@ -16,7 +16,9 @@ import {
   type Suite,
   type VerdictPolicy,
   attemptIdOf,
+  caseExecutionId,
 } from "@everdict/contracts";
+import type { ExecutionId } from "@everdict/contracts";
 import {
   type CircuitBreaker,
   Run,
@@ -69,9 +71,11 @@ import {
 
 // The correlation id a case is DISPATCHED with — the key its frames, logs, live trajectory and replay are
 // written under. One function, so the id the job carries and the id the child row stamps cannot drift.
-function executionIdOf(job: { evalCase: { id: string }; trial?: number; batchId?: string }, batchId?: string): string {
-  const parent = job.batchId ?? batchId ?? "";
-  return `evd-${parent}-${job.evalCase.id}${job.trial !== undefined ? `-t${job.trial}` : ""}`;
+function executionIdOf(
+  job: { evalCase: { id: string }; trial?: number; batchId?: string },
+  batchId?: string,
+): ExecutionId {
+  return caseExecutionId(job.batchId ?? batchId ?? "", job.evalCase.id, job.trial);
 }
 
 // Re-drive support (docs/architecture/batch-resilience.md):

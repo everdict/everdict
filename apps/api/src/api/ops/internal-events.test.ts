@@ -1,6 +1,6 @@
 import { NotificationService, PlatformEventService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { PaymentRequiredError } from "@everdict/contracts";
+import { PaymentRequiredError, storedExecutionId } from "@everdict/contracts";
 import {
   InMemoryNotificationStore,
   InMemoryPlatformEventStore,
@@ -478,7 +478,7 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     expect((await trajectories.get("acme", "run-chat-1"))?.events).toEqual(trace);
 
     // Human typing volume must not drown the event log — the conversation is already visible as itself.
-    expect(await eventStore.list("acme")).toEqual([]);
+    expect(await eventStore.list(storedExecutionId("acme"))).toEqual([]);
   });
 
   it("cause=chat without a creator is refused (400) — an unattributed turn would be a lie in the ledger", async () => {

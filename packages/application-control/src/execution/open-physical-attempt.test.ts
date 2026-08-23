@@ -1,4 +1,4 @@
-import { InternalError } from "@everdict/contracts";
+import { InternalError, runExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { RecordingStore } from "../ports/recording-store.js";
@@ -38,11 +38,11 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
     // When two attempts of one execution open
     const first = await openPhysicalAttempt(
       { attempts, recordings: store },
-      { executionId: "evd-run-1", tenant: "acme" },
+      { executionId: runExecutionId("1"), tenant: "acme" },
     );
     const second = await openPhysicalAttempt(
       { attempts, recordings: store },
-      { executionId: "evd-run-1", tenant: "acme" },
+      { executionId: runExecutionId("1"), tenant: "acme" },
     );
 
     // Then the recording store was TOLD the coordinate rather than asked for one, and the two planes agree
@@ -66,7 +66,7 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
     // When an attempt opens
     const opened = await openPhysicalAttempt(
       { attempts, recordings: store },
-      { executionId: "evd-run-2", tenant: "acme" },
+      { executionId: runExecutionId("2"), tenant: "acme" },
     );
 
     // Then the JOB carries no generation — byte-compatible with the pre-ledger behaviour: producers stamp 0,
@@ -76,14 +76,21 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
     // …while the LEDGER still holds the attempt, marked unisolated. This is the whole point: an execution
     // whose fence could not be raised used to leave no trace anywhere at all.
     expect(opened.attemptId).toBe("evd-run-2#g1");
-    expect((await attempts.list("evd-run-2"))[0]).toMatchObject({ generation: 1, unisolated: true, state: "created" });
+    expect((await attempts.list(runExecutionId("2")))[0]).toMatchObject({
+      generation: 1,
+      unisolated: true,
+      state: "created",
+    });
   });
 
   it("with no ledger wired the recording store self-mints, exactly as before", async () => {
     // Given only a recording store
     const { store, calls } = recordings(async () => 4);
 
-    const opened = await openPhysicalAttempt({ recordings: store }, { executionId: "evd-run-3", tenant: "acme" });
+    const opened = await openPhysicalAttempt(
+      { recordings: store },
+      { executionId: runExecutionId("3"), tenant: "acme" },
+    );
 
     // Then it was asked for a coordinate (no generation argument) and no attempt id exists to report.
     expect(calls).toEqual([{ runId: "evd-run-3" }]);
@@ -102,7 +109,7 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
 
     const opened = await openPhysicalAttempt(
       { attempts, recordings: store },
-      { executionId: "evd-run-4", tenant: "acme" },
+      { executionId: runExecutionId("4"), tenant: "acme" },
     );
 
     // The recording store was never asked — no coordinate exists that another authority might own.
@@ -111,6 +118,8 @@ describe("openPhysicalAttempt — the one verb for 'a physical execution begins'
   });
 
   it("with neither store wired nothing is opened and nothing is unisolated", async () => {
-    expect(await openPhysicalAttempt({}, { executionId: "evd-run-5", tenant: "acme" })).toEqual({ unisolated: false });
+    expect(await openPhysicalAttempt({}, { executionId: runExecutionId("5"), tenant: "acme" })).toEqual({
+      unisolated: false,
+    });
   });
 });

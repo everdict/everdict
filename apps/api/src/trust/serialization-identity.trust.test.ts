@@ -1,3 +1,4 @@
+import { storedExecutionId } from "@everdict/contracts";
 import type { ScorecardRecord, ScoringPass } from "@everdict/contracts";
 import { PgScorecardStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -99,7 +100,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-104/105 — identity survives the data
     const world = { os: "linux" as const, drivers: ["docker"], mixed: false, observed: 3 };
     await cards.update(id, { world });
     expect((await cards.get(id))?.world).toEqual(world);
-    const listed = (await cards.list("trust")).find((r) => r.id === id);
+    const listed = (await cards.list(storedExecutionId("trust"))).find((r) => r.id === id);
     expect(listed?.world).toEqual(world);
   });
 });
