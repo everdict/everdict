@@ -1,4 +1,4 @@
-import type { ExecutionAttemptState } from "../records/execution-attempt.js";
+import { type ExecutionAttemptState, isTerminalAttemptState } from "../records/execution-attempt.js";
 
 // ── MAY THIS DISPATCH CREATE EXTERNAL WORK, RIGHT NOW? (arch-review 57 P0) ───────────────────────────
 //
@@ -47,8 +47,20 @@ export function decideActivation(request: ActivationRequest): ActivationDecision
     return { kind: "refuse", reason: "the run this attempt belongs to may no longer author external work" };
   if (state === "revoked")
     return { kind: "refuse", reason: "this reservation was revoked — a cancellation already took it back" };
-  if (state === "committed" || state === "failed" || state === "superseded")
+  // ── ASKED THROUGH THE PREDICATE, NOT A COPY OF ITS CONTENTS (arch-review 64) ─────────────────────
+  //
+  // This read `state === "committed" || state === "failed" || state === "superseded"` — the terminal set,
+  // hand-copied. When `verdict_produced` was added the copy did not grow, so an attempt that had already
+  // produced its verdict and had its container reclaimed fell through every arm here and was AUTHORIZED to
+  // create new work. Exactly the failure `MAY_STILL_CREATE_WORK` was exported to make impossible, in the one
+  // function that decides a birth.
+  //
+  // `verdict_produced` is named separately from the terminals because it is not one: the row is waiting to
+  // learn whether the case adopts its bytes. What it may not do is make more.
+  if (isTerminalAttemptState(state))
     return { kind: "refuse", reason: `this attempt is settled (${state}) and cannot create new work` };
+  if (state === "verdict_produced")
+    return { kind: "refuse", reason: "this attempt already produced its verdict and may not create new work" };
   if (recordedWork === undefined)
     return { kind: "refuse", reason: "this attempt reserved no work, so there is nothing it is authorized to create" };
   // A reservation authorizes ONE external object. Spending it on another id is how a lane creates compute the

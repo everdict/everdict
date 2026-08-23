@@ -97,13 +97,17 @@ describe("[R57 COUNTEREXAMPLE] a verifier is durable work the cancellation can f
     expect(handles.map((h) => h.externalJobId)).toContain("everdict-verify-1");
   });
 
-  it("SETTLES the row when the verdict comes back — a live row is compute a sweep will chase", async () => {
+  it("MOVES the row off live when the verdict comes back — a live row is compute a sweep will chase", async () => {
     const attempts = new InMemoryExecutionAttemptStore();
     await verifierOperation({ attempts }, job(), async (_j, hooks) => {
       await hooks.authority.reserve(work("everdict-verify-1"));
       return invocation;
     });
-    expect((await attempts.list(storedExecutionId("r1")))[0]?.state).toBe("committed");
+    // `verdict_produced`, not `committed` (arch-review 64). The invariant this file pins is unchanged — the
+    // row does not stay somewhere a sweep reads as live work — and the STATE it moves to now says what
+    // actually happened here: bytes exist, and no settlement has yet decided whether the case takes them.
+    // `committed` is written by the canonical settlement, which is three steps away and can still refuse.
+    expect((await attempts.list(storedExecutionId("r1")))[0]?.state).toBe("verdict_produced");
   });
 
   it("settles it on FAILURE too — an abandoned row is owed forever", async () => {

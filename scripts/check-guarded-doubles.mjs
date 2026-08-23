@@ -60,10 +60,6 @@ const ALLOWED = new Map([
     "PREMISE — the envelope admits so a run exists; the subject is `releaseRuns` carrying the same requestId the admit used",
   ],
   [
-    "packages/application-control/src/execution/agent-half.counterexample.test.ts",
-    "OPEN (arch-review 64) — this IS the defect: the double asserts we ASKED, while production has no parameter to pass a ledger through and the real store refuses `committed → superseded` outright. Removed when `verdict_produced` replaces the correction",
-  ],
-  [
     "apps/api/src/composition/verifier-is-not-the-run-result.counterexample.test.ts",
     "OPEN (arch-review 64) — the assertion reads a call log (`closed`) rather than the row; removed when the recovery settles its adopted attempt through the real ledger",
   ],

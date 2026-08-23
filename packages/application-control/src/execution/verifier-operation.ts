@@ -124,9 +124,9 @@ export async function verifierOperation(
         activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),
       },
     });
-    // ── THE TERMINAL CAS IS THIS VERDICT'S RE-PROOF (arch-review 58) ──────────────────────────────
+    // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
     //
-    // Settled as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and
+    // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and
     // chasing a container that finished is how a cancellation stops converging.
     //
     // And the ANSWER is consumed, because `transition` is a conditional write and the one way it says `false`
@@ -135,7 +135,17 @@ export async function verifierOperation(
     // back is not a measurement (rule `protocol` L1: the write that records the outcome is where the effect
     // re-proves its proof is still valid). The throw becomes `tests_pass: unmeasured` upstream, which says the
     // case was not judged — where a `1` would have said it passed.
-    if (!(await attempts.transition(attemptId, "committed"))) {
+    //
+    // ⚠️ THE STATE THIS WROTE WAS `committed`, AND THAT WAS A DIFFERENT CLAIM. `committed` means "this
+    // attempt's result is the case's answer", and at THIS line three later steps can still withhold it: the
+    // merge can refuse the verdict as being about another workspace, the deferred collection can fail, a
+    // speculative sibling can win the receipt. The correction for the first of those — flipping the row to
+    // `superseded` — was refused by every real store, because `committed` is terminal and first-terminal-wins
+    // (arch-review 64 P1-high).
+    //
+    // `verdict_produced` says what actually happened here: the bytes exist. The canonical settlement writes
+    // `committed`, and from this state `superseded` is a write rather than a request.
+    if (!(await attempts.transition(attemptId, "verdict_produced"))) {
       const state = await attempts
         .list(storedExecutionId(job.runId))
         .then((rows) => rows.find((r) => r.attemptId === attemptId)?.state ?? "absent")

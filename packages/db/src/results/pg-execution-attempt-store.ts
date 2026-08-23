@@ -2,6 +2,7 @@ import type { ExecutionAttemptStore, OpenAttemptInput, RevocationOutcome } from 
 import type { ExecutionId } from "@everdict/contracts";
 import {
   type ActivationDecision,
+  COMMIT_PREDECESSOR_STATES,
   ConflictError,
   EXECUTING_PREDECESSOR_STATES,
   type ExecutionAttemptRecord,
@@ -16,6 +17,7 @@ import {
   type RuntimeWorkRef,
   RuntimeWorkRefSchema,
   TERMINAL_ATTEMPT_STATES,
+  VERDICT_PREDECESSOR_STATES,
   attemptIdOf,
   decideActivation,
 } from "@everdict/contracts";
@@ -67,6 +69,11 @@ const TERMINAL_LIST = TERMINAL_ATTEMPT_STATES.map((s) => `'${s}'`).join(", ");
 // Hand-enumerating this beside the in-memory twin is how the two drifted the last time a state was added, so
 // both read the one list in contracts (arch-review 58).
 const EXECUTING_FROM_LIST = EXECUTING_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ");
+// …and the two sets `verdict_produced` introduced (arch-review 64). Rendered from the SAME exported
+// constants the in-memory twin narrows on, because a phase one adapter knows and the other refuses is worse
+// than a phase neither has: the counterexamples run against the in-memory store and production runs on this.
+const VERDICT_FROM_LIST = VERDICT_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ");
+const COMMIT_FROM_LIST = COMMIT_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", ");
 // ── THE PARENT-AUTHORITY VOCABULARY, GENERATED (arch-review 56, Wave A) ─────────────────────────────
 //
 // The reservation's parent condition was hand-written as `NOT IN ('succeeded', 'failed')`, which is fail-OPEN:
@@ -186,6 +193,11 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
          AND a.state NOT IN (${TERMINAL_LIST})
          AND $2 <> 'created'
          AND ($2 <> 'executing' OR a.state IN (${EXECUTING_FROM_LIST}))
+         -- A verdict is reported by a lane whose object exists, never from \`created\`.
+         AND ($2 <> 'verdict_produced' OR a.state IN (${VERDICT_FROM_LIST}))
+         -- …and \`committed\` is the CANONICAL adoption, enumerated rather than "any non-terminal", so a
+         -- state added to the machine breaks this clause instead of silently widening it.
+         AND ($2 <> 'committed' OR a.state IN (${COMMIT_FROM_LIST}))
          -- ── \`committed\` CLAIMS A RESULT, SO IT ANSWERS TO THE PARENT (arch-review 62 P1) ──────────
          --
          -- Reserving and activating have always carried this predicate; the write that actually claims the

@@ -47,6 +47,23 @@ export const ExecutionAttemptStateSchema = z.enum([
   "active",
   "revoked",
   "executing",
+  // ── A SUB-STEP PRODUCED BYTES; THE CASE HAS NOT ADOPTED THEM (arch-review 64 P1-high) ────────────
+  //
+  // `committed` means "this attempt's result is the case's answer". The verifier lane stamped it the moment
+  // its container returned scores — and after that moment the merge can still refuse the verdict (it was
+  // produced against a different workspace), the deferred collection can still fail, a speculative sibling
+  // can still win the receipt, and the settlement can still not happen at all. So the row claimed an
+  // adoption that three later steps could withhold.
+  //
+  // The compensation that was supposed to cover it could never run: `committed` is terminal and every store
+  // is first-terminal-wins, so `committed → superseded` is refused by construction. A compensation the state
+  // machine forbids is not a compensation (rule `protocol`, the sub-step-terminal law).
+  //
+  // This phase is NOT terminal, deliberately: it is a row whose external object is gone and whose bytes are
+  // staged, still waiting to learn whether the case took them. From here `committed` is written by the
+  // canonical settlement and by nothing else, and `superseded` is reachable — which is what makes the
+  // refused-merge correction a real write rather than a request.
+  "verdict_produced",
   "committed",
   "superseded",
   "failed",
@@ -100,6 +117,25 @@ export function isTerminalAttemptState(state: ExecutionAttemptState): boolean {
 // ledger recorded work that was authorized and then settled with no phase saying it ran.
 // A new state is not shipped until every guard that mentions its NEIGHBOURS has been re-read.
 export const EXECUTING_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["created", "reserved", "active"];
+
+// The states a VERDICT may be reported from. A verdict is reported by a lane whose object exists, so the row
+// is `executing` on a lane that stamps it and `active` on one that has not got there — never `created`, which
+// would be a verdict from an attempt that reserved nothing.
+//
+// Its own list rather than a reuse of the one above: they overlap today and they answer different questions,
+// and a set shared for its current contents is the shape that stopped being a superset without anyone
+// noticing (see `MAY_STILL_CREATE_WORK`, which is derived precisely because it must NOT drift).
+export const VERDICT_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = ["reserved", "active", "executing"];
+
+// What may become `committed` — the CANONICAL adoption. Written by the settlement transaction only: a lane
+// that produced evidence stops at `verdict_produced` and the settlement decides whether the case took it.
+export const COMMIT_PREDECESSOR_STATES: readonly ExecutionAttemptState[] = [
+  "created",
+  "reserved",
+  "active",
+  "executing",
+  "verdict_produced",
+];
 
 // ── THE STATES FROM WHICH AN EXTERNAL OBJECT MAY STILL BE BORN (arch-review 60 P0) ───────────────────
 //

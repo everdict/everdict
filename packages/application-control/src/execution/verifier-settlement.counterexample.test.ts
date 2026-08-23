@@ -7,7 +7,7 @@ import { verifierOperation } from "./verifier-operation.js";
 //
 // `verifierOperation` settles its row with
 //
-//     await attempts.transition(attemptId, "committed");
+//     await attempts.transition(attemptId, "verdict_produced");   // `committed` when this was written
 //
 // and drops the answer. `transition` is a CONDITIONAL write — it returns whether the row moved — and the one
 // way it returns `false` here is the way that matters: something else already made this attempt terminal
@@ -70,7 +70,9 @@ describe("[R58 COUNTEREXAMPLE] a verdict is only a measurement if its attempt se
     });
     expect(invocation.scores).toHaveLength(1);
     const rows = await attempts.listForScorecard("sc-1");
-    expect(rows[0]?.state).toBe("committed");
+    // The write is `verdict_produced` since arch-review 64 — the CAS this file is about is unchanged, only
+    // what it claims: a produced verdict is not an adopted one.
+    expect(rows[0]?.state).toBe("verdict_produced");
   });
 
   it("REFUSES when the ledger cannot say whether it settled — unknown is not success", async () => {

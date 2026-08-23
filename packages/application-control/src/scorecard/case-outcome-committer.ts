@@ -486,6 +486,20 @@ export class CaseOutcomeCommitter {
               childRunId: childId,
               ...(input.outcome === "failed" ? { error: failureError } : {}),
             });
+          // ── …AND THE VERDICT'S ROW, IN THE SAME TRANSACTION (arch-review 64 P1-high) ──────────────
+          //
+          // A private-verifier case is TWO physical executions under one execution id. The agent's attempt
+          // was adopted here and the verifier's was not, so the verdict this receipt is built from left its
+          // row saying `verdict_produced` — bytes exist, nobody decided — forever, and a teardown kept
+          // reading it as live work.
+          //
+          // Taken off the receipt the commit is actually claiming, not from a variable this closure
+          // remembered: an attempt id read from the receipt cannot name a verdict this case did not adopt.
+          // Both rows reach the same terminal or neither does, which is what makes the settlement one
+          // decision rather than two writes that agree most of the time.
+          const verifierAttempt = covered.verifier?.work?.attemptId;
+          if (this.deps.attempts && attempts && verifierAttempt !== undefined)
+            await attempts.transition(verifierAttempt, terminalState);
           return settled;
         },
         runStore,

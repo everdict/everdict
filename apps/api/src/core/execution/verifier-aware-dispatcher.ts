@@ -1,5 +1,5 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
-import type { AgentHalfStore } from "@everdict/application-control";
+import type { AgentHalfStore, VerifierPassDeps } from "@everdict/application-control";
 import { withVerifierPass } from "@everdict/application-control";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 
@@ -23,6 +23,14 @@ export class VerifierAwareDispatcher implements Dispatcher {
     // Where the agent's half is staged before the second container exists (arch-review 60 follow-through).
     // Absent means a crash between the two halves loses the agent's evidence, which is what it did before.
     private readonly agentHalves?: AgentHalfStore,
+    // ── AND THE LEDGER, BECAUSE THE PASS CORRECTS A ROW (arch-review 64 P1-high) ────────────────────
+    //
+    // `withVerifierPass` has taken an optional `attempts` since arch-review 63, to correct the attempt of a
+    // verdict its merge refused. This constructor had no parameter to pass one through, so the dep was
+    // `undefined` in every production dispatch and the correction was a no-op — while its counterexample,
+    // which builds its own deps object, passed. An optional dependency with no producer is a plan (rule
+    // `protocol`); this is the producer.
+    private readonly attempts?: VerifierPassDeps["attempts"],
   ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
@@ -30,6 +38,7 @@ export class VerifierAwareDispatcher implements Dispatcher {
       dispatch: (agentJob: CaseJob) => this.inner.dispatch(agentJob, opts),
       ...(this.dispatchVerifier ? { dispatchVerifier: this.dispatchVerifier } : {}),
       ...(this.agentHalves ? { agentHalves: this.agentHalves } : {}),
+      ...(this.attempts ? { attempts: this.attempts } : {}),
     });
   }
 }

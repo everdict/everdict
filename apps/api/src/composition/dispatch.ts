@@ -442,6 +442,9 @@ export function buildDispatch(deps: {
     // …and where the agent's half is staged, so a crash between the two halves is recoverable rather than a
     // lost case (arch-review 60 follow-through).
     deps.agentHalves,
+    // …and the LEDGER, so the pass can correct the attempt of a verdict its merge refused. This argument did
+    // not exist, so that correction was inert in production for a whole review cycle (arch-review 64 P1-high).
+    attempts,
   );
   // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
   // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's

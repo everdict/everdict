@@ -285,8 +285,10 @@ const MUTATIONS = [
     // Ignoring the answer must go red, or a cancelled attempt's verdict is a measurement again.
     name: "R58 — a verifier verdict is returned without re-proving its authority",
     file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: '    if (!(await attempts.transition(attemptId, "committed"))) {',
-    to: '    await attempts.transition(attemptId, "committed");\n    if (false) {',
+    // RE-AIMED (arch-review 64): the lane stamps `verdict_produced` now — a produced verdict is not an
+    // adopted one — so the CAS this rung neutralizes moved with it.
+    from: '    if (!(await attempts.transition(attemptId, "verdict_produced"))) {',
+    to: '    await attempts.transition(attemptId, "verdict_produced");\n    if (false) {',
     suite: ["--root", "packages/application-control", "src/execution/verifier-settlement.counterexample.test.ts"],
   },
   {
@@ -1666,6 +1668,27 @@ const MUTATIONS = [
     to: "            void evalCase;",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/batch-completion-parity.counterexample.test.ts"],
+  },
+  {
+    // arch-review 64 P1-high. `committed` means "this attempt's result is the case's answer", and the lane
+    // stamped it before the merge, the collection and the settlement could each still withhold the adoption.
+    // The correction for a refused merge was refused by every real store, because `committed` is terminal.
+    name: "verdict phase — a produced verdict claims the case adopted it",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: '    if (!(await attempts.transition(attemptId, "verdict_produced"))) {',
+    to: '    if (!(await attempts.transition(attemptId, "committed"))) {',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/verdict-produced.counterexample.test.ts"],
+  },
+  {
+    // …and the ADOPTION, which is what keeps the phase from being a leak. Without it every verifier row sits
+    // at `verdict_produced` forever and a teardown keeps reading it as live work.
+    name: "verdict phase — the run settlement does not adopt the verdict's own attempt",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: '                    if (adoptedVerifier !== undefined) await ledger.transition(adoptedVerifier, "committed");',
+    to: "                    void adoptedVerifier;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/two-attempt-settlement.counterexample.test.ts"],
   },
 ];
 

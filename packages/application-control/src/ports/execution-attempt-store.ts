@@ -1,5 +1,6 @@
 import {
   type ActivationDecision,
+  COMMIT_PREDECESSOR_STATES,
   ConflictError,
   EXECUTING_PREDECESSOR_STATES,
   type ExecutionAttemptRecord,
@@ -10,6 +11,7 @@ import {
   OPEN_SCORECARD_STATUSES,
   type PersistedWorkIntent,
   type RuntimeWorkRef,
+  VERDICT_PREDECESSOR_STATES,
   attemptIdOf,
   decideActivation,
   isTerminalAttemptState,
@@ -237,6 +239,14 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     // starts executing from is whichever of those three the lane last transitioned. The set is owned by
     // contracts because the Pg twin arbitrates on the same question.
     if (to === "executing" && !EXECUTING_PREDECESSOR_STATES.includes(current.state)) return false;
+    // …and a VERDICT comes from a row whose object exists (arch-review 64). Its own list, because "which
+    // states may report a verdict" and "which states may report execution" are different questions that
+    // happen to overlap — see the constants for why one is derived and these two are not.
+    if (to === "verdict_produced" && !VERDICT_PREDECESSOR_STATES.includes(current.state)) return false;
+    // …and `committed` is the CANONICAL adoption, so it may not skip backwards out of `verdict_produced`'s
+    // successors. The list is exhaustive rather than a `!isTerminal` check: adding a state to the machine
+    // must break this guard's arithmetic, not silently widen it.
+    if (to === "committed" && !COMMIT_PREDECESSOR_STATES.includes(current.state)) return false;
     if (to === "created") return false; // an attempt is opened into "created"; nothing transitions back to it
     // ── `committed` CLAIMS A RESULT, SO IT ANSWERS TO THE PARENT (arch-review 62 P1) ────────────────
     //

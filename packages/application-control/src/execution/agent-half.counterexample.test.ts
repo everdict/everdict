@@ -1,6 +1,8 @@
+import { storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult, VerifierInvocation } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
+import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { agentHalfDigest, agentHalfKey, mergeVerifierPass, readAgentHalf } from "./agent-half.js";
 import { withVerifierPass } from "./verifier-pass.js";
 
@@ -295,46 +297,56 @@ describe("[R63 COUNTEREXAMPLE] a refused merge corrects the attempt that produce
     scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
   } as unknown as VerifierInvocation;
 
+  // ── AGAINST THE REAL LEDGER, AND READING THE ROW (arch-review 64) ────────────────────────────────
+  //
+  // These two used to hand `withVerifierPass` a double whose `transition` returned `true` unconditionally, so
+  // the assertion recorded that we had ASKED. It hid TWO things at once: the real store refuses
+  // `committed → superseded` outright (first-terminal-wins), and production had no constructor parameter to
+  // pass a ledger through at all. The correction was inert twice over and this file was green.
+  //
+  // Now the lane stops at `verdict_produced`, from which `superseded` is an ordinary write, and the row is
+  // read back rather than a call log. `pnpm guarded-doubles` is what keeps the old shape from coming back.
+  const ledgerHoldingVerdict = async () => {
+    const attempts = new InMemoryExecutionAttemptStore();
+    const { attemptId } = await attempts.open({ executionId: storedExecutionId("evd-run-r1"), tenant: "acme" });
+    await attempts.reserveWork(attemptId, { tenant: "acme", runId: "evd-run-r1", externalJobId: "v" });
+    await attempts.transition(attemptId, "verdict_produced");
+    return { attempts, attemptId };
+  };
+
   it("SUPERSEDES the verifier attempt when its verdict is refused", async () => {
-    const moved: Array<[string, string]> = [];
+    const { attempts, attemptId } = await ledgerHoldingVerdict();
     const out = await withVerifierPass(JOB(), {
       dispatch: async () => RESULT,
-      dispatchVerifier: async () => REFUSED,
-      attempts: {
-        transition: async (id: string, to: string) => {
-          moved.push([id, to]);
-          return true;
-        },
-      },
+      dispatchVerifier: async () => ({ ...REFUSED, work: { ...REFUSED.work, attemptId } }),
+      attempts,
     } as never);
 
     // The control first: the merge really was refused, or there is nothing to correct.
     expect(out.verifier, "the merge was not refused, so this test measured nothing").toBeUndefined();
-    expect(moved, "a refused verdict was left claiming it contributed").toEqual([["a-verify", "superseded"]]);
+    const [row] = await attempts.list(storedExecutionId("evd-run-r1"));
+    expect(row?.state, "a refused verdict was left claiming it contributed").toBe("superseded");
   });
 
   it("leaves the attempt alone when the verdict IS used", async () => {
     // The control. Correcting an attempt whose verdict landed would be a worse record than the one this
-    // fixes, and the assertion above would still pass.
-    const moved: Array<[string, string]> = [];
+    // fixes, and the assertion above would still pass. The row stays at `verdict_produced` — waiting for the
+    // SETTLEMENT to adopt it, which is the whole point of the phase.
+    const { attempts, attemptId } = await ledgerHoldingVerdict();
     const out = await withVerifierPass(JOB(), {
       dispatch: async () => RESULT,
       dispatchVerifier: async (): Promise<VerifierInvocation> =>
         ({
           planDigest: "sha256:plan",
           workspaceDigest: contentDigest(RESULT.snapshot),
-          work: { tenant: "acme", runId: "evd-run-r1", externalJobId: "v", attemptId: "a-verify" },
+          work: { tenant: "acme", runId: "evd-run-r1", externalJobId: "v", attemptId },
           scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
         }) as unknown as VerifierInvocation,
-      attempts: {
-        transition: async (id: string, to: string) => {
-          moved.push([id, to]);
-          return true;
-        },
-      },
+      attempts,
     } as never);
 
     expect(out.verifier, "the verdict never reached the result, so the assertion below is vacuous").toBeDefined();
-    expect(moved, "an attempt whose verdict was used was corrected anyway").toEqual([]);
+    const [row] = await attempts.list(storedExecutionId("evd-run-r1"));
+    expect(row?.state, "an attempt whose verdict was used was corrected anyway").toBe("verdict_produced");
   });
 });

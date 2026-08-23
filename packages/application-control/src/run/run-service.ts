@@ -928,6 +928,12 @@ export class RunService {
       // arch-review 45: hand the stamp to the settlement and the two writes are one decision, ordered so the
       // guard's question still has an answer.
       const adoptedAttempt = adoptedAttemptId;
+      // …and the VERDICT'S attempt, when the recovered result carries one (arch-review 64 P1-high). A
+      // two-phase case has two rows under one execution id, and a recovery that adopts the merged document is
+      // adopting both halves' work — so both reach the same terminal in this write, or the verifier's row is
+      // left at `verdict_produced` for a case that finished. Read off the receipt this settlement is
+      // committing, never remembered, so it cannot name a verdict the run did not take.
+      const adoptedVerifier = adoption.patch.result?.verifier?.work?.attemptId;
       const claimed = await settleRun(
         this.deps.store,
         record.id,
@@ -940,7 +946,10 @@ export class RunService {
                 stamp: {
                   attempts: this.deps.attempts,
                   attemptId: adoptedAttempt,
-                  apply: async (ledger) => void (await ledger.transition(adoptedAttempt, "committed")),
+                  apply: async (ledger) => {
+                    await ledger.transition(adoptedAttempt, "committed");
+                    if (adoptedVerifier !== undefined) await ledger.transition(adoptedVerifier, "committed");
+                  },
                 },
               }
             : {}),
@@ -1950,7 +1959,18 @@ export class RunService {
     // has no receipt to claim — and the window was the same one: a crash between the fenced settle and the
     // awaited stamp left a succeeded run whose attempt row said `created` forever. The run row IS this
     // lane's outcome record, so the commit point is the terminal write itself.
-    const riding = stamp !== undefined ? this.attemptStamp(id, stamp.committed, stamp.error) : undefined;
+    // ── …AND SO DOES THE VERIFIER'S, WHEN THE CASE HAD TWO HALVES (arch-review 64 P1-high) ──────────
+    //
+    // A private-verifier case is two physical executions under one execution id, and only one of them was
+    // being settled here. The verifier's row stops at `verdict_produced` — bytes exist, nobody has said
+    // whether the case took them — and THIS write is the moment it learns: the run is settling with a result
+    // whose `verifier` receipt is that invocation, so the same transaction adopts both attempts or neither.
+    //
+    // Read off the receipt rather than remembered: the receipt is what the settlement is actually committing,
+    // so an attempt id taken from it cannot name a verdict the run did not adopt (rule `protocol` L3).
+    const verifierAttempt = patch.result?.verifier?.work?.attemptId;
+    const riding =
+      stamp !== undefined ? this.attemptStamp(id, stamp.committed, stamp.error, verifierAttempt) : undefined;
     let settled: RunRecord | undefined;
     let faulted = false;
     try {
@@ -1998,9 +2018,12 @@ export class RunService {
     id: string,
     to: ExecutionAttemptState,
     error?: { code: string; message: string },
+    // The verifier's attempt, when this case had a judging half. Settled in the SAME `apply`, so a case whose
+    // verdict the run adopted cannot leave that verdict's row saying nobody decided (arch-review 64).
+    verifierAttemptId?: string,
   ): AttemptStamp | undefined {
     const attempts = this.deps.attempts;
-    const attemptId = this.attemptRow.get(`evd-run-${id}`);
+    const attemptId = this.attemptRow.get(runExecutionId(id));
     if (!attempts || attemptId === undefined || this.deps.store.settleWith === undefined) return undefined;
     return {
       attempts,
@@ -2009,6 +2032,10 @@ export class RunService {
         // The transition's own answer is deliberately unread: a refusal is a silent no-op by contract (an
         // already-terminal row meeting a late stamp is ordinary), and only a throw aborts the settlement.
         await bound.transition(attemptId, to, { childRunId: id, ...(error !== undefined ? { error } : {}) });
+        // …and the verdict's own row, to the SAME terminal. `verdict_produced → committed` is exactly the
+        // adoption this settlement is performing, and it happens here or the phase has no reader — which is
+        // the leak an inert phase becomes (rule `protocol`, the phase-readers law).
+        if (verifierAttemptId !== undefined) await bound.transition(verifierAttemptId, to);
       },
     };
   }
