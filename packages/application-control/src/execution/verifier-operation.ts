@@ -86,6 +86,7 @@ export async function verifierOperation(
     // (arch-review 62 P1). Absent for a deployment that stages nothing, which is the case a recovery already
     // handles by skipping.
     ...(job.agentResultDigest !== undefined ? { agentResultDigest: job.agentResultDigest } : {}),
+    ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),
   };
 
   // ── WHERE THIS VERDICT WAS PRODUCED, KEPT (arch-review 60 P1-provenance) ────────────────────────────
@@ -170,7 +171,13 @@ export async function verifierOperation(
         { attemptId, reserved: persistedWork.externalJobId, reported: invocation.work.externalJobId },
         "this verifier reported a different container than the one it reserved, so its verdict cannot be attributed",
       );
-    return { ...invocation, work: persistedWork };
+    return {
+      ...invocation,
+      work: persistedWork,
+      // The judged execution, from the job that named it — so the receipt this becomes carries both halves'
+      // attempts rather than only the one that produced the verdict.
+      ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),
+    };
   } catch (err) {
     // …and settled on failure too, for the same reason: an abandoned row is owed forever. The error keeps
     // travelling — `withVerifierPass` turns it into `unmeasured`, which is the honest verdict.

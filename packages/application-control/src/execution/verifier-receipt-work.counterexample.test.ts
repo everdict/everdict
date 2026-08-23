@@ -129,3 +129,37 @@ describe("[R60 COUNTEREXAMPLE] a verifier invocation carries the object that pro
     expect(invocation.planDigest).toBe("sha256:plan");
   });
 });
+
+// ── …AND WHICH EXECUTION WAS JUDGED (arch-review 62 follow-through) ─────────────────────────────────
+//
+// The previous wave put the JUDGING attempt on the receipt. The judged one was still missing, so a merged
+// two-phase case named the container that produced the verdict and not the container that produced the
+// evidence — and a reader asking "which execution is this verdict about" had to fall back to the run id,
+// which is the LOGICAL execution and the same across a retry, a re-lease and a speculative duplicate.
+//
+// The coordinate was already in hand: `CaseJob.attemptId` is minted where the ledger row is opened and rides
+// the job. It is read through `jobAttemptId`, the helper every other consumer uses, rather than derived a
+// second time — a coordinate spelled twice is a coordinate that can differ (see the cancellation that asked
+// for `rec.id`).
+//
+// Seen RED before it travelled, observed:
+//   the receipt cannot say which execution it judged: expected undefined to be 'evd-run-r1#g1'
+describe("[R62-followup COUNTEREXAMPLE] a verdict names both contributing attempts", () => {
+  it("carries the judged execution's attempt beside the judging one", async () => {
+    const { attempts } = await open();
+    const judged = { ...JOB, agentAttemptId: "evd-run-r1#g1" } as unknown as VerifierJob;
+    const invocation = await verifierOperation({ attempts }, judged, nomadShaped as never);
+
+    expect(invocation.agentAttemptId, "the receipt cannot say which execution it judged").toBe("evd-run-r1#g1");
+    // …and the one that produced the verdict is still there, or this has traded one half for the other.
+    expect(invocation.work?.attemptId, "the judging attempt was lost").toBeDefined();
+  });
+
+  it("says nothing when the job could not name one", async () => {
+    // A deployment with no ledger opens no row, so there is no attempt to name. An invented id would be
+    // worse than an absent one: it would join to nothing while looking like provenance.
+    const { attempts } = await open();
+    const invocation = await verifierOperation({ attempts }, JOB, nomadShaped as never);
+    expect(invocation.agentAttemptId).toBeUndefined();
+  });
+});

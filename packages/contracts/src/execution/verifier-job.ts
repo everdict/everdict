@@ -115,6 +115,12 @@ export const VerifierJobSchema = z.object({
   // one's and a recovered verdict could be merged onto another execution's evidence. This is the coordinate
   // of the exact half, carried to the lane so it reaches the handle a recovery reads.
   agentResultDigest: z.string().min(1).optional(),
+  // …and WHICH PHYSICAL EXECUTION produced that half (arch-review 62 follow-through). The digest above says
+  // which bytes; this says which attempt row made them. A merged two-phase case named the container that
+  // JUDGED it and not the one that produced the evidence being judged, so a reader asking "which execution
+  // is this verdict about" had to guess from the run id — which is the logical execution, the same across a
+  // retry. Minted where the row was opened (`CaseJob.attemptId`) and carried, never re-derived.
+  agentAttemptId: z.string().min(1).optional(),
   // Which trial of a pass@k fan-out this judged. An attempt that cannot say is one a re-drive cannot tell
   // apart from its predecessor.
   trial: z.number().int().nonnegative().optional(),
@@ -153,6 +159,10 @@ export const VerifierInvocationSchema = z.object({
   work: RuntimeWorkRefSchema.optional(),
   // …and in WHICH WORLD, three-valued as everywhere else.
   imageProvenance: ImageProvenanceSchema.optional(),
+  // WHICH physical execution produced the half this verdict is about — see `agentAttemptId` on the job. The
+  // receipt extends this document, so naming it here is what puts BOTH contributing attempts on the final
+  // record: the one that judged (`work.attemptId`) and the one that was judged.
+  agentAttemptId: z.string().min(1).optional(),
   scores: z.array(ScoreSchema),
 });
 export type VerifierInvocation = z.infer<typeof VerifierInvocationSchema>;

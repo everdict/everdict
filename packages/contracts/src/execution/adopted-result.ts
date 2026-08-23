@@ -60,6 +60,9 @@ export function adoptedResultFrom(stdout: string, work: RuntimeWorkRef): Adopted
       planDigest: envelope.planDigest,
       workspaceDigest: envelope.workspaceDigest,
       work,
+      // From the handle, which is the only coordinate a recovery holds — so a verdict adopted after a restart
+      // names the same two attempts an in-line one does (arch-review 62 follow-through).
+      ...(work.verifier?.agentAttemptId !== undefined ? { agentAttemptId: work.verifier.agentAttemptId } : {}),
       scores: envelope.scores,
     },
   };

@@ -8,6 +8,7 @@ import {
   mergeVerifierPass,
   stageAgentHalf,
 } from "./agent-half.js";
+import { jobAttemptId } from "./open-physical-attempt.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -134,6 +135,9 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     // parsed back out of the execution id (rule `protocol` L3).
     // WHICH physical agent half this verdict will be merged into — see `agentResultDigest` on the schema.
     agentResultDigest: stagedDigest,
+    // …and which physical execution produced it. Read through the SAME helper every other consumer uses, so
+    // the id the receipt names is the id the ledger holds rather than a second derivation of it.
+    ...(jobAttemptId(job, job.runId) !== undefined ? { agentAttemptId: jobAttemptId(job, job.runId) } : {}),
     ...(job.batchId !== undefined ? { scorecardId: job.batchId } : {}),
     ...(job.trial !== undefined ? { trial: job.trial } : {}),
     ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),

@@ -1441,6 +1441,17 @@ const MUTATIONS = [
     to: "        if (slot.free <= 0)",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 follow-through. The receipt named the attempt that JUDGED and not the one that was
+    // judged, so a merged two-phase case could not say which execution its verdict was about — only which
+    // logical run, which is the same across a retry.
+    name: "verifier verdict — the judged execution is not named",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "      ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),\n    };",
+    to: "    };",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

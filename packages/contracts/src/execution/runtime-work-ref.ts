@@ -73,6 +73,9 @@ export const RuntimeWorkRefSchema = z.object({
       // The RESULT digest is that discriminator, minted where the result is (rule `protocol` L3) and carried
       // here so the recovery site can address the exact object rather than whatever is at the tree's key.
       agentResultDigest: z.string().min(1).optional(),
+      // …and which execution produced those bytes, so a verdict adopted after a restart names the same two
+      // attempts an in-line one does. A recovery holds the handle and nothing else.
+      agentAttemptId: z.string().min(1).optional(),
     })
     .optional(),
 });
