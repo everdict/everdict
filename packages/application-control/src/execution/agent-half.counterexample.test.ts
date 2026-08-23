@@ -48,14 +48,19 @@ const RESULT: CaseResult = {
 describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is dispatched", () => {
   it("stages it FIRST, and under the key the recovery computes", async () => {
     const order: string[] = [];
+    const staged: string[] = [];
     const written = new Map<string, Uint8Array>();
     const halves = {
       put: async (key: string, data: Uint8Array) => {
         order.push("stage");
+        staged.push(key);
         written.set(key, data);
         return "ref";
       },
       get: async (key: string) => written.get(key),
+      remove: async (key: string) => {
+        written.delete(key);
+      },
     };
 
     await withVerifierPass(JOB(), {
@@ -78,10 +83,16 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
     // …under the key the RECOVERY addresses, which the verifier's handle carries. Keyed by the RESULT, not
     // the workspace: two attempts of one case can leave byte-identical trees and differ in everything else,
     // and the tree's key is one object (arch-review 61 P1-high, narrowed by 62 P1).
+    //
+    // Asserted from what was WRITTEN rather than what is still there: the pass discards its half once the
+    // verdict is merged (see the retention describe below), so the store is empty by now and that is correct.
     const digest = agentHalfDigest(RESULT);
-    expect([...written.keys()]).toEqual([agentHalfKey("acme", "evd-run-r1", digest)]);
+    expect(staged).toEqual([agentHalfKey("acme", "evd-run-r1", digest)]);
 
-    // …and it reads back as the agent's own result, through the contract rather than a cast.
+    // …and it reads back as the agent's own result, through the contract rather than a cast. Written back in
+    // for this read, because the pass has already discarded it — the bytes are what is under test here, not
+    // the retention.
+    written.set(agentHalfKey("acme", "evd-run-r1", digest), new TextEncoder().encode(JSON.stringify(RESULT)));
     const half = await readAgentHalf(halves, "acme", "evd-run-r1", digest);
     expect(half.kind).toBe("read");
     expect(half.kind === "read" && half.result.harness).toBe("agent@1");
@@ -159,6 +170,7 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
           throw new Error("artifact store unavailable");
         },
         get: async () => undefined,
+        remove: async () => undefined,
       },
     });
     expect(
@@ -179,5 +191,73 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
         }) as unknown as VerifierInvocation,
     });
     expect(result.verifier, "the verifier receipt did not reach the result").toBeDefined();
+  });
+});
+
+// ── …AND THE IN-LINE PATH CLOSES ITS OWN WINDOW (arch-review 62 follow-through) ──────────────────────
+//
+// The other end. `withVerifierPass` opens the window by staging and closes it by merging, so it discards
+// what it wrote — and it stages at the moment the window actually opens rather than for every case with a
+// verifier PLAN, which used to write halves for cases refused two lines later (no repo snapshot, no lane).
+//
+// Seen RED before the retention owner, observed:
+//   the case finished and its intermediate half stayed in storage: expected 1 to be +0
+describe("[R62-followup COUNTEREXAMPLE] the in-line pass discards the half it staged", () => {
+  const halvesRecording = (written: Map<string, Uint8Array>) => ({
+    put: async (key: string, data: Uint8Array) => {
+      written.set(key, data);
+      return "ref";
+    },
+    get: async (key: string) => written.get(key),
+    remove: async (key: string) => {
+      written.delete(key);
+    },
+  });
+
+  it("leaves nothing behind once the verdict is merged", async () => {
+    const written = new Map<string, Uint8Array>();
+    const merged = await withVerifierPass(JOB(), {
+      dispatch: async () => RESULT,
+      dispatchVerifier: async (): Promise<VerifierInvocation> =>
+        ({
+          planDigest: "sha256:plan",
+          workspaceDigest: contentDigest(RESULT.snapshot),
+          scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+        }) as unknown as VerifierInvocation,
+      agentHalves: halvesRecording(written),
+    } as never);
+
+    // The control first: a pass that never merged would leave nothing behind for the wrong reason.
+    expect(merged.verifier, "the verdict never reached the result, so the retention claim is vacuous").toBeDefined();
+    expect(written.size, "the case finished and its intermediate half stayed in storage").toBe(0);
+  });
+
+  it("leaves nothing behind when the VERIFIER failed either", async () => {
+    // No container will ever be adopted for this case, so the half is garbage the moment the dispatch failed.
+    const written = new Map<string, Uint8Array>();
+    await withVerifierPass(JOB(), {
+      dispatch: async () => RESULT,
+      dispatchVerifier: async () => {
+        throw new Error("the lane refused");
+      },
+      agentHalves: halvesRecording(written),
+    } as never);
+
+    expect(written.size, "a failed verifier left its agent half in storage").toBe(0);
+  });
+
+  it("stages NOTHING for a case whose verifier can never be dispatched", async () => {
+    // A prompt snapshot has no workspace to judge, so this case is refused before any second container —
+    // there is no window, and a half written for it would be garbage from birth.
+    const written = new Map<string, Uint8Array>();
+    await withVerifierPass(JOB(), {
+      dispatch: async () => ({ ...RESULT, snapshot: { kind: "prompt", output: "x" } }) as CaseResult,
+      dispatchVerifier: async (): Promise<VerifierInvocation> => {
+        throw new Error("must not be reached");
+      },
+      agentHalves: halvesRecording(written),
+    } as never);
+
+    expect(written.size, "a half was staged for a case that never opened a window").toBe(0);
   });
 });

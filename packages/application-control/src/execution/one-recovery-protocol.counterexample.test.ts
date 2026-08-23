@@ -58,9 +58,15 @@ const VERDICT = {
   scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
 } as unknown as VerifierInvocation;
 
+// What the store was asked to REMOVE — the retention half of the protocol (arch-review 62 follow-through).
+const removed: string[] = [];
+
 const store = (bytes?: Uint8Array) => ({
   put: async () => "ref",
   get: async (key: string) => (key === agentHalfKey("acme", "evd-run-r1", DIGEST) ? bytes : undefined),
+  remove: async (key: string) => {
+    removed.push(key);
+  },
 });
 
 describe("[R62 COUNTEREXAMPLE] a recovered verdict is finished the same way by every owner", () => {
@@ -85,6 +91,7 @@ describe("[R62 COUNTEREXAMPLE] a recovered verdict is finished the same way by e
   it("stays UNKNOWN when the store will not say", async () => {
     const broken = {
       put: async () => "ref",
+      remove: async () => undefined,
       get: async () => {
         throw new Error("artifact store unavailable");
       },
@@ -113,5 +120,53 @@ describe("[R62 COUNTEREXAMPLE] a recovered verdict is finished the same way by e
         'stage === "verifier"',
       );
     }
+  });
+});
+
+// ── …AND THE WINDOW HAS AN OWNER THAT ENDS IT (arch-review 62 follow-through) ────────────────────────
+//
+// The staged half is an INTERMEDIATE artifact: a full `CaseResult`, trace and workspace snapshot included,
+// duplicating evidence the case already carries. The port was put/get, so one was written for every
+// private-verifier case and nothing ever removed it — no reference, no sweep, no expiry.
+//
+// Its window is exactly one span: from the moment the agent's container is reaped to the moment its verdict
+// is merged. Both ends are code in this package, so both ends close it — the in-line merge and the recovery
+// merge. A half only ONE of them discards is a half that survives every crashed case forever, which is the
+// same shape as the lookup that only one owner knew (above).
+//
+// Best-effort, like the staging: a half that outlives its window costs storage, and a case that failed
+// because a delete did not answer costs a verdict.
+//
+// Seen RED before the retention owner, observed:
+//   the recovery merged a half and left it in storage forever: expected [] to have a length of 1
+describe("[R62-followup COUNTEREXAMPLE] a staged half is discarded by whoever closes its window", () => {
+  it("the RECOVERY discards the half it merged", async () => {
+    removed.length = 0;
+    const staged = store(new TextEncoder().encode(JSON.stringify(HALF)));
+    const out = await recoverVerifiedCase(staged, "acme", "evd-run-r1", WORK, VERDICT);
+
+    expect(out.kind, "the fixture never reached the merge, so this proves nothing").toBe("merged");
+    expect(removed, "the recovery merged a half and left it in storage forever").toHaveLength(1);
+    expect(removed[0], "the recovery removed an object other than the half it read").toBe(
+      agentHalfKey("acme", "evd-run-r1", DIGEST),
+    );
+  });
+
+  it("does NOT discard a half it could not merge", async () => {
+    // Discarding before the merge succeeded would turn a refused merge into a case nothing can ever recover:
+    // the verdict is already spent and the evidence would be gone too.
+    removed.length = 0;
+    const staged = store(new TextEncoder().encode(JSON.stringify(HALF)));
+    const wrongTree = { ...VERDICT, workspaceDigest: "sha256:another-tree" } as typeof VERDICT;
+    await recoverVerifiedCase(staged, "acme", "evd-run-r1", WORK, wrongTree).catch(() => undefined);
+
+    expect(removed, "a half was discarded even though its verdict was refused").toHaveLength(0);
+  });
+
+  it("does NOT discard anything when there was no half to read", async () => {
+    removed.length = 0;
+    const empty = store(undefined);
+    expect((await recoverVerifiedCase(empty, "acme", "evd-run-r1", WORK, VERDICT)).kind).toBe("absent");
+    expect(removed).toHaveLength(0);
   });
 });

@@ -74,6 +74,23 @@ export function agentHalfDigest(result: CaseResult): string {
 export interface AgentHalfStore {
   put(key: string, data: Uint8Array, contentType: string): Promise<string>;
   get(key: string): Promise<Uint8Array | undefined>;
+  // ── AND THE WINDOW HAS AN OWNER THAT ENDS IT (arch-review 62 follow-through) ──────────────────────
+  //
+  // This port was put/get, so every private-verifier case left a full intermediate `CaseResult` — trace,
+  // workspace snapshot and all — in object storage forever. Nothing referenced it, nothing swept it, and it
+  // duplicates evidence the case already carries.
+  //
+  // The half exists for exactly one window: from the moment the agent's container is reaped to the moment
+  // its verdict is merged. Both ends of that window are code in this package, so the window has an owner —
+  // and a capability the owner is not given is a retention policy it cannot apply.
+  remove(key: string): Promise<void>;
+}
+
+// Best-effort by contract, like the staging itself. A half that outlives its window costs storage; a case
+// that failed because a delete did not answer costs a verdict, which is the trade this file already made
+// once in the other direction.
+export async function discardAgentHalf(store: AgentHalfStore | undefined, key: string): Promise<void> {
+  await store?.remove(key).catch(() => undefined);
 }
 
 export async function stageAgentHalf(
@@ -156,7 +173,12 @@ export async function recoverVerifiedCase(
   if (digest === undefined) return { kind: "absent" };
   const half = await readAgentHalf(store, tenant, runId, digest);
   if (half.kind !== "read") return half;
-  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };
+  const merged = mergeVerifierPass(half.result, invocation);
+  // The window closes here too — the recovery is the OTHER end of it, and a half only one owner discards is
+  // a half that survives every crashed case forever. Best-effort, and after the merge succeeded: discarding
+  // before it would turn a refused merge into a case nothing can recover.
+  await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));
+  return { kind: "merged", result: merged };
 }
 
 // ── THE MERGE, ONCE (rule `protocol` L5) ─────────────────────────────────────────────────────────────

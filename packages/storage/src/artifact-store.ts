@@ -13,6 +13,12 @@ export class InMemoryArtifactStore implements ArtifactStore {
     return this.objects.get(key)?.data;
   }
 
+  // See the S3 twin for why this is on the class and not on the port: the store holds evidence, and evidence
+  // is kept — the staged agent half is the one intermediate artifact with an owner that ends it.
+  async remove(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+
   // memory:// refs don't expire and there is no second address to mint — a ref of ours is already the only
   // one; the stable artifact:// handle mints against the base like the S3 twin signs against its endpoint.
   async publicUrlFor(ref: string): Promise<string | undefined> {

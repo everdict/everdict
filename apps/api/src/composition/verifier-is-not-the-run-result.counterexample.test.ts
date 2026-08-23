@@ -117,6 +117,7 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
   const staged = (bytes?: Uint8Array) => ({
     put: async () => "ref",
     get: async () => bytes,
+    remove: async () => undefined,
   });
 
   // A REAL verdict: `verifierReceiptOf` refuses an empty one ("an empty verdict is not a measurement"), and
@@ -193,6 +194,7 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
     const resumedWith: Array<unknown> = [];
     const halves = {
       put: async () => "ref",
+      remove: async () => undefined,
       get: async () => {
         throw new Error("artifact store unavailable");
       },

@@ -1,5 +1,6 @@
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
@@ -101,6 +102,29 @@ export class S3ArtifactStore implements ArtifactStore {
         "UPSTREAM_ERROR",
         { key },
         `object storage read failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // ── AN INTERMEDIATE ARTIFACT HAS A RETENTION OWNER (arch-review 62 follow-through) ────────────────
+  //
+  // Deliberately NOT on the `ArtifactStore` port: almost everything this store holds is EVIDENCE — a sealed
+  // trajectory, an offloaded snapshot, a published payload — and evidence is kept, so a delete on the shared
+  // port would be a capability forty callers have and nobody should use. The staged agent half is the
+  // exception (it exists only between a case's two halves), so the capability lives on the concrete store and
+  // the narrow `AgentHalfStore` port is the only thing that asks for it.
+  //
+  // An absent object is a no-op, like every delete in this repo: the half may have been reclaimed already by
+  // the path that raced this one.
+  async remove(key: string): Promise<void> {
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.opts.bucket, Key: key }));
+    } catch (err) {
+      if (isNotFound(err)) return;
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { key },
+        `object storage delete failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

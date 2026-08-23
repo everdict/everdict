@@ -1,6 +1,13 @@
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
-import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
+import {
+  type AgentHalfStore,
+  agentHalfDigest,
+  agentHalfKey,
+  discardAgentHalf,
+  mergeVerifierPass,
+  stageAgentHalf,
+} from "./agent-half.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -64,9 +71,7 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   //
   // Staged now, keyed by the execution, so that recovery can read it back and finish the same merge. See
   // `stageAgentHalf` for why its failure is swallowed and what that costs.
-  if (job.runId !== undefined && job.tenant !== undefined)
-    await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
-  // …and WHICH half it is, computed over the document that was staged, so the verifier job below can carry
+  // …and WHICH half it is, computed over the document the stage below writes, so the verifier job can carry
   // the coordinate rather than have a recovery guess it from something two attempts share (arch-review 62).
   const stagedDigest = agentHalfDigest(result);
 
@@ -134,9 +139,22 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     ...(job.driverEpoch !== undefined ? { driverEpoch: job.driverEpoch } : {}),
   };
 
+  // ── THE WINDOW OPENS HERE (arch-review 62 follow-through) ────────────────────────────────────────
+  //
+  // Staged immediately before the second container is dispatched, which is where the window actually starts:
+  // the earlier placement wrote a half for every case with a verifier PLAN, including the ones refused two
+  // lines later for having no repo snapshot or no lane to judge on — halves for a verifier that was never
+  // dispatched, and therefore garbage the moment they were written.
+  const halfKey = agentHalfKey(job.tenant, job.runId, stagedDigest);
+  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
+
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
-  if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores)
+  if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {
+    // …and CLOSES on every path out. The verifier's container has been read or has failed, so nothing will
+    // ever merge this half: a recovery reaching it would find the verifier handle gone and re-drive anyway.
+    await discardAgentHalf(deps.agentHalves, halfKey);
     return owed("grader_error", invocation instanceof Error ? invocation.message : String(invocation));
+  }
 
   // ── THE VERDICT AND WHAT PRODUCED IT, TOGETHER (arch-review 57 P1) ──────────────────────────────
   //
@@ -155,5 +173,10 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     return mergeVerifierPass(result, invocation as VerifierInvocation);
   } catch (err) {
     return owed("grader_error", err instanceof Error ? err.message : String(err));
+  } finally {
+    // The merge is the far end of the window, whichever way it went. After it there is nothing left that
+    // could use this half: the verdict is in the result the caller settles, and a crash from here on finds
+    // no verifier container to adopt.
+    await discardAgentHalf(deps.agentHalves, halfKey);
   }
 }
