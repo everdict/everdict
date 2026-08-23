@@ -24,6 +24,7 @@ import {
   verifierJobPayload,
 } from "@everdict/contracts";
 import {
+  AppError,
   BadRequestError,
   type CaseJob,
   type CaseResult,
@@ -1018,6 +1019,21 @@ export function runLabelValue(runId: string): string {
 // The selector a `killWork` sweeps by: every Job this RUN placed in this TENANT, and nothing else. Tenant is
 // in it because a cross-tenant stop is the same defect as a cross-tenant read; the run is in it because the
 // case is not an execution.
+// Did a create that ERRORED nevertheless create? Asked by the exact name this dispatch chose, because the
+// handle was reserved before the call — and answered three ways, since a cluster that will not say is not a
+// cluster with nothing in it (arch-review 63 P1).
+async function reclaimByName(
+  api: Pick<K8sApi, "jobsByLabel" | "deleteJob">,
+  name: string,
+  ns: string,
+): Promise<"absent" | "reclaimed" | "failed"> {
+  const jobs = await api.jobsByLabel(`everdict.dev/job=${name}`).catch(() => undefined);
+  if (jobs === undefined) return "failed"; // could not find out — the caller says so on the thrown failure
+  if (!jobs.some((j) => j.name === name)) return "absent";
+  const removed = await api.deleteJob(name, ns).catch(() => undefined);
+  return removed !== undefined && killConverged(removed) ? "reclaimed" : "failed";
+}
+
 export function runWorkSelector(work: { tenant: string; runId: string }): string {
   return `app=everdict,everdict.dev/tenant=${work.tenant},everdict.dev/run=${runLabelValue(work.runId)}`;
 }
@@ -1592,7 +1608,18 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // reclaim it, and the owner patch that followed could not report a failed uid read.
       const verifierAuths = pullCredentialsFor(job, job.image ?? this.opts.image, this.opts.image);
       const verifierSecret = workPullSecretName(name);
-      await api.applyJob(manifest, ns);
+      // …and the same readback the agent lane makes: a create that ERRORED may still have created
+      // (arch-review 63 P1). One spelling for both lanes, or the next review finds the one that was missed.
+      await api.applyJob(manifest, ns).catch(async (err: unknown) => {
+        const reclaimed = await reclaimByName(api, name, ns);
+        throw err instanceof AppError
+          ? new UpstreamError("UPSTREAM_ERROR", { ...err.extra, reclaimed }, err.message)
+          : new UpstreamError(
+              "UPSTREAM_ERROR",
+              { job: name, ns, reclaimed },
+              `the verifier Job could not be applied: ${err instanceof Error ? err.message : String(err)}`,
+            );
+      });
       // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
       // The same boundary the agent lane got: a resume that threw left a suspended Job forever (suspended is
@@ -2124,7 +2151,25 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
       // before the Secret its pod will reference, and the owner reference is available at the moment the
       // credential is written. Nothing is ever unowned, so there is nothing for a compensating delete to
       // get wrong.
-      await api.applyJob(manifest, ns);
+      // ── AND A CREATE THAT ERRORED MAY STILL HAVE CREATED (arch-review 63 P1) ──────────────────────
+      //
+      // The scope below opens after this call RETURNS, which is one call too late: an API server that
+      // applied the Job and then lost the response leaves an object nobody owns. It costs no compute — the
+      // Job is inert — and it is never collected either, because inert is not terminal, so the namespace's
+      // object count climbs by one per lost response, forever.
+      //
+      // "The call threw" is not "nothing was created". The handle was reserved before this line, so the
+      // question is answerable by exactly the name this dispatch chose.
+      await api.applyJob(manifest, ns).catch(async (err: unknown) => {
+        const reclaimed = await reclaimByName(api, name, ns);
+        throw err instanceof AppError
+          ? new UpstreamError("UPSTREAM_ERROR", { ...err.extra, reclaimed }, err.message)
+          : new UpstreamError(
+              "UPSTREAM_ERROR",
+              { job: name, ns, reclaimed },
+              `the Job could not be applied: ${err instanceof Error ? err.message : String(err)}`,
+            );
+      });
       // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 61 P1-high) ────────────
       //
       // The reclaim used to open below `resumeJob`, so two failures escaped it. A resume that THREW left a

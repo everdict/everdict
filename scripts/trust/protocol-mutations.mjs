@@ -1569,6 +1569,40 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/ports/reservation-atomicity.counterexample.test.ts"],
   },
+  {
+    // arch-review 63 P1. The cleanup scope opens after the create RETURNS, so a server that applied the
+    // object and then lost the response left it with nobody to own it — and an inert object is not
+    // terminal, so no TTL and no dead-job sweep collects it.
+    //
+    // PER LANE and as a REGION: this file holds two dispatches spelled alike, so a short `from` neutralizes
+    // whichever appears first — which is how the first draft passed while the agent lane went untested.
+    name: "k8s dispatch (agent lane) — a create whose response was lost leaves its object behind",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: [
+      "      await api.applyJob(manifest, ns).catch(async (err: unknown) => {",
+      "        const reclaimed = await reclaimByName(api, name, ns);",
+      "        throw err instanceof AppError",
+      '          ? new UpstreamError("UPSTREAM_ERROR", { ...err.extra, reclaimed }, err.message)',
+      "          : new UpstreamError(",
+      '              "UPSTREAM_ERROR",',
+      "              { job: name, ns, reclaimed },",
+      "              `the Job could not be applied: ${err instanceof Error ? err.message : String(err)}`,",
+      "            );",
+      "      });",
+    ].join("\n"),
+    to: "      await api.applyJob(manifest, ns);",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/ambiguous-create.counterexample.test.ts"],
+  },
+  {
+    // …and the Nomad twin, which had the same window on its inert registration.
+    name: "nomad dispatch — a registration whose response was lost leaves its job behind",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "        const found = await this.findJob(jobId, ns);",
+    to: '        const found = { kind: "absent" };',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/ambiguous-create.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

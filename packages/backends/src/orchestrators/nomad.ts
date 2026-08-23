@@ -1127,11 +1127,29 @@ export class NomadBackend
     // and Nomad schedules no allocation. So a cancellation racing this dispatch can no longer kill nothing,
     // probe absent and certify zero while a submission is still pending — the race the K8s lane closed with
     // `suspend: true` in arch-review 60 and this one kept.
-    const submit = await this.http.request(
-      "POST",
-      "/v1/jobs",
-      buildNomadJob(job, opts, jobId, verifier?.payload, true),
-    );
+    // ── AND A REGISTRATION THAT ERRORED MAY STILL HAVE REGISTERED (arch-review 63 P1) ────────────────
+    //
+    // The cleanup scope below opens after this call RETURNS, which is one call too late: a Nomad that
+    // accepted the registration and then lost the response leaves a job nobody owns. It costs no compute —
+    // `Count: 0` schedules nothing — and it is never collected either, because an inert job is not dead, so
+    // no dead-job sweep matches it and the cluster's job count climbs by one per lost response.
+    //
+    // "The call threw" is not "nothing was registered". The handle was reserved before this line, so the
+    // question is answerable by exactly the id this dispatch chose.
+    const submit = await this.http
+      .request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload, true))
+      .catch(async (err: unknown) => {
+        const found = await this.findJob(jobId, ns);
+        if (found.kind === "read")
+          await this.http
+            .request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns ? `&namespace=${ns}` : ""}`)
+            .catch(() => undefined);
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { job: jobId, reclaimed: found.kind === "read" ? "reclaimed" : found.kind },
+          `Nomad job submission failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
