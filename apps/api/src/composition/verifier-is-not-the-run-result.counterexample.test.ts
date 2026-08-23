@@ -1,5 +1,6 @@
 import type { RecoveryTarget } from "@everdict/application-control";
 import { agentHalfDigest } from "@everdict/application-control";
+import type { ResumeResult } from "@everdict/application-control";
 import type { CaseResult } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
@@ -258,5 +259,97 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict never becomes the ru
 
     await recoverStandaloneRun(w as never, RECORD as never, { ownerReplica: "r1", epoch: 1 } as never);
     expect((resumedWith[0] as { harness?: string } | undefined)?.harness).toBe("agent@1");
+  });
+});
+
+// ── …AND THE STAMP FOLLOWS THE SETTLEMENT (arch-review 62 follow-through) ────────────────────────────
+//
+// `committed` says this attempt's result IS the case's answer, and this lane wrote it BEFORE handing the
+// result to `service.resume`. So a crash in between — or a resume that lost to a concurrent settlement —
+// left the ledger claiming an answer the run never recorded.
+//
+// The batch path stopped making that statement when `commitCase` bound the receipt, the child's terminal
+// write and the attempt stamp into one transaction (arch-review 43). This lane has no such transaction to
+// join: the run store and the ledger settle through different calls. What it can do is stop asserting the
+// stronger thing first — the residual window is now the reverse one, a settled run whose attempt row is
+// still open, and that is the direction the sweep already handles because an open row is work it re-examines
+// rather than a claim it believes.
+//
+// Seen RED before the reorder, observed:
+//   an attempt claimed the case's answer while another settlement had already won: expected [ [ 'a-verify',
+//   'committed' ] ] to deeply equal []
+describe("[R62-followup COUNTEREXAMPLE] an adopted attempt is stamped only once the run took its result", () => {
+  const world = (resume: () => ResumeResult) => {
+    const closed: Array<[string, string]> = [];
+    const halves = {
+      put: async () => "ref",
+      get: async () => new TextEncoder().encode(JSON.stringify(AGENT_HALF)),
+      remove: async () => undefined,
+    };
+    const deps = {
+      scorecardStore: { get: async () => undefined },
+      store: { get: async () => RECORD },
+      owner: "r1",
+      replicas: { alive: async () => [] },
+      scorecardService: { resume: async () => ({ kind: "resumed" }) },
+      service: { resume: async () => resume() },
+      agentHalves: halves,
+      attempts: {
+        transition: async (id: string, to: string) => {
+          closed.push([id, to]);
+          return true;
+        },
+      },
+      workHandlesFor: async () => [
+        {
+          tenant: "acme",
+          runId: "evd-run-r1",
+          externalJobId: "everdict-verify-c1",
+          attemptId: "a-verify",
+          verifier: {
+            planDigest: "sha256:plan",
+            workspaceDigest: AGENT_TREE,
+            caseId: "c1",
+            agentResultDigest: agentHalfDigest(AGENT_HALF),
+          },
+        },
+      ],
+      adoptWorkFn: async () => ({
+        kind: "adopted",
+        adopted: {
+          stage: "verifier",
+          invocation: {
+            planDigest: "sha256:plan",
+            workspaceDigest: AGENT_TREE,
+            scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+          },
+        },
+      }),
+    } as unknown as Parameters<typeof recoverStandaloneRun>[0];
+    return { deps, closed };
+  };
+
+  const recover = async (resume: () => ResumeResult) => {
+    const { deps, closed } = world(resume);
+    await recoverStandaloneRun(deps, RECORD as never, { ownerReplica: "r1", epoch: 1 } as never);
+    return closed;
+  };
+
+  it("does NOT stamp it when another settlement already won", async () => {
+    const closed = await recover(() => ({ kind: "already_settled", record: RECORD as never }));
+    expect(closed, "an attempt claimed the case's answer while another settlement had already won").toEqual([]);
+  });
+
+  it("does NOT stamp it when the settlement decided nothing", async () => {
+    // `retry_later` establishes nothing about the run, so it establishes nothing about the attempt either.
+    const closed = await recover(() => ({ kind: "retry_later", reason: "the store would not answer" }));
+    expect(closed, "an attempt was settled on the strength of a decision nobody made").toEqual([]);
+  });
+
+  it("DOES stamp it when the run recorded this result", async () => {
+    // The control: a stamp that never fires would satisfy both assertions above and leave every recovered
+    // attempt reading as live work — the defect arch-review 61 closed.
+    const closed = await recover(() => ({ kind: "resumed" }));
+    expect(closed, "a recovered attempt was left reading as live work").toEqual([["a-verify", "committed"]]);
   });
 });

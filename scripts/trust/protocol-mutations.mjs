@@ -1452,6 +1452,17 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 follow-through. `committed` says this attempt's result IS the case's answer, and the
+    // standalone recovery wrote it BEFORE handing the result to the settle — so a resume that lost to a
+    // concurrent settlement left the ledger claiming an answer the run never recorded. Put the stamp back in
+    // front and the claim comes back.
+    name: "standalone recovery — the attempt is stamped before the settlement takes it",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: '  if (outcome.kind === "resumed" && adoptedFrom !== undefined) await closeAdopted(adoptedFrom);',
+    to: "  if (adoptedFrom !== undefined) await closeAdopted(adoptedFrom);",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
