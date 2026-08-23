@@ -224,11 +224,10 @@ const MUTATIONS = [
     // the one signal for "this verdict is not fully attributed" said yes for the two cases it exists to flag.
     name: "R58 — a receipt calls unresolved provenance complete",
     file: "packages/domain/src/execution/verifier-receipt.ts",
-    from: [
-      "      invocation.work?.attemptId !== undefined &&",
-      "      invocation.work.verifier !== undefined &&",
-      '      invocation.imageProvenance?.kind === "resolved",',
-    ].join("\n"),
+    // RE-AIMED (arch-review 63): the predicate grew the judged execution, so the resolved-provenance clause
+    // sits two lines lower. The protocol is unchanged — call unresolved provenance complete and the one
+    // signal for "this verdict is not fully attributed" says yes for the case it exists to flag.
+    from: '      invocation.imageProvenance?.kind === "resolved",',
     to: "      invocation.work !== undefined &&",
     suite: ["--root", "packages/domain", "src/execution/verifier-receipt-completeness.counterexample.test.ts"],
   },
@@ -1194,15 +1193,6 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
-    // arch-review 61 P2-audit. The attempt row left open after a recovery adopted its answer and deleted its
-    // Job, so the physical ledger reads `active`/`executing` for a container that no longer exists.
-    name: "adoption — the adopted attempt is left reading as live work",
-    file: "apps/api/src/composition/runtime-access.ts",
-    from: '    await deps.attempts.transition(work.attemptId, "committed").catch(() => undefined);',
-    to: "    void work;",
-    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
-  },
-  {
     // arch-review 62 P0. Both managed lanes create their object INERT so a cancellation always has something
     // to address. A crash before the activation leaves that object with no owner, and adoption used to wait
     // for it to finish — a suspended Job never does, so the run deferred on every boot forever. Neutralize
@@ -1227,10 +1217,14 @@ const MUTATIONS = [
   {
     // …and the READER half. Teaching the lanes a phase closes nothing while the fold that consumes their
     // answers treats anything it was not taught as "nothing to do here".
+    //
+    // RE-AIMED (arch-review 63): the inert arm now also names the object it reclaimed, so the return moved.
+    // The protocol is unchanged — route `inert` to `unresolved` and a reclaimed object leaves the run
+    // deferred forever, which is the defect the arm was added to close.
     name: "adoption — the fold absorbs a phase it was never taught",
     file: "packages/backends/src/backend.ts",
-    from: '    case "inert":\n    case "absent":\n      return { kind: "redrive" };',
-    to: '    case "absent":\n      return { kind: "redrive" };\n    case "inert":\n      return { kind: "unresolved" };',
+    from: '      return { kind: "redrive", reclaimed: outcome.work };',
+    to: '      return { kind: "unresolved" };',
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
   },
@@ -1271,15 +1265,15 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
-    // …and the other half: a reading is not a reservation. Without the lane's own in-flight count, concurrent
-    // verifiers all see the same free slot in a snapshot none of them is visible in yet.
+    // …and the other half: a reading is not a reservation. Without the lane recording what it holds,
+    // concurrent verifiers all see the same free slot in a snapshot none of them is visible in yet.
+    //
+    // RE-AIMED (arch-review 63): what the lane holds lives on the shared `Admission` now, so the neutralized
+    // line is the reservation itself rather than a local map read.
     name: "verifier admission — the lane does not count the slots it is holding",
     file: "apps/api/src/composition/runtime-access.ts",
-    // RE-AIMED (arch-review 62 follow-through): what the lane holds is three numbers now, not a count, so
-    // the shared fit decision can see memory and CPU too. The protocol is unchanged — neutralizing it still
-    // hands the same free slot to every concurrent verifier.
-    from: "        const held = verifiersHeld.get(target) ?? { count: 0, memoryMb: 0, cpu: 0 };",
-    to: "        const held = { count: 0, memoryMb: 0, cpu: 0 };",
+    from: "        verifiersHeld.reserve(target, job.tenant, need.memoryMb ?? 0, need.cpu ?? 0, `verify:${job.caseId}`);",
+    to: "        void target;",
     suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
   },
   {
@@ -1319,12 +1313,24 @@ const MUTATIONS = [
     // arch-review 62 P1-provenance. `complete` asked only whether a handle was present, so the K8s lane —
     // which answers {tenant, runId, externalJobId, namespace} — produced receipts reading complete that no
     // query could join to the attempt row that made them.
+    //
+    // RE-AIMED as a REGION (arch-review 63): the predicate grew a second requirement, and removing the first
+    // one alone left the second independently answering `false`, so the mutation went green over a defect it
+    // could no longer create. Defence in depth means no single line IS the protocol — the neutralization has
+    // to remove every clause that reaches the same answer.
     name: "verifier receipt — presence of a handle passes for a join to the attempt",
     file: "packages/domain/src/execution/verifier-receipt.ts",
-    from: "      invocation.work?.attemptId !== undefined &&\n      invocation.work.verifier !== undefined &&",
-    to: "      invocation.work !== undefined &&",
+    from: [
+      "    complete:",
+      "      invocation.work?.attemptId !== undefined &&",
+      "      invocation.work.verifier !== undefined &&",
+      "      invocation.agentAttemptId !== undefined &&",
+      "      invocation.work.verifier.agentAttemptId === invocation.agentAttemptId &&",
+      '      invocation.imageProvenance?.kind === "resolved",',
+    ].join("\n"),
+    to: '    complete: invocation.work !== undefined && invocation.imageProvenance?.kind === "resolved",',
     build: "@everdict/domain",
-    suite: ["packages/domain/src/execution/verifier-receipt.counterexample.test.ts"],
+    suite: ["--root", "packages/domain", "src/execution/verifier-receipt.counterexample.test.ts"],
   },
   {
     // …and the operation half: the lane's own answer used to win over the ledger's canonical row, which is
@@ -1434,17 +1440,6 @@ const MUTATIONS = [
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
   {
-    // arch-review 62 follow-through. `committed` says this attempt's result IS the case's answer, and the
-    // standalone recovery wrote it BEFORE handing the result to the settle — so a resume that lost to a
-    // concurrent settlement left the ledger claiming an answer the run never recorded. Put the stamp back in
-    // front and the claim comes back.
-    name: "standalone recovery — the attempt is stamped before the settlement takes it",
-    file: "apps/api/src/composition/runtime-access.ts",
-    from: '  if (outcome.kind === "resumed" && adoptedFrom !== undefined) await closeAdopted(adoptedFrom);',
-    to: "  if (adoptedFrom !== undefined) await closeAdopted(adoptedFrom);",
-    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
-  },
-  {
     // arch-review 63 P0. A scorecard child's row id and its execution id are different strings, and the
     // attempt ledger is keyed by the second. Reading by the first matched no row for ANY child, so every
     // batch recovery adopted nothing and re-dispatched cases whose Jobs may still have been live — the
@@ -1473,8 +1468,11 @@ const MUTATIONS = [
     // nothing to name and the row stays open.
     name: "recovery — the settlement is not told which attempt produced the result",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: "  const outcome = await service.resume(r, adopted, authority, adoptedFrom?.attemptId).catch(",
-    to: "  const outcome = await service.resume(r, adopted, authority).catch(",
+    // RE-AIMED (arch-review 63): the recovered result now goes through the same completion an in-line one
+    // runs, so the argument is `completed`. The protocol is unchanged — withhold the attempt id and the
+    // settlement has nothing to stamp, so the row stays open.
+    from: "  const outcome = await service.resume(r, completed, authority, adoptedFrom?.attemptId).catch(",
+    to: "  const outcome = await service.resume(r, completed, authority).catch(",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
   {
