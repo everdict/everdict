@@ -267,7 +267,42 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     return true;
   }
 
+  // ── ONE CALLER AT A TIME, PER ATTEMPT (arch-review 63 P1-adapter) ────────────────────────────────
+  //
+  // The guarded writes below are read → `await` the parent check → write, and an `await` yields the event
+  // loop. So two concurrent callers both read `created`, both pass the check, and both are handed a
+  // `PersistedWorkIntent` — while the map keeps one. Measured, not theorised: the loser's dispatch then
+  // creates a cluster object whose handle nothing holds, which is the exact failure L1 exists to prevent.
+  //
+  // The Postgres twin cannot do this: its claim is a guarded `UPDATE … RETURNING` and the second caller
+  // simply gets no row. This store is dev/test, and that is the reason it matters — most counterexamples in
+  // this repository run against it, so a state Postgres cannot reach must not be reachable here either or
+  // the suite certifies something production does not do.
+  //
+  // A promise chain per attempt is the whole mechanism: entries are per-attempt and an attempt's life is
+  // bounded, so the map does not grow without bound the way a global lock would serialize.
+  private readonly serialized = new Map<string, Promise<unknown>>();
+
+  private perAttempt<T>(attemptId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.serialized.get(attemptId) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    // The chain must survive a rejection, or one refused reservation would wedge every later call on this
+    // attempt — the tail is a settled promise, never the caller's.
+    this.serialized.set(
+      attemptId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  }
+
   async reserveWork(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
+    return this.perAttempt(attemptId, () => this.reserveWorkUnsafe(attemptId, work));
+  }
+
+  private async reserveWorkUnsafe(attemptId: string, work: RuntimeWorkRef): Promise<PersistedWorkIntent> {
     const current = this.attempts.get(attemptId);
     // The zero-row case, stated. A silent return here is what let a reservation hook resolve over an attempt
     // row that does not exist, which licensed the cluster object that followed it.
@@ -315,6 +350,11 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
   // ONE ANSWER, BOTH PATHS (arch-review 56, Wave D). Extracted so the idempotent return cannot drift from the
   // guarded write — the two used to be a check and a shortcut past it, which is the whole defect.
   async activateWork(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision> {
+    // The same read-await-write shape, and the same serialization — see `perAttempt`.
+    return this.perAttempt(attemptId, () => this.activateWorkUnsafe(attemptId, work));
+  }
+
+  private async activateWorkUnsafe(attemptId: string, work: RuntimeWorkRef): Promise<ActivationDecision> {
     const current = this.attempts.get(attemptId);
     if (!current) return { kind: "refuse", reason: "this attempt row does not exist" };
     // The parent question, asked as a boolean rather than by throwing: an activation refusal is a normal
