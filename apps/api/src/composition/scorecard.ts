@@ -255,6 +255,8 @@ export function buildScorecard(deps: {
     // standalone recovery has had this since arch-review 61; this owner did not, which is how one protocol
     // ended up with two behaviours (arch-review 62 P1).
     ...(artifacts ? { agentHalves: artifacts } : {}),
+    // …and the VERDICT's own stage, same store, its own key space (arch-review 64 P0).
+    ...(artifacts ? { verdicts: artifacts } : {}),
     killUnhandled,
     killWork,
     ...(temporalDriver

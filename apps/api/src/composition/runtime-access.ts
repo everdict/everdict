@@ -12,7 +12,12 @@ import {
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import { agentHalfKey, discardAgentHalf, recoverVerifiedCase } from "@everdict/application-control";
+import {
+  agentHalfKey,
+  discardAgentHalf,
+  recoverStagedVerdict,
+  recoverVerifiedCase,
+} from "@everdict/application-control";
 import {
   Admission,
   type Backend,
@@ -52,6 +57,7 @@ import {
   UpstreamError,
   readOrUnknown,
   recordExecutionId,
+  runExecutionId,
   worstKillOutcome,
 } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
@@ -120,6 +126,9 @@ export function buildRuntimeAccess(deps: {
   // one envelope twice (arch-review 63 P1-high). Absent = this lane accounts for itself, which is correct
   // for a deployment with no scheduler beside it.
   admission?: Admission;
+  // Where a produced VERDICT becomes durable before its row claims it exists (arch-review 64 P0). Absent =
+  // this deployment cannot recover a two-phase case whose verifier container was already reclaimed.
+  verdicts?: AgentHalfStore;
   verifierSlots?: {
     // …including RENEWAL (arch-review 61 P1). The ledger's permit is a 30-minute LEASE and the Scheduler
     // renews the ones it holds every ten; this lane was handed only `tryAdmit`/`releaseAdmission`, so a
@@ -600,8 +609,14 @@ export function buildRuntimeAccess(deps: {
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
         // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
         // otherwise certify zero live work over it.
-        invocation = await verifierOperation({ ...(attempts ? { attempts } : {}) }, job, (j, hooks) =>
-          backend.dispatchVerifier(j, hooks),
+        invocation = await verifierOperation(
+          {
+            ...(attempts ? { attempts } : {}),
+            // …and where this verdict becomes durable before the row says it exists (arch-review 64 P0).
+            ...(deps.verdicts ? { verdicts: deps.verdicts } : {}),
+          },
+          job,
+          (j, hooks) => backend.dispatchVerifier(j, hooks),
         );
         return true; // the first lane that can judge is the answer
       });
@@ -740,6 +755,9 @@ export async function recoverStandaloneRun(
   deps: Pick<Parameters<typeof runStartupRecovery>[0], "service" | "adoptWorkFn" | "workHandlesFor"> & {
     // The physical ledger, so an adopted attempt stops reading as live work — see `closeAdopted`.
     attempts?: Pick<ExecutionAttemptStore, "transition">;
+    // …and where its VERDICT is staged, so a verifier whose container was already reclaimed is finished from
+    // bytes rather than re-run (arch-review 64 P0).
+    verdicts?: AgentHalfStore;
     // Where `withVerifierPass` staged the agent's half — see the verifier branch below. Absent means this
     // deployment cannot merge a recovered verdict, which is exactly what it could not do before.
     agentHalves?: AgentHalfStore;
@@ -861,6 +879,29 @@ export async function recoverStandaloneRun(
         // `absent` — nothing was staged (an older writer, no artifact store, a staging failure). The agent's
         // evidence is genuinely gone, so this falls through to the no-adoption path exactly as before: the
         // run re-drives or tombstones under its own fence, which is the honest answer.
+      }
+      // ── A RECLAIMED VERIFIER STILL HAS ITS VERDICT (arch-review 64 P0) ────────────────────────────
+      //
+      // The branch above needs an invocation, and adoption produces one only while the verifier's object
+      // still exists. Its lane reclaims it the moment the logs are parsed, so the ordinary shape of a crash
+      // here is `absent` — and that re-ran BOTH containers over a judgement already computed and paid for.
+      //
+      // Asked only on `absent`, so a live object is still adopted from the source rather than from a stage.
+      // Same merge, same coordinate, same three answers as everything else in this loop.
+      if (decision.kind === "absent" && work.verifier !== undefined) {
+        const staged = await recoverStagedVerdict(
+          deps.agentHalves,
+          deps.verdicts,
+          r.tenant,
+          runExecutionId(r.id),
+          work,
+        );
+        if (staged.kind === "unknown") return { kind: "retry_later", reason: staged.reason };
+        if (staged.kind === "merged") {
+          adopted = staged.result;
+          adoptedFrom = work;
+          break;
+        }
       }
       if (decision.kind === "unknown") return { kind: "retry_later", reason: decision.reason };
     }

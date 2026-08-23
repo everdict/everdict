@@ -159,6 +159,10 @@ export interface ScorecardServiceDeps {
   // since arch-review 61; the batch planner did not, so it discarded a verdict whose container had already
   // run and re-drove the case at full cost — one protocol, two owners, two behaviours.
   agentHalves?: AgentHalfStore;
+  // …and where the VERDICT is staged (arch-review 64 P0). The agent's half became durable a wave ago and the
+  // judgement did not, so a crash after the verifier's container was reclaimed re-ran a case whose verdict
+  // was already computed. Same store shape, different key space.
+  verdicts?: AgentHalfStore;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //
@@ -331,6 +335,7 @@ export type ScorecardBatchDeps = Pick<
   | "temporalBatches"
   | "adoptWork"
   | "agentHalves"
+  | "verdicts"
   | "cancelQueued"
   | "queueDepth"
   | "queuePressure"

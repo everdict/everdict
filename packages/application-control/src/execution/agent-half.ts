@@ -4,6 +4,7 @@ import {
   type RuntimeWorkRef,
   UpstreamError,
   type VerifierInvocation,
+  VerifierInvocationSchema,
 } from "@everdict/contracts";
 import { type VerifierReceipt, contentDigest, verifierReceiptOf } from "@everdict/domain";
 
@@ -110,6 +111,89 @@ export async function stageAgentHalf(
     .catch(() => undefined);
 }
 
+// ── AND THE SECOND HALF, WHICH WAS NEVER STAGED AT ALL (arch-review 64 P0) ──────────────────────────
+//
+// The agent's half became durable and the VERDICT did not. A verifier container is reclaimed by its lane as
+// soon as the logs are parsed, and from that moment the `VerifierInvocation` — the scores, the image
+// provenance, the canonical work handle, the digests — lived in exactly one place: this process's memory,
+// until the canonical settlement. A crash in that window left:
+//
+//     agent half        staged
+//     verifier Job      deleted
+//     verdict bytes     nowhere
+//
+// and the recovery, finding the verifier's object absent, re-ran the WHOLE case. A constitutional decision
+// that had already been computed was tied to the lifetime of the process that computed it.
+//
+// The attempt row is not verdict storage either: it can say `verdict_produced` while the only copy of the
+// verdict is gone. The row records that a phase happened; these bytes are the phase.
+//
+// Keyed by the same coordinate the agent's half uses — `(tenant, runId, agentResultDigest)` — because that is
+// what a recovery holds when it finds the verifier handle: `work.verifier.agentResultDigest`. One half, one
+// verdict about it, one key (rule `protocol` L4: a settlement references frozen payloads by key).
+export function verifierVerdictKey(tenant: string, runId: string, agentResultDigest: string): string {
+  return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}.json`;
+}
+
+// Best-effort, for the reason `stageAgentHalf` is: a staging failure must not fail a verdict that exists. It
+// costs the RECOVERY, not the run.
+//
+// ⚠️ WHAT THIS DOES NOT CLOSE, stated rather than implied. Both lanes reclaim the verifier's object inside
+// their own dispatch — the Nomad one inside the shared `dispatch` it delegates to — so this write happens
+// just AFTER the container is gone rather than just before. It closes the window that spans the deferred
+// collection, the registered judges, the evidence assembly and the settlement, which is the window measured
+// in seconds; it leaves the one between the lane's reclaim and this call, which is a function return with no
+// I/O in it. Making the lane await a durable verdict before reclaiming needs a hook the Nomad path cannot
+// currently offer, and claiming the stronger property without the mechanism is the failure rule `protocol`
+// names in the time-based-lease law.
+export async function stageVerifierVerdict(
+  store: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  agentResultDigest: string,
+  invocation: VerifierInvocation,
+): Promise<void> {
+  if (!store) return;
+  await store
+    .put(
+      verifierVerdictKey(tenant, runId, agentResultDigest),
+      new TextEncoder().encode(JSON.stringify(invocation)),
+      "application/json",
+    )
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
+// Three answers, for the reason `readAgentHalf` has three: a verdict that was never staged is the ordinary
+// reason a recovery cannot finish a two-phase case, and a store that would not say must not read as one.
+export type StagedVerdict =
+  | { kind: "read"; invocation: VerifierInvocation }
+  | { kind: "absent" }
+  | { kind: "unknown"; reason: string };
+
+export async function readVerifierVerdict(
+  store: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  agentResultDigest: string,
+): Promise<StagedVerdict> {
+  if (!store) return { kind: "absent" };
+  let bytes: Uint8Array | undefined;
+  try {
+    bytes = await store.get(verifierVerdictKey(tenant, runId, agentResultDigest));
+  } catch (err) {
+    return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
+  }
+  if (bytes === undefined) return { kind: "absent" };
+  try {
+    // Through the CONTRACT, like the half: these bytes crossed a restart, and a shape this version cannot
+    // validate is `unknown` — something IS there and we could not use it.
+    return { kind: "read", invocation: VerifierInvocationSchema.parse(JSON.parse(new TextDecoder().decode(bytes))) };
+  } catch (err) {
+    return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // Three answers, not two (rule `protocol` L2). `absent` is a case that never staged — an older writer, a
 // deployment with no artifact store, a staging failure — and it is the ordinary reason a recovery cannot
 // merge. `unknown` is a store that would not say, which must not be read as "there is no agent half": that
@@ -159,6 +243,29 @@ export type RecoveredCase =
   | { kind: "merged"; result: CaseResult }
   | { kind: "absent" } // nothing staged — an older writer, no artifact store, a staging failure: re-drive
   | { kind: "unknown"; reason: string }; // the store would not say — decide nothing, come back
+
+// ── …AND FROM THE STAGE, WHEN THE CONTAINER IS ALREADY GONE (arch-review 64 P0) ─────────────────────
+//
+// `recoverVerifiedCase` needs an invocation, and a recovery only HAS one when adoption could still read the
+// verifier's object. The container is reclaimed the moment its logs are parsed, so the ordinary shape of this
+// crash is: the verdict was produced, its Job is absent, and adoption answers `absent` — which routed the
+// case to a full re-drive of BOTH containers over a judgement that had already been computed.
+//
+// Same merge, same coordinate, sourced from the stage instead of from a live object. `absent` here is the
+// honest "nothing to recover" that re-drives; `unknown` decides nothing, exactly as it does everywhere else.
+export async function recoverStagedVerdict(
+  store: AgentHalfStore | undefined,
+  verdicts: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  work: RuntimeWorkRef,
+): Promise<RecoveredCase> {
+  const digest = work.verifier?.agentResultDigest;
+  if (digest === undefined) return { kind: "absent" };
+  const staged = await readVerifierVerdict(verdicts, tenant, runId, digest);
+  if (staged.kind !== "read") return staged;
+  return await recoverVerifiedCase(store, tenant, runId, work, staged.invocation);
+}
 
 export async function recoverVerifiedCase(
   store: AgentHalfStore | undefined,

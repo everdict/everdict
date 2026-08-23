@@ -1690,6 +1690,19 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/two-attempt-settlement.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P0. The agent's half became durable a wave ago and the VERDICT never did, so a crash
+    // between the lane's reclaim and the settlement re-ran a case whose judgement was already computed.
+    name: "verdict durability — the verdict dies with the process that produced it",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: [
+      "    if (job.agentResultDigest !== undefined)",
+      "      await stageVerifierVerdict(deps.verdicts, job.tenant, job.runId, job.agentResultDigest, invocation);",
+    ].join("\n"),
+    to: "    void stageVerifierVerdict;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

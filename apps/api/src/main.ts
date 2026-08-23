@@ -527,6 +527,8 @@ async function main(): Promise<void> {
     // The agent's half is staged here, before the verifier's container exists — the backend deletes the
     // agent's Job as soon as it has parsed the result, so until this write it lives only in memory.
     ...(artifacts ? { agentHalves: artifacts } : {}),
+    // …and the VERDICT's own stage, same store, its own key space (arch-review 64 P0).
+    ...(artifacts ? { verdicts: artifacts } : {}),
     ...(workspaceImages ? { images: workspaceImages } : {}),
     ...(trustZones ? { trustZones } : {}),
     callbackStore,
@@ -720,6 +722,9 @@ async function main(): Promise<void> {
     runtimeRegistry,
     runtimeSecretsFor,
     runtimeBuildBackend,
+    // Where a produced verdict becomes durable before the ledger says it exists, and where a recovery reads
+    // it back when the verifier's container is already gone (arch-review 64 P0).
+    ...(artifacts ? { verdicts: artifacts } : {}),
     // ONE accounting for both lanes: the verifier places containers on the same backends the Scheduler does,
     // and a placement is invisible to the cluster probe until its object exists — so two separate maps meant
     // one envelope spent twice (arch-review 63 P1-high).
@@ -904,6 +909,8 @@ async function main(): Promise<void> {
     // …and where `withVerifierPass` staged the agent's half, so a run that crashed between its two halves is
     // MERGED rather than losing the verdict its verifier already produced (arch-review 60 follow-through).
     ...(artifacts ? { agentHalves: artifacts } : {}),
+    // …and the VERDICT's own stage, same store, its own key space (arch-review 64 P0).
+    ...(artifacts ? { verdicts: artifacts } : {}),
     // …and the physical ledger, so an attempt this recovery adopted stops reading as live work
     // (arch-review 61 P2-audit).
     ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),

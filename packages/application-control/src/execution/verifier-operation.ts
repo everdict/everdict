@@ -9,6 +9,7 @@ import {
 import { contentDigest } from "@everdict/domain";
 import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import { type AgentHalfStore, stageVerifierVerdict } from "./agent-half.js";
 
 // ── THE JUDGING HALF IS DURABLE WORK (arch-review 57 P0-verifier) ────────────────────────────────────
 //
@@ -35,6 +36,15 @@ export interface VerifierOperationDeps {
   // must still be able to judge: refusing here would make the ledger a prerequisite for a verdict rather
   // than a record of one.
   attempts?: ExecutionAttemptStore;
+  // ── WHERE THE VERDICT ITSELF BECOMES DURABLE (arch-review 64 P0) ─────────────────────────────────
+  //
+  // The agent's half has been staged since arch-review 60; the VERDICT never was. A lane reclaims its
+  // verifier container the moment it has parsed the logs, so from then until the canonical settlement the
+  // invocation lived only in this process. A crash there re-ran a case whose judgement was already computed.
+  //
+  // Absent = this deployment cannot recover a two-phase case that crashed after its verdict, which is what it
+  // could do before. It never changes what a case that completes normally produces.
+  verdicts?: AgentHalfStore;
 }
 
 // The judging half places external work exactly as the agent's half does, so it is handed the SAME
@@ -124,6 +134,16 @@ export async function verifierOperation(
         activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),
       },
     });
+    // ── THE BYTES BECOME DURABLE BEFORE THE ROW CLAIMS THEY EXIST (arch-review 64 P0) ──────────────
+    //
+    // Ordered deliberately: stage, then stamp. The row saying `verdict_produced` is a claim that a verdict
+    // exists somewhere a recovery can reach; writing it first would make the ledger promise an artifact that
+    // is not there yet — the same inversion rule `protocol` L1 forbids between a reservation and an effect.
+    //
+    // The coordinate is the one the recovery holds: the digest of the agent half this verdict is about, which
+    // the verifier job carried in and which its handle records.
+    if (job.agentResultDigest !== undefined)
+      await stageVerifierVerdict(deps.verdicts, job.tenant, job.runId, job.agentResultDigest, invocation);
     // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
     //
     // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and

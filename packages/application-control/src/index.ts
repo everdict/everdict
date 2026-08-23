@@ -81,6 +81,7 @@ export {
   mergeVerifierPass,
   agentHalfDigest,
   readAgentHalf,
+  recoverStagedVerdict,
   recoverVerifiedCase,
   stageAgentHalf,
 } from "./execution/agent-half.js";

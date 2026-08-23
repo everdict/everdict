@@ -2,7 +2,7 @@ import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef 
 import { UpstreamError, readOrUnknown, storedExecutionId } from "@everdict/contracts";
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
-import { recoverVerifiedCase } from "../execution/agent-half.js";
+import { recoverStagedVerdict, recoverVerifiedCase } from "../execution/agent-half.js";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
@@ -27,6 +27,9 @@ type RecoveryPlannerDeps = Pick<
   | "adoptWork"
   | "attempts"
   | "agentHalves"
+  // …and where the VERDICT is staged, so a verifier whose container was already reclaimed is finished
+  // from bytes rather than re-run (arch-review 64 P0).
+  | "verdicts"
   // ── AND WHAT COMPLETES A CASE, BECAUSE THIS IS A THIRD PATH TO ONE (arch-review 64 P0) ────────────
   //
   // `collectDeferredTrace` is not log tidying: it pulls the platform trace, extracts the judge's evidence
@@ -218,6 +221,33 @@ export class RecoveryPlanner {
               }
               // `absent` — nothing staged, so the agent's evidence is genuinely gone and the case re-drives,
               // exactly as it did before this branch existed.
+            }
+            // ── A RECLAIMED VERIFIER STILL HAS ITS VERDICT (arch-review 64 P0) ───────────────────────
+            //
+            // The branch above needs an invocation, and adoption only produces one while the verifier's
+            // object still exists. It is reclaimed the moment its logs are parsed, so the ORDINARY shape of a
+            // crash here is `absent` — and that routed the case to a full re-drive of both containers over a
+            // judgement that had already been computed and paid for.
+            //
+            // The verdict is staged now, keyed by the half it is about, so the same merge runs from bytes
+            // instead of from a live object. Asked only when the object is absent: a live one is the branch
+            // above, and asking first would prefer a stage to the source it came from.
+            if (decision?.kind === "absent" && work.verifier !== undefined) {
+              const staged = await recoverStagedVerdict(
+                this.deps.agentHalves,
+                this.deps.verdicts,
+                tenant,
+                executionId,
+                work,
+              );
+              if (staged.kind === "unknown") {
+                unestablished = staged.reason;
+                break;
+              }
+              if (staged.kind === "merged") {
+                adoptable = staged.result;
+                break;
+              }
             }
             if (decision?.kind === "unknown") {
               unestablished = decision.reason;
