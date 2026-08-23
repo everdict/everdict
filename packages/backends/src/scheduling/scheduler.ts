@@ -31,6 +31,45 @@ export interface BackendSlot {
   cpuFree: number;
 }
 
+// ── WHAT THIS BACKEND HAS LEFT, AND WHETHER A UNIT FITS — ONE ANSWER (arch-review 62 follow-through) ─
+//
+// The Scheduler has always admitted on three axes: free slots, the declared memory envelope and the declared
+// CPU envelope, each net of what THIS process is already holding. The verifier lane admits on one — it asked
+// `used >= total` and nothing else — so a verifier that declares two gigabytes was placed on a lane whose
+// memory envelope was already full, and the case it judges then dies for a reason nothing attributes to the
+// judging half.
+//
+// The bookkeeping stays per-lane (a queue's in-flight and a lane's held containers are different pools), but
+// the DECISION is one function, so an axis added here reaches both. That is the narrow reading of "generalize
+// the Scheduler's admission primitive": it does not mean giving the queue a second dispatch verb, which is
+// what routing verifiers through `dispatch` would mean.
+// `used` is the EFFECTIVE usage, already combined by the caller — deliberately not computed here, because the
+// two lanes combine differently and both are right. The Scheduler takes `max(probe, its own in-flight)`: it
+// pumps repeatedly against a probe that eventually sees its placements, and summing would double-count them
+// into permanent starvation. The verifier lane SUMS: it has no pump, its whole reason for counting is the
+// window before a placement is visible to the probe, and refusing slightly early is the safe direction for a
+// cap. Forcing one rule on both would make this primitive wrong for one of them.
+export function backendSlotOf(
+  name: string,
+  cap: BackendCapacity,
+  used: { slots: number; memoryMb: number; cpu: number },
+): BackendSlot {
+  return {
+    name,
+    total: cap.total,
+    free: Math.max(0, cap.total - used.slots),
+    memFreeMb:
+      cap.memoryBudgetMb === undefined ? Number.POSITIVE_INFINITY : Math.max(0, cap.memoryBudgetMb - used.memoryMb),
+    cpuFree: cap.cpuBudget === undefined ? Number.POSITIVE_INFINITY : Math.max(0, cap.cpuBudget - used.cpu),
+  };
+}
+
+// Does a unit asking this much fit? Undeclared resources ask nothing — resource-aware admission is opt-in by
+// declaring them, and a unit that declares none must not be refused by an envelope it never entered.
+export function slotAdmits(slot: BackendSlot, need: { memoryMb?: number; cpu?: number }): boolean {
+  return slot.free > 0 && (need.memoryMb ?? 0) <= slot.memFreeMb && (need.cpu ?? 0) <= slot.cpuFree;
+}
+
 // The memory a job asks of the admission envelope — the harness's declared weight. Undeclared → 0 (admitted
 // outside the memory budget; resource-aware admission is opt-in by declaring resources on the harness).
 const jobMemoryMb = (job: CaseJob): number =>
@@ -381,18 +420,19 @@ export class Scheduler {
   // round with no HTTP. used = max(probe, ownInFlight) so a lagging probe can't let us over-admit our own placements.
   private freeSlotsFrom(caps: Map<string, BackendCapacity>): Map<string, BackendSlot> {
     const slots = new Map<string, BackendSlot>();
-    for (const [name, cap] of caps) {
-      const used = Math.max(cap.used, this.admission.countFor(name));
-      const memFreeMb =
-        cap.memoryBudgetMb === undefined
-          ? Number.POSITIVE_INFINITY
-          : Math.max(0, cap.memoryBudgetMb - this.admission.memMbFor(name));
-      const cpuFree =
-        cap.cpuBudget === undefined
-          ? Number.POSITIVE_INFINITY
-          : Math.max(0, cap.cpuBudget - this.admission.cpuFor(name));
-      slots.set(name, { name, total: cap.total, free: Math.max(0, cap.total - used), memFreeMb, cpuFree });
-    }
+    for (const [name, cap] of caps)
+      slots.set(
+        name,
+        // The shared answer — see `backendSlotOf`. Spelled here once, so the verifier lane admits on the same
+        // three axes rather than on the one it happened to know about.
+        backendSlotOf(name, cap, {
+          // The cluster's reading and ours, whichever is higher — see `backendSlotOf` for why this lane
+          // maxes where the verifier lane sums.
+          slots: Math.max(cap.used, this.admission.countFor(name)),
+          memoryMb: this.admission.memMbFor(name),
+          cpu: this.admission.cpuFor(name),
+        }),
+      );
     return slots;
   }
 
@@ -438,9 +478,7 @@ export class Scheduler {
           const cpuNeed = jobCpu(entry.job);
           const candidates = names
             .map((n) => slots.get(n))
-            .filter(
-              (s): s is BackendSlot => s !== undefined && s.free > 0 && memNeed <= s.memFreeMb && cpuNeed <= s.cpuFree,
-            );
+            .filter((s): s is BackendSlot => s !== undefined && slotAdmits(s, { memoryMb: memNeed, cpu: cpuNeed }));
           if (candidates.length === 0) continue; // no room right now → try the next job
 
           // Harness-keyed capacity (CaseCapacityAware): among the slot-eligible backends keep only those where

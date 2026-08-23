@@ -510,3 +510,79 @@ describe("[R62 COUNTEREXAMPLE] a verifier is not placed on capacity nobody estab
     }
   });
 });
+
+// ── …AND ON THE SAME AXES THE SCHEDULER ADMITS ON (arch-review 62 follow-through) ───────────────────
+//
+// The envelope check asked `used >= total` and stopped there. The Scheduler has admitted on three axes since
+// it grew resource-aware placement: free slots, the backend's declared MEMORY envelope, and its declared CPU
+// envelope — each net of what this process already holds. A verifier declaring two gigabytes therefore went
+// onto a lane whose memory budget was already spent, and the case it judges then died of a resource failure
+// nothing attributes to the judging half.
+//
+// The bookkeeping stays per-lane — a queue's in-flight and a lane's held containers are different pools —
+// but the DECISION is one exported function, so an axis added to one reaches the other. That is the narrow
+// reading of generalizing the Scheduler's admission primitive; it is not giving the queue a second dispatch
+// verb, which is what routing verifiers through `dispatch` would mean.
+//
+// What is deliberately NOT shared is the harness POOL (`capacityFor`), which answers about a harness's warm
+// sessions. A verifier is a batch container, so consulting it would refuse for a reason that is not about
+// this unit — stated rather than left as an unexplained gap.
+//
+// Seen RED before the axes travelled, observed:
+//   a verifier was placed on a lane with no memory left: expected 'placed' to be 'RATE_LIMITED'
+describe("[R62-followup COUNTEREXAMPLE] a verifier fits the whole envelope, not just the slot count", () => {
+  const HEAVY = { ...JOB, resources: { memoryMb: 2048, cpu: 1000 } } as unknown as VerifierJob;
+
+  const laneWith = (cap: { total: number; used: number; memoryBudgetMb?: number; cpuBudget?: number }) =>
+    buildRuntimeAccess({
+      runtimeRegistry: {
+        get: async () => ({ id: "rt-1", version: "1", kind: "k8s" }),
+        list: async () => [],
+      } as never,
+      runtimeSecretsFor: async () => ({}),
+      runtimeBuildBackend: () =>
+        ({
+          id: "rt-1",
+          capacity: async () => cap,
+          dispatchVerifier: async () => ({ planDigest: "p", workspaceDigest: "w", scores: [] }),
+        }) as never,
+      admitVerifierCompute: budget(),
+    });
+
+  const place = async (access: ReturnType<typeof buildRuntimeAccess>, job = HEAVY) =>
+    await access
+      .dispatchVerifier(job)
+      .then(() => "placed")
+      .catch((e: unknown) => (e as { code?: string })?.code ?? "error");
+
+  it("REFUSES when the lane has slots but no MEMORY left", async () => {
+    // Slots free, envelope spent — the exact shape the count-only check waved through.
+    expect(
+      await place(laneWith({ total: 20, used: 1, memoryBudgetMb: 1024 })),
+      "a verifier was placed on a lane with no memory left",
+    ).toBe("RATE_LIMITED");
+  });
+
+  it("REFUSES when the lane has slots and memory but no CPU left", async () => {
+    expect(
+      await place(laneWith({ total: 20, used: 1, memoryBudgetMb: 8192, cpuBudget: 500 })),
+      "a verifier was placed on a lane with no CPU left",
+    ).toBe("RATE_LIMITED");
+  });
+
+  it("PLACES when the whole envelope has room", async () => {
+    // The control: refusing everything would satisfy both assertions above and stop the product.
+    expect(await place(laneWith({ total: 20, used: 1, memoryBudgetMb: 8192, cpuBudget: 4000 }))).toBe("placed");
+  });
+
+  it("PLACES a verifier that declares no resources against a lane that declares an envelope", async () => {
+    // Resource-aware admission is opt-in by DECLARING resources. A unit that asks for nothing must not be
+    // refused by an envelope it never entered — otherwise every ordinary case stops being judged the moment
+    // an operator sets a memory budget.
+    const bare = { ...JOB } as unknown as VerifierJob;
+    expect(
+      await place(laneWith({ total: 20, used: 1, memoryBudgetMb: 1 }), bare),
+      "a verifier that declared nothing was refused by an envelope it never entered",
+    ).toBe("placed");
+  });
+});

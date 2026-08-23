@@ -44,6 +44,8 @@ export {
   binPackPolicy,
   type PlacementPolicy,
   type BackendSlot,
+  backendSlotOf,
+  slotAdmits,
   type SchedulerOptions,
   type SchedulerQueueEntry,
 } from "./scheduling/scheduler.js";

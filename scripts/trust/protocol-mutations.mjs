@@ -1431,6 +1431,16 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 follow-through. The verifier lane admitted on slot COUNT alone while the Scheduler has
+    // always admitted on slots AND the declared memory envelope AND the declared CPU envelope. Drop the
+    // shared decision back to a count and a heavy verifier lands on a lane whose memory is already spent.
+    name: "verifier admission — the lane admits on slot count alone",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "        if (!slotAdmits(slot, need))",
+    to: "        if (slot.free <= 0)",
+    suite: ["--root", "apps/api", "src/composition/verifier-admission.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

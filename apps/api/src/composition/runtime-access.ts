@@ -17,12 +17,14 @@ import {
   type Backend,
   type LogStream,
   adoptionStep,
+  backendSlotOf,
   isScreenAttachable,
   isScreenCapturable,
   isTopologyInspectable,
   isVerifierDispatchable,
   isWorkAddressable,
   isWorkControllable,
+  slotAdmits,
 } from "@everdict/backends";
 import type {
   AdoptedWork,
@@ -128,7 +130,7 @@ export function buildRuntimeAccess(deps: {
   // can see, and a placement is not visible there until its object exists — so without this, concurrent
   // verifiers all read the same free slot and all take it. Exactly the Scheduler's own local accounting
   // (`inFlight`, subtracted from the capacity snapshot), in the lane that dispatches around it.
-  const verifiersHeld = new Map<string, number>();
+  const verifiersHeld = new Map<string, { count: number; memoryMb: number; cpu: number }>();
   const eachRuntimeBackend = async (
     tenant: string,
     runtimeList: string | undefined,
@@ -455,7 +457,7 @@ export function buildRuntimeAccess(deps: {
     let renewal: ReturnType<typeof startRenewal> | undefined;
     // Which backend, if any, this lane is holding a slot against — so the `finally` gives back exactly what
     // it took, and nothing when the placement never got that far.
-    let laneHolding: string | undefined;
+    let laneHolding: { target: string; need: { memoryMb?: number; cpu?: number } } | undefined;
     try {
       admitVerifierCompute?.admit(job.tenant);
       budgetHeld = true;
@@ -529,15 +531,39 @@ export function buildRuntimeAccess(deps: {
         // Scheduler's: what makes the limit fleet-wide is the tenant permit above, and no claim beyond that
         // is made here (rule `protocol` L1 — observing room is not reserving room; this reserves the part
         // this process can).
-        const held = verifiersHeld.get(target) ?? 0;
-        if (room.value.used + held >= room.value.total)
+        // ── AND ON THE SAME THREE AXES THE SCHEDULER USES (arch-review 62 follow-through) ─────────
+        //
+        // This asked `used >= total` and nothing else, while the Scheduler has always admitted on free
+        // slots AND the backend's declared memory envelope AND its CPU envelope. So a verifier declaring
+        // two gigabytes went onto a lane whose memory budget was already spent, and the case it judges then
+        // died for a reason nothing attributes to the judging half.
+        //
+        // `backendSlotOf`/`slotAdmits` are that decision, exported and shared, so an axis added to one lane
+        // reaches the other. What is NOT shared is the harness POOL (`capacityFor`): it answers about a
+        // harness's warm sessions and a verifier is a batch container, so consulting it would refuse for a
+        // reason that is not about this unit. Said here rather than left as an unexplained gap.
+        const held = verifiersHeld.get(target) ?? { count: 0, memoryMb: 0, cpu: 0 };
+        // SUMMED with the cluster's reading, not maxed: this lane has no pump to correct itself, and the
+        // window it counts is exactly the one before a placement is visible to the probe (see
+        // `backendSlotOf`). Refusing slightly early is the safe direction for a cap.
+        const slot = backendSlotOf(target, room.value, {
+          slots: room.value.used + held.count,
+          memoryMb: held.memoryMb,
+          cpu: held.cpu,
+        });
+        const need = { memoryMb: job.resources?.memoryMb, cpu: job.resources?.cpu };
+        if (!slotAdmits(slot, need))
           throw new RateLimitError(
             "RATE_LIMITED",
-            { tenant: job.tenant, runtime: target, total: room.value.total, used: room.value.used, held },
-            "this runtime is at its concurrent-execution limit, so the verifier cannot be placed yet.",
+            { tenant: job.tenant, runtime: target, slot, need },
+            "this runtime has no room for the verifier — its slots, memory or CPU envelope are full.",
           );
-        verifiersHeld.set(target, held + 1);
-        laneHolding = target;
+        verifiersHeld.set(target, {
+          count: held.count + 1,
+          memoryMb: held.memoryMb + (need.memoryMb ?? 0),
+          cpu: held.cpu + (need.cpu ?? 0),
+        });
+        laneHolding = { target, need };
         // WRAPPED so the verifier is durable work (arch-review 57 P0-verifier): its own attempt row, its
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
         // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
@@ -574,9 +600,14 @@ export function buildRuntimeAccess(deps: {
       // for the same reason: a count never given back would refuse verifiers for containers that exited long
       // ago, which is the failure mode a cap is supposed to prevent rather than cause.
       if (laneHolding !== undefined) {
-        const remaining = (verifiersHeld.get(laneHolding) ?? 1) - 1;
-        if (remaining > 0) verifiersHeld.set(laneHolding, remaining);
-        else verifiersHeld.delete(laneHolding);
+        const cur = verifiersHeld.get(laneHolding.target);
+        const rest = {
+          count: (cur?.count ?? 1) - 1,
+          memoryMb: Math.max(0, (cur?.memoryMb ?? 0) - (laneHolding.need.memoryMb ?? 0)),
+          cpu: Math.max(0, (cur?.cpu ?? 0) - (laneHolding.need.cpu ?? 0)),
+        };
+        if (rest.count > 0) verifiersHeld.set(laneHolding.target, rest);
+        else verifiersHeld.delete(laneHolding.target);
       }
     }
   };
