@@ -1240,11 +1240,26 @@ export class NomadBackend
       // it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
       return mergePlacedImage(result, job, "the Nomad API");
     } catch (err) {
-      // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
-      if (options?.signal?.aborted) {
-        const delq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-        await this.http.request("DELETE", `/v1/job/${jobId}${delq}`).catch(() => {});
-      }
+      // ── EVERY POST-START FAILURE RECLAIMS, NOT JUST AN ABORT (arch-review 63 P1-high) ──────────────
+      //
+      // This reclaimed only when the caller had cancelled. `waitForAlloc` and the log fetch throw for a
+      // dozen other reasons that say nothing about the job — a 5xx from `/allocations`, a reset connection,
+      // a poll timeout, unparseable JSON — and on every one of them the allocation kept running while this
+      // process reported a retryable infra failure. The batch then retried and placed a SECOND job: two
+      // containers, one case, competing evidence.
+      //
+      // The K8s twin has held apply-to-result inside one scope since arch-review 61; this is the same
+      // contract. Evidence is already captured above (`parseResultOrExplain` reads the alloc's own events
+      // before this point), so the reclaim costs nothing a failure path still needs.
+      //
+      // A STOP, not a purge: the job's record and its logs stay readable for whoever investigates, which is
+      // what the deferred purge in the `finally` is for.
+      const delq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const stopped = await this.http.request("DELETE", `/v1/job/${jobId}${delq}`).catch(() => undefined);
+      // …and the ANSWER is read (rule `protocol` L5): a stop that did not converge means this failure may
+      // still be burning compute, which is a different incident from one that tidied up after itself.
+      if (stopped === undefined || stopped.status >= 300)
+        mark("reclaim_failed", `nomad job ${jobId} may still be running after a failed dispatch`);
       throw err;
     } finally {
       // Purge dead jobs after capturing results (parity with K8sBackend's deleteJob-in-finally). Without it, every
@@ -1408,7 +1423,7 @@ export class NomadBackend
           "DELETE",
           `/v1/job/${encodeURIComponent(work.externalJobId)}?purge=true${ns ? `&namespace=${encodeURIComponent(ns)}` : ""}`,
         );
-        return purge.status < 300 ? { status: "inert" } : { status: "unknown" };
+        return purge.status < 300 ? { status: "inert", work } : { status: "unknown" };
       }
       const allocId = await this.waitForAlloc(work.externalJobId, ns);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";

@@ -119,6 +119,8 @@ describe("[R62 COUNTEREXAMPLE] a Nomad start can never create the job it is star
       .dispatch(JOB(), { authority: AUTHORITY, onStarted: () => state.events.push("started") })
       .catch(() => undefined);
 
-    expect(state.events).toEqual(["created-at-0", "updated-at-1", "started"]);
+    // The start landed; what follows is this fake refusing the poll, which arch-review 63 makes a
+    // post-start failure that reclaims. The claim here is the START, so it is read off the prefix.
+    expect(state.events.slice(0, 3)).toEqual(["created-at-0", "updated-at-1", "started"]);
   });
 });

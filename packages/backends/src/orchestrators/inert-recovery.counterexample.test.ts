@@ -211,8 +211,12 @@ describe("[R62 COUNTEREXAMPLE] the recovery fold has a word for every answer a l
   it("re-drives an INERT answer instead of deferring on it", () => {
     // The behaviour the P0 is about: the lane reclaimed an object that could never run, so this run stands
     // exactly where one whose object was never created stands.
-    expect(adoptionStep({ status: "inert" }).kind, "a reclaimed birth-phase object left the run deferred").toBe(
-      "redrive",
+    const step = adoptionStep({ status: "inert", work: WORK });
+    expect(step.kind, "a reclaimed birth-phase object left the run deferred").toBe("redrive");
+    // …and it NAMES the object it removed, so the attempt that owned it can be closed rather than left
+    // reading as live work beside a fresh execution (arch-review 63 P1).
+    expect(step.kind === "redrive" && step.reclaimed?.externalJobId, "the reclaim was anonymous").toBe(
+      WORK.externalJobId,
     );
   });
 

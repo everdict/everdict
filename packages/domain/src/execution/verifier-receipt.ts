@@ -62,9 +62,19 @@ export function verifierReceiptOf(invocation: VerifierInvocation): VerifierRecei
     // unit it was a verdict about. Both are on the canonical handle `verifierOperation` now returns; asking
     // for them is the difference between "there is a handle" and "this verdict can be joined to the
     // container that made it".
+    // …and WHICH EXECUTION IT JUDGED (arch-review 63 P1-provenance). The previous version required the
+    // verifier's own attempt and the unit coordinate, so a receipt could read `complete` while answering
+    // "which tree was judged" and not "whose trace, scores and runtime provenance were judged" — and those
+    // are different questions the moment two attempts of one case leave the same tree.
+    //
+    // Both halves, and they must AGREE: the id on the invocation and the one the handle carries are written
+    // at different moments (the job, and the reservation), so a receipt whose two copies disagree describes
+    // two executions and can be joined to neither.
     complete:
       invocation.work?.attemptId !== undefined &&
       invocation.work.verifier !== undefined &&
+      invocation.agentAttemptId !== undefined &&
+      invocation.work.verifier.agentAttemptId === invocation.agentAttemptId &&
       invocation.imageProvenance?.kind === "resolved",
   };
 }

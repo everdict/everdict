@@ -1,4 +1,4 @@
-import type { CaseJob, RuntimeWorkRef } from "@everdict/contracts";
+import { type CaseJob, type RuntimeWorkRef, encodeResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { NomadBackend } from "./nomad.js";
 
@@ -72,8 +72,25 @@ function nomad(opts: {
         opts.live.delete(id);
         return { status: 200, text: "{}" };
       }
-      // Anything the poll asks after a successful start: this file's question is already answered by then.
-      throw new Error("stop after the start");
+      // A started job that actually RUNS: the control below needs the ordinary path to complete, because a
+      // dispatch that fails after the start now reclaims too (arch-review 63 P1-high) — so "stop at the
+      // poll" would be a failure, not a success.
+      if (path.includes("/allocations"))
+        return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
+      if (path.includes("/logs/"))
+        return {
+          status: 200,
+          // The PRODUCTION encoder — a hand-spelled sentinel makes the control fail for a reason that has
+          // nothing to do with this file (rule `testing`, and the third time this session).
+          text: encodeResult({
+            caseId: "c1",
+            harness: "agent@1",
+            trace: [],
+            scores: [],
+            snapshot: { kind: "prompt", output: "done" },
+          }),
+        };
+      return { status: 404, text: "" };
     },
   };
 }
@@ -131,9 +148,10 @@ describe("[R62-followup COUNTEREXAMPLE] a Nomad dispatch removes the object it m
     ).toBe("failed");
   });
 
-  it("does NOT reclaim a job that started — the scope must not eat the ordinary path", async () => {
+  it("does NOT reclaim a job that started AND FINISHED — the scope must not eat the ordinary path", async () => {
     // The control. A cleanup scope that removed the object on success would be a far worse defect than the
-    // leak it closes, and every assertion above would still pass.
+    // leak it closes, and every assertion above would still pass. Note what changed in arch-review 63: a
+    // dispatch that fails AFTER the start reclaims as well, so the success path has to complete for real.
     const calls: string[] = [];
     const live = new Set<string>();
     await dispatch(nomad({ calls, live }));
@@ -143,5 +161,59 @@ describe("[R62-followup COUNTEREXAMPLE] a Nomad dispatch removes the object it m
       "the dispatch reclaimed the job it had just started",
     ).toHaveLength(0);
     expect(live.size, "the started job was removed before it could run").toBe(1);
+  });
+});
+
+// ── …AND AFTER THE START TOO (arch-review 63 P1-high) ───────────────────────────────────────────────
+//
+// The block above covers every failure BEFORE the job runs. After a successful start the lane reclaimed on
+// exactly one condition: the caller had cancelled. `waitForAlloc` and the log fetch throw for a dozen other
+// reasons that say nothing about the job — a 5xx from `/allocations`, a reset connection, a poll timeout,
+// unparseable JSON — and on each of them the allocation kept running while this process reported a retryable
+// infra failure. The batch retried and placed a SECOND job: two containers, one case, competing evidence.
+//
+// The K8s twin has held apply-to-result inside one scope since arch-review 61. This is the same contract, and
+// it is a STOP rather than a purge so the job's record and logs stay readable for whoever investigates.
+//
+// Seen RED before the reclaim was widened, observed:
+//   a transport failure after the start left the allocation running: expected [] to contain 'DELETE'
+function startedThenBroken(opts: { calls: string[]; live: Set<string> }) {
+  return {
+    request: async (method: string, path: string, body?: unknown) => {
+      if (method === "POST" && path === "/v1/jobs") {
+        const job = (body as { Job: { ID: string; TaskGroups: Array<{ Count: number }> } }).Job;
+        const count = job.TaskGroups[0]?.Count ?? 0;
+        opts.calls.push(count === 0 ? "register(inert)" : "start");
+        opts.live.add(job.ID);
+        return { status: 200, text: JSON.stringify({ JobModifyIndex: count === 0 ? 7 : 8 }) };
+      }
+      if (method === "DELETE") {
+        opts.calls.push("DELETE");
+        const id = decodeURIComponent(path.split("/v1/job/")[1]?.split("?")[0] ?? "");
+        opts.live.delete(id);
+        return { status: 200, text: "{}" };
+      }
+      // The job is RUNNING and the control plane cannot reach the API: the failure this file is about.
+      throw new Error("ECONNRESET while reading allocations");
+    },
+  };
+}
+
+describe("[R63 COUNTEREXAMPLE] a Nomad dispatch reclaims after the start too, not only on an abort", () => {
+  it("stops the allocation when the poll fails for a transport reason", async () => {
+    const calls: string[] = [];
+    const live = new Set<string>();
+    await new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "runner:1",
+      http: startedThenBroken({ calls, live }),
+    } as never)
+      .dispatch(JOB(), { authority: AUTHORITY })
+      .catch(() => undefined);
+
+    // The control first: the job really did start, or this is the pre-start case the block above covers.
+    expect(calls, "the dispatch never got past the inert registration").toContain("start");
+    expect(calls, "a transport failure after the start left the allocation running").toContain("DELETE");
+    expect(live.size, "the job this dispatch started is still on the cluster").toBe(0);
   });
 });

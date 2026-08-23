@@ -125,7 +125,8 @@ export type AdoptOutcome =
   // live clusters — so the caller re-drives exactly as it does for `absent`. The lane reports this only
   // after reclaiming the object and READING THE DELETE BACK (L5); a delete it could not confirm is
   // `unknown`, because a submitter paused across the crash could still resume what is still there.
-  | { status: "inert" }
+  // …and WHICH object was reclaimed, so the attempt that owned it can be closed by whoever re-drives.
+  | { status: "inert"; work: RuntimeWorkRef }
   | { status: "unknown" }; // an API/parse failure left it ambiguous → re-dispatch MAY double-spend a live job
 
 // What a recovery DOES with one lane's answer. Exported and pure because the fold that consumes it lives in a
@@ -134,7 +135,11 @@ export type AdoptOutcome =
 // instead of falling through to whichever arm happens to be last (arch-review 62 P0).
 export type AdoptionStep =
   | { kind: "harvest"; adopted: AdoptedWork } // a finished container's answer — settle it, never re-dispatch
-  | { kind: "redrive" } // established that nothing of this work is live or can become live — safe to re-place
+  // Established that nothing of this work is live or can become live — safe to re-place. `reclaimed` names
+  // the object the lane REMOVED to get here, which only the inert arm has: an attempt whose external object
+  // was taken away is not a live attempt, and leaving its row `reserved`/`active` tells a cancellation to
+  // chase an object that is gone and an operator that work is running when none is (arch-review 63 P1).
+  | { kind: "redrive"; reclaimed?: RuntimeWorkRef }
   | { kind: "unresolved" }; // nobody could tell us — decide nothing, the sweep comes back
 
 export function adoptionStep(outcome: AdoptOutcome): AdoptionStep {
@@ -148,6 +153,10 @@ export function adoptionStep(outcome: AdoptOutcome): AdoptionStep {
     // whose object was never created stands. Joined to `absent` HERE, in one place a test can point at,
     // rather than by a fall-through nobody wrote down.
     case "inert":
+      // The lane found an object still in its birth phase and removed it, reading the delete back first. The
+      // attempt that owned it is therefore over — say which one, so the caller can close its row instead of
+      // opening a second execution beside a first that still reads as live.
+      return { kind: "redrive", reclaimed: outcome.work };
     case "absent":
       return { kind: "redrive" };
   }

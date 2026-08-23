@@ -214,6 +214,17 @@ export function buildRuntimeAccess(deps: {
         return true;
       }
       if (step.kind === "unresolved") unresolved = "a runtime could not say whether this work is still live";
+      // ── AND A RECLAIMED ATTEMPT IS CLOSED (arch-review 63 P1) ────────────────────────────────────
+      //
+      // The lane removed an object still in its birth phase, so the attempt that owned it is over. Left
+      // `reserved`/`active` it keeps appearing in a cancellation's workset — which then chases an object
+      // that is gone — and an operator reading the ledger is told work is running beside the fresh execution
+      // this re-drive is about to open.
+      //
+      // `superseded`, not `failed`: nothing failed. The attempt's object was taken away before it could run,
+      // and a later attempt takes its place. Best-effort, like every other stamp on this path.
+      if (step.kind === "redrive" && step.reclaimed?.attemptId !== undefined)
+        await attempts?.transition(step.reclaimed.attemptId, "superseded").catch(() => undefined);
       return false;
     });
     if (harvested !== undefined) return { kind: "adopted", adopted: harvested };

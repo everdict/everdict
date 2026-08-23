@@ -1498,6 +1498,47 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
+  {
+    // arch-review 63 P1-high. The Nomad lane reclaimed after a successful start only when the caller had
+    // CANCELLED. Every other post-start failure — a 5xx from /allocations, a reset connection, a poll
+    // timeout — left the allocation running while this process reported a retryable infra error, and the
+    // retry placed a second job.
+    name: "nomad dispatch — only an abort reclaims after the start",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      const stopped = await this.http.request("DELETE", `/v1/job/${jobId}${delq}`).catch(() => undefined);',
+    to: "      const stopped = { status: 200 };\n      void delq;",
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/nomad-birth-cleanup.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63 P1-provenance. `complete` asked for the verifier's own attempt and not for the one it
+    // JUDGED, so a receipt answered "which tree" while unable to say whose evidence.
+    name: "verifier receipt — complete without naming the execution it judged",
+    file: "packages/domain/src/execution/verifier-receipt.ts",
+    from: "      invocation.agentAttemptId !== undefined &&\n      invocation.work.verifier.agentAttemptId === invocation.agentAttemptId &&",
+    to: "",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/execution/verifier-receipt-completeness.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63 P1. An inert object reclaimed by adoption left its attempt row reserved/active, so a
+    // cancellation kept chasing an object that is gone and an operator read live work beside the re-drive.
+    name: "inert reclaim — the attempt that owned the object is left open",
+    file: "packages/backends/src/backend.ts",
+    from: '      return { kind: "redrive", reclaimed: outcome.work };',
+    to: '      return { kind: "redrive" };',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63 P1-high. A verdict refused by the merge was left claiming it contributed.
+    name: "verifier verdict — a refused merge leaves the attempt claiming it contributed",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: '      await deps.attempts?.transition(verifierAttempt, "superseded").catch(() => undefined);',
+    to: "      void verifierAttempt;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/agent-half.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

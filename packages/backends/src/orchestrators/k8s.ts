@@ -1442,7 +1442,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           // resumable by a submitter paused across the crash, and certifying over that is the shape L5
           // exists to forbid.
           const removed = await api.deleteJob(work.externalJobId, ns);
-          return killConverged(removed) ? { status: "inert" } : { status: "unknown" };
+          return killConverged(removed) ? { status: "inert", work } : { status: "unknown" };
         }
         await this.waitForJob(api, work.externalJobId, ns);
         // The ONE reader, which chooses the protocol from the handle — a verifier prints a different

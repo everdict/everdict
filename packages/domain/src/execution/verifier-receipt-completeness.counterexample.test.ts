@@ -32,6 +32,9 @@ const invocation = (over: Partial<VerifierInvocation> = {}): VerifierInvocation 
   ({
     planDigest: "sha256:plan",
     workspaceDigest: "sha256:workspace",
+    // The execution this verdict is ABOUT, matching what the handle carries — a receipt whose two copies
+    // disagree describes two executions and joins to neither (arch-review 63 P1-provenance).
+    agentAttemptId: "evd-run-r1#g1",
     scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
     ...over,
   }) as unknown as VerifierInvocation;
@@ -44,7 +47,14 @@ const WORK = {
   runId: "r1",
   externalJobId: "job-1",
   attemptId: "a-verify",
-  verifier: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", caseId: "c1" },
+  verifier: {
+    planDigest: "sha256:plan",
+    workspaceDigest: "sha256:ws",
+    caseId: "c1",
+    // …and WHICH execution was judged (arch-review 63): a receipt that cannot say so answers "which tree"
+    // and not "whose evidence", and those diverge the moment two attempts leave the same tree.
+    agentAttemptId: "evd-run-r1#g1",
+  },
 };
 const RESOLVED = { kind: "resolved", by: "driver", images: [{ ref: "tasks/repro:1", digest: "sha256:img" }] };
 
@@ -82,5 +92,45 @@ describe("[R58 COUNTEREXAMPLE] a receipt is complete only when its provenance re
     expect(receipt.complete).toBe(false);
     expect(receipt.scoreDigest).not.toBe("");
     expect(receipt.planDigest).toBe("sha256:plan");
+  });
+});
+
+// ── …AND WHICH EXECUTION IT JUDGED (arch-review 63 P1-provenance) ───────────────────────────────────
+//
+// `complete` asked for the verifier's own attempt and the unit coordinate. Both answer "which container
+// produced this verdict" and "which tree it was about"; neither answers "whose trace, scores and runtime
+// provenance were judged" — and those diverge the moment two attempts of one case leave the same tree,
+// which is precisely the case arch-review 62 keyed the staged half by the result digest to handle.
+//
+// Both copies of that id must AGREE: one is written on the job and one on the reservation, at different
+// moments, so a receipt whose copies differ describes two executions and joins to neither.
+//
+// Seen RED before the requirement, observed:
+//   a receipt claimed to be whole while unable to say which execution it judged: expected true to be false
+describe("[R63 COUNTEREXAMPLE] a complete receipt names the execution it judged", () => {
+  const bare = { ...WORK, verifier: { ...WORK.verifier, agentAttemptId: undefined } };
+
+  it("is INCOMPLETE when the judged execution is not named", () => {
+    expect(
+      verifierReceiptOf(invocation({ work: bare, agentAttemptId: undefined, imageProvenance: RESOLVED } as never))
+        .complete,
+      "a receipt claimed to be whole while unable to say which execution it judged",
+    ).toBe(false);
+  });
+
+  it("is INCOMPLETE when the two copies of that id DISAGREE", () => {
+    // The invocation's and the handle's are written at different moments; a receipt that carries two answers
+    // describes two executions.
+    expect(
+      verifierReceiptOf(invocation({ work: WORK, agentAttemptId: "evd-run-r1#g9", imageProvenance: RESOLVED } as never))
+        .complete,
+      "a receipt with two different judged executions read as whole",
+    ).toBe(false);
+  });
+
+  it("is complete when both name the same execution", () => {
+    // The control, and the shape production produces — `verifierOperation` stamps the coordinate onto the
+    // reservation and returns it on the invocation from the one job field.
+    expect(verifierReceiptOf(invocation({ work: WORK, imageProvenance: RESOLVED } as never)).complete).toBe(true);
   });
 });

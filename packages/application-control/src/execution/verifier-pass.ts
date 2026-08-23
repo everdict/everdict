@@ -1,5 +1,6 @@
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
+import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 import { jobAttemptId } from "./open-physical-attempt.js";
 
@@ -32,6 +33,18 @@ export interface VerifierPassDeps {
   // this deployment cannot recover a case that crashed between the halves, which is what it could do before;
   // it never changes what a case that completes normally produces.
   agentHalves?: AgentHalfStore;
+  // ── SO A VERDICT THAT DID NOT CONTRIBUTE CAN SAY SO (arch-review 63 P1-high) ─────────────────────
+  //
+  // `verifierOperation` stamps the verifier's attempt `committed` the moment the verdict exists, and the
+  // merge that decides whether the verdict is USED happens here, afterwards. When that merge is refused —
+  // the verdict was produced against a different workspace than the half it would join — the ledger is left
+  // saying an attempt contributed to a case that did not take it.
+  //
+  // The deeper repair is a pre-terminal state (`verdict_produced`) so `committed` is only ever written by
+  // the settlement, and that is a vocabulary change every guard has to be re-walked for. This closes the one
+  // case where the record is demonstrably false, in the vocabulary that exists: the attempt is SUPERSEDED,
+  // which is what an attempt whose work another one replaced already means.
+  attempts?: Pick<ExecutionAttemptStore, "transition">;
 }
 
 // The verdict a case owes but did not get. `unmeasured` rather than a zero, for the reason the reward-file
@@ -168,6 +181,12 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   try {
     return mergeVerifierPass(result, invocation as VerifierInvocation);
   } catch (err) {
+    // The verdict exists and was NOT used, so the row that claims it contributed is corrected here rather
+    // than left to read as the case's answer. Best-effort: a ledger that will not take the correction must
+    // not turn a refused merge into a failed case, which is already `unmeasured` below.
+    const verifierAttempt = (invocation as VerifierInvocation).work?.attemptId;
+    if (verifierAttempt !== undefined)
+      await deps.attempts?.transition(verifierAttempt, "superseded").catch(() => undefined);
     return owed("grader_error", err instanceof Error ? err.message : String(err));
   }
 }

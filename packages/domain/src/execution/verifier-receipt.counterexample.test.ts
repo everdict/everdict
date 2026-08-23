@@ -112,8 +112,16 @@ describe("[R57 COUNTEREXAMPLE] a verifier verdict says what produced it", () => 
             runId: "r1",
             externalJobId: "j",
             attemptId: "a-verify",
-            verifier: { planDigest: "sha256:plan", workspaceDigest: "sha256:ws", caseId: "c1" },
+            verifier: {
+              planDigest: "sha256:plan",
+              workspaceDigest: "sha256:ws",
+              caseId: "c1",
+              agentAttemptId: "evd-run-r1#g1",
+            },
           },
+          // …and the JUDGED execution (arch-review 63): "which tree" and "whose evidence" are different
+          // questions, and only the second one names an execution a reader can go and look at.
+          agentAttemptId: "evd-run-r1#g1",
           imageProvenance: { kind: "resolved", by: "driver", images: [{ ref: "t:1", digest: "sha256:img" }] },
         }),
       ).complete,

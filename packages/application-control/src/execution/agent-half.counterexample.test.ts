@@ -270,3 +270,71 @@ describe("[R63 COUNTEREXAMPLE] the merge does not discard the half the settlemen
     expect(written.size, "a half was staged for a case that never opened a window").toBe(0);
   });
 });
+
+// ── A VERDICT THAT WAS NOT USED DOES NOT CLAIM IT WAS (arch-review 63 P1-high) ───────────────────────
+//
+// `verifierOperation` stamps the verifier's attempt `committed` the moment the verdict exists, and the merge
+// that decides whether the verdict is USED runs afterwards. When that merge is refused — the verdict was
+// produced against a different workspace than the half it would join — the ledger was left saying an attempt
+// contributed to a case that did not take it.
+//
+// The deeper repair is a pre-terminal state (`verdict_produced`) so `committed` is only ever written by the
+// settlement, and that is a vocabulary change every guard has to be re-walked for. Not attempted here, and
+// said so rather than implied: this closes the one case where the record is demonstrably FALSE, using the
+// state that already means "another attempt's work replaced this one's".
+//
+// Seen RED before the correction, observed:
+//   a refused verdict was left claiming it contributed: expected 'committed' to be 'superseded'
+describe("[R63 COUNTEREXAMPLE] a refused merge corrects the attempt that produced the verdict", () => {
+  const REFUSED: VerifierInvocation = {
+    planDigest: "sha256:plan",
+    // A verdict about a DIFFERENT tree than the half it would merge into — the check `mergeVerifierPass`
+    // makes, and the reason this verdict cannot be used.
+    workspaceDigest: "sha256:some-other-tree",
+    work: { tenant: "acme", runId: "evd-run-r1", externalJobId: "everdict-verify-c1", attemptId: "a-verify" },
+    scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+  } as unknown as VerifierInvocation;
+
+  it("SUPERSEDES the verifier attempt when its verdict is refused", async () => {
+    const moved: Array<[string, string]> = [];
+    const out = await withVerifierPass(JOB(), {
+      dispatch: async () => RESULT,
+      dispatchVerifier: async () => REFUSED,
+      attempts: {
+        transition: async (id: string, to: string) => {
+          moved.push([id, to]);
+          return true;
+        },
+      },
+    } as never);
+
+    // The control first: the merge really was refused, or there is nothing to correct.
+    expect(out.verifier, "the merge was not refused, so this test measured nothing").toBeUndefined();
+    expect(moved, "a refused verdict was left claiming it contributed").toEqual([["a-verify", "superseded"]]);
+  });
+
+  it("leaves the attempt alone when the verdict IS used", async () => {
+    // The control. Correcting an attempt whose verdict landed would be a worse record than the one this
+    // fixes, and the assertion above would still pass.
+    const moved: Array<[string, string]> = [];
+    const out = await withVerifierPass(JOB(), {
+      dispatch: async () => RESULT,
+      dispatchVerifier: async (): Promise<VerifierInvocation> =>
+        ({
+          planDigest: "sha256:plan",
+          workspaceDigest: contentDigest(RESULT.snapshot),
+          work: { tenant: "acme", runId: "evd-run-r1", externalJobId: "v", attemptId: "a-verify" },
+          scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+        }) as unknown as VerifierInvocation,
+      attempts: {
+        transition: async (id: string, to: string) => {
+          moved.push([id, to]);
+          return true;
+        },
+      },
+    } as never);
+
+    expect(out.verifier, "the verdict never reached the result, so the assertion below is vacuous").toBeDefined();
+    expect(moved, "an attempt whose verdict was used was corrected anyway").toEqual([]);
+  });
+});
