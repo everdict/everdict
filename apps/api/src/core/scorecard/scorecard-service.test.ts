@@ -3619,10 +3619,17 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
       updatedAt: "2026-07-08T00:00:01.000Z",
     });
 
-    const opened = await attempts.open({ executionId: "child-adopted", tenant: "acme", caseId: "c2" });
+    // Opened under the child's EXECUTION id, which is what production stamps and what the ledger is keyed by
+    // — this fixture used the row id, so it matched the lookup that arch-review 63 found reading the wrong
+    // coordinate. Two wrongs agreeing is what kept that defect green.
+    const opened = await attempts.open({
+      executionId: "evd-sc-adopt-receipt-c2",
+      tenant: "acme",
+      caseId: "c2",
+    });
     await attempts.reserveWork(opened.attemptId, {
       tenant: "acme",
-      runId: "child-adopted",
+      runId: "evd-sc-adopt-receipt-c2",
       externalJobId: "everdict-c2-aaaa",
     });
 

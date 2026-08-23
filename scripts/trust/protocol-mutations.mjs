@@ -1464,6 +1464,18 @@ const MUTATIONS = [
     to: "  if (adoptedFrom !== undefined) await closeAdopted(adoptedFrom);",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
+  {
+    // arch-review 63 P0. A scorecard child's row id and its execution id are different strings, and the
+    // attempt ledger is keyed by the second. Reading by the first matched no row for ANY child, so every
+    // batch recovery adopted nothing and re-dispatched cases whose Jobs may still have been live — the
+    // inert-recovery arm and the staged-half merge were both correct and both unreachable.
+    name: "batch recovery — attempts are read by the child's row id",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: "          const executionId = c.executionId ?? c.id;",
+    to: "          const executionId = c.id;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/scorecard/recovery-coordinate.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

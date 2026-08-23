@@ -97,15 +97,31 @@ export class RecoveryPlanner {
           // unreadable attempt ledger into "this case placed no compute", which routes to re-dispatch — the
           // same collapse the standalone-run path had, one lane over. A batch resuming on an unreadable
           // ledger would re-run every case whose job is still live.
+          // ── THE LEDGER IS KEYED BY THE EXECUTION, NOT BY THE ROW (arch-review 63 P0) ─────────────
+          //
+          // A child has TWO identifiers and they are not the same string. `c.id` is the database row's id,
+          // minted by `newId()`; `c.executionId` is `evd-<scorecardId>-<caseId>[-t<n>]`, the coordinate the
+          // physical attempt is opened under and stamped on the child for exactly this reason (mig 0172).
+          //
+          // This read used `c.id`, so `attempts.list` matched no row for ANY child. Every batch recovery
+          // therefore saw an empty handle list, adopted nothing, interrupted the child and re-dispatched a
+          // case whose managed Job may still have been running: duplicate compute, two executions writing
+          // competing evidence for one case, and a private verifier that had already finished thrown away.
+          // The inert-recovery and staged-half protocols were both correct and both unreachable, because the
+          // handle that leads into them was never found.
+          //
+          // Nothing types a string as an execution id, which is why this survived review while looking
+          // consistent — the verifier lookup below used `c.id` too, and a comment said so approvingly.
+          const executionId = c.executionId ?? c.id;
           const handlesRead = this.deps.attempts
             ? await readOrUnknown(
                 () =>
                   this.deps.attempts
                     ? this.deps.attempts
-                        .list(c.id)
+                        .list(executionId)
                         .then((rows) => rows.flatMap((a) => (a.runtimeWork ? [a.runtimeWork] : [])))
                     : Promise.resolve([]),
-                `the attempt handles of case ${c.id}`,
+                `the attempt handles of case ${c.caseId} (execution ${executionId})`,
               )
             : ({ kind: "absent" } as ReadResult<RuntimeWorkRef[]>);
           if (handlesRead.kind === "unknown")
@@ -164,9 +180,9 @@ export class RecoveryPlanner {
               const recovered = await recoverVerifiedCase(
                 this.deps.agentHalves,
                 tenant,
-                // The SAME coordinate the handles above were read by, not a lookalike computed here — a
-                // teardown four lines apart from its own execution id is how arch-review 62 P1 started.
-                c.id,
+                // The SAME coordinate the handles above were read by — and now the RIGHT one. Being
+                // consistent with the wrong string is what this comment used to certify (arch-review 63 P0).
+                executionId,
                 work,
                 decision.adopted.invocation,
               );
