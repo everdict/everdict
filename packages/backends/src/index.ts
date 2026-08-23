@@ -46,6 +46,7 @@ export {
   type BackendSlot,
   Admission,
   backendSlotOf,
+  effectiveUsed,
   slotAdmits,
   type SchedulerOptions,
   type SchedulerQueueEntry,

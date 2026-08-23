@@ -1148,8 +1148,10 @@ const MUTATIONS = [
     // can render inert and nobody requests it.
     name: "inert birth — the Nomad lane never asks for an inert registration",
     file: "packages/backends/src/orchestrators/nomad.ts",
-    from: "      buildNomadJob(job, opts, jobId, verifier?.payload, true),",
-    to: "      buildNomadJob(job, opts, jobId, verifier?.payload),",
+    // RE-AIMED (arch-review 63): the call moved inside the `.request(...)` whose lost-response reclaim was
+    // added beside it, so the old bare-argument line no longer exists.
+    from: '      .request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload, true))',
+    to: '      .request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId, verifier?.payload))',
     suite: ["--root", "packages/backends", "src/orchestrators/started-means-born.counterexample.test.ts"],
   },
   {
@@ -1446,8 +1448,8 @@ const MUTATIONS = [
     // inert-recovery arm and the staged-half merge were both correct and both unreachable.
     name: "batch recovery — attempts are read by the child's row id",
     file: "packages/application-control/src/scorecard/recovery-planner.ts",
-    from: "          const executionId = c.executionId ?? c.id;",
-    to: "          const executionId = c.id;",
+    from: "          const executionId = storedExecutionId(c.executionId ?? c.id);",
+    to: "          const executionId = storedExecutionId(c.id);",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/recovery-coordinate.counterexample.test.ts"],
   },
@@ -1619,6 +1621,39 @@ const MUTATIONS = [
     to: "  return runExecutionId(record.id);",
     build: "@everdict/contracts",
     suite: ["--root", "packages/application-control", "src/run/child-display-coordinate.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63, the fleet-permit assessment. `BackendCapacity.used` is the ONLY fleet-wide bound on a
+    // backend's slots, and folding an unverifiable reading back to 0 is what let every replica admit a full
+    // `total` for as long as an orchestrator outage lasted.
+    name: "capacity — an unverifiable probe is spent as an empty cluster",
+    file: "packages/backends/src/scheduling/scheduler.ts",
+    from: [
+      '  if (cap.used === "unknown") return cap.total;',
+      '  return rule === "max" ? Math.max(cap.used, held) : cap.used + held;',
+    ].join("\n"),
+    to: [
+      '  const used = cap.used === "unknown" ? 0 : cap.used;',
+      '  return rule === "max" ? Math.max(used, held) : used + held;',
+    ].join("\n"),
+    suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
+  },
+  {
+    // …and the two PRODUCERS, because a union nothing emits is a type rather than a protocol. `countActiveJobs`
+    // already answered `undefined` for "the query failed"; the lane threw that answer away.
+    name: "capacity (k8s lane) — an uncountable cluster is reported idle",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: '      used: used ?? "unknown",',
+    to: "      used: used ?? 0,",
+    suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
+  },
+  {
+    // …and the Nomad twin, whose fallthrough covers a 5xx as well as the throw its comment named.
+    name: "capacity (nomad lane) — an unreachable cluster is reported idle",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      used: "unknown",',
+    to: "      used: 0,",
+    suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
   },
 ];
 

@@ -19,6 +19,7 @@ import {
   type LogStream,
   adoptionStep,
   backendSlotOf,
+  effectiveUsed,
   isScreenAttachable,
   isScreenCapturable,
   isTopologyInspectable,
@@ -581,7 +582,7 @@ export function buildRuntimeAccess(deps: {
         // window it counts is exactly the one before a placement is visible to the probe (see
         // `backendSlotOf`). Refusing slightly early is the safe direction for a cap.
         const slot = backendSlotOf(target, room.value, {
-          slots: room.value.used + held.count,
+          slots: effectiveUsed(room.value, held.count, "sum"),
           memoryMb: held.memoryMb,
           cpu: held.cpu,
         });

@@ -1417,7 +1417,8 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     const used = await this.withApi((api) => api.countActiveJobs());
     return {
       total,
-      used: used ?? 0,
+      // `countActiveJobs` answers `undefined` for "the query itself failed" and this used to `?? 0` it away.
+      used: used ?? "unknown",
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
       ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };
@@ -1815,7 +1816,10 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
         let capacity: InspectRuntimeResult["capacity"];
         try {
           const c = await this.capacity();
-          capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
+          // An operator panel showing `used: 0` over an uncounted cluster is the same lie in a place a human
+          // acts on. The wire block is optional precisely so a sub-read that failed can be absent instead.
+          if (c.used === "unknown") warnings.push("capacity probe could not count the cluster's in-flight jobs");
+          else capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
         } catch {
           warnings.push("capacity probe failed");
         }

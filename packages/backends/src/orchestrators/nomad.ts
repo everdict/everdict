@@ -822,11 +822,13 @@ export class NomadBackend
         };
       }
     } catch {
-      // probe failed → used 0
+      // …and fall through to the unknown below: a probe that threw counted nothing.
     }
+    // Reached by a non-2xx answer as well as by the catch — neither one counted the cluster, and reporting
+    // that as an idle cluster is what let every replica admit a full `total` through an outage.
     return {
       total,
-      used: 0,
+      used: "unknown",
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
       ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };
@@ -933,7 +935,8 @@ export class NomadBackend
     let capacity: InspectRuntimeResult["capacity"];
     try {
       const c = await this.capacity();
-      capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
+      if (c.used === "unknown") warnings.push("capacity probe could not count the cluster's in-flight jobs");
+      else capacity = { total: c.total, used: c.used, free: Math.max(0, c.total - c.used) };
     } catch {
       warnings.push("capacity probe failed");
     }

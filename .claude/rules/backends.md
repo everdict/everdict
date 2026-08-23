@@ -31,7 +31,18 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 
 - Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
-  `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).
+  `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap.
+- **A probe that could not count reports `used: "unknown"`, never `0`.** This line used to say "else `used: 0`"
+  and both managed lanes did exactly that — `used ?? 0` over a `countActiveJobs` that already answered
+  `undefined`, and a Nomad `catch` commented "probe failed → used 0". `used` is the ONLY fleet-wide bound on a
+  backend's slots (the tenant quota has an atomic permit; slots/memory/CPU are per-PROCESS accounting), so
+  through an orchestrator outage every replica computed free slots against an empty cluster and kept admitting
+  a full `total` each — for as long as the outage lasted, which is when the cluster could least take it. Not
+  the probe LAG the `used` contract discloses: lag self-corrects on the next probe. Fold the third answer with
+  `effectiveUsed(cap, held, "max"|"sum")` — the one owner, which yields `total` (no free slots) for `unknown`,
+  because a replica that cannot verify the bound may not spend it. A lane that genuinely holds nothing (Local,
+  Docker) still reports `0`: that is an observation, not a shrug. An inspect panel OMITS its optional capacity
+  block and pushes a `warnings` entry rather than rendering `used: 0` a human would act on.
 - **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`); everything
   beyond it is a SEPARATE interface the backend also `implements`, and consumers narrow with the matching guard
   (`isWorkControllable(backend)`), never a `backend.logsForWork?.()` feature-detect. Don't add a new optional

@@ -64,6 +64,16 @@ export function backendSlotOf(
   };
 }
 
+// The probe reading and this process's own accounting, as ONE number — and the one place a probe that could
+// not count is answered. `unknown` folds to `cap.total`, so the slot has no room: see `BackendCapacity.used`
+// for why an unverifiable reading may not be spent. Both combination rules pass through here, so neither can
+// turn "nobody knows" back into a number — `sum` was the shape most likely to do it by accident, since
+// `unknown + held` reads as `0 + held` to anyone reaching for `??`.
+export function effectiveUsed(cap: BackendCapacity, held: number, rule: "max" | "sum"): number {
+  if (cap.used === "unknown") return cap.total;
+  return rule === "max" ? Math.max(cap.used, held) : cap.used + held;
+}
+
 // Does a unit asking this much fit? Undeclared resources ask nothing — resource-aware admission is opt-in by
 // declaring them, and a unit that declares none must not be refused by an envelope it never entered.
 export function slotAdmits(slot: BackendSlot, need: { memoryMb?: number; cpu?: number }): boolean {
@@ -447,7 +457,7 @@ export class Scheduler {
         backendSlotOf(name, cap, {
           // The cluster's reading and ours, whichever is higher — see `backendSlotOf` for why this lane
           // maxes where the verifier lane sums.
-          slots: Math.max(cap.used, this.admission.countFor(name)),
+          slots: effectiveUsed(cap, this.admission.countFor(name), "max"),
           memoryMb: this.admission.memMbFor(name),
           cpu: this.admission.cpuFor(name),
         }),
@@ -570,7 +580,7 @@ export class Scheduler {
     if (!memo.has(key)) memo.set(key, await backend.capacityFor(job).catch(() => undefined));
     const cap = memo.get(key);
     if (!cap) return true; // no per-harness signal (not warm yet / no pool declared) → the aggregate decides
-    const used = Math.max(cap.used, this.admission.harnessCountFor(name, harness));
+    const used = effectiveUsed(cap, this.admission.harnessCountFor(name, harness), "max");
     return cap.total - used > 0;
   }
 

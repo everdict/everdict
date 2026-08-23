@@ -45,12 +45,28 @@ export interface ExecStreamHandle {
 // A backend's concurrent capacity. The scheduler adds its own in-flight to compute free slots.
 export interface BackendCapacity {
   total: number; // upper bound of concurrent slots (static config or live probe)
+  // ── "COULD NOT COUNT" IS NOT "COUNTED ZERO" (arch-review 63, the fleet-permit assessment) ──────────
+  //
+  // This number is the ONLY fleet-wide bound on a backend's slots. The tenant quota has an atomic permit; the
+  // slot, memory and CPU envelopes are per-PROCESS accounting, so what stops N replicas each admitting a full
+  // `total` is that they all read the orchestrator's own count of what is running. Both managed lanes used to
+  // report a failed probe as `0` — `used ?? 0` over a `countActiveJobs` that already answered `undefined`,
+  // and a Nomad `catch` commented "probe failed -> used 0". During an API-server outage every replica then
+  // computed free slots against an empty cluster and kept admitting at full width, for as long as the outage
+  // lasted. That is a different failure from the probe LAG disclosed below: lag self-corrects on the next
+  // probe, this does not.
+  //
+  // So a lane says which it means, and `effectiveUsed` is the one place the third answer is folded — into
+  // `total`, i.e. no free slots, because a replica that cannot verify the bound may not spend it (rule
+  // `protocol` L2, whose fail-closed side is holding). The work stays queued, which is the right answer
+  // anyway: a dispatch to an orchestrator we cannot reach was going to fail.
+  //
   // External usage the backend observed at probe time (0 when it can't cheaply tell). NOT the whole story: the
   // Scheduler computes free = total − max(used, itsOwnInFlight), because `used` may already INCLUDE this scheduler's
   // jobs (so max avoids double-counting) OR LAG behind them (a just-submitted job the probe hasn't seen yet). The
   // reconciliation is therefore best-effort — under probe lag a backend can briefly over-admit; acceptable for eval
   // workloads and self-correcting on the next probe. Report 0 rather than guessing when a live count is unavailable.
-  used: number;
+  used: number | "unknown";
   // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
   // harness-declared memory the Scheduler admits at once. Absent = slots-only admission (previous behavior).
   memoryBudgetMb?: number;

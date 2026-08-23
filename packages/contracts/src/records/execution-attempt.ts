@@ -53,6 +53,28 @@ export const ExecutionAttemptStateSchema = z.enum([
 ]);
 export type ExecutionAttemptState = z.infer<typeof ExecutionAttemptStateSchema>;
 
+// ── WHY THERE IS NO `verdict_produced` (arch-review 63, considered and declined) ──────────────────────
+//
+// The review asked for a state between "this attempt's verdict is in hand" and "this attempt's result is the
+// case's answer", so that `committed` could be written only by the settlement. The distinction is real; the
+// state is not what closes it, and the empirical case is already closed by the vocabulary above:
+//
+//   - `committed` is CONDITIONAL on the parent still authorizing (see the store's transition guard). A
+//     verifier that produced its verdict while a cancellation settled the batch is refused, and the caller
+//     turns the refusal into `tests_pass: unmeasured` — not a `1`.
+//   - a verdict the merge REFUSED settles `superseded`, so no attempt is left claiming it contributed.
+//   - on the standalone path `committed` is stamped inside the settlement's own transaction, so it cannot be
+//     written by anything else.
+//
+// What would remain is a naming refinement with no defect behind it — and its cost is the failure this very
+// wave was written by. Every guard that mentions a state's NEIGHBOURS has to be re-read when the machine
+// grows (see `EXECUTING_PREDECESSOR_STATES` below, added late and inert until a producer existed, and
+// `MAY_STILL_CREATE_WORK`, which a teardown had spelled inline as a subset that stopped being one). Growing
+// the vocabulary to express a distinction no reader currently gets wrong is how those two happened.
+//
+// The condition for revisiting is a READER: a decision that must tell "produced a verdict" from "produced
+// the case's answer" and currently cannot. Add the state then, with that reader's counterexample.
+
 // The states after which an attempt's story is over. Written ONCE because both store implementations arbitrate
 // on it — two hand-enumerated terminal sets is how a guard drifts into a set that admits the write it exists
 // to refuse.
