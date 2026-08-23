@@ -223,7 +223,10 @@ export class RetryFailedBatch {
           recovered.push(r); // case left the dataset — carry as-is rather than dropping the result
           continue;
         }
-        const attempt = await collectDeferredTrace(this.deps, input.tenant, evalCase, r).catch(() => r);
+        // No `.catch(() => r)`: `collectDeferredTrace` is total — every failure it can have comes back as a
+        // classified `{collect, infra, retryable}` result, which is the seedable answer. The wrapper read as
+        // handling something and could never run (arch-review 64).
+        const attempt = await collectDeferredTrace(this.deps, input.tenant, evalCase, r);
         if (attempt.failure === undefined) {
           healed += 1;
           if (orch.judges.length > 0)

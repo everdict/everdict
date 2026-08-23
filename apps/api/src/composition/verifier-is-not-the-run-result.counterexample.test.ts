@@ -457,12 +457,32 @@ describe("[R63 COUNTEREXAMPLE] a recovered case runs the completion an in-line o
     expect(settled?.sourceTraceId).toBeUndefined();
   });
 
-  it("keeps the result when the completion FAILS — parity must not cost the case", async () => {
-    // A collection that cannot reach the platform is a retryable failure `collectDeferredTrace` records on
-    // the result itself; refusing the whole recovery over it would trade a real verdict for a trace pull.
+  it("DEFERS when the completion throws, rather than settling the pre-collection document", async () => {
+    // ── THIS TEST USED TO ASSERT THE DEFECT (arch-review 64) ──────────────────────────────────────
+    //
+    // It read "keeps the result when the completion FAILS — parity must not cost the case", and its reason
+    // was that a platform which cannot be reached is a retryable failure `collectDeferredTrace` records on
+    // the result. That is true, and it is about a different input: the reachable failures come back as a
+    // CLASSIFIED result, never as a throw. So the `.catch(() => adopted)` this pinned could only ever fire
+    // on the one input that means "we do not know what this case measured" — and settled the pre-collection
+    // document as the run's answer, which is precisely the substitution the completion parity fix exists to
+    // stop, one line after it.
+    //
+    // The invariant, rewritten rather than the behaviour preserved: a throw is deferred. `retry_later` leaves
+    // the row alone and the next sweep asks again; nothing is settled from evidence we know is short.
     const settled = await recoverWith(async () => {
-      throw new Error("the trace platform is unreachable");
+      throw new Error("the completion seam is broken");
     });
-    expect(settled?.harness, "a completion failure cost the recovery a result it already had").toBe("agent@1");
+    expect(settled, "an unknowable completion was settled as the run's answer").toBeUndefined();
+  });
+
+  it("still settles on the failures a collection ACTUALLY has", async () => {
+    // The control that keeps the arm above from becoming "any collection trouble loses the case". A platform
+    // that answers nothing hands back a classified, settleable result — and it must still settle.
+    const settled = await recoverWith(async (_t: string, _c: unknown, result: Record<string, unknown>) => ({
+      ...result,
+      failure: { stage: "collect", kind: "infra", retryable: true, message: "collected 0 traces" },
+    }));
+    expect(settled?.harness, "a degraded collection cost the recovery a result it already had").toBe("agent@1");
   });
 });

@@ -1655,6 +1655,18 @@ const MUTATIONS = [
     to: "      used: 0,",
     suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P0. `collectDeferredTrace` pulls the platform trace, extracts the judge's evidence
+    // slots, records the sourceTraceId, runs the deferred observation graders and seals the trajectory.
+    // Three paths ran it and the batch recovery did not, so a crash changed what a scorecard child MEASURED
+    // rather than only when it finished.
+    name: "batch recovery — an adopted case is judged without being completed",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: "            if (evalCase !== undefined) adoptable = await collectDeferredTrace(this.deps, tenant, evalCase, adoptable);",
+    to: "            void evalCase;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/scorecard/batch-completion-parity.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

@@ -3,6 +3,7 @@ import { UpstreamError, readOrUnknown, storedExecutionId } from "@everdict/contr
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import { recoverVerifiedCase } from "../execution/agent-half.js";
+import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
@@ -21,7 +22,25 @@ import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 
 type RecoveryPlannerDeps = Pick<
   ScorecardBatchDeps,
-  "runStore" | "caseReceipts" | "adoptWork" | "attempts" | "agentHalves"
+  | "runStore"
+  | "caseReceipts"
+  | "adoptWork"
+  | "attempts"
+  | "agentHalves"
+  // ── AND WHAT COMPLETES A CASE, BECAUSE THIS IS A THIRD PATH TO ONE (arch-review 64 P0) ────────────
+  //
+  // `collectDeferredTrace` is not log tidying: it pulls the platform trace, extracts the judge's evidence
+  // slots, records the `sourceTraceId`, runs the deferred observation graders and seals the trajectory. Every
+  // normal case goes through it (`executeCase`), the standalone recovery goes through it, the retry-failed
+  // path goes through it — and this one did not, so a crash did not merely delay a scorecard child's answer,
+  // it CHANGED the evidence and the score set the answer was computed from.
+  //
+  // Picked rather than reached for through a new seam: `ScorecardBatchDeps` already carries all three
+  // capabilities for the in-flight pipeline, so a fourth spelling of "how do I complete a case" is exactly
+  // the predicate-written-twice this whole review is about (rule `protocol` L3).
+  | "buildTraceSource"
+  | "secretsFor"
+  | "makeGraders"
 >;
 
 export class RecoveryPlanner {
@@ -238,6 +257,28 @@ export class RecoveryPlanner {
             // the very shape re-judging on recovery was introduced to prevent. A per-judge failure still
             // becomes an `unmeasured` row inside the stream; this catch is for the stream itself dying,
             // and then the case is left OPEN for the next attempt rather than sealed as complete.
+            // ── THE SAME COMPLETION EVERY OTHER PATH RUNS (arch-review 64 P0) ─────────────────────
+            //
+            // An adopted result is what the CONTAINER produced, which for a `traceRef` case is a document
+            // whose trace has not been pulled, whose evidence slots are empty, whose `sourceTraceId` is
+            // absent and whose deferred observation graders have not run. Judging it here scored a case on
+            // less evidence than the same case would have been scored on had nothing crashed — and both are
+            // `CaseResult`s, so the difference is invisible downstream.
+            //
+            // Ordered exactly as the in-flight pipeline orders it: collect, then the registered judges below,
+            // then the coverage completion, then the canonical commit.
+            const evalCase = dataset.cases.find((dc) => dc.id === c.caseId);
+            // Called BARE, exactly as `executeCase` calls it. `collectDeferredTrace` is TOTAL on this path —
+            // a platform that is down, an auth secret that is not registered, a grader that cannot be
+            // reconstructed each come back as a classified, seedable result rather than a throw — so
+            // wrapping it in a `.catch` adds a branch no input reaches and hides the one contract that
+            // matters. The sibling paths carried exactly such a wrapper and it never ran.
+            //
+            // A case whose definition left the re-resolved selection cannot be completed against a
+            // definition nobody holds, so it is carried verbatim — the same answer the retry-failed path
+            // gives, for the same reason.
+            if (evalCase !== undefined) adoptable = await collectDeferredTrace(this.deps, tenant, evalCase, adoptable);
+
             let judged = true;
             if (judges.length > 0)
               judged = await this.scoring

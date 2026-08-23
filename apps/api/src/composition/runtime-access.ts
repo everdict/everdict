@@ -873,13 +873,34 @@ export async function recoverStandaloneRun(
   // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
   // "this run failed", and the sweep wrote a tombstone on the strength of it.
   // …and the recovered result finishes the way an in-line one does, BEFORE it is settled (arch-review 63
-  // P0). A completion that fails leaves `adopted` as it was: this lane's job is parity, and refusing a real
-  // result because its trace could not be pulled would trade a recovered case for a collection hiccup —
-  // `collectDeferredTrace` already classifies that as a retryable collect failure on the result itself.
-  const completed =
+  // P0). The failures a collection actually HAS — a platform that is down, an unregistered auth secret, a
+  // grader that cannot be reconstructed — come back as a classified `{collect, infra, retryable}` result, so
+  // parity is preserved by calling it, not by guarding it.
+  //
+  // ── AND A THROW IS DEFERRED, NOT DOWNGRADED (arch-review 64) ──────────────────────────────────────
+  //
+  // This was `.catch(() => adopted)`: an exception from the completion seam settled the run with the
+  // PRE-COLLECTION document — the exact substitution the P0 above exists to stop, one line after the fix for
+  // it. `completeRecovered` is a seam whose implementation belongs to the composition root, so "it cannot
+  // throw" is a claim about somebody else's function (rule `protocol`, the comment-is-a-claim law).
+  //
+  // Expressed in the vocabulary this lane already has rather than as a bare throw: arch-review 55 watched a
+  // throw here become `retry_later`'s opposite one frame up and settle a live batch as `failed{INTERRUPTED}`.
+  // `retry_later` leaves the row alone and the next sweep asks again — which is what "we could not find out
+  // what this case measured" means (rule `protocol` L2).
+  const completion =
     adopted !== undefined && deps.completeRecovered !== undefined && r.caseSpec !== undefined
-      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).catch(() => adopted)
-      : adopted;
+      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).then(
+          (result) => ({ kind: "completed" as const, result }),
+          (err: unknown) => ({ kind: "unknown" as const, reason: err instanceof Error ? err.message : String(err) }),
+        )
+      : { kind: "completed" as const, result: adopted };
+  if (completion.kind === "unknown")
+    return {
+      kind: "retry_later",
+      reason: `this run's recovered result could not be completed: ${completion.reason}`,
+    };
+  const completed = completion.result;
   const outcome = await service.resume(r, completed, authority, adoptedFrom?.attemptId).catch(
     (err: unknown): ResumeResult => ({
       kind: "retry_later",
