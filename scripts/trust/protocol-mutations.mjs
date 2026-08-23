@@ -1399,6 +1399,18 @@ const MUTATIONS = [
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/pull-secret-lifecycle.counterexample.test.ts"],
   },
+  {
+    // arch-review 62 follow-through. The Nomad lane reclaimed its object on each refusal somebody had
+    // enumerated, and the START was not among them — a 5xx, a reset connection or a timeout threw past every
+    // hand-rolled delete and left an inert registration nothing collects. Remove the scope and the list of
+    // enumerated failures is back.
+    name: "nomad dispatch — a failure between birth and start leaves its object behind",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: "      const reclaimed = await reclaimInert();",
+    to: '      const reclaimed = "reclaimed";',
+    build: "@everdict/backends",
+    suite: ["packages/backends/src/orchestrators/nomad-birth-cleanup.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

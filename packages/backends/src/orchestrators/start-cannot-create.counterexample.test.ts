@@ -103,8 +103,11 @@ describe("[R62 COUNTEREXAMPLE] a Nomad start can never create the job it is star
       state.events.filter((e) => e.startsWith("created-at-1")),
       "a start recreated the job a cancellation had already deleted",
     ).toHaveLength(0);
-    // …and specifically: the cluster refused it, so nothing ran and nothing was reported started.
-    expect(state.events).toEqual(["created-at-0", "deleted", "refused-at-1"]);
+    // …and specifically: the cluster refused it, so nothing ran and nothing was reported started. The trailing
+    // reclaim is the cleanup scope asking whether this dispatch left anything behind — a purge of an absent
+    // job is a no-op, and asking is cheaper than being wrong about which failure this was.
+    expect(state.events.slice(0, 3)).toEqual(["created-at-0", "deleted", "refused-at-1"]);
+    expect(state.events.filter((e) => e.startsWith("created-at-1"))).toHaveLength(0);
     expect(state.jobs.size, "the cancellation's certificate of zero was made false").toBe(0);
   });
 

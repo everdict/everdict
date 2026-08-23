@@ -1140,46 +1140,66 @@ export class NomadBackend
     // anything else — a job somebody deleted, or one a different dispatch re-registered under the same id.
     // Unreadable is a REFUSAL, not an unfenced start: a start that cannot name which object it is starting is
     // the create this whole protocol exists to prevent.
-    const bornAt = jobModifyIndexOf(submit.text);
-    if (bornAt === undefined) {
-      await this.http
+    // ── ONE CLEANUP SCOPE, FROM THE MOMENT THE OBJECT EXISTS (arch-review 62 follow-through) ─────────
+    //
+    // arch-review 61 gave the K8s lane this boundary; this one kept a hand-rolled delete on each refusal
+    // somebody had thought of, and the START was not among them. A 5xx, a reset connection or a timeout
+    // threw past every one of them and left the registration on the cluster — inert, therefore never
+    // terminal, therefore collected by no dead-job sweep. And an applied start whose RESPONSE was lost left
+    // a job that is actually running while this process reports failure, so the retry places a second one.
+    //
+    // A reclaim per failure mode is a list somebody has to keep complete, and this is the third review to
+    // find an entry missing from it. The property is "this dispatch made an object, so this dispatch removes
+    // it" — one scope, and the two hand-rolled deletes fold into it.
+    const reclaimInert = async (): Promise<"reclaimed" | "failed"> => {
+      // …and the answer is READ (rule `protocol` L5). A purge the cluster refused leaves an object this
+      // dispatch cannot account for, and the record says so rather than the lane pretending it tidied up.
+      const purge = await this.http
         .request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns ? `&namespace=${ns}` : ""}`)
-        .catch(() => undefined);
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { job: jobId },
-        "Nomad did not report the registration's version, so this dispatch cannot start exactly the job it made.",
-      );
-    }
-    // …and the reservation is re-presented against an object that already exists (arch-review 57 P0 · 61).
-    // A refusal removes what this dispatch registered, so the cancellation's certificate stays true: the only
-    // thing that existed was a job with no allocations, purged by its own creator.
-    if (job.runId !== undefined) {
-      try {
-        await requireActivation(job, work, options?.authority);
-      } catch (err) {
-        await this.http
-          .request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns ? `&namespace=${ns}` : ""}`)
-          .catch(() => undefined);
-        throw err;
-      }
-    }
-    // …and only an authorized dispatch scales it to one, which is what makes it run — applied to THIS
-    // registration or to nothing at all (see `EnforceIndex` on `NomadJobSpec`).
-    const start = await this.http.request("POST", "/v1/jobs", {
-      ...buildNomadJob(job, opts, jobId, verifier?.payload),
-      EnforceIndex: true,
-      JobModifyIndex: bornAt,
-    });
-    if (start.status >= 300) {
-      // A refusal here is the ordinary outcome of losing the race to a cancellation, and it is a refusal to
-      // CREATE — the job is gone and stays gone, so nothing needs reclaiming and the certificate of zero the
-      // teardown issued is still true.
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { status: start.status, job: jobId },
-        "Nomad job could not be started — the registration this dispatch made is no longer the one on the cluster",
-      );
+        .catch(() => ({ status: 599, text: "" }));
+      if (purge.status < 300) return "reclaimed";
+      mark("reclaim_failed", `nomad job ${jobId} could not be reclaimed (${purge.status})`);
+      return "failed";
+    };
+    try {
+      const bornAt = jobModifyIndexOf(submit.text);
+      // The version this dispatch created. The start below carries it so Nomad refuses to apply the update to
+      // anything else — a job somebody deleted, or one a different dispatch re-registered under the same id.
+      // Unreadable is a REFUSAL, not an unfenced start: a start that cannot name which object it is starting
+      // is the create this whole protocol exists to prevent.
+      if (bornAt === undefined)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { job: jobId },
+          "Nomad did not report the registration's version, so this dispatch cannot start exactly the job it made.",
+        );
+      // …and the reservation is re-presented against an object that already exists (arch-review 57 P0 · 61).
+      // A refusal removes what this dispatch registered, so the cancellation's certificate stays true: the
+      // only thing that existed was a job with no allocations, purged by its own creator.
+      if (job.runId !== undefined) await requireActivation(job, work, options?.authority);
+      // …and only an authorized dispatch scales it to one, which is what makes it run — applied to THIS
+      // registration or to nothing at all (see `EnforceIndex` on `NomadJobSpec`).
+      const start = await this.http.request("POST", "/v1/jobs", {
+        ...buildNomadJob(job, opts, jobId, verifier?.payload),
+        EnforceIndex: true,
+        JobModifyIndex: bornAt,
+      });
+      if (start.status >= 300)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { status: start.status, job: jobId },
+          "Nomad job could not be started — the registration this dispatch made is no longer the one on the cluster",
+        );
+    } catch (err) {
+      // Whatever failed, the object this dispatch created goes with it. An EnforceIndex refusal is the one
+      // case where there is usually nothing left to remove — and asking is cheaper than being wrong about
+      // which case this is, since the purge of an absent job is a no-op.
+      const reclaimed = await reclaimInert();
+      // The reclaim's outcome rides the failure the caller sees: "this dispatch failed AND its object is
+      // gone" and "this dispatch failed and something may still be running" are different incidents, and
+      // only one of them needs a human.
+      if (err instanceof AppError) throw new UpstreamError("UPSTREAM_ERROR", { ...err.extra, reclaimed }, err.message);
+      throw err;
     }
     mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
     // ── AND ONLY NOW IS THIS RUN "STARTED" (arch-review 54 Phase 1 · 60 P0) ──────────────────────────
