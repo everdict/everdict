@@ -12,7 +12,7 @@ import {
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import { recoverVerifiedCase } from "@everdict/application-control";
+import { agentHalfKey, discardAgentHalf, recoverVerifiedCase } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
@@ -30,6 +30,7 @@ import type {
   AdoptedWork,
   AdoptionDecision,
   CaseResult,
+  EvalCase,
   KillOutcome,
   ReadResult,
   RegistryAuth,
@@ -713,6 +714,18 @@ export async function recoverStandaloneRun(
     // Where `withVerifierPass` staged the agent's half — see the verifier branch below. Absent means this
     // deployment cannot merge a recovered verdict, which is exactly what it could not do before.
     agentHalves?: AgentHalfStore;
+    // ── THE REST OF THE CASE, WHICH A CRASH MUST NOT SKIP (arch-review 63 P0) ──────────────────────
+    //
+    // A case is not finished when its containers are. The in-line path runs `collectDeferredTrace` after the
+    // dispatch — the platform trace pull, the evidence and `sourceTraceId`, the deferred observation graders,
+    // the seal — and the recovery handed the adopted result straight to the settle. So a case with a
+    // `traceRef` came out of a crash with a different trace, no deferred scores and no evidence: the crash
+    // did not delay an outcome, it changed what had been measured.
+    //
+    // The SAME completion, injected because this layer may not import the grader impls (the reason
+    // `collectDeferredTrace` takes them as a capability at all). Absent means this deployment does no
+    // deferred collection, which is the ordinary case and not a silent difference.
+    completeRecovered?: (tenant: string, caseSpec: EvalCase, result: CaseResult) => Promise<CaseResult>;
   },
   r: RunRecord,
   authority: DriverAuthority,
@@ -830,7 +843,15 @@ export async function recoverStandaloneRun(
   // A resume that THREW told us nothing — which is `retry_later`, not `unresumable` (arch-review 55,
   // rule `protocol` L2). Mapping it to the permanent case is how "the store hiccuped" became
   // "this run failed", and the sweep wrote a tombstone on the strength of it.
-  const outcome = await service.resume(r, adopted, authority, adoptedFrom?.attemptId).catch(
+  // …and the recovered result finishes the way an in-line one does, BEFORE it is settled (arch-review 63
+  // P0). A completion that fails leaves `adopted` as it was: this lane's job is parity, and refusing a real
+  // result because its trace could not be pulled would trade a recovered case for a collection hiccup —
+  // `collectDeferredTrace` already classifies that as a retryable collect failure on the result itself.
+  const completed =
+    adopted !== undefined && deps.completeRecovered !== undefined && r.caseSpec !== undefined
+      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).catch(() => adopted)
+      : adopted;
+  const outcome = await service.resume(r, completed, authority, adoptedFrom?.attemptId).catch(
     (err: unknown): ResumeResult => ({
       kind: "retry_later",
       reason: err instanceof Error ? err.message : String(err),
@@ -840,6 +861,20 @@ export async function recoverStandaloneRun(
   // refused every single time: `committed` requires the parent to be open and a successful resume closes it,
   // so the previous version of this line left every recovered attempt `reserved` — the defect arch-review 61
   // had closed. The stamp rides `settleRun` now, ordered inside the same decision.
+  // ── AND NOW THE STAGED HALF IS OWED NO LONGER (arch-review 63 P0) ───────────────────────────────
+  //
+  // Its window ends at the canonical settlement, not at the merge that read it — the merge is followed by
+  // the completion above and then by this settle, and a crash anywhere in there is exactly what the half
+  // exists to survive. Discarding it at the merge (the previous version) left a window in which the agent's
+  // container, the verifier's container and the half were all gone.
+  //
+  // `resumed` is the only outcome that means this run recorded this result. Best-effort, like the staging:
+  // an orphan costs storage, and a delete that failed must not cost a settled case.
+  if (outcome.kind === "resumed" && adoptedFrom?.verifier?.agentResultDigest !== undefined)
+    await discardAgentHalf(
+      deps.agentHalves,
+      agentHalfKey(r.tenant, `evd-run-${r.id}`, adoptedFrom.verifier.agentResultDigest),
+    );
   if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
   // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
   // fire-and-forget leg whose caller had already answered `true` — so the one place that knew the

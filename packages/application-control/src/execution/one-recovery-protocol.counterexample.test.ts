@@ -140,19 +140,22 @@ describe("[R62 COUNTEREXAMPLE] a recovered verdict is finished the same way by e
 // Seen RED before the retention owner, observed:
 //   the recovery merged a half and left it in storage forever: expected [] to have a length of 1
 describe("[R62-followup COUNTEREXAMPLE] a staged half is discarded by whoever closes its window", () => {
-  it("the RECOVERY discards the half it merged", async () => {
+  it("the MERGE keeps it — the settlement is what ends its window (arch-review 63 P0)", async () => {
+    // The first version discarded here, and that was one step too early: after this merge the case still
+    // completes (deferred collection, observation grading, evidence) and only then settles. A crash in that
+    // span found every copy of the agent's evidence gone — which is exactly what the half exists to survive.
     removed.length = 0;
     const staged = store(new TextEncoder().encode(JSON.stringify(HALF)));
     const out = await recoverVerifiedCase(staged, "acme", "evd-run-r1", WORK, VERDICT);
 
     expect(out.kind, "the fixture never reached the merge, so this proves nothing").toBe("merged");
-    expect(removed, "the recovery merged a half and left it in storage forever").toHaveLength(1);
-    expect(removed[0], "the recovery removed an object other than the half it read").toBe(
-      agentHalfKey("acme", "evd-run-r1", DIGEST),
-    );
+    expect(removed, "the merge deleted a half the settlement still needed").toHaveLength(0);
+    // …and the key the settlement will discard is derivable from the same coordinate the merge read by, so
+    // the owner that ends the window addresses exactly this object.
+    expect(agentHalfKey("acme", "evd-run-r1", DIGEST)).toBe(`agent-half/acme/evd-run-r1/${DIGEST}.json`);
   });
 
-  it("does NOT discard a half it could not merge", async () => {
+  it("does NOT discard a half it could not merge either", async () => {
     // Discarding before the merge succeeded would turn a refused merge into a case nothing can ever recover:
     // the verdict is already spent and the evidence would be gone too.
     removed.length = 0;

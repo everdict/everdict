@@ -77,6 +77,7 @@ export {
   type AgentHalfStore,
   type StagedAgentHalf,
   agentHalfKey,
+  discardAgentHalf,
   mergeVerifierPass,
   agentHalfDigest,
   readAgentHalf,

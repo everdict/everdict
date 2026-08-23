@@ -1413,26 +1413,6 @@ const MUTATIONS = [
     suite: ["packages/backends/src/orchestrators/nomad-birth-cleanup.counterexample.test.ts"],
   },
   {
-    // arch-review 62 follow-through. The staged agent half is an intermediate artifact — a full CaseResult,
-    // trace and snapshot included — and the port was put/get, so one survived every private-verifier case
-    // forever. Its window has two ends and BOTH close it; drop the in-line one and the residue is back.
-    name: "agent half — the in-line pass keeps the half it staged",
-    file: "packages/application-control/src/execution/verifier-pass.ts",
-    from: "    await discardAgentHalf(deps.agentHalves, halfKey);\n  }\n}",
-    to: "  }\n}",
-    build: "@everdict/application-control",
-    suite: ["packages/application-control/src/execution/agent-half.counterexample.test.ts"],
-  },
-  {
-    // …and the recovery end of the same window.
-    name: "agent half — the recovery keeps the half it merged",
-    file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));",
-    to: "  void digest;",
-    build: "@everdict/application-control",
-    suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
-  },
-  {
     // arch-review 62 follow-through. The verifier lane admitted on slot COUNT alone while the Scheduler has
     // always admitted on slots AND the declared memory envelope AND the declared CPU envelope. Drop the
     // shared decision back to a count and a heavy verifier lands on a lane whose memory is already spent.
@@ -1496,6 +1476,27 @@ const MUTATIONS = [
     from: "  const outcome = await service.resume(r, adopted, authority, adoptedFrom?.attemptId).catch(",
     to: "  const outcome = await service.resume(r, adopted, authority).catch(",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
+  {
+    // arch-review 63 P0. The in-line path runs collectDeferredTrace after the dispatch — the deferred trace
+    // pull, the evidence, the observation graders, the seal — and the recovery handed the adopted result
+    // straight to the settle. Skip the completion and a crash changes what was measured, not when.
+    name: "recovery parity — a recovered case skips the completion an in-line one runs",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).catch(() => adopted)",
+    to: "      ? adopted",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
+  {
+    // …and the retention owner, INVERTED from the previous wave: the half is owed until the settlement, so
+    // discarding it at the merge is the defect. Put the discard back at the merge and the window where
+    // nothing is recoverable comes back.
+    name: "agent half — the merge discards a half the settlement still needs",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: '  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };',
+    to: '  const m = mergeVerifierPass(half.result, invocation);\n  await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));\n  return { kind: "merged", result: m };',
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
 ];
 

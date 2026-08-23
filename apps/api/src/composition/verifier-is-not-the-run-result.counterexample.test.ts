@@ -367,3 +367,102 @@ describe("[R62-followup COUNTEREXAMPLE] an adopted attempt is stamped only once 
     expect(closed, "a recovered attempt was left reading as live work").toEqual([["a-verify", "committed"]]);
   });
 });
+
+// ── A CRASH DELAYS AN OUTCOME, IT DOES NOT CHANGE WHAT WAS MEASURED (arch-review 63 P0) ─────────────
+//
+// A case is not finished when its containers are. The in-line path is
+//
+//     dispatch → collectDeferredTrace → settle
+//
+// and that middle step is where a `traceRef` case gets its platform trace pulled, its `sourceTraceId` and
+// evidence recorded, its DEFERRED observation graders run and its trajectory sealed. The recovery handed the
+// adopted result straight to the settle.
+//
+// So the same case, judged by the same containers, came out of a crash with a different trace, no deferred
+// scores and no evidence — and nothing downstream can see the seam, because both are `CaseResult`s. That is
+// not a slower answer; it is a different measurement, which is the one thing a recovery may never be.
+//
+// Seen RED before the completion travelled, observed:
+//   a recovered case skipped the completion an in-line one runs: expected undefined to be 'collected'
+describe("[R63 COUNTEREXAMPLE] a recovered case runs the completion an in-line one runs", () => {
+  const recoverWith = async (completeRecovered?: unknown) => {
+    const resumedWith: Array<unknown> = [];
+    const halves = {
+      put: async () => "ref",
+      get: async () => new TextEncoder().encode(JSON.stringify(AGENT_HALF)),
+      remove: async () => undefined,
+    };
+    const deps = {
+      scorecardStore: { get: async () => undefined },
+      store: { get: async () => RECORD },
+      owner: "r1",
+      replicas: { alive: async () => [] },
+      scorecardService: { resume: async () => ({ kind: "resumed" }) },
+      service: {
+        resume: async (_r: unknown, adopted: unknown) => {
+          resumedWith.push(adopted);
+          return { kind: "resumed" };
+        },
+      },
+      agentHalves: halves,
+      ...(completeRecovered ? { completeRecovered } : {}),
+      workHandlesFor: async () => [
+        {
+          tenant: "acme",
+          runId: "evd-run-r1",
+          externalJobId: "everdict-verify-c1",
+          attemptId: "a-verify",
+          verifier: {
+            planDigest: "sha256:plan",
+            workspaceDigest: AGENT_TREE,
+            caseId: "c1",
+            agentResultDigest: agentHalfDigest(AGENT_HALF),
+          },
+        },
+      ],
+      adoptWorkFn: async () => ({
+        kind: "adopted",
+        adopted: {
+          stage: "verifier",
+          invocation: {
+            planDigest: "sha256:plan",
+            workspaceDigest: AGENT_TREE,
+            scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+          },
+        },
+      }),
+    } as unknown as Parameters<typeof recoverStandaloneRun>[0];
+    // A record with a case spec, because the completion is about THIS case's declared graders and trace ref.
+    const record = { ...RECORD, caseSpec: { id: "c1", task: "t", env: { kind: "prompt" }, graders: [] } };
+    await recoverStandaloneRun(deps, record as never, { ownerReplica: "r1", epoch: 1 } as never);
+    return resumedWith[0] as { harness?: string; sourceTraceId?: string } | undefined;
+  };
+
+  it("settles the COMPLETED result, not the raw merge", async () => {
+    const settled = await recoverWith(async (_t: string, _c: unknown, result: Record<string, unknown>) => ({
+      ...result,
+      sourceTraceId: "collected",
+    }));
+
+    expect(settled?.sourceTraceId, "a recovered case skipped the completion an in-line one runs").toBe("collected");
+    // …and it is still the agent's own document underneath, or the completion has replaced the case.
+    expect(settled?.harness).toBe("agent@1");
+  });
+
+  it("settles the merge unchanged when this deployment defers no collection", async () => {
+    // The ordinary case: no completion wired means no deferred collection, which is a real configuration and
+    // not a silent difference.
+    const settled = await recoverWith(undefined);
+    expect(settled?.harness).toBe("agent@1");
+    expect(settled?.sourceTraceId).toBeUndefined();
+  });
+
+  it("keeps the result when the completion FAILS — parity must not cost the case", async () => {
+    // A collection that cannot reach the platform is a retryable failure `collectDeferredTrace` records on
+    // the result itself; refusing the whole recovery over it would trade a real verdict for a trace pull.
+    const settled = await recoverWith(async () => {
+      throw new Error("the trace platform is unreachable");
+    });
+    expect(settled?.harness, "a completion failure cost the recovery a result it already had").toBe("agent@1");
+  });
+});

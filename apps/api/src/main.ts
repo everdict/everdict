@@ -18,6 +18,7 @@ import {
   TaskService,
   TeamService,
   WorkflowStateService,
+  collectDeferredTrace,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
   settleOrphanSessionRuns,
@@ -52,7 +53,15 @@ import {
   firstPartyDefaults,
   resolveSeriesContract as resolveSeriesContractFor,
 } from "@everdict/application-control";
-import type { ProductSeries, RegistryAuth, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
+import type {
+  CaseResult,
+  EvalCase,
+  ProductSeries,
+  RegistryAuth,
+  Score,
+  VerifierInvocation,
+  VerifierJob,
+} from "@everdict/contracts";
 import { UpstreamError } from "@everdict/contracts";
 import {
   type SeriesContractResolution,
@@ -60,8 +69,10 @@ import {
   perTenantTrustZones,
   refuseGateForInputTrust,
 } from "@everdict/domain";
+import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
+import { buildTraceSource } from "@everdict/trace";
 import type { AgentTryRelay } from "./api/mcp-context.js";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseFsRequestHub } from "./common/case-fs-request-hub.js";
@@ -891,6 +902,12 @@ async function main(): Promise<void> {
     // …and the physical ledger, so an attempt this recovery adopted stops reading as live work
     // (arch-review 61 P2-audit).
     ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),
+    // …and THE REST OF THE CASE (arch-review 63 P0). The in-line path runs this after the dispatch — the
+    // deferred trace pull, the evidence, the observation graders, the seal — and the recovery used to hand
+    // the adopted result straight to the settle, so a crash changed what had been measured rather than when.
+    // The same function, the same capabilities the run lane is given.
+    completeRecovered: (tenant: string, caseSpec: EvalCase, result: CaseResult) =>
+      collectDeferredTrace({ buildTraceSource, makeGraders, secretsFor: runtimeSecretsFor }, tenant, caseSpec, result),
   };
   const owedRecovery = await runStartupRecovery(recoveryDeps);
   // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────

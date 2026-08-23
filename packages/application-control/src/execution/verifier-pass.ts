@@ -1,13 +1,6 @@
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
-import {
-  type AgentHalfStore,
-  agentHalfDigest,
-  agentHalfKey,
-  discardAgentHalf,
-  mergeVerifierPass,
-  stageAgentHalf,
-} from "./agent-half.js";
+import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 import { jobAttemptId } from "./open-physical-attempt.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
@@ -149,14 +142,13 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // the earlier placement wrote a half for every case with a verifier PLAN, including the ones refused two
   // lines later for having no repo snapshot or no lane to judge on — halves for a verifier that was never
   // dispatched, and therefore garbage the moment they were written.
-  const halfKey = agentHalfKey(job.tenant, job.runId, stagedDigest);
   await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {
-    // …and CLOSES on every path out. The verifier's container has been read or has failed, so nothing will
-    // ever merge this half: a recovery reaching it would find the verifier handle gone and re-drive anyway.
-    await discardAgentHalf(deps.agentHalves, halfKey);
+    // The half stays. A verifier that failed leaves a case that still has to be COMPLETED and settled, and
+    // a crash before that settlement is exactly what the half exists to survive (arch-review 63 P0). What
+    // ends its window is the canonical settlement, never the step that read it.
     return owed("grader_error", invocation instanceof Error ? invocation.message : String(invocation));
   }
 
@@ -177,10 +169,5 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     return mergeVerifierPass(result, invocation as VerifierInvocation);
   } catch (err) {
     return owed("grader_error", err instanceof Error ? err.message : String(err));
-  } finally {
-    // The merge is the far end of the window, whichever way it went. After it there is nothing left that
-    // could use this half: the verdict is in the result the caller settles, and a crash from here on finds
-    // no verifier container to adopt.
-    await discardAgentHalf(deps.agentHalves, halfKey);
   }
 }

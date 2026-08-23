@@ -173,12 +173,12 @@ export async function recoverVerifiedCase(
   if (digest === undefined) return { kind: "absent" };
   const half = await readAgentHalf(store, tenant, runId, digest);
   if (half.kind !== "read") return half;
-  const merged = mergeVerifierPass(half.result, invocation);
-  // The window closes here too — the recovery is the OTHER end of it, and a half only one owner discards is
-  // a half that survives every crashed case forever. Best-effort, and after the merge succeeded: discarding
-  // before it would turn a refused merge into a case nothing can recover.
-  await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));
-  return { kind: "merged", result: merged };
+  // …and the half STAYS. Its window ends at the canonical settlement, not at the merge that reads it: after
+  // this the case still completes (deferred collection, observation grading, evidence) and then settles, and
+  // a crash anywhere in there is precisely what the half exists to survive. Discarding here left a window in
+  // which the verifier's container, the agent's container AND the staged half were all gone (arch-review 63
+  // P0). The settlement owns the discard — see `discardAgentHalf`'s callers.
+  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };
 }
 
 // ── THE MERGE, ONCE (rule `protocol` L5) ─────────────────────────────────────────────────────────────

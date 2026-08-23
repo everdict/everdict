@@ -194,15 +194,24 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
   });
 });
 
-// ── …AND THE IN-LINE PATH CLOSES ITS OWN WINDOW (arch-review 62 follow-through) ──────────────────────
+// ── …AND THE WINDOW ENDS AT THE SETTLEMENT, NOT AT THE MERGE (arch-review 63 P0) ────────────────────
 //
-// The other end. `withVerifierPass` opens the window by staging and closes it by merging, so it discards
-// what it wrote — and it stages at the moment the window actually opens rather than for every case with a
-// verifier PLAN, which used to write halves for cases refused two lines later (no repo snapshot, no lane).
+// The first version of this file put the retention owner at the MERGE — the step that consumes the half —
+// and asserted the deletion there. That is one step too early, and the assertion was pinning the defect.
 //
-// Seen RED before the retention owner, observed:
-//   the case finished and its intermediate half stayed in storage: expected 1 to be +0
-describe("[R62-followup COUNTEREXAMPLE] the in-line pass discards the half it staged", () => {
+// After the merge a case still runs its deferred trace collection, its observation graders and its evidence
+// assembly, and only then settles. A crash anywhere in there found the agent's container gone, the
+// verifier's container gone AND the staged half deleted, so the case re-ran from nothing — which is exactly
+// what the half was staged to prevent.
+//
+// An artifact that exists so a crash can be recovered from is owed until the thing it would recover is
+// DURABLE, not until its value has been read: a value in memory is precisely what it was staged to survive.
+// So the merge keeps it, and the settlement discards it (see `discardAgentHalf`'s caller in the recovery
+// lane, and rule `protocol`).
+//
+// Seen RED before the invariant was corrected, observed:
+//   the merge deleted a half the settlement still needed: expected 1 to be +0
+describe("[R63 COUNTEREXAMPLE] the merge does not discard the half the settlement still needs", () => {
   const halvesRecording = (written: Map<string, Uint8Array>) => ({
     put: async (key: string, data: Uint8Array) => {
       written.set(key, data);
@@ -214,7 +223,7 @@ describe("[R62-followup COUNTEREXAMPLE] the in-line pass discards the half it st
     },
   });
 
-  it("leaves nothing behind once the verdict is merged", async () => {
+  it("KEEPS the half after a successful merge — the case is not settled yet", async () => {
     const written = new Map<string, Uint8Array>();
     const merged = await withVerifierPass(JOB(), {
       dispatch: async () => RESULT,
@@ -227,13 +236,13 @@ describe("[R62-followup COUNTEREXAMPLE] the in-line pass discards the half it st
       agentHalves: halvesRecording(written),
     } as never);
 
-    // The control first: a pass that never merged would leave nothing behind for the wrong reason.
+    // The control first: a pass that never merged would keep the half for the wrong reason.
     expect(merged.verifier, "the verdict never reached the result, so the retention claim is vacuous").toBeDefined();
-    expect(written.size, "the case finished and its intermediate half stayed in storage").toBe(0);
+    expect(written.size, "the merge deleted a half the settlement still needed").toBe(1);
   });
 
-  it("leaves nothing behind when the VERIFIER failed either", async () => {
-    // No container will ever be adopted for this case, so the half is garbage the moment the dispatch failed.
+  it("KEEPS it when the verifier FAILED too", async () => {
+    // The case still has to be completed and settled; a crash before that is the window the half covers.
     const written = new Map<string, Uint8Array>();
     await withVerifierPass(JOB(), {
       dispatch: async () => RESULT,
@@ -243,12 +252,12 @@ describe("[R62-followup COUNTEREXAMPLE] the in-line pass discards the half it st
       agentHalves: halvesRecording(written),
     } as never);
 
-    expect(written.size, "a failed verifier left its agent half in storage").toBe(0);
+    expect(written.size, "a failed verifier deleted the half its case still needs").toBe(1);
   });
 
   it("stages NOTHING for a case whose verifier can never be dispatched", async () => {
-    // A prompt snapshot has no workspace to judge, so this case is refused before any second container —
-    // there is no window, and a half written for it would be garbage from birth.
+    // Unchanged and still true: a prompt snapshot has no workspace to judge, so this case is refused before
+    // any second container — there is no window, and a half written for it would be garbage from birth.
     const written = new Map<string, Uint8Array>();
     await withVerifierPass(JOB(), {
       dispatch: async () => ({ ...RESULT, snapshot: { kind: "prompt", output: "x" } }) as CaseResult,
