@@ -233,8 +233,10 @@ export class RecoveryPlanner {
               }
               if (recovered.kind === "merged") {
                 adoptable = recovered.result;
-                // The VERIFIER's handle: this document is the merge of two halves, and the row this
-                // settlement can name is the one that produced the verdict it adopted.
+                // BOTH halves' rows. This document is the merge of two physical executions, and the comment
+                // that used to stand here said the settlement names "the one that produced the verdict" — so
+                // the receipt named the JUDGING container and the agent's row stayed open (arch-review 65
+                // P0-verifier). The merge returns them separately and each is spent for what it is.
                 contributing = { ...contributing, ...recovered.attempts };
                 break;
               }

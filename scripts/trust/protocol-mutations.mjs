@@ -1805,6 +1805,59 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
   {
+    // arch-review 65 P1-high. The GC coordinate was derived from the receipt, which exists only on a case that
+    // settled with a COMPLETE one — so the ending that needed no help was the only one that could clean up,
+    // and a verifier error, a refused merge and a retried capacity refusal each left a full intermediate
+    // `CaseResult` in storage forever.
+    name: "intermediate GC — the cleanup coordinate is derived from the receipt again",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  if (result.intermediates !== undefined) return result.intermediates;",
+    to: "  if (false) return result.intermediates;",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 65 P0-verifier. Both recovery owners carried ONE `RuntimeWorkRef` to the settlement, and on
+    // the verifier branches it was the judging container's — so the receipt named the verifier while the
+    // agent's row stayed open, and a trajectory read resolved the case's evidence plane against the wrong
+    // container's output.
+    name: "contributing attempts — the settlement adopts the judging attempt as the execution",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "  const outcome = await service.resume(r, completed, authority, contributing.agent).catch(",
+    to: "  const outcome = await service.resume(r, completed, authority, contributing.verifier ?? contributing.agent).catch(",
+    build: "@everdict/api",
+    suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
+  },
+  {
+    // …and the BATCH owner of the same protocol. The merge returns both contributors; collapsing them back to
+    // the handle the merge was reached through is the defect in the lane the api rung cannot see.
+    name: "contributing attempts — the merge returns the judging handle for both halves",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "      ...(work.verifier?.agentAttemptId !== undefined ? { agent: work.verifier.agentAttemptId } : {}),\n      ...(invocation.agentAttemptId !== undefined ? { agent: invocation.agentAttemptId } : {}),",
+    to: "      ...(work.attemptId !== undefined ? { agent: work.attemptId } : {}),",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/adopted-attempt-settlement.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 65 P1. Every component of the old key belongs to the AGENT's half, so two verifier attempts
+    // judging it addressed one object — and `put` is not a conditional create. The later verdict destroyed the
+    // earlier, and a recovery holding the loser's handle read the winner's bytes.
+    name: "verdict key — two verifier attempts of one agent half share a key",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}/${verifierAttemptId}.json`;",
+    to: "  void verifierAttemptId;\n  return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}.json`;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/verdict-key-identity.counterexample.test.ts"],
+  },
+  {
     // arch-review 65 P2-adapter. The last mutation outside the per-attempt queue: a `transition` paused in its
     // parent check, a `markUnisolated` inside that window, and the stale `current` writes the flag back off.
     name: "attempt serialization — markUnisolated races a transition and loses the flag",

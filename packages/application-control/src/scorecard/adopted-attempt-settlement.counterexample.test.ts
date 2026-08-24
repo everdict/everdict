@@ -1,6 +1,8 @@
 import type { CaseResult } from "@everdict/contracts";
-import { storedExecutionId } from "@everdict/contracts";
+import { CaseResultSchema, storedExecutionId } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
+import { agentHalfDigest, agentHalfKey } from "../execution/agent-half.js";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { RecoveryPlanner } from "./recovery-planner.js";
 
@@ -203,5 +205,106 @@ describe("[R64 COUNTEREXAMPLE] a batch recovery settles the attempt it adopted",
       await stateOf(attempts, verifier.attemptId),
       "the verdict's row was left waiting for a case that had already settled",
     ).toBe("committed");
+  });
+
+  // ── AND WHEN THE VERIFIER'S HANDLE IS THE ONE THAT ANSWERED (arch-review 65 P0-verifier) ──────────
+  //
+  // The branch above adopts `stage: "case"` — the agent's own handle — so `contributing.agent` is the handle
+  // that was harvested and the receipt is right by construction. The VERIFIER branch is the one that was
+  // wrong: it reached the merge through the judging container's handle, and that single ref became both
+  // `receipt.attemptId` and the settlement's stamp. `receipt.attemptId` is what a trajectory read resolves an
+  // evidence plane against, so a recovered case could serve the verifier's output as the case's evidence.
+  //
+  // Seen RED with the merge returning one coordinate again, observed:
+  //   the receipt named the JUDGING container as the case's execution: expected 'evd-sc-1-c1#g2' to be 'evd-sc-1-c1#g1'
+  it("names the AGENT's attempt on the receipt when the verdict's handle is what answered", async () => {
+    const { attempts, attemptId: agentAttempt } = await ledgerHolding();
+    const verifier = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+
+    // PARSED FIRST, and the digests taken from the parsed document. `readAgentHalf` runs the schema on what it
+    // reads back, and a schema that fills a default makes `contentDigest(parsed.snapshot)` a different string
+    // from the raw one — the merge then refuses for a reason that has nothing to do with this test (the first
+    // draft of this case did exactly that: "produced against a different workspace").
+    const AGENT_HALF = CaseResultSchema.parse({
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      scores: [{ graderId: "steps", metric: "steps", value: 3 }],
+      snapshot: { kind: "repo", diff: "diff --git a/x b/x", changedFiles: [], base: "b", headSha: "h" },
+    });
+    const digest = agentHalfDigest(AGENT_HALF);
+    const halves = new Map<string, Uint8Array>([
+      [agentHalfKey("acme", "evd-sc-1-c1", digest), new TextEncoder().encode(JSON.stringify(AGENT_HALF))],
+    ]);
+
+    // The verifier's handle, as `reserveWork` stored it: it names the half it judged AND the agent execution
+    // that produced it, which is what makes the two contributors separable at all.
+    await attempts.reserveWork(verifier.attemptId, {
+      tenant: "acme",
+      runId: "evd-sc-1-c1",
+      externalJobId: "everdict-c1-verify",
+      attemptId: verifier.attemptId,
+      verifier: {
+        planDigest: "sha256:plan",
+        workspaceDigest: contentDigest(AGENT_HALF.snapshot),
+        caseId: "c1",
+        agentResultDigest: digest,
+        agentAttemptId: agentAttempt,
+      },
+    });
+    await attempts.transition(verifier.attemptId, "verdict_produced");
+
+    const receipts = receiptsOver(attempts);
+    const planner = plannerOver(
+      {
+        // Only the verifier's handle answers — the agent's container is long gone, which is the whole shape
+        // of this crash.
+        adoptWork: async (_t: string, _r: unknown, work: { attemptId?: string }) =>
+          work.attemptId === verifier.attemptId
+            ? {
+                kind: "adopted",
+                adopted: {
+                  stage: "verifier",
+                  invocation: {
+                    planDigest: "sha256:plan",
+                    workspaceDigest: contentDigest(AGENT_HALF.snapshot),
+                    scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+                    agentAttemptId: agentAttempt,
+                  },
+                },
+              }
+            : { kind: "absent" },
+        agentHalves: {
+          async get(key: string) {
+            return halves.get(key);
+          },
+          async put(key: string, data: Uint8Array) {
+            halves.set(key, data);
+            return key;
+          },
+          async remove(key: string) {
+            halves.delete(key);
+          },
+        },
+        caseReceipts: receipts.store,
+      },
+      attempts,
+    );
+    await planner
+      .seedFromLedger({
+        scorecardId: SCORECARD,
+        tenant: "acme",
+        dataset: { id: "d", version: "1", cases: [] } as never,
+        judges: [],
+      })
+      .catch(() => undefined);
+
+    expect(receipts.claimed, "the recovery never committed, so this case measured nothing").toHaveLength(1);
+    expect(receipts.claimed[0]?.attemptId, "the receipt named the JUDGING container as the case's execution").toBe(
+      agentAttempt,
+    );
+    // …and BOTH rows are closed, each as what it is.
+    expect(await stateOf(attempts, agentAttempt)).toBe("committed");
+    expect(await stateOf(attempts, verifier.attemptId)).toBe("committed");
   });
 });

@@ -62,6 +62,12 @@ See skill `ci`.
   repo has paid for twice (a scanner draft green over the defect it was written for, a judgment fixture that
   certified a gap). A new protocol adds its mutation there; a mutation whose target line is gone FAILS rather
   than silently testing nothing.
+  ⚠️ **A KILLED RUN LEAVES ITS IN-FLIGHT MUTATION IN THE TREE.** The revert is a `finally`, and a `finally`
+  does not run when the process is killed — so cancelling the gate mid-rung leaves a production file carrying
+  `if (false)` (or whatever that rung writes). The next run refuses to start on it, which is the guard
+  working; a COMMIT in between ships it. After stopping the gate for any reason, `git diff HEAD --name-only`
+  and restore what it names before doing anything else. Do not run it concurrently with edits to a file it
+  mutates, for the same reason.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
 - **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`

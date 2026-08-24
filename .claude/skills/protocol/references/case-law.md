@@ -476,6 +476,45 @@ A heredoc turned a template literal's space into `\x00` in `scoring-revision.ts`
 every `grep` silently found nothing, so edits appeared to vanish. Second occurrence in this tree. If a change
 you just made cannot be found, check `grep -c $'\x00' <file>` before re-editing.
 
+## Review 65 — the durable copy, and two mistakes made while fixing it
+
+### The defect: a persisted document the normal path would never return
+`verifierOperation` staged the lane's raw answer and returned `{...invocation, work: persistedWork,
+agentAttemptId}`. Both are `VerifierInvocation`s, both parse, and `VerifierReceipt.complete` requires exactly
+the three fields the enrichment adds — so the same verifier execution produced a `complete` receipt in-line
+and an `incomplete` one after a crash. The stage also ran ABOVE the two guards that can refuse the verdict,
+so a verdict this process rejected was left for a restart to adopt. Canonical → durable → stamp; and the
+recovery CHECKS the bytes against the handle it is recovering from, because a key is an address, not an
+authentication.
+
+### ⚠️ My first repair was worse than the defect, and the suite said so in one run
+The obvious fix for "the state claims durability the stage may not have achieved" is to gate the state on the
+stage. That skipped the CAS's OTHER job: re-proving the authority that reserved the work has not been revoked.
+On every deployment with no artifact store — the CLI, single-process dev — a revoked attempt's verdict became
+usable again. Eight tests went red immediately and reading them was the whole diagnosis.
+
+The repair is the other direction: keep the CAS unconditional and NARROW WHAT THE STATE CLAIMS. Durability is
+an artifact, not a state — a recovery asks the store, so there is no second place for the two to disagree.
+When a state and an artifact could both answer a question, the artifact answers it and the state stops saying
+it.
+
+### ⚠️ The same wave's own new check caught the same wave's own dead value
+The first draft of the stage returned a `{key, digest}` durability proof. Nothing consumed it, and
+`noUnusedLocals` — turned on one commit earlier, for exactly this defect class — refused it. A proof no
+reader receives is the hypothetical surface rule `api-layer` forbids; if a reader ever needs it, it asks the
+store.
+
+### ⚠️ A lost test that passed because the race window had not opened yet
+The `markUnisolated` counterexample was GREEN under neutralization. `perAttempt` defers to a microtask, so
+the second call landed BEFORE the transition had read the row — a harmless order, not the interleaving the
+test claims to pin. One `await new Promise((r) => setTimeout(r, 0))` puts it in the window. Running the RED
+check is what found it; reading the test could not have.
+
+### ⚠️ Killing the mutation gate leaves a production file mutated
+The revert is a `finally` and a killed process does not run one. Stopping the run mid-rung left
+`if (false)` in `startup-recovery.ts`. The next run refuses to start on it — the guard working — but a commit
+in between would have shipped it. `git diff HEAD --name-only` immediately after stopping, always.
+
 ## Cross-cutting: how these survived a green CI
 
 Every one of the above shipped with a green gate, and the gate is not weak — it runs the five commands, the

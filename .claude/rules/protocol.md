@@ -438,6 +438,52 @@ return value rather than in a missing branch:
 - A `Promise<boolean>` double that never returns `false`, or a `Promise<void>` double over a method that
   throws, is a green light wired to nothing.
 
+## THE DOCUMENT THAT BECOMES DURABLE IS THE DOCUMENT THAT IS RETURNED
+A verdict was persisted so a crash could recover it, and what got persisted was the LANE's raw answer while
+the value returned to the caller was `{...invocation, work: persistedWork, agentAttemptId}` — the attempt id,
+the protocol coordinate and the judged execution, joined from the reservation after the lane replies. The K8s
+lane reports `{tenant, runId, externalJobId, namespace}` and nothing more, and `VerifierReceipt.complete`
+requires exactly the three that are joined. So one verifier execution read `complete` in-line and
+`incomplete` after a crash: a difference in the RECORD produced by whether the process survived
+(arch-review 65 P0).
+
+    persist(upstreamValue)  …  return enrich(upstreamValue)     ← two documents, one of them recoverable
+
+- **Assemble the canonical value first, persist THAT, then stamp the state.** Each step is a precondition of
+  the next, and the order is the protocol: a recovery must not be able to observe a document the normal path
+  would never return.
+- **Persist AFTER every check that can still reject.** The stage ran above the two guards that refuse a lane
+  naming a different container than it reserved, so a verdict this process refused was left on the stage for a
+  restart to adopt. A rejected value that is already durable is a rejection only this process honours.
+- The recovery's half of the same law: **staged bytes are ADDRESSED, not authenticated.** Live adoption
+  re-presents the coordinates it holds; a staged path that merges whatever it read is a second protocol for
+  one question, and only one of the two verified. Check what you read against the handle you are recovering
+  from — attempt, external id, and every digest the handle carries — and answer `unknown` on disagreement,
+  never `absent`: something IS there and we could not use it.
+- **A key built from what two producers SHARE is a key at which the later write wins.** `put` is not a
+  conditional create. Keying a verdict by `(tenant, runId, agentResultDigest)` — all three properties of the
+  half being judged — let two verifier attempts overwrite each other, and a recovery holding the loser's
+  handle read the winner's bytes. The producing attempt is the discriminator, and every recovery already
+  holds it.
+
+## TWO CONTRIBUTORS CANNOT BE ONE COORDINATE
+A case with a private verifier is TWO physical executions, and both recovery owners carried a single
+`RuntimeWorkRef` to the settlement — the JUDGING container's, because that is the handle the merge was
+reached through. So `resume(…, attemptId)` and `receipt.attemptId` named the verifier while the agent's row
+stayed open. `attemptId` on a receipt is what a trajectory read resolves an evidence plane against, so a
+recovered case could serve the verifier's output as the case's evidence (arch-review 65 P0-verifier).
+
+- When an outcome has more than one producer, the type says so (`ContributingAttempts {agent, verifier}`) and
+  each consumer names which one it means. A single field cannot be spent for one and read as the other.
+- **Every ending owns its cleanup debt.** The GC coordinate was read out of the receipt, which exists only on
+  a case that settled with a COMPLETE one — so a producer that errored, a merge that was refused and a
+  capacity-refusal retry could not clean up after themselves. The refs are stamped by the pass that WROTE the
+  intermediates, on every outcome including the failures; deriving them from the document that happens to
+  succeed only ever covers the path that did not need it.
+- ⚠️ The comment defending the single coordinate was written in this repo and it was wrong: "the agent's was
+  committed before its half was staged". In that lane the agent's attempt is stamped BY the settlement, which
+  runs after the whole pass. The comment-is-a-claim law applies to your own comments about your own lane.
+
 ## AN INTERMEDIATE ARTIFACT'S WINDOW ENDS AT THE SETTLEMENT, NOT AT THE STEP THAT USED IT
 The staged agent half was given a retention owner, and the owner was placed at the merge — the step that
 consumes the half. That is one step too early. After the merge the case still collects its deferred trace,
