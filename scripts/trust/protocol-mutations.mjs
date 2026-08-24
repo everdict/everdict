@@ -1080,7 +1080,8 @@ const MUTATIONS = [
     file: "packages/application-control/src/execution/verifier-pass.ts",
     // RE-AIMED (arch-review 62 follow-through): the stage moved to where the window actually opens —
     // immediately before the second container — so it no longer runs for cases refused two lines later.
-    from: "  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);",
+    // RE-AIMED (arch-review 66): the staging also records the cleanup debt now, so it takes the ledger.
+    from: "  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);",
     to: "  void deps.agentHalves;",
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
@@ -1344,8 +1345,10 @@ const MUTATIONS = [
     // RE-AIMED (arch-review 62 follow-through): the return grew the judged execution's attempt, so it is a
     // multi-line object now. The protocol is unchanged — prefer the lane's bare handle and the receipt
     // stops joining to the row that produced it.
-    from: "      work: persistedWork,",
-    to: "      work: invocation.work ?? persistedWork,",
+    // RE-AIMED (arch-review 66): the join lives in `canonicalize`, which both the pre-reclaim
+    // acknowledgement and the late fallback spend — so neutralizing it reaches every lane.
+    from: "    work: persistedWork,",
+    to: "    work: invocation.work ?? persistedWork,",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
@@ -1438,8 +1441,9 @@ const MUTATIONS = [
     // logical run, which is the same across a retry.
     name: "verifier verdict — the judged execution is not named",
     file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: "      ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),\n    };",
-    to: "    };",
+    // RE-AIMED (arch-review 66): same move — the judged execution is joined inside `canonicalize`.
+    from: "    ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),\n  });",
+    to: "  });",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/verifier-receipt-work.counterexample.test.ts"],
   },
@@ -1694,7 +1698,8 @@ const MUTATIONS = [
     // at `verdict_produced` forever and a teardown keeps reading it as live work.
     name: "verdict phase — the run settlement does not adopt the verdict's own attempt",
     file: "packages/application-control/src/run/run-service.ts",
-    from: '                    if (adoptedVerifier !== undefined) await ledger.transition(adoptedVerifier, "committed");',
+    // RE-AIMED (arch-review 66 P0-protocol): the settlement ADOPTS now, and consumes the answer.
+    from: "                    if (adoptedVerifier !== undefined)\n                      requireAdopted(\n                        await ledger.adoptAtSettlement(adoptedVerifier, { parent, expectedExecutionId }),\n                        adoptedVerifier,\n                      );",
     to: "                    void adoptedVerifier;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/two-attempt-settlement.counterexample.test.ts"],
@@ -1707,16 +1712,11 @@ const MUTATIONS = [
     // RE-AIMED (arch-review 65): the stage moved BELOW the canonical join — it now persists the document this
     // function returns rather than the lane's raw answer — and takes the coordinate as one object. The
     // neutralization is unchanged: stage nothing, and the verdict dies with the process.
-    from: [
-      "    await stageVerifierVerdict(deps.verdicts, {",
-      "      tenant: job.tenant,",
-      "      runId: job.runId,",
-      "      agentResultDigest: job.agentResultDigest,",
-      "      verifierAttemptId: attemptId,",
-      "      invocation: canonical,",
-      "    }).catch(() => undefined);",
-    ].join("\n"),
-    to: "    void stageVerifierVerdict;",
+    // RE-AIMED (arch-review 66 P0-lifecycle): the verdict is staged by the lane's acknowledgement BEFORE
+    // its container is reclaimed, and the late call is the fallback for a lane that has not learned it.
+    // Aimed at the acknowledgement, which is the path both managed lanes take.
+    from: "        acknowledged = canonical;",
+    to: "        acknowledged = undefined;\n        return canonical;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
@@ -1727,8 +1727,9 @@ const MUTATIONS = [
     file: "packages/application-control/src/scorecard/recovery-planner.ts",
     // RE-AIMED (arch-review 65): the single `adoptedFrom` ref became `ContributingAttempts`, and the row this
     // stamps is the AGENT's. Withhold it and the case settles with its execution attempt still reading live.
-    from: '                        if (contributing.agent !== undefined)\n                          await boundAttempts.transition(contributing.agent, "committed", { childRunId: c.id });',
-    to: "                        void contributing;",
+    // RE-AIMED (arch-review 66 P0-protocol): the planner ADOPTS now, and a refusal aborts the transaction.
+    from: "                        if (contributing.agent !== undefined)\n                          requireAdopted(",
+    to: "                        if (false)\n                          requireAdopted(",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/adopted-attempt-settlement.counterexample.test.ts"],
   },
@@ -1740,8 +1741,10 @@ const MUTATIONS = [
     file: "packages/application-control/src/run/run-service.ts",
     // RE-AIMED (arch-review 65): the coordinate is `stagedIntermediatesOf(result)` — a ref the writing pass
     // stamps — rather than a digest dug out of the receipt, so the guard names a different local.
-    from: "      if (claimed !== undefined && adoptedRefs !== undefined)",
-    to: "      if (false && claimed !== undefined && adoptedRefs !== undefined)",
+    // RE-AIMED (arch-review 66 P1-high): the settlement discharges what the LEDGER says this execution
+    // owes, so the coordinate is no longer dug out of the recovered document.
+    from: "      if (claimed !== undefined) await this.dischargeStaged(record.tenant, runExecutionId(record.id));",
+    to: "      void claimed;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/intermediate-gc.counterexample.test.ts"],
   },
@@ -1803,10 +1806,17 @@ const MUTATIONS = [
     // one — the attempt id, the verifier coordinate and the judged execution are joined after the lane
     // answers, and `VerifierReceipt.complete` requires exactly those three. The same verifier execution read
     // `complete` in-line and `incomplete` after a crash.
+    // ⚠️ RE-AIMED, AND IT WAS A HOLE FIRST (arch-review 66). The acknowledgement added a SECOND
+    // `invocation: canonical,` line, textually identical to the fallback's, so this rung matched the
+    // acknowledge path — which the durability suite's lane does not call. It mutated a line nobody executed
+    // and read as enforcement. A rung whose `from` is not unique is aimed at whichever copy comes first.
+    //
+    // The production sites are named apart now (`handedOver` vs `canonical`), so this `from` is unique and
+    // aims at the fallback — the path the durability suite's lane actually takes.
     name: "verdict staging — the raw wire is staged instead of the canonical invocation",
     file: "packages/application-control/src/execution/verifier-operation.ts",
-    from: "      invocation: canonical,",
-    to: "      invocation,",
+    from: "        invocation: canonical,",
+    to: "        invocation,",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
@@ -1834,8 +1844,10 @@ const MUTATIONS = [
     // `CaseResult` in storage forever.
     name: "intermediate GC — the cleanup coordinate is derived from the receipt again",
     file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  if (result.intermediates !== undefined) return result.intermediates;",
-    to: "  if (false) return result.intermediates;",
+    // RE-AIMED (arch-review 66 P1-high): the coordinate is not on the document at all now — the debt is a
+    // ledger row the staging writes, so neutralizing THAT is what leaves an ending owing nothing.
+    from: "  await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });",
+    to: "  void cleanup;",
     build: "@everdict/application-control",
     suite: [
       "--root",
@@ -1955,20 +1967,6 @@ const MUTATIONS = [
     to: "  intermediates: z.object({ agentResultDigest: z.string(), verifierAttemptId: z.string().optional() }).optional(),\n  judgmentsSealed: z.boolean().optional(),",
     build: "@everdict/contracts",
     suite: ["--root", "packages/contracts", "src/execution/execution-boundary.counterexample.test.ts"],
-  },
-  {
-    // arch-review 66 P1-high. The staging recorded no debt, so an ending with no receipt left its bytes owed
-    // to nobody — the leak arch-review 65 fixed on the document and 66 moved to a ledger.
-    name: "intermediate debt — the staging writes bytes nothing owes",
-    file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });",
-    to: "  void cleanup;",
-    build: "@everdict/application-control",
-    suite: [
-      "--root",
-      "packages/application-control",
-      "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
-    ],
   },
   {
     // …and the other half: a delete that did not converge marked the debt paid anyway, which is the leak one

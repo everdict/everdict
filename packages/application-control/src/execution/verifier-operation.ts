@@ -160,16 +160,20 @@ export async function verifierOperation(
             { attemptId },
             "this verifier acknowledged a verdict before reserving a handle, so nothing can say which container made it",
           );
-        const canonical = canonicalize(raw);
+        // Named for the moment it belongs to. It used to be `canonical`, which made this line byte-identical
+        // to the fallback stage below — and a mutation rung aimed at "the raw wire is staged" then matched
+        // THIS copy, which the suite pinning that protocol never executes. A rung whose `from` is not unique
+        // is aimed at whichever copy comes first (arch-review 66).
+        const handedOver = canonicalize(raw);
         await stageVerifierVerdict(deps.verdicts, {
           tenant: job.tenant,
           runId: job.runId,
           agentResultDigest: job.agentResultDigest,
           verifierAttemptId: attemptId,
-          invocation: canonical,
+          invocation: handedOver,
         }).catch(() => undefined);
-        acknowledged = canonical;
-        return canonical;
+        acknowledged = handedOver;
+        return handedOver;
       },
       authority: {
         // …and WHICH PROTOCOL reads this work's answer, stamped where the handle becomes durable. A verifier
