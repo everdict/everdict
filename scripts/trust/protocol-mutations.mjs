@@ -1708,15 +1708,19 @@ const MUTATIONS = [
     // arch-review 64 P0. The agent's half became durable a wave ago and the VERDICT never did, so a crash
     // between the lane's reclaim and the settlement re-ran a case whose judgement was already computed.
     name: "verdict durability — the verdict dies with the process that produced it",
-    file: "packages/application-control/src/execution/verifier-operation.ts",
-    // RE-AIMED (arch-review 65): the stage moved BELOW the canonical join — it now persists the document this
-    // function returns rather than the lane's raw answer — and takes the coordinate as one object. The
-    // neutralization is unchanged: stage nothing, and the verdict dies with the process.
-    // RE-AIMED (arch-review 66 P0-lifecycle): the verdict is staged by the lane's acknowledgement BEFORE
-    // its container is reclaimed, and the late call is the fallback for a lane that has not learned it.
-    // Aimed at the acknowledgement, which is the path both managed lanes take.
-    from: "        acknowledged = canonical;",
-    to: "        acknowledged = undefined;\n        return canonical;",
+    // RE-AIMED (arch-review 65): the stage moved BELOW the canonical join, and takes its coordinate as one
+    // object.
+    //
+    // ⚠️ RE-AIMED AGAIN AT THE WRITER (arch-review 66), because the first attempt was a HOLE. arch-review 66
+    // gave the lane an acknowledgement that stages BEFORE its container is reclaimed, and disabling that
+    // alone does not break durability — the fallback stages the same document a moment later, which is
+    // precisely what the fallback is for. The protocol this rung owns is "the verdict outlives the process
+    // AT ALL", and only the write itself carries it. The ORDERING is a separate protocol with its own rung
+    // (`verdict handover`), and conflating the two is how a rung ends up mutating a line whose absence
+    // changes nothing.
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  if (!store || at.agentResultDigest === undefined) return;",
+    to: "  if (true) return;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
