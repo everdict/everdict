@@ -1,5 +1,4 @@
 import {
-  type PersistedWorkIntent,
   type RuntimeWorkRef,
   UpstreamError,
   type VerifierInvocation,

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { WorkspaceSettingsBodySchema } from "./request/workspace-settings.js";
 import { settingsDocs } from "./settings.docs.js";
 

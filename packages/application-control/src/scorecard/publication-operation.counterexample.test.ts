@@ -1,5 +1,4 @@
 import type { CaseResult, PublicationPlan, ScorecardExport, ScorecardRecord } from "@everdict/contracts";
-import { contentDigest } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryPublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
@@ -84,10 +83,6 @@ function fakeStore(initial: ScorecardRecord): { store: ScorecardStore; current: 
   return { store, current: () => held };
 }
 
-const stagedOf = (marker: string) => ({
-  revisionKey: `analyses/${SCORECARD_ID}/pass-${marker}.json`,
-  key: `analyses/${SCORECARD_ID}/pass-${marker}.json`,
-});
 // A plan that owes only the EXPORT — which since arch-review 55 Wave 7 is the only owed effect there is. The
 // payload is UNFROZEN: these cases hand the drain the exact plane the settlement counted, so the compare-and-
 // export path runs, and nothing here is about where the bytes were staged.

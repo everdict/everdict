@@ -26,7 +26,6 @@ import {
   initialScoringPassId,
   inputObservationOf,
   judgmentReceiptsFromPlane,
-  nextScoringRevision,
   scorecardModels,
   summarizeScorecard,
   verdictSummaryOf,

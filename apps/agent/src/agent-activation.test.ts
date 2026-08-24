@@ -19,7 +19,6 @@ import {
   triggerMatches,
 } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
-import type { AgentTurnUsage } from "./run-trace.js";
 
 function spec(over: Partial<AgentSpec> = {}): AgentSpec {
   return {

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   type DriverAuthority,
   type RecoveryTarget,
@@ -6,7 +5,6 @@ import {
   type ResumeResult,
   recoverInterrupted,
   retryDeferredRecovery,
-  tombstoneInterrupted,
   verifierOperation,
 } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
@@ -40,7 +38,6 @@ import type {
   RunRecord,
   RuntimeSpec,
   RuntimeWorkRef,
-  Score,
   TraceEvent,
   VerifierInvocation,
   VerifierJob,
@@ -648,6 +645,14 @@ export function buildRuntimeAccess(deps: {
           runnerImage.length > 0 && deps.registryAuthsFor !== undefined
             ? registryAuthsForImages(await deps.registryAuthsFor(job.tenant, podImages), podImages)
             : [];
+        // ── …AND THE ENRICHED JOB IS THE ONE DISPATCHED (arch-review 65 P1-high) ────────────────────
+        //
+        // The last wave computed exactly this and then passed `job` one line down. The mint was correct, the
+        // union grant was correct, and the backend — which builds its pull Secret from `job.registryAuths` —
+        // never saw any of it, so a private runner beside a public task image still sat in ImagePullBackOff.
+        //
+        // A local that is computed and never read is invisible to review and was invisible to the compiler:
+        // `noUnusedLocals` was off. It is on now, and turning it on is what found this line.
         const dispatched: VerifierJob =
           podAuths.length > 0 ? { ...job, registryAuths: [...podAuths, ...(job.registryAuths ?? [])] } : job;
         invocation = await verifierOperation(
@@ -656,7 +661,7 @@ export function buildRuntimeAccess(deps: {
             // …and where this verdict becomes durable before the row says it exists (arch-review 64 P0).
             ...(deps.verdicts ? { verdicts: deps.verdicts } : {}),
           },
-          job,
+          dispatched,
           (j, hooks) => backend.dispatchVerifier(j, hooks),
         );
         return true; // the first lane that can judge is the answer
@@ -1038,7 +1043,7 @@ export async function runStartupRecovery(deps: {
   adoptWorkFn?: (tenant: string, runtimeList: string | undefined, work: RuntimeWorkRef) => Promise<AdoptionDecision>;
   workHandlesFor?: (executionId: ExecutionId) => Promise<RuntimeWorkRef[]>;
 }): Promise<RecoveryTarget[]> {
-  const { scorecardStore, store, scorecardService, service, adoptWorkFn, workHandlesFor, owner, replicas } = deps;
+  const { scorecardStore, store, scorecardService, owner, replicas } = deps;
   const recovered = await recoverInterrupted({
     scorecards: scorecardStore,
     runs: store,

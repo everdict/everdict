@@ -52,7 +52,6 @@ import {
   releasePolicyDocument,
   releaseReadiness,
   resolveWatchedSeries,
-  seriesContractDigest,
   seriesNeedingEvidence,
   watchedSeries,
 } from "@everdict/domain";
@@ -1129,14 +1128,6 @@ export class ProductService {
       );
     }
     return out;
-  }
-
-  // The instant the product last shipped BEFORE this release — the baseline's anchor. For a released release
-  // that is the ship before its own; for a planned one, the newest ship so far. `<=` because the release
-  // itself is already excluded by id — a previous ship landing on this exact instant must still anchor.
-  private async baselineAnchor(tenant: string, release: ReleaseRecord): Promise<string | undefined> {
-    const previous = await this.previousShip(tenant, release);
-    return previous?.releasedAt;
   }
 
   // The ship this release compares against — the whole record, because its DECISION is the anchor, not just

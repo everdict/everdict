@@ -1,5 +1,4 @@
-import { ForbiddenError } from "@everdict/contracts";
-import { type Principal, can } from "@everdict/domain";
+import type { Principal } from "@everdict/domain";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import { deleteVersionedResource } from "../versioned-resource/versioned-resource-delete.js";
 

@@ -1,7 +1,7 @@
 import { EVERDICT_ROLES } from "@everdict/auth";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { memberDocs } from "./member.docs.js";
 
 // workspace members (read = viewer+, role change/remove = admin, leave = self).

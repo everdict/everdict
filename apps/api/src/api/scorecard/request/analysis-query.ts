@@ -22,8 +22,13 @@ const DIMENSIONS = [
   "week",
   "month",
 ] as const;
-type _DimensionsForward = AssertAssignable<(typeof DIMENSIONS)[number], AnalysisDimension>;
-type _DimensionsBackward = AssertAssignable<AnalysisDimension, (typeof DIMENSIONS)[number]>;
+// EXPORTED so `noUnusedLocals` and this guard can coexist (arch-review 65). The pair exists only to break
+// the build when the two lists diverge, and an unexported type alias reads to the compiler as dead — which is
+// exactly what the check is for everywhere else. Naming the invariant on the module surface says what it is.
+export type AnalysisDimensionDriftGuard = [
+  AssertAssignable<(typeof DIMENSIONS)[number], AnalysisDimension>,
+  AssertAssignable<AnalysisDimension, (typeof DIMENSIONS)[number]>,
+];
 
 export const AnalysisDimensionSchema = z.enum(DIMENSIONS);
 

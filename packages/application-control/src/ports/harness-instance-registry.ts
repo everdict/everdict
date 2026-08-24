@@ -1,5 +1,4 @@
 import type { CapabilityOrigin, HarnessInstanceSpec, HarnessSpec, ServiceHarnessSpec } from "@everdict/contracts";
-import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 
 // List metadata — live-version summary for one id (from registration history). Spec derivations like category/kind are filled in by the upstream registry.
 export interface VersionMeta {

@@ -178,7 +178,7 @@ describe("operator surface (/internal/driver) — the fleet-wide workflow invent
 
 describe("reaction family ownership (fix: the guard knew every family but reaction)", () => {
   it("describes a reaction chain by <eventId>-<subscriptionId> when the rule is the tenant's — another tenant reads 404", async () => {
-    const { app, calls } = await build();
+    const { calls } = await build();
     const subscriptionService = new SubscriptionService({ store: new InMemorySubscriptionStore() });
     const rule = await subscriptionService.create({
       tenant: "acme",

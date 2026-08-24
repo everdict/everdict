@@ -9,7 +9,6 @@ import {
   caseKeyAddress,
   caseKeyOf,
   inlineExportPayload,
-  measuredScores,
 } from "@everdict/contracts";
 import type { ExportPayloadSource } from "@everdict/contracts";
 import { type ScorecardOutcomes, caseVerdict, scorecardOutcomes } from "@everdict/domain";

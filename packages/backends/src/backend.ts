@@ -1,7 +1,5 @@
 import {
-  type ActivationDecision,
   type CaseJob,
-  type CaseResult,
   ConflictError,
   type Driver,
   InternalError,
@@ -9,7 +7,6 @@ import {
   type PersistedWorkIntent,
   type RuntimeSample,
   type RuntimeWorkRef,
-  type Score,
   type TraceEvent,
   type VerifierInvocation,
   type VerifierJob,
@@ -111,12 +108,7 @@ export interface ProbeResult {
 // The Dispatcher port lives in @everdict/application-control; Backend extends it, so backends re-exports it
 // here as a deliberate convenience — a consumer narrowing a Backend gets its supertype from the same module.
 export type { DispatchOptions, Dispatcher } from "@everdict/application-control";
-import type {
-  DispatchOptions,
-  Dispatcher,
-  ManagedDispatchAuthority,
-  VerifierDispatchHooks,
-} from "@everdict/application-control";
+import type { Dispatcher, ManagedDispatchAuthority, VerifierDispatchHooks } from "@everdict/application-control";
 import type { AdoptedWork } from "@everdict/contracts";
 
 // The uniform "this dispatch was cancelled via its AbortSignal" rejection (reuses the CANCELLED code the Scheduler

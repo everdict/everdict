@@ -1,5 +1,5 @@
 import { storedExecutionId } from "@everdict/contracts";
-import type { AttemptRef, CaseJob, CaseResult, PersistedWorkIntent, RuntimeWorkRef } from "@everdict/contracts";
+import type { AttemptRef, CaseJob, CaseResult } from "@everdict/contracts";
 import { type CircuitBreaker, type HarnessSecretMaps, resolveHarnessSecrets } from "@everdict/domain";
 import { executeCase } from "../execution/execute-case.js";
 import { type PhysicalAttempt, jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";

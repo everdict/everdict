@@ -1,6 +1,6 @@
 import { PairRunnerBodySchema } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runnerDocs } from "./runner.docs.js";
 
 // self-hosted runners (personal device pairing — self-scoped like profile/connections, no role gate).

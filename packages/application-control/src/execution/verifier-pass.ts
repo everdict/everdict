@@ -1,6 +1,6 @@
 import { AppError } from "@everdict/contracts";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
-import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
+import { verifierPlanOf } from "@everdict/domain";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 import { jobAttemptId } from "./open-physical-attempt.js";

@@ -129,7 +129,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
   }
 
   it("an issue linked between the decision and the write REFUSES the ship", async () => {
-    const { service, product, issues, releases } = await world();
+    const { service, product, releases } = await world();
     const release = await service.createRelease({
       tenant: "trust",
       createdBy: "captain",

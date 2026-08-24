@@ -4,7 +4,7 @@ import { priceUsd } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { constantTimeEq } from "../route-context.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, sendError } from "../route-context.js";
 import { internalDocs } from "./internal.docs.js";
 
 // internal control-plane surface (x-internal-token guard, fail-closed): scheduling dials, tenant-key issuance, Temporal schedule fire/finalize + batch bridge.

@@ -6,7 +6,7 @@
 // ⑤ POST /scorecards/ingest → record *history* as a Scorecard record (benchmark dataset id/ver + harness id/ver + scores + the trace's
 //    model llm_call). ⑥ GET /scorecards/:id to print the recorded history (harness / model / performance / benchmark).
 // Prereqs: everdict-hermes-agent:demo built, LiteLLM (:4000), apps/api/dist.
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 

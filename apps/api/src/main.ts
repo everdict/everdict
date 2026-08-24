@@ -59,17 +59,11 @@ import type {
   ExecutionId,
   ProductSeries,
   RegistryAuth,
-  Score,
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
 import { UpstreamError } from "@everdict/contracts";
-import {
-  type SeriesContractResolution,
-  evaluateGate,
-  perTenantTrustZones,
-  refuseGateForInputTrust,
-} from "@everdict/domain";
+import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
@@ -716,7 +710,6 @@ async function main(): Promise<void> {
     topologyServiceLogsFn,
     killWork,
     killUnhandled,
-    probeWork,
     dispatchVerifier,
   } = buildRuntimeAccess({
     runtimeRegistry,

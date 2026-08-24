@@ -8,7 +8,6 @@ import {
   JOB_PAYLOAD_FILE_ENV,
   JOB_PAYLOAD_FS_GROUP,
   JOB_PAYLOAD_VOLUME,
-  type Score,
   type VerifierInvocation,
   type VerifierJob,
   adoptedResultFrom,
@@ -54,7 +53,6 @@ import {
   contentDigest,
   dockerAuthConfigJson,
   laneImageProvenance,
-  pickRegistryAuth,
   registryAuthsForImages,
   registryAuthsOf,
 } from "@everdict/domain";

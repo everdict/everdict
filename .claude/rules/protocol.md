@@ -319,6 +319,33 @@ So when a change tightens a precondition, the change is not done at the guard:
 - The suite cannot catch this with two separate tests. The counterexample has to drive the two changed
   things in the order production runs them, against the real store.
 
+## A VALUE THE CONSUMER NEVER RECEIVED — MACHINE-CHECKED, BECAUSE PROSE DID NOT HOLD
+Three reviews in a row found the same defect wearing a different coat:
+
+    62   a producer fix that never reached its consumer
+    64   an optional dependency with no producer at the composition root
+    65   const dispatched = { ...job, registryAuths: [...] };   dispatchVerifier(job)
+
+The last one is the shape at its purest: the enriched job was built, correct in every detail, and the
+ORIGINAL identifier was passed one line later. The mint was right, the union grant was right, and the backend
+— which builds its pull Secret from `job.registryAuths` — received nothing. A private runner image beside a
+public task image sat in ImagePullBackOff with the CASE wearing our wiring error.
+
+Two prose laws already covered it and neither bound. So `noUnusedLocals` is ON (`tsconfig.base.json`), and
+turning it on found, in one sweep: this dispatch, two dead private methods whose comments describe careful
+semantics nobody executes (`baselineAnchor`, `assertSession`), a dead store READ (`priorScoring` — a wasted
+round trip and a dropped check), three dead trace-source helpers implementing an artifact channel with no
+consumer, and a computed `targetRevision` whose comment explains a protocol that never runs.
+
+- **A local that is computed and never read is invisible to review and free for the compiler to catch.** If
+  you find yourself writing "the value travelled", the compiler can check it — ask it.
+- The corollary for enrichment specifically: **name the enriched value and pass THAT**, never re-mention the
+  input. `f(job)` and `f(dispatched)` differ by one token and by everything.
+- A deliberate compile-time assertion (a drift guard, `AssertAssignable<A,B>`) is EXPORTED rather than left
+  as an unused local, so the check and the guard coexist and the invariant is named on the surface.
+- ⚠️ `pnpm typecheck` can PASS over a tsconfig change because turbo serves a cached result. When a compiler
+  option changes, verify with `npx tsc --noEmit` inside a package before believing the gate.
+
 ## AN OPTIONAL DEPENDENCY WITH NO PRODUCER IS A PLAN, AND ITS TEST IS A DRAWING OF ONE
 The wave that wrote the always-succeeds-double law below also shipped this, as the fix for a ledger that
 claimed a refused verdict had contributed:

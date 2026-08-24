@@ -1,5 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
-import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { timingSafeEqual } from "node:crypto";
 import type {
   ConstitutionApprovalStore,
   ConstitutionalPublisher,
@@ -8,14 +7,11 @@ import type {
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
+import type { CiLinkService } from "@everdict/application-control";
+import type { CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
-import { deleteDatasetVersion } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
-import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import type { EnvironmentAdoptionService, ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { MattermostCommandService } from "@everdict/application-control";
@@ -25,17 +21,11 @@ import type { NotificationService } from "@everdict/application-control";
 import type { ProfileService } from "@everdict/application-control";
 import type { QueueService } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
-import { installGithubWorkspaceRunner } from "@everdict/application-control";
 import type { RunnerHubLike } from "@everdict/application-control";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "@everdict/application-control";
-import { type ScheduleService, isValidCron } from "@everdict/application-control";
+import type { RunnerService } from "@everdict/application-control";
+import type { ScheduleService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  type ScorecardService,
-  originSource,
-} from "@everdict/application-control";
+import type { ScorecardService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
   CheckpointService,
@@ -59,57 +49,19 @@ import type { SkillService } from "@everdict/application-control";
 import type { FileExecutionService, FsService } from "@everdict/application-control";
 import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
-import {
-  API_KEY_SCOPES,
-  type Action,
-  type Authenticator,
-  EVERDICT_ROLES,
-  type Principal,
-  type ResourceScope,
-  authorize,
-  can,
-} from "@everdict/auth";
+import { type Action, type Authenticator, type Principal, type ResourceScope, authorize } from "@everdict/auth";
 import {
   AppError,
   type Dataset,
-  DatasetSchema,
-  EvalCaseSchema,
   ForbiddenError,
-  HarnessInstanceSpecSchema,
-  HarnessTemplateSpecSchema,
-  type ImageWarning,
-  JudgeRunConfigSchema,
-  JudgeSpecSchema,
-  ModelSpecSchema,
   NotFoundError,
   type RunRecord,
   type RuntimeSpec,
-  RuntimeSpecSchema,
   UpstreamError,
-  resolveHarnessInstance,
 } from "@everdict/contracts";
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
-import {
-  BenchmarkAdapterSpecSchema,
-  TerminalBenchTaskSchema,
-  diffDatasets,
-  terminalBenchToDataset,
-} from "@everdict/datasets";
-import {
-  type SecretStore,
-  type TenantKeyStore,
-  type WorkspaceSettingsStore,
-  type WorkspaceStore,
-  issueKey,
-} from "@everdict/db";
-import {
-  SHARED_TENANT,
-  canReadRun,
-  collectHarnessImages,
-  contentDigest,
-  groundTruthDeclarations,
-  imageWarnings,
-} from "@everdict/domain";
+import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore, WorkspaceStore } from "@everdict/db";
+import { SHARED_TENANT, canReadRun, contentDigest, groundTruthDeclarations } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type { ImageTokenService } from "@everdict/images";
 import type {
@@ -123,12 +75,9 @@ import type {
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { CallbackSink } from "@everdict/topology";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { WebSocketServer } from "ws";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { z } from "zod";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
+import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { CaseFsRequestHub } from "../common/case-fs-request-hub.js";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
@@ -138,14 +87,10 @@ import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
 import type { AgentService } from "../core/agent/agent-service.js";
-import {
-  BenchmarkImportBodySchema,
-  BenchmarkPreviewBodySchema,
-  type BenchmarkService,
-} from "../core/benchmark/benchmark-service.js";
+import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
+import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { ImageMirrorService } from "../core/image/image-mirror-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
@@ -157,7 +102,6 @@ import type { SecretUsageService } from "../core/secret/secret-usage-service.js"
 import type { SkillGenerator } from "../core/skill/skill-generator.js";
 import type { WorkspacePulseService } from "../core/workspace/workspace-pulse-service.js";
 import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
-import { buildMcpServer } from "../mcp.js";
 import type { AgentTryRelay } from "./mcp-context.js";
 
 export interface ServerDeps {

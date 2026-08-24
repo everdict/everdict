@@ -1,11 +1,5 @@
 import { type RecordingSeal, type RecordingStore, recordingRefOf } from "@everdict/application-control";
-import {
-  type CaseRecording,
-  CaseRecordingSchema,
-  type Fidelity,
-  type RecordingRef,
-  type TrackEntry,
-} from "@everdict/contracts";
+import { type CaseRecording, CaseRecordingSchema, type RecordingRef, type TrackEntry } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
 interface RecordingRow {

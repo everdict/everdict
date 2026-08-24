@@ -289,21 +289,6 @@ const DEFAULT_KEYS = {
   messageText: ["message.content", "output.value"],
 } as const;
 
-// Conventional attribute keys for the artifact channel (fixed, not part of the per-field SpanAttrMapping override).
-const ARTIFACT_KEYS = {
-  ref: ["artifact.ref", "artifact.uri", "mlflow.artifact.uri"],
-  name: ["artifact.name"],
-  mediaType: ["artifact.media_type", "artifact.mediaType"],
-  role: ["artifact.role"],
-} as const;
-
-// Does the span's DECLARED kind say "tool" (mlflow.spanType=TOOL, openinference TOOL/FUNCTION, …)? The kind-driven
-// twin of the attribute-driven toolName detection — langfuse/langsmith/phoenix already branch on their native kinds.
-function declaredKindIsTool(a: Record<string, unknown>): boolean {
-  const declared = pickStr(a, SPAN_KIND_KEYS)?.toUpperCase();
-  return declared !== undefined && (declared.includes("TOOL") || declared.includes("FUNCTION"));
-}
-
 // First defined string among a field's mapping-override keys then its defaults.
 function pickStr(a: Record<string, unknown>, keys: readonly string[]): string | undefined {
   for (const k of keys) {
@@ -317,10 +302,6 @@ function pickNum(a: Record<string, unknown>, keys: readonly string[]): number | 
     const v = num(a[k]);
     if (v !== undefined) return v;
   }
-  return undefined;
-}
-function firstDefined(a: Record<string, unknown>, keys: readonly string[]): unknown {
-  for (const k of keys) if (a[k] !== undefined) return a[k];
   return undefined;
 }
 // Span → TraceEvent, via the RECORD.

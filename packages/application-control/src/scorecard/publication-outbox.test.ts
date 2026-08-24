@@ -3,7 +3,7 @@ import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { ArtifactStore } from "../ports/artifact-store.js";
 import { InMemoryPublicationOperationStore } from "../ports/publication-operation-store.js";
-import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
+import type { ScorecardStore } from "../ports/scorecard-store.js";
 import { PublicationCoordinator, drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import { type AnalysisBundle, analysisPassKey } from "./scorecard-observability.js";
 

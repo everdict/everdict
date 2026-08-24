@@ -11,7 +11,6 @@ import type { ArtifactStore } from "../ports/artifact-store.js";
 import type { PublicationOperationStore } from "../ports/publication-operation-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { AnalysisBundle, AnalysisOffload } from "./scorecard-observability.js";
-import { analysisArtifactKey } from "./scorecard-observability.js";
 
 // ── PREPARED BYTES MAY PRECEDE COMMIT. PUBLICATION MAY NOT (arch-review 52, Wave 4) ─────────────────
 //

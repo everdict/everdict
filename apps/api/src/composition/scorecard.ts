@@ -6,7 +6,6 @@ import type {
   ScoringStageStore,
   TrajectoryStore,
 } from "@everdict/application-control";
-import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import type {
@@ -19,7 +18,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type { AdoptionDecision, CaseResult, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
+import type { AdoptionDecision, KillOutcome, RegistryAuth, RuntimeWorkRef } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -130,7 +129,6 @@ export function buildScorecard(deps: {
     harnessInstanceRegistry,
     judgeRegistry,
     rubricRegistry,
-    modelRegistry,
     runtimeRegistry,
     judgeRunner,
     budget,
@@ -140,7 +138,6 @@ export function buildScorecard(deps: {
     scopedSecretsFor,
     githubAppService,
     registryAuthsFor,
-    notificationService,
     platformEventService,
     traceSinkService,
     preflightPlacement,

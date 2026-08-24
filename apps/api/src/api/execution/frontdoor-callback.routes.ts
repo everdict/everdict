@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import type { ServerDeps } from "../route-context.js";
 import { frontdoorCallbackDocs } from "./frontdoor-callback.docs.js";
 
 // inbound front-door completion callback — public route; the unguessable runId is the capability (webhook convention).

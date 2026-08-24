@@ -2,7 +2,7 @@ import type { RunRecord } from "@everdict/contracts";
 import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
-import { settleRun, settleScorecard } from "../ports/settle.js";
+import { settleScorecard } from "../ports/settle.js";
 import type { ResumeResult } from "../run/run-service.js";
 import { tombstoneInterrupted } from "./tombstone.js";
 

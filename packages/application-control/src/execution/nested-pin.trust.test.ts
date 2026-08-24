@@ -1,4 +1,4 @@
-import type { CaseJob, HarnessSpec, JudgeSpec, ModelSpec, Score } from "@everdict/contracts";
+import type { CaseJob, HarnessSpec, JudgeSpec, ModelSpec } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
@@ -33,16 +33,6 @@ const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : desc
 const rubricDoc = (text: string) => ({ id: "style", version: "1.0.0", text }) as never;
 const modelDoc = (model: string): ModelSpec =>
   ({ id: "model-x", version: "1.0.0", provider: "anthropic", model }) as unknown as ModelSpec;
-const agentDoc = (command: string): HarnessSpec =>
-  ({
-    kind: "command",
-    id: "grader-agent",
-    version: "1.0.0",
-    command,
-    trace: { kind: "none" },
-    setup: [],
-    params: {},
-  }) as unknown as HarnessSpec;
 
 const modelJudge = (): JudgeSpec => ({
   kind: "model",

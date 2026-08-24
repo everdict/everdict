@@ -94,7 +94,7 @@ describe("[R62 COUNTEREXAMPLE] a standalone cancellation takes back the reservat
   };
 
   it("REVOKES the reservation of an attempt that has not created its object", async () => {
-    const { attempts, attemptId } = await paused();
+    const { attempts } = await paused();
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store: store([runningRun("r1")]),

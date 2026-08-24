@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, resolvePrincipal, sendError } from "../route-context.js";
 import { profileDocs } from "./profile.docs.js";
 
 // the current principal (/me: identity + workspaces + profile) and profile editing.

@@ -7,7 +7,7 @@
 // Usage: node scripts/live/runner-churn-heap-diff.mjs [churnRounds=150]
 //   Requires a Postgres reachable via DATABASE_URL (this script starts one in a container if unset).
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

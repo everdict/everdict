@@ -125,7 +125,7 @@ describe("PgRunStore.settleWith — BEGIN … terminal write … attempt stamp �
 
   it("a REFUSED fence stamps nothing and rolls nothing back — the loser wrote nothing to undo", async () => {
     const seen: string[] = [];
-    const { client, events, txStatements } = fakeTxClient({ updateRows: [] });
+    const { client, events } = fakeTxClient({ updateRows: [] });
     const settled = await new PgRunStore(client).settleWith(
       "r1",
       TERMINAL,

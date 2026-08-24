@@ -1,7 +1,6 @@
-import { BadRequestError, type CaseResult, ConflictError, TERMINAL_SCORECARD_STATUSES } from "@everdict/contracts";
+import { BadRequestError, ConflictError, TERMINAL_SCORECARD_STATUSES } from "@everdict/contracts";
 import type { DomainFact, RunOrigin } from "@everdict/contracts";
 import type {
-  RunEnvelope,
   RunRecord,
   ScorecardDecisionContext,
   ScorecardOrigin,
@@ -12,7 +11,7 @@ import type {
 } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
-import { decisionPassRate, headlinePassRate } from "./headline.js";
+import { decisionPassRate } from "./headline.js";
 import { childKey } from "./scoring-plan.js";
 import { summarizeTrials } from "./trials.js";
 import { resolvePolicyResolution, verdictPolicyRef } from "./verdict-policy.js";

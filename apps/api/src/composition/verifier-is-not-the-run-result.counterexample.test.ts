@@ -1,4 +1,3 @@
-import type { RecoveryTarget } from "@everdict/application-control";
 import { agentHalfDigest } from "@everdict/application-control";
 import type { ResumeResult } from "@everdict/application-control";
 import type { CaseResult } from "@everdict/contracts";
@@ -35,9 +34,6 @@ import { recoverStandaloneRun } from "./runtime-access.js";
 //
 // Seen RED before the stage travelled, observed:
 //   a verifier's verdict was settled as the run's own result: expected 'verifier' to be undefined
-
-const target = (id: string): RecoveryTarget =>
-  ({ kind: "run", id, authority: { ownerReplica: "r1", epoch: 1 }, attempts: 1 }) as unknown as RecoveryTarget;
 
 const RECORD = { id: "r1", tenant: "acme", status: "running", ownerReplica: "r1", ownerEpoch: 1 };
 

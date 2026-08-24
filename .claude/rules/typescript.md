@@ -38,6 +38,15 @@ Non-default rules — see skill `foundation` for rationale.
   one as a composite-key separator (`${tenant}\u0000${id}`, which is the right idea), and one of them was
   `sameResolvedImages` — the function deciding whether two runs used the same image bytes sat unreviewable and
   unsearchable for as long as the byte did. `pnpm source-bytes` refuses it (CI-required).
+- **`noUnusedLocals` is ON, and it is a protocol check rather than tidiness** (arch-review 65). A value
+  computed and never read is the "producer computed it, consumer never got it" defect the last three reviews
+  each found once — most sharply as `const dispatched = enrich(job)` followed by `dispatch(job)`. Its first
+  run also surfaced two dead private methods, a dead store read, three dead helpers for an unwired feature,
+  and a computed revision whose comment describes a protocol nothing executes. Unused IMPORTS are the same
+  switch and are auto-fixable (`biome check --write`, `correctness/noUnusedImports`). A deliberate
+  compile-time assertion is EXPORTED (`export type XDriftGuard = [AssertAssignable<…>, …]`) so the guard and
+  the check coexist. ⚠️ After changing a compiler option, `pnpm typecheck` may pass from turbo's cache —
+  confirm with `npx tsc --noEmit` in the package.
 - **Model a decision as a discriminated union, never `{ value?: T; ok: boolean }`.** A caller can read the
   value and never look at the flag — and will. Exhaustive `switch` on `kind` is the shape that cannot be
   half-consumed. See rule `protocol` L2.

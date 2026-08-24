@@ -1771,6 +1771,17 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/transient-refusal.counterexample.test.ts"],
   },
+  {
+    // arch-review 65 P1-high. The union pull grant was minted correctly and the ORIGINAL job was dispatched,
+    // so the verifier's pod pulled its runner image with no credential. Found by `noUnusedLocals`, not by
+    // review: the enriched local was computed and never read.
+    name: "verifier credentials — the enriched job is computed and the original is dispatched",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "          dispatched,\n          (j, hooks) => backend.dispatchVerifier(j, hooks),",
+    to: "          job,\n          (j, hooks) => backend.dispatchVerifier(j, hooks),",
+    build: "@everdict/api",
+    suite: ["--root", "apps/api", "src/composition/verifier-credentials.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

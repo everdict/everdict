@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { workspaceDocs } from "./workspace.docs.js";
 
 // workspaces (self-serve membership: list + create) + the singular /workspace metadata record (name/logo/owner; delete = owner only).

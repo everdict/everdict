@@ -2,7 +2,7 @@ import { API_KEY_SCOPES } from "@everdict/auth";
 import { isAgentTokenPrefix, issueKey } from "@everdict/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, resolvePrincipal, sendError } from "../route-context.js";
 import { apiKeyDocs } from "./api-key.docs.js";
 
 // personal API key self-serve (no role gate — personal-owned; a key acts with the issuer's identity/permissions).

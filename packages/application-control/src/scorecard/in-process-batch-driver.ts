@@ -1052,7 +1052,6 @@ export class InProcessBatchDriver {
       const summary = summarizeScorecard(scorecard);
       // The per-revision artifact needs its revision number BEFORE the append — a light ledger pre-read
       // (the settle below re-reads race-tight as before; initial settles are revision 1 in practice).
-      const priorScoring = (await this.deps.store.get(id))?.scoring;
       const initialBundle = analysisBundle(
         { scorecardId: id, dataset: exportCtx.dataset, harness: exportCtx.harness },
         summary,

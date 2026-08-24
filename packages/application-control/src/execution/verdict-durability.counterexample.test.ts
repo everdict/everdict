@@ -1,5 +1,5 @@
 import type { CaseResult, RuntimeWorkRef, VerifierInvocation, VerifierJob } from "@everdict/contracts";
-import { CaseResultSchema, VerifierInvocationSchema, storedExecutionId } from "@everdict/contracts";
+import { CaseResultSchema, VerifierInvocationSchema } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
@@ -35,7 +35,6 @@ import { verifierOperation } from "./verifier-operation.js";
 //   the verdict was gone with its container, so the whole case re-ran: expected 'absent' to be 'merged'
 
 const RUN = "evd-run-r1";
-const EXECUTION = storedExecutionId(RUN);
 
 // PARSED BY THE CONTRACT, not cast past it. `readAgentHalf` runs `CaseResultSchema.parse` on what it reads
 // back — these bytes crossed a restart — so a hand-shaped fixture that does not validate makes the recovery

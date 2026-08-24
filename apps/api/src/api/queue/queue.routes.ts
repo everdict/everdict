@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { queueDocs } from "./queue.docs.js";
 
 // workload visibility — Prometheus text metrics (operator-token scrape) + the work-queue snapshot per runtime lane (viewer+).

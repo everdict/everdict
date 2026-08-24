@@ -659,10 +659,4 @@ export class Run {
   private assertNotTerminal(transition: string): void {
     assertRunNotTerminal(this.record, transition);
   }
-
-  // Session-only transitions guard on the session half existing — a task-lifetime run reaching one is a
-  // caller bug, reported as a conflict with the transition named (never a silent no-op).
-  private assertSession(transition: string): NonNullable<RunRecord["session"]> {
-    return assertRunSession(this.record, transition);
-  }
 }

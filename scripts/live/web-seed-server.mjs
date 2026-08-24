@@ -1,9 +1,3 @@
-// live (web full-stack visual check): seed *representative browser-use run/scorecard records* into the real control-plane HTTP surface (buildServer)
-// and serve on :8787 → a seed server for confirming that the web dashboard (next, CONTROL_PLANE_URL defaults to 127.0.0.1:8787, KEYCLOAK unset = dev tenant)
-// actually renders the browser snapshot (final URL + DOM) + scores (steps/cost) + trace.
-// The record values are representative values taken from this session's real browser-use run (Wikipedia 'Web scraping', tokens 35872/1074, usd 0.006025, navigate →
-// input → click → done) — seeded directly into the store instead of a POST dispatch (intent of the request: seed a run record).
-import process from "node:process";
 import { RunService } from "../../apps/api/dist/run-service.js";
 import { ScorecardService } from "../../apps/api/dist/scorecard-service.js";
 import { buildServer } from "../../apps/api/dist/server.js";

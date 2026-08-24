@@ -55,14 +55,8 @@ import { WorkflowBatchDriver } from "./workflow-batch-driver.js";
 const UNRESUMABLE: ResumeResult = { kind: "unresumable" };
 
 export class ScorecardBatchService {
-  private readonly newId: () => string;
   private readonly now: () => string;
-  private readonly concurrency: number;
-  private readonly scoring: ScoringService;
-  private readonly inFlight: Map<string, AbortController>;
   // Runtime health memory for sharded-batch spillover (docs/architecture/batch-resilience.md).
-  private readonly breaker: CircuitBreaker;
-  private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
   // WHERE A CASE ENDS, for both drivers (arch-review 47 §4). The commit point — judge coverage, evidence
   // assembly, receipt, the child's one terminal write, the attempt's terminal stamp — is this collaborator's,
   // and every path that finalizes a case goes through it. Stateless per batch by construction: the pending
@@ -95,13 +89,7 @@ export class ScorecardBatchService {
       getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
     },
   ) {
-    this.newId = shared.newId;
     this.now = shared.now;
-    this.concurrency = shared.concurrency;
-    this.scoring = shared.scoring;
-    this.breaker = shared.breaker;
-    this.inFlight = shared.inFlight;
-    this.getRecord = shared.getRecord;
     this.commit = new CaseOutcomeCommitter(deps, { newId: shared.newId, now: shared.now });
     this.recovery = new RecoveryPlanner(deps, shared.scoring, this.commit, { now: shared.now });
     this.cases = new ResilientCaseRunner(deps, shared.breaker, this.commit);

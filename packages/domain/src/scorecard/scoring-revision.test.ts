@@ -7,7 +7,6 @@ import {
   inputObservationOf,
   inputObservationSetDigest,
   judgmentReceiptSetDigest,
-  observationSetDigest,
   scorePlaneDigest,
   scoringPinInputDiverged,
 } from "./scoring-revision.js";

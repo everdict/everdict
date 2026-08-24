@@ -1,5 +1,4 @@
 import type { CaseReceiptStore, EnvelopeStore, GithubAppService, TrajectoryStore } from "@everdict/application-control";
-import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { CancellationStore, ExecutionAttemptStore, RecordingStore } from "@everdict/application-control";
@@ -159,7 +158,6 @@ export function buildRun(deps: {
     scopedSecretsFor,
     githubAppService,
     registryAuthsFor,
-    notificationService,
     platformEventService,
     envMeterPolicy,
     preflightPlacement,

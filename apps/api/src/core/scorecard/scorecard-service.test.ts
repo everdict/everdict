@@ -3231,7 +3231,7 @@ describe("ScorecardService — batch-on-Temporal internals (plan → case → fi
         return ok(job.evalCase.id);
       },
     };
-    const { store, service, datasets } = wire(dispatcher);
+    const { store, datasets } = wire(dispatcher);
     await datasets.register("acme", threeCases);
     const svc = new ScorecardService({
       dispatcher,

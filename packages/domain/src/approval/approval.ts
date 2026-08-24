@@ -22,10 +22,6 @@ export interface NewPendingApprovalInput {
   now: string;
 }
 
-function approvalLabel(record: ApprovalRecord): string {
-  return `${record.request.name} (session ${record.sessionId})`;
-}
-
 export class Approval {
   private constructor(private readonly record: ApprovalRecord) {}
 

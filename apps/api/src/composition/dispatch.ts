@@ -21,7 +21,7 @@ import {
   buildRuntimeBackend,
   isWorkControllable,
 } from "@everdict/backends";
-import type { Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
+import type { VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import type { RuntimeWorkRef } from "@everdict/contracts";
 import {
   BadRequestError,

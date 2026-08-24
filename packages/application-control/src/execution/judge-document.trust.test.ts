@@ -1,4 +1,4 @@
-import type { GradeContext, JudgeSpec, Score } from "@everdict/contracts";
+import type { JudgeSpec, Score } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { JudgeRegistry } from "../ports/judge-registry.js";

@@ -32,15 +32,12 @@ import {
   inputObservationOf,
   judgeEvidenceEmitter,
   judgeGradeable,
-  nextScoringRevision,
   promoteStagedJudgments,
   scorePlaneDigest,
-  sealedExecutionMessage,
   stagePromotionRefusal,
   stagePromotionSafe,
   summarizeScorecard,
   verdictSummaryOf,
-  verifySealedCaseDocuments,
 } from "@everdict/domain";
 import { appendScoringRevision, resolvePolicyResolution } from "@everdict/domain";
 import {
@@ -814,7 +811,6 @@ export class ScorecardScoreService {
     const resolution = resolvePolicyResolution(fresh.verdictPolicy, fresh.manifest?.verdictPolicy);
     // The pass's revision number comes from the MARKER (sealed at pass start — the same number the guarded
     // settle below enforces via the ledger length); a marker-less legacy pass derives it from the ledger.
-    const targetRevision = fresh.scoringPass?.targetRevision ?? nextScoringRevision(fresh.scoring);
     const bundle =
       resolution.status === "unresolvable"
         ? undefined

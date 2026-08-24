@@ -21,7 +21,9 @@
     "indentWidth": 2,
     "lineWidth": 120
   },
-  "organizeImports": { "enabled": true },
+  "organizeImports": {
+    "enabled": true
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -34,13 +36,22 @@
       },
       "suspicious": {
         "noExplicitAny": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "error"
       }
     }
   },
   "overrides": [
     {
       "include": ["*.config.ts", "**/*.config.ts", "site/sidebars.ts"],
-      "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
     }
   ]
 }

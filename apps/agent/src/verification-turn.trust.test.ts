@@ -4,7 +4,6 @@ import { InMemoryAgentSessionStore } from "@everdict/db";
 import { verificationClaimFor, verifierPolicy } from "@everdict/domain";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
-import type { ChatDeps } from "./chat.js";
 import { runVerificationTurn } from "./verification-turn.js";
 
 // Trust suite (docs/trust-certification.md) — TRUST-129.

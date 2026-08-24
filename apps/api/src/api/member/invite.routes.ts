@@ -1,7 +1,7 @@
 import { EVERDICT_ROLES } from "@everdict/auth";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { inviteDocs } from "./invite.docs.js";
 
 // invites (token/link redemption; issue/list/revoke = admin, accept = authenticated, preview = public-by-token).

@@ -29,11 +29,9 @@ import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runReportTurn } from "./report-turn.js";
-import type { AgentTurnUsage } from "./run-trace.js";
 import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
-import type { AgentRunEventReport } from "./usage.js";
 import { runVerificationTurn } from "./verification-turn.js";
 import { buildWakeResumer } from "./wake-resume.js";
 

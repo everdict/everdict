@@ -9,7 +9,6 @@ import {
 } from "@everdict/contracts";
 import { LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
-import type { CodeToolRuntime } from "./code-tools.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import type { Principal } from "./principal.js";
 

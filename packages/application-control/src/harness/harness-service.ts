@@ -1,5 +1,4 @@
-import { ForbiddenError } from "@everdict/contracts";
-import { type Principal, can, referencesUserSecret } from "@everdict/domain";
+import { type Principal, referencesUserSecret } from "@everdict/domain";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import { deleteVersionedResource } from "../versioned-resource/versioned-resource-delete.js";
 

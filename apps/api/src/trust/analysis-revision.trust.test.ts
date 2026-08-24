@@ -1,4 +1,4 @@
-import { InMemoryCaseReceiptStore, ScorecardService, analysisRevisionKey } from "@everdict/application-control";
+import { InMemoryCaseReceiptStore, ScorecardService } from "@everdict/application-control";
 import type { JudgeSpec } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";

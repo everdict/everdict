@@ -1,7 +1,7 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/application-control";
 import type { AgentHalfStore, VerifierPassDeps } from "@everdict/application-control";
 import { withVerifierPass } from "@everdict/application-control";
-import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
+import type { CaseJob, CaseResult, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 
 // ── THE CASE'S TWO HALVES, AT THE DISPATCH SEAM (arch-review 56, Wave K) ─────────────────────────────
 //

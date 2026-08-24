@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { BudgetLimitInputSchema } from "../../common/budget-tracker.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { billingDocs } from "./billing.docs.js";
 
 // billing view — metered LLM usage (meter-only) + the enforcement budget (usage + per-tenant limit; read = member, limit change = admin).

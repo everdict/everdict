@@ -1,85 +1,7 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
-import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
-import { deleteDatasetVersion } from "@everdict/application-control";
-import type { GithubAppService } from "@everdict/application-control";
-import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
-import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import type { ImageRegistryService } from "@everdict/application-control";
-import type { MattermostCommandService } from "@everdict/application-control";
-import type { MattermostService } from "@everdict/application-control";
-import type { MembershipService } from "@everdict/application-control";
-import type { NotificationService } from "@everdict/application-control";
-import type { ProfileService } from "@everdict/application-control";
-import type { QueueService } from "@everdict/application-control";
-import type { RunService } from "@everdict/application-control";
-import { installGithubWorkspaceRunner } from "@everdict/application-control";
-import type { RunnerHub } from "@everdict/application-control";
-import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "@everdict/application-control";
-import { type ScheduleService, isValidCron } from "@everdict/application-control";
-import {
-  IngestScorecardBodySchema,
-  PullIngestBodySchema,
-  type ScorecardService,
-  originSource,
-} from "@everdict/application-control";
-import type { ViewService } from "@everdict/application-control";
-import type { WorkspaceService } from "@everdict/application-control";
-import {
-  API_KEY_SCOPES,
-  type Action,
-  type Authenticator,
-  EVERDICT_ROLES,
-  type Principal,
-  authorize,
-  can,
-} from "@everdict/auth";
-import {
-  AppError,
-  DatasetSchema,
-  EvalCaseSchema,
-  HarnessInstanceSpecSchema,
-  HarnessTemplateSpecSchema,
-  type ImageWarning,
-  JudgeRunConfigSchema,
-  JudgeSpecSchema,
-  ModelSpecSchema,
-  type RuntimeSpec,
-  RuntimeSpecSchema,
-  resolveHarnessInstance,
-} from "@everdict/contracts";
-import {
-  BenchmarkAdapterSpecSchema,
-  TerminalBenchTaskSchema,
-  diffDatasets,
-  terminalBenchToDataset,
-} from "@everdict/datasets";
-import {
-  type SecretStore,
-  type TenantKeyStore,
-  type WorkspaceSettingsStore,
-  type WorkspaceStore,
-  issueKey,
-} from "@everdict/db";
-import { collectHarnessImages, imageWarnings } from "@everdict/domain";
-import type { UsageMeter } from "@everdict/domain";
-import type {
-  DatasetRegistry,
-  HarnessInstanceRegistry,
-  HarnessTemplateRegistry,
-  JudgeRegistry,
-  ModelRegistry,
-  RuntimeRegistry,
-} from "@everdict/registry";
-import type { CallbackSink } from "@everdict/topology";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { WebSocketServer } from "ws";
-import { z } from "zod";
 import { registerAgentToolRoutes } from "./api/agent/agent-tool.routes.js";
 import { registerAgentRoutes } from "./api/agent/agent.routes.js";
 import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
@@ -126,17 +48,6 @@ import { registerProjectRoutes } from "./api/project/project.routes.js";
 import { registerProxyRoutes } from "./api/proxy/proxy.routes.js";
 import { registerQueueRoutes } from "./api/queue/queue.routes.js";
 import type { ServerDeps } from "./api/route-context.js";
-import {
-  baseUrl,
-  constantTimeEq,
-  gate,
-  mcpChallenge,
-  protectedResourceMetadata,
-  resolveBearerPrincipal,
-  resolvePrincipal,
-  sendError,
-  zodIssues,
-} from "./api/route-context.js";
 import { registerRubricRoutes } from "./api/rubric/rubric.routes.js";
 import { registerRunObservabilityRoutes } from "./api/run/run-observability.routes.js";
 import { registerRunRoutes } from "./api/run/run.routes.js";
@@ -159,16 +70,6 @@ import { registerWorkspaceOpsReportRoutes } from "./api/workspace/ops-report.rou
 import { registerWorkspacePulseRoutes } from "./api/workspace/pulse.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
-import { type BudgetAdmin, BudgetLimitInputSchema } from "./common/budget-tracker.js";
-import type { TerminalTicketStore } from "./common/terminal-ticket.js";
-import {
-  BenchmarkImportBodySchema,
-  BenchmarkPreviewBodySchema,
-  type BenchmarkService,
-} from "./core/benchmark/benchmark-service.js";
-import { BundleSchema, type BundleService, requiredActionsForBundle } from "./core/bundle/bundle-service.js";
-import type { RuntimeProbeResult } from "./core/ops/runtime-probe.js";
-import { buildMcpServer } from "./mcp.js";
 import { registerMcpRoutes } from "./mcp.routes.js";
 
 // Control-plane HTTP surface. Auth is owned by the control plane (OIDC/JWT + API keys), workspace=tenant, authZ enforced.

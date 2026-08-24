@@ -38,11 +38,6 @@ const JOB = (): CaseJob =>
     evalCase: { id: "c1", task: "t", env: { kind: "prompt" }, graders: [], timeoutSec: 60, tags: [] },
   }) as unknown as CaseJob;
 
-const AUTHORITY = {
-  reserve: async (work: RuntimeWorkRef) => ({ attemptId: "a1", work, persistedAt: new Date(0).toISOString() }),
-  activate: async () => ({ kind: "activate" as const }),
-};
-
 // The K8s authority, recording the transition so the ORDER around the inert object is observable.
 const recordingAuthority = (order: string[]) => ({
   reserve: async (work: RuntimeWorkRef) => ({ attemptId: "a1", work, persistedAt: new Date(0).toISOString() }),

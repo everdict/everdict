@@ -420,12 +420,10 @@ function withoutCallback<T extends { webhookUrl?: string }>(record: T): T {
 export class RunService {
   private readonly newId: () => string;
   private readonly now: () => string;
-  private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly deps: RunServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
     this.now = deps.now ?? (() => new Date().toISOString());
-    this.fetchImpl = deps.fetch ?? fetch;
   }
 
   // Synchronous admission (throws → 402 if over budget). On pass, create the record then dispatch asynchronously (no await).

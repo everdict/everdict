@@ -2,7 +2,7 @@ import { can } from "@everdict/auth";
 import { OfflineTokenGrantSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { SecretNameSchema } from "./request/secret-name.js";
 import { secretDocs } from "./secret.docs.js";
 

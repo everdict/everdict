@@ -4,7 +4,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { FastifyInstance } from "fastify";
 import { agentAttributionFrom } from "./api/fs/fs-actor.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "./api/route-context.js";
+import type { ServerDeps } from "./api/route-context.js";
 import { baseUrl, mcpChallenge, protectedResourceMetadata, resolveBearerPrincipal } from "./api/route-context.js";
 import { buildMcpServer } from "./mcp.js";
 

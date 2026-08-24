@@ -3,7 +3,6 @@ import {
   type ExpectedVerifierIdentity,
   JOB_PAYLOAD_FILE_ENV,
   type ResourceRequest,
-  type Score,
   type VerifierInvocation,
   type VerifierJob,
   type WorkPresence,
@@ -36,7 +35,6 @@ import {
   type TraceEvent,
   UpstreamError,
   judgeEnv,
-  worstKillOutcome,
 } from "@everdict/contracts";
 import type {
   CasePlacement,

@@ -1,10 +1,4 @@
-import {
-  InitiativeService,
-  IssueService,
-  ProjectService,
-  RunService,
-  TeamService,
-} from "@everdict/application-control";
+import { InitiativeService, ProjectService, RunService, TeamService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import {
   InMemoryInitiativeStore,
