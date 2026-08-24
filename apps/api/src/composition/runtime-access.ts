@@ -57,6 +57,7 @@ import {
 } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
+import { registryAuthsForImages } from "@everdict/domain";
 import type { BudgetTracker } from "@everdict/domain";
 import type { RuntimeRegistry } from "@everdict/registry";
 
@@ -81,6 +82,18 @@ function startRenewal(
 
 export function buildRuntimeAccess(deps: {
   runtimeRegistry: RuntimeRegistry;
+  // ── THE VERIFIER'S POD PULLS IMAGES NOBODY MINTED A GRANT FOR (arch-review 64 P1-high) ───────────
+  //
+  // `VerifierAwareDispatcher` wraps the resolving dispatcher, so `withVerifierPass` builds the `VerifierJob`
+  // from the job as it stood BEFORE `RuntimeDispatcher` resolved the runtime and its runner image. The
+  // verifier then copies those pre-augmentation credentials — and its pod pulls the tenant's runner/init
+  // image all the same. A private runner beside a public task image left the init container in
+  // ImagePullBackOff with the case blaming the harness.
+  //
+  // Resolved HERE because this is where the target is known. One mint over both of the verifier pod's
+  // images, for the reason the agent lane mints once over all of its own: two repository-scoped tokens for
+  // one host cannot be merged, and a docker config holds one credential per host.
+  registryAuthsFor?: (workspace: string, imageRefs: string[]) => Promise<RegistryAuth[]>;
   runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
   runtimeBuildBackend: (
     spec: RuntimeSpec,
@@ -604,6 +617,39 @@ export function buildRuntimeAccess(deps: {
         // reservation recorded before the lane creates anything, settled either way. Cancellation builds its
         // workset from attempt rows, so this is what makes a running verifier visible to a sweep that would
         // otherwise certify zero live work over it.
+        // ── ONE GRANT OVER THIS POD'S IMAGES (arch-review 64 P1-high) ───────────────────────────
+        //
+        // The verifier pod pulls its task image AND the runtime's runner/init image, and the job it was
+        // built from predates the runtime resolution — so those credentials covered the first and never the
+        // second. Minted once over both, and placed FIRST so the first-wins deduplication downstream
+        // resolves to the credential that covers everything this pod pulls.
+        // The runtime spec for the lane this verifier is being placed on — the same read the agent lane's
+        // dispatcher makes, and where the runner image is declared.
+        //
+        // NOT `.catch(() => undefined)`. A registry that could not be READ and a target that is not a tenant
+        // runtime are different answers, and collapsing them means minting no grant for a runner image that
+        // may well be private — which is an ImagePullBackOff the CASE wears (the unknown-collapse guard
+        // refuses this shape, and its allowlist names exactly this consequence). A genuine absence is a real
+        // answer and yields no runner image; a fault propagates, and `withVerifierPass` records the verdict
+        // as `unmeasured` with the registry's own words.
+        const laneSpec = await runtimeRegistry.get(job.tenant, target).catch((err: unknown) => {
+          if (err instanceof NotFoundError) return undefined; // not a tenant runtime — no runner image to cover
+          throw err;
+        });
+        const runnerImage = laneSpec !== undefined && "image" in laneSpec && laneSpec.image ? [laneSpec.image] : [];
+        const podImages = [...(job.image !== undefined ? [job.image] : []), ...runnerImage];
+        // NOT swallowed into `[]`. The unknown-collapse guard is right to refuse it here, and its own
+        // allowlist names why: "a credential-less backend would fail auth and report it as the work's
+        // problem". A mint that failed and an image that needs no credential are different answers, and
+        // collapsing them puts the verifier's pod into ImagePullBackOff with the CASE wearing the failure.
+        // A throw becomes `tests_pass: unmeasured` with the registry's own words, which says the case was
+        // not judged — and that is the true statement.
+        const podAuths =
+          runnerImage.length > 0 && deps.registryAuthsFor !== undefined
+            ? registryAuthsForImages(await deps.registryAuthsFor(job.tenant, podImages), podImages)
+            : [];
+        const dispatched: VerifierJob =
+          podAuths.length > 0 ? { ...job, registryAuths: [...podAuths, ...(job.registryAuths ?? [])] } : job;
         invocation = await verifierOperation(
           {
             ...(attempts ? { attempts } : {}),

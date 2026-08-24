@@ -722,6 +722,9 @@ async function main(): Promise<void> {
     runtimeRegistry,
     runtimeSecretsFor,
     runtimeBuildBackend,
+    // …so the VERIFIER pod's own images get a grant. Its job predates the runtime resolution, so nothing had
+    // minted one for the runner/init image it pulls (arch-review 64 P1-high).
+    registryAuthsFor,
     // Where a produced verdict becomes durable before the ledger says it exists, and where a recovery reads
     // it back when the verifier's container is already gone (arch-review 64 P0).
     ...(artifacts ? { verdicts: artifacts } : {}),

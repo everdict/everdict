@@ -270,12 +270,25 @@ export class RuntimeDispatcher implements Dispatcher {
         // into a backend that is built once and reused hands the first job's short-lived grants to every job
         // after it, and keeps them past their expiry. It rides the job below, which is where both lanes
         // already read image credentials from and where they are per-dispatch by construction.
+        // ── ONE MINT OVER EVERY IMAGE THIS POD PULLS (arch-review 64 P1-high) ────────────────────────
+        //
+        // This minted a SECOND grant for the runner image and appended it to the job's own. A managed
+        // registry serving both — `managed.example/acme/task` and `managed.example/platform/job-runner` — then
+        // produced two repository-scoped credentials for one HOST, and a docker config holds exactly one
+        // credential per host. Whichever survived, the other image pulled anonymously and 401'd, in a way that
+        // reads as a registry problem rather than as ours.
+        //
+        // A grant covering several repositories is what `mintPullGrant(tenant, refs)` has always produced, so
+        // the fix is to ask once over the union rather than to merge two answers afterwards — two
+        // repository-scoped tokens cannot be merged into one, which is why the domain-side deduplication can
+        // only stop the disagreement from being silent (see `registryAuthsForImages`).
         const runnerImage = "image" in spec && spec.image ? [spec.image] : [];
+        const podImages = [...jobImages(job), ...runnerImage];
         const runnerAuths =
           runnerImage.length > 0
             ? registryAuthsForImages(
-                (await this.deps.registryAuthsFor?.(tenant, runnerImage).catch(() => [])) ?? [],
-                runnerImage,
+                (await this.deps.registryAuthsFor?.(tenant, podImages).catch(() => [])) ?? [],
+                podImages,
               )
             : [];
         if (!this.deps.backends.has(name)) {
@@ -317,9 +330,12 @@ export class RuntimeDispatcher implements Dispatcher {
         // outlives their expiry.
         //
         // Merged, never replaced: the job's own case/service credentials are still its own.
+        // …and the union-minted grants come FIRST, so `registryAuthsForImages`' first-wins deduplication and
+        // `dockerAuthConfigJson` both resolve to the credential that covers every repository this pod pulls.
+        // The job's own entries stay for hosts the union did not cover (a BYO registry serving one image).
         routed = {
           ...job,
-          ...(runnerAuths.length > 0 ? { registryAuths: [...(job.registryAuths ?? []), ...runnerAuths] } : {}),
+          ...(runnerAuths.length > 0 ? { registryAuths: [...runnerAuths, ...(job.registryAuths ?? [])] } : {}),
           evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
         };
       }

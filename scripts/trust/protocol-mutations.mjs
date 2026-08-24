@@ -1724,6 +1724,17 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/intermediate-gc.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P1-high. Two repository-scoped credentials for one registry host: the rendered docker
+    // config kept the LAST (`auths[host] =`) while every other consumer picked the FIRST (`.find`), so one
+    // of the pod's images pulled anonymously and 401'd.
+    name: "registry scopes — one host renders a different credential than the system picks",
+    file: "packages/domain/src/image/image-ref.ts",
+    from: "    if (auths[entry.host] !== undefined) continue;",
+    to: "    void entry;",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/image/same-host-scopes.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

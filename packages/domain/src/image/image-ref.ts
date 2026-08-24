@@ -144,9 +144,26 @@ export function pickRegistryAuth(auths: RegistryAuth[], image: string): Registry
 }
 
 // The credentials covering ANY of these images — what a multi-image consumer (topology deploy, dockerconfigjson
-// Secret) renders. Deduplicated by host: one entry per registry, however many images it serves.
+// Secret) renders.
+//
+// ── THE COMMENT SAID "DEDUPLICATED BY HOST" AND THE BODY WAS A FILTER (arch-review 64 P1-high) ──────
+//
+// Two mint calls can produce two credentials for ONE registry host — one scoped to the task image's
+// repository, one to the runner image's — and both landed in this list. Downstream, `dockerAuthConfigJson`
+// keys `auths[host]`, so the LAST entry won; `pickRegistryAuth` uses `.find`, so the FIRST did. Two consumers
+// of one list resolving it in opposite directions, and a docker config carrying exactly one token per host —
+// so whichever image the surviving token did not cover failed to pull with a 401 that reads as a registry
+// problem.
+//
+// Deduplicated for real now, FIRST-WINS, which is the rule `pickRegistryAuth` has always had. That makes the
+// two consumers agree; it does not make a repository-scoped token cover a repository it was not minted for.
+// Only the producer can do that, by minting ONE grant per host over every image the pod will pull — see
+// `RuntimeDispatcher`. This function's job is to stop the disagreement from being silent.
 export function registryAuthsForImages(auths: RegistryAuth[], images: string[]): RegistryAuth[] {
-  return auths.filter((auth) => images.some((image) => imageUsesRegistryHost(image, auth.host)));
+  const covering = auths.filter((auth) => images.some((image) => imageUsesRegistryHost(image, auth.host)));
+  const byHost = new Map<string, RegistryAuth>();
+  for (const auth of covering) if (!byHost.has(auth.host)) byHost.set(auth.host, auth);
+  return [...byHost.values()];
 }
 
 // docker config.json contents (auths[host].auth = base64("user:pass")) — written to a temporary DOCKER_CONFIG directory
@@ -157,6 +174,10 @@ export function dockerAuthConfigJson(auth: RegistryAuth | RegistryAuth[]): strin
   const list = Array.isArray(auth) ? auth : [auth];
   const auths: Record<string, { auth: string }> = {};
   for (const entry of list) {
+    // FIRST-WINS, matching `pickRegistryAuth`'s `.find` (arch-review 64 P1-high). This was an unguarded
+    // assignment, so a list carrying two credentials for one host rendered the LAST one while every other
+    // consumer resolved the first — one list, two answers, and an image that could not pull.
+    if (auths[entry.host] !== undefined) continue;
     auths[entry.host] = {
       auth: Buffer.from(`${entry.username ?? "everdict"}:${entry.password}`).toString("base64"),
     };
