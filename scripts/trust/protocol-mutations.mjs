@@ -1472,10 +1472,11 @@ const MUTATIONS = [
     // nothing to name and the row stays open.
     name: "recovery — the settlement is not told which attempt produced the result",
     file: "apps/api/src/composition/runtime-access.ts",
-    // RE-AIMED (arch-review 63): the recovered result now goes through the same completion an in-line one
-    // runs, so the argument is `completed`. The protocol is unchanged — withhold the attempt id and the
-    // settlement has nothing to stamp, so the row stays open.
-    from: "  const outcome = await service.resume(r, completed, authority, adoptedFrom?.attemptId).catch(",
+    // RE-AIMED TWICE. arch-review 63 moved the argument to `completed` (the recovered result runs the same
+    // completion an in-line one does); arch-review 65 split the single coordinate into `ContributingAttempts`,
+    // because a two-phase case has two producers and this argument means the AGENT's. The protocol is
+    // unchanged — withhold the attempt id and the settlement has nothing to stamp, so the row stays open.
+    from: "  const outcome = await service.resume(r, completed, authority, contributing.agent).catch(",
     to: "  const outcome = await service.resume(r, completed, authority).catch(",
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
@@ -1498,8 +1499,11 @@ const MUTATIONS = [
     // nothing is recoverable comes back.
     name: "agent half — the merge discards a half the settlement still needs",
     file: "packages/application-control/src/execution/agent-half.ts",
-    from: '  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };',
-    to: '  const m = mergeVerifierPass(half.result, invocation);\n  await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));\n  return { kind: "merged", result: m };',
+    // RE-AIMED (arch-review 65): the merge returns BOTH contributing attempts now, so the return statement it
+    // used to anchor on spans several lines. The neutralization is the same one — put the discard back at the
+    // merge and the window in which nothing is recoverable comes back.
+    from: '    kind: "merged",\n    result: mergeVerifierPass(half.result, invocation),',
+    to: '    kind: "merged",\n    result: await (async () => {\n      const m = mergeVerifierPass(half.result, invocation);\n      await discardAgentHalf(store, agentHalfKey(tenant, runId, digest));\n      return m;\n    })(),',
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
@@ -1700,9 +1704,17 @@ const MUTATIONS = [
     // between the lane's reclaim and the settlement re-ran a case whose judgement was already computed.
     name: "verdict durability — the verdict dies with the process that produced it",
     file: "packages/application-control/src/execution/verifier-operation.ts",
+    // RE-AIMED (arch-review 65): the stage moved BELOW the canonical join — it now persists the document this
+    // function returns rather than the lane's raw answer — and takes the coordinate as one object. The
+    // neutralization is unchanged: stage nothing, and the verdict dies with the process.
     from: [
-      "    if (job.agentResultDigest !== undefined)",
-      "      await stageVerifierVerdict(deps.verdicts, job.tenant, job.runId, job.agentResultDigest, invocation);",
+      "    await stageVerifierVerdict(deps.verdicts, {",
+      "      tenant: job.tenant,",
+      "      runId: job.runId,",
+      "      agentResultDigest: job.agentResultDigest,",
+      "      verifierAttemptId: attemptId,",
+      "      invocation: canonical,",
+      "    }).catch(() => undefined);",
     ].join("\n"),
     to: "    void stageVerifierVerdict;",
     build: "@everdict/application-control",
@@ -1713,8 +1725,10 @@ const MUTATIONS = [
     // recovered case settled with a committed receipt naming no attempt and a row still reading as live work.
     name: "batch recovery — the adopted attempt is not settled with the case",
     file: "packages/application-control/src/scorecard/recovery-planner.ts",
-    from: '                        if (adoptedFrom?.attemptId !== undefined)\n                          await boundAttempts.transition(adoptedFrom.attemptId, "committed", { childRunId: c.id });',
-    to: "                        void adoptedFrom;",
+    // RE-AIMED (arch-review 65): the single `adoptedFrom` ref became `ContributingAttempts`, and the row this
+    // stamps is the AGENT's. Withhold it and the case settles with its execution attempt still reading live.
+    from: '                        if (contributing.agent !== undefined)\n                          await boundAttempts.transition(contributing.agent, "committed", { childRunId: c.id });',
+    to: "                        void contributing;",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/adopted-attempt-settlement.counterexample.test.ts"],
   },
@@ -1724,8 +1738,10 @@ const MUTATIONS = [
     // a full intermediate CaseResult in object storage forever.
     name: "intermediate GC — a settled case leaves its halves in storage forever",
     file: "packages/application-control/src/run/run-service.ts",
-    from: "      if (claimed !== undefined && adoptedDigest !== undefined)",
-    to: "      if (false && claimed !== undefined && adoptedDigest !== undefined)",
+    // RE-AIMED (arch-review 65): the coordinate is `stagedIntermediatesOf(result)` — a ref the writing pass
+    // stamps — rather than a digest dug out of the receipt, so the guard names a different local.
+    from: "      if (claimed !== undefined && adoptedRefs !== undefined)",
+    to: "      if (false && claimed !== undefined && adoptedRefs !== undefined)",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/intermediate-gc.counterexample.test.ts"],
   },
@@ -1797,12 +1813,19 @@ const MUTATIONS = [
   {
     // …and the recovery's own half of it: staged bytes are ADDRESSED, not authenticated, so a document that
     // does not describe the handle recovering it is `unknown` rather than merged.
+    //
+    // ⚠️ THIS RUNG WAS A HOLE ON ITS FIRST RUN, and the gate said so: the suite it pointed at stages the
+    // CANONICAL invocation, so no handle ever disagrees with it and removing the check changed nothing. The
+    // red that file records came from the OTHER mutation (staging the raw wire), which is a different
+    // protocol. The file that actually presents one execution's bytes under another's coordinate is the
+    // key-identity counterexample — a rung is aimed at the suite that exercises it, not the one that
+    // mentions it.
     name: "verdict recovery — staged bytes are merged without checking the handle",
     file: "packages/application-control/src/execution/agent-half.ts",
     from: "  if (mismatch)",
     to: "  if (false)",
     build: "@everdict/application-control",
-    suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
+    suite: ["--root", "packages/application-control", "src/execution/verdict-key-identity.counterexample.test.ts"],
   },
   {
     // arch-review 65 P1-high. The GC coordinate was derived from the receipt, which exists only on a case that
@@ -1869,6 +1892,24 @@ const MUTATIONS = [
   },
 ];
 
+// ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
+//
+// A rung whose target line a change MOVED fails rather than silently testing nothing, which is the design —
+// and re-aiming it then has to be verified, because a rung that matches but does not break is worse than a
+// hole (it reads as enforcement). Verifying meant a full run: 174 rungs, each with a package build.
+//
+// So the whole suite stays the CI contract and `--only <substring>` is the author's loop. It is deliberately
+// not a way to run less in CI: `pnpm protocol-mutations` with no argument is every rung, and the summary line
+// below says how many ran.
+const only = process.argv.slice(2).includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : undefined;
+const SELECTED = only === undefined ? MUTATIONS : MUTATIONS.filter((m) => m.name.includes(only));
+if (only !== undefined && SELECTED.length === 0) {
+  console.error(`✖ no protocol mutation's name contains ${JSON.stringify(only)} — nothing would have run.`);
+  process.exit(2);
+}
+
+// Every rung's file, not only the selected ones: a partial run still writes into the tree, and the same
+// "restore the exact original" promise has to hold for the file it touches.
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
 // `git diff HEAD`, not `status --porcelain`: the latter also compares the worktree to the INDEX, and in a
 // tree several sessions commit into through temp indexes the real one lags behind the ref — so files whose
@@ -1882,7 +1923,7 @@ if (dirty !== "") {
 }
 
 let holes = 0;
-for (const mutation of MUTATIONS) {
+for (const mutation of SELECTED) {
   const original = readFileSync(mutation.file, "utf8");
   if (!original.includes(mutation.from)) {
     console.error(`✖ ${mutation.name}: the line to mutate is gone from ${mutation.file}`);
@@ -1910,4 +1951,8 @@ if (holes > 0) {
   console.error(`\n✖ ${holes} protocol(s) are not actually enforced by the suite that claims to enforce them.`);
   process.exit(1);
 }
-console.log(`\n✓ every protocol mutation was caught (${MUTATIONS.length} checked)`);
+console.log(
+  `\n✓ every protocol mutation was caught (${SELECTED.length} checked${
+    only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``
+  })`,
+);
