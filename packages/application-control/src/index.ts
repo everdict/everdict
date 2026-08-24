@@ -78,8 +78,6 @@ export {
   type StagedAgentHalf,
   agentHalfKey,
   discardAgentHalf,
-  discardIntermediates,
-  stagedIntermediatesOf,
   mergeVerifierPass,
   agentHalfDigest,
   readAgentHalf,
@@ -88,6 +86,15 @@ export {
   recoverVerifiedCase,
   stageAgentHalf,
 } from "./execution/agent-half.js";
+export {
+  type ArtifactRef,
+  dischargeIntermediates,
+  InMemoryIntermediateCleanupStore,
+  type IntermediateCleanupDebt,
+  type IntermediateCleanupStore,
+  removeStagedObject,
+  requireOwed,
+} from "./ports/intermediate-cleanup-store.js";
 export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type {
@@ -104,9 +111,11 @@ export type {
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export { recordingGenerationOf, recordingRefOf } from "./ports/recording-store.js";
 export { type CaseReceiptStore, type CaseSettleOutcome, InMemoryCaseReceiptStore } from "./ports/case-receipt-store.js";
-export { attemptParentAuthority } from "./ports/execution-attempt-store.js";
+export { attemptParentAuthority, requireAdopted } from "./ports/execution-attempt-store.js";
 export { type RecoveryTarget, retryDeferredRecovery } from "./ops/startup-recovery.js";
 export {
+  type AdoptAttemptOutcome,
+  type AttemptAdoption,
   type ExecutionAttemptStore,
   InMemoryExecutionAttemptStore,
   type OpenAttemptInput,

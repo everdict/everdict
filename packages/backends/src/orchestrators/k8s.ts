@@ -1672,7 +1672,7 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
             planDigest: job.plan.digest,
             workspaceDigest: contentDigest(job.workspace),
           });
-          return {
+          const invocation: VerifierInvocation = {
             planDigest: envelope.planDigest,
             workspaceDigest: envelope.workspaceDigest,
             work: { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns },
@@ -1680,6 +1680,16 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
               job.image !== undefined ? laneImageProvenance(job.image, "the Kubernetes API") : { kind: "none" },
             scores: envelope.scores,
           };
+          // ── HANDED OVER BEFORE THE `finally` RECLAIMS IT (arch-review 66 P0-lifecycle) ─────────────
+          //
+          // The reclaim below runs whichever way this block leaves, so returning first meant the Job was
+          // deleted before anything durable held the verdict — and a crash in that window destroyed a
+          // constitutional decision whose container was already gone.
+          //
+          // What comes back is the CANONICAL document (the operation joins the coordinates only the ledger
+          // has), so this lane returns the same object the caller will use rather than a second version of
+          // it. A caller with no hook is the old ordering and still works.
+          return hooks?.acknowledge ? await hooks.acknowledge(invocation) : invocation;
         }
       } finally {
         // The reclaim for EVERYTHING this dispatch created, whichever step failed. The Secret and the policy

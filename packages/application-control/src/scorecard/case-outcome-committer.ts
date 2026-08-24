@@ -10,6 +10,7 @@ import {
   type RuntimeWorkRef,
   type VerdictPolicy,
   attemptIdOf,
+  storedExecutionId,
 } from "@everdict/contracts";
 import {
   Run,
@@ -21,10 +22,10 @@ import {
   completeJudgeCoverage,
   contentDigest,
 } from "@everdict/domain";
-import { discardIntermediates, stagedIntermediatesOf } from "../execution/agent-half.js";
 import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
+import { dischargeIntermediates, removeStagedObject } from "../ports/intermediate-cleanup-store.js";
 import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
@@ -47,7 +48,15 @@ import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 // assembly stages into, and the bus the completion fact nudges. Nothing here can dispatch or kill.
 type CaseOutcomeCommitterDeps = Pick<
   ScorecardBatchDeps,
-  "runStore" | "caseReceipts" | "attempts" | "artifacts" | "recordingStore" | "events" | "agentHalves" | "verdicts"
+  | "runStore"
+  | "caseReceipts"
+  | "attempts"
+  | "artifacts"
+  | "recordingStore"
+  | "events"
+  | "agentHalves"
+  | "verdicts"
+  | "cleanup"
 >;
 
 // A case whose execution is done and whose child row is deliberately still open until its judges land.
@@ -519,15 +528,21 @@ export class CaseOutcomeCommitter {
       // No `?? ""` on the tenant: a key built from an empty workspace addresses somebody else's prefix, and
       // a silent default for a domain value is exactly what rule `typescript` forbids. A commit with no
       // tenant has no staged intermediates to end — the staging is keyed by one.
-      const stagedRefs = stagedIntermediatesOf(covered);
-      if (stagedRefs !== undefined && input.tenant !== undefined)
-        await discardIntermediates(
-          this.deps.agentHalves,
-          this.deps.verdicts,
+      //
+      // ── AND THE WORKLIST IS THE LEDGER'S, NOT THE DOCUMENT'S (arch-review 66 P1-high) ──────────────
+      //
+      // This read the coordinate off `covered` — the settled document — which only ever named what a
+      // SUCCESSFUL ending happened to carry. The debt is a row written when the bytes were staged, so this
+      // discharge covers the endings that carry no document at all, and a delete that does not converge
+      // leaves the row owed for the reconciler instead of vanishing with this process.
+      if (input.tenant !== undefined)
+        await dischargeIntermediates(
+          {
+            ...(this.deps.cleanup ? { cleanup: this.deps.cleanup } : {}),
+            remove: removeStagedObject(this.deps),
+          },
           input.tenant,
-          input.executionId,
-          stagedRefs.agentResultDigest,
-          stagedRefs.verifierAttemptId,
+          storedExecutionId(input.executionId),
         );
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.

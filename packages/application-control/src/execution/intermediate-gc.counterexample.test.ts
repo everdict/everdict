@@ -4,6 +4,7 @@ import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import { InMemoryIntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import type { AttemptStamp, RunStore } from "../ports/run-store.js";
 import { RunService } from "../run/run-service.js";
 import { type AgentHalfStore, agentHalfDigest, stageAgentHalf, stageVerifierVerdict } from "./agent-half.js";
@@ -39,27 +40,33 @@ const DIGEST = agentHalfDigest(AGENT_HALF);
 
 // The settled document: the merged case, carrying the receipt whose handle names WHICH half it was judged
 // from. That coordinate is the only thing a settlement has to find the intermediates with.
-const SETTLED: CaseResult = {
-  ...AGENT_HALF,
-  verifier: {
-    planDigest: "sha256:plan",
-    workspaceDigest: contentDigest(AGENT_HALF.snapshot),
-    scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
-    work: {
-      tenant: "acme",
-      runId: "evd-run-r1",
-      externalJobId: "everdict-verify-c1",
-      attemptId: "a-verify",
-      verifier: {
-        planDigest: "sha256:plan",
-        workspaceDigest: contentDigest(AGENT_HALF.snapshot),
-        caseId: "c1",
-        agentResultDigest: DIGEST,
+// ⚠️ THE VERIFIER ATTEMPT IS A ROW THE LEDGER ACTUALLY HOLDS (arch-review 66). This named `a-verify`, an id
+// no `open` had ever minted — harmless while the settlement only stamped attempts best-effort, and a hard
+// refusal once the settlement started ADOPTING them (`absent` aborts, as it must: a case whose physical rows
+// cannot be closed is a case that has not been settled). In production `verifierOperation` opens the row
+// before it dispatches anything, so the fixture was describing a world that cannot occur.
+const settledWith = (verifierAttemptId: string): CaseResult =>
+  ({
+    ...AGENT_HALF,
+    verifier: {
+      planDigest: "sha256:plan",
+      workspaceDigest: contentDigest(AGENT_HALF.snapshot),
+      scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+      work: {
+        tenant: "acme",
+        runId: "evd-run-r1",
+        externalJobId: "everdict-verify-c1",
+        attemptId: verifierAttemptId,
+        verifier: {
+          planDigest: "sha256:plan",
+          workspaceDigest: contentDigest(AGENT_HALF.snapshot),
+          caseId: "c1",
+          agentResultDigest: DIGEST,
+        },
       },
+      complete: true,
     },
-    complete: true,
-  },
-} as unknown as CaseResult;
+  }) as unknown as CaseResult;
 
 const RECORD: RunRecord = {
   id: RUN,
@@ -139,14 +146,15 @@ function storeWithSeam(record: RunRecord, opts?: { refuse?: boolean }): RunStore
   } as unknown as RunStore;
 }
 
-const staged = async () => {
+const staged = async (verifierAttemptId: string, cleanup: InMemoryIntermediateCleanupStore) => {
   const artifacts = artifactStore();
-  await stageAgentHalf(artifacts, "acme", "evd-run-r1", AGENT_HALF);
+  await stageAgentHalf(artifacts, "acme", "evd-run-r1", AGENT_HALF, cleanup);
   await stageVerifierVerdict(artifacts, {
     tenant: "acme",
     runId: "evd-run-r1",
     agentResultDigest: DIGEST,
-    verifierAttemptId: "a-verify",
+    verifierAttemptId,
+    cleanup,
     invocation: {
       planDigest: "sha256:plan",
       workspaceDigest: contentDigest(AGENT_HALF.snapshot),
@@ -158,11 +166,13 @@ const staged = async () => {
 
 describe("[R64 COUNTEREXAMPLE] a settlement ends the window it was staged for", () => {
   it("discards BOTH intermediates when the run settles", async () => {
-    const artifacts = await staged();
-    expect(artifacts.keys(), "nothing was staged, so this file measured nothing").toHaveLength(2);
-
+    const cleanup = new InMemoryIntermediateCleanupStore();
     const attempts = new InMemoryExecutionAttemptStore();
     const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
+    const verifierRow = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+    const SETTLED = settledWith(verifierRow.attemptId);
+    const artifacts = await staged(verifierRow.attemptId, cleanup);
+    expect(artifacts.keys(), "nothing was staged, so this file measured nothing").toHaveLength(2);
     const store = storeWithSeam(RECORD);
     const service = new RunService({
       dispatcher: unusedDispatcher,
@@ -170,6 +180,7 @@ describe("[R64 COUNTEREXAMPLE] a settlement ends the window it was staged for", 
       attempts,
       agentHalves: artifacts,
       verdicts: artifacts,
+      cleanup,
     });
     (service as unknown as { attemptRow: Map<string, string> }).attemptRow.set(EXECUTION, attemptId);
 
@@ -185,15 +196,19 @@ describe("[R64 COUNTEREXAMPLE] a settlement ends the window it was staged for", 
     // The control, and the one that matters most. A lost fence means somebody else owns this run and their
     // settlement is what ends the window — discarding here would delete the halves out from under the
     // process that is about to need them (rule `protocol`: the window ends at the settlement that LANDED).
-    const artifacts = await staged();
+    const cleanup = new InMemoryIntermediateCleanupStore();
     const attempts = new InMemoryExecutionAttemptStore();
     const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
+    const verifierRow = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+    const SETTLED = settledWith(verifierRow.attemptId);
+    const artifacts = await staged(verifierRow.attemptId, cleanup);
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store: storeWithSeam(RECORD, { refuse: true }),
       attempts,
       agentHalves: artifacts,
       verdicts: artifacts,
+      cleanup,
     });
     (service as unknown as { attemptRow: Map<string, string> }).attemptRow.set(EXECUTION, attemptId);
 
@@ -202,23 +217,40 @@ describe("[R64 COUNTEREXAMPLE] a settlement ends the window it was staged for", 
     expect(artifacts.keys(), "a refused settlement deleted the halves the winner still needs").toHaveLength(2);
   });
 
-  it("touches nothing for a case with no judging half", async () => {
-    // The other control: the coordinate comes off the RECEIPT, so a result with none discards nothing rather
-    // than guessing a key — a guessed key deletes another execution's bytes.
-    const artifacts = await staged();
+  it("discharges only what THIS execution owes", async () => {
+    // ⚠️ THIS CASE USED TO ASSERT THE OPPOSITE, and its reasoning is what changed. It said "the coordinate
+    // comes off the RECEIPT, so a result with none discards nothing rather than guessing a key". The
+    // settlement no longer guesses: it reads what this execution recorded as owed, so a case that settles
+    // WITHOUT a verifier receipt still ends the window for bytes that execution really did stage.
+    //
+    // What has to stay true is the half that sentence was protecting — another execution's objects are not
+    // this settlement's to delete.
+    const cleanup = new InMemoryIntermediateCleanupStore();
     const attempts = new InMemoryExecutionAttemptStore();
     const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
+    const verifierRow = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+    const artifacts = await staged(verifierRow.attemptId, cleanup);
+    // A sibling execution's staged half, sitting in the same bucket.
+    await artifacts.put(
+      "agent-half/acme/evd-run-OTHER/sha256:someone-else.json",
+      new TextEncoder().encode("{}"),
+      "application/json",
+    );
+
     const service = new RunService({
       dispatcher: unusedDispatcher,
       store: storeWithSeam(RECORD),
       attempts,
       agentHalves: artifacts,
       verdicts: artifacts,
+      cleanup,
     });
     (service as unknown as { attemptRow: Map<string, string> }).attemptRow.set(EXECUTION, attemptId);
 
     await service.resume(RECORD, AGENT_HALF, { ownerReplica: "r1", epoch: 1 } as never, attemptId);
 
-    expect(artifacts.keys()).toHaveLength(2);
+    expect(artifacts.keys(), "the settlement deleted bytes belonging to another execution").toEqual([
+      "agent-half/acme/evd-run-OTHER/sha256:someone-else.json",
+    ]);
   });
 });

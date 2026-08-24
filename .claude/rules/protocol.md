@@ -438,6 +438,117 @@ return value rather than in a missing branch:
 - A `Promise<boolean>` double that never returns `false`, or a `Promise<void>` double over a method that
   throws, is a green light wired to nothing.
 
+## A CONDITIONAL WRITE INSIDE A TRANSACTION IS NOT A SUCCESSFUL ONE
+The previous wave put both contributing attempts inside the settlement transaction — the right structure, and
+the reason it looked finished. What it does is:
+
+    await boundAttempts.transition(contributing.agent, "committed", { childRunId: c.id });
+    //     ↑ Promise<boolean>, and the boolean is the whole answer
+
+`transition` is a guarded UPDATE. In real Postgres its `committed` arm carries `PARENT_AUTHORIZES`, which
+requires `parent.owner_epoch = a.driver_epoch` — and a boot recovery RAISES the parent's epoch when it claims
+the batch (`claimOwnership`, the fencing token). So every attempt the recovery adopts was opened under the
+epoch before the claim, every `committed` is refused, and the transaction commits the canonical outcome on top
+of two no-ops: receipt committed, child succeeded, both attempt rows still reading as live compute that was
+reclaimed (arch-review 66 P0).
+
+    the call is inside the transaction   ≠   the write happened
+
+- **A decision that rests on a conditional write consumes its answer.** Membership in the transaction buys
+  atomicity for the writes that LAND; it says nothing about whether this one did. This is L1's
+  "never `Promise<void>`" one layer in: returning the boolean is not enough if the caller discards it.
+- **`false` IS NOT ONE ANSWER.** already-adopted, revoked, failed, superseded, wrong epoch, parent no longer
+  open and absent all collapse into it, so a settlement cannot tell "somebody else already did this" (fine)
+  from "this attempt may not be adopted at all" (abort). Where a caller must distinguish them, the store owes
+  a UNION, not a boolean — and the arms are named after what the caller does with them.
+- **A recovery's authority is a different question from the original driver's.** `driverEpoch` records WHO
+  STARTED this compute and is provenance; it must not double as "who may adopt it now". Adoption carries the
+  ADOPTING epoch and the guard checks the parent is open under it, so a fence that legitimately moved does not
+  read as an attempt that may not be settled. Re-using one number for both is how a correct fence became a
+  silent refusal.
+- The counterexample has to run against the REAL adapter. The in-memory twin has no parent-authority join, so
+  every test of this path passed while the production store refused every call (rule `testing`).
+
+## AN ARTIFACT WITHOUT AN OPERATION IS BYTES NOBODY WILL LOOK FOR
+Two waves added durable bytes — the agent half, then the verdict — and both are found by a POINTER that is
+written somewhere else and later: the recovery locates the half by the digest a verifier work ref carries, and
+the verdict by the verifier's attempt id. Neither is a scan. So the window between "the bytes are durable" and
+"a durable row points at them" is a window in which the artifact exists and no recovery can reach it
+(arch-review 66 P0-lifecycle).
+
+    durable bytes  +  no durable pointer  =  operationally undiscoverable
+
+Worse in the other direction: the external object is reclaimed by the lane the moment it parses the result, and
+the staging happens after that call RETURNS. So every one of these is a crash that loses work already paid for:
+
+    agent result parsed → agent Job deleted → dispatch returns → ✗ → nothing staged, nothing to recover
+    half staged        → ✗ → no verifier handle exists, so no pointer names the half
+    verifier logs read → verifier Job deleted → ✗ → the verdict is gone
+
+- **The durable acknowledgement precedes the external cleanup, not the other way round.** A backend that
+  deletes its object and then hands the caller a value has made the caller's next line load-bearing for
+  correctness. Order: read the result → canonicalize → write the immutable artifact → CAS the operation →
+  acknowledge → THEN reclaim.
+- **A multi-step effect gets one aggregate that owns it**, whose state says which step is next and which
+  artifacts it owes — not N artifacts plus N rows plus a settlement, none of which is responsible for the
+  whole. This is L5's "a debt owns its worklist" for the forward path.
+- Where a deployment legitimately has no artifact store, say what it loses (the recovery) — but a deployment
+  running private verifiers must not have that store as an OPTIONAL dependency, because the thing it is
+  optional for is the only reason the case can be finished at all.
+
+## A MEASUREMENT DOCUMENT IS NOT A PLACE TO PUT PLATFORM CONTROL STATE
+The GC coordinate was added to `CaseResult` — the document a grader produces, a runner submits, a receipt
+digests, and a leaderboard compares. Three consequences, and only the first was intended (arch-review 66):
+
+- **Identity.** The normal path attaches it and the recovery path does not, so the same agent bytes and the
+  same verdict produce different `caseResultDigest` AND `caseObservationDigest` depending on whether a process
+  crashed. An observation digest exists precisely to say "the same thing was observed"; lifecycle metadata in
+  it makes one measurement read as two experiments.
+- **Authority.** `submit_job_result` parses the runner's JSON with the same schema, so a workspace-controlled
+  runner can name the objects the settlement will delete. Not cross-tenant — the keys use the settlement's own
+  tenant and execution — but a sibling attempt's staged half is inside that boundary, and a result is not a
+  cleanup instruction.
+- **Review.** The field reads as evidence because everything around it is.
+
+So: **the untrusted execution surface, the canonical measurement, and the platform's private lifecycle state
+are three schemas.** A field that answers "what should the platform do next" is never on the one that answers
+"what did the agent do". Strip platform-only fields AT the execution boundary rather than trusting producers
+not to send them, and keep them out of anything a digest covers.
+
+## A CONTENT-DERIVED ADDRESS IS NOT CONTENT AUTHENTICATION
+`agentHalfKey` carries the result digest, which was the right fix for a key two attempts shared. It is not
+integrity: nothing re-digests the bytes that come back, the S3 adapter writes with a plain `PutObject` (no
+conditional create, no stored digest, same key overwrites), and a different schema-valid `CaseResult` at that
+key is merged as though it were the one the digest names (arch-review 66 P1-provenance).
+
+    the digest is IN the key   ≠   the bytes hash to it
+
+- **Verify at the read.** An artifact whose address encodes its content is checked by re-deriving that content
+  on the way in; otherwise the address is a naming convention with a strong-sounding shape.
+- **An immutable artifact is written immutably** — conditional create, or a versioned key — or the word
+  "immutable" is doing work the storage layer never agreed to.
+- **Absent is not "matches".** A guard written as *"present AND different → refuse"* accepts a document that
+  omits the field entirely, which is the easiest thing for a wrong or forged artifact to do. The durable form
+  of a coordinate is REQUIRED; optional-and-compared is the shape that admits silence.
+- And say out loud what an incomplete artifact may still do. `complete: false` on a receipt is a label; if the
+  scores ride into the case anyway, the label is advisory exactly where the constitution is decided — the
+  annotation failure this whole rule file is about. Decide it, fail-closed, and test the refusal.
+
+## AN INLINE CLEANUP AFTER A COMMIT IS NOT A LIFECYCLE
+The discard runs after the settlement returns, in the same process, best-effort. That covers the ending where
+nothing went wrong, which is the ending that needed no help. Every other one leaks: a transient refusal
+rethrown for retry orphans the first attempt's stage (the re-run's digest differs), a refused post-stage CAS
+orphans the verdict because the caller never receives the invocation that names it, one of the two recovery
+owners never discards at all, a crash between the commit and the delete is retried by nobody, and a delete
+that fails is swallowed (arch-review 66 P1-high).
+
+- **The debt is recorded in the transaction that creates it** — the same write that makes the outcome
+  canonical — and a reconciler drains it. Inline deletion is then a latency optimization whose failure costs
+  nothing, which is the only shape in which "best-effort" is honest.
+- **Enumerate the endings, not the happy path.** committed · failed · unmeasured · superseded · abandoned
+  retry · adopted-by-recovery. If any of them cannot name what it staged, the ref is in the wrong place
+  (see the every-ending law below, which this one is the durable half of).
+
 ## THE DOCUMENT THAT BECOMES DURABLE IS THE DOCUMENT THAT IS RETURNED
 A verdict was persisted so a crash could recover it, and what got persisted was the LANE's raw answer while
 the value returned to the caller was `{...invocation, work: persistedWork, agentAttemptId}` — the attempt id,

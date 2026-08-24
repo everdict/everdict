@@ -285,25 +285,22 @@ export const CaseResultSchema = z.object({
   // recorded failure is indistinguishable from a complete one unless the producer says so. Absent on legacy
   // rows and on producers that cannot vouch — and `evidenceVersion` above is what tells those two apart.
   traceSealed: z.boolean().optional(),
-  // ── WHAT THIS CASE STAGED, SO EVERY ENDING CAN END IT (arch-review 65 P1-high) ────────────────────
+  // ── WHAT THIS CASE STAGED USED TO LIVE HERE, AND IT WAS THE WRONG DOCUMENT (arch-review 66) ───────
   //
-  // A two-phase case writes intermediates — the agent's half, and the verdict — before anything succeeds,
-  // and the GC coordinate was read out of `result.verifier.work.verifier.agentResultDigest`. That exists only
-  // on a case that settled WITH a complete verifier receipt, so three endings could not clean up after
-  // themselves: a verifier that errored (no receipt), a merge the workspace check refused (no receipt), and a
-  // capacity refusal retried under a new agent execution (a different digest, so the successful settlement
-  // deletes only the latest).
+  // arch-review 65 put the intermediates' cleanup coordinate on this schema so that every ending — not only
+  // the one carrying a verifier receipt — could address what it staged. The problem it solved was real; the
+  // place was not. `CaseResult` is the MEASUREMENT, and putting platform lifecycle state on it cost three
+  // things at once:
   //
-  // The cleanup key belongs to whoever WROTE the intermediates, not to the document that happens to succeed.
-  // Carried here so success, `unmeasured`, failure and supersession all address the same objects.
-  intermediates: z
-    .object({
-      agentResultDigest: z.string().min(1),
-      // Absent when the verifier never produced a verdict to stage — the half is still owed and still
-      // addressable; a verdict key guessed without this would name another attempt's bytes.
-      verifierAttemptId: z.string().min(1).optional(),
-    })
-    .optional(),
+  //   • the normal path attached the field and the recovery path did not, so one execution produced two
+  //     different `caseResultDigest`/`caseObservationDigest` values depending on whether a process crashed;
+  //   • `submit_job_result` parses a self-hosted runner's JSON with this schema, so a workspace-controlled
+  //     runner could name the objects a settlement would delete;
+  //   • it reads as evidence, because everything around it is.
+  //
+  // The debt now lives in `IntermediateCleanupStore` (@everdict/application-control), written by the pass
+  // that stages the bytes and keyed by EXECUTION — a coordinate every ending can name without carrying
+  // anything on the document. A result is what the agent did; what the platform still owes is not.
   // POSITIVE judgment seal, the same grammar as the trace one above: the scorer VOUCHES that every judge it
   // ran got its own execution sealed as evidence on this run's trajectory. Sealing is best-effort by
   // contract — a lost seal must not lose a real verdict — and the loss used to be silent, so a judgment

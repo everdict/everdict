@@ -66,7 +66,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
-import { type AgentHalfStore, discardIntermediates, stagedIntermediatesOf } from "../execution/agent-half.js";
+import type { AgentHalfStore } from "../execution/agent-half.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
@@ -77,7 +77,12 @@ import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
-import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import { type ExecutionAttemptStore, requireAdopted } from "../ports/execution-attempt-store.js";
+import {
+  type IntermediateCleanupStore,
+  dischargeIntermediates,
+  removeStagedObject,
+} from "../ports/intermediate-cleanup-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import { type RecordingStore, recordingGenerationOf } from "../ports/recording-store.js";
 import type { AttemptStamp, RunStore } from "../ports/run-store.js";
@@ -143,6 +148,8 @@ export interface RunServiceDeps {
   // P1-high). Absent = this deployment stages nothing, which is the deployment that also cannot recover a
   // crash between the halves.
   agentHalves?: AgentHalfStore;
+  // Where a two-phase case's staged bytes are OWED until this settlement discharges them (arch-review 66).
+  cleanup?: IntermediateCleanupStore;
   verdicts?: AgentHalfStore;
   // Grader factory (@everdict/graders) injected into executeCase's collection-mode scoring — the application layer
   // never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3). Optional: a mock
@@ -950,9 +957,30 @@ export class RunService {
                 stamp: {
                   attempts: this.deps.attempts,
                   attemptId: adoptedAttempt,
+                  // ── AND THE ANSWER IS CONSUMED (arch-review 66 P0-protocol) ──────────────────────
+                  //
+                  // These were `transition(…, "committed")` with the boolean dropped. That write requires
+                  // the parent still to be owned at the epoch the attempt was OPENED under, and a recovery
+                  // claim raises it — so on the recovery path every one of these was refused while the run
+                  // settled `succeeded` on top. `adoptAtSettlement` asks whether THIS authority may claim
+                  // the attempt, and a refusal throws: the settle transaction rolls back rather than
+                  // recording an outcome whose physical rows it could not close.
                   apply: async (ledger) => {
-                    await ledger.transition(adoptedAttempt, "committed");
-                    if (adoptedVerifier !== undefined) await ledger.transition(adoptedVerifier, "committed");
+                    const parent = { kind: "run" as const, id: record.id, adoptingEpoch: epoch };
+                    const expectedExecutionId = runExecutionId(record.id);
+                    requireAdopted(
+                      await ledger.adoptAtSettlement(adoptedAttempt, {
+                        parent,
+                        expectedExecutionId,
+                        childRunId: record.id,
+                      }),
+                      adoptedAttempt,
+                    );
+                    if (adoptedVerifier !== undefined)
+                      requireAdopted(
+                        await ledger.adoptAtSettlement(adoptedVerifier, { parent, expectedExecutionId }),
+                        adoptedVerifier,
+                      );
                   },
                 },
               }
@@ -963,17 +991,7 @@ export class RunService {
       // …and the intermediates are owed no longer (arch-review 64 P1-high). This is a SETTLEMENT — the
       // adoption path does not pass through `finalize` — so the window ends here too, and only when the
       // claim landed: a refused fence means the winner still needs the halves.
-      const adoptedRefs =
-        adoption.patch.result !== undefined ? stagedIntermediatesOf(adoption.patch.result) : undefined;
-      if (claimed !== undefined && adoptedRefs !== undefined)
-        await discardIntermediates(
-          this.deps.agentHalves,
-          this.deps.verdicts,
-          record.tenant,
-          runExecutionId(record.id),
-          adoptedRefs.agentResultDigest,
-          adoptedRefs.verifierAttemptId,
-        );
+      if (claimed !== undefined) await this.dischargeStaged(record.tenant, runExecutionId(record.id));
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
       return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
     }
@@ -1996,7 +2014,6 @@ export class RunService {
     // ordinary path that completes without crashing never discarded anything, so every private-verifier case
     // left a full intermediate `CaseResult` in object storage forever. `recoverVerifiedCase`'s own comment
     // said "the settlement owns the discard"; this is the settlement, and it did not.
-    const stagedRefs = patch.result !== undefined ? stagedIntermediatesOf(patch.result) : undefined;
     let settled: RunRecord | undefined;
     let faulted = false;
     try {
@@ -2035,16 +2052,26 @@ export class RunService {
     }
     // …and only a settlement that LANDED ends the window. A refused fence means somebody else owns this run
     // and their settlement will discard; a fault means the run is still open and the halves are still owed.
-    if (settled !== undefined && !faulted && stagedRefs !== undefined)
-      await discardIntermediates(
-        this.deps.agentHalves,
-        this.deps.verdicts,
-        settled.tenant,
-        runExecutionId(id),
-        stagedRefs.agentResultDigest,
-        stagedRefs.verifierAttemptId,
-      );
+    if (settled !== undefined && !faulted) await this.dischargeStaged(settled.tenant, runExecutionId(id));
     return settled;
+  }
+
+  // ── ONE DISCHARGE, SPENT BY BOTH SETTLEMENTS (arch-review 66 P1-high) ──────────────────────────────
+  //
+  // The worklist comes from the cleanup LEDGER rather than from whatever document happened to reach this
+  // line, so an ending that carries no result — and the crash-then-retry that carries a different digest —
+  // are covered by the same call. A delete that does not converge leaves the row owed for the reconciler
+  // instead of disappearing with this process (rule `protocol`: an inline cleanup after a commit is not a
+  // lifecycle).
+  private async dischargeStaged(tenant: string, executionId: ExecutionId): Promise<void> {
+    await dischargeIntermediates(
+      {
+        ...(this.deps.cleanup ? { cleanup: this.deps.cleanup } : {}),
+        remove: removeStagedObject(this.deps),
+      },
+      tenant,
+      executionId,
+    );
   }
 
   // The atomic seam AS THIS DEPLOYMENT ACTUALLY HAS IT — three conditions asking three different questions:

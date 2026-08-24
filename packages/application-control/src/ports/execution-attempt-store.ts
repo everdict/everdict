@@ -11,6 +11,7 @@ import {
   OPEN_SCORECARD_STATUSES,
   type PersistedWorkIntent,
   type RuntimeWorkRef,
+  UpstreamError,
   VERDICT_PREDECESSOR_STATES,
   attemptIdOf,
   decideActivation,
@@ -89,6 +90,56 @@ export type RevocationOutcome =
   | { kind: "revoked"; from: ExecutionAttemptState }
   | { kind: "settled"; state: ExecutionAttemptState }
   | { kind: "absent" };
+
+// WHO is claiming this attempt's result as the case's answer, and under what authority — see
+// `adoptAtSettlement`. The epoch here is the ADOPTING driver's current one, which after a recovery claim is
+// deliberately not the epoch the attempt was opened under.
+export interface AttemptAdoption {
+  parent: { kind: "scorecard" | "run"; id: string; adoptingEpoch: number };
+  // The execution this settlement is settling. An attempt id is a string and a wrong one names a real row in
+  // another case, so the adoption states which execution it believes it is closing rather than trusting the
+  // id it was handed (rule `protocol` L3).
+  expectedExecutionId: ExecutionId;
+  // The child row this attempt's result became, when the settlement has one.
+  childRunId?: string;
+}
+
+// The five facts `false` used to be. Only the first two are a settlement proceeding.
+export type AdoptAttemptOutcome =
+  | { kind: "adopted" }
+  // Already `committed` under this same adoption — an at-least-once retry converging, which is success.
+  | { kind: "already_adopted" }
+  // The row is somewhere this settlement may not claim from: revoked, failed, superseded, or already
+  // committed by a DIFFERENT child. Named, because "we cannot adopt" and "we already did" are opposite
+  // instructions to the caller.
+  | { kind: "incompatible_state"; state: ExecutionAttemptState }
+  // The parent is closed, is owned by somebody else now, or is not the parent this attempt belongs to — and
+  // the same arm covers an attempt that belongs to another execution entirely.
+  | { kind: "wrong_parent"; reason: string }
+  | { kind: "absent" };
+
+// A settlement adopts the attempts it settles, or it settles nothing (rule `protocol`: a conditional write
+// inside a transaction is not a successful one). Throwing rolls the canonical transaction back, which is the
+// point — the alternative is what this replaced, a committed receipt written over two refused writes.
+//
+// ONE owner, imported by both recovery lanes. A predicate written twice has already diverged (L3), and these
+// two lanes are exactly the pair that drifted the last three times.
+//
+// `already_adopted` is success: an at-least-once settlement converging on what it already did.
+export function requireAdopted(outcome: AdoptAttemptOutcome, attemptId: string): void {
+  if (outcome.kind === "adopted" || outcome.kind === "already_adopted") return;
+  const why =
+    outcome.kind === "incompatible_state"
+      ? `it is '${outcome.state}'`
+      : outcome.kind === "wrong_parent"
+        ? outcome.reason
+        : "no such attempt row exists";
+  throw new UpstreamError(
+    "UPSTREAM_ERROR",
+    { attemptId, outcome: outcome.kind },
+    `this settlement could not adopt attempt ${attemptId} (${why}), so the case it would have claimed is left for another pass`,
+  );
+}
 
 export interface ExecutionAttemptStore {
   // Mint the next attempt for this execution and INSERT it, state "created". Returns the coordinate — the
@@ -177,6 +228,28 @@ export interface ExecutionAttemptStore {
   // verb rather than a transition, because it says nothing about WHERE the attempt is in its life: an attempt
   // is marked unisolated while still "created", and it goes on to execute, commit or fail from there.
   markUnisolated(attemptId: string): Promise<void>;
+  // ── ADOPTION IS A DIFFERENT QUESTION FROM COMMITTING (arch-review 66 P0-protocol) ─────────────────
+  //
+  // `transition(id, "committed")` asks: may the driver that OPENED this attempt claim its result? Its guard
+  // requires the parent still to be owned at `driver_epoch`, which is right for the lane that is still
+  // running — a driver a takeover displaced must not claim anything.
+  //
+  // A RECOVERY is the other case, and the same guard answers it backwards. Claiming a dead owner's batch
+  // RAISES the parent's epoch — that is what the claim is for, the fencing token that stops the replica we
+  // declared dead. So every attempt the recovery then adopts was opened one epoch ago, `PARENT_AUTHORIZES`
+  // is false, and the settlement wrote its canonical outcome over two refusals it never looked at: child
+  // succeeded, receipt committed, both attempt rows still reading as live compute that had been reclaimed.
+  //
+  // Two authorities, named separately. `driverEpoch` stays PROVENANCE — who started this compute — and the
+  // adopting epoch is a parameter: who is claiming it as the case's answer NOW. The guard asks that the
+  // parent is open and currently owned at THAT epoch, so a fence which legitimately moved reads as authority
+  // rather than as an attempt nobody may settle.
+  //
+  // And it answers a UNION rather than a boolean, because `false` was five facts wearing one hat: already
+  // adopted, revoked, failed, superseded, wrong epoch, and no such row. A settlement's response differs for
+  // each — `already_adopted` is success (an at-least-once retry converging), everything else aborts the
+  // canonical transaction rather than committing an outcome whose physical attempts it could not close.
+  adoptAtSettlement(attemptId: string, at: AttemptAdoption): Promise<AdoptAttemptOutcome>;
   // Every physical attempt of one logical execution, oldest first — "what actually ran for this case".
   list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]>;
   // Every attempt under one batch: the compute a scorecard actually spent, which its receipts (one per case)
@@ -470,6 +543,52 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     const current = this.attempts.get(attemptId);
     if (!current) return;
     this.attempts.set(attemptId, { ...current, unisolated: true, updatedAt: this.now() });
+  }
+
+  // See the port for why adoption is not `transition(id, "committed")`. In the same serialization domain as
+  // every other mutation here — it is the same read → await → write shape (arch-review 64 P1-adapter).
+  async adoptAtSettlement(attemptId: string, at: AttemptAdoption): Promise<AdoptAttemptOutcome> {
+    return this.perAttempt(attemptId, () => this.adoptAtSettlementUnsafe(attemptId, at));
+  }
+
+  private async adoptAtSettlementUnsafe(attemptId: string, at: AttemptAdoption): Promise<AdoptAttemptOutcome> {
+    const current = this.attempts.get(attemptId);
+    if (!current) return { kind: "absent" };
+    // The id came from a handle, a receipt or a merge, and a wrong one names a REAL row in another case. The
+    // settlement states which execution it believes it is closing (rule `protocol` L3).
+    if (current.executionId !== at.expectedExecutionId)
+      return {
+        kind: "wrong_parent",
+        reason: `this attempt belongs to execution ${current.executionId}, not ${at.expectedExecutionId}`,
+      };
+    // Already ours: an at-least-once settlement repeating itself, which is the one refusal that is success.
+    // A `committed` row naming a DIFFERENT child is another attempt's win, which is not.
+    if (current.state === "committed")
+      return at.childRunId === undefined || current.childRunId === undefined || current.childRunId === at.childRunId
+        ? { kind: "already_adopted" }
+        : { kind: "incompatible_state", state: current.state };
+    if (isTerminalAttemptState(current.state) || !COMMIT_PREDECESSOR_STATES.includes(current.state))
+      return { kind: "incompatible_state", state: current.state };
+    // …and the parent, asked about the ADOPTING authority rather than the one that opened the row. `undefined`
+    // is a parent that is closed or gone: a settlement under it is not a fence that moved, it is a case whose
+    // batch is over.
+    const authority = this.parents ? await this.parents.authorityOf(current) : undefined;
+    if (this.parents !== undefined) {
+      if (authority === undefined)
+        return { kind: "wrong_parent", reason: `the parent ${at.parent.kind} ${at.parent.id} is no longer open` };
+      if (authority.epoch !== at.parent.adoptingEpoch)
+        return {
+          kind: "wrong_parent",
+          reason: `the parent is owned at epoch ${authority.epoch}, and this settlement adopts at ${at.parent.adoptingEpoch}`,
+        };
+    }
+    this.attempts.set(attemptId, {
+      ...current,
+      state: "committed",
+      ...(at.childRunId !== undefined ? { childRunId: at.childRunId } : {}),
+      updatedAt: this.now(),
+    });
+    return { kind: "adopted" };
   }
 
   async list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]> {

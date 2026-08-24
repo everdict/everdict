@@ -33,6 +33,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
+import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
@@ -163,6 +164,10 @@ export interface ScorecardServiceDeps {
   // judgement did not, so a crash after the verifier's container was reclaimed re-ran a case whose verdict
   // was already computed. Same store shape, different key space.
   verdicts?: AgentHalfStore;
+  // Where a two-phase case's staged bytes are OWED, from the moment they are written until the canonical
+  // settlement discharges them (arch-review 66 P1-high). Absent = this deployment keeps the previous
+  // behaviour, in which the objects are owed to nobody.
+  cleanup?: IntermediateCleanupStore;
   // Supersede force-kill: stop a reclaimed batch's live orchestrator jobs (best-effort; cooperative abort already
   // stops the un-fired remainder — this reclaims the compute of the already-fired ones).
   //
@@ -336,6 +341,7 @@ export type ScorecardBatchDeps = Pick<
   | "adoptWork"
   | "agentHalves"
   | "verdicts"
+  | "cleanup"
   | "cancelQueued"
   | "queueDepth"
   | "queuePressure"

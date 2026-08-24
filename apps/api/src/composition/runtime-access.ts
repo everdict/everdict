@@ -6,13 +6,18 @@ import {
   type ResumeResult,
   recoverInterrupted,
   retryDeferredRecovery,
-  stagedIntermediatesOf,
   verifierOperation,
 } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import { discardIntermediates, recoverStagedVerdict, recoverVerifiedCase } from "@everdict/application-control";
+import type { IntermediateCleanupStore } from "@everdict/application-control";
+import {
+  dischargeIntermediates,
+  recoverStagedVerdict,
+  recoverVerifiedCase,
+  removeStagedObject,
+} from "@everdict/application-control";
 import {
   Admission,
   type Backend,
@@ -809,6 +814,9 @@ export async function recoverStandaloneRun(
     // Where `withVerifierPass` staged the agent's half — see the verifier branch below. Absent means this
     // deployment cannot merge a recovered verdict, which is exactly what it could not do before.
     agentHalves?: AgentHalfStore;
+    // …and what this execution still OWES for those staged bytes (arch-review 66 P1-high). The coordinate
+    // used to ride the recovered document, which is what made the recovered case differ from the in-line one.
+    cleanup?: IntermediateCleanupStore;
     // ── THE REST OF THE CASE, WHICH A CRASH MUST NOT SKIP (arch-review 63 P0) ──────────────────────
     //
     // A case is not finished when its containers are. The in-line path runs `collectDeferredTrace` after the
@@ -1016,17 +1024,18 @@ export async function recoverStandaloneRun(
   // `resumed` is the only outcome that means this run recorded this result. Best-effort, like the staging:
   // an orphan costs storage, and a delete that failed must not cost a settled case.
   //
-  // …and BOTH intermediates (arch-review 64 P1-high). The verdict is staged too now, and this site discarded
-  // only the half — a settled case would have left its judgement in object storage forever.
-  const recoveredRefs = completed !== undefined ? stagedIntermediatesOf(completed) : undefined;
-  if (outcome.kind === "resumed" && recoveredRefs !== undefined)
-    await discardIntermediates(
-      deps.agentHalves,
-      deps.verdicts,
+  // …and the WORKLIST IS THE LEDGER'S (arch-review 66 P1-high). This dug the coordinate out of the recovered
+  // document, which only ever named what a successful ending happened to carry — and putting it on the
+  // document at all is what made the recovered case differ from the in-line one. The debt was recorded when
+  // the bytes were staged; this discharges whatever THIS execution still owes.
+  if (outcome.kind === "resumed")
+    await dischargeIntermediates(
+      {
+        ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),
+        remove: removeStagedObject(deps),
+      },
       r.tenant,
       runExecutionId(r.id),
-      recoveredRefs.agentResultDigest,
-      recoveredRefs.verifierAttemptId,
     );
   if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
   // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a

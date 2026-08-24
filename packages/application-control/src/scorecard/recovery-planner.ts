@@ -5,6 +5,8 @@ import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import { type ContributingAttempts, recoverStagedVerdict, recoverVerifiedCase } from "../execution/agent-half.js";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
+import type { CaseSettleOutcome } from "../ports/case-receipt-store.js";
+import { requireAdopted } from "../ports/execution-attempt-store.js";
 import { settleRun } from "../ports/settle.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
@@ -373,8 +375,11 @@ export class RecoveryPlanner {
             // leaves the case active — the resume below re-dispatches it, which is the recoverable reading
             // of a store fault.
             const recoveryRuns = this.deps.runStore;
-            const adoption = this.deps.caseReceipts
-              ? await this.deps.caseReceipts
+            // Held in a local so the `unknown` arm below can re-read through it — that arm is reachable only
+            // when this store exists, and the narrowing does not survive the ternary.
+            const receiptStore = this.deps.caseReceipts;
+            const adoption = receiptStore
+              ? await receiptStore
                   .commitCase(
                     this.commit.receiptOf(id, adoptedResult, {
                       childId: c.id,
@@ -405,22 +410,92 @@ export class RecoveryPlanner {
                       // orders it: a refused fence must not have said `committed` about an attempt that lost.
                       // Two rows, because a two-phase case has two — the one the handle names and, when the
                       // adopted document carries a verdict, the row that produced it.
+                      //
+                      // ── AND THE ANSWER IS CONSUMED (arch-review 66 P0-protocol) ─────────────────────
+                      //
+                      // This called `transition(…, "committed")` and dropped the boolean. In real Postgres
+                      // that write requires the parent still to be owned at the attempt's OPENING epoch —
+                      // and this recovery's claim raised it, which is what a claim is for. So every adoption
+                      // was refused and the transaction committed the canonical outcome on top of two
+                      // no-ops: child succeeded, receipt committed, both attempt rows still reading as live
+                      // compute that had already been reclaimed.
+                      //
+                      // `adoptAtSettlement` asks the question a recovery is actually asking — may THIS
+                      // authority claim this attempt's result — and answers a union. Anything but adopted or
+                      // already-adopted throws, which rolls the whole transaction back: a case whose
+                      // physical attempts we cannot close is a case we have not settled.
                       if (settled !== undefined && this.deps.attempts && boundAttempts) {
-                        if (contributing.agent !== undefined)
-                          await boundAttempts.transition(contributing.agent, "committed", { childRunId: c.id });
                         const verdictAttempt = adoptedResult.verifier?.work?.attemptId;
                         const verifierAttempt = contributing.verifier ?? verdictAttempt;
+                        const executionId = storedExecutionId(c.executionId ?? c.id);
+                        const parent = {
+                          kind: "scorecard" as const,
+                          id,
+                          adoptingEpoch: parentDriver?.epoch ?? cur.ownerEpoch ?? 0,
+                        };
+                        if (contributing.agent !== undefined)
+                          requireAdopted(
+                            await boundAttempts.adoptAtSettlement(contributing.agent, {
+                              parent,
+                              expectedExecutionId: executionId,
+                              childRunId: c.id,
+                            }),
+                            contributing.agent,
+                          );
                         if (verifierAttempt !== undefined && verifierAttempt !== contributing.agent)
-                          await boundAttempts.transition(verifierAttempt, "committed");
+                          requireAdopted(
+                            await boundAttempts.adoptAtSettlement(verifierAttempt, {
+                              parent,
+                              expectedExecutionId: executionId,
+                            }),
+                            verifierAttempt,
+                          );
                       }
                       return settled;
                     },
                     recoveryRuns,
                     this.deps.attempts,
                   )
-                  .catch(() => undefined)
+                  // ── A THROW IS NOT AN ABSENCE (arch-review 66 P1-lifecycle) ────────────────────────
+                  //
+                  // This was `.catch(() => undefined)` and the `undefined` arm below re-dispatched the case.
+                  // A connection reset AFTER Postgres committed raises exactly like a failed insert, so a
+                  // case that had settled was run again: the second attempt loses the receipt claim, and the
+                  // compute is spent either way. The third value says which question is still open.
+                  .catch(
+                    (err: unknown): CaseSettleOutcome => ({
+                      kind: "unknown",
+                      reason: err instanceof Error ? err.message : String(err),
+                    }),
+                  )
               : undefined;
-            if (adoption === undefined) continue; // store fault — left active: the resume below re-dispatches it
+            if (adoption === undefined || receiptStore === undefined) continue; // no receipt store: the resume drives it
+            // …and an ambiguous commit is CONVERGED ON, never assumed. The exact receipt and its child are
+            // the persisted truth: present means this case is done and must not be re-dispatched; absent
+            // means nothing landed and the re-drive is safe; a read that also fails leaves the batch owed
+            // rather than deciding from two failures in a row (rule `protocol` L2).
+            if (adoption.kind === "unknown") {
+              // Through the THREE-VALUED read (`read`, not `list`), because deciding this from a second
+              // swallowed failure is the same mistake one layer down.
+              const readBack = await receiptStore.read(id);
+              if (readBack.kind === "unknown")
+                throw new UpstreamError(
+                  "UPSTREAM_ERROR",
+                  { scorecardId: id, caseId: c.caseId },
+                  `cannot tell whether this case's commit landed: ${adoption.reason}; and the read-back also failed: ${readBack.reason}. Re-dispatching a case that may have settled would double-spend it.`,
+                );
+              const landed = readBack.kind === "read" && readBack.value.some((r) => r.childRunId === c.id);
+              if (landed) {
+                // It committed and we could not hear so. Seed it exactly as the `committed` arm does — the
+                // case is answered, and re-running it is the double-spend this whole branch exists to stop.
+                adopted += 1;
+                seed.push(adoptedResult);
+                seedRunIds.push(c.id);
+              }
+              // Not landed: nothing was persisted, so the resume below re-dispatches — which is now a
+              // decision made from a READ rather than from an exception.
+              continue;
+            }
             if (adoption.kind === "committed") {
               adopted += 1;
               seed.push(adoptedResult);

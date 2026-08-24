@@ -1051,9 +1051,25 @@ export class NomadBackend
       planDigest: job.plan.digest,
       workspaceDigest: contentDigest(job.workspace),
     };
+    // Built from what the container reported, in ONE place, so the value handed over before the purge and the
+    // value returned afterwards cannot be two different documents (arch-review 65 P0, one layer up).
+    const invocationOf = (result: CaseResult): VerifierInvocation => ({
+      planDigest: identity.planDigest,
+      workspaceDigest: identity.workspaceDigest,
+      ...(result.execution?.imageProvenance !== undefined ? { imageProvenance: result.execution.imageProvenance } : {}),
+      scores: result.scores ?? [],
+    });
+    let acknowledged: VerifierInvocation | undefined;
     const result = await this.dispatch(spec, hooks ? { authority: hooks.authority } : undefined, {
       payload: verifierJobPayload(job),
       identity,
+      ...(hooks?.acknowledge
+        ? {
+            acknowledge: async (parsed: CaseResult) => {
+              acknowledged = await hooks.acknowledge?.(invocationOf(parsed));
+            },
+          }
+        : {}),
     });
     // The INVOCATION, not bare numbers (arch-review 57 P1). Which procedure ran, what it read, and in which
     // world — all known here and previously discarded. The image provenance comes off the dispatch's own
@@ -1061,12 +1077,8 @@ export class NomadBackend
     // VERIFIED rather than assumed (arch-review 59 P1). `parseVerifierResult` refused any envelope naming a
     // different unit, so these digests are the container's own account and not a copy of the request — the
     // difference the happy path hides, and the one a replay joins on.
-    return {
-      planDigest: identity.planDigest,
-      workspaceDigest: identity.workspaceDigest,
-      ...(result.execution?.imageProvenance !== undefined ? { imageProvenance: result.execution.imageProvenance } : {}),
-      scores: result.scores,
-    };
+    // The canonical document the acknowledgement returned, when this lane handed the verdict over in time.
+    return acknowledged ?? invocationOf(result);
   }
 
   // `verifier` is ONE object on purpose: the payload and the identity the answer must match are two halves of
@@ -1075,7 +1087,16 @@ export class NomadBackend
   async dispatch(
     job: CaseJob,
     options?: DispatchOptions,
-    verifier?: { payload: string; identity: ExpectedVerifierIdentity },
+    verifier?: {
+      payload: string;
+      identity: ExpectedVerifierIdentity;
+      // ── HANDED OVER BEFORE THE `finally` PURGES THE JOB (arch-review 66 P0-lifecycle) ─────────────
+      //
+      // The purge below runs whichever way this method leaves, and `dispatchVerifier` assembles its
+      // invocation from the RETURN value — so the object was always gone before anything durable held the
+      // verdict. Called here, inside the try, with what the container actually reported.
+      acknowledge?: (result: CaseResult) => Promise<void>;
+    },
   ): Promise<CaseResult> {
     if (options?.signal?.aborted) throw dispatchAborted(job); // cancelled before we even submitted
     const opts = await this.effectiveOpts(job);
@@ -1257,7 +1278,10 @@ export class NomadBackend
       ];
       // The image THIS lane placed, added to what the in-container driver could see — which is nothing, since
       // it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
-      return mergePlacedImage(result, job, "the Nomad API");
+      const placed = mergePlacedImage(result, job, "the Nomad API");
+      // …and the verdict reaches its durable owner BEFORE the purge in the `finally` (arch-review 66).
+      if (verifier?.acknowledge) await verifier.acknowledge(placed);
+      return placed;
     } catch (err) {
       // ── EVERY POST-START FAILURE RECLAIMS, NOT JUST AN ABORT (arch-review 63 P1-high) ──────────────
       //

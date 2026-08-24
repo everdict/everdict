@@ -28,7 +28,18 @@ export type CaseSettleOutcome =
   | { kind: "already_committed"; receipt: CaseCommitReceipt }
   // The child's terminal write was REFUSED by its fence (takeover / cancel / already terminal). No receipt
   // was persisted — the case is still claimable by whoever holds the authority now.
-  | { kind: "unsettled" };
+  | { kind: "unsettled" }
+  // ── "THE COMMIT THREW" IS NOT "THE COMMIT DID NOT HAPPEN" (arch-review 66 P1-lifecycle) ────────────
+  //
+  // A connection reset after Postgres wrote the rows raises exactly like a failed insert, and the batch
+  // recovery turned both into `undefined` and re-dispatched the case. The second attempt loses the receipt
+  // claim, so the ledger stays honest — and the compute was already spent, which is the cost this arm exists
+  // to stop. Same distinction `runSuite` learned for compensation (rule `suite`: an exception is not proof
+  // that a commit did not happen).
+  //
+  // The caller's answer is to READ BACK, never to decide: the exact receipt plus its child says committed,
+  // both absent says safe to retry, and a read that also fails leaves the whole batch owed.
+  | { kind: "unknown"; reason: string };
 
 export interface CaseReceiptStore {
   // The raw claim — seeding/backfill only (see above). `already_committed` carries the receipt that won.

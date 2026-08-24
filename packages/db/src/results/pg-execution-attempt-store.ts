@@ -1,4 +1,10 @@
-import type { ExecutionAttemptStore, OpenAttemptInput, RevocationOutcome } from "@everdict/application-control";
+import type {
+  AdoptAttemptOutcome,
+  AttemptAdoption,
+  ExecutionAttemptStore,
+  OpenAttemptInput,
+  RevocationOutcome,
+} from "@everdict/application-control";
 import type { ExecutionId } from "@everdict/contracts";
 import {
   type ActivationDecision,
@@ -81,6 +87,8 @@ const COMMIT_FROM_LIST = COMMIT_PREDECESSOR_STATES.map((s) => `'${s}'`).join(", 
 // `suspended` (runs) joined afterwards, so the guard answered "this parent may still place compute" for a
 // batch the user had cancelled. Generated from the shared allowlist instead, so the SQL cannot say something
 // the domain does not — and a status added tomorrow is excluded until somebody classifies it.
+// How many concurrent openers of ONE execution the mint converges for. See `open`.
+const OPEN_COLLISION_RETRIES = 8;
 const OPEN_SCORECARDS = OPEN_SCORECARD_STATUSES.map((s) => `'${s}'`).join(", ");
 const OPEN_RUNS = OPEN_RUN_STATUSES.map((s) => `'${s}'`).join(", ");
 
@@ -114,16 +122,36 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
   // the UNIQUE (execution_id, generation) refuses the second, which is what makes the retry below correct
   // rather than a way of eventually agreeing with a race.
   async open(input: OpenAttemptInput): Promise<{ attemptId: string; generation: number }> {
-    try {
-      return await this.insertNext(input);
-    } catch (err) {
-      // A lost race is ORDINARY here (a spillover duplicate and its straggler open within milliseconds of
-      // each other), and the loser's answer is simply the next ordinal — recomputed, since the winner's row
-      // is now committed and visible. Retried ONCE: a second collision means something other than a race,
-      // and quietly looping would turn a store fault into an unbounded one.
-      if ((err as { code?: string }).code !== "23505") throw err;
-      return await this.insertNext(input);
+    // ── A RACE CONVERGES FOR N OPENERS, NOT FOR TWO (arch-review 66 P1-adapter) ─────────────────────
+    //
+    // A lost race is ORDINARY here (a spillover duplicate and its straggler open within milliseconds of each
+    // other), and the loser's answer is simply the next ordinal — recomputed, since the winner's row is now
+    // committed and visible. This retried EXACTLY ONCE, defended by "a second collision means something other
+    // than a race".
+    //
+    // With three concurrent openers that sentence is false, and three is not a hypothetical: tail
+    // speculation, a spillover duplicate and a retry can all open one execution at the same moment. A, B and
+    // C all try N+1; A wins; B and C both retry N+2; B wins; C's SECOND collision was an ordinary race and
+    // became a store fault — which fails a dispatch that had nothing wrong with it.
+    //
+    // Bounded rather than unbounded, because the original worry was right: a loop with no ceiling turns a
+    // real fault (a broken sequence, a constraint nobody expects) into a hang. The ceiling is the number of
+    // openers a single execution could plausibly have at once, with a little headroom; exhausting it is a
+    // genuine store fault and throws with the count, which is what an operator needs to see.
+    let lastCollision: unknown;
+    for (let attempt = 0; attempt < OPEN_COLLISION_RETRIES; attempt += 1) {
+      try {
+        return await this.insertNext(input);
+      } catch (err) {
+        if ((err as { code?: string }).code !== "23505") throw err;
+        lastCollision = err;
+      }
     }
+    throw new InternalError(
+      "UPSTREAM_ERROR",
+      { executionId: input.executionId, attempts: OPEN_COLLISION_RETRIES, cause: String(lastCollision) },
+      `execution attempt was not opened after ${OPEN_COLLISION_RETRIES} generation collisions — this is no longer an ordinary race`,
+    );
   }
 
   private async insertNext(input: OpenAttemptInput): Promise<{ attemptId: string; generation: number }> {
@@ -386,6 +414,74 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
       "UPDATE everdict_execution_attempts SET unisolated = true, updated_at = now() WHERE attempt_id = $1",
       [attemptId],
     );
+  }
+
+  // ── ADOPTION ASKS ABOUT THE ADOPTING AUTHORITY, NOT THE OPENING ONE (arch-review 66 P0-protocol) ──
+  //
+  // `PARENT_AUTHORIZES` matches the parent's CURRENT owner epoch against `a.driver_epoch` — the epoch this
+  // attempt was OPENED under. For a lane that is still running that is exactly right. For a recovery it is
+  // exactly backwards: claiming a dead owner's batch raises the epoch (that is what a fencing token is), so
+  // every attempt the recovery adopts fails the comparison, `transition(…, "committed")` returns false, and
+  // the settlement that ignored the boolean committed its canonical outcome over two no-ops.
+  //
+  // So the adopting epoch is a PARAMETER and the guard compares the parent's current owner to it. The
+  // attempt's own `driver_epoch` is untouched and stays what it always meant: who started this compute.
+  //
+  // One statement, for the reason every guard in this file is one statement — a read followed by a write is
+  // the window itself. The follow-up read runs only when nothing moved, and says WHICH of the five facts it
+  // was, because a settlement's response differs for each.
+  async adoptAtSettlement(attemptId: string, at: AttemptAdoption): Promise<AdoptAttemptOutcome> {
+    const { rows: moved } = await this.client.query<{ attempt_id: string }>(
+      `UPDATE everdict_execution_attempts a SET
+         state = 'committed',
+         child_run_id = COALESCE($4, a.child_run_id),
+         updated_at = now()
+       WHERE a.attempt_id = $1
+         AND a.execution_id = $2
+         AND a.state IN (${COMMIT_FROM_LIST})
+         AND (
+           a.scorecard_id IS NOT NULL AND EXISTS (
+             SELECT 1 FROM everdict_scorecards s
+              WHERE s.id = a.scorecard_id
+                AND s.status IN (${OPEN_SCORECARDS})
+                AND s.owner_epoch = $3::int
+           )
+           OR a.scorecard_id IS NULL AND EXISTS (
+             SELECT 1 FROM everdict_runs r
+              WHERE 'evd-run-' || r.id = a.execution_id
+                AND r.status IN (${OPEN_RUNS})
+                AND r.owner_epoch = $3::int
+           )
+         )
+       RETURNING a.attempt_id`,
+      [attemptId, at.expectedExecutionId, at.parent.adoptingEpoch, at.childRunId ?? null],
+    );
+    if (moved.length > 0) return { kind: "adopted" };
+
+    const { rows } = await this.client.query<{ state: string; execution_id: string; child_run_id: string | null }>(
+      "SELECT state, execution_id, child_run_id FROM everdict_execution_attempts WHERE attempt_id = $1",
+      [attemptId],
+    );
+    const row = rows[0];
+    if (!row) return { kind: "absent" };
+    if (row.execution_id !== at.expectedExecutionId)
+      return {
+        kind: "wrong_parent",
+        reason: `this attempt belongs to execution ${row.execution_id}, not ${at.expectedExecutionId}`,
+      };
+    const state = ExecutionAttemptStateSchema.parse(row.state);
+    // Already ours — an at-least-once settlement repeating itself, which is the one refusal that is success.
+    // A `committed` row naming a DIFFERENT child is another attempt's win, which is not.
+    if (state === "committed")
+      return at.childRunId === undefined || row.child_run_id === null || row.child_run_id === at.childRunId
+        ? { kind: "already_adopted" }
+        : { kind: "incompatible_state", state };
+    if (!COMMIT_PREDECESSOR_STATES.includes(state)) return { kind: "incompatible_state", state };
+    // The state allows it, so what refused was the parent clause: closed, gone, or owned by somebody else now.
+    return {
+      kind: "wrong_parent",
+      reason: `the parent ${at.parent.kind} ${at.parent.id} is not open at epoch ${at.parent.adoptingEpoch}`,
+    };
   }
 
   async list(executionId: ExecutionId): Promise<ExecutionAttemptRecord[]> {

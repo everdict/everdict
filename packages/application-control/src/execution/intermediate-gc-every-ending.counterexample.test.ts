@@ -3,6 +3,7 @@ import { UpstreamError, storedExecutionId } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import { InMemoryIntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import type { AttemptStamp, RunStore } from "../ports/run-store.js";
 import { RunService } from "../run/run-service.js";
 import type { AgentHalfStore } from "./agent-half.js";
@@ -24,14 +25,22 @@ import { withVerifierPass } from "./verifier-pass.js";
 // the retention problem arch-review 64 closed for the happy path and left open for every other one.
 //
 // The intermediates are written BEFORE any of those endings is decided, so the coordinate cannot live in the
-// document that happens to succeed. `CaseResult.intermediates` is stamped by the pass that WROTE them.
+// document that happens to succeed.
 //
-// Seen RED with the coordinate derived from the receipt again, observed:
-//   a verifier that errored left its agent half in storage forever: expected [ 'agent-half/…' ] to have a length of +0
+// ── …AND THE COORDINATE IS NOT ON THE DOCUMENT AT ALL NOW (arch-review 66) ──────────────────────────
+//
+// arch-review 65 stamped the refs onto every outcome. Right problem, wrong document: `CaseResult` is the
+// measurement, and platform lifecycle state on it made the recovered document differ from the normal one
+// (two different digests for one execution) and let a self-hosted runner name objects for deletion through
+// `submit_job_result`. The debt is a LEDGER ROW now, written by the staging itself, so this file asserts
+// what the execution OWES rather than what its document happens to carry.
+//
+// Seen RED with the debt not recorded at stage time, observed:
+//   a verifier that errored left its agent half owed to nobody: expected [] to have a length of 1
 //
 // ⚠️ THIS IS THE HALF THE EXISTING GC COUNTEREXAMPLE CANNOT SEE. That file settles a case carrying a complete
-// receipt, so the receipt FALLBACK answers and the test passes with or without the stamped field. A file that
-// is green under the change it exists to pin is measuring the fallback (rule `testing`).
+// receipt, so the successful ending answers and the test passes either way. A file that is green under the
+// change it exists to pin is measuring the wrong thing (rule `testing`).
 
 const RUN = "evd-run-r1";
 const EXECUTION = storedExecutionId(RUN);
@@ -136,19 +145,27 @@ function storeWithSeam(): RunStore {
   } as unknown as RunStore;
 }
 
-// The failure, driven through the REAL pass so the result under test is the one production produces — the
-// stamp is what is being tested, and a hand-built `intermediates` field would assert the assertion.
-async function caseEndedByAVerifierError(artifacts: AgentHalfStore): Promise<CaseResult> {
+// The failure, driven through the REAL pass so the world under test is the one production produces — a
+// hand-recorded debt would assert the assertion.
+async function caseEndedByAVerifierError(
+  artifacts: AgentHalfStore,
+  cleanup: InMemoryIntermediateCleanupStore,
+): Promise<CaseResult> {
   return await withVerifierPass(JOB, {
     dispatch: async () => AGENT_RESULT,
     agentHalves: artifacts,
+    cleanup,
     dispatchVerifier: async (): Promise<VerifierInvocation> => {
       throw new UpstreamError("UPSTREAM_ERROR", {}, "the verifier container crashed");
     },
   } as never);
 }
 
-async function settle(artifacts: AgentHalfStore, result: CaseResult): Promise<void> {
+async function settle(
+  artifacts: AgentHalfStore,
+  result: CaseResult,
+  cleanup?: InMemoryIntermediateCleanupStore,
+): Promise<void> {
   const attempts = new InMemoryExecutionAttemptStore();
   const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
   const service = new RunService({
@@ -157,49 +174,81 @@ async function settle(artifacts: AgentHalfStore, result: CaseResult): Promise<vo
     attempts,
     agentHalves: artifacts,
     verdicts: artifacts,
+    ...(cleanup ? { cleanup } : {}),
   });
   (service as unknown as { attemptRow: Map<string, string> }).attemptRow.set(EXECUTION, attemptId);
   await service.resume(RECORD, result, { ownerReplica: "r1", epoch: 1 } as never, attemptId);
 }
 
-describe("[R65 COUNTEREXAMPLE] a case that could not be judged still cleans up after itself", () => {
-  it("carries the staged coordinate on an ending that has no receipt", async () => {
+describe("[R66 COUNTEREXAMPLE] a case that could not be judged still cleans up after itself", () => {
+  it("OWES what it staged on an ending that has no receipt", async () => {
     const artifacts = artifactStore();
-    const result = await caseEndedByAVerifierError(artifacts);
+    const cleanup = new InMemoryIntermediateCleanupStore();
+    const result = await caseEndedByAVerifierError(artifacts, cleanup);
 
     // The premise: the pass really did stage, and really did end unjudged. Without both, everything below is
     // an assertion about a case that never wrote anything.
     expect(artifacts.keys(), "nothing was staged, so this file measures nothing").toHaveLength(1);
     expect(result.scores?.find((s) => s.metric === "tests_pass")?.status).toBe("unmeasured");
-    expect(result.verifier, "this ending has a receipt, so the fallback would answer and hide the defect").toBe(
-      undefined,
-    );
+    expect(result.verifier, "this ending has a receipt, so the successful path would answer instead").toBe(undefined);
 
-    expect(result.intermediates?.agentResultDigest, "the ending carries no way to address what it staged").toBe(
-      artifacts.keys()[0]?.split("/").pop()?.replace(".json", ""),
-    );
+    // …and the document carries NOTHING about it, which is the trust-domain half of this change.
+    expect(
+      (result as unknown as Record<string, unknown>).intermediates,
+      "the measurement document carries platform cleanup state again",
+    ).toBe(undefined);
+
+    const owed = await cleanup.owed("acme", EXECUTION);
+    expect(
+      owed.map((r) => r.key),
+      "the ending left its staged bytes owed to nobody",
+    ).toEqual(artifacts.keys());
   });
 
-  it("DISCARDS them when the unjudged case settles", async () => {
+  it("DISCHARGES the debt when the unjudged case settles", async () => {
     const artifacts = artifactStore();
-    const result = await caseEndedByAVerifierError(artifacts);
+    const cleanup = new InMemoryIntermediateCleanupStore();
+    const result = await caseEndedByAVerifierError(artifacts, cleanup);
 
-    await settle(artifacts, result);
+    await settle(artifacts, result, cleanup);
 
     expect(artifacts.keys(), "a verifier that errored left its agent half in storage forever").toHaveLength(0);
+    expect(await cleanup.owed("acme", EXECUTION), "the debt outlived the settlement that paid it").toEqual([]);
+  });
+
+  it("KEEPS the debt owed when the delete does not converge", async () => {
+    // The lifecycle half: an inline delete that failed used to be swallowed and the bytes were owed to
+    // nobody. The row stays owed so the reconciler retries — "we could not find out" is an escalation
+    // field, never a terminal (rule `protocol` L5).
+    const artifacts = artifactStore();
+    const cleanup = new InMemoryIntermediateCleanupStore();
+    const result = await caseEndedByAVerifierError(artifacts, cleanup);
+    const unreachable: AgentHalfStore = {
+      put: artifacts.put.bind(artifacts),
+      get: artifacts.get.bind(artifacts),
+      async remove() {
+        throw new Error("the object store is unreachable");
+      },
+    };
+
+    await settle(unreachable, result, cleanup);
+
+    expect(await cleanup.owed("acme", EXECUTION), "a failed delete discharged the debt anyway").toHaveLength(1);
+    expect((await cleanup.due("2999-01-01T00:00:00.000Z", 10)).length, "the reconciler has no worklist").toBe(1);
   });
 
   it("touches nothing for a case that staged nothing at all", async () => {
     // The control. A case with no verifier plan writes no intermediates, so its settlement has no coordinate
     // and must not invent one — a guessed key deletes another execution's bytes.
     const artifacts = artifactStore();
+    const cleanup = new InMemoryIntermediateCleanupStore();
     await artifacts.put(
       "agent-half/acme/evd-run-OTHER/sha256:someone-else.json",
       new TextEncoder().encode("{}"),
       "application/json",
     );
 
-    await settle(artifacts, AGENT_RESULT);
+    await settle(artifacts, AGENT_RESULT, cleanup);
 
     expect(artifacts.keys(), "the settlement deleted bytes belonging to another execution").toHaveLength(1);
   });

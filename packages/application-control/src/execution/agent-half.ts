@@ -2,11 +2,14 @@ import {
   type CaseResult,
   CaseResultSchema,
   type RuntimeWorkRef,
+  type Score,
   UpstreamError,
   type VerifierInvocation,
   VerifierInvocationSchema,
+  storedExecutionId,
 } from "@everdict/contracts";
 import { type VerifierReceipt, contentDigest, verifierReceiptOf } from "@everdict/domain";
+import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 
 // ── A TWO-PHASE CASE MAKES ITS FIRST PHASE DURABLE (arch-review 60 P0 follow-through) ────────────────
 //
@@ -73,7 +76,10 @@ export function agentHalfDigest(result: CaseResult): string {
 }
 
 export interface AgentHalfStore {
-  put(key: string, data: Uint8Array, contentType: string): Promise<string>;
+  // `immutable` says this key encodes its own content, so a second write of the same key is either the same
+  // bytes (converge) or somebody else's (refuse). An adapter that cannot express the condition ignores it —
+  // the READ-side digest check is what makes the property enforceable everywhere (arch-review 66).
+  put(key: string, data: Uint8Array, contentType: string, opts?: { immutable?: boolean }): Promise<string>;
   get(key: string): Promise<Uint8Array | undefined>;
   // ── AND THE WINDOW HAS AN OWNER THAT ENDS IT (arch-review 62 follow-through) ──────────────────────
   //
@@ -94,65 +100,42 @@ export async function discardAgentHalf(store: AgentHalfStore | undefined, key: s
   await store?.remove(key).catch(() => undefined);
 }
 
-// ── THE WINDOW HAS ONE OWNER, AND EVERY SETTLEMENT IS IT (arch-review 64 P1-high) ───────────────────
+// ── THE WINDOW HAS ONE OWNER, AND IT IS A LEDGER (arch-review 64 P1-high → 66) ─────────────────────
 //
-// `discardAgentHalf` had exactly ONE production caller — the standalone recovery — while `recoverVerifiedCase`
-// carried the comment "the settlement owns the discard — see `discardAgentHalf`'s callers". Its callers did
-// not keep that promise: the normal in-line settlement, the batch committer and the batch recovery never
-// discarded anything. So every normally-completed private-verifier case left a full intermediate `CaseResult`
-// — trace, workspace snapshot, observation scores, runtime provenance — in object storage forever. That is a
-// RETENTION and disclosure problem, not only a leak: it duplicates the case's own evidence under a key
-// nothing references and nothing sweeps.
+// `discardIntermediates` and `stagedIntermediatesOf` used to live here: the settlement dug the cleanup
+// coordinate out of the RESULT and deleted the objects inline. Two waves of repair to that shape — first
+// moving the coordinate off the receipt onto the document, then carrying it on every ending — and both were
+// fixing the address rather than the owner.
 //
-// Both intermediates, because there are two of them now (the verdict is staged as well), and one coordinate,
-// because both are keyed by the half this case was judged from.
-export async function discardIntermediates(
-  store: AgentHalfStore | undefined,
-  verdicts: AgentHalfStore | undefined,
-  tenant: string,
-  runId: string,
-  agentResultDigest: string,
-  // …and WHICH verifier's verdict, since the key names it (arch-review 65 P1). Absent for a case with no
-  // judging half, or one whose receipt cannot name the attempt: the half is still discarded, and a verdict
-  // key guessed without it would address another attempt's bytes.
-  verifierAttemptId?: string,
-): Promise<void> {
-  await discardAgentHalf(store, agentHalfKey(tenant, runId, agentResultDigest));
-  if (verifierAttemptId !== undefined)
-    await discardAgentHalf(verdicts, verifierVerdictKey(tenant, runId, agentResultDigest, verifierAttemptId));
-}
-
-// WHAT this case staged, so a settlement can end the window whatever the case ended as.
+// The debt is a ROW now (`IntermediateCleanupStore`), written by the staging above before the bytes exist
+// and discharged by `dischargeIntermediates` at the canonical settlement. That closes what neither previous
+// version could: a crash between the commit and the delete, a delete that failed, a transient refusal
+// retried under a new digest, and a runner naming somebody else's objects on a document nobody validated
+// as platform state.
 //
-// ── READ FROM THE CARRIED REF, NOT DUG OUT OF THE RECEIPT (arch-review 65 P1-high) ─────────────────
-//
-// This read `result.verifier.work.verifier.agentResultDigest`, which exists only on a case that settled WITH
-// a complete verifier receipt. Three endings therefore could not clean up after themselves: a verifier that
-// errored, a merge the workspace check refused, and a capacity refusal retried under a new agent execution.
-// The intermediates are written before any of those are decided, so the coordinate cannot live in the
-// document that happens to succeed.
-//
-// `intermediates` is stamped by the pass that wrote them. The receipt remains the FALLBACK for results
-// produced before this field existed — one more place absence means "an older writer", not "nothing staged".
-export function stagedIntermediatesOf(result: CaseResult): CaseResult["intermediates"] {
-  if (result.intermediates !== undefined) return result.intermediates;
-  const digest = result.verifier?.work?.verifier?.agentResultDigest;
-  if (digest === undefined) return undefined;
-  const verifierAttemptId = result.verifier?.work?.attemptId;
-  return { agentResultDigest: digest, ...(verifierAttemptId !== undefined ? { verifierAttemptId } : {}) };
-}
+// `discardAgentHalf` stays: it is the one-key primitive the discharge and the tests both spend.
 
 export async function stageAgentHalf(
   store: AgentHalfStore | undefined,
   tenant: string,
   runId: string,
   result: CaseResult,
+  // ── AND THE DEBT, RECORDED BEFORE THE BYTES (arch-review 66 P1-high) ──────────────────────────────
+  //
+  // The cleanup coordinate used to ride the CaseResult, which made it visible to a runner and made the
+  // recovered document differ from the normal one. It is a ledger row now, written first: an object whose
+  // removal nothing owns is exactly the leak this staging created.
+  cleanup?: IntermediateCleanupStore,
 ): Promise<void> {
   if (!store) return;
   // The SAME digest the verifier will carry, over the SAME document, by the same function.
-  const key = agentHalfKey(tenant, runId, agentHalfDigest(result));
+  const digest = agentHalfDigest(result);
+  const key = agentHalfKey(tenant, runId, digest);
+  // Owed FIRST. A debt recorded for bytes that then failed to write costs one wasted delete attempt; bytes
+  // written with no debt recorded are a leak forever, and only one of those is recoverable.
+  await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });
   await store
-    .put(key, new TextEncoder().encode(JSON.stringify(result)), "application/json")
+    .put(key, new TextEncoder().encode(JSON.stringify(result)), "application/json", { immutable: true })
     .then(() => undefined)
     // Swallowed HERE and nowhere else: this is the one call whose failure genuinely costs nothing the case
     // needs, and the comment above says what it does cost. Every other read in this file answers three ways.
@@ -219,13 +202,18 @@ export async function stageVerifierVerdict(
     agentResultDigest?: string;
     verifierAttemptId: string;
     invocation: VerifierInvocation;
+    cleanup?: IntermediateCleanupStore;
   },
 ): Promise<void> {
   // No store, or a job that never staged an agent half to be about: nothing to key this verdict by, and a
   // key invented here would address bytes no recovery can find.
   if (!store || at.agentResultDigest === undefined) return;
   const key = verifierVerdictKey(at.tenant, at.runId, at.agentResultDigest, at.verifierAttemptId);
-  await store.put(key, new TextEncoder().encode(JSON.stringify(at.invocation)), "application/json");
+  // …and its debt, for the same reason and before the same write (arch-review 66 P1-high).
+  await at.cleanup?.owe({ tenant: at.tenant, executionId: storedExecutionId(at.runId), refs: [{ key }] });
+  await store.put(key, new TextEncoder().encode(JSON.stringify(at.invocation)), "application/json", {
+    immutable: true,
+  });
 }
 
 // Three answers, for the reason `readAgentHalf` has three: a verdict that was never staged is the ordinary
@@ -290,7 +278,25 @@ export async function readAgentHalf(
     // Parsed through the CONTRACT, not cast: these bytes crossed a process boundary and a restart, and a
     // shape that no longer validates is a stage this version cannot honour — which is `unknown`, because
     // something IS there and we could not use it.
-    return { kind: "read", result: CaseResultSchema.parse(JSON.parse(new TextDecoder().decode(bytes))) };
+    const result = CaseResultSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+    // ── AND THE BYTES ARE RE-DERIVED AGAINST THE ADDRESS (arch-review 66 P1-provenance) ─────────────
+    //
+    // The key CONTAINS the result digest, which reads like content addressing and is not: nothing hashed
+    // what came back. The S3 adapter writes with a plain `PutObject` — no conditional create, no stored
+    // digest, same key overwrites — so any schema-valid `CaseResult` sitting at that address was merged as
+    // though it were the one the digest names. A verdict would then be attached to a document with the same
+    // workspace snapshot but a different trace, different scores and different runtime provenance, and the
+    // `workspaceDigest` check downstream would pass because the trees really were the same.
+    //
+    // A digest in a key is a naming convention until somebody re-derives it. `unknown`, never `absent`:
+    // something IS there and we could not trust it.
+    const actual = agentHalfDigest(result);
+    if (actual !== agentResultDigest)
+      return {
+        kind: "unknown",
+        reason: `the bytes staged at this coordinate hash to ${actual}, not the ${agentResultDigest} its key names`,
+      };
+    return { kind: "read", result };
   } catch (err) {
     return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
   }
@@ -367,16 +373,40 @@ export async function recoverStagedVerdict(
   // third answer this whole file exists to keep (rule `protocol` L2). Reading it as "nothing staged" would
   // re-drive a case whose verdict is sitting right there under a coordinate we mistrust.
   const v = staged.invocation;
+  // ── ABSENT IS NOT "MATCHES" (arch-review 66 P1-provenance) ────────────────────────────────────────
+  //
+  // Every clause here was "present AND different → refuse", which accepts a document that simply OMITS the
+  // field — the easiest thing for a wrong or forged artifact to do, and `VerifierInvocationSchema` makes
+  // `work` and `agentAttemptId` optional so omitting them parses cleanly. A staged verdict with no `work` at
+  // all matched any handle, merged, and rode into the case with `complete: false` — a label, while its
+  // scores decided the verdict anyway.
+  //
+  // A DURABLE artifact carries its full coordinate or it is not usable. This is stricter than the live
+  // adoption path deliberately: a live object is one the lane just answered from, and these bytes crossed an
+  // object store nothing authenticates.
+  const stagedWork = v.work;
+  // ── ABSENT IS NOT "MATCHES" (arch-review 66 P1-provenance) ────────────────────────────────────────
+  //
+  // Every clause used to read "present AND different → refuse", which ACCEPTS a document that simply omits
+  // the field — and `VerifierInvocationSchema` makes `work` and `agentAttemptId` optional, so omitting them
+  // parses cleanly. A staged verdict with no `work` at all therefore matched any handle, merged, and rode
+  // into the case with `complete: false` — a label, while its scores decided the verdict.
+  //
+  // Written as a straight comparison instead: an absent coordinate is unequal to the one we hold, so it
+  // refuses by the same clause that catches a wrong one. Stricter than the LIVE adoption path deliberately —
+  // a live object is one the lane just answered from, and these bytes crossed a store nothing authenticates.
   const mismatch =
-    (v.work?.attemptId !== undefined && v.work.attemptId !== verifierAttemptId) ||
-    (v.work?.externalJobId !== undefined && v.work.externalJobId !== work.externalJobId) ||
+    stagedWork?.attemptId !== verifierAttemptId ||
+    stagedWork.externalJobId !== work.externalJobId ||
+    v.planDigest === undefined ||
+    v.workspaceDigest === undefined ||
     (work.verifier?.planDigest !== undefined && v.planDigest !== work.verifier.planDigest) ||
     (work.verifier?.workspaceDigest !== undefined && v.workspaceDigest !== work.verifier.workspaceDigest) ||
     (work.verifier?.agentAttemptId !== undefined && v.agentAttemptId !== work.verifier.agentAttemptId);
   if (mismatch)
     return {
       kind: "unknown",
-      reason: `the staged verdict at this coordinate describes a different execution than the handle recovering it (attempt ${v.work?.attemptId ?? "absent"} vs ${verifierAttemptId})`,
+      reason: `the staged verdict at this coordinate does not name the execution this handle is recovering (attempt ${stagedWork?.attemptId ?? "absent"} vs ${verifierAttemptId})`,
     };
   return await recoverVerifiedCase(store, tenant, runId, work, v);
 }
@@ -431,5 +461,32 @@ export function mergeVerifierPass(result: CaseResult, invocation: VerifierInvoca
       "this verdict was produced against a different workspace than the agent half it would be merged into.",
     );
   const receipt: VerifierReceipt = verifierReceiptOf(invocation);
-  return { ...result, scores: [...(result.scores ?? []), ...receipt.scores], verifier: receipt };
+  // ── AN INCOMPLETE RECEIPT DOES NOT DECIDE THE CASE (arch-review 66 P1-provenance) ────────────────
+  //
+  // `complete: false` means the receipt cannot say which container produced this verdict, against which
+  // workspace, under which resolved image — and the scores rode into the case ANYWAY. The evidence
+  // projection marked the case `judgment: partial`, which is a label on a decision that had already been
+  // made: `tests_pass` is a RESERVED authority metric, so an unattributable verdict was still deciding
+  // whether the case passed.
+  //
+  // That is the annotation failure this whole file is a history of, one level up. The policy is stated here
+  // rather than implied, and it is fail-CLOSED: the scores are recorded `unmeasured` with the receipt
+  // attached, so the case reads as "this was not judged" — which is true — instead of as a pass or a fail
+  // nobody can attribute. A number the platform cannot vouch for must not reach a mean, a gate or a diff.
+  const usable = receipt.complete === true;
+  const scores = usable
+    ? receipt.scores
+    : receipt.scores.map(
+        (score) =>
+          ({
+            graderId: score.graderId,
+            metric: score.metric,
+            status: "unmeasured",
+            reason: "contract_violation",
+            retryable: false,
+            detail:
+              "this verdict's receipt could not name the execution that produced it, so its score is not attributable",
+          }) as Score,
+      );
+  return { ...result, scores: [...(result.scores ?? []), ...scores], verifier: receipt };
 }

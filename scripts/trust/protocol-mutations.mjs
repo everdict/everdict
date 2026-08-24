@@ -1890,6 +1890,150 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/ports/mutation-serialization.counterexample.test.ts"],
   },
+  {
+    // arch-review 66 P0-lifecycle. Both managed lanes reclaim their container in a `finally`, and the verdict
+    // reached its durable owner only from the RETURN value — so the object was always gone before anything
+    // held the bytes. Disabling the acknowledgement puts the stage back after the reclaim.
+    name: "verdict handover — the verdict becomes durable only after its container is gone",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "      acknowledge: async (raw) => {",
+    to: "      acknowledgeDisabled: async (raw) => {",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/verdict-acknowledged-before-reclaim.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 66 P1-provenance ①. The key CONTAINS the digest and nothing re-derived it, so any
+    // schema-valid CaseResult sitting at that address merged as the half the digest names.
+    name: "artifact authenticity — the staged bytes are never hashed against their key",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "    if (actual !== agentResultDigest)",
+    to: "    if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/artifact-authenticity.counterexample.test.ts"],
+  },
+  {
+    // ② "present AND different → refuse" accepts omission, and `work` is optional on the schema — so the
+    // cheapest forgery is a verdict that satisfies every offered comparison and declines to say where it ran.
+    name: "artifact authenticity — an absent coordinate reads as a matching one",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "    stagedWork?.attemptId !== verifierAttemptId ||\n    stagedWork.externalJobId !== work.externalJobId ||\n    v.planDigest === undefined ||\n    v.workspaceDigest === undefined ||",
+    to: "    (stagedWork?.attemptId !== undefined && stagedWork.attemptId !== verifierAttemptId) ||\n    (stagedWork?.externalJobId !== undefined && stagedWork.externalJobId !== work.externalJobId) ||",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/artifact-authenticity.counterexample.test.ts"],
+  },
+  {
+    // ③ `complete: false` was a LABEL: the scores rode into the case anyway, and `tests_pass` is a reserved
+    // authority metric — so a verdict nobody could attribute decided whether the case passed.
+    name: "artifact authenticity — an incomplete receipt still decides the case",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  const usable = receipt.complete === true;",
+    to: "  const usable = true;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/artifact-authenticity.counterexample.test.ts"],
+  },
+  {
+    // arch-review 66 P1-adapter. Retrying a generation collision exactly once made a THIRD concurrent opener
+    // of one execution a store fault — an ordinary race (tail speculation + spillover + retry) failing a
+    // dispatch that had nothing wrong with it.
+    name: "attempt mint — a third collision is treated as a store fault",
+    file: "packages/db/src/results/pg-execution-attempt-store.ts",
+    from: "const OPEN_COLLISION_RETRIES = 8;",
+    to: "const OPEN_COLLISION_RETRIES = 2;",
+    build: "@everdict/db",
+    suite: ["--root", "packages/db", "src/results/attempt-mint-convergence.counterexample.test.ts"],
+  },
+  {
+    // arch-review 66 P1-security. `CaseResult` is what a self-hosted runner submits, so a field naming objects
+    // for deletion is a deletion a workspace can request. Putting it back re-opens that door.
+    name: "execution boundary — the measurement document carries a cleanup instruction",
+    file: "packages/contracts/src/execution/eval-case.ts",
+    from: "  judgmentsSealed: z.boolean().optional(),",
+    to: "  intermediates: z.object({ agentResultDigest: z.string(), verifierAttemptId: z.string().optional() }).optional(),\n  judgmentsSealed: z.boolean().optional(),",
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/contracts", "src/execution/execution-boundary.counterexample.test.ts"],
+  },
+  {
+    // arch-review 66 P1-high. The staging recorded no debt, so an ending with no receipt left its bytes owed
+    // to nobody — the leak arch-review 65 fixed on the document and 66 moved to a ledger.
+    name: "intermediate debt — the staging writes bytes nothing owes",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });",
+    to: "  void cleanup;",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the other half: a delete that did not converge marked the debt paid anyway, which is the leak one
+    // call inside the ledger that was built to stop it.
+    name: "intermediate debt — a failed delete discharges the debt anyway",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: "  if (failures.length > 0) {",
+    to: "  if (false) {",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 66 P1-high · P1-security. Platform cleanup state back on the measurement document: the
+    // normal and recovered documents diverge (both digests), and a self-hosted runner can name objects for
+    // deletion through `submit_job_result`.
+    name: "result parity — the normal path stamps cleanup state onto the case document",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: "    return mergeVerifierPass(result, invocation as VerifierInvocation);",
+    to: "    return {\n      ...mergeVerifierPass(result, invocation as VerifierInvocation),\n      intermediates: { agentResultDigest: stagedDigest },\n    } as CaseResult;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/normal-vs-restart-parity.counterexample.test.ts"],
+  },
+  {
+    // arch-review 66 P1-lifecycle. `.catch(() => undefined)` made a commit whose RESPONSE was lost
+    // indistinguishable from one that never happened, and the planner re-dispatched the case — duplicate
+    // compute for a case that had already settled.
+    name: "ambiguous commit — a lost response is read as a case that never committed",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: '            if (adoption.kind === "unknown") {',
+    to: '            if (adoption.kind === "unknown" && false) {',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/scorecard/ambiguous-commit.counterexample.test.ts"],
+  },
+  {
+    // arch-review 66 P0-protocol, in-memory twin. The same guard the SQL carries — comparing the parent's
+    // current epoch against the epoch the attempt was OPENED under, which a recovery's own claim has raised.
+    name: "recovery adoption — the in-memory guard compares the opening epoch",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "      if (authority.epoch !== at.parent.adoptingEpoch)",
+    to: "      if (authority.epoch !== current.driverEpoch)",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/scorecard/settlement-adopts-its-attempts.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 66 P0-protocol. `PARENT_AUTHORIZES` matches the parent's CURRENT epoch against the epoch the
+    // attempt was OPENED under — right for a lane still running, backwards for a recovery, whose claim raises
+    // that epoch. Comparing against `driver_epoch` again makes every recovery-adopted attempt unadoptable,
+    // which is the production defect: canonical outcome committed over refused writes.
+    name: "recovery adoption — the guard asks about the opening epoch instead of the adopting one",
+    file: "packages/db/src/results/pg-execution-attempt-store.ts",
+    from: "                AND s.owner_epoch = $3::int",
+    to: "                AND (a.driver_epoch IS NULL OR s.owner_epoch = a.driver_epoch)",
+    build: "@everdict/db",
+    suite: ["--root", "apps/api", "src/trust/recovery-adoption.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
@@ -1923,7 +2067,25 @@ if (dirty !== "") {
 }
 
 let holes = 0;
+let skipped = 0;
 for (const mutation of SELECTED) {
+  // ── A RUNG WHOSE SUITE NEEDS REAL INFRASTRUCTURE (arch-review 66) ───────────────────────────────
+  //
+  // Some protocols live in the ADAPTER — a SQL join, a constraint, a conditional UPDATE's WHERE clause — and
+  // their counterexample is a `*.trust.test.ts` against real Postgres. Running one without a database does
+  // not fail: vitest SKIPS the describe and exits 0, which this runner would read as "the suite stayed green
+  // with the protocol removed" — a HOLE reported for a rung that never ran.
+  //
+  // So the prerequisite is declared and a rung without it is SKIPPED LOUDLY and counted in the summary. That
+  // is not the same as covered, and the summary says so rather than letting the total imply it. The required
+  // `trust fast (real Postgres)` check runs the scenario itself on every push; what is deferred here is the
+  // neutralization, not the assertion.
+  const missing = (mutation.requiresEnv ?? []).filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.log(`○ SKIPPED — ${mutation.name}: needs ${missing.join(", ")}`);
+    skipped += 1;
+    continue;
+  }
   const original = readFileSync(mutation.file, "utf8");
   if (!original.includes(mutation.from)) {
     console.error(`✖ ${mutation.name}: the line to mutate is gone from ${mutation.file}`);
@@ -1934,7 +2096,10 @@ for (const mutation of SELECTED) {
   try {
     writeFileSync(mutation.file, original.replace(mutation.from, mutation.to));
     if (mutation.build) spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
-    const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], { stdio: "ignore" });
+    const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], {
+      stdio: "ignore",
+      env: { ...process.env, ...(mutation.env ?? {}) },
+    });
     if (run.status === 0) {
       console.error(`✖ HOLE — ${mutation.name}: the suite stayed GREEN with the protocol removed.`);
       holes += 1;
@@ -1952,7 +2117,7 @@ if (holes > 0) {
   process.exit(1);
 }
 console.log(
-  `\n✓ every protocol mutation was caught (${SELECTED.length} checked${
-    only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``
-  })`,
+  `\n✓ every protocol mutation was caught (${SELECTED.length - skipped} checked${
+    skipped > 0 ? `, ${skipped} SKIPPED for missing infrastructure — not the same as covered` : ""
+  }${only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``})`,
 );

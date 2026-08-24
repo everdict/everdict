@@ -2,6 +2,7 @@ import { AppError } from "@everdict/contracts";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { verifierPlanOf } from "@everdict/domain";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
 import { jobAttemptId } from "./open-physical-attempt.js";
 
@@ -34,6 +35,9 @@ export interface VerifierPassDeps {
   // this deployment cannot recover a case that crashed between the halves, which is what it could do before;
   // it never changes what a case that completes normally produces.
   agentHalves?: AgentHalfStore;
+  // Where the cleanup debt for those staged bytes is recorded (arch-review 66). Absent = this deployment
+  // keeps the previous behaviour, in which the objects are owed to nobody.
+  cleanup?: IntermediateCleanupStore;
   // ── SO A VERDICT THAT DID NOT CONTRIBUTE CAN SAY SO (arch-review 63 P1-high) ─────────────────────
   //
   // `verifierOperation` stamps the verifier's attempt `committed` the moment the verdict exists, and the
@@ -85,16 +89,19 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
 
   // A verdict this deployment cannot reach is stated, never omitted. An omitted one leaves a CaseResult whose
   // scores are the observation-only ones, which reads downstream as "graded, and it scored nothing".
-  // ── EVERY ENDING CARRIES WHAT THIS PASS STAGED (arch-review 65 P1-high) ──────────────────────────
+  // ── EVERY ENDING ALREADY OWES WHAT THIS PASS STAGED (arch-review 65 P1-high → 66) ────────────────
   //
-  // `owed` is how a case ends when the verifier could not be reached, errored, or produced a verdict the
-  // merge refused — and none of those documents has a verifier receipt, which is where the GC coordinate
-  // used to be read from. So the agent half (and, on the refused-merge path, the staged verdict) had no
-  // ending that could address them. Stamped on the outcome instead of derived from it.
-  let staged: CaseResult["intermediates"];
+  // arch-review 65 stamped the cleanup coordinate onto every outcome here, because `owed` — the verifier
+  // could not be reached, errored, or produced a verdict the merge refused — carries no verifier receipt to
+  // dig it out of. Right problem, wrong document: `CaseResult` is the measurement, and platform lifecycle
+  // state on it made the recovered document differ from the normal one and handed a runner the ability to
+  // name objects for deletion.
+  //
+  // The debt is recorded by `stageAgentHalf`/`stageVerifierVerdict` themselves now, keyed by execution, so
+  // EVERY ending owes it without carrying anything — including the `RATE_LIMITED` rethrow below, which
+  // returns no document at all and could never have carried a stamp.
   const owed = (reason: "unsupported" | "missing_evidence" | "grader_error", detail: string): CaseResult => ({
     ...result,
-    ...(staged !== undefined ? { intermediates: staged } : {}),
     scores: [...(result.scores ?? []), unmeasuredVerdict(reason, detail)],
   });
 
@@ -164,9 +171,7 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // the earlier placement wrote a half for every case with a verifier PLAN, including the ones refused two
   // lines later for having no repo snapshot or no lane to judge on — halves for a verifier that was never
   // dispatched, and therefore garbage the moment they were written.
-  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
-  // …and from here the case OWES this object, whatever it ends as.
-  staged = { agentResultDigest: stagedDigest };
+  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {
@@ -201,11 +206,8 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // …and the merge itself is ONE function, shared with the recovery (rule `protocol` L5). Two spellings of
   // "combine these halves" would make a case recovered after a crash a different document from one that
   // finished normally, and both are `CaseResult`s, so the difference would be invisible.
-  const verifierAttempt = (invocation as VerifierInvocation).work?.attemptId;
-  if (verifierAttempt !== undefined) staged = { agentResultDigest: stagedDigest, verifierAttemptId: verifierAttempt };
   try {
-    const merged = mergeVerifierPass(result, invocation as VerifierInvocation);
-    return staged !== undefined ? { ...merged, intermediates: staged } : merged;
+    return mergeVerifierPass(result, invocation as VerifierInvocation);
   } catch (err) {
     // The verdict exists and was NOT used, so the row that claims it contributed is corrected here rather
     // than left to read as the case's answer. Best-effort: a ledger that will not take the correction must

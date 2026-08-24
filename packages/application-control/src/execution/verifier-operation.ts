@@ -50,7 +50,29 @@ export interface VerifierOperationDeps {
 // capability rather than a lookalike pair of hooks — see `ManagedDispatchAuthority` for what being two
 // optional fields cost the agent lane (arch-review 58 W2). Required here, not optional: a verifier dispatch
 // that cannot record where its container will be must not get one.
-export type VerifierDispatchHooks = { authority: ManagedDispatchAuthority };
+export type VerifierDispatchHooks = {
+  authority: ManagedDispatchAuthority;
+  // ── HAND THE VERDICT OVER BEFORE RECLAIMING WHAT PRODUCED IT (arch-review 66 P0-lifecycle) ────────
+  //
+  // Every managed lane reads its container's logs, builds the invocation, and reclaims the object in a
+  // `finally` — and only THEN does the returned value reach this operation, which canonicalizes and stages
+  // it. So the ordinary shape of a crash here was:
+  //
+  //     verifier logs parsed → verifier Job deleted → ✗ → the verdict is gone
+  //
+  // A constitutional decision that had already been computed and paid for was tied to the lifetime of the
+  // process holding it, with the container that could have re-produced it already destroyed.
+  //
+  // The lane calls this INSIDE its try, before its cleanup runs. What it hands over is the raw answer; what
+  // comes back is the canonical document — the same one this operation returns — so the lane can keep it
+  // and the two can never be different documents again (arch-review 65 P0, one layer up).
+  //
+  // A lane that does not call it is the old behaviour and still works: the operation canonicalizes and
+  // stages after the fact, and says so on the invocation it returns. Not optional because a deployment
+  // legitimately lacks it — optional because two lanes had to learn it, and the one that has not yet must
+  // not silently claim the property.
+  acknowledge?: (invocation: VerifierInvocation) => Promise<VerifierInvocation>;
+};
 
 export async function verifierOperation(
   deps: VerifierOperationDeps,
@@ -113,9 +135,42 @@ export async function verifierOperation(
   // whatever the lane answered, so the receipt's coordinate comes from the write that made it durable rather
   // than from a lane that may not know its own id yet (rule `protocol` L3 — born at the source).
   let persistedWork: RuntimeWorkRef | undefined;
+  // What the lane handed over before it reclaimed, if it did.
+  let acknowledged: VerifierInvocation | undefined;
+
+  // The canonical document: the lane's answer joined to the coordinates only the ledger has. Written once
+  // and spent by both the acknowledgement and the fallback, because two spellings of "the canonical
+  // invocation" is exactly the divergence arch-review 65 closed.
+  const canonicalize = (invocation: VerifierInvocation): VerifierInvocation => ({
+    ...invocation,
+    work: persistedWork,
+    // The judged execution, from the job that named it — so the receipt this becomes carries both halves'
+    // attempts rather than only the one that produced the verdict.
+    ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),
+  });
 
   try {
     const invocation = await dispatch(job, {
+      // Called by the lane before its cleanup. Everything the fallback does, done EARLIER — canonicalize,
+      // then make durable — so a crash after the container is gone still has the verdict.
+      acknowledge: async (raw) => {
+        if (persistedWork === undefined)
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { attemptId },
+            "this verifier acknowledged a verdict before reserving a handle, so nothing can say which container made it",
+          );
+        const canonical = canonicalize(raw);
+        await stageVerifierVerdict(deps.verdicts, {
+          tenant: job.tenant,
+          runId: job.runId,
+          agentResultDigest: job.agentResultDigest,
+          verifierAttemptId: attemptId,
+          invocation: canonical,
+        }).catch(() => undefined);
+        acknowledged = canonical;
+        return canonical;
+      },
       authority: {
         // …and WHICH PROTOCOL reads this work's answer, stamped where the handle becomes durable. A verifier
         // prints a different document than a case, and adoption had no way to know which one a handle names —
@@ -160,13 +215,9 @@ export async function verifierOperation(
         { attemptId, reserved: persistedWork.externalJobId, reported: invocation.work.externalJobId },
         "this verifier reported a different container than the one it reserved, so its verdict cannot be attributed",
       );
-    const canonical: VerifierInvocation = {
-      ...invocation,
-      work: persistedWork,
-      // The judged execution, from the job that named it — so the receipt this becomes carries both halves'
-      // attempts rather than only the one that produced the verdict.
-      ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),
-    };
+    // Already canonicalized and staged by the lane's own acknowledgement, before it reclaimed the container.
+    // Re-derived here only when the lane did not ask (see `acknowledge`).
+    const canonical: VerifierInvocation = acknowledged ?? canonicalize(invocation);
 
     // ── THE DOCUMENT THAT BECOMES DURABLE IS THE DOCUMENT THAT IS RETURNED (arch-review 65 P0) ──────
     //
@@ -185,13 +236,16 @@ export async function verifierOperation(
     // over a storage hiccup would trade a real measurement for a property only a crash would have needed.
     // Caught HERE rather than swallowed inside the stage, so the trade is made where it is visible — and
     // `verdict_produced` does not claim durability, so nothing downstream is misled by the loss.
-    await stageVerifierVerdict(deps.verdicts, {
-      tenant: job.tenant,
-      runId: job.runId,
-      agentResultDigest: job.agentResultDigest,
-      verifierAttemptId: attemptId,
-      invocation: canonical,
-    }).catch(() => undefined);
+    // …and staged, unless the lane already did it before reclaiming. A lane that acknowledged has made this
+    // durable at the earlier, correct moment; one that did not gets the late stage it always had.
+    if (acknowledged === undefined)
+      await stageVerifierVerdict(deps.verdicts, {
+        tenant: job.tenant,
+        runId: job.runId,
+        agentResultDigest: job.agentResultDigest,
+        verifierAttemptId: attemptId,
+        invocation: canonical,
+      }).catch(() => undefined);
     // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
     //
     // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and

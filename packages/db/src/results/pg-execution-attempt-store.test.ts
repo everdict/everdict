@@ -73,9 +73,15 @@ describe("PgExecutionAttemptStore", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("open surfaces a SECOND collision as a fault instead of looping", async () => {
-    // A second collision is not a race any more — quietly retrying forever would turn a store fault into an
-    // unbounded one.
+  it("open surfaces ENDLESS collisions as a fault instead of looping", async () => {
+    // ⚠️ THIS ASSERTION MOVED, AND THE DESIGN IS WHY (arch-review 66 P1-adapter). It used to say a SECOND
+    // collision is a fault — "not a race any more" — and that sentence is only true for two concurrent
+    // openers. Three is ordinary here: tail speculation, a spillover duplicate and a retry can open one
+    // execution together, and the third one's second collision was a real race being reported as a store
+    // fault, failing a dispatch with nothing wrong with it.
+    //
+    // The bound is what survived, because the original worry was right: an unbounded loop turns a broken
+    // sequence into a hang. `attempt-mint-convergence.counterexample.test.ts` pins the convergence side.
     const { client } = fakeClient(() => {
       const err: Error & { code?: string } = new Error("duplicate key");
       err.code = "23505";
@@ -83,7 +89,7 @@ describe("PgExecutionAttemptStore", () => {
     });
     await expect(
       new PgExecutionAttemptStore(client).open({ executionId: runExecutionId("1"), tenant: "acme" }),
-    ).rejects.toThrow("duplicate key");
+    ).rejects.toThrow("no longer an ordinary race");
   });
 
   it("open REFUSES to invent an ordinal when the insert came back empty", async () => {

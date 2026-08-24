@@ -59,10 +59,37 @@ export class S3ArtifactStore implements ArtifactStore {
   // The returned ref is a SERVER-side handle: signed for the in-network endpoint, because that is who re-reads it
   // (a judge resolving evidence, the analysis download). What a browser gets is minted at read time by publicUrlFor —
   // handing the persisted ref to a page would ship an unresolvable host and an hour-old signature.
-  async put(key: string, data: Uint8Array, contentType: string): Promise<string> {
-    await this.client.send(
-      new PutObjectCommand({ Bucket: this.opts.bucket, Key: key, Body: data, ContentType: contentType }),
-    );
+  //
+  // ── AN OBJECT WHOSE KEY ENCODES ITS CONTENT IS WRITTEN ONCE (arch-review 66 P1-provenance) ─────────
+  //
+  // The two-phase case's intermediates are addressed by a digest of their own bytes (`agentHalfKey`), which
+  // reads like content addressing and was not: a plain `PutObject` overwrites, so a second writer at that
+  // key replaced the document the digest names. The recovery re-derives the digest on the way in now, which
+  // is the half that MUST be there — this is the other half, refusing the overwrite at the source.
+  //
+  // `IfNoneMatch: "*"` is the S3 conditional create (and MinIO implements it). A key that already holds
+  // bytes answers 412, and for a content-addressed object that is the IDEMPOTENT case rather than an error:
+  // the same digest means the same bytes, so the write is already done. Any other failure propagates.
+  //
+  // Applied only when the caller declares the object immutable, because this store also holds run media that
+  // is legitimately re-uploaded (a refreshed snapshot ref, a re-rendered analysis artifact).
+  async put(key: string, data: Uint8Array, contentType: string, opts?: { immutable?: boolean }): Promise<string> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.opts.bucket,
+          Key: key,
+          Body: data,
+          ContentType: contentType,
+          ...(opts?.immutable === true ? { IfNoneMatch: "*" } : {}),
+        }),
+      );
+    } catch (err) {
+      // The key is already occupied. For a content-addressed write that is convergence, not a conflict —
+      // and for anything else this branch is not reachable, because the condition was not sent.
+      const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (opts?.immutable !== true || status !== 412) throw err;
+    }
     return await this.signedUrl(this.client, key);
   }
 

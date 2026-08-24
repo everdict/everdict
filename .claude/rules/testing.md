@@ -44,6 +44,15 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   the correction was a no-op in every real dispatch while its test passed (arch-review 64). Where the root is
   too large to construct, assert the CONSTRUCTOR SIGNATURE carries the dependency — a fixture cannot pass what
   production cannot.
+- **A guard the in-memory twin does not have is a guard no unit test can see.** `PARENT_AUTHORIZES` is a SQL
+  join; the in-memory attempt store has no parent table, so every counterexample for recovery adoption passed
+  while the production store refused every one of those writes (arch-review 66 P0). When a protocol's decision
+  lives in the ADAPTER — a join, a constraint, a conditional UPDATE's WHERE clause — its counterexample is a
+  `*.trust.test.ts` against real Postgres, and the in-memory test proves only the shape.
+- **A parity test compares the two PRODUCTION entry points.** The durability file compared
+  `recoverStagedVerdict` against `recoverVerifiedCase` — two helpers, both missing what the real normal path
+  (`withVerifierPass`) adds — so a field present on one path and absent on the other stayed green. Parity is
+  asserted between what production actually runs, not between two functions that happen to be nearby.
 - **A fixture whose ids all match is not the production shape.** A scorecard child's `id` is a random row id
   and its `executionId` is a different string; a test that sets them equal cannot see a lookup using the
   wrong one, which is how a recovery that finds no handles at all stayed green (arch-review 63 P0).
