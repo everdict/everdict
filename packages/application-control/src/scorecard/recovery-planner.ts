@@ -2,7 +2,7 @@ import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef 
 import { UpstreamError, readOrUnknown, storedExecutionId } from "@everdict/contracts";
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
-import { recoverStagedVerdict, recoverVerifiedCase } from "../execution/agent-half.js";
+import { type ContributingAttempts, recoverStagedVerdict, recoverVerifiedCase } from "../execution/agent-half.js";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { settleRun } from "../ports/settle.js";
@@ -173,7 +173,13 @@ export class RecoveryPlanner {
           // the adoption, and the attempt row still reading `reserved`/`active`/`executing` for compute that
           // is gone. `CaseReceiptStore.commitCase` has taken a transaction-bound ledger since arch-review 40
           // precisely so those are one decision.
-          let adoptedFrom: RuntimeWorkRef | undefined;
+          // ── WHICH ATTEMPTS CONTRIBUTED, NAMED (arch-review 65 P0-verifier) ────────────────────
+          //
+          // One `RuntimeWorkRef` for two physical executions, and on the verifier branches it was the
+          // VERIFIER's — so `receipt.attemptId` could name the judging container. That field is what a
+          // trajectory read resolves an evidence plane against, so a recovered case could serve the
+          // verifier's output as the case's evidence.
+          let contributing: ContributingAttempts = {};
           let unestablished: string | undefined;
           for (const work of handles) {
             const decision = await this.deps.adoptWork?.call(this.deps, tenant, c.runtime ?? input.runtime, work).catch(
@@ -195,7 +201,7 @@ export class RecoveryPlanner {
             // case to the re-drive, which is the honest answer when the agent's evidence is gone.
             if (decision?.kind === "adopted" && decision.adopted.stage === "case") {
               adoptable = decision.adopted.result;
-              adoptedFrom = work;
+              contributing = { ...contributing, ...(work.attemptId !== undefined ? { agent: work.attemptId } : {}) };
               break;
             }
             // ── …AND A COMPLETED VERIFIER IS FINISHED, NOT THROWN AWAY (arch-review 62 P1) ───────────
@@ -229,7 +235,7 @@ export class RecoveryPlanner {
                 adoptable = recovered.result;
                 // The VERIFIER's handle: this document is the merge of two halves, and the row this
                 // settlement can name is the one that produced the verdict it adopted.
-                adoptedFrom = work;
+                contributing = { ...contributing, ...recovered.attempts };
                 break;
               }
               // `absent` — nothing staged, so the agent's evidence is genuinely gone and the case re-drives,
@@ -259,7 +265,7 @@ export class RecoveryPlanner {
               }
               if (staged.kind === "merged") {
                 adoptable = staged.result;
-                adoptedFrom = work;
+                contributing = { ...contributing, ...staged.attempts };
                 break;
               }
             }
@@ -377,7 +383,9 @@ export class RecoveryPlanner {
                       // WHICH attempt this batch counted — the one the handle above came from. The planner
                       // knew it and did not write it down, so the receipt could not join to the physical row
                       // and the parity check read every recovered case as a disagreement.
-                      ...(adoptedFrom?.attemptId !== undefined ? { attemptId: adoptedFrom.attemptId } : {}),
+                      // The EXECUTION attempt — the agent's. `attemptId` on a receipt is the coordinate a
+                      // trajectory read resolves against, so the verifier's row may never stand in for it.
+                      ...(contributing.agent !== undefined ? { attemptId: contributing.agent } : {}),
                       judges: judges,
                       ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
                     }),
@@ -396,11 +404,12 @@ export class RecoveryPlanner {
                       // Two rows, because a two-phase case has two — the one the handle names and, when the
                       // adopted document carries a verdict, the row that produced it.
                       if (settled !== undefined && this.deps.attempts && boundAttempts) {
-                        if (adoptedFrom?.attemptId !== undefined)
-                          await boundAttempts.transition(adoptedFrom.attemptId, "committed", { childRunId: c.id });
+                        if (contributing.agent !== undefined)
+                          await boundAttempts.transition(contributing.agent, "committed", { childRunId: c.id });
                         const verdictAttempt = adoptedResult.verifier?.work?.attemptId;
-                        if (verdictAttempt !== undefined && verdictAttempt !== adoptedFrom?.attemptId)
-                          await boundAttempts.transition(verdictAttempt, "committed");
+                        const verifierAttempt = contributing.verifier ?? verdictAttempt;
+                        if (verifierAttempt !== undefined && verifierAttempt !== contributing.agent)
+                          await boundAttempts.transition(verifierAttempt, "committed");
                       }
                       return settled;
                     },

@@ -181,6 +181,10 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
             workspaceDigest: AGENT_TREE,
             caseId: "c1",
             agentResultDigest: agentHalfDigest(AGENT_HALF),
+            // …and WHICH agent execution this verdict judged (arch-review 65 P0-verifier). Without it the
+            // recovery has only the verifier's own handle, which is how the verifier attempt came to be
+            // recorded as the case's EXECUTION attempt.
+            agentAttemptId: "a-agent",
           },
         },
       ],
@@ -188,7 +192,15 @@ describe("[R60 COUNTEREXAMPLE] a recovered verifier verdict is merged into the s
 
     await recoverStandaloneRun(w, RECORD as never, { ownerReplica: "r1", epoch: 1 } as never);
 
-    expect(closed, "the adopted attempt was left reading as live work").toEqual([["a-verify", "committed"]]);
+    // ── THE EXECUTION ATTEMPT IS THE AGENT'S (arch-review 65 P0-verifier) ────────────────────────
+    //
+    // This asserted `a-verify` — the JUDGING container's row — as the attempt the settlement adopts. That is
+    // the coordinate a receipt's `attemptId` means and the one a trajectory read resolves an evidence plane
+    // against, so a recovered case could serve the verifier's output as the case's evidence. The recovery
+    // carries both contributors now, and the one it hands the settlement is the agent's.
+    expect(closed, "the settlement adopted the JUDGING attempt as the case's execution").toEqual([
+      ["a-agent", "committed"],
+    ]);
   });
 
   it("STAYS OWED when the store cannot say whether a half was staged", async () => {
@@ -321,6 +333,10 @@ describe("[R62-followup COUNTEREXAMPLE] an adopted attempt is stamped only once 
             workspaceDigest: AGENT_TREE,
             caseId: "c1",
             agentResultDigest: agentHalfDigest(AGENT_HALF),
+            // …and WHICH agent execution this verdict judged (arch-review 65 P0-verifier). Without it the
+            // recovery has only the verifier's own handle, which is how the verifier attempt came to be
+            // recorded as the case's EXECUTION attempt.
+            agentAttemptId: "a-agent",
           },
         },
       ],
@@ -360,7 +376,9 @@ describe("[R62-followup COUNTEREXAMPLE] an adopted attempt is stamped only once 
     // The control: a stamp that never fires would satisfy both assertions above and leave every recovered
     // attempt reading as live work — the defect arch-review 61 closed.
     const closed = await recover(() => ({ kind: "resumed" }));
-    expect(closed, "a recovered attempt was left reading as live work").toEqual([["a-verify", "committed"]]);
+    expect(closed, "the settlement adopted the JUDGING attempt as the case's execution").toEqual([
+      ["a-agent", "committed"],
+    ]);
   });
 });
 
@@ -413,6 +431,10 @@ describe("[R63 COUNTEREXAMPLE] a recovered case runs the completion an in-line o
             workspaceDigest: AGENT_TREE,
             caseId: "c1",
             agentResultDigest: agentHalfDigest(AGENT_HALF),
+            // …and WHICH agent execution this verdict judged (arch-review 65 P0-verifier). Without it the
+            // recovery has only the verifier's own handle, which is how the verifier attempt came to be
+            // recorded as the case's EXECUTION attempt.
+            agentAttemptId: "a-agent",
           },
         },
       ],

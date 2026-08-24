@@ -142,11 +142,17 @@ function storeWithSeam(record: RunRecord, opts?: { refuse?: boolean }): RunStore
 const staged = async () => {
   const artifacts = artifactStore();
   await stageAgentHalf(artifacts, "acme", "evd-run-r1", AGENT_HALF);
-  await stageVerifierVerdict(artifacts, "acme", "evd-run-r1", DIGEST, {
-    planDigest: "sha256:plan",
-    workspaceDigest: contentDigest(AGENT_HALF.snapshot),
-    scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
-  } as never);
+  await stageVerifierVerdict(artifacts, {
+    tenant: "acme",
+    runId: "evd-run-r1",
+    agentResultDigest: DIGEST,
+    verifierAttemptId: "a-verify",
+    invocation: {
+      planDigest: "sha256:plan",
+      workspaceDigest: contentDigest(AGENT_HALF.snapshot),
+      scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+    } as never,
+  });
   return artifacts;
 };
 

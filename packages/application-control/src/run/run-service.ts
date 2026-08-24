@@ -66,7 +66,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
-import { type AgentHalfStore, discardIntermediates, stagedHalfDigestOf } from "../execution/agent-half.js";
+import { type AgentHalfStore, discardIntermediates, stagedIntermediatesOf } from "../execution/agent-half.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
@@ -963,14 +963,16 @@ export class RunService {
       // …and the intermediates are owed no longer (arch-review 64 P1-high). This is a SETTLEMENT — the
       // adoption path does not pass through `finalize` — so the window ends here too, and only when the
       // claim landed: a refused fence means the winner still needs the halves.
-      const adoptedDigest = adoption.patch.result !== undefined ? stagedHalfDigestOf(adoption.patch.result) : undefined;
-      if (claimed !== undefined && adoptedDigest !== undefined)
+      const adoptedRefs =
+        adoption.patch.result !== undefined ? stagedIntermediatesOf(adoption.patch.result) : undefined;
+      if (claimed !== undefined && adoptedRefs !== undefined)
         await discardIntermediates(
           this.deps.agentHalves,
           this.deps.verdicts,
           record.tenant,
           runExecutionId(record.id),
-          adoptedDigest,
+          adoptedRefs.agentResultDigest,
+          adoptedRefs.verifierAttemptId,
         );
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
       return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
@@ -1994,7 +1996,7 @@ export class RunService {
     // ordinary path that completes without crashing never discarded anything, so every private-verifier case
     // left a full intermediate `CaseResult` in object storage forever. `recoverVerifiedCase`'s own comment
     // said "the settlement owns the discard"; this is the settlement, and it did not.
-    const stagedDigest = patch.result !== undefined ? stagedHalfDigestOf(patch.result) : undefined;
+    const stagedRefs = patch.result !== undefined ? stagedIntermediatesOf(patch.result) : undefined;
     let settled: RunRecord | undefined;
     let faulted = false;
     try {
@@ -2033,13 +2035,14 @@ export class RunService {
     }
     // …and only a settlement that LANDED ends the window. A refused fence means somebody else owns this run
     // and their settlement will discard; a fault means the run is still open and the halves are still owed.
-    if (settled !== undefined && !faulted && stagedDigest !== undefined)
+    if (settled !== undefined && !faulted && stagedRefs !== undefined)
       await discardIntermediates(
         this.deps.agentHalves,
         this.deps.verdicts,
         settled.tenant,
         runExecutionId(id),
-        stagedDigest,
+        stagedRefs.agentResultDigest,
+        stagedRefs.verifierAttemptId,
       );
     return settled;
   }

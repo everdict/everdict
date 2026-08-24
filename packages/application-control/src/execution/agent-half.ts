@@ -112,16 +112,34 @@ export async function discardIntermediates(
   tenant: string,
   runId: string,
   agentResultDigest: string,
+  // …and WHICH verifier's verdict, since the key names it (arch-review 65 P1). Absent for a case with no
+  // judging half, or one whose receipt cannot name the attempt: the half is still discarded, and a verdict
+  // key guessed without it would address another attempt's bytes.
+  verifierAttemptId?: string,
 ): Promise<void> {
   await discardAgentHalf(store, agentHalfKey(tenant, runId, agentResultDigest));
-  await discardAgentHalf(verdicts, verifierVerdictKey(tenant, runId, agentResultDigest));
+  if (verifierAttemptId !== undefined)
+    await discardAgentHalf(verdicts, verifierVerdictKey(tenant, runId, agentResultDigest, verifierAttemptId));
 }
 
-// WHICH half a settled case was judged from, read off the receipt it settled with. `undefined` for a case
-// with no judging half — there is nothing staged and nothing to discard — and for a receipt whose lane could
-// not name its handle, where guessing a key would delete somebody else's bytes.
-export function stagedHalfDigestOf(result: CaseResult): string | undefined {
-  return result.verifier?.work?.verifier?.agentResultDigest;
+// WHAT this case staged, so a settlement can end the window whatever the case ended as.
+//
+// ── READ FROM THE CARRIED REF, NOT DUG OUT OF THE RECEIPT (arch-review 65 P1-high) ─────────────────
+//
+// This read `result.verifier.work.verifier.agentResultDigest`, which exists only on a case that settled WITH
+// a complete verifier receipt. Three endings therefore could not clean up after themselves: a verifier that
+// errored, a merge the workspace check refused, and a capacity refusal retried under a new agent execution.
+// The intermediates are written before any of those are decided, so the coordinate cannot live in the
+// document that happens to succeed.
+//
+// `intermediates` is stamped by the pass that wrote them. The receipt remains the FALLBACK for results
+// produced before this field existed — one more place absence means "an older writer", not "nothing staged".
+export function stagedIntermediatesOf(result: CaseResult): CaseResult["intermediates"] {
+  if (result.intermediates !== undefined) return result.intermediates;
+  const digest = result.verifier?.work?.verifier?.agentResultDigest;
+  if (digest === undefined) return undefined;
+  const verifierAttemptId = result.verifier?.work?.attemptId;
+  return { agentResultDigest: digest, ...(verifierAttemptId !== undefined ? { verifierAttemptId } : {}) };
 }
 
 export async function stageAgentHalf(
@@ -158,40 +176,56 @@ export async function stageAgentHalf(
 // The attempt row is not verdict storage either: it can say `verdict_produced` while the only copy of the
 // verdict is gone. The row records that a phase happened; these bytes are the phase.
 //
-// Keyed by the same coordinate the agent's half uses — `(tenant, runId, agentResultDigest)` — because that is
-// what a recovery holds when it finds the verifier handle: `work.verifier.agentResultDigest`. One half, one
-// verdict about it, one key (rule `protocol` L4: a settlement references frozen payloads by key).
-export function verifierVerdictKey(tenant: string, runId: string, agentResultDigest: string): string {
-  return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}.json`;
-}
-
-// Best-effort, for the reason `stageAgentHalf` is: a staging failure must not fail a verdict that exists. It
-// costs the RECOVERY, not the run.
+// ── WHAT THE STAGE PROVES, AND WHAT IT REFUSES TO PRETEND (arch-review 65 P0-lifecycle) ────────────
 //
-// ⚠️ WHAT THIS DOES NOT CLOSE, stated rather than implied. Both lanes reclaim the verifier's object inside
-// their own dispatch — the Nomad one inside the shared `dispatch` it delegates to — so this write happens
-// just AFTER the container is gone rather than just before. It closes the window that spans the deferred
-// collection, the registered judges, the evidence assembly and the settlement, which is the window measured
-// in seconds; it leaves the one between the lane's reclaim and this call, which is a function return with no
-// I/O in it. Making the lane await a durable verdict before reclaiming needs a hook the Nomad path cannot
-// currently offer, and claiming the stronger property without the mechanism is the failure rule `protocol`
-// names in the time-based-lease law.
-export async function stageVerifierVerdict(
-  store: AgentHalfStore | undefined,
+// This returned `void` and swallowed its own failure, and `verdict_produced` was stamped either way. So the
+// row could assert "recoverable verdict bytes exist" over a deleted container and an empty store. The state's
+// whole meaning is that claim; a write that cannot prove it must not produce it.
+//
+// It no longer SWALLOWS. The `.catch(() => undefined)` made a store outage indistinguishable from a
+// deployment that stages nothing, and the caller could not tell the two apart to say anything true about
+// either. A store that throws now throws; `verifierOperation` decides what that costs, and what it costs is
+// the RECOVERY rather than the verdict — which is the trade this file has always made, stated at the site
+// that makes it instead of hidden here.
+//
+// ⚠️ IT DOES NOT RETURN A REF. The first draft returned `{key, digest}` as a durability proof, and nothing
+// consumed it — `noUnusedLocals` said so in the same wave that added the check. A proof nobody reads is the
+// hypothetical surface rule `api-layer` forbids; if a reader ever needs to know whether a verdict is
+// recoverable, it asks the store, which is where the answer actually lives.
+//
+// ── …AND THE KEY NAMES WHICH VERIFIER PRODUCED IT (arch-review 65 P1) ─────────────────────────────
+//
+// Keyed by `(tenant, runId, agentResultDigest)` alone, two verifier attempts judging the same agent half —
+// a deterministic task, a re-lease, a speculative duplicate — wrote to ONE key, and `put` is not a
+// conditional create. Recovering verifier A could read verifier B's verdict. That is the hazard
+// `agentHalfKey`'s own history is a record of, one document over: a key built from what two attempts SHARE
+// means the later write destroys the earlier.
+//
+// The verifier attempt is the discriminator, and the recovery holds it on the handle it is recovering from.
+export function verifierVerdictKey(
   tenant: string,
   runId: string,
   agentResultDigest: string,
-  invocation: VerifierInvocation,
+  verifierAttemptId: string,
+): string {
+  return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}/${verifierAttemptId}.json`;
+}
+
+export async function stageVerifierVerdict(
+  store: AgentHalfStore | undefined,
+  at: {
+    tenant: string;
+    runId: string;
+    agentResultDigest?: string;
+    verifierAttemptId: string;
+    invocation: VerifierInvocation;
+  },
 ): Promise<void> {
-  if (!store) return;
-  await store
-    .put(
-      verifierVerdictKey(tenant, runId, agentResultDigest),
-      new TextEncoder().encode(JSON.stringify(invocation)),
-      "application/json",
-    )
-    .then(() => undefined)
-    .catch(() => undefined);
+  // No store, or a job that never staged an agent half to be about: nothing to key this verdict by, and a
+  // key invented here would address bytes no recovery can find.
+  if (!store || at.agentResultDigest === undefined) return;
+  const key = verifierVerdictKey(at.tenant, at.runId, at.agentResultDigest, at.verifierAttemptId);
+  await store.put(key, new TextEncoder().encode(JSON.stringify(at.invocation)), "application/json");
 }
 
 // Three answers, for the reason `readAgentHalf` has three: a verdict that was never staged is the ordinary
@@ -206,11 +240,14 @@ export async function readVerifierVerdict(
   tenant: string,
   runId: string,
   agentResultDigest: string,
+  // WHICH verifier's verdict — the attempt on the handle this recovery is recovering from. Without it two
+  // verifier attempts of one agent half read the same key and the later write wins (arch-review 65 P1).
+  verifierAttemptId: string,
 ): Promise<StagedVerdict> {
   if (!store) return { kind: "absent" };
   let bytes: Uint8Array | undefined;
   try {
-    bytes = await store.get(verifierVerdictKey(tenant, runId, agentResultDigest));
+    bytes = await store.get(verifierVerdictKey(tenant, runId, agentResultDigest, verifierAttemptId));
   } catch (err) {
     return { kind: "unknown", reason: err instanceof Error ? err.message : String(err) };
   }
@@ -269,8 +306,32 @@ export async function readAgentHalf(
 //
 // One entry point for "I adopted a verdict; give me the case it completes", so a lane that learns the
 // protocol learns all of it. Three answers, for the reason `readAgentHalf` has three.
+// ── TWO CONTRIBUTORS CANNOT BE ONE COORDINATE (arch-review 65 P0-verifier) ─────────────────────────
+//
+// A private-verifier case is TWO physical executions, and both recovery owners carried one `RuntimeWorkRef`
+// to the settlement — the VERIFIER's, because that is the handle the merge was reached through. That single
+// ref became `service.resume(…, adoptedFrom.attemptId)` and `receipt.attemptId`, so a recovered case could
+// settle with the run `succeeded`, the verifier attempt `committed`, and the AGENT attempt still `executing`.
+//
+// Worse than an untidy row: `CaseCommitReceipt.attemptId` is the coordinate the trajectory reader uses to
+// choose an evidence plane, so a recovered case could point replay at the verifier's plane instead of the
+// agent's — the wrong container's output, presented as the case's evidence.
+//
+// ⚠️ THE COMMENT DEFENDING IT WAS MINE AND IT WAS WRONG: "the agent's was committed before its half was
+// staged". In the standalone lane the agent attempt is stamped BY the run settlement, which happens after
+// this whole pass — so nothing had committed it. The comment-is-a-claim law, in a comment I wrote.
+//
+// Named explicitly, so a settlement cannot spend one where it means the other.
+export interface ContributingAttempts {
+  // The EXECUTION attempt — the agent's. This is what a receipt's `attemptId` means and what a trajectory
+  // read resolves against.
+  agent?: string;
+  // …and the judging half, when there was one.
+  verifier?: string;
+}
+
 export type RecoveredCase =
-  | { kind: "merged"; result: CaseResult }
+  | { kind: "merged"; result: CaseResult; attempts: ContributingAttempts }
   | { kind: "absent" } // nothing staged — an older writer, no artifact store, a staging failure: re-drive
   | { kind: "unknown"; reason: string }; // the store would not say — decide nothing, come back
 
@@ -291,10 +352,33 @@ export async function recoverStagedVerdict(
   work: RuntimeWorkRef,
 ): Promise<RecoveredCase> {
   const digest = work.verifier?.agentResultDigest;
-  if (digest === undefined) return { kind: "absent" };
-  const staged = await readVerifierVerdict(verdicts, tenant, runId, digest);
+  const verifierAttemptId = work.attemptId;
+  if (digest === undefined || verifierAttemptId === undefined) return { kind: "absent" };
+  const staged = await readVerifierVerdict(verdicts, tenant, runId, digest, verifierAttemptId);
   if (staged.kind !== "read") return staged;
-  return await recoverVerifiedCase(store, tenant, runId, work, staged.invocation);
+  // ── THE BYTES ARE CHECKED AGAINST THE HANDLE, NOT TRUSTED (arch-review 65 P0) ──────────────────────
+  //
+  // Live adoption joins the canonical handle onto the invocation and re-presents the coordinates it holds;
+  // the staged path read the object and merged whatever was in it. Two protocols for one question, and only
+  // one of them verified. These bytes crossed a restart and an object store — the key is addressed, not
+  // authenticated — so the handle this recovery is acting on is what they have to agree with.
+  //
+  // A disagreement is `unknown`, never `absent`: something IS there and we could not use it, which is the
+  // third answer this whole file exists to keep (rule `protocol` L2). Reading it as "nothing staged" would
+  // re-drive a case whose verdict is sitting right there under a coordinate we mistrust.
+  const v = staged.invocation;
+  const mismatch =
+    (v.work?.attemptId !== undefined && v.work.attemptId !== verifierAttemptId) ||
+    (v.work?.externalJobId !== undefined && v.work.externalJobId !== work.externalJobId) ||
+    (work.verifier?.planDigest !== undefined && v.planDigest !== work.verifier.planDigest) ||
+    (work.verifier?.workspaceDigest !== undefined && v.workspaceDigest !== work.verifier.workspaceDigest) ||
+    (work.verifier?.agentAttemptId !== undefined && v.agentAttemptId !== work.verifier.agentAttemptId);
+  if (mismatch)
+    return {
+      kind: "unknown",
+      reason: `the staged verdict at this coordinate describes a different execution than the handle recovering it (attempt ${v.work?.attemptId ?? "absent"} vs ${verifierAttemptId})`,
+    };
+  return await recoverVerifiedCase(store, tenant, runId, work, v);
 }
 
 export async function recoverVerifiedCase(
@@ -315,7 +399,17 @@ export async function recoverVerifiedCase(
   // a crash anywhere in there is precisely what the half exists to survive. Discarding here left a window in
   // which the verifier's container, the agent's container AND the staged half were all gone (arch-review 63
   // P0). The settlement owns the discard — see `discardAgentHalf`'s callers.
-  return { kind: "merged", result: mergeVerifierPass(half.result, invocation) };
+  return {
+    kind: "merged",
+    result: mergeVerifierPass(half.result, invocation),
+    // Both halves, from the coordinates this recovery actually holds: the verifier's own handle, and the
+    // agent execution the verdict names as the one it judged.
+    attempts: {
+      ...(work.verifier?.agentAttemptId !== undefined ? { agent: work.verifier.agentAttemptId } : {}),
+      ...(invocation.agentAttemptId !== undefined ? { agent: invocation.agentAttemptId } : {}),
+      ...(work.attemptId !== undefined ? { verifier: work.attemptId } : {}),
+    },
+  };
 }
 
 // ── THE MERGE, ONCE (rule `protocol` L5) ─────────────────────────────────────────────────────────────

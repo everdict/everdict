@@ -133,49 +133,6 @@ export async function verifierOperation(
         activate: async (work) => await attempts.activateWork(attemptId, { ...work, attemptId }),
       },
     });
-    // ── THE BYTES BECOME DURABLE BEFORE THE ROW CLAIMS THEY EXIST (arch-review 64 P0) ──────────────
-    //
-    // Ordered deliberately: stage, then stamp. The row saying `verdict_produced` is a claim that a verdict
-    // exists somewhere a recovery can reach; writing it first would make the ledger promise an artifact that
-    // is not there yet — the same inversion rule `protocol` L1 forbids between a reservation and an effect.
-    //
-    // The coordinate is the one the recovery holds: the digest of the agent half this verdict is about, which
-    // the verifier job carried in and which its handle records.
-    if (job.agentResultDigest !== undefined)
-      await stageVerifierVerdict(deps.verdicts, job.tenant, job.runId, job.agentResultDigest, invocation);
-    // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
-    //
-    // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and
-    // chasing a container that finished is how a cancellation stops converging.
-    //
-    // And the ANSWER is consumed, because `transition` is a conditional write and the one way it says `false`
-    // here is the way that matters — something else made this attempt terminal while the verifier was judging,
-    // which in practice means a cancellation revoked it. A verdict produced under an authority that was taken
-    // back is not a measurement (rule `protocol` L1: the write that records the outcome is where the effect
-    // re-proves its proof is still valid). The throw becomes `tests_pass: unmeasured` upstream, which says the
-    // case was not judged — where a `1` would have said it passed.
-    //
-    // ⚠️ THE STATE THIS WROTE WAS `committed`, AND THAT WAS A DIFFERENT CLAIM. `committed` means "this
-    // attempt's result is the case's answer", and at THIS line three later steps can still withhold it: the
-    // merge can refuse the verdict as being about another workspace, the deferred collection can fail, a
-    // speculative sibling can win the receipt. The correction for the first of those — flipping the row to
-    // `superseded` — was refused by every real store, because `committed` is terminal and first-terminal-wins
-    // (arch-review 64 P1-high).
-    //
-    // `verdict_produced` says what actually happened here: the bytes exist. The canonical settlement writes
-    // `committed`, and from this state `superseded` is a write rather than a request.
-    if (!(await attempts.transition(attemptId, "verdict_produced"))) {
-      const state = await attempts
-        .list(storedExecutionId(job.runId))
-        .then((rows) => rows.find((r) => r.attemptId === attemptId)?.state ?? "absent")
-        // A ledger that cannot say whether the attempt settled has not said that it did (rule `protocol` L2).
-        .catch(() => "unreadable");
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { attemptId, state },
-        `this verifier's attempt could not be settled (it is '${state}'), so the verdict it produced was not made under a live authorization`,
-      );
-    }
     // ── THE CANONICAL HANDLE IS THE ROW'S, NOT THE LANE'S (arch-review 62 P1-provenance) ───────────
     //
     // The previous version preferred `invocation.work` and fell back to the reservation, with a comment
@@ -203,13 +160,88 @@ export async function verifierOperation(
         { attemptId, reserved: persistedWork.externalJobId, reported: invocation.work.externalJobId },
         "this verifier reported a different container than the one it reserved, so its verdict cannot be attributed",
       );
-    return {
+    const canonical: VerifierInvocation = {
       ...invocation,
       work: persistedWork,
       // The judged execution, from the job that named it — so the receipt this becomes carries both halves'
       // attempts rather than only the one that produced the verdict.
       ...(job.agentAttemptId !== undefined ? { agentAttemptId: job.agentAttemptId } : {}),
     };
+
+    // ── THE DOCUMENT THAT BECOMES DURABLE IS THE DOCUMENT THAT IS RETURNED (arch-review 65 P0) ──────
+    //
+    // The stage used to run ABOVE, on the lane's raw answer, while the canonical one was assembled here.
+    // Two different documents: the K8s lane reports `{tenant, runId, externalJobId, namespace}` and the
+    // attempt id, the verifier coordinate and the judged execution are joined from the reservation right
+    // here. `VerifierReceipt.complete` requires exactly those three, so the same verifier execution read
+    // `complete` in-line and `incomplete` after a crash — a difference in the RECORD produced by a
+    // difference in whether this process survived.
+    //
+    // And the stage ran before the two checks above, so a verdict this process REFUSED for naming a
+    // different container than it reserved was left on the stage for a restart to adopt.
+    //
+    // Canonical first, then durable, then the row. Each step is a precondition of the next.
+    // A store fault here costs the RECOVERY, never the verdict: the answer is in hand and refusing the case
+    // over a storage hiccup would trade a real measurement for a property only a crash would have needed.
+    // Caught HERE rather than swallowed inside the stage, so the trade is made where it is visible — and
+    // `verdict_produced` does not claim durability, so nothing downstream is misled by the loss.
+    await stageVerifierVerdict(deps.verdicts, {
+      tenant: job.tenant,
+      runId: job.runId,
+      agentResultDigest: job.agentResultDigest,
+      verifierAttemptId: attemptId,
+      invocation: canonical,
+    }).catch(() => undefined);
+    // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
+    //
+    // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and
+    // chasing a container that finished is how a cancellation stops converging.
+    //
+    // And the ANSWER is consumed, because `transition` is a conditional write and the one way it says `false`
+    // here is the way that matters — something else made this attempt terminal while the verifier was judging,
+    // which in practice means a cancellation revoked it. A verdict produced under an authority that was taken
+    // back is not a measurement (rule `protocol` L1: the write that records the outcome is where the effect
+    // re-proves its proof is still valid). The throw becomes `tests_pass: unmeasured` upstream, which says the
+    // case was not judged — where a `1` would have said it passed.
+    //
+    // ⚠️ THE STATE THIS WROTE WAS `committed`, AND THAT WAS A DIFFERENT CLAIM. `committed` means "this
+    // attempt's result is the case's answer", and at THIS line three later steps can still withhold it: the
+    // merge can refuse the verdict as being about another workspace, the deferred collection can fail, a
+    // speculative sibling can win the receipt. The correction for the first of those — flipping the row to
+    // `superseded` — was refused by every real store, because `committed` is terminal and first-terminal-wins
+    // (arch-review 64 P1-high).
+    //
+    // `verdict_produced` says what actually happened here: the bytes exist. The canonical settlement writes
+    // `committed`, and from this state `superseded` is a write rather than a request.
+    //
+    // ⚠️ AND WHAT IT CLAIMS IS "A VERDICT WAS PRODUCED", NOT "RECOVERABLE BYTES EXIST" (arch-review 65
+    // P0-lifecycle). Those are different facts and the state was documented as the second one, which it could
+    // not prove: the stage swallowed its own failure and was a no-op on a deployment with no artifact store,
+    // while this transition ran either way.
+    //
+    // The first repair attempt gated the transition on `stagedRef`, and that was WRONG in a way worth
+    // recording: this CAS does two jobs. It moves the row off live, AND it re-proves that the authority which
+    // reserved this work has not been revoked — a verdict produced under a cancelled batch is not a
+    // measurement. Gating the whole thing on durability skipped the re-proof on every deployment that stages
+    // nothing, so a revoked attempt's verdict became usable again. The suite said so immediately.
+    //
+    // So the CAS is unconditional and the CLAIM is narrowed to what it can always prove. Durability is not a
+    // state, it is an ARTIFACT: `stagedRef` says whether one exists, recovery asks the store rather than the
+    // row, and `readVerifierVerdict` answering `absent` is the same answer a row could have given — without a
+    // second place for the two to disagree.
+    if (!(await attempts.transition(attemptId, "verdict_produced"))) {
+      const state = await attempts
+        .list(storedExecutionId(job.runId))
+        .then((rows) => rows.find((r) => r.attemptId === attemptId)?.state ?? "absent")
+        // A ledger that cannot say whether the attempt settled has not said that it did (rule `protocol` L2).
+        .catch(() => "unreadable");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { attemptId, state },
+        `this verifier's attempt could not be settled (it is '${state}'), so the verdict it produced was not made under a live authorization`,
+      );
+    }
+    return canonical;
   } catch (err) {
     // …and settled on failure too, for the same reason: an abandoned row is owed forever. The error keeps
     // travelling — `withVerifierPass` turns it into `unmeasured`, which is the honest verdict.

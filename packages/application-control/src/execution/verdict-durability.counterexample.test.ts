@@ -33,6 +33,13 @@ import { verifierOperation } from "./verifier-operation.js";
 //
 // Seen RED before the verdict was staged, observed:
 //   the verdict was gone with its container, so the whole case re-ran: expected 'absent' to be 'merged'
+//
+// …and RED again with the RAW invocation staged instead of the canonical one (arch-review 65 P0), observed:
+//   expected 'unknown' to be 'merged'
+//
+// `unknown` rather than a wrong merge, because the recovery now checks the staged bytes against the handle it
+// is recovering from. A raw document cannot name the attempt the handle names, so it is REFUSED instead of
+// quietly producing a case whose receipt is incomplete.
 
 const RUN = "evd-run-r1";
 
@@ -58,12 +65,19 @@ const JOB: VerifierJob = {
   timeoutSec: 60,
   // WHICH half this verdict is about — the coordinate both the stage and the recovery are keyed by.
   agentResultDigest: agentHalfDigest(AGENT_HALF),
+  // …and WHICH physical agent execution it judged. `VerifierReceipt.complete` requires this alongside the
+  // verifier's own attempt and the protocol coordinate, which is why a staged RAW invocation produced an
+  // incomplete receipt: all three are joined by `verifierOperation` after the lane has answered.
+  agentAttemptId: "evd-run-r1#g1",
 } as unknown as VerifierJob;
 
 const INVOCATION: VerifierInvocation = VerifierInvocationSchema.parse({
   planDigest: "sha256:plan",
   workspaceDigest: contentDigest(AGENT_HALF.snapshot),
   scores: [{ graderId: "reward-file", metric: "tests_pass", value: 1, pass: true }],
+  // What the LANE answers with: the world it observed. A receipt is `complete` only when this is `resolved`
+  // alongside the two attempt ids, which is why the raw-vs-canonical difference is a difference in the record.
+  imageProvenance: { kind: "resolved", images: [{ ref: "verifier:1", digest: "sha256:img" }], by: "orchestrator" },
 });
 
 // The handle a recovery finds on the attempt ledger for the judging half.
@@ -71,11 +85,15 @@ const VERIFIER_HANDLE: RuntimeWorkRef = {
   tenant: "acme",
   runId: RUN,
   externalJobId: "everdict-verify-c1",
+  // WHICH verifier attempt — the key names it since arch-review 65, so two verifier attempts of one agent
+  // half can no longer overwrite each other's verdict.
+  attemptId: "evd-run-r1#g1",
   verifier: {
     planDigest: "sha256:plan",
     workspaceDigest: contentDigest(AGENT_HALF.snapshot),
     caseId: "c1",
     agentResultDigest: agentHalfDigest(AGENT_HALF),
+    agentAttemptId: "evd-run-r1#g1",
   },
 } as unknown as RuntimeWorkRef;
 
@@ -104,7 +122,7 @@ const upToTheCrash = async () => {
   const attempts = new InMemoryExecutionAttemptStore();
   await stageAgentHalf(artifacts, "acme", RUN, AGENT_HALF);
 
-  await verifierOperation({ attempts, verdicts: artifacts }, JOB, async (job, hooks) => {
+  const canonical = await verifierOperation({ attempts, verdicts: artifacts }, JOB, async (job, hooks) => {
     const work = { tenant: job.tenant, runId: job.runId, externalJobId: "everdict-verify-c1" };
     await hooks.authority.reserve(work);
     await hooks.authority.activate(work);
@@ -112,12 +130,12 @@ const upToTheCrash = async () => {
     return INVOCATION;
   });
 
-  return { artifacts, attempts };
+  return { artifacts, attempts, canonical };
 };
 
 describe("[R64 COUNTEREXAMPLE] a verdict outlives the process that produced it", () => {
   it("finishes the case from the two staged halves, with no live object", async () => {
-    const { artifacts } = await upToTheCrash();
+    const { artifacts, canonical } = await upToTheCrash();
 
     // The crash. Nothing survives but the object store — and the verifier's Job is long gone, which is what
     // makes adoption answer `absent` and what used to send the case back for a full re-drive.
@@ -125,15 +143,25 @@ describe("[R64 COUNTEREXAMPLE] a verdict outlives the process that produced it",
 
     expect(recovered.kind, "the verdict was gone with its container, so the whole case re-ran").toBe("merged");
     if (recovered.kind !== "merged") return;
-    // …and it is the SAME document the in-line path would have produced from the same two halves.
-    // …and it is the SAME document the in-line path produces from the same two halves. Compared against the
-    // production merge rather than a field list, so a merge that grows a field cannot pass here by omission.
+    // ── AGAINST THE CANONICAL INVOCATION, NOT THE RAW ONE (arch-review 65 P0) ────────────────────
+    //
+    // The earlier version of this file compared the recovered document against a merge of the RAW invocation
+    // — the same document the stage held — so it was raw-to-raw and could not see the defect it was written
+    // near. The lane's answer carries `{tenant, runId, externalJobId, namespace}` and nothing else; the
+    // attempt id, the verifier coordinate and the judged execution are joined by `verifierOperation` from
+    // the reservation, and `VerifierReceipt.complete` requires exactly those three.
+    //
+    // So the comparison is against what the NORMAL path returns. A staged document missing the canonical
+    // join produces an INCOMPLETE receipt here, which is the whole defect: the same verifier execution read
+    // `complete` in-line and `incomplete` after a crash.
     const inline = store();
     await stageAgentHalf(inline, "acme", RUN, AGENT_HALF);
-    const normal = await recoverVerifiedCase(inline, "acme", RUN, VERIFIER_HANDLE, INVOCATION);
+    const normal = await recoverVerifiedCase(inline, "acme", RUN, VERIFIER_HANDLE, canonical);
     expect(normal.kind).toBe("merged");
     if (normal.kind !== "merged") return;
-    expect(recovered.result).toEqual(normal.result);
+    expect(recovered.result, "a crash changed the RECEIPT, not only the timing").toEqual(normal.result);
+    // …and the receipt the recovered case carries is complete, which is the property the join buys.
+    expect(recovered.result.verifier?.complete, "the recovered receipt could not name its own attempts").toBe(true);
   });
 
   it("says `absent` when nothing was staged — a re-drive, not a guess", async () => {

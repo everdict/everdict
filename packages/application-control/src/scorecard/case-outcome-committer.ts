@@ -21,7 +21,7 @@ import {
   completeJudgeCoverage,
   contentDigest,
 } from "@everdict/domain";
-import { discardIntermediates, stagedHalfDigestOf } from "../execution/agent-half.js";
+import { discardIntermediates, stagedIntermediatesOf } from "../execution/agent-half.js";
 import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
@@ -519,14 +519,15 @@ export class CaseOutcomeCommitter {
       // No `?? ""` on the tenant: a key built from an empty workspace addresses somebody else's prefix, and
       // a silent default for a domain value is exactly what rule `typescript` forbids. A commit with no
       // tenant has no staged intermediates to end — the staging is keyed by one.
-      const stagedDigest = stagedHalfDigestOf(covered);
-      if (stagedDigest !== undefined && input.tenant !== undefined)
+      const stagedRefs = stagedIntermediatesOf(covered);
+      if (stagedRefs !== undefined && input.tenant !== undefined)
         await discardIntermediates(
           this.deps.agentHalves,
           this.deps.verdicts,
           input.tenant,
           input.executionId,
-          stagedDigest,
+          stagedRefs.agentResultDigest,
+          stagedRefs.verifierAttemptId,
         );
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.

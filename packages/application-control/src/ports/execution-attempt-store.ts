@@ -453,7 +453,20 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
       );
   }
 
+  // …and the LAST mutation outside the queue (arch-review 65 P2-adapter). arch-review 64 brought reserve,
+  // activate, transition and revoke into one serialization domain and left this one reading and writing the
+  // map directly. A `transition` paused in its parent-authority await, a `markUnisolated` landing inside that
+  // window, and the transition's stale `current` writes `unisolated: false` back over it — the flag lost, and
+  // with it the record that an execution's replay was never claimed as ours.
+  //
+  // Postgres cannot lose it: the flag is its own column update. That asymmetry is the whole reason this
+  // matters — nearly every counterexample here runs against the in-memory twin, so a state production cannot
+  // reach must not be reachable in it either.
   async markUnisolated(attemptId: string): Promise<void> {
+    return this.perAttempt(attemptId, () => this.markUnisolatedUnsafe(attemptId));
+  }
+
+  private async markUnisolatedUnsafe(attemptId: string): Promise<void> {
     const current = this.attempts.get(attemptId);
     if (!current) return;
     this.attempts.set(attemptId, { ...current, unisolated: true, updatedAt: this.now() });

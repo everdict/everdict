@@ -1,10 +1,12 @@
 import {
+  type ContributingAttempts,
   type DriverAuthority,
   type RecoveryTarget,
   type ReplicaRegistry,
   type ResumeResult,
   recoverInterrupted,
   retryDeferredRecovery,
+  stagedIntermediatesOf,
   verifierOperation,
 } from "@everdict/application-control";
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
@@ -843,7 +845,12 @@ export async function recoverStandaloneRun(
   // The seam for this has existed since arch-review 45: `settleRun` takes the stamp, the store binds it into
   // the settlement's own transaction, and the two writes are one decision — ordered so the guard's question
   // still has an answer when it is asked. All this lane owes is WHICH attempt answered.
-  let adoptedFrom: RuntimeWorkRef | undefined;
+  // ── WHICH ATTEMPTS CONTRIBUTED, NAMED (arch-review 65 P0-verifier) ──────────────────────────────
+  //
+  // This was one `RuntimeWorkRef`, and on the verifier branches it was the VERIFIER's handle — so the
+  // settlement below stamped the verifier attempt as the run's adopted execution and left the agent's row
+  // open. `attemptId` on a receipt means the EXECUTION attempt, and a trajectory read resolves against it.
+  let contributing: ContributingAttempts = {};
 
   // THE HANDLE FIRST (arch-review 53, Wave B). A run whose ledger row holds where its compute was
   // placed is adopted by THAT — one job, this run's. Only a row with no handle (pre-Wave-2, or a lane
@@ -887,7 +894,7 @@ export async function recoverStandaloneRun(
       // tombstones under its own fence, which is what it already does when nothing adopts.
       if (decision.kind === "adopted" && decision.adopted.stage === "case") {
         adopted = decision.adopted.result;
-        adoptedFrom = work;
+        contributing = { ...contributing, ...(work.attemptId !== undefined ? { agent: work.attemptId } : {}) };
         break;
       }
       // ── A RECOVERED VERDICT IS MERGED, NOT DISCARDED (arch-review 60 follow-through) ────────────
@@ -917,9 +924,10 @@ export async function recoverStandaloneRun(
         if (half.kind === "unknown") return { kind: "retry_later", reason: half.reason };
         if (half.kind === "merged") {
           adopted = half.result;
-          // The VERIFIER's row, which is the one this handle names — the agent's was committed before its
-          // half was staged, so the two halves close on their own rows rather than one standing for both.
-          adoptedFrom = work;
+          // BOTH, from the merge that knows them (arch-review 65 P0-verifier). This used to record the
+          // verifier's handle alone, and the sentence defending it — "the agent's was committed before its
+          // half was staged" — was wrong: in this lane the agent attempt is stamped BY the settlement below.
+          contributing = { ...contributing, ...half.attempts };
           break;
         }
         // `absent` — nothing was staged (an older writer, no artifact store, a staging failure). The agent's
@@ -945,7 +953,7 @@ export async function recoverStandaloneRun(
         if (staged.kind === "unknown") return { kind: "retry_later", reason: staged.reason };
         if (staged.kind === "merged") {
           adopted = staged.result;
-          adoptedFrom = work;
+          contributing = { ...contributing, ...staged.attempts };
           break;
         }
       }
@@ -988,7 +996,7 @@ export async function recoverStandaloneRun(
       reason: `this run's recovered result could not be completed: ${completion.reason}`,
     };
   const completed = completion.result;
-  const outcome = await service.resume(r, completed, authority, adoptedFrom?.attemptId).catch(
+  const outcome = await service.resume(r, completed, authority, contributing.agent).catch(
     (err: unknown): ResumeResult => ({
       kind: "retry_later",
       reason: err instanceof Error ? err.message : String(err),
@@ -1010,13 +1018,15 @@ export async function recoverStandaloneRun(
   //
   // …and BOTH intermediates (arch-review 64 P1-high). The verdict is staged too now, and this site discarded
   // only the half — a settled case would have left its judgement in object storage forever.
-  if (outcome.kind === "resumed" && adoptedFrom?.verifier?.agentResultDigest !== undefined)
+  const recoveredRefs = completed !== undefined ? stagedIntermediatesOf(completed) : undefined;
+  if (outcome.kind === "resumed" && recoveredRefs !== undefined)
     await discardIntermediates(
       deps.agentHalves,
       deps.verdicts,
       r.tenant,
       runExecutionId(r.id),
-      adoptedFrom.verifier.agentResultDigest,
+      recoveredRefs.agentResultDigest,
+      recoveredRefs.verifierAttemptId,
     );
   if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
   // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a

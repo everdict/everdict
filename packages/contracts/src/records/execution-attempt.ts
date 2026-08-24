@@ -59,10 +59,15 @@ export const ExecutionAttemptStateSchema = z.enum([
   // is first-terminal-wins, so `committed → superseded` is refused by construction. A compensation the state
   // machine forbids is not a compensation (rule `protocol`, the sub-step-terminal law).
   //
-  // This phase is NOT terminal, deliberately: it is a row whose external object is gone and whose bytes are
-  // staged, still waiting to learn whether the case took them. From here `committed` is written by the
-  // canonical settlement and by nothing else, and `superseded` is reachable — which is what makes the
-  // refused-merge correction a real write rather than a request.
+  // This phase is NOT terminal, deliberately: it is a row whose external object is gone, still waiting to
+  // learn whether the case took its answer. From here `committed` is written by the canonical settlement and
+  // by nothing else, and `superseded` is reachable — which is what makes the refused-merge correction a real
+  // write rather than a request.
+  //
+  // ⚠️ IT CLAIMS "A VERDICT WAS PRODUCED", NOT "RECOVERABLE BYTES EXIST" (arch-review 65). The first draft
+  // said the second, and the row could not prove it: staging is best-effort and absent entirely on a
+  // deployment with no artifact store. Durability is an ARTIFACT, not a state — a recovery asks the verdict
+  // store, never this column, so there is no second place for the two to disagree.
   "verdict_produced",
   "committed",
   "superseded",
@@ -70,27 +75,12 @@ export const ExecutionAttemptStateSchema = z.enum([
 ]);
 export type ExecutionAttemptState = z.infer<typeof ExecutionAttemptStateSchema>;
 
-// ── WHY THERE IS NO `verdict_produced` (arch-review 63, considered and declined) ──────────────────────
+// ── THE DECLINE THAT WAS OVERTURNED, KEPT SHORT (arch-review 63 → 64) ──────────────────────────────
 //
-// The review asked for a state between "this attempt's verdict is in hand" and "this attempt's result is the
-// case's answer", so that `committed` could be written only by the settlement. The distinction is real; the
-// state is not what closes it, and the empirical case is already closed by the vocabulary above:
-//
-//   - `committed` is CONDITIONAL on the parent still authorizing (see the store's transition guard). A
-//     verifier that produced its verdict while a cancellation settled the batch is refused, and the caller
-//     turns the refusal into `tests_pass: unmeasured` — not a `1`.
-//   - a verdict the merge REFUSED settles `superseded`, so no attempt is left claiming it contributed.
-//   - on the standalone path `committed` is stamped inside the settlement's own transaction, so it cannot be
-//     written by anything else.
-//
-// What would remain is a naming refinement with no defect behind it — and its cost is the failure this very
-// wave was written by. Every guard that mentions a state's NEIGHBOURS has to be re-read when the machine
-// grows (see `EXECUTING_PREDECESSOR_STATES` below, added late and inert until a producer existed, and
-// `MAY_STILL_CREATE_WORK`, which a teardown had spelled inline as a subset that stopped being one). Growing
-// the vocabulary to express a distinction no reader currently gets wrong is how those two happened.
-//
-// The condition for revisiting is a READER: a decision that must tell "produced a verdict" from "produced
-// the case's answer" and currently cannot. Add the state then, with that reader's counterexample.
+// arch-review 63 considered this state and declined it, recording the condition for revisiting: "a READER
+// that must tell 'produced a verdict' from 'produced the case's answer' and currently cannot". arch-review 64
+// supplied exactly that reader and the state landed. The note is kept as one line rather than deleted because
+// the CONDITION was the useful part — a vocabulary grows when a reader needs the distinction, not before.
 
 // The states after which an attempt's story is over. Written ONCE because both store implementations arbitrate
 // on it — two hand-enumerated terminal sets is how a guard drifts into a set that admits the write it exists

@@ -85,8 +85,16 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
 
   // A verdict this deployment cannot reach is stated, never omitted. An omitted one leaves a CaseResult whose
   // scores are the observation-only ones, which reads downstream as "graded, and it scored nothing".
+  // ── EVERY ENDING CARRIES WHAT THIS PASS STAGED (arch-review 65 P1-high) ──────────────────────────
+  //
+  // `owed` is how a case ends when the verifier could not be reached, errored, or produced a verdict the
+  // merge refused — and none of those documents has a verifier receipt, which is where the GC coordinate
+  // used to be read from. So the agent half (and, on the refused-merge path, the staged verdict) had no
+  // ending that could address them. Stamped on the outcome instead of derived from it.
+  let staged: CaseResult["intermediates"];
   const owed = (reason: "unsupported" | "missing_evidence" | "grader_error", detail: string): CaseResult => ({
     ...result,
+    ...(staged !== undefined ? { intermediates: staged } : {}),
     scores: [...(result.scores ?? []), unmeasuredVerdict(reason, detail)],
   });
 
@@ -157,6 +165,8 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // lines later for having no repo snapshot or no lane to judge on — halves for a verifier that was never
   // dispatched, and therefore garbage the moment they were written.
   await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result);
+  // …and from here the case OWES this object, whatever it ends as.
+  staged = { agentResultDigest: stagedDigest };
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {
@@ -191,8 +201,11 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // …and the merge itself is ONE function, shared with the recovery (rule `protocol` L5). Two spellings of
   // "combine these halves" would make a case recovered after a crash a different document from one that
   // finished normally, and both are `CaseResult`s, so the difference would be invisible.
+  const verifierAttempt = (invocation as VerifierInvocation).work?.attemptId;
+  if (verifierAttempt !== undefined) staged = { agentResultDigest: stagedDigest, verifierAttemptId: verifierAttempt };
   try {
-    return mergeVerifierPass(result, invocation as VerifierInvocation);
+    const merged = mergeVerifierPass(result, invocation as VerifierInvocation);
+    return staged !== undefined ? { ...merged, intermediates: staged } : merged;
   } catch (err) {
     // The verdict exists and was NOT used, so the row that claims it contributed is corrected here rather
     // than left to read as the case's answer. Best-effort: a ledger that will not take the correction must

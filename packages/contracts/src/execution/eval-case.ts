@@ -285,6 +285,25 @@ export const CaseResultSchema = z.object({
   // recorded failure is indistinguishable from a complete one unless the producer says so. Absent on legacy
   // rows and on producers that cannot vouch — and `evidenceVersion` above is what tells those two apart.
   traceSealed: z.boolean().optional(),
+  // ── WHAT THIS CASE STAGED, SO EVERY ENDING CAN END IT (arch-review 65 P1-high) ────────────────────
+  //
+  // A two-phase case writes intermediates — the agent's half, and the verdict — before anything succeeds,
+  // and the GC coordinate was read out of `result.verifier.work.verifier.agentResultDigest`. That exists only
+  // on a case that settled WITH a complete verifier receipt, so three endings could not clean up after
+  // themselves: a verifier that errored (no receipt), a merge the workspace check refused (no receipt), and a
+  // capacity refusal retried under a new agent execution (a different digest, so the successful settlement
+  // deletes only the latest).
+  //
+  // The cleanup key belongs to whoever WROTE the intermediates, not to the document that happens to succeed.
+  // Carried here so success, `unmeasured`, failure and supersession all address the same objects.
+  intermediates: z
+    .object({
+      agentResultDigest: z.string().min(1),
+      // Absent when the verifier never produced a verdict to stage — the half is still owed and still
+      // addressable; a verdict key guessed without this would name another attempt's bytes.
+      verifierAttemptId: z.string().min(1).optional(),
+    })
+    .optional(),
   // POSITIVE judgment seal, the same grammar as the trace one above: the scorer VOUCHES that every judge it
   // ran got its own execution sealed as evidence on this run's trajectory. Sealing is best-effort by
   // contract — a lost seal must not lose a real verdict — and the loss used to be silent, so a judgment

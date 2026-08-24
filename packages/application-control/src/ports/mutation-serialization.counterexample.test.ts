@@ -78,6 +78,35 @@ describe("[R64 COUNTEREXAMPLE] every attempt mutation shares one serialization d
     expect((await attempts.list(EXECUTION))[0]?.state).toBe("committed");
   });
 
+  it("keeps `unisolated` when a transition was reading the row as it was set", async () => {
+    // ── THE LAST MUTATION OUTSIDE THE QUEUE (arch-review 65 P2-adapter) ────────────────────────────
+    //
+    // arch-review 64 brought reserve, activate, transition and revoke into one domain and left this one
+    // reading and writing the map directly. Same shape, same window: a `transition` paused in its
+    // parent-authority await, a `markUnisolated` landing inside it, and the transition's stale `current`
+    // writes `unisolated: false` back over the flag — losing the record that an execution's replay was never
+    // claimed as ours, which is precisely what an audit of that execution would ask.
+    //
+    // Postgres cannot lose it: the flag is its own column update.
+    const { attempts, hold, release } = storeWithPausableAuthority();
+    const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
+    await attempts.reserveWork(attemptId, { tenant: "acme", runId: "evd-run-r1", externalJobId: "job-A" });
+
+    hold();
+    const commit = attempts.transition(attemptId, "committed");
+    // …and the interleaving has to be REAL. `perAttempt` defers its body to a microtask, so calling
+    // `markUnisolated` on the next line makes it land BEFORE the transition has even read the row — which is
+    // a harmless order, and the first draft of this test measured exactly that and stayed green under
+    // neutralization. One tick lets the transition reach its parent-authority await, which is the window.
+    await new Promise((r) => setTimeout(r, 0));
+    const marked = attempts.markUnisolated(attemptId); // arrives while the transition holds a stale read
+    release();
+    await Promise.all([commit, marked]);
+
+    const [row] = await attempts.list(EXECUTION);
+    expect(row?.unisolated, "a transition wrote its stale read back over the unisolated flag").toBe(true);
+  });
+
   it("does not WEDGE the attempt when one mutation refuses", async () => {
     // The hazard a promise-chain lock introduces if the tail is the caller's promise: one rejection and every
     // later call on this attempt waits forever. Now that four verbs share the chain, the blast radius of that

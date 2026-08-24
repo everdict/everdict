@@ -1782,6 +1782,38 @@ const MUTATIONS = [
     build: "@everdict/api",
     suite: ["--root", "apps/api", "src/composition/verifier-credentials.counterexample.test.ts"],
   },
+  {
+    // arch-review 65 P0. The stage held the lane's RAW answer while the normal path returned the canonical
+    // one — the attempt id, the verifier coordinate and the judged execution are joined after the lane
+    // answers, and `VerifierReceipt.complete` requires exactly those three. The same verifier execution read
+    // `complete` in-line and `incomplete` after a crash.
+    name: "verdict staging — the raw wire is staged instead of the canonical invocation",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: "      invocation: canonical,",
+    to: "      invocation,",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
+  },
+  {
+    // …and the recovery's own half of it: staged bytes are ADDRESSED, not authenticated, so a document that
+    // does not describe the handle recovering it is `unknown` rather than merged.
+    name: "verdict recovery — staged bytes are merged without checking the handle",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  if (mismatch)",
+    to: "  if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
+  },
+  {
+    // arch-review 65 P2-adapter. The last mutation outside the per-attempt queue: a `transition` paused in its
+    // parent check, a `markUnisolated` inside that window, and the stale `current` writes the flag back off.
+    name: "attempt serialization — markUnisolated races a transition and loses the flag",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "    return this.perAttempt(attemptId, () => this.markUnisolatedUnsafe(attemptId));",
+    to: "    return this.markUnisolatedUnsafe(attemptId);",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/ports/mutation-serialization.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
