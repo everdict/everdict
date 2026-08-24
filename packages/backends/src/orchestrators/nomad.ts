@@ -1277,10 +1277,46 @@ export class NomadBackend
       // what the deferred purge in the `finally` is for.
       const delq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
       const stopped = await this.http.request("DELETE", `/v1/job/${jobId}${delq}`).catch(() => undefined);
-      // …and the ANSWER is read (rule `protocol` L5): a stop that did not converge means this failure may
-      // still be burning compute, which is a different incident from one that tidied up after itself.
-      if (stopped === undefined || stopped.status >= 300)
+      // ── ACCEPTED IS NOT GONE, AND THE RETRY DEPENDS ON THE DIFFERENCE (arch-review 64 P1) ─────────
+      //
+      // A Nomad DELETE answering 2xx means the job is marked STOPPED. Its allocation keeps running for the
+      // kill timeout — this adapter's own `probeWork` says exactly that — and the throw below is retryable,
+      // so `runSuite` re-dispatched while the old allocation was still terminating. Two allocations of one
+      // case, overlapping: the double-spend the placement protocol exists to prevent, arrived through the
+      // FAILURE path rather than the cancellation one, which had converged on absence for two reviews.
+      //
+      // So the stop is followed by a READ-BACK of the exact job (rule `protocol` L5, one verifier for both
+      // paths). Absent — or a job whose status is dead — is convergence and the original error stands. Anything
+      // else, including a probe that could not answer, throws `TEARDOWN_UNCONVERGED` instead, which is
+      // classified NON-retryable: retry eligibility waits on confirmed absence, and the reconciler is what
+      // confirms it.
+      const converged =
+        stopped !== undefined && stopped.status < 300 ? await this.reclaimConverged(jobId, ns) : "failed";
+      if (converged !== "reclaimed") {
         mark("reclaim_failed", `nomad job ${jobId} may still be running after a failed dispatch`);
+        // MARKED, not replaced. The first draft threw a fresh `TEARDOWN_UNCONVERGED` and took the original
+        // failure's message and its `extra` with it — the placement verdict, the task-event cause, the unit
+        // and node, the log tail. That evidence is captured on this path precisely because the job and its
+        // logs are about to be purged (rule `backends`, failure evidence rides the throw), so replacing the
+        // error to say something about the CLEANUP would delete what the failure itself said.
+        //
+        // The signal rides `extra`, the way an OOM does, and `classifyFailure` reads it: same code, same
+        // words, same evidence, and `retryable: false` because the old allocation may still be running.
+        // `extra` is readonly, so the same error is re-made rather than mutated — same class, same code,
+        // same words, same evidence, plus the one fact the retry needs.
+        // …and for ANY thrown value, not only an `AppError`. A raw throw classifies as retryable `INTERNAL`,
+        // which is the same re-dispatch over the same possibly-live allocation — the first draft guarded on
+        // `instanceof` and its own counterexample, which throws a bare `Error`, went straight past it.
+        if (err instanceof AppError) {
+          const Same = err.constructor as new (code: string, extra: unknown, message: string) => AppError;
+          throw new Same(err.code, { ...err.extra, teardown: "unconverged" }, err.message);
+        }
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { job: jobId, ns, teardown: "unconverged" },
+          err instanceof Error ? err.message : String(err),
+        );
+      }
       throw err;
     } finally {
       // Purge dead jobs after capturing results (parity with K8sBackend's deleteJob-in-finally). Without it, every
@@ -1743,6 +1779,27 @@ export class NomadBackend
     } catch {
       return { kind: "unknown", reason: "the Nomad job document could not be parsed" };
     }
+  }
+
+  // ── DID THE STOP ACTUALLY CONVERGE? (arch-review 64 P1) ────────────────────────────────────────────
+  //
+  // The read-back a failed dispatch's teardown owes, and the same question the cancellation path answers:
+  // `absent` or a job Nomad reports `dead` is gone; anything else — including a listing that could not be
+  // read — is `failed`, which is what makes the retry wait. Deliberately NOT a poll loop: this runs on a
+  // failure path that already has an error to report, and "we asked once and it was still there" is the
+  // honest answer rather than a budget spent hoping.
+  private async reclaimConverged(name: string, namespace?: string): Promise<"reclaimed" | "failed"> {
+    const found = await this.findJob(name, namespace).catch(
+      () => ({ kind: "unknown", reason: "the Nomad job listing threw" }) as ReadResult<{ ID?: string }>,
+    );
+    if (found.kind === "absent") return "reclaimed";
+    if (found.kind !== "read") return "failed"; // a probe that learned nothing stopped nothing
+    const status = await this.http
+      .request("GET", `/v1/job/${encodeURIComponent(name)}${namespace ? `?namespace=${namespace}` : ""}`)
+      .catch(() => undefined);
+    if (status === undefined || status.status >= 300) return "failed";
+    const job = JSON.parse(status.text) as { Status?: string };
+    return job.Status === "dead" ? "reclaimed" : "failed";
   }
 
   private async findJob(name: string, namespace?: string): Promise<ReadResult<{ ID?: string; Namespace?: string }>> {

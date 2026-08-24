@@ -7,6 +7,17 @@ import { AppError, type CaseFailure, OOM_KILLED } from "@everdict/contracts";
 // docs/architecture/batch-resilience.md
 
 const INFRA_RETRYABLE = new Set(["UPSTREAM_ERROR", "RATE_LIMITED", "DRIVER_PROVISION_FAILED", "TRACE_COLLECT_FAILED"]);
+// ── AND A TEARDOWN THAT DID NOT CONVERGE (arch-review 64 P1) ───────────────────────────────────────
+//
+// A dispatch failure whose cleanup could not be confirmed must not be retried. Nomad's DELETE returning 2xx
+// means the job is marked STOPPED, not that its allocation is gone — this adapter's own `probeWork` says so —
+// so rethrowing the original retryable error let `runSuite` re-dispatch while the old allocation was still
+// terminating. Two allocations of one case, overlapping, which is the double-spend the whole placement
+// protocol exists to prevent.
+//
+// Fatal rather than retryable because the safe direction is to stop: the compute may still be burning, and
+// an operator reading the failure is who decides. Retry eligibility waits on confirmed absence, and the
+// reconciler is what confirms it (rule `protocol` L5).
 const INFRA_FATAL = new Set(["UPSTREAM_MISCONFIGURED", OOM_KILLED]);
 const CONFIG = new Set(["BAD_REQUEST", "NOT_FOUND", "CONFLICT", "BUDGET_EXCEEDED", "UNAUTHENTICATED", "FORBIDDEN"]);
 const HARNESS = new Set(["HARNESS_INSTALL_FAILED", "HARNESS_RUN_FAILED", "COMPUTE_EXEC_FAILED", "GRADER_FAILED"]);
@@ -59,6 +70,24 @@ export function classifyFailure(err: unknown, stage: CaseFailure["stage"]): Case
     // OOM stamped by a backend rides in extra.signal (the code stays UPSTREAM_ERROR for the HTTP envelope).
     const signal = typeof err.extra?.signal === "string" ? err.extra.signal : undefined;
     const code = signal ?? err.code;
+    // ── A TEARDOWN THAT DID NOT CONVERGE IS NEVER RETRYABLE (arch-review 64 P1) ──────────────────
+    //
+    // A dispatch failure whose cleanup could not be confirmed must not be re-driven: Nomad's DELETE answering
+    // 2xx means the job is marked STOPPED, not that its allocation is gone, so retrying places a second
+    // allocation beside one that may still be running.
+    //
+    // Read off `extra` rather than expressed as a code, so the failure keeps its OWN code, message and
+    // evidence — the placement verdict, the task-event cause, the log tail. The cleanup is a second fact
+    // about the failure, not a replacement for it.
+    if (err.extra?.teardown === "unconverged")
+      return {
+        stage,
+        class: "infra",
+        code,
+        message: `${err.message} (its work could not be confirmed stopped, so it will not be retried)`,
+        retryable: false,
+        ...failureEvidence(err.extra),
+      };
     // A deliberate stop is NEVER retryable — the unknown-throw default (retryable infra) let a batch's inner
     // retry loop re-dispatch a case the user had just cancelled, burning compute to un-stop a stop. The code
     // is the cancellation shape every cancel path stamps (runCase's cancelledRun, the batch settle).

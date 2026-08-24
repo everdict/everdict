@@ -221,7 +221,37 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
     return { attemptId, generation };
   }
 
+  // ── EVERY MUTATION IN ONE SERIALIZATION DOMAIN (arch-review 64 P1-adapter) ────────────────────────
+  //
+  // arch-review 63 serialized `reserveWork` and `activateWork` and left these two outside it. `transition`
+  // is read current → await the parent-authority check → write from that stale `current`, so a revocation
+  // landing inside the await is overwritten:
+  //
+  //     commit  reads `active`, awaits parentAuthority
+  //     cancel  revokeReservation → `revoked`
+  //     commit  resumes, writes `committed` from the stale read
+  //
+  // Postgres cannot reach that state: its guarded `UPDATE … WHERE` re-evaluates on the latest row version
+  // under the row lock. Most counterexamples and every mutation rung run against THIS store, so a state
+  // production cannot reach must not be reachable here either — otherwise the suite certifies a protocol the
+  // real adapter does not have, which is the fake-more-permissive rule in its most expensive form.
+  //
+  // So: reserve, activate, transition and revoke all queue per attempt. `open` stays outside — it mints a new
+  // row and has no `current` to go stale.
   async transition(
+    attemptId: string,
+    to: ExecutionAttemptState,
+    patch?: {
+      childRunId?: string;
+      leaseEpoch?: number;
+      unisolated?: boolean;
+      error?: { code: string; message: string };
+    },
+  ): Promise<boolean> {
+    return this.perAttempt(attemptId, () => this.transitionUnsafe(attemptId, to, patch));
+  }
+
+  private async transitionUnsafe(
     attemptId: string,
     to: ExecutionAttemptState,
     patch?: {
@@ -390,6 +420,11 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
   }
 
   async revokeReservation(attemptId: string): Promise<RevocationOutcome> {
+    // …and the revocation, for the same reason — see `transition` above. It is the OTHER side of that race.
+    return this.perAttempt(attemptId, () => this.revokeReservationUnsafe(attemptId));
+  }
+
+  private async revokeReservationUnsafe(attemptId: string): Promise<RevocationOutcome> {
     const current = this.attempts.get(attemptId);
     // A settled attempt is not revived into `revoked`, and a missing row needs nothing taken back. Both are
     // no-ops rather than errors: a cancellation sweeping a batch must not fail on an attempt that already

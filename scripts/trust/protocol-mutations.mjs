@@ -1735,6 +1735,27 @@ const MUTATIONS = [
     build: "@everdict/domain",
     suite: ["--root", "packages/domain", "src/image/same-host-scopes.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P1. Nomad's DELETE answering 2xx means the job is marked stopped, not that the
+    // allocation is gone — so the retryable rethrow re-dispatched over compute that was still terminating.
+    name: "teardown convergence — a failed dispatch retries before its work is confirmed gone",
+    file: "packages/backends/src/orchestrators/nomad.ts",
+    from: '      const converged =\n        stopped !== undefined && stopped.status < 300 ? await this.reclaimConverged(jobId, ns) : "failed";',
+    to: '      const converged = "reclaimed";',
+    build: "@everdict/backends",
+    suite: ["--root", "packages/backends", "src/orchestrators/teardown-convergence.counterexample.test.ts"],
+  },
+  {
+    // arch-review 64 P1-adapter. `transition` reads, awaits the parent check, then writes from the stale
+    // read — so a revocation landing inside that await was overwritten. Postgres cannot reach that state,
+    // and nearly every counterexample in this repository runs against the in-memory twin.
+    name: "attempt serialization — a commit overwrites a revocation it never saw",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "    return this.perAttempt(attemptId, () => this.transitionUnsafe(attemptId, to, patch));",
+    to: "    return this.transitionUnsafe(attemptId, to, patch);",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/ports/mutation-serialization.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
