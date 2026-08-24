@@ -32,6 +32,14 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 - Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap.
+- **Know which axis is bounded where.** Tenant concurrency is fleet-wide and HARD (`AdmissionLedger.tryAdmit`,
+  an atomic permit). Backend SLOTS are bounded across replicas by OBSERVATION — `used` is the orchestrator's
+  own count, so another replica's placement shows up once its object exists. MEMORY and CPU are bounded
+  **per process only**: `memoryBudgetMb`/`cpuBudget` are DECLARED envelopes and nothing observes actual
+  allocation, so two replicas can each reserve 3 GiB against one 4 GiB budget (arch-review 64 P1). Closing
+  that needs a capacity probe that reports observed memory/CPU — which `effectiveUsed` would then fold like
+  slots — or a durable per-backend resource permit. Until one exists, do not write a comment that implies the
+  envelope is fleet-wide; the contract on `BackendCapacity` states the scope and is the place to keep honest.
 - **A probe that could not count reports `used: "unknown"`, never `0`.** This line used to say "else `used: 0`"
   and both managed lanes did exactly that — `used ?? 0` over a `countActiveJobs` that already answered
   `undefined`, and a Nomad `catch` commented "probe failed → used 0". `used` is the ONLY fleet-wide bound on a

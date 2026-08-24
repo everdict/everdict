@@ -67,8 +67,26 @@ export interface BackendCapacity {
   // reconciliation is therefore best-effort — under probe lag a backend can briefly over-admit; acceptable for eval
   // workloads and self-correcting on the next probe. Report 0 rather than guessing when a live count is unavailable.
   used: number | "unknown";
+  // ── WHAT THESE TWO AXES BOUND, AND WHAT THEY DO NOT (arch-review 64 P1) ────────────────────────────
+  //
+  // Assessed rather than assumed, because the answer is not the same as it is for `used` above.
+  //
+  //   TENANT CONCURRENCY is fleet-wide and hard — `AdmissionLedger.tryAdmit` is an atomic per-tenant permit.
+  //   SLOTS are bounded across replicas by OBSERVATION: `used` is the orchestrator's own count, so another
+  //     replica's placement becomes visible once its object exists, and an unverifiable probe is fail-closed.
+  //   MEMORY and CPU are bounded PER PROCESS ONLY, and there is no weaker word for it. The two fields below
+  //     are DECLARED envelopes read from config; nothing observes actual allocation, so the usage subtracted
+  //     from them is `Admission`'s process-local accounting and nothing else. Two replicas with a 4 GiB
+  //     runtime budget can each locally reserve 3 GiB and neither sees the other: 6 GiB admitted.
+  //
+  // That asymmetry is the whole finding. Slots have a probe and these do not, so the fix is not a smaller
+  // `?? 0` somewhere — it is either a capacity probe that reports observed memory/CPU (then `effectiveUsed`
+  // folds it exactly as it folds slots) or a durable per-backend resource permit claimed and renewed the way
+  // the tenant permit is. Neither is done, and saying so is the point: a comment implying the stronger
+  // property is the failure rule `protocol` names in the time-based-lease law.
+  //
   // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
-  // harness-declared memory the Scheduler admits at once. Absent = slots-only admission (previous behavior).
+  // harness-declared memory the Scheduler admits at once, WITHIN ONE PROCESS. Absent = slots-only admission.
   memoryBudgetMb?: number;
   // Optional CPU envelope (RuntimeSpec.cpuBudget, resources.cpu units: 1000 = 1 vCPU) — same admission
   // contract as memoryBudgetMb for the SUM of in-flight harness-declared cpu.

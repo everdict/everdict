@@ -1756,6 +1756,16 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/ports/mutation-serialization.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P2. A verifier lane momentarily full refuses with RATE_LIMITED, and this recorded it as
+    // `tests_pass: unmeasured` — final, because `runSuite` only retries a dispatch that THREW.
+    name: "transient refusal — a capacity blip settles the case permanently unjudged",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: '    if (invocation instanceof AppError && invocation.code === "RATE_LIMITED") throw invocation;',
+    to: "    void invocation;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/execution/transient-refusal.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

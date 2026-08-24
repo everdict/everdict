@@ -1,3 +1,4 @@
+import { AppError } from "@everdict/contracts";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { type VerifierReceipt, verifierPlanOf, verifierReceiptOf } from "@everdict/domain";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
@@ -159,6 +160,18 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {
+    // ── A LANE THAT IS MOMENTARILY FULL IS NOT A CASE THAT CANNOT BE JUDGED (arch-review 64 P2) ─────
+    //
+    // A verifier lane with no slots — or one whose capacity could not be counted — refuses with
+    // `RATE_LIMITED`, and this turned it into `tests_pass: unmeasured`. `runSuite` retries a dispatch that
+    // THREW; a successfully returned unmeasured result is final. So a capacity blip lasting seconds settled
+    // a case permanently unjudged, while the comments around the refusal said the caller would retry.
+    //
+    // Rethrown so the transient retry the batch already has can consume it. That re-runs the agent half too,
+    // which is the honest price of not owning a second queue: a case re-run costs compute, and a case
+    // recorded as unjudged costs the measurement. Only `RATE_LIMITED` — a budget refusal, a missing lane and
+    // a verifier that genuinely errored are all answers about THIS case, and repeating them changes nothing.
+    if (invocation instanceof AppError && invocation.code === "RATE_LIMITED") throw invocation;
     // The half stays. A verifier that failed leaves a case that still has to be COMPLETED and settled, and
     // a crash before that settlement is exactly what the half exists to survive (arch-review 63 P0). What
     // ends its window is the canonical settlement, never the step that read it.
