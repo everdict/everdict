@@ -183,6 +183,9 @@ export function buildRun(deps: {
   } = readers;
 
   const service = new RunService({
+    // Where a two-phase case's intermediates live, so THIS settlement ends their window rather than leaving a
+    // full intermediate CaseResult in object storage forever (arch-review 64 P1-high).
+    ...(artifacts ? { agentHalves: artifacts, verdicts: artifacts } : {}),
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
     ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — every settled trace seals in the owned store

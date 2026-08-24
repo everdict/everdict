@@ -94,6 +94,36 @@ export async function discardAgentHalf(store: AgentHalfStore | undefined, key: s
   await store?.remove(key).catch(() => undefined);
 }
 
+// ── THE WINDOW HAS ONE OWNER, AND EVERY SETTLEMENT IS IT (arch-review 64 P1-high) ───────────────────
+//
+// `discardAgentHalf` had exactly ONE production caller — the standalone recovery — while `recoverVerifiedCase`
+// carried the comment "the settlement owns the discard — see `discardAgentHalf`'s callers". Its callers did
+// not keep that promise: the normal in-line settlement, the batch committer and the batch recovery never
+// discarded anything. So every normally-completed private-verifier case left a full intermediate `CaseResult`
+// — trace, workspace snapshot, observation scores, runtime provenance — in object storage forever. That is a
+// RETENTION and disclosure problem, not only a leak: it duplicates the case's own evidence under a key
+// nothing references and nothing sweeps.
+//
+// Both intermediates, because there are two of them now (the verdict is staged as well), and one coordinate,
+// because both are keyed by the half this case was judged from.
+export async function discardIntermediates(
+  store: AgentHalfStore | undefined,
+  verdicts: AgentHalfStore | undefined,
+  tenant: string,
+  runId: string,
+  agentResultDigest: string,
+): Promise<void> {
+  await discardAgentHalf(store, agentHalfKey(tenant, runId, agentResultDigest));
+  await discardAgentHalf(verdicts, verifierVerdictKey(tenant, runId, agentResultDigest));
+}
+
+// WHICH half a settled case was judged from, read off the receipt it settled with. `undefined` for a case
+// with no judging half — there is nothing staged and nothing to discard — and for a receipt whose lane could
+// not name its handle, where guessing a key would delete somebody else's bytes.
+export function stagedHalfDigestOf(result: CaseResult): string | undefined {
+  return result.verifier?.work?.verifier?.agentResultDigest;
+}
+
 export async function stageAgentHalf(
   store: AgentHalfStore | undefined,
   tenant: string,

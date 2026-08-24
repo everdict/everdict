@@ -78,6 +78,8 @@ export {
   type StagedAgentHalf,
   agentHalfKey,
   discardAgentHalf,
+  discardIntermediates,
+  stagedHalfDigestOf,
   mergeVerifierPass,
   agentHalfDigest,
   readAgentHalf,

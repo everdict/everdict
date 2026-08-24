@@ -1703,6 +1703,27 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
+  {
+    // arch-review 64 P1-high. The planner adopts by the exact handle and dropped its `attemptId`, so a
+    // recovered case settled with a committed receipt naming no attempt and a row still reading as live work.
+    name: "batch recovery — the adopted attempt is not settled with the case",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: '                        if (adoptedFrom?.attemptId !== undefined)\n                          await boundAttempts.transition(adoptedFrom.attemptId, "committed", { childRunId: c.id });',
+    to: "                        void adoptedFrom;",
+    build: "@everdict/application-control",
+    suite: ["packages/application-control/src/scorecard/adopted-attempt-settlement.counterexample.test.ts"],
+  },
+  {
+    // arch-review 64 P1-high. `discardAgentHalf` had ONE production caller — the standalone recovery — while
+    // the code claimed "the settlement owns the discard". Every normally-completed private-verifier case left
+    // a full intermediate CaseResult in object storage forever.
+    name: "intermediate GC — a settled case leaves its halves in storage forever",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: "      if (claimed !== undefined && adoptedDigest !== undefined)",
+    to: "      if (false && claimed !== undefined && adoptedDigest !== undefined)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/intermediate-gc.counterexample.test.ts"],
+  },
 ];
 
 const files = [...new Set(MUTATIONS.map((m) => m.file))];

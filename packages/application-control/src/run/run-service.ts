@@ -66,6 +66,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
+import { type AgentHalfStore, discardIntermediates, stagedHalfDigestOf } from "../execution/agent-half.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
@@ -138,6 +139,11 @@ export interface RunServiceDeps {
   // this run, including the re-drive that the recording buffer alone could never distinguish. Dual-write and
   // observed-only: nothing reads it to decide anything yet.
   attempts?: ExecutionAttemptStore;
+  // Where a two-phase case's intermediates live, so THIS settlement can end their window (arch-review 64
+  // P1-high). Absent = this deployment stages nothing, which is the deployment that also cannot recover a
+  // crash between the halves.
+  agentHalves?: AgentHalfStore;
+  verdicts?: AgentHalfStore;
   // Grader factory (@everdict/graders) injected into executeCase's collection-mode scoring — the application layer
   // never imports the grader impls, so apps/api supplies makeGraders here (re-architecture P2 S3). Optional: a mock
   // dispatcher (unit tests) never reaches the collection path, so it may be omitted there; main.ts always supplies it.
@@ -956,6 +962,18 @@ export class RunService {
         },
       );
       if (claimed !== undefined && stampedAdoption.length > 0) void this.deps.events?.pushPersisted?.(stampedAdoption);
+      // …and the intermediates are owed no longer (arch-review 64 P1-high). This is a SETTLEMENT — the
+      // adoption path does not pass through `finalize` — so the window ends here too, and only when the
+      // claim landed: a refused fence means the winner still needs the halves.
+      const adoptedDigest = adoption.patch.result !== undefined ? stagedHalfDigestOf(adoption.patch.result) : undefined;
+      if (claimed !== undefined && adoptedDigest !== undefined)
+        await discardIntermediates(
+          this.deps.agentHalves,
+          this.deps.verdicts,
+          record.tenant,
+          runExecutionId(record.id),
+          adoptedDigest,
+        );
       // Lost: the run settled on its own, which is a resume nobody needs rather than one that failed.
       return claimed === undefined ? settledElsewhere() : { kind: "resumed" };
     }
@@ -1971,6 +1989,14 @@ export class RunService {
     const verifierAttempt = patch.result?.verifier?.work?.attemptId;
     const riding =
       stamp !== undefined ? this.attemptStamp(id, stamp.committed, stamp.error, verifierAttempt) : undefined;
+    // ── AND THE INTERMEDIATES ARE OWED NO LONGER (arch-review 64 P1-high) ────────────────────────────
+    //
+    // The staged half and the staged verdict exist for exactly one window: from the agent's container being
+    // reaped to this write. `discardAgentHalf` had ONE production caller — the standalone RECOVERY — and the
+    // ordinary path that completes without crashing never discarded anything, so every private-verifier case
+    // left a full intermediate `CaseResult` in object storage forever. `recoverVerifiedCase`'s own comment
+    // said "the settlement owns the discard"; this is the settlement, and it did not.
+    const stagedDigest = patch.result !== undefined ? stagedHalfDigestOf(patch.result) : undefined;
     let settled: RunRecord | undefined;
     let faulted = false;
     try {
@@ -2007,6 +2033,16 @@ export class RunService {
       else if (riding === undefined)
         await this.stampAttempt(id, stamp.committed, stamp.error !== undefined ? { error: stamp.error } : undefined);
     }
+    // …and only a settlement that LANDED ends the window. A refused fence means somebody else owns this run
+    // and their settlement will discard; a fault means the run is still open and the halves are still owed.
+    if (settled !== undefined && !faulted && stagedDigest !== undefined)
+      await discardIntermediates(
+        this.deps.agentHalves,
+        this.deps.verdicts,
+        settled.tenant,
+        runExecutionId(id),
+        stagedDigest,
+      );
     return settled;
   }
 

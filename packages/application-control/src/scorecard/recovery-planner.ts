@@ -165,6 +165,15 @@ export class RecoveryPlanner {
             );
           const handles = handlesRead.kind === "read" ? handlesRead.value : [];
           let adoptable: CaseResult | undefined;
+          // ── …AND WHICH HANDLE ANSWERED (arch-review 64 P1-high) ────────────────────────────────
+          //
+          // The planner holds the exact `RuntimeWorkRef` it adopted from — and therefore `work.attemptId` —
+          // and dropped it the moment it had a result. So the receipt named no attempt and the canonical
+          // transaction stamped none, leaving: child `succeeded`, receipt committed, external Job deleted by
+          // the adoption, and the attempt row still reading `reserved`/`active`/`executing` for compute that
+          // is gone. `CaseReceiptStore.commitCase` has taken a transaction-bound ledger since arch-review 40
+          // precisely so those are one decision.
+          let adoptedFrom: RuntimeWorkRef | undefined;
           let unestablished: string | undefined;
           for (const work of handles) {
             const decision = await this.deps.adoptWork?.call(this.deps, tenant, c.runtime ?? input.runtime, work).catch(
@@ -186,6 +195,7 @@ export class RecoveryPlanner {
             // case to the re-drive, which is the honest answer when the agent's evidence is gone.
             if (decision?.kind === "adopted" && decision.adopted.stage === "case") {
               adoptable = decision.adopted.result;
+              adoptedFrom = work;
               break;
             }
             // ── …AND A COMPLETED VERIFIER IS FINISHED, NOT THROWN AWAY (arch-review 62 P1) ───────────
@@ -217,6 +227,9 @@ export class RecoveryPlanner {
               }
               if (recovered.kind === "merged") {
                 adoptable = recovered.result;
+                // The VERIFIER's handle: this document is the merge of two halves, and the row this
+                // settlement can name is the one that produced the verdict it adopted.
+                adoptedFrom = work;
                 break;
               }
               // `absent` — nothing staged, so the agent's evidence is genuinely gone and the case re-drives,
@@ -246,6 +259,7 @@ export class RecoveryPlanner {
               }
               if (staged.kind === "merged") {
                 adoptable = staged.result;
+                adoptedFrom = work;
                 break;
               }
             }
@@ -360,18 +374,38 @@ export class RecoveryPlanner {
                       // (its dispatch just outlived the driver), so the kind is the run's own outcome.
                       kind: adoptedResult.failure !== undefined ? "failed" : "executed",
                       ...(c.executionId ? { executionId: c.executionId } : {}),
+                      // WHICH attempt this batch counted — the one the handle above came from. The planner
+                      // knew it and did not write it down, so the receipt could not join to the physical row
+                      // and the parity check read every recovered case as a disagreement.
+                      ...(adoptedFrom?.attemptId !== undefined ? { attemptId: adoptedFrom.attemptId } : {}),
                       judges: judges,
                       ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
                     }),
-                    async (runs) => {
+                    async (runs, boundAttempts) => {
                       const cur = await runs.get(c.id);
                       if (!cur || Run.from(cur).isTerminal()) return undefined;
-                      return settleRun(runs, c.id, Run.from(cur).adopt(adoptedResult, this.now()).patch, undefined, {
-                        epoch: cur.ownerEpoch ?? 0,
-                        ...(parentDriver ? { parentDriver } : {}),
-                      });
+                      const settled = await settleRun(
+                        runs,
+                        c.id,
+                        Run.from(cur).adopt(adoptedResult, this.now()).patch,
+                        undefined,
+                        { epoch: cur.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
+                      );
+                      // AFTER the settle and inside the same transaction, exactly as the in-flight committer
+                      // orders it: a refused fence must not have said `committed` about an attempt that lost.
+                      // Two rows, because a two-phase case has two — the one the handle names and, when the
+                      // adopted document carries a verdict, the row that produced it.
+                      if (settled !== undefined && this.deps.attempts && boundAttempts) {
+                        if (adoptedFrom?.attemptId !== undefined)
+                          await boundAttempts.transition(adoptedFrom.attemptId, "committed", { childRunId: c.id });
+                        const verdictAttempt = adoptedResult.verifier?.work?.attemptId;
+                        if (verdictAttempt !== undefined && verdictAttempt !== adoptedFrom?.attemptId)
+                          await boundAttempts.transition(verdictAttempt, "committed");
+                      }
+                      return settled;
                     },
                     recoveryRuns,
+                    this.deps.attempts,
                   )
                   .catch(() => undefined)
               : undefined;

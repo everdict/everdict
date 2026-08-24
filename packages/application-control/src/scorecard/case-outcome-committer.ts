@@ -21,6 +21,7 @@ import {
   completeJudgeCoverage,
   contentDigest,
 } from "@everdict/domain";
+import { discardIntermediates, stagedHalfDigestOf } from "../execution/agent-half.js";
 import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
@@ -46,7 +47,7 @@ import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 // assembly stages into, and the bus the completion fact nudges. Nothing here can dispatch or kill.
 type CaseOutcomeCommitterDeps = Pick<
   ScorecardBatchDeps,
-  "runStore" | "caseReceipts" | "attempts" | "artifacts" | "recordingStore" | "events"
+  "runStore" | "caseReceipts" | "attempts" | "artifacts" | "recordingStore" | "events" | "agentHalves" | "verdicts"
 >;
 
 // A case whose execution is done and whose child row is deliberately still open until its judges land.
@@ -508,6 +509,25 @@ export class CaseOutcomeCommitter {
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
     if (outcome.kind === "committed") {
+      // ── THE INTERMEDIATES ARE OWED NO LONGER (arch-review 64 P1-high) ──────────────────────────
+      //
+      // A two-phase case's staged half and staged verdict exist for one window, from the agent's container
+      // being reaped to THIS write. Only the standalone recovery ever ended it, so every batch case with a
+      // private verifier left a full intermediate `CaseResult` in object storage forever — a retention
+      // problem, not merely a leak. Best-effort: an orphan costs storage, a delete that would not answer
+      // must not cost a committed case.
+      // No `?? ""` on the tenant: a key built from an empty workspace addresses somebody else's prefix, and
+      // a silent default for a domain value is exactly what rule `typescript` forbids. A commit with no
+      // tenant has no staged intermediates to end — the staging is keyed by one.
+      const stagedDigest = stagedHalfDigestOf(covered);
+      if (stagedDigest !== undefined && input.tenant !== undefined)
+        await discardIntermediates(
+          this.deps.agentHalves,
+          this.deps.verdicts,
+          input.tenant,
+          input.executionId,
+          stagedDigest,
+        );
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);

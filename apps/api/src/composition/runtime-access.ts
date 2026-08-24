@@ -12,12 +12,7 @@ import {
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import {
-  agentHalfKey,
-  discardAgentHalf,
-  recoverStagedVerdict,
-  recoverVerifiedCase,
-} from "@everdict/application-control";
+import { discardIntermediates, recoverStagedVerdict, recoverVerifiedCase } from "@everdict/application-control";
 import {
   Admission,
   type Backend,
@@ -961,10 +956,16 @@ export async function recoverStandaloneRun(
   //
   // `resumed` is the only outcome that means this run recorded this result. Best-effort, like the staging:
   // an orphan costs storage, and a delete that failed must not cost a settled case.
+  //
+  // …and BOTH intermediates (arch-review 64 P1-high). The verdict is staged too now, and this site discarded
+  // only the half — a settled case would have left its judgement in object storage forever.
   if (outcome.kind === "resumed" && adoptedFrom?.verifier?.agentResultDigest !== undefined)
-    await discardAgentHalf(
+    await discardIntermediates(
       deps.agentHalves,
-      agentHalfKey(r.tenant, `evd-run-${r.id}`, adoptedFrom.verifier.agentResultDigest),
+      deps.verdicts,
+      r.tenant,
+      runExecutionId(r.id),
+      adoptedFrom.verifier.agentResultDigest,
     );
   if (outcome.kind !== "unresumable") return outcome; // resumed, or already settled by whoever finished it
   // …and the TOMBSTONE IS THE SWEEP'S (arch-review 55). It used to be written here, inside a
