@@ -1485,8 +1485,11 @@ const MUTATIONS = [
     // straight to the settle. Skip the completion and a crash changes what was measured, not when.
     name: "recovery parity — a recovered case skips the completion an in-line one runs",
     file: "apps/api/src/composition/runtime-access.ts",
-    from: "      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).catch(() => adopted)",
-    to: "      ? adopted",
+    // RE-AIMED (arch-review 64): the `.catch(() => adopted)` this used to neutralize WAS the defect — it
+    // settled the pre-collection document — so the call now folds into a three-valued completion and the
+    // rung neutralizes the completion itself.
+    from: "      ? await deps.completeRecovered(r.tenant, r.caseSpec, adopted).then(",
+    to: '      ? await Promise.resolve({ kind: "completed" as const, result: adopted }).then(',
     suite: ["--root", "apps/api", "src/composition/verifier-is-not-the-run-result.counterexample.test.ts"],
   },
   {
@@ -1558,7 +1561,9 @@ const MUTATIONS = [
     // they are per-dispatch.
     name: "runtime credentials — the runner image's grant never reaches the dispatch",
     file: "apps/api/src/core/execution/runtime-dispatcher.ts",
-    from: "          ...(runnerAuths.length > 0 ? { registryAuths: [...(job.registryAuths ?? []), ...runnerAuths] } : {}),",
+    // RE-AIMED (arch-review 64): the union-minted grants come FIRST now, so the first-wins deduplication
+    // downstream resolves to the credential covering every repository this pod pulls.
+    from: "          ...(runnerAuths.length > 0 ? { registryAuths: [...runnerAuths, ...(job.registryAuths ?? [])] } : {}),",
     to: "",
     suite: ["--root", "apps/api", "src/core/execution/runtime-dispatcher.test.ts"],
   },
