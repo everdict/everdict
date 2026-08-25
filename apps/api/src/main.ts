@@ -4,8 +4,8 @@ import { promisify } from "node:util";
 import {
   CycleService,
   GithubIssueSync,
-  InMemoryIntermediateCleanupStore,
   InitiativeService,
+  IntermediateCleanupReconciler,
   IssueLabelService,
   IssueService,
   KnowledgeEntryService,
@@ -19,6 +19,7 @@ import {
   TaskService,
   TeamService,
   WorkflowStateService,
+  cleanupRemover,
   collectDeferredTrace,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
@@ -199,6 +200,7 @@ async function main(): Promise<void> {
     recordingStore,
     caseReceiptStore,
     executionAttemptStore,
+    intermediateCleanupStore,
     cancellationStore,
     publicationOperationStore,
     scorecardStore,
@@ -449,7 +451,7 @@ async function main(): Promise<void> {
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
   const artifacts = await artifactStoreFromEnv();
-  // ── AND WHAT THOSE INTERMEDIATE OBJECTS ARE OWED TO (arch-review 67 P1-high) ──────────────────────
+  // ── AND WHAT THOSE INTERMEDIATE OBJECTS ARE OWED TO (arch-review 67 → 68) ─────────────────────────
   //
   // `IntermediateCleanupStore` shipped with a port, an implementation, application helpers and five
   // counterexamples that pass one in — and nothing anywhere constructed it, so every production
@@ -457,12 +459,12 @@ async function main(): Promise<void> {
   // "an optional dependency with no producer is a plan" law (arch-review 64) broken by its own author two
   // waves later, which is why `pnpm unwired-capabilities` now refuses it mechanically.
   //
-  // In-memory for now, and that is a real limitation rather than a placeholder: the debt does not survive a
-  // control-plane restart, so a process that dies between staging and settlement still leaks its artifacts.
-  // What it DOES buy today is the ordinary path — every case that settles in this process discharges exactly
-  // what it staged, on every ending rather than only the successful one. The Postgres adapter is the
-  // remaining half.
-  const intermediateCleanup = new InMemoryIntermediateCleanupStore();
+  // DURABLE where there is a database (arch-review 68). The in-memory row closed the ordinary path — a case
+  // settling in this process discharges exactly what it staged, on every ending — and left the one the
+  // ledger exists for: a control plane that dies between the staging and the settlement leaks its artifacts
+  // forever, because the only record of what was owed died with it. It comes from `persistence` now, beside
+  // every other store that answers that question the same way.
+  const intermediateCleanup = intermediateCleanupStore;
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
   // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
   // persistence. The runner-lease MCP tees pushed frames/logs into it (self-hosted) and the managed topology backend
@@ -951,6 +953,30 @@ async function main(): Promise<void> {
   // pass had discharged (arch-review 58 P1, `DeferredRecoverySweep`).
   const deferredRecovery = new DeferredRecoverySweep(recoveryDeps, owedRecovery);
   setInterval(() => void deferredRecovery.tick(), 60_000).unref();
+  // ── AND THE ONE THAT PAYS THE INTERMEDIATE DEBT (arch-review 68) ──────────────────────────────────
+  //
+  // The settlement discharges inline, which covers every case that settles in the process that ran it. This
+  // covers the reason the ledger exists: a control plane that died between the staging and the settlement,
+  // and a delete that did not converge. Both leave a row saying "these bytes are garbage" and, until now,
+  // nobody looking at it.
+  //
+  // LEADER-GATED, because every replica shares one ledger and one bucket — N sweeps racing would spend N
+  // times the object-store calls to do one execution's work, and the loser's delete answers "already gone",
+  // which is the shape that teaches a sweep to trust a deletion it did not perform.
+  //
+  // It collects only what a settlement RELEASED (`due()` never returns a retained row), which is what makes
+  // running it safe at all: a sweep that could see retained rows would delete the artifact a crashed case is
+  // about to be recovered from.
+  if (artifacts) {
+    const cleanupReconciler = new IntermediateCleanupReconciler({
+      cleanup: intermediateCleanup,
+      remove: cleanupRemover({ agentHalves: artifacts, verdicts: artifacts }),
+    });
+    setInterval(
+      whenLeader(leader, () => void cleanupReconciler.tick().catch(() => {})),
+      60_000,
+    ).unref();
+  }
   // The cancel teardown's reconciler (mig 0184, arch-review 47 §5.2). Boot recovery above resumes batches
   // whose DRIVER died; this closes the other half — batches whose cancellation was decided and whose teardown
   // never finished. Registered here rather than inside runStartupRecovery because it is not a one-shot boot

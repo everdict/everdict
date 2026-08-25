@@ -87,6 +87,12 @@ export {
   stageAgentHalf,
 } from "./execution/agent-half.js";
 export {
+  type CleanupTick,
+  cleanupRemover,
+  IntermediateCleanupReconciler,
+  type IntermediateCleanupReconcilerDeps,
+} from "./ops/intermediate-cleanup-reconciler.js";
+export {
   type ArtifactRef,
   dischargeIntermediates,
   InMemoryIntermediateCleanupStore,

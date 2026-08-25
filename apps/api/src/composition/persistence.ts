@@ -16,7 +16,9 @@ import {
   InMemoryCancellationStore,
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,
+  InMemoryIntermediateCleanupStore,
   InMemoryPublicationOperationStore,
+  type IntermediateCleanupStore,
   NamingTrajectoryStore,
   attemptParentAuthority,
   soleLeader,
@@ -123,6 +125,7 @@ import {
   PgHandoffCheckpointStore,
   PgInitiativeStore,
   PgInitiativeUpdateStore,
+  PgIntermediateCleanupStore,
   PgIssueLabelStore,
   PgIssueStore,
   PgKnowledgeEntryStore,
@@ -230,6 +233,10 @@ export interface Persistence {
   // The PHYSICAL execution ledger (mig 0182): one unconditional row per physical execution, with a state.
   // Phase-1 dual-write — stamped beside the commit points, read by nothing (arch-review 42).
   executionAttemptStore: ExecutionAttemptStore;
+  // Where a two-phase case's staged intermediates are OWED until the settlement releases them and a
+  // reconciler collects them (arch-review 67 → 68). Postgres-backed when there is a database: the whole
+  // point of the row is surviving the process that incurred the debt.
+  intermediateCleanupStore: IntermediateCleanupStore;
   // The cancel teardown's durable owner (mig 0184, generalized by 0186): a scorecard OR a standalone run
   // whose CANCELLED decision committed but whose live work may still be running. Swept by the
   // CancellationCoordinator (arch-review 47 §5.2, arch-review 52 Wave 3).
@@ -419,6 +426,7 @@ export async function makePersistence(): Promise<Persistence> {
       // work only while the batch or run it belongs to is still open and still owned at the epoch the attempt
       // was opened under. The Pg twin asks the same question as a correlated EXISTS inside its one UPDATE;
       // here the two stores are in the same process, so the reader closes over them.
+      intermediateCleanupStore: new InMemoryIntermediateCleanupStore(),
       executionAttemptStore: new InMemoryExecutionAttemptStore(
         undefined,
         // …and the reservation's PARENT AUTHORITY (arch-review 55, Wave 1). The predicate itself is
@@ -499,6 +507,7 @@ export async function makePersistence(): Promise<Persistence> {
     recordingStore: new PgRecordingStore(client),
     caseReceiptStore: new PgCaseReceiptStore(client),
     executionAttemptStore: new PgExecutionAttemptStore(client),
+    intermediateCleanupStore: new PgIntermediateCleanupStore(client),
     cancellationStore: new PgCancellationStore(client),
     publicationOperationStore: new PgPublicationOperationStore(client),
     scorecardStore: new PgScorecardStore(client, REPLICA_ID),

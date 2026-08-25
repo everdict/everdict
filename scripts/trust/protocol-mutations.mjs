@@ -1864,6 +1864,9 @@ const MUTATIONS = [
       "--root",
       "packages/application-control",
       "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
+      // …and window B (arch-review 68): a half staged before any verifier reservation is discoverable ONLY
+      // through this row, so neutralizing it is what makes those bytes undiscoverable.
+      "src/execution/staged-half-is-discoverable.counterexample.test.ts",
     ],
   },
   {
@@ -2062,6 +2065,40 @@ const MUTATIONS = [
     to: "        if (!parent) return undefined;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
+  },
+  {
+    // arch-review 68. The safety property of the whole ledger: a sweep that can see RETAINED rows deletes the
+    // artifact a crashed case is about to be recovered from, which turns the cleanup into a way of destroying
+    // the recovery it exists to enable.
+    name: "cleanup sweep — a retained artifact is handed to the reconciler",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: '          (d.state === "gc_owed" || d.state === "retry_wait") &&',
+    to: '          d.state !== "completed" &&',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ops/cleanup-reconciler.counterexample.test.ts"],
+  },
+  {
+    // …and the same predicate in the adapter that actually runs it. Real Postgres, because the guard IS the
+    // SQL — the in-memory twin proves the shape and this proves the deployment.
+    name: "cleanup sweep (postgres) — a retained artifact is handed to the reconciler",
+    file: "packages/db/src/results/pg-intermediate-cleanup-store.ts",
+    from: "        WHERE state IN ('gc_owed', 'retry_wait')\n          AND (next_attempt_at IS NULL",
+    to: "        WHERE state <> 'completed'\n          AND (next_attempt_at IS NULL",
+    build: "@everdict/db",
+    suite: ["--root", "apps/api", "src/trust/intermediate-cleanup.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
+  {
+    // arch-review 68. `owe` records the debt BEFORE the put, so a ref can name bytes that do not exist —
+    // and deleting an absent key succeeds on every object store. Counting it done completes a debt whose put
+    // is still in flight behind it, orphaning the object the row exists to protect.
+    name: "cleanup sweep — an unwritten ref is counted deleted",
+    file: "packages/application-control/src/ops/intermediate-cleanup-reconciler.ts",
+    from: "        if (ref.written !== true) {",
+    to: "        if (false) {",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ops/cleanup-reconciler.counterexample.test.ts"],
   },
   {
     // arch-review 67 P1-high. The ledger existed, the tests wired it, and the production dispatcher had no

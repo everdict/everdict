@@ -135,6 +135,7 @@ export { PgRunStore } from "./results/pg-run-store.js";
 export { PgRecordingStore } from "./results/pg-recording-store.js";
 export { PgCaseReceiptStore } from "./results/pg-case-receipt-store.js";
 export { PgExecutionAttemptStore } from "./results/pg-execution-attempt-store.js";
+export { PgIntermediateCleanupStore } from "./results/pg-intermediate-cleanup-store.js";
 export { PgCancellationStore } from "./results/pg-cancellation-store.js";
 export { PgPublicationOperationStore } from "./results/pg-publication-operation-store.js";
 export { PgScorecardStore } from "./results/pg-scorecard-store.js";

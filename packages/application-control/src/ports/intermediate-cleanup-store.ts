@@ -175,7 +175,10 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
   async deferred(operationId: string, error: string, nextAttemptAt: string): Promise<void> {
     for (const [k, d] of this.debts)
       if (d.operationId === operationId)
-        this.debts.set(k, { ...d, attempts: d.attempts + 1, lastError: error, nextAttemptAt });
+        // …INCLUDING THE STATE. This set the counters and left `state` alone, so a deferred debt still read
+        // as `gc_owed` — indistinguishable from one no sweep had ever tried. The Pg adapter sets it, and an
+        // adapter pair that disagrees is a protocol only one of them has (arch-review 68).
+        this.debts.set(k, { ...d, state: "retry_wait", attempts: d.attempts + 1, lastError: error, nextAttemptAt });
   }
 }
 
