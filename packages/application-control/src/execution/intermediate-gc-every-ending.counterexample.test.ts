@@ -198,11 +198,29 @@ describe("[R66 COUNTEREXAMPLE] a case that could not be judged still cleans up a
       "the measurement document carries platform cleanup state again",
     ).toBe(undefined);
 
-    const owed = cleanup.snapshot().flatMap((d) => d.refs);
+    const debts = cleanup.snapshot();
     expect(
-      owed.map((r) => r.key),
+      debts.flatMap((d) => d.refs).map((r) => r.key),
       "the ending left its staged bytes owed to nobody",
     ).toEqual(artifacts.keys());
+
+    // ── AND IT IS RETAINED, NOT COLLECTABLE (arch-review 67 P1-high) ─────────────────────────────────
+    //
+    // The first version recorded the debt as `owed` — the state that means DELETE THIS — from the moment the
+    // bytes were staged. Nothing removed them only because no reconciler was wired, and wiring one is the
+    // row's entire purpose: a sweep must find NOTHING to do until the case settles.
+    //
+    // ⚠️ THESE TWO ASSERTIONS WERE WRITTEN ONCE AND SILENTLY NEVER LANDED — a scripted edit whose match
+    // failed after a reformat, and the file stayed green because it was still asserting the older property.
+    // `pnpm protocol-mutations` reported the rung as a HOLE, which is precisely the thing it exists to say.
+    expect(
+      debts.map((d) => d.state),
+      "the staged bytes were marked collectable before the case settled",
+    ).toEqual(["retained"]);
+    expect(
+      await cleanup.due("2999-01-01T00:00:00.000Z", 10),
+      "a reconciler would have deleted the artifact this case still needs",
+    ).toEqual([]);
   });
 
   it("DISCHARGES the debt when the unjudged case settles", async () => {

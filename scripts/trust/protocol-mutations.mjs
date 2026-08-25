@@ -705,8 +705,11 @@ const MUTATIONS = [
     // — and `caseJobPayload` refuses it, which is the regression this wave exists to close.
     name: "R56 Wave K — the dispatch stops splitting the case",
     file: "packages/application-control/src/execution/verifier-pass.ts",
-    from: "  const result = await deps.dispatch({ ...job, evalCase: plan.remainder });",
-    to: "  const result = await deps.dispatch(job);",
+    // RE-AIMED (arch-review 67): the dispatch carries an acknowledgement so the agent half is staged before
+    // its container is reclaimed, so the call spans several lines. The neutralization is unchanged — hand the
+    // agent the WHOLE case and the private material goes into its container.
+    from: "    { ...job, evalCase: plan.remainder },",
+    to: "    job,",
     suite: ["--root", "packages/application-control", "src/execution/verifier-pass.counterexample.test.ts"],
   },
   {
@@ -1081,8 +1084,10 @@ const MUTATIONS = [
     // RE-AIMED (arch-review 62 follow-through): the stage moved to where the window actually opens —
     // immediately before the second container — so it no longer runs for cases refused two lines later.
     // RE-AIMED (arch-review 66): the staging also records the cleanup debt now, so it takes the ledger.
-    from: "  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);",
-    to: "  void deps.agentHalves;",
+    // RE-AIMED (arch-review 67): staging happens in the acknowledgement when the lane has one, and here
+    // otherwise. Neutralizing the WRITER covers both paths — see the durability rung for the same move.
+    from: "  if (!store) return;",
+    to: "  if (true) return;",
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
   {
@@ -1358,8 +1363,9 @@ const MUTATIONS = [
     // execution's evidence. Key by the tree again and the two attempts collide.
     name: "agent half — the staged half is keyed by something two attempts share",
     file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  return contentDigest(result);",
-    to: "  return contentDigest(result.snapshot);",
+    // RE-AIMED (arch-review 67): the digest is parse-first, so the raw call moved into `canonicalAgentHalf`.
+    from: "  return contentDigest(canonicalAgentHalf(result));",
+    to: "  return contentDigest(canonicalAgentHalf(result).snapshot);",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/agent-half.counterexample.test.ts"],
   },
@@ -1719,8 +1725,9 @@ const MUTATIONS = [
     // (`verdict handover`), and conflating the two is how a rung ends up mutating a line whose absence
     // changes nothing.
     file: "packages/application-control/src/execution/agent-half.ts",
-    from: "  if (!store || at.agentResultDigest === undefined) return;",
-    to: "  if (true) return;",
+    // RE-AIMED (arch-review 67): the stage returns a proof rather than `void`, so its guard names the arm.
+    from: '    return { kind: "absent", reason: store ? "this job staged no agent half to key a verdict by" : "no verdict store" };',
+    to: '    return { kind: "absent", reason: "neutralized" };\n  if (true)\n    return { kind: "absent", reason: "neutralized" };',
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
