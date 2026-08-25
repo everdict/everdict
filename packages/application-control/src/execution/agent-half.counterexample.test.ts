@@ -112,8 +112,19 @@ describe("[R60 COUNTEREXAMPLE] the agent's half is staged before the verifier is
     // earlier, and a verdict from the first attempt merged onto the second attempt's evidence with the
     // workspace check passing because the trees really were the same.
     const sameTree: CaseResult["snapshot"] = { kind: "repo", diff: "A", changedFiles: ["a"], headSha: "sha-a" };
-    const attemptA = agentHalfDigest({ ...RESULT, snapshot: sameTree, trace: [{ t: 1 } as never] });
-    const attemptB = agentHalfDigest({ ...RESULT, snapshot: sameTree, trace: [{ t: 2 } as never] });
+    // ⚠️ VALID TRACE EVENTS, because the digest is parse-first since arch-review 67 — the write, the key and
+    // the read all come from the canonical form, so a document the schema refuses is never staged at all.
+    // Two REAL executions differ in their traces, which is exactly what this case is about.
+    const attemptA = agentHalfDigest({
+      ...RESULT,
+      snapshot: sameTree,
+      trace: [{ t: 1, kind: "log", stream: "stdout", text: "attempt A ran" }],
+    });
+    const attemptB = agentHalfDigest({
+      ...RESULT,
+      snapshot: sameTree,
+      trace: [{ t: 2, kind: "log", stream: "stdout", text: "attempt B ran" }],
+    });
     expect(contentDigest(sameTree), "the two attempts did not share a tree, so this proves nothing").toBe(
       contentDigest(sameTree),
     );

@@ -1279,8 +1279,11 @@ export class NomadBackend
       // The image THIS lane placed, added to what the in-container driver could see — which is nothing, since
       // it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
       const placed = mergePlacedImage(result, job, "the Nomad API");
-      // …and the verdict reaches its durable owner BEFORE the purge in the `finally` (arch-review 66).
+      // …and the result reaches its durable owner BEFORE the purge in the `finally`. The verifier's own
+      // acknowledgement (arch-review 66) and the AGENT's (arch-review 67) are the same moment on the same
+      // lane — a verifier dispatch takes the first, an ordinary case the second.
       if (verifier?.acknowledge) await verifier.acknowledge(placed);
+      else if (options?.acknowledgeResult) return await options.acknowledgeResult(placed);
       return placed;
     } catch (err) {
       // ── EVERY POST-START FAILURE RECLAIMS, NOT JUST AN ABORT (arch-review 63 P1-high) ──────────────

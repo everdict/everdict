@@ -22,7 +22,7 @@ See skill `ci`.
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
-  **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
+  **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
   **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
@@ -55,6 +55,13 @@ See skill `ci`.
   which is what moved it here. Every allowlist entry names whether the granted call is the test's PREMISE or
   an `OPEN` defect, and an entry whose site stopped hard-coding a success FAILS — a reason that outlived its
   subject reads as permission, and an unremoved `OPEN` reads as a defect still open when it was fixed.
+- **`pnpm unwired-capabilities` is the optional-dependency law, enforced instead of stated** (arch-review 67).
+  An optional port whose only implementations are classes nobody constructs in `apps/*/src` is a capability
+  the tests exercise and production does not have — `deps.x?.y()` reads the same either way, which is why the
+  prose version failed: it was written after arch-review 64 and broken by its own author two waves later,
+  leaving every production private-verifier case recording no cleanup debt. Ports satisfied STRUCTURALLY (an
+  object literal at the root) are deliberately not flagged — the compiler already refuses a missing one where
+  it is passed. `DECLARED_UNWIRED` states why a capability is inert on purpose.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A

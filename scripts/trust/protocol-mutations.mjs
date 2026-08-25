@@ -1998,6 +1998,126 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/execution/normal-vs-restart-parity.counterexample.test.ts"],
   },
   {
+    // arch-review 67 P0-lifecycle. The verifier lane got the pre-cleanup handover in arch-review 66 and the
+    // AGENT lane did not — so a crash between the backend's reclaim and the stage lost a completed agent
+    // execution whose container was already gone.
+    name: "agent handover — the half becomes durable only after its container is gone",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: "        stagedEarly = true;",
+    to: "        stagedEarly = false;",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/verdict-acknowledged-before-reclaim.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 67 P2-contract. `AttemptAdoption` advertises a parent kind and id and only the epoch
+    // reached a guard — two of three fields were a proof nobody consumed, inside the type introduced to fix
+    // an instance of exactly that.
+    name: "adoption parent identity — the parent a settlement names is never checked",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "    if (at.parent.kind !== rowParent || at.parent.id !== rowParentId)",
+    to: "    if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
+  },
+  {
+    // arch-review 67 P1-provenance. 412 was read as idempotent success outright — "this key is occupied"
+    // accepted as "the same object is there". For the verifier verdict's attempt-scoped key those are
+    // different statements, and the difference is a restart reading a verdict the normal path never used.
+    name: "immutable conflict — a taken key is assumed to hold the same bytes",
+    file: "packages/storage/src/s3.ts",
+    from: "      if (opts?.immutable !== true || status !== 412) throw err;",
+    to: "      if (opts?.immutable !== true || status !== 412) throw err;\n      return await this.signedUrl(this.client, key);",
+    build: "@everdict/storage",
+    suite: ["--root", "packages/storage", "src/immutable-conflict.counterexample.test.ts"],
+  },
+  {
+    // arch-review 67 P1-adapter. The digest was taken over the RAW producer object while the read re-derives
+    // it after `CaseResultSchema.parse`, so a producer whose literal differs from its parsed form staged
+    // under a key its own read then refused.
+    name: "agent half canonicality — the digest is taken before the schema normalizes",
+    file: "packages/application-control/src/execution/agent-half.ts",
+    from: "  return contentDigest(canonicalAgentHalf(result));",
+    to: "  return contentDigest(result);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/artifact-authenticity.counterexample.test.ts"],
+  },
+  {
+    // arch-review 67 P1-high. A cancellation terminalizes the parent WITHOUT raising its epoch, so every
+    // guard that checks only the epoch still passes and only the openness check refuses — which the ordinary
+    // settlement was dropping on the floor. Cancelled batch, committed case, attempts that never settled.
+    name: "settlement adoption — a cancelled parent is treated as one still driving",
+    file: "packages/application-control/src/ports/execution-attempt-store.ts",
+    from: "        if (!parent || !(OPEN_SCORECARD_STATUSES as readonly string[]).includes(parent.status)) return undefined;",
+    to: "        if (!parent) return undefined;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
+  },
+  {
+    // arch-review 67 P1-high. The ledger existed, the tests wired it, and the production dispatcher had no
+    // parameter to carry it — so every production private-verifier case staged artifacts nothing owed.
+    name: "cleanup wiring — the dispatcher drops the ledger on its way to the pass",
+    file: "apps/api/src/core/execution/verifier-aware-dispatcher.ts",
+    from: "      ...(this.cleanup ? { cleanup: this.cleanup } : {}),",
+    to: "",
+    build: "@everdict/api",
+    suite: ["--root", "apps/api", "src/composition/cleanup-is-wired.counterexample.test.ts"],
+  },
+  {
+    // arch-review 67 P0-lifecycle. The acknowledgement's ordering was right and its guarantee was empty: it
+    // swallowed its own store write and reported success, so an unwritable verdict was handed over as
+    // durable and the lane reclaimed the container that could have re-produced it.
+    name: "verdict durability policy — an unwritable verdict is acknowledged as durable",
+    file: "packages/application-control/src/execution/verifier-operation.ts",
+    from: '  const requiresDurableVerdict = deps.durability === "required";',
+    to: "  const requiresDurableVerdict = false;",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/verdict-acknowledged-before-reclaim.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 67 P1-high. The debt was written as `owed` — the state that means DELETE THIS — from the
+    // moment the bytes were staged, so wiring a reconciler would have deleted the artifact the case still
+    // needed. Retention and deletion are two states.
+    name: "cleanup lifecycle — a staged artifact is collectable before its case settles",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: '      state: "retained",',
+    to: '      state: "gc_owed",',
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/execution/intermediate-gc-every-ending.counterexample.test.ts",
+    ],
+  },
+  {
+    // arch-review 67 P0-canonicality. The ambiguous arm read the receipt ledger for EXISTENCE and then seeded
+    // the process-local document — so a concurrent writer's different result for the same child left the
+    // batch carrying something the ledger does not hold, silently.
+    name: "commit readback — the recovery seeds its own result over the persisted one",
+    file: "packages/application-control/src/scorecard/recovery-planner.ts",
+    from: "                  seed.push(readBack.result);",
+    to: "                  seed.push(adoptedResult);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/scorecard/ambiguous-commit.counterexample.test.ts"],
+  },
+  {
+    // …and the corroboration itself: a receipt whose child cannot back it is not a tie to break in favour of
+    // whoever is asking.
+    name: "commit readback — a receipt the child contradicts is accepted anyway",
+    file: "packages/application-control/src/scorecard/commit-readback.ts",
+    from: "  if (actual !== vouched)",
+    to: "  if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/scorecard/ambiguous-commit.counterexample.test.ts"],
+  },
+  {
     // arch-review 66 P1-lifecycle. `.catch(() => undefined)` made a commit whose RESPONSE was lost
     // indistinguishable from one that never happened, and the planner re-dispatched the case — duplicate
     // compute for a case that had already settled.

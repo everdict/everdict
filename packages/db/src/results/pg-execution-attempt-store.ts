@@ -440,13 +440,17 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
          AND a.execution_id = $2
          AND a.state IN (${COMMIT_FROM_LIST})
          AND (
-           a.scorecard_id IS NOT NULL AND EXISTS (
+           -- …and the parent the SETTLEMENT names is the parent the row has (arch-review 67 P2-contract).
+           -- The adoption's parent kind and id were carried by the contract and reached no predicate: this
+           -- branched on the row's own parent and compared only the epoch, so two of three advertised fields
+           -- were a proof nobody consumed. (No backticks in here: this is inside a template literal.)
+           a.scorecard_id IS NOT NULL AND $5 = 'scorecard' AND a.scorecard_id = $6 AND EXISTS (
              SELECT 1 FROM everdict_scorecards s
               WHERE s.id = a.scorecard_id
                 AND s.status IN (${OPEN_SCORECARDS})
                 AND s.owner_epoch = $3::int
            )
-           OR a.scorecard_id IS NULL AND EXISTS (
+           OR a.scorecard_id IS NULL AND $5 = 'run' AND 'evd-run-' || $6 = a.execution_id AND EXISTS (
              SELECT 1 FROM everdict_runs r
               WHERE 'evd-run-' || r.id = a.execution_id
                 AND r.status IN (${OPEN_RUNS})
@@ -454,7 +458,7 @@ export class PgExecutionAttemptStore implements ExecutionAttemptStore {
            )
          )
        RETURNING a.attempt_id`,
-      [attemptId, at.expectedExecutionId, at.parent.adoptingEpoch, at.childRunId ?? null],
+      [attemptId, at.expectedExecutionId, at.parent.adoptingEpoch, at.childRunId ?? null, at.parent.kind, at.parent.id],
     );
     if (moved.length > 0) return { kind: "adopted" };
 

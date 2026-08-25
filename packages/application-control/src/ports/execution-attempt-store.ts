@@ -569,6 +569,23 @@ export class InMemoryExecutionAttemptStore implements ExecutionAttemptStore {
         : { kind: "incompatible_state", state: current.state };
     if (isTerminalAttemptState(current.state) || !COMMIT_PREDECESSOR_STATES.includes(current.state))
       return { kind: "incompatible_state", state: current.state };
+    // ── THE PARENT THE CALLER NAMES IS THE PARENT THE ROW HAS (arch-review 67 P2-contract) ──────────
+    //
+    // `AttemptAdoption` advertises `parent: {kind, id, adoptingEpoch}` and only the epoch reached a guard:
+    // both adapters branched on the row's OWN parent and compared the number. So two of the three fields
+    // were a proof the contract asked for and never consumed — the annotation failure this rule file exists
+    // to stop, in the type introduced to fix an instance of it.
+    //
+    // Production callers happen to pass the right coordinate, which is what kept this from being reachable.
+    // "Nobody misuses it today" is not the property; the property is that misusing it is refused.
+    const rowParent = current.scorecardId !== undefined ? "scorecard" : "run";
+    const rowParentId =
+      current.scorecardId ?? (current.executionId.startsWith("evd-run-") ? current.executionId.slice(8) : "");
+    if (at.parent.kind !== rowParent || at.parent.id !== rowParentId)
+      return {
+        kind: "wrong_parent",
+        reason: `this attempt belongs to ${rowParent} ${rowParentId}, and the settlement named ${at.parent.kind} ${at.parent.id}`,
+      };
     // …and the parent, asked about the ADOPTING authority rather than the one that opened the row. `undefined`
     // is a parent that is closed or gone: a settlement under it is not a fence that moved, it is a case whose
     // batch is over.

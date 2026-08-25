@@ -1,6 +1,7 @@
 import { AppError } from "@everdict/contracts";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { verifierPlanOf } from "@everdict/domain";
+import type { DispatchOptions } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
@@ -25,7 +26,9 @@ import { jobAttemptId } from "./open-physical-attempt.js";
 // could never provide.
 export interface VerifierPassDeps {
   // Run the agent's half. Whatever the caller already uses — a backend, the scheduler, the in-process driver.
-  dispatch: (job: CaseJob) => Promise<CaseResult>;
+  // …and the OPTIONS it forwards, so this pass can hand the backend an acknowledgement to call before it
+  // reclaims the agent's container (arch-review 67 P0-lifecycle).
+  dispatch: (job: CaseJob, options?: DispatchOptions) => Promise<CaseResult>;
   // Run the judging half somewhere the agent was not. Absent = this deployment has no second lane, which is a
   // reason to REFUSE the case (the dispatch below already does), never to grade it in the agent's container.
   // Answers the INVOCATION, not bare numbers (arch-review 57 P1) — which procedure ran, what it read, and
@@ -73,7 +76,33 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // ordinary case for a lane it does not use.
   if (!plan) return await deps.dispatch(job);
 
-  const result = await deps.dispatch({ ...job, evalCase: plan.remainder });
+  // ── THE AGENT'S HALF IS DURABLE BEFORE ITS CONTAINER IS RECLAIMED (arch-review 67 P0-lifecycle) ──
+  //
+  // The verifier lane got this seam in arch-review 66 and this one did not. Every managed backend parses its
+  // logs, builds the result, and reclaims the object in a `finally` — so staging AFTER the dispatch resolved
+  // meant a crash there lost a completed agent execution with its container already gone.
+  //
+  // ⚠️ AND IT MUST NOT STAGE FOR A VERIFIER THAT WILL NEVER RUN (arch-review 62): a half written for a
+  // refused case is garbage the moment it is written. Every refusal below is decidable HERE — the lane's
+  // presence and the tenant/run coordinate are known before the dispatch, and the snapshot kind is on the
+  // result being handed over — so the decision is made once and spent twice.
+  let stagedEarly = false;
+  const willJudge = (r: CaseResult): boolean =>
+    deps.dispatchVerifier !== undefined &&
+    r.snapshot?.kind === "repo" &&
+    job.runId !== undefined &&
+    job.tenant !== undefined;
+  const result = await deps.dispatch(
+    { ...job, evalCase: plan.remainder },
+    {
+      acknowledgeResult: async (r) => {
+        if (!willJudge(r) || job.tenant === undefined || job.runId === undefined) return r;
+        await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, r, deps.cleanup);
+        stagedEarly = true;
+        return r;
+      },
+    },
+  );
   // ── THE FIRST PHASE, MADE DURABLE BEFORE THE SECOND EXISTS (arch-review 60 follow-through) ────────
   //
   // The backend deletes the agent's Job as soon as it has parsed this result, so from here until the merge
@@ -171,7 +200,9 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // the earlier placement wrote a half for every case with a verifier PLAN, including the ones refused two
   // lines later for having no repo snapshot or no lane to judge on — halves for a verifier that was never
   // dispatched, and therefore garbage the moment they were written.
-  await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);
+  // …unless the lane already did it, before reclaiming. A lane with no acknowledgement keeps the ordering it
+  // had, which is this line.
+  if (!stagedEarly) await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {

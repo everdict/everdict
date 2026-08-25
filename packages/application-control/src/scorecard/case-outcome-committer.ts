@@ -25,6 +25,7 @@ import {
 import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
+import { requireAdopted } from "../ports/execution-attempt-store.js";
 import { dischargeIntermediates, removeStagedObject } from "../ports/intermediate-cleanup-store.js";
 import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
@@ -491,11 +492,50 @@ export class CaseOutcomeCommitter {
           // stamp a plane the deployment was configured without), and `attempts` is the store the write must
           // go through — the transaction's twin wherever one exists.
           if (settled === undefined) return undefined;
-          if (this.deps.attempts && attempts && attemptId !== undefined)
-            await attempts.transition(attemptId, terminalState, {
-              childRunId: childId,
-              ...(input.outcome === "failed" ? { error: failureError } : {}),
-            });
+          // ── AND THE ANSWER IS CONSUMED HERE TOO (arch-review 67 P1-high) ───────────────────────────
+          //
+          // arch-review 66 gave the RECOVERY lane a semantic adoption whose result aborts the transaction,
+          // and left this one calling `transition` and dropping the boolean — the one-lane-only shape this
+          // review series has now found six times.
+          //
+          // It is not hypothetical here. A scorecard cancellation terminalizes the parent WITHOUT raising
+          // its epoch, and the child's settle fence checks epoch equality but not that the parent is open —
+          // so a case completing just after a cancel could settle its child, claim its receipt, and have
+          // `PARENT_AUTHORIZES` refuse both attempt transitions. Cancelled batch, committed case, physical
+          // rows that never settled.
+          //
+          // `committed` goes through the SAME adoption verb the recovery uses, so the policy is stated once:
+          // a settlement adopts the attempts it settles, or it settles nothing. Under a cancelled parent the
+          // adoption answers `wrong_parent`, this throws, and the transaction rolls back — which is what a
+          // cancellation should mean, and is now true of the receipt and the row together rather than of one
+          // of them.
+          //
+          // The OTHER terminals keep `transition`: a `failed` row must still settle under a closed parent or
+          // attempts read live forever (rule `protocol` L5), and none of them asserts that anything was
+          // measured.
+          const adoptingParent = {
+            kind: "scorecard" as const,
+            id: input.scorecardId,
+            // The driver's CURRENT epoch — the same fence the child's settle just used, so the receipt and
+            // the row are adopted under one authority rather than two that usually agree.
+            adoptingEpoch: input.epoch,
+          };
+          if (this.deps.attempts && attempts && attemptId !== undefined) {
+            if (terminalState === "committed")
+              requireAdopted(
+                await attempts.adoptAtSettlement(attemptId, {
+                  parent: adoptingParent,
+                  expectedExecutionId: storedExecutionId(input.executionId),
+                  childRunId: childId,
+                }),
+                attemptId,
+              );
+            else
+              await attempts.transition(attemptId, terminalState, {
+                childRunId: childId,
+                ...(input.outcome === "failed" ? { error: failureError } : {}),
+              });
+          }
           // ── …AND THE VERDICT'S ROW, IN THE SAME TRANSACTION (arch-review 64 P1-high) ──────────────
           //
           // A private-verifier case is TWO physical executions under one execution id. The agent's attempt
@@ -508,8 +548,17 @@ export class CaseOutcomeCommitter {
           // Both rows reach the same terminal or neither does, which is what makes the settlement one
           // decision rather than two writes that agree most of the time.
           const verifierAttempt = covered.verifier?.work?.attemptId;
-          if (this.deps.attempts && attempts && verifierAttempt !== undefined)
-            await attempts.transition(verifierAttempt, terminalState);
+          if (this.deps.attempts && attempts && verifierAttempt !== undefined) {
+            if (terminalState === "committed")
+              requireAdopted(
+                await attempts.adoptAtSettlement(verifierAttempt, {
+                  parent: adoptingParent,
+                  expectedExecutionId: storedExecutionId(input.executionId),
+                }),
+                verifierAttempt,
+              );
+            else await attempts.transition(verifierAttempt, terminalState);
+          }
           return settled;
         },
         runStore,

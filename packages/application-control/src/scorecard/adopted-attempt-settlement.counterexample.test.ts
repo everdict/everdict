@@ -56,7 +56,11 @@ const ADOPTED: CaseResult = {
 // reserved. The adoption harvests THAT handle.
 const ledgerHolding = async () => {
   const attempts = new InMemoryExecutionAttemptStore();
-  const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme" });
+  // ⚠️ WITH ITS PARENT. A batch case's attempt always carries `scorecardId` in production, and the adoption
+  // checks that the parent a settlement NAMES is the parent the row has (arch-review 67 P2-contract) — so a
+  // fixture that omits it is describing a standalone run and refusing a batch settlement for the right
+  // reason (rule `testing`: a fixture must be the production shape).
+  const { attemptId } = await attempts.open({ executionId: EXECUTION, tenant: "acme", scorecardId: SCORECARD });
   await attempts.reserveWork(attemptId, {
     tenant: "acme",
     runId: "evd-sc-1-c1",
@@ -159,7 +163,12 @@ describe("[R64 COUNTEREXAMPLE] a batch recovery settles the attempt it adopted",
     // A two-phase case is two physical executions under one execution id. Adopting only the harvested handle
     // leaves the row that produced the verdict at `verdict_produced` for a case that finished.
     const { attempts } = await ledgerHolding();
-    const verifier = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+    const verifier = await attempts.open({
+      executionId: EXECUTION,
+      tenant: "acme",
+      scorecardId: SCORECARD,
+      caseId: "c1#verify",
+    });
     await attempts.reserveWork(verifier.attemptId, {
       tenant: "acme",
       runId: "evd-sc-1-c1",
@@ -219,7 +228,12 @@ describe("[R64 COUNTEREXAMPLE] a batch recovery settles the attempt it adopted",
   //   the receipt named the JUDGING container as the case's execution: expected 'evd-sc-1-c1#g2' to be 'evd-sc-1-c1#g1'
   it("names the AGENT's attempt on the receipt when the verdict's handle is what answered", async () => {
     const { attempts, attemptId: agentAttempt } = await ledgerHolding();
-    const verifier = await attempts.open({ executionId: EXECUTION, tenant: "acme", caseId: "c1#verify" });
+    const verifier = await attempts.open({
+      executionId: EXECUTION,
+      tenant: "acme",
+      scorecardId: SCORECARD,
+      caseId: "c1#verify",
+    });
 
     // PARSED FIRST, and the digests taken from the parsed document. `readAgentHalf` runs the schema on what it
     // reads back, and a schema that fills a default makes `contentDigest(parsed.snapshot)` a different string

@@ -8,6 +8,7 @@ import {
 import { contentDigest } from "@everdict/domain";
 import type { ManagedDispatchAuthority } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
+import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
 import { type AgentHalfStore, stageVerifierVerdict } from "./agent-half.js";
 
 // ── THE JUDGING HALF IS DURABLE WORK (arch-review 57 P0-verifier) ────────────────────────────────────
@@ -44,7 +45,30 @@ export interface VerifierOperationDeps {
   // Absent = this deployment cannot recover a two-phase case that crashed after its verdict, which is what it
   // could do before. It never changes what a case that completes normally produces.
   verdicts?: AgentHalfStore;
+  // …and where the verdict artifact's cleanup debt is recorded. Its absence is why the verdict was never in
+  // the debt at all even on deployments that wired the ledger by hand (arch-review 67 P1-high).
+  cleanup?: IntermediateCleanupStore;
+  // ── WHAT AN UNWRITABLE VERDICT COSTS, DECIDED HERE (arch-review 67 P0-lifecycle) ──────────────────
+  //
+  // The acknowledgement below hands the verdict to a durable owner BEFORE the lane reclaims its container.
+  // Its first version wrapped the write in `.catch(() => undefined)` and reported success anyway — so a
+  // verdict store that threw produced a successful acknowledgement, the Job was deleted, and a crash before
+  // settlement lost a decision that had already been computed. Correct ordering, empty guarantee.
+  //
+  // The trade is real and it has two honest answers, so it is DECLARED rather than assumed:
+  //   `required`    — a write that did not land fails the acknowledgement, and therefore the lane's cleanup.
+  //                   The case ends `unmeasured` and the container may still be inspectable. This is what a
+  //                   deployment running private verifiers as constitutional evidence wants.
+  //   `best_effort` — availability first: the verdict this process holds is still returned and used, and the
+  //                   deployment accepts that a crash can lose it. The default, because it is what every
+  //                   caller had before this existed.
+  //
+  // Absent = `best_effort`. A deployment that has not chosen must not silently get the stricter behaviour
+  // and start failing cases it used to measure.
+  durability?: VerifierDurabilityPolicy;
 }
+
+export type VerifierDurabilityPolicy = "required" | "best_effort";
 
 // The judging half places external work exactly as the agent's half does, so it is handed the SAME
 // capability rather than a lookalike pair of hooks — see `ManagedDispatchAuthority` for what being two
@@ -80,6 +104,10 @@ export async function verifierOperation(
   dispatch: (job: VerifierJob, hooks: VerifierDispatchHooks) => Promise<VerifierInvocation>,
 ): Promise<VerifierInvocation> {
   const attempts = deps.attempts;
+  // Read ONCE. Two sites enforce this policy — a store that throws and a store that answers `absent` — and
+  // when a defence has two arms neither one is the protocol (rule `protocol`: a guard nobody can neutralize
+  // in a single place is a guard nobody can test). This local is the protocol.
+  const requiresDurableVerdict = deps.durability === "required";
   // No ledger: nothing to record, and the lane must still be able to judge. The intent it gets back names
   // the work it reported and says plainly that no row backs it — an empty attempt id, rather than a
   // fabricated one that would read as a reservation somebody wrote.
@@ -165,13 +193,26 @@ export async function verifierOperation(
         // THIS copy, which the suite pinning that protocol never executes. A rung whose `from` is not unique
         // is aimed at whichever copy comes first (arch-review 66).
         const handedOver = canonicalize(raw);
-        await stageVerifierVerdict(deps.verdicts, {
+        // The write's ANSWER is consumed. Under `required` a failure propagates out of the acknowledgement,
+        // which means the lane never reaches its cleanup — the container stays, and the case fails honestly
+        // rather than succeeding over bytes that do not exist.
+        const staged = await stageVerifierVerdict(deps.verdicts, {
           tenant: job.tenant,
           runId: job.runId,
           agentResultDigest: job.agentResultDigest,
           verifierAttemptId: attemptId,
           invocation: handedOver,
-        }).catch(() => undefined);
+          ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),
+        }).catch((err: unknown) => {
+          if (requiresDurableVerdict) throw err;
+          return { kind: "absent" as const, reason: err instanceof Error ? err.message : String(err) };
+        });
+        if (requiresDurableVerdict && staged.kind !== "staged")
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { attemptId, reason: staged.reason },
+            `this verifier's verdict could not be made durable (${staged.reason}), and this deployment requires durability before its container is reclaimed`,
+          );
         acknowledged = handedOver;
         return handedOver;
       },
@@ -242,14 +283,25 @@ export async function verifierOperation(
     // `verdict_produced` does not claim durability, so nothing downstream is misled by the loss.
     // …and staged, unless the lane already did it before reclaiming. A lane that acknowledged has made this
     // durable at the earlier, correct moment; one that did not gets the late stage it always had.
-    if (acknowledged === undefined)
-      await stageVerifierVerdict(deps.verdicts, {
+    if (acknowledged === undefined) {
+      const staged = await stageVerifierVerdict(deps.verdicts, {
         tenant: job.tenant,
         runId: job.runId,
         agentResultDigest: job.agentResultDigest,
         verifierAttemptId: attemptId,
         invocation: canonical,
-      }).catch(() => undefined);
+        ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),
+      }).catch((err: unknown) => {
+        if (requiresDurableVerdict) throw err;
+        return { kind: "absent" as const, reason: err instanceof Error ? err.message : String(err) };
+      });
+      if (requiresDurableVerdict && staged.kind !== "staged")
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { attemptId, reason: staged.reason },
+          `this verifier's verdict could not be made durable (${staged.reason}), and this deployment requires it`,
+        );
+    }
     // ── THE CAS IS THIS VERDICT'S RE-PROOF, AND IT IS NOT THE ADOPTION (arch-review 58 · 64) ───────
     //
     // Stamped as soon as the verdict is in hand: a row left live is compute a later sweep will chase, and

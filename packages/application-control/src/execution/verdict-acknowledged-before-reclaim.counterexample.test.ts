@@ -1,9 +1,11 @@
 import type { VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { VerifierInvocationSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import type { DispatchOptions } from "../ports/dispatcher.js";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { AgentHalfStore } from "./agent-half.js";
 import { type VerifierDispatchHooks, verifierOperation } from "./verifier-operation.js";
+import { withVerifierPass } from "./verifier-pass.js";
 
 // ── THE DURABLE HANDOVER PRECEDES THE EXTERNAL CLEANUP (arch-review 66 P0-lifecycle) ───────────────
 //
@@ -113,6 +115,76 @@ describe("[R66 COUNTEREXAMPLE] a verdict is durable before its container is recl
     expect(returned.agentAttemptId).toBe(`${RUN}#g1`);
   });
 
+  it("REFUSES the acknowledgement when the write did not land, under `required`", async () => {
+    // ⚠️ THE ORDERING WAS RIGHT AND THE GUARANTEE WAS EMPTY (arch-review 67 P0-lifecycle). The first version
+    // of the acknowledgement wrapped its store write in `.catch(() => undefined)` and then reported success,
+    // so a verdict store that threw produced a successful handover, the lane deleted its Job, and a crash
+    // before settlement lost a decision that had already been computed — with the container that could have
+    // re-produced it already gone.
+    //
+    // Under `required`, the failure propagates OUT of the acknowledgement and the operation refuses — so the
+    // case ends `unmeasured` upstream instead of being recorded as judged over bytes that do not exist.
+    //
+    // ⚠️ WHAT IT DOES NOT BUY, STATED RATHER THAN CLAIMED: the container is still reclaimed. Both lanes put
+    // their cleanup in a `finally`, which runs on the throw path too, so keeping the object for inspection
+    // would mean restructuring every backend's failure-path reclaim — and a `finally` that stops running on
+    // some errors is how objects leak. `required` means "no verdict this deployment cannot recover is ever
+    // recorded as one"; it does not mean the container survives (rule `protocol`: claiming the stronger
+    // property without the mechanism is the failure).
+    const order: string[] = [];
+    const attempts = new InMemoryExecutionAttemptStore();
+    const unwritable: AgentHalfStore = {
+      async put() {
+        order.push("write-failed");
+        throw new Error("the verdict store is unreachable");
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+    };
+
+    const outcome = await verifierOperation(
+      { attempts, verdicts: unwritable, durability: "required" },
+      JOB,
+      laneThatReclaims(order, { acknowledge: true }),
+    ).then(
+      () => "returned" as const,
+      () => "refused" as const,
+    );
+
+    expect(outcome, "an unwritable verdict was acknowledged as durable").toBe("refused");
+    // The write really was attempted and really did fail — without this the refusal could be coming from
+    // anywhere.
+    expect(order, "the stage was never reached, so this case measures something else").toContain("write-failed");
+  });
+
+  it("KEEPS the verdict under `best_effort`, and says the deployment chose that", async () => {
+    // The control, and the reason this is a declared policy rather than a hardening: availability first is a
+    // legitimate choice, and it is what every caller had before the seam existed. What it must not be is the
+    // SILENT default of a system claiming crash-safety.
+    const order: string[] = [];
+    const attempts = new InMemoryExecutionAttemptStore();
+    const unwritable: AgentHalfStore = {
+      async put() {
+        throw new Error("the verdict store is unreachable");
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+    };
+
+    const returned = await verifierOperation(
+      { attempts, verdicts: unwritable, durability: "best_effort" },
+      JOB,
+      laneThatReclaims(order, { acknowledge: true }),
+    );
+
+    expect(returned.scores, "an availability-first deployment lost a verdict it had in hand").toEqual(RAW.scores);
+    expect(order, "the lane did not reclaim, so this is not the best-effort path").toContain("reclaim");
+  });
+
   it("still finishes for a lane that does NOT acknowledge — the old ordering, stated", async () => {
     // Both lanes learned this together, and a third (a self-hosted runner, a future orchestrator) may not
     // have. Such a lane keeps exactly what it had: a verdict staged after its container is gone. What it must
@@ -131,5 +203,97 @@ describe("[R66 COUNTEREXAMPLE] a verdict is durable before its container is recl
       order.filter((s) => s === "staged" || s === "reclaim"),
       "this lane is not on the old ordering",
     ).toEqual(["reclaim", "staged"]);
+  });
+});
+// ── AND THE AGENT'S HALF, ON THE LANE THAT WAS LEFT (arch-review 67 P0-lifecycle) ──────────────────
+//
+// arch-review 66 gave the verifier this seam and left the agent's — the one-lane-only shape again. Every
+// managed backend reclaims its object in a `finally`, so staging the half after the dispatch RESOLVED meant
+// a crash there lost a completed agent execution whose container was already gone.
+//
+// ⚠️ AND IT MUST NOT STAGE FOR A VERIFIER THAT WILL NEVER RUN. A half written for a refused case is garbage
+// the moment it is written (arch-review 62), so the acknowledgement decides that first — from the lane's
+// presence, the tenant/run coordinate and the snapshot on the result it is handed.
+//
+// Seen RED with the stage left after the dispatch, observed:
+//   the agent half was not durable until after its container had been reclaimed: expected [ 'reclaim', 'staged' ] to deeply equal [ 'staged', 'reclaim' ]
+describe("[R67 COUNTEREXAMPLE] the agent's half is durable before its container is reclaimed", () => {
+  const AGENT_JOB = {
+    tenant: "acme",
+    runId: RUN,
+    harness: { id: "h", version: "1" },
+    evalCase: {
+      id: "c1",
+      task: "t",
+      env: { kind: "repo", source: { path: "/app" } },
+      graders: [{ id: "reward-file", config: { files: { "tests/test.sh": "exit 0" } } }],
+      timeoutSec: 60,
+      tags: [],
+    },
+  } as never;
+
+  const AGENT_RESULT = {
+    caseId: "c1",
+    harness: "h@1",
+    trace: [],
+    scores: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], base: "b", headSha: "h" },
+  } as never;
+
+  // A managed lane in the shape both real ones have: parse, hand over, reclaim in a `finally`.
+  const agentLane = (order: string[], acknowledge: boolean) => async (_job: never, opts?: DispatchOptions) => {
+    try {
+      order.push("parsed");
+      return acknowledge && opts?.acknowledgeResult ? await opts.acknowledgeResult(AGENT_RESULT) : AGENT_RESULT;
+    } finally {
+      order.push("reclaim");
+    }
+  };
+
+  it("STAGES before the lane's cleanup runs", async () => {
+    const order: string[] = [];
+    const halves: AgentHalfStore = {
+      async put(key: string) {
+        order.push("staged");
+        return key;
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+    };
+
+    await withVerifierPass(AGENT_JOB, {
+      dispatch: agentLane(order, true),
+      agentHalves: halves,
+      dispatchVerifier: async () => {
+        throw new Error("the verifier container crashed");
+      },
+    } as never);
+
+    expect(
+      order.filter((step) => step === "staged" || step === "reclaim"),
+      "the agent half was not durable until after its container had been reclaimed",
+    ).toEqual(["staged", "reclaim"]);
+  });
+
+  it("stages NOTHING when no verifier will run", async () => {
+    // The control that keeps this from re-opening arch-review 62: a half for a verifier that is never
+    // dispatched is garbage on arrival, and the acknowledgement has everything it needs to know that.
+    const order: string[] = [];
+    const halves: AgentHalfStore = {
+      async put(key: string) {
+        order.push("staged");
+        return key;
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+    };
+
+    await withVerifierPass(AGENT_JOB, { dispatch: agentLane(order, true), agentHalves: halves } as never);
+
+    expect(order, "a half was staged for a verifier this deployment cannot run").not.toContain("staged");
   });
 });

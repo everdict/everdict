@@ -31,14 +31,22 @@ export class VerifierAwareDispatcher implements Dispatcher {
     // which builds its own deps object, passed. An optional dependency with no producer is a plan (rule
     // `protocol`); this is the producer.
     private readonly attempts?: VerifierPassDeps["attempts"],
+    // …and where the staged bytes are OWED until the settlement discharges them (arch-review 67 P1-high).
+    // Same shape as the argument above and the same history: the capability existed, the tests passed one
+    // in, and production had no parameter to carry it — so every case staged artifacts nothing owned.
+    private readonly cleanup?: VerifierPassDeps["cleanup"],
   ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     return await withVerifierPass(job, {
-      dispatch: (agentJob: CaseJob) => this.inner.dispatch(agentJob, opts),
+      // The pass's own options are MERGED over the caller's, so the acknowledgement it supplies reaches the
+      // backend alongside whatever the caller asked for (arch-review 67 P0-lifecycle).
+      dispatch: (agentJob: CaseJob, passOpts?: DispatchOptions) =>
+        this.inner.dispatch(agentJob, { ...opts, ...passOpts }),
       ...(this.dispatchVerifier ? { dispatchVerifier: this.dispatchVerifier } : {}),
       ...(this.agentHalves ? { agentHalves: this.agentHalves } : {}),
       ...(this.attempts ? { attempts: this.attempts } : {}),
+      ...(this.cleanup ? { cleanup: this.cleanup } : {}),
     });
   }
 }

@@ -176,7 +176,7 @@ describe("[R66 COUNTEREXAMPLE] a crash changes when a case is answered, never wh
       dispatchVerifier: async (): Promise<VerifierInvocation> => VERDICT,
     } as never);
 
-    const owed = await cleanup.owed("acme", EXECUTION);
+    const owed = cleanup.snapshot().flatMap((d) => d.refs);
     expect(owed.length, "the staged half is owed to nobody now that the document does not carry it").toBe(1);
     expect(owed[0]?.key).toBe(artifacts.keys().find((k) => k.startsWith("agent-half/")));
   });

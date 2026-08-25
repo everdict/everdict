@@ -72,14 +72,38 @@ export function agentHalfKey(tenant: string, runId: string, agentResultDigest: s
 // The digest of a staged half, computed at both ends by the same function over the same document — the
 // coordinate itself, never a label beside it.
 export function agentHalfDigest(result: CaseResult): string {
-  return contentDigest(result);
+  return contentDigest(canonicalAgentHalf(result));
+}
+
+// ── ONE CANONICAL FORM FOR THE WRITE, THE READ AND THE DIGEST (arch-review 67 P1-adapter) ──────────
+//
+// The digest was taken over the RAW producer object while the recovery re-derives it after
+// `CaseResultSchema.parse` — and the schema normalizes (a measured score gains its `status`, defaults land).
+// Most lanes happen to parse on the way through, but `LocalBackend` returns `runCaseJob`'s result straight
+// from `runCase`, so a producer whose literal differs from its parsed form stages under a key its own read
+// then refuses. The half is durable, addressed, and unreadable by the only code that looks for it.
+//
+// This is the same lesson `caseResultDigest` already learned (`case-result-digest.ts`: a raw digest tells the
+// producer literal from the jsonb round-trip apart, and the fail-closed gate then refuses every Pg-backed
+// batch). Parse first, everywhere, including the BYTES that get written — otherwise the object and its own
+// key disagree.
+export function canonicalAgentHalf(result: CaseResult): CaseResult {
+  return CaseResultSchema.parse(result);
 }
 
 export interface AgentHalfStore {
   // `immutable` says this key encodes its own content, so a second write of the same key is either the same
   // bytes (converge) or somebody else's (refuse). An adapter that cannot express the condition ignores it —
   // the READ-side digest check is what makes the property enforceable everywhere (arch-review 66).
-  put(key: string, data: Uint8Array, contentType: string, opts?: { immutable?: boolean }): Promise<string>;
+  // `immutable` says this key encodes its own content, so a second write of the same key is either the same
+  // bytes (converge) or somebody else's (refuse). `digest` is what an adapter compares to tell those apart —
+  // an address that encodes content is not content authentication until somebody checks (arch-review 67).
+  put(
+    key: string,
+    data: Uint8Array,
+    contentType: string,
+    opts?: { immutable?: boolean; digest?: string },
+  ): Promise<string>;
   get(key: string): Promise<Uint8Array | undefined>;
   // ── AND THE WINDOW HAS AN OWNER THAT ENDS IT (arch-review 62 follow-through) ──────────────────────
   //
@@ -129,14 +153,32 @@ export async function stageAgentHalf(
 ): Promise<void> {
   if (!store) return;
   // The SAME digest the verifier will carry, over the SAME document, by the same function.
-  const digest = agentHalfDigest(result);
+  // Canonicalized ONCE: the bytes written, the key they are written under and the digest a recovery
+  // re-derives all come from this one value.
+  //
+  // ⚠️ A RESULT THIS SCHEMA CANNOT PARSE IS NOT STAGED, and does not fail the case. Staging is best-effort by
+  // contract (see the swallow below), and the parse is now part of it — so a document the READ could never
+  // validate anyway is simply not written, rather than throwing out of a helper whose failure was never
+  // allowed to cost a verdict. Absent is exactly what the recovery already handles.
+  const canonical = ((): CaseResult | undefined => {
+    try {
+      return canonicalAgentHalf(result);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!canonical) return;
+  const digest = contentDigest(canonical);
   const key = agentHalfKey(tenant, runId, digest);
   // Owed FIRST. A debt recorded for bytes that then failed to write costs one wasted delete attempt; bytes
   // written with no debt recorded are a leak forever, and only one of those is recoverable.
   await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });
   await store
-    .put(key, new TextEncoder().encode(JSON.stringify(result)), "application/json", { immutable: true })
-    .then(() => undefined)
+    .put(key, new TextEncoder().encode(JSON.stringify(canonical)), "application/json", { immutable: true, digest })
+    .then(async () => {
+      // Confirmed AFTER the write, so a sweep can tell an object that exists from one whose put never landed.
+      await cleanup?.confirm({ tenant, executionId: storedExecutionId(runId), keys: [key] });
+    })
     // Swallowed HERE and nowhere else: this is the one call whose failure genuinely costs nothing the case
     // needs, and the comment above says what it does cost. Every other read in this file answers three ways.
     .catch(() => undefined);
@@ -185,6 +227,22 @@ export async function stageAgentHalf(
 // means the later write destroys the earlier.
 //
 // The verifier attempt is the discriminator, and the recovery holds it on the handle it is recovering from.
+// ── THE ADDRESS IS ATTEMPT-SCOPED, AND THE CONFLICT IS VERIFIED (arch-review 67 P1-provenance) ────
+//
+// The four axes here answer "whose object is this" — tenant, run, which half was judged, which verifier
+// judged it. None of them is a digest of the VERDICT, so two different verdicts under one attempt
+// coordinate are the same address; combined with a conditional create that read 412 as "already there", the
+// normal path could hold V2 while a restart read V1 — same execution, two answers, every coordinate check
+// passing because they agree on everything except the scores.
+//
+// ⚠️ AND THE VERDICT'S DIGEST CANNOT GO IN THE KEY, which is why this is not the agent half's fix. A
+// recovery addresses the half by a digest the verifier's handle carries; it has no such coordinate for the
+// verdict — the verdict is what it is trying to find. An address the reader cannot construct is not an
+// address.
+//
+// So the write carries the digest and the ADAPTER verifies on conflict: a 412 is idempotent success only
+// when the bytes already there hash to the same thing (see `S3ArtifactStore.put`). The address stays
+// constructible and the collision stops being silent.
 export function verifierVerdictKey(
   tenant: string,
   runId: string,
@@ -193,6 +251,13 @@ export function verifierVerdictKey(
 ): string {
   return `verifier-verdict/${tenant}/${runId}/${agentResultDigest}/${verifierAttemptId}.json`;
 }
+
+// What a durability write actually did. `staged` carries the ref a recovery would find it by; `absent` says
+// nothing was written and does not pretend the case is any worse for it. A FAILURE is not an arm here — it
+// propagates, because the caller's next act is destroying the only other copy and it must decide.
+export type VerdictStageOutcome =
+  | { kind: "staged"; ref: { key: string; digest: string } }
+  | { kind: "absent"; reason: string };
 
 export async function stageVerifierVerdict(
   store: AgentHalfStore | undefined,
@@ -204,16 +269,30 @@ export async function stageVerifierVerdict(
     invocation: VerifierInvocation;
     cleanup?: IntermediateCleanupStore;
   },
-): Promise<void> {
+): Promise<VerdictStageOutcome> {
   // No store, or a job that never staged an agent half to be about: nothing to key this verdict by, and a
   // key invented here would address bytes no recovery can find.
-  if (!store || at.agentResultDigest === undefined) return;
+  // ── IT RETURNS A PROOF, BECAUSE ITS CALLER DESTROYS THE OTHER COPY (arch-review 67 P0-lifecycle) ──
+  //
+  // This answered `void`, and `verifierOperation`'s acknowledgement wrapped it in `.catch(() => undefined)`
+  // and then reported success. So a verdict store that threw produced a successful acknowledgement, the
+  // lane deleted its Job, and a crash before settlement lost a constitutional decision with the container
+  // that could have re-produced it already gone. The ORDERING was right and the guarantee was empty — which
+  // is `Promise<void>` on a write a decision rests on (rule `protocol` L1), one wave after the fix that
+  // made the ordering correct.
+  //
+  // `absent` is the honest answer for a deployment with no verdict store or a job that staged no half:
+  // nothing was written and nothing pretends otherwise.
+  if (!store || at.agentResultDigest === undefined)
+    return { kind: "absent", reason: store ? "this job staged no agent half to key a verdict by" : "no verdict store" };
+  const digest = contentDigest(at.invocation);
   const key = verifierVerdictKey(at.tenant, at.runId, at.agentResultDigest, at.verifierAttemptId);
+  const bytes = new TextEncoder().encode(JSON.stringify(at.invocation));
   // …and its debt, for the same reason and before the same write (arch-review 66 P1-high).
-  await at.cleanup?.owe({ tenant: at.tenant, executionId: storedExecutionId(at.runId), refs: [{ key }] });
-  await store.put(key, new TextEncoder().encode(JSON.stringify(at.invocation)), "application/json", {
-    immutable: true,
-  });
+  await at.cleanup?.owe({ tenant: at.tenant, executionId: storedExecutionId(at.runId), refs: [{ key, digest }] });
+  await store.put(key, bytes, "application/json", { immutable: true, digest });
+  await at.cleanup?.confirm({ tenant: at.tenant, executionId: storedExecutionId(at.runId), keys: [key] });
+  return { kind: "staged", ref: { key, digest } };
 }
 
 // Three answers, for the reason `readAgentHalf` has three: a verdict that was never staged is the ordinary

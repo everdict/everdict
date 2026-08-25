@@ -2256,7 +2256,14 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           // for a mutable tag. Reading it is a separate API round trip on a path that is already deleting the
           // Job, so it is left for the wave that gives this lane a PlacementReceipt; until then an unpinned tag
           // is honestly `unresolved{lane_cannot_report}` rather than dishonestly `none`.
-          return mergePlacedImage(result, job, "the Kubernetes API");
+          const placed = mergePlacedImage(result, job, "the Kubernetes API");
+          // ── HANDED OVER BEFORE THE `finally` RECLAIMS IT (arch-review 67 P0-lifecycle) ─────────────
+          //
+          // The reclaim below runs whichever way this block leaves, so returning first meant the Job was
+          // deleted before anything durable held the agent's result — and a crash in that window destroyed a
+          // completed execution whose container was already gone. Same seam the verifier lane got in
+          // arch-review 66; this is the lane that was left.
+          return options?.acknowledgeResult ? await options.acknowledgeResult(placed) : placed;
         }
       } finally {
         // The reclaim for EVERYTHING this dispatch created, whichever step failed: an aborted wait, a refused

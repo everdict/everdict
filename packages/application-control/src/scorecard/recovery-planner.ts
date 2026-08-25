@@ -9,6 +9,7 @@ import type { CaseSettleOutcome } from "../ports/case-receipt-store.js";
 import { requireAdopted } from "../ports/execution-attempt-store.js";
 import { settleRun } from "../ports/settle.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
+import { commitReadback } from "./commit-readback.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 
 // ── WHAT THE LEDGER ALREADY ANSWERS FOR THIS BATCH (arch-review 47 §4) ───────────────────────────────
@@ -475,25 +476,37 @@ export class RecoveryPlanner {
             // means nothing landed and the re-drive is safe; a read that also fails leaves the batch owed
             // rather than deciding from two failures in a row (rule `protocol` L2).
             if (adoption.kind === "unknown") {
-              // Through the THREE-VALUED read (`read`, not `list`), because deciding this from a second
-              // swallowed failure is the same mistake one layer down.
-              const readBack = await receiptStore.read(id);
-              if (readBack.kind === "unknown")
-                throw new UpstreamError(
-                  "UPSTREAM_ERROR",
-                  { scorecardId: id, caseId: c.caseId },
-                  `cannot tell whether this case's commit landed: ${adoption.reason}; and the read-back also failed: ${readBack.reason}. Re-dispatching a case that may have settled would double-spend it.`,
-                );
-              const landed = readBack.kind === "read" && readBack.value.some((r) => r.childRunId === c.id);
-              if (landed) {
-                // It committed and we could not hear so. Seed it exactly as the `committed` arm does — the
-                // case is answered, and re-running it is the double-spend this whole branch exists to stop.
-                adopted += 1;
-                seed.push(adoptedResult);
-                seedRunIds.push(c.id);
+              // ── THE READ-BACK RETURNS THE PERSISTED RESULT, NOT MY LOCAL ONE (arch-review 67 P0) ────
+              //
+              // The first version of this arm asked only whether SOME receipt named this child and then
+              // seeded `adoptedResult` — the document this process happened to be holding. A concurrent
+              // writer that committed a DIFFERENT result for that child first therefore left the resumed
+              // batch carrying a document the ledger does not hold, with the receipt's digest disagreeing
+              // with what the aggregate reports. That is worse than the duplicate dispatch it replaced: a
+              // double-spend is visible in the ledger and in the bill, and this is silent.
+              const readBack = await commitReadback(receiptStore, this.deps.runStore, id, c.id);
+              switch (readBack.kind) {
+                case "landed":
+                  // Somebody's commit landed and it is THIS result — persisted, verified against the digest
+                  // the receipt sealed, and seeded as the canonical answer rather than as ours.
+                  adopted += 1;
+                  seed.push(readBack.result);
+                  seedRunIds.push(c.id);
+                  break;
+                case "not_landed":
+                  // Nothing was persisted, so the resume below re-dispatches — a decision made from a READ
+                  // rather than from an exception, which is the whole point of this arm.
+                  break;
+                default:
+                  // `inconsistent` (a receipt whose child result is missing or does not match its digest) and
+                  // `unknown` (a read that would not answer) are both "we cannot say". Deciding either way
+                  // here is what this branch exists to stop, so the batch is left owed.
+                  throw new UpstreamError(
+                    "UPSTREAM_ERROR",
+                    { scorecardId: id, caseId: c.caseId },
+                    `cannot tell whether this case's commit landed: ${adoption.reason}; and the read-back could not settle it either: ${readBack.reason}. Re-dispatching a case that may have settled would double-spend it, and seeding a result the ledger does not hold would corrupt the batch.`,
+                  );
               }
-              // Not landed: nothing was persisted, so the resume below re-dispatches — which is now a
-              // decision made from a READ rather than from an exception.
               continue;
             }
             if (adoption.kind === "committed") {

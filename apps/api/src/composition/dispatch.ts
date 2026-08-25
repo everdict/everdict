@@ -1,4 +1,4 @@
-import { ImageRegistryService } from "@everdict/application-control";
+import { ImageRegistryService, type IntermediateCleanupStore } from "@everdict/application-control";
 import type { AgentHalfStore, Metrics } from "@everdict/application-control";
 import {
   type ExecutionAttemptStore,
@@ -91,6 +91,7 @@ export function buildDispatch(deps: {
   // grading it in the agent's own container.
   dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
   agentHalves?: AgentHalfStore;
+  cleanup?: IntermediateCleanupStore;
 }) {
   const {
     callbackStore,
@@ -445,6 +446,7 @@ export function buildDispatch(deps: {
     // …and the LEDGER, so the pass can correct the attempt of a verdict its merge refused. This argument did
     // not exist, so that correction was inert in production for a whole review cycle (arch-review 64 P1-high).
     attempts,
+    deps.cleanup,
   );
   // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
   // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's

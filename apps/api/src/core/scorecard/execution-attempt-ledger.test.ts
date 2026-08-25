@@ -244,20 +244,32 @@ class WatchingLedger extends InMemoryExecutionAttemptStore {
     return super.open(input);
   }
 
-  override async transition(
+  // ⚠️ RE-POINTED AT `adoptAtSettlement` (arch-review 67 P1-high). The ordinary settlement used to reach
+  // `committed` through `transition` and drop the boolean; it goes through the semantic adoption now, whose
+  // answer aborts the transaction. A double still watching `transition` observes nothing — which is a test
+  // that stopped measuring rather than a protocol that stopped holding (rule `testing`: after a refactor,
+  // re-prove by mutation).
+  override async adoptAtSettlement(
     attemptId: string,
-    to: ExecutionAttemptState,
-    patch?: Parameters<InMemoryExecutionAttemptStore["transition"]>[2],
-  ): Promise<boolean> {
+    at: Parameters<InMemoryExecutionAttemptStore["adoptAtSettlement"]>[1],
+  ): Promise<ReturnType<InMemoryExecutionAttemptStore["adoptAtSettlement"]> extends Promise<infer R> ? R : never> {
     const scorecardId = this.scorecardId;
-    if (to === "committed" && scorecardId !== undefined)
-      this.receiptsWhenStamped.push(this.receipts.countFor(scorecardId));
-    return super.transition(attemptId, to, patch);
+    if (scorecardId !== undefined) this.receiptsWhenStamped.push(this.receipts.countFor(scorecardId));
+    return super.adoptAtSettlement(attemptId, at);
   }
 }
 
 // A ledger that cannot record the terminal state of the very attempt the receipt is about to name.
 class BrokenLedger extends InMemoryExecutionAttemptStore {
+  override async adoptAtSettlement(
+    attemptId: string,
+    at: Parameters<InMemoryExecutionAttemptStore["adoptAtSettlement"]>[1],
+  ): Promise<ReturnType<InMemoryExecutionAttemptStore["adoptAtSettlement"]> extends Promise<infer R> ? R : never> {
+    void attemptId;
+    void at;
+    throw new UpstreamError("UPSTREAM_ERROR", {}, "attempt ledger down");
+  }
+
   override async transition(
     attemptId: string,
     to: ExecutionAttemptState,

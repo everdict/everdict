@@ -112,6 +112,7 @@ export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export { recordingGenerationOf, recordingRefOf } from "./ports/recording-store.js";
 export { type CaseReceiptStore, type CaseSettleOutcome, InMemoryCaseReceiptStore } from "./ports/case-receipt-store.js";
 export { attemptParentAuthority, requireAdopted } from "./ports/execution-attempt-store.js";
+export { type CommitReadback, commitReadback } from "./scorecard/commit-readback.js";
 export { type RecoveryTarget, retryDeferredRecovery } from "./ops/startup-recovery.js";
 export {
   type AdoptAttemptOutcome,

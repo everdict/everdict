@@ -438,6 +438,80 @@ return value rather than in a missing branch:
 - A `Promise<boolean>` double that never returns `false`, or a `Promise<void>` double over a method that
   throws, is a green light wired to nothing.
 
+## ⚠️ THE LAWS BELOW WERE BROKEN BY THEIR OWN AUTHOR, ONE WAVE LATER — HERE IS WHY
+Three findings of arch-review 67 are laws already written here, violated by the change that closed the
+review before it:
+
+    "an optional dependency with no producer is a plan"   (64)  → the cleanup store, wired in tests, has
+                                                                   no production constructor at all
+    "a conditional write in a transaction is not success" (66)  → fixed in the recovery lane, left in the
+                                                                   ordinary settlement two files away
+    "unknown is unignorable"                        (L2, long)  → the new acknowledgement swallows its own
+                                                                   store write and reports success
+
+A law nobody disagrees with, broken immediately by the person who wrote it, is not a knowledge problem. It
+is that **each of these is invisible at the site where it is committed**:
+
+- **The optional dep looks wired because the TEST wires it.** Writing `cleanup?: Store` and a counterexample
+  that passes one makes the capability feel present; nothing at the call site distinguishes "this deployment
+  chose not to" from "no code anywhere constructs this". So: when a capability is introduced, its production
+  CONSTRUCTOR is written in the same change, or the change is not finished. Grep the composition root for
+  `new <Store>` before believing the feature exists.
+- **Fixing one lane feels like fixing the protocol**, because the counterexample you just wrote is green. The
+  review series has now found the one-lane-only shape SIX times (58, 59, 61, 64, 66, 67). So: after changing
+  a guarded write's contract, `grep -n` for every OTHER caller of that method by name and count them in the
+  commit message. Two callers is the default, not the exception.
+- **A `.catch(() => undefined)` inside a function whose PURPOSE is durability reads as the same
+  best-effort idiom it is everywhere else.** It is not: here the caller's next act is destroying the only
+  other copy. So: a swallow inside a function whose name contains `stage`, `persist`, `commit` or
+  `acknowledge` is reviewed as a protocol decision, never as hygiene.
+
+The general form, and the reason this block sits at the top of the file: **a law is applied at the moment of
+writing a call site, not at the moment of reading a rule.** What makes it applicable is a mechanical check —
+a scanner, a required parameter, a compiler flag — and where the check does not exist yet, the law is a
+reminder that has already failed once.
+
+## RETENTION AND DELETION ARE TWO STATES, NOT ONE
+The cleanup ledger records a debt when the bytes are staged, which is right — and it records it as `owed`,
+which is the state that means "delete this". From the moment the agent half exists until the case settles,
+the row therefore says *delete me* about an artifact the case is still going to need. Nothing deleted it
+only because no reconciler was wired; wiring one is what the row exists for (arch-review 67).
+
+    the artifact must be RETAINED    (a crash here must be able to recover it)
+    the artifact may be DELETED      (the settlement took its answer)
+
+are opposite instructions, and one field held both. Worse, the debt is written BEFORE the object — so a
+sweep between the two would delete an absent key, mark the debt paid, and orphan the write that follows.
+
+- **A lifecycle row starts in the state that forbids the effect** (`retained`), and only the canonical
+  settlement moves it to the one that permits it (`gc_owed`). A reconciler's worklist is the permitting
+  states, never "everything not yet completed".
+- **The debt is recorded before the bytes and CONFIRMED after them.** A row that claims an object exists
+  before the put returned is a worklist entry pointing at nothing.
+- The same shape as L5's escalation field: a state that means "we are not done" must not be the same value
+  as one that means "act now".
+
+## A RECEIPT EXISTS IS NOT MY RESULT IS THE ONE THAT COMMITTED
+The ambiguous-commit repair (arch-review 66) read back the receipt ledger, found a receipt naming this
+child, and seeded the PROCESS-LOCAL result it had been about to commit. It never compared them. So a
+concurrent writer that committed a different result for that child first left the resumed batch carrying a
+document the ledger does not hold, with the receipt's digest disagreeing with what the aggregate reports
+(arch-review 67 P0-canonicality).
+
+That is a worse failure than the duplicate dispatch it replaced. A double-spend is visible in cost and in
+the ledger; this is silent, and the batch's own numbers are the thing that is wrong.
+
+    something committed for this child   ≠   what I was about to commit is what committed
+
+- **A read-back returns the PERSISTED value, and the caller uses that value** — never the local one it
+  happened to be holding. The local copy is for COMPARISON, and a disagreement is a third answer
+  (`inconsistent`), not a tie broken in favour of whoever is asking.
+- Verify the pair, not the existence: the receipt AND the child row it names, joined on the digest the
+  receipt sealed. A receipt whose child result cannot be read, or whose digest does not match it, leaves the
+  operation owed.
+- This is L2 and L3 meeting: the third value is `inconsistent`, and the identity comes from the row that
+  won rather than from the caller that is asking.
+
 ## A CONDITIONAL WRITE INSIDE A TRANSACTION IS NOT A SUCCESSFUL ONE
 The previous wave put both contributing attempts inside the settlement transaction — the right structure, and
 the reason it looked finished. What it does is:

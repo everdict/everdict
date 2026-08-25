@@ -13,6 +13,25 @@ import type {
 // in-flight promise, complementing the id-keyed kill(caseId) side channel.
 export interface DispatchOptions {
   signal?: AbortSignal;
+  // ── HAND THE RESULT OVER BEFORE RECLAIMING WHAT PRODUCED IT (arch-review 67 P0-lifecycle) ─────────
+  //
+  // The verifier lane got this in arch-review 66 and the AGENT lane did not, which is the one-lane-only
+  // shape again. Every managed backend parses its container's logs, builds the `CaseResult`, and reclaims
+  // the object in a `finally` — and only then does the value reach `withVerifierPass`, which stages the
+  // agent half. So the ordinary crash was:
+  //
+  //     agent result parsed → agent Job deleted → dispatch returns → ✗ → nothing staged
+  //
+  // and a completed agent execution, already paid for, could not be recovered: no Job, no half, and no
+  // verifier handle pointing at one.
+  //
+  // The backend calls this INSIDE its try, before its cleanup runs. What it hands over is the result it is
+  // about to return; what comes back is the document the caller wants used — so a lane cannot end up
+  // holding a different one (the arch-review 65 defect, which a careless fix for this would re-open).
+  //
+  // Optional because two lanes had to learn it and a third (self-hosted, a future orchestrator) has not:
+  // such a lane keeps exactly the ordering it had, and the caller stages after the fact.
+  acknowledgeResult?: (result: CaseResult) => Promise<CaseResult>;
   // Fired ONCE the moment the job actually begins executing — NOT at enqueue/park. Managed backends fire it at
   // dispatch() entry (= the Scheduler admitted it, past the wait queue); the self-hosted path fires it when a runner
   // LEASES the job (in-memory hub: at lease; store-backed hub: on the first "leased" outcome). Lets the caller flip

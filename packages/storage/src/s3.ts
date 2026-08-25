@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { type ArtifactStore, artifactKeyOf } from "@everdict/application-control";
-import { UpstreamError } from "@everdict/contracts";
+import { ConflictError, UpstreamError } from "@everdict/contracts";
 
 export interface S3ArtifactStoreOptions {
   endpoint: string; // S3 API endpoint (e.g. http://localhost:9100 = MinIO)
@@ -73,7 +73,12 @@ export class S3ArtifactStore implements ArtifactStore {
   //
   // Applied only when the caller declares the object immutable, because this store also holds run media that
   // is legitimately re-uploaded (a refreshed snapshot ref, a re-rendered analysis artifact).
-  async put(key: string, data: Uint8Array, contentType: string, opts?: { immutable?: boolean }): Promise<string> {
+  async put(
+    key: string,
+    data: Uint8Array,
+    contentType: string,
+    opts?: { immutable?: boolean; digest?: string },
+  ): Promise<string> {
     try {
       await this.client.send(
         new PutObjectCommand({
@@ -85,10 +90,35 @@ export class S3ArtifactStore implements ArtifactStore {
         }),
       );
     } catch (err) {
-      // The key is already occupied. For a content-addressed write that is convergence, not a conflict —
-      // and for anything else this branch is not reachable, because the condition was not sent.
+      // ── A TAKEN KEY IS NOT THE SAME BYTES (arch-review 67 P1-provenance) ─────────────────────────
+      //
+      // The first version read 412 as idempotent success outright: "the key is occupied" was accepted as
+      // "the same object is already there". For an address that does not encode the verdict's own content —
+      // and the verifier verdict's cannot, because a recovery has no digest to address it by — those are
+      // different statements, and the difference is a restart reading a verdict the normal path never used.
+      //
+      // So the conflict is VERIFIED: read what is there and compare. Same digest is convergence; different
+      // digest is a genuine conflict and throws, because two verdicts under one coordinate is not something
+      // an adapter may silently pick a winner for.
       const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
       if (opts?.immutable !== true || status !== 412) throw err;
+      const existing = await this.get(key);
+      // Unreadable is NOT convergence (rule `protocol` L2) — we could not find out, so we do not claim it.
+      if (existing === undefined)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { key },
+          "this immutable key is occupied and its contents could not be read back, so the write cannot be called convergent",
+        );
+      // Compared as BYTES, not as digests: an adapter's notion of "the same object" is the same octets, and
+      // this layer cannot reach the domain's digest function anyway (storage depends on contracts and
+      // application-control only). `opts.digest` stays as the caller's own statement of what it wrote.
+      if (existing.length !== data.length || !existing.every((b, i) => b === data[i]))
+        throw new ConflictError(
+          "CONFLICT",
+          { key, existingBytes: existing.length, incomingBytes: data.length, digest: opts.digest ?? null },
+          "this immutable key already holds different bytes — two documents under one coordinate is not something this adapter may pick a winner for",
+        );
     }
     return await this.signedUrl(this.client, key);
   }

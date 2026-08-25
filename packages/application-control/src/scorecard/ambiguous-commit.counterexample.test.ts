@@ -1,5 +1,6 @@
 import type { CaseCommitReceipt, CaseResult } from "@everdict/contracts";
 import { storedExecutionId } from "@everdict/contracts";
+import { caseObservationDigest, caseResultDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import { RecoveryPlanner } from "./recovery-planner.js";
@@ -18,8 +19,18 @@ import { RecoveryPlanner } from "./recovery-planner.js";
 // The answer is a READ, never an assumption. The exact receipt says which world we are in, and a read that
 // ALSO fails leaves the batch owed rather than deciding from two failures in a row.
 //
+// ── …AND THE READ RETURNS THE PERSISTED RESULT (arch-review 67 P0-canonicality) ─────────────────────
+//
+// The first version of this arm asked only whether SOME receipt named this child, then seeded the
+// PROCESS-LOCAL document it had been about to commit. A concurrent writer that committed a different result
+// for that child first therefore left the batch carrying a document the ledger does not hold — worse than
+// the double-spend it replaced, because a double-spend is visible and this is not.
+//
 // Seen RED before the `unknown` arm existed, observed:
 //   a committed case was re-dispatched because its commit response was lost: expected [] to have a length of 1
+//
+// …and RED again with the local result seeded (arch-review 67), observed:
+//   the recovery seeded its own result over the one the ledger holds: expected 'RA' to be 'RB'
 
 const SCORECARD = "sc-1";
 const CHILD_ID = "child-9f2a3b";
@@ -46,18 +57,39 @@ const ADOPTED: CaseResult = {
   snapshot: { kind: "prompt", output: "done" },
 } as unknown as CaseResult;
 
-const RECEIPT = { scorecardId: SCORECARD, caseId: "c1", childRunId: CHILD_ID, kind: "executed" } as CaseCommitReceipt;
+// The document the LEDGER holds — deliberately not the one the recovering process is about to commit.
+const PERSISTED: CaseResult = {
+  caseId: "c1",
+  harness: "h@1",
+  trace: [],
+  scores: [{ graderId: "tests", metric: "tests_pass", value: 0, pass: false }],
+  snapshot: { kind: "prompt", output: "somebody else got there first" },
+} as unknown as CaseResult;
+
+// Sealed the way a real commit seals it, so the corroboration below compares production digests rather than
+// two literals.
+const receiptFor = (result: CaseResult): CaseCommitReceipt =>
+  ({
+    scorecardId: SCORECARD,
+    caseId: "c1",
+    childRunId: CHILD_ID,
+    kind: "executed",
+    resultDigest: caseResultDigest(result),
+    observationDigest: caseObservationDigest(result),
+    committedAt: "2026-08-25T00:00:00.000Z",
+  }) as CaseCommitReceipt;
 
 // A receipt store whose commit LANDED and whose response was lost — the world the old code could not tell
 // from a commit that never happened.
-function lostResponseStore(opts: { landed: boolean; readFails?: boolean }) {
+function lostResponseStore(opts: { landed?: CaseResult; readFails?: boolean }) {
+  const receipts = opts.landed ? [receiptFor(opts.landed)] : [];
   return {
     async list() {
-      return opts.landed ? [RECEIPT] : [];
+      return receipts;
     },
     async read() {
       if (opts.readFails) return { kind: "unknown" as const, reason: "the receipt ledger is unreachable" };
-      return { kind: "read" as const, value: opts.landed ? [RECEIPT] : [] };
+      return { kind: "read" as const, value: receipts };
     },
     async commitCase() {
       // Postgres wrote the rows (or did not) and then the connection died. Identical from here.
@@ -82,23 +114,31 @@ async function ledgerHoldingWork() {
   return attempts;
 }
 
-function plannerOver(deps: Record<string, unknown>, attempts: InMemoryExecutionAttemptStore) {
-  const rows = new Map<string, typeof CHILD>([[CHILD.id, CHILD]]);
+function plannerOver(
+  deps: Record<string, unknown>,
+  attempts: InMemoryExecutionAttemptStore,
+  // What the CONCURRENT WRITER lands while our commit is in flight. Absent = nothing landed.
+  persisted?: CaseResult,
+) {
+  // ⚠️ THE ROW CHANGES BETWEEN THE LIST AND THE READ-BACK, because that is the interleaving. At planning
+  // time the child is still running with no result — otherwise the planner seeds it from the ledger up
+  // front and the ambiguous path is never reached, which is how the first draft of this case measured
+  // nothing. The other writer's commit lands while ours is in flight, so `get` (the read-back's source)
+  // answers with the settled row.
+  const listed = { ...CHILD };
+  const settled = persisted ? { ...CHILD, status: "succeeded", result: persisted } : undefined;
   return new RecoveryPlanner(
     {
       runStore: {
         async list() {
-          return [...rows.values()];
+          return [listed];
         },
         async get(id: string) {
-          return rows.get(id);
+          if (id !== CHILD.id) return undefined;
+          return settled ?? listed;
         },
-        async update(id: string, patch: Record<string, unknown>) {
-          const cur = rows.get(id);
-          if (!cur) return undefined;
-          const next = { ...cur, ...patch };
-          rows.set(id, next as typeof CHILD);
-          return next;
+        async update() {
+          return listed;
         },
       },
       attempts,
@@ -125,8 +165,14 @@ const seed = async (planner: RecoveryPlanner) =>
     .catch((err: unknown) => ({ kind: "owed" as const, err }));
 
 describe("[R66 COUNTEREXAMPLE] an ambiguous commit is converged on, not assumed absent", () => {
-  it("SEEDS the case whose commit landed and whose response was lost", async () => {
-    const planner = plannerOver({ caseReceipts: lostResponseStore({ landed: true }) }, await ledgerHoldingWork());
+  it("SEEDS THE PERSISTED result when the commit landed and the response was lost", async () => {
+    // ⚠️ THE LEDGER HOLDS A DIFFERENT DOCUMENT THAN THIS RECOVERY IS CARRYING. That is the case the first
+    // version could not see: it checked only that a receipt named this child and then seeded `adoptedResult`.
+    const planner = plannerOver(
+      { caseReceipts: lostResponseStore({ landed: PERSISTED }) },
+      await ledgerHoldingWork(),
+      PERSISTED,
+    );
 
     const out = await seed(planner);
     expect(out.kind).toBe("planned");
@@ -137,12 +183,31 @@ describe("[R66 COUNTEREXAMPLE] an ambiguous commit is converged on, not assumed 
       CHILD_ID,
     ]);
     expect(out.adopted).toBe(1);
+    expect(out.seed[0]?.snapshot, "the recovery seeded its own result over the one the ledger holds").toEqual(
+      PERSISTED.snapshot,
+    );
+  });
+
+  it("leaves the batch OWED when the receipt and the child disagree", async () => {
+    // A receipt vouching for bytes the row does not hold is not a tie to break in favour of whoever is
+    // asking. Something is wrong, and a resume that picks a side makes it permanent.
+    const planner = plannerOver(
+      { caseReceipts: lostResponseStore({ landed: PERSISTED }) },
+      await ledgerHoldingWork(),
+      // The row holds ADOPTED while the receipt vouches for PERSISTED.
+      ADOPTED,
+    );
+
+    const out = await seed(planner);
+    expect(out.kind, "the recovery decided a case whose ledger contradicts itself").toBe("owed");
+    if (out.kind !== "owed") return;
+    expect((out.err as Error).message).toContain("could not settle it either");
   });
 
   it("leaves the case for the re-drive when nothing landed", async () => {
     // The control. A commit that genuinely failed must still re-dispatch — the fix is not "assume it
     // committed", it is "go and look".
-    const planner = plannerOver({ caseReceipts: lostResponseStore({ landed: false }) }, await ledgerHoldingWork());
+    const planner = plannerOver({ caseReceipts: lostResponseStore({}) }, await ledgerHoldingWork());
 
     const out = await seed(planner);
     expect(out.kind).toBe("planned");
@@ -155,7 +220,7 @@ describe("[R66 COUNTEREXAMPLE] an ambiguous commit is converged on, not assumed 
     // Two failures in a row is not evidence. Deciding here would be the same defect one layer down, so the
     // planner refuses to produce a plan at all — the batch is retried, which is what `retry_later` means.
     const planner = plannerOver(
-      { caseReceipts: lostResponseStore({ landed: true, readFails: true }) },
+      { caseReceipts: lostResponseStore({ landed: PERSISTED, readFails: true }) },
       await ledgerHoldingWork(),
     );
 

@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import {
   CycleService,
   GithubIssueSync,
+  InMemoryIntermediateCleanupStore,
   InitiativeService,
   IssueLabelService,
   IssueService,
@@ -448,6 +449,20 @@ async function main(): Promise<void> {
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
   // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
   const artifacts = await artifactStoreFromEnv();
+  // ── AND WHAT THOSE INTERMEDIATE OBJECTS ARE OWED TO (arch-review 67 P1-high) ──────────────────────
+  //
+  // `IntermediateCleanupStore` shipped with a port, an implementation, application helpers and five
+  // counterexamples that pass one in — and nothing anywhere constructed it, so every production
+  // private-verifier case recorded no debt and its settlement discharged nothing. That is the
+  // "an optional dependency with no producer is a plan" law (arch-review 64) broken by its own author two
+  // waves later, which is why `pnpm unwired-capabilities` now refuses it mechanically.
+  //
+  // In-memory for now, and that is a real limitation rather than a placeholder: the debt does not survive a
+  // control-plane restart, so a process that dies between staging and settlement still leaks its artifacts.
+  // What it DOES buy today is the ordinary path — every case that settles in this process discharges exactly
+  // what it staged, on every ending rather than only the successful one. The Postgres adapter is the
+  // remaining half.
+  const intermediateCleanup = new InMemoryIntermediateCleanupStore();
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
   // Durable replay recording — persistent by DEFAULT (Postgres when DATABASE_URL is set, else in-memory), from
   // persistence. The runner-lease MCP tees pushed frames/logs into it (self-hosted) and the managed topology backend
@@ -520,7 +535,7 @@ async function main(): Promise<void> {
     dispatchVerifier: (job) => verifierLane.fn(job),
     // The agent's half is staged here, before the verifier's container exists — the backend deletes the
     // agent's Job as soon as it has parsed the result, so until this write it lives only in memory.
-    ...(artifacts ? { agentHalves: artifacts } : {}),
+    ...(artifacts ? { agentHalves: artifacts, cleanup: intermediateCleanup } : {}),
     // …and the VERDICT's own stage, same store, its own key space (arch-review 64 P0).
     ...(artifacts ? { verdicts: artifacts } : {}),
     ...(workspaceImages ? { images: workspaceImages } : {}),
@@ -904,7 +919,7 @@ async function main(): Promise<void> {
     replicas,
     // …and where `withVerifierPass` staged the agent's half, so a run that crashed between its two halves is
     // MERGED rather than losing the verdict its verifier already produced (arch-review 60 follow-through).
-    ...(artifacts ? { agentHalves: artifacts } : {}),
+    ...(artifacts ? { agentHalves: artifacts, cleanup: intermediateCleanup } : {}),
     // …and the VERDICT's own stage, same store, its own key space (arch-review 64 P0).
     ...(artifacts ? { verdicts: artifacts } : {}),
     // …and the physical ledger, so an attempt this recovery adopted stops reading as live work

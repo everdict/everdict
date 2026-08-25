@@ -50,6 +50,7 @@ jobs:
       - run: pnpm docs-check
       - run: pnpm constructed-casts
       - run: pnpm guarded-doubles
+      - run: pnpm unwired-capabilities
       - run: pnpm language-policy
       - run: pnpm source-bytes
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.

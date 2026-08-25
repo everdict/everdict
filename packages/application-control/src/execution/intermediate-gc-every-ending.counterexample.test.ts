@@ -198,7 +198,7 @@ describe("[R66 COUNTEREXAMPLE] a case that could not be judged still cleans up a
       "the measurement document carries platform cleanup state again",
     ).toBe(undefined);
 
-    const owed = await cleanup.owed("acme", EXECUTION);
+    const owed = cleanup.snapshot().flatMap((d) => d.refs);
     expect(
       owed.map((r) => r.key),
       "the ending left its staged bytes owed to nobody",
@@ -213,7 +213,10 @@ describe("[R66 COUNTEREXAMPLE] a case that could not be judged still cleans up a
     await settle(artifacts, result, cleanup);
 
     expect(artifacts.keys(), "a verifier that errored left its agent half in storage forever").toHaveLength(0);
-    expect(await cleanup.owed("acme", EXECUTION), "the debt outlived the settlement that paid it").toEqual([]);
+    expect(
+      cleanup.snapshot().map((d) => d.state),
+      "the debt outlived the settlement that paid it",
+    ).toEqual(["completed"]);
   });
 
   it("KEEPS the debt owed when the delete does not converge", async () => {
@@ -233,7 +236,10 @@ describe("[R66 COUNTEREXAMPLE] a case that could not be judged still cleans up a
 
     await settle(unreachable, result, cleanup);
 
-    expect(await cleanup.owed("acme", EXECUTION), "a failed delete discharged the debt anyway").toHaveLength(1);
+    expect(
+      cleanup.snapshot().flatMap((d) => d.refs),
+      "a failed delete discharged the debt anyway",
+    ).toHaveLength(1);
     expect((await cleanup.due("2999-01-01T00:00:00.000Z", 10)).length, "the reconciler has no worklist").toBe(1);
   });
 

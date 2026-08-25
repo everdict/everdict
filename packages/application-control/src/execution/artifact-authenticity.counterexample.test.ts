@@ -192,4 +192,32 @@ describe("[R66 COUNTEREXAMPLE] a staged artifact is authenticated, not merely ad
     const verdict = merged.scores?.find((s) => s.metric === "tests_pass");
     expect(verdict && isMeasured(verdict), "a fully attributable verdict was refused").toBe(true);
   });
+
+  it("stages the PARSED bytes, so the key and its own read agree", async () => {
+    // ── ONE CANONICAL FORM FOR THE WRITE, THE READ AND THE DIGEST (arch-review 67 P1-adapter) ───────
+    //
+    // The digest was taken over the RAW producer object while the read re-derives it after
+    // `CaseResultSchema.parse` — and the schema normalizes (a measured score gains its `status`). Most lanes
+    // parse on the way through, but `LocalBackend` returns `runCase`'s result straight, so a producer whose
+    // literal differs from its parsed form staged under a key its own read then refused: durable, addressed,
+    // and unreadable by the only code that looks for it.
+    //
+    // The producer literal here is exactly that shape — a measured score with no `status`, which is what a
+    // grader writes and what the schema fills in.
+    const artifacts = store();
+    const producerLiteral = {
+      caseId: "c1",
+      harness: "cc@1.0.0",
+      trace: [],
+      scores: [{ graderId: "steps", metric: "steps", value: 7 }],
+      snapshot: { kind: "repo", diff: "d", changedFiles: [], base: "b", headSha: "h" },
+    } as unknown as CaseResult;
+
+    await stageAgentHalf(artifacts, "acme", RUN, producerLiteral);
+
+    // The key the half went under, read back by the same coordinate a verifier handle would carry.
+    const digest = agentHalfDigest(producerLiteral);
+    const read = await readAgentHalf(artifacts, "acme", RUN, digest);
+    expect(read.kind, "the half was staged under a key its own read cannot verify").toBe("read");
+  });
 });

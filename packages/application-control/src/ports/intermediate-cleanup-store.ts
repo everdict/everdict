@@ -31,14 +31,36 @@ import type { ExecutionId } from "@everdict/contracts";
 export interface ArtifactRef {
   key: string;
   digest?: string;
+  // Set by `confirm` once the object store returned. A ref that is owed but not written is a row pointing at
+  // bytes that may not exist — a sweep deleting it and completing the debt would orphan the put still in
+  // flight behind it.
+  written?: boolean;
 }
+
+// ── RETENTION AND DELETION ARE TWO STATES, NOT ONE (arch-review 67 P1-high) ─────────────────────────
+//
+// The first version wrote the row as `owed` the moment the bytes were staged — and `owed` is the state that
+// means DELETE THIS. So from the agent half's birth until the case settled, the ledger said "delete me"
+// about the artifact a crash would need. Nothing deleted it only because no reconciler was wired, and
+// wiring one is the entire purpose of the row.
+//
+// `retained` is where a debt starts: the object exists (or is about to) and a recovery may still need it.
+// Only the CANONICAL SETTLEMENT — the write that makes the outcome the record's answer — releases it.
+export type IntermediateLifecycle =
+  // Staged, and the case may still need it. A reconciler must not touch these.
+  | "retained"
+  // The settlement took its answer; the bytes are now garbage and a sweep may remove them.
+  | "gc_owed"
+  // A sweep tried and could not converge. Backoff, never terminal (rule `protocol` L5).
+  | "retry_wait"
+  | "completed";
 
 export interface IntermediateCleanupDebt {
   operationId: string;
   tenant: string;
   executionId: ExecutionId;
   refs: ArtifactRef[];
-  state: "owed" | "completed";
+  state: IntermediateLifecycle;
   attempts: number;
   nextAttemptAt?: string;
   lastError?: string;
@@ -50,13 +72,19 @@ export interface IntermediateCleanupStore {
   //
   // Returns the row it wrote, never `void` — a decision rests on this (rule `protocol` L1), and the caller
   // must be able to tell "recorded" from "the store was down".
+  // Recorded BEFORE the put, in state `retained`: a crash between the two must leave a row a sweep can find,
+  // and a row that says "keep this" is the safe thing to find.
   owe(input: { tenant: string; executionId: ExecutionId; refs: ArtifactRef[] }): Promise<IntermediateCleanupDebt>;
-  // What this execution owes right now — the settlement's worklist, read inside its own transaction.
-  owed(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]>;
-  // The settlement's discharge: mark the debt paid. Returns false when there was nothing owed (an execution
-  // that staged nothing) so a caller can tell that from a store that refused.
+  // …and confirmed AFTER it, so a sweep can tell an object that exists from one whose write never landed.
+  // Without this the owe-before-put ordering lets a reconciler delete an absent key, mark the debt paid, and
+  // orphan the put that follows it.
+  confirm(input: { tenant: string; executionId: ExecutionId; keys: string[] }): Promise<void>;
+  // THE SETTLEMENT'S RELEASE. Until this, the artifacts are retained and no sweep may remove them. Returns
+  // what became collectable, so the caller can delete inline as a latency optimization.
+  releaseForGc(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]>;
+  // The reconciler's discharge: mark a released debt paid.
   complete(tenant: string, executionId: ExecutionId): Promise<boolean>;
-  // The reconciler's worklist — debts whose deletion has not been confirmed, oldest first.
+  // The reconciler's worklist — RELEASED debts only, oldest first. A `retained` row is not work.
   due(now: string, limit: number): Promise<IntermediateCleanupDebt[]>;
   // A deletion that did not converge. Backoff, never a terminal: "we could not find out" is an escalation
   // field (rule `protocol` L5), so the row stays owed and the attempt count is what an operator reads.
@@ -90,30 +118,57 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
       tenant: input.tenant,
       executionId: input.executionId,
       refs,
-      // A re-stage after a completed sweep re-opens the debt: new bytes are owed even if older ones were paid.
-      state: "owed",
+      // A re-stage after a completed sweep re-opens the debt as RETAINED: new bytes exist and the case that
+      // wrote them is not finished, whatever happened to the older ones.
+      state: "retained",
       attempts: prior?.attempts ?? 0,
     };
     this.debts.set(k, debt);
     return debt;
   }
 
-  async owed(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]> {
-    const debt = this.debts.get(this.key(tenant, executionId));
-    return debt?.state === "owed" ? debt.refs : [];
+  // Everything this store holds, whatever its state. The in-memory twin's own affordance — like `keys()` on
+  // the artifact doubles — so a test can assert what is RETAINED without the port growing a read nothing in
+  // production calls (rule `api-layer`: no hypothetical surface).
+  snapshot(): IntermediateCleanupDebt[] {
+    return [...this.debts.values()];
+  }
+
+  async confirm(input: { tenant: string; executionId: ExecutionId; keys: string[] }): Promise<void> {
+    const k = this.key(input.tenant, input.executionId);
+    const debt = this.debts.get(k);
+    if (!debt) return;
+    this.debts.set(k, {
+      ...debt,
+      refs: debt.refs.map((r) => (input.keys.includes(r.key) ? { ...r, written: true } : r)),
+    });
+  }
+
+  async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]> {
+    const k = this.key(tenant, executionId);
+    const debt = this.debts.get(k);
+    if (!debt || debt.state === "completed") return [];
+    this.debts.set(k, { ...debt, state: "gc_owed" });
+    return debt.refs;
   }
 
   async complete(tenant: string, executionId: ExecutionId): Promise<boolean> {
     const k = this.key(tenant, executionId);
     const debt = this.debts.get(k);
-    if (!debt || debt.state === "completed") return false;
+    if (!debt || debt.state === "completed" || debt.state === "retained") return false;
     this.debts.set(k, { ...debt, state: "completed" });
     return true;
   }
 
   async due(now: string, limit: number): Promise<IntermediateCleanupDebt[]> {
+    // RELEASED ONLY. A `retained` row is an artifact the case may still need, and returning it here is what
+    // would turn this ledger from a cleanup into a way of destroying the recovery it exists to enable.
     return [...this.debts.values()]
-      .filter((d) => d.state === "owed" && (d.nextAttemptAt === undefined || d.nextAttemptAt <= now))
+      .filter(
+        (d) =>
+          (d.state === "gc_owed" || d.state === "retry_wait") &&
+          (d.nextAttemptAt === undefined || d.nextAttemptAt <= now),
+      )
       .slice(0, limit);
   }
 
@@ -155,7 +210,8 @@ export async function dischargeIntermediates(
   executionId: ExecutionId,
 ): Promise<{ deleted: number; owed: number }> {
   if (!deps.cleanup) return { deleted: 0, owed: 0 };
-  const refs = await deps.cleanup.owed(tenant, executionId);
+  // RELEASE, not read: this is the canonical settlement, and until it runs the artifacts are retained.
+  const refs = await deps.cleanup.releaseForGc(tenant, executionId);
   if (refs.length === 0) return { deleted: 0, owed: 0 };
   let deleted = 0;
   const failures: string[] = [];
