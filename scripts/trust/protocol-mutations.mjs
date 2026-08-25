@@ -1080,7 +1080,7 @@ const MUTATIONS = [
     // …and the staging half: without it there is nothing on file to merge INTO, which is the state
     // arch-review 60 could only skip.
     name: "two-phase case — the agent's half is never staged",
-    file: "packages/application-control/src/execution/verifier-pass.ts",
+    file: "packages/application-control/src/execution/agent-half.ts",
     // RE-AIMED (arch-review 62 follow-through): the stage moved to where the window actually opens —
     // immediately before the second container — so it no longer runs for cases refused two lines later.
     // RE-AIMED (arch-review 66): the staging also records the cleanup debt now, so it takes the ledger.
