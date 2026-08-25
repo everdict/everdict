@@ -84,6 +84,14 @@ describe("[R63 COUNTEREXAMPLE] a probe that could not count is not a probe that 
     const api = { activeUsage: async () => undefined } as unknown as ConstructorParameters<typeof K8sBackend>[0]["api"];
     const cap = await new K8sBackend({ image: "runner:1", api, maxConcurrent: 4 } as never).capacity();
     expect(cap.used, "the K8s lane reported an uncountable cluster as idle").toBe("unknown");
+    // ── AND THE TWO AXES ADDED LATER, WHICH HAD NO PRODUCER ASSERTION AT ALL (arch-review 68) ──────
+    //
+    // `usedMemoryMb`/`usedCpu` joined this probe when the envelope became fleet-wide, and only the CONSUMER
+    // fold was pinned (`fleet-resource-envelope`). A lane could have `?? 0`-ed either one back to "the
+    // cluster is empty" and every test here stayed green — the one-axis-only shape of the very defect the
+    // `used` assertions above exist for, one field over.
+    expect(cap.usedMemoryMb, "the K8s lane reported unmeasurable memory as free").toBe("unknown");
+    expect(cap.usedCpu, "the K8s lane reported unmeasurable cpu as free").toBe("unknown");
   });
 
   it("the K8s lane still reports a REAL count", async () => {
@@ -102,6 +110,8 @@ describe("[R63 COUNTEREXAMPLE] a probe that could not count is not a probe that 
     };
     const cap = await new NomadBackend({ addr: "http://nomad:4646", image: "runner:1", http } as never).capacity();
     expect(cap.used, "the Nomad lane reported an unreachable cluster as idle").toBe("unknown");
+    expect(cap.usedMemoryMb, "the Nomad lane reported unmeasurable memory as free").toBe("unknown");
+    expect(cap.usedCpu, "the Nomad lane reported unmeasurable cpu as free").toBe("unknown");
   });
 
   it("the Nomad lane treats a non-2xx the same way", async () => {

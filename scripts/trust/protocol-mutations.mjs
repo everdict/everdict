@@ -1660,12 +1660,26 @@ const MUTATIONS = [
     suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
   },
   {
-    // …and the two PRODUCERS, because a union nothing emits is a type rather than a protocol. `countActiveJobs`
+    // …and the two PRODUCERS, because a union nothing emits is a type rather than a protocol. The probe
     // already answered `undefined` for "the query failed"; the lane threw that answer away.
+    //
+    // ⚠️ RE-AIMED in arch-review 68: the probe was `countActiveJobs` and became `activeUsage` when the
+    // envelope grew two more axes, so this rung's `from` stopped matching. The gate reported it as a rung
+    // testing nothing — which is the design, and it caught the rename in the same wave that made it.
     name: "capacity (k8s lane) — an uncountable cluster is reported idle",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: '      used: used ?? "unknown",',
-    to: "      used: used ?? 0,",
+    from: '      used: usage?.jobs ?? "unknown",',
+    to: "      used: usage?.jobs ?? 0,",
+    suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
+  },
+  {
+    // arch-review 68. The two axes added with the fleet envelope had a CONSUMER rung (`resource envelope`)
+    // and no producer one, so a lane spending an unmeasurable reading as free room was unguarded on exactly
+    // the axis the wave introduced.
+    name: "capacity (k8s lane) — unmeasurable memory is reported as free room",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: '      usedMemoryMb: usage?.memoryMb ?? "unknown",',
+    to: "      usedMemoryMb: usage?.memoryMb ?? 0,",
     suite: ["--root", "packages/backends", "src/scheduling/capacity-probe-unknown.counterexample.test.ts"],
   },
   {
