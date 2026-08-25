@@ -95,6 +95,9 @@ const FAST = [
 ];
 
 let failed;
+// What to re-run in the kept worktree when something breaks — the args, not the label, so the message is a
+// command an operator can paste rather than a description of one.
+let failedArgs = [];
 const stamped = [];
 try {
   for (const [i, sha] of commits.entries()) {
@@ -115,6 +118,7 @@ try {
     });
     if (install.status !== 0) {
       failed = `${short} — pnpm install`;
+      failedArgs = ["install", "--frozen-lockfile", "--prefer-offline"];
       break;
     }
     const broke = FAST.find(([label, args]) => {
@@ -123,12 +127,24 @@ try {
     });
     if (broke) {
       failed = `${short} — ${broke[0]}`;
+      failedArgs = broke[1];
       break;
     }
     stamped.push(sha);
   }
 } finally {
-  git(["worktree", "remove", "--force", wt]);
+  // ── A RED THAT CANNOT BE DIAGNOSED IS A RED THAT GETS RE-RUN (arch-review 69) ────────────────────
+  //
+  // This gate went red once with `pnpm test` at the tip and passed on an immediate re-run with no change.
+  // Two things made that undiagnosable, and both were here:
+  //
+  //   the step runs `stdio: "inherit"`, so WHICH test failed scrolled past among thousands of lines
+  //   the worktree is destroyed unconditionally, so there was nothing left to look at afterwards
+  //
+  // A gate whose failures can only be answered by running it again teaches you to run it again — which is
+  // precisely how a real red reaches the remote. So a FAILED run keeps its worktree and says where it is;
+  // a green one still cleans up, because the cost is only paid when something is already wrong.
+  if (failed === undefined) git(["worktree", "remove", "--force", wt]);
 }
 
 if (stamped.length > 0) {
@@ -140,6 +156,11 @@ if (stamped.length > 0) {
 if (failed !== undefined) {
   console.error(
     `\n✖ COMMIT GATE RED at ${failed}.\n  That commit is in the push and would be a hole in the history. Fix it where it is (rebuild the\n  commit rather than appending a repair on top), then re-run.`,
+  );
+  // Kept ON PURPOSE (see the `finally` above): re-run the failing step here to see what broke, instead of
+  // re-running the whole gate and hoping it stays red long enough to read.
+  console.error(
+    `\n  The worktree is KEPT for diagnosis, checked out at the failing commit:\n    cd ${wt} && pnpm ${failedArgs.join(" ")}\n  It is reused (and reset) by the next run, so there is nothing to clean up by hand.`,
   );
   process.exit(1);
 }
