@@ -29,21 +29,31 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   to await, so it would park a slot forever. They share admission, and their held-open jobs are counted by
   the same `capacity()` probe (all submit under the `everdict-` prefix).
 
-- Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
+- Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<BackendCapacity>`
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
-  `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap.
-- **Know which axis is bounded where.** Tenant concurrency is fleet-wide and HARD (`AdmissionLedger.tryAdmit`,
-  an atomic permit). Backend SLOTS are bounded across replicas by OBSERVATION — `used` is the orchestrator's
-  own count, so another replica's placement shows up once its object exists. MEMORY and CPU are bounded
-  **per process only**: `memoryBudgetMb`/`cpuBudget` are DECLARED envelopes and nothing observes actual
-  allocation, so two replicas can each reserve 3 GiB against one 4 GiB budget (arch-review 64 P1). Closing
-  that needs a capacity probe that reports observed memory/CPU — which `effectiveUsed` would then fold like
-  slots — or a durable per-backend resource permit. Until one exists, do not write a comment that implies the
-  envelope is fleet-wide; the contract on `BackendCapacity` states the scope and is the place to keep honest.
+  `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap, and report `usedMemoryMb`/
+  `usedCpu` from the same call when the orchestrator already tells you (see the axis bullet below).
+- **Know which axis is bounded where, and by WHOSE reading.** Tenant concurrency is fleet-wide and HARD
+  (`AdmissionLedger.tryAdmit`, an atomic permit). SLOTS, MEMORY and CPU are bounded across replicas by
+  OBSERVATION: each is a probe reading folded with this process's own accounting, so another replica's
+  placement counts once the orchestrator can see it.
+  Memory and CPU were process-local until arch-review 68 — declared envelopes with nothing observing
+  allocation, so two replicas could each reserve 3 GiB against one 4 GiB budget. The fix was deliberately
+  NOT a second mechanism: slots already solved this with a probe, so both managed lanes report the two axes
+  from a call they were already making (K8s reads `resources.requests` off the Job specs it lists; Nomad sums
+  the cluster's own `AllocatedResources`), and `effectiveResource` folds all three by one rule —
+  observed → `max(observed, ours)`, `"unknown"` → the WHOLE budget, `undefined` → ours alone.
+  That last arm is the honesty: a lane with no probe for an axis leaves it undefined and keeps process-local
+  accounting rather than being silently upgraded to a bound it cannot observe. A NEW lane that declares an
+  envelope either reports the axis or leaves it undefined — never `0`, which is the `?? 0` failure one bullet
+  down wearing different clothes. What remains genuinely unclosed is the pre-placement window: a probe sees an
+  allocation once it exists, so two replicas admitting in the same instant can still both pass. Slots have
+  always had that and it self-corrects on the next probe; a durable per-backend permit is what would remove it.
 - **A probe that could not count reports `used: "unknown"`, never `0`.** This line used to say "else `used: 0`"
-  and both managed lanes did exactly that — `used ?? 0` over a `countActiveJobs` that already answered
-  `undefined`, and a Nomad `catch` commented "probe failed → used 0". `used` is the ONLY fleet-wide bound on a
-  backend's slots (the tenant quota has an atomic permit; slots/memory/CPU are per-PROCESS accounting), so
+  and both managed lanes did exactly that — `used ?? 0` over a probe that already answered `undefined` (the
+  method was countActiveJobs, now `activeUsage`), and a Nomad `catch` commented "probe failed → used 0".
+  `used` is the fleet-wide bound on a backend's slots — the tenant quota has an atomic permit, and the other
+  three axes are probe readings folded with process-local accounting (see the bullet above) — so
   through an orchestrator outage every replica computed free slots against an empty cluster and kept admitting
   a full `total` each — for as long as the outage lasted, which is when the cluster could least take it. Not
   the probe LAG the `used` contract discloses: lag self-corrects on the next probe. Fold the third answer with

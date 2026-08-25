@@ -76,14 +76,28 @@ export interface BackendCapacity {
   //     from them is `Admission`'s process-local accounting and nothing else. Two replicas with a 4 GiB
   //     runtime budget can each locally reserve 3 GiB and neither sees the other: 6 GiB admitted.
   //
-  // That asymmetry is the whole finding. Slots have a probe and these do not, so the fix is not a smaller
-  // `?? 0` somewhere — it is either a capacity probe that reports observed memory/CPU (then `effectiveUsed`
-  // folds it exactly as it folds slots) or a durable per-backend resource permit claimed and renewed the way
-  // the tenant permit is. Neither is done, and saying so is the point: a comment implying the stronger
-  // property is the failure rule `protocol` names in the time-based-lease law.
+  // ── …AND THE PROBE THAT MAKES THEM FLEET-WIDE (arch-review 68) ───────────────────────────────────
+  //
+  // The paragraph above named two ways to close it: a capacity probe reporting observed memory/CPU, or a
+  // durable per-backend resource permit. The probe is the right one here and not by preference — it is the
+  // mechanism SLOTS already use, so closing the gap adds an axis to a working primitive rather than a second
+  // primitive beside it. `effectiveUsed` folds all three identically, including the fail-closed `unknown`.
+  //
+  // A lane that cannot cheaply tell reports `unknown` rather than `0`, for the reason the slot count learned
+  // the hard way: during an API-server outage, `?? 0` had every replica computing free capacity against an
+  // empty cluster and admitting at full width for as long as the outage lasted. A lane that reports NOTHING
+  // (leaves these undefined) keeps the previous behaviour — process-local accounting — because a lane with
+  // no probe must not be silently upgraded to claiming a bound it cannot observe.
+  //
+  // Observed memory allocated on this backend right now, in MiB, or `unknown` when the probe could not tell.
+  // Undefined = this lane has no memory probe; admission stays process-local for this axis and says so.
+  usedMemoryMb?: number | "unknown";
+  // The CPU twin, in the same units as `cpuBudget` (1000 = 1 vCPU).
+  usedCpu?: number | "unknown";
   //
   // Optional memory envelope (declared, e.g. RuntimeSpec.memoryBudgetMb) — caps the SUM of in-flight
-  // harness-declared memory the Scheduler admits at once, WITHIN ONE PROCESS. Absent = slots-only admission.
+  // harness-declared memory the Scheduler admits at once. Fleet-wide when `usedMemoryMb` is observed,
+  // WITHIN ONE PROCESS otherwise. Absent = slots-only admission.
   memoryBudgetMb?: number;
   // Optional CPU envelope (RuntimeSpec.cpuBudget, resources.cpu units: 1000 = 1 vCPU) — same admission
   // contract as memoryBudgetMb for the SUM of in-flight harness-declared cpu.

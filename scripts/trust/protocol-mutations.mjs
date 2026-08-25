@@ -2067,6 +2067,17 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 68. Memory and CPU were bounded PER PROCESS ONLY — declared envelopes with nothing
+    // observing allocation, so two replicas holding one 4 GiB budget could each reserve 3 GiB. Folding only
+    // this process's accounting puts that back.
+    name: "resource envelope — the observed reading is ignored and only this process counts",
+    file: "packages/backends/src/scheduling/scheduler.ts",
+    from: '  if (observed === undefined) return ours;\n  if (observed === "unknown") return budget;\n  return Math.max(observed, ours);',
+    to: "  void budget;\n  void observed;\n  return ours;",
+    build: "@everdict/backends",
+    suite: ["--root", "packages/backends", "src/scheduling/fleet-resource-envelope.counterexample.test.ts"],
+  },
+  {
     // arch-review 68. The safety property of the whole ledger: a sweep that can see RETAINED rows deletes the
     // artifact a crashed case is about to be recovered from, which turns the cleanup into a way of destroying
     // the recovery it exists to enable.

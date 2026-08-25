@@ -160,8 +160,8 @@ function mockApi(
     async jobsByLabel(selector) {
       return opts.labeledJobs?.filter((j) => j.selector === selector) ?? [];
     },
-    async countActiveJobs() {
-      return opts.active ?? 3;
+    async activeUsage() {
+      return { jobs: opts.active ?? 3, memoryMb: 0, cpu: 0 };
     },
     async serverVersion() {
       if (opts.unreachable) throw new Error("dial tcp: connection refused");
@@ -528,7 +528,9 @@ describe("K8sBackend.dispatch", () => {
   it("capacity: reports used via a live probe", async () => {
     const { api } = mockApi({ active: 5 });
     const backend = new K8sBackend({ image: "img", api, maxConcurrent: 10 });
-    expect(await backend.capacity()).toEqual({ total: 10, used: 5 });
+    // …and the two axes the same probe now answers (arch-review 68): memory and CPU were process-local for
+    // want of reading a field already in this response, so the lane reports them alongside the count.
+    expect(await backend.capacity()).toEqual({ total: 10, used: 5, usedMemoryMb: 0, usedCpu: 0 });
   });
 });
 

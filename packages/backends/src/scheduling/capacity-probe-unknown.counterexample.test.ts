@@ -12,14 +12,14 @@ import { backendSlotOf, effectiveUsed, slotAdmits } from "./scheduler.js";
 //
 // Both managed lanes reported a failed probe as zero:
 //
-//     k8s    const used = await this.withApi((api) => api.countActiveJobs());   // undefined = could not tell
+//     k8s    const used = await this.withApi((api) => api.activeUsage());   // undefined = could not tell
 //            return { total, used: used ?? 0 };
 //
 //     nomad  } catch {
 //              // probe failed → used 0
 //            }
 //
-// `countActiveJobs` already answered `undefined` for "could not find out" and the `??` threw that answer
+// `activeUsage` already answered `undefined` for "could not find out" and the `??` threw that answer
 // away. So during an orchestrator API outage every replica computes `free = total − max(0, its own few)` and
 // keeps admitting at full width — N × total, continuously, at precisely the moment the cluster is least able
 // to take it. This is rule `protocol` L2 in the one place the fleet bound rests on, and the failure is not
@@ -79,17 +79,17 @@ describe("[R63 COUNTEREXAMPLE] a probe that could not count is not a probe that 
   });
 
   it("the K8s lane SAYS it could not count", async () => {
-    // `countActiveJobs` has always answered `undefined` for "the query itself failed"; the lane threw that
+    // `activeUsage` has always answered `undefined` for "the query itself failed"; the lane threw that
     // answer away with `?? 0`. This is the producer half — without it the union above is a type nothing emits.
-    const api = { countActiveJobs: async () => undefined } as unknown as ConstructorParameters<
-      typeof K8sBackend
-    >[0]["api"];
+    const api = { activeUsage: async () => undefined } as unknown as ConstructorParameters<typeof K8sBackend>[0]["api"];
     const cap = await new K8sBackend({ image: "runner:1", api, maxConcurrent: 4 } as never).capacity();
     expect(cap.used, "the K8s lane reported an uncountable cluster as idle").toBe("unknown");
   });
 
   it("the K8s lane still reports a REAL count", async () => {
-    const api = { countActiveJobs: async () => 2 } as unknown as ConstructorParameters<typeof K8sBackend>[0]["api"];
+    const api = { activeUsage: async () => ({ jobs: 2, memoryMb: 0, cpu: 0 }) } as unknown as ConstructorParameters<
+      typeof K8sBackend
+    >[0]["api"];
     const cap = await new K8sBackend({ image: "runner:1", api, maxConcurrent: 4 } as never).capacity();
     expect(cap.used).toBe(2);
   });

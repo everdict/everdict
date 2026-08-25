@@ -90,6 +90,46 @@ import { mergePlacedImage, withWorldProof } from "./placement-image.js";
 import { verifierCaseJob } from "./verifier-placement.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
+// ── KUBERNETES QUANTITIES, READ THE WAY KUBERNETES WRITES THEM (arch-review 68) ─────────────────────
+//
+// A resource request is a quantity string, not a number: `512Mi`, `2Gi`, `1500m`, `2`. Parsing it with
+// `Number()` yields NaN for every form the cluster actually uses, and NaN in a sum makes the whole probe
+// NaN — which compares false against every budget and silently admits everything. Both helpers return 0 for
+// a shape they do not recognise, which under-counts rather than poisoning the sum: an under-count is the
+// pre-probe behaviour, and NaN is a fail-open nobody can see.
+function k8sMemoryMb(q: string | undefined): number {
+  if (!q) return 0;
+  const m = /^(\d+(?:\.\d+)?)\s*(Ki|Mi|Gi|Ti|K|M|G|T)?$/.exec(q.trim());
+  if (!m?.[1]) return 0;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return 0;
+  const scale: Record<string, number> = {
+    Ki: 1 / 1024,
+    Mi: 1,
+    Gi: 1024,
+    Ti: 1024 * 1024,
+    K: 1000 / (1024 * 1024),
+    M: (1000 * 1000) / (1024 * 1024),
+    G: (1000 * 1000 * 1000) / (1024 * 1024),
+    T: (1000 * 1000 * 1000 * 1000) / (1024 * 1024),
+  };
+  // A bare number is BYTES in Kubernetes' own grammar, not megabytes.
+  return Math.round(n * (m[2] ? (scale[m[2]] ?? 0) : 1 / (1024 * 1024)));
+}
+
+// CPU in the units this repo's envelope uses: 1000 = 1 vCPU, which is Kubernetes' own millicore.
+function k8sCpuUnits(q: string | undefined): number {
+  if (!q) return 0;
+  const t = q.trim();
+  const milli = /^(\d+(?:\.\d+)?)m$/.exec(t);
+  if (milli?.[1]) {
+    const n = Number(milli[1]);
+    return Number.isFinite(n) ? Math.round(n) : 0;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.round(n * 1000) : 0;
+}
+
 export interface K8sApi {
   ensureNamespace(ns: string): Promise<void>;
   applyJob(manifest: unknown, ns: string): Promise<void>; // kubectl -n ns apply -f -
@@ -160,7 +200,11 @@ export interface K8sApi {
   // The job pod's live resource usage from the metrics API (`kubectl top pod`) — the replay runtime plane's
   // producer read (CaseSampleable). undefined when metrics-server is absent / the pod is gone (best-effort).
   podTop(name: string, ns: string): Promise<{ cpuMillicores?: number; memoryMb?: number } | undefined>;
-  countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
+  // Capacity probe: in-flight app=everdict jobs across all namespaces, AND what they asked the cluster for.
+  // One call answers all three because the Job spec carries its own resource requests — the memory and CPU
+  // axes were process-local only for want of reading a field already in the response (arch-review 68).
+  // `undefined` = the query itself failed, which every caller must fold fail-closed rather than `?? 0`.
+  activeUsage(): Promise<{ jobs: number; memoryMb: number; cpu: number } | undefined>;
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
   // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
   inspectNodes(): Promise<
@@ -523,14 +567,25 @@ export function kubectlApi(
         return undefined;
       }
     },
-    async countActiveJobs() {
+    async activeUsage() {
       const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=everdict", "-o", "json"]);
       if (res.code !== 0) return undefined;
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           status?: { succeeded?: number; failed?: number };
+          spec?: {
+            template?: { spec?: { containers?: Array<{ resources?: { requests?: Record<string, string> } }> } };
+          };
         }>;
-        return items.filter((j) => !j.status?.succeeded && !j.status?.failed).length;
+        const active = items.filter((j) => !j.status?.succeeded && !j.status?.failed);
+        let memoryMb = 0;
+        let cpu = 0;
+        for (const job of active)
+          for (const c of job.spec?.template?.spec?.containers ?? []) {
+            memoryMb += k8sMemoryMb(c.resources?.requests?.memory);
+            cpu += k8sCpuUnits(c.resources?.requests?.cpu);
+          }
+        return { jobs: active.length, memoryMb, cpu };
       } catch {
         return undefined;
       }
@@ -1412,11 +1467,16 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
-    const used = await this.withApi((api) => api.countActiveJobs());
+    const usage = await this.withApi((api) => api.activeUsage());
     return {
       total,
-      // `countActiveJobs` answers `undefined` for "the query itself failed" and this used to `?? 0` it away.
-      used: used ?? "unknown",
+      // `activeUsage` answers `undefined` for "the query itself failed" and this used to `?? 0` it away.
+      used: usage?.jobs ?? "unknown",
+      // …and the two axes that used to be process-local (arch-review 68). Same three-way fold: a probe that
+      // could not tell reports `unknown`, which `effectiveResource` spends as the WHOLE budget rather than as
+      // free room — the fail-closed direction the slot count learned during an API-server outage.
+      usedMemoryMb: usage?.memoryMb ?? "unknown",
+      usedCpu: usage?.cpu ?? "unknown",
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
       ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };

@@ -56,9 +56,23 @@ export function backendSlotOf(
     name,
     total: cap.total,
     free: Math.max(0, cap.total - used.slots),
+    // ── THE SAME FOLD FOR ALL THREE AXES (arch-review 68) ──────────────────────────────────────────
+    //
+    // Memory and CPU were subtracted from THIS PROCESS's accounting alone, so two replicas holding a 4 GiB
+    // budget could each locally reserve 3 GiB and neither saw the other. `effectiveResource` folds the
+    // lane's OBSERVED reading with this process's in-flight exactly as `effectiveUsed` folds slots — same
+    // `max` rule, same fail-closed `unknown`, so an outage cannot turn "nobody knows" into free capacity.
+    //
+    // A lane that reports nothing (undefined) keeps the previous, process-local behaviour: an axis without a
+    // probe must not be silently upgraded to claiming a bound it cannot observe.
     memFreeMb:
-      cap.memoryBudgetMb === undefined ? Number.POSITIVE_INFINITY : Math.max(0, cap.memoryBudgetMb - used.memoryMb),
-    cpuFree: cap.cpuBudget === undefined ? Number.POSITIVE_INFINITY : Math.max(0, cap.cpuBudget - used.cpu),
+      cap.memoryBudgetMb === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, cap.memoryBudgetMb - effectiveResource(cap.memoryBudgetMb, cap.usedMemoryMb, used.memoryMb)),
+    cpuFree:
+      cap.cpuBudget === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, cap.cpuBudget - effectiveResource(cap.cpuBudget, cap.usedCpu, used.cpu)),
   };
 }
 
@@ -67,6 +81,19 @@ export function backendSlotOf(
 // for why an unverifiable reading may not be spent. Both combination rules pass through here, so neither can
 // turn "nobody knows" back into a number — `sum` was the shape most likely to do it by accident, since
 // `unknown + held` reads as `0 + held` to anyone reaching for `??`.
+// The resource twin of `effectiveUsed`, and deliberately the same three-way shape (arch-review 68):
+//   observed number  → max(observed, ours), because the probe may already include our placements or lag them
+//   "unknown"        → the WHOLE budget, i.e. no room; a replica that cannot verify the bound may not spend it
+//   undefined        → ours alone, the pre-probe behaviour for a lane that has no probe for this axis
+//
+// Written beside `effectiveUsed` rather than inside it because the two take different budgets and the caller
+// must not be able to pass the wrong one — but the RULE is one rule, and a future axis joins here.
+export function effectiveResource(budget: number, observed: number | "unknown" | undefined, ours: number): number {
+  if (observed === undefined) return ours;
+  if (observed === "unknown") return budget;
+  return Math.max(observed, ours);
+}
+
 export function effectiveUsed(cap: BackendCapacity, held: number, rule: "max" | "sum"): number {
   if (cap.used === "unknown") return cap.total;
   return rule === "max" ? Math.max(cap.used, held) : cap.used + held;

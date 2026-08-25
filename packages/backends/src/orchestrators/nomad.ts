@@ -804,6 +804,37 @@ export class NomadBackend
 
   // Capacity: total=configured cap, used=count of in-flight everdict jobs observed in the cluster (live probe, all namespaces).
   // If the probe fails, leave used=0 and gate only via the scheduler's in-flight.
+  // What this backend's everdict allocations currently hold, summed from the cluster's OWN grant
+  // (`AllocatedResources`) rather than from what any job asked for. `undefined` = the query did not answer,
+  // which the caller folds to `unknown` — never to zero (see `BackendCapacity.used` for what `?? 0` cost the
+  // slot count during an API-server outage).
+  private async allocatedResources(): Promise<{ memoryMb: number; cpu: number } | undefined> {
+    try {
+      const res = await this.http.request("GET", "/v1/allocations?namespace=*&resources=true");
+      if (res.status >= 300) return undefined;
+      const allocs = JSON.parse(res.text) as Array<{
+        JobID?: string;
+        ClientStatus?: string;
+        AllocatedResources?: {
+          Tasks?: Record<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }>;
+        };
+      }>;
+      let memoryMb = 0;
+      let cpu = 0;
+      for (const a of allocs) {
+        if (!a.JobID?.startsWith("everdict-")) continue;
+        if (a.ClientStatus !== "running" && a.ClientStatus !== "pending") continue;
+        for (const task of Object.values(a.AllocatedResources?.Tasks ?? {})) {
+          memoryMb += task.Memory?.MemoryMB ?? 0;
+          cpu += task.Cpu?.CpuShares ?? 0;
+        }
+      }
+      return { memoryMb, cpu };
+    } catch {
+      return undefined;
+    }
+  }
+
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
@@ -812,9 +843,22 @@ export class NomadBackend
       if (res.status < 300) {
         const jobs = JSON.parse(res.text) as Array<{ Status?: string }>;
         const used = jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
+        // ── AND WHAT THOSE ALLOCATIONS ACTUALLY HOLD (arch-review 68) ────────────────────────────────
+        //
+        // Memory and CPU were bounded PER PROCESS ONLY: the envelopes are declared config and nothing
+        // observed allocation, so two replicas with a 4 GiB budget could each locally reserve 3 GiB and
+        // neither saw the other. Slots did not have that problem because they have a probe — so this axis
+        // gets the same probe rather than a second mechanism beside it.
+        //
+        // A second request, deliberately: the job stubs above carry no resources, and `AllocatedResources`
+        // is what the CLUSTER granted rather than what we asked for. A failure here is `unknown`, not zero —
+        // this lane HAS a probe and it did not answer, which `effectiveResource` spends as the whole budget.
+        const observed = await this.allocatedResources();
         return {
           total,
           used,
+          usedMemoryMb: observed === undefined ? "unknown" : observed.memoryMb,
+          usedCpu: observed === undefined ? "unknown" : observed.cpu,
           ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
           ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
         };
@@ -827,6 +871,9 @@ export class NomadBackend
     return {
       total,
       used: "unknown",
+      // The same reading for all three: nothing counted this cluster, and an axis nobody counted is not free.
+      usedMemoryMb: "unknown",
+      usedCpu: "unknown",
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
       ...(this.opts.cpuBudget !== undefined ? { cpuBudget: this.opts.cpuBudget } : {}),
     };
