@@ -2211,6 +2211,20 @@ const MUTATIONS = [
     env: { EVERDICT_TRUST_SUITE: "1" },
     requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
   },
+  {
+    // arch-review 68. The conditional create is what makes an "immutable" artifact immutable, and every
+    // repair that rests on it was certified against a mocked 412. Removing the header leaves that mocked
+    // counterexample 4/4 GREEN — verified — while a real endpoint accepts the overwrite, which is precisely
+    // why this rung is aimed at the scenario that talks to one.
+    name: "immutable artifact — the conditional create never reaches the endpoint",
+    file: "packages/storage/src/s3.ts",
+    from: '          ...(opts?.immutable === true ? { IfNoneMatch: "*" } : {}),',
+    to: "          ...{},",
+    build: "@everdict/storage",
+    suite: ["--root", "apps/api", "src/trust/intermediate-artifacts.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_S3_ENDPOINT", "EVERDICT_TRUST_S3_ACCESS_KEY", "EVERDICT_TRUST_S3_SECRET_KEY"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────

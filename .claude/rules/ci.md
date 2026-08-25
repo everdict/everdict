@@ -78,22 +78,26 @@ See skill `ci`.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
 - **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`
-  (job name **`trust fast (real Postgres)`**) runs the Postgres-only trust subset on every push and PR, through
-  `scripts/trust/trust-suite.mjs` so that a scenario which SKIPPED still fails the check. Scope = every
-  `*.trust.test.ts` needing only Postgres: `apps/api/src/trust` minus the Temporal durability files, **plus
+  (job name **`trust fast (real Postgres)`**) runs the trust subset that needs a real Postgres **and a real
+  object store** on every push and PR, through `scripts/trust/trust-suite.mjs` so that a scenario which
+  SKIPPED still fails the check. Scope = `apps/api/src/trust` minus the Temporal durability files, **plus
   `packages/` and `apps/agent`** — those two were nightly-only until arch-review 56, which is how a signature
-  change left a package's scenario red for a day where the required check could not see it. The local gate
-  deliberately boots no database, so this is the one required check you cannot pre-run with `ci:local`;
-  reproduce it against a THROWAWAY Postgres (the suite migrates whatever you give it — never point it at a dev
-  stack) with `EVERDICT_TRUST_DATABASE_URL=… node scripts/trust/trust-suite.mjs apps/api/src/trust
+  change left a package's scenario red for a day where the required check could not see it. MinIO joined in
+  arch-review 68 for the same reason one level down: four reviews had repaired the two-phase intermediates
+  against a MOCKED 412, and deleting the conditional create leaves that counterexample 4/4 green while a real
+  endpoint silently overwrites. The local gate deliberately boots neither, so this is the one required check
+  you cannot pre-run with `ci:local`; reproduce it against a THROWAWAY Postgres and a THROWAWAY MinIO (the
+  suite migrates whatever database you give it — never point it at a dev stack) with
+  `EVERDICT_TRUST_DATABASE_URL=… EVERDICT_TRUST_S3_ENDPOINT=… EVERDICT_TRUST_S3_ACCESS_KEY=…
+  EVERDICT_TRUST_S3_SECRET_KEY=… node scripts/trust/trust-suite.mjs apps/api/src/trust
   '!apps/api/src/trust/temporal-' packages apps/agent`.
 - **A trust scenario that SKIPS is not a passing one, and locally that is the default.** Without
   `EVERDICT_TRUST_DATABASE_URL` these files skip, so `pnpm test` going green says nothing about them. After
   changing anything a trust scenario asserts on — a return type especially, since `expect(x).toBe(false)`
   still compiles when `x` becomes an object — run the suite against a real Postgres before pushing.
   A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing.
-  The full suite — Temporal, MinIO, Windows — stays nightly (`trust-nightly.yml`, non-blocking); see
-  `docs/trust-certification.md`.
+  What still stays nightly is Temporal and Windows (`trust-nightly.yml`, non-blocking) — MinIO does not, as
+  of arch-review 68; see `docs/trust-certification.md`.
 - A failure you did not cause (someone else's WIP / earlier commit) still blocks your push:
   surface it to the maintainer instead of silently absorbing or bypassing it.
 - After pushing, confirm the run went green:

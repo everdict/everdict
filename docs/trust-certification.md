@@ -17,9 +17,11 @@ budget is not a budget.
   The full suite is deliberately **not** part of the push gate (`ci.yml`); see
   [Why the full suite is not in ci.yml](#why-the-full-suite-is-not-in-ciyml).
 - **…and the subset that DOES gate a push**: `.github/workflows/trust-fast.yml` (job name
-  `trust fast (real Postgres)`) — the scenarios that need nothing but a real Postgres, on every push and pull
-  request, as a **required check**. Certifying invariants only at 03:00 means certifying them after the change
-  that broke them merged.
+  `trust fast (real Postgres)`) — the scenarios that need a real Postgres and a real object store, on every
+  push and pull request, as a **required check**. Certifying invariants only at 03:00 means certifying them
+  after the change that broke them merged. MinIO joined it in arch-review 68 for exactly that reason: four
+  consecutive reviews had repaired the two-phase case's intermediates against a MOCKED 412, which proves the
+  adapter's branch and never the endpoint's behaviour.
 - **What runs it**: `scripts/trust/trust-suite.mjs` — for both, so the rule below cannot differ between them.
   A positional argument scopes it to a repo-relative path prefix (`!prefix` excludes); no arguments runs
   everything, which is what the nightly does.
@@ -232,6 +234,8 @@ half the other missed, and both looked handled.
 | TRUST-177 | **A cancel whose teardown died is still owed, and something durable owes it** — the protocol is terminal-first, so a control-plane crash between the CANCELLED commit and a failed teardown left children "running" for ever, leases held and compute burning, with nothing in the system looking for the difference; convergence-by-retry needs a caller, and a crash has none. Driven through the real `ScorecardService` over real Pg stores against a batch whose children a real submit created: a throwing teardown leaves the decision terminal, the operation row (mig 0184) owed with its reason recorded and the children stranded; `reconcileCancellations` — the sweep another replica runs — re-runs the same idempotent steps, settles every child `failed{CANCELLED}` in Postgres and completes the row; a second sweep is a genuine no-op, never a teardown re-run on every pass | `apps/api/src/trust/cancel-convergence.trust.test.ts` |
 | TRUST-178 | **A cancelled lease authorizes nothing, and the row it holds still ends** — cancellation is capability revocation, and the store lane's half of it is five SQL predicates plus a terminalizing sweep and ack. What covered them was the InMemory twin (a hand-written mirror of the predicates, which cannot certify the predicates) and a fake-`SqlClient` assertion on statement TEXT (which certifies a string). Asked of a live database instead: `authorize` answers null and `restampJob` refuses, `complete`/`fail` are refused BY POSTGRES so the outcome reads `cancelled` with no payload to contradict it, the refused report IS the ack that terminalizes the row, the heartbeat still ANSWERS (the reply is the abort channel) while freezing `activity_at` so a non-compliant holder stops looking alive, the claim-time sweep terminalizes a cancelled lease nobody acked (excluded from requeue is not the same as ended), and `pending` stops counting it | `apps/api/src/trust/cancelled-lease-revocation.trust.test.ts` |
 | TRUST-179 | **What the judges read reaches the gate, and the doubt a revision recorded blocks there** — the two halves were certified apart (`inputObservationOf`/`applyInputTrust` as pure functions; the jsonb round trip over a HAND-BUILT record in TRUST-35) and the seam between them was assumed: that a real batch settling through the real service produces an observation a decision can read. End to end over Postgres — real submit, real dispatch, real receipts, real settle: the settled revision's `inputObservation` is completed with zero divergence and a gate over two such batches carries no input reason at all; a revision whose observation (built by handing the PRODUCTION builder a disagreeing ledger reading, never typed in) reports divergence is `not_comparable` with `input_diverged` LEADING and no acknowledgement waives it; and a LEGACY revision — the field genuinely absent from the jsonb, as a pre-observation row has it — blocks with `input_unverified` by default and passes only under a recorded `allowUnverifiedInput` the decision keeps | `apps/api/src/trust/input-trust-decision.trust.test.ts` |
+| TRUST-180 | **The cleanup debt outlives the process that incurred it** — the ledger shipped in-memory, which closes the ordinary path (a case settling in one process discharges exactly what it staged) and leaves the reason the ledger exists: a control plane that dies between the staging and the settlement leaks its artifacts forever, because the only record of what was owed died with it. Drives the REAL Postgres adapter over TWO independent store instances — the one that staged is gone, the one that sweeps is reading something it did not write. The safety property is the one that matters most: `due()` must NEVER return a `retained` row, or a sweep deletes the artifact a crashed case is about to be recovered from | `apps/api/src/trust/intermediate-cleanup.trust.test.ts` |
+| TRUST-181 | **The two-phase case's intermediates, against a store that can disagree** — four consecutive reviews centred on these artifacts (how the agent half is keyed, whether its address authenticates its bytes, whether a taken key is the same bytes, who owes their deletion) and every repair was certified against a mocked `S3Client.send` throwing a SYNTHETIC 412, or a `Map`. Both prove the branch; neither proves the premise, which is a sentence about somebody else's software — `IfNoneMatch: "*"` reaching the endpoint and coming back 412. Drives the PRODUCTION composition (`stageAgentHalf` · `verifierOperation` · `recoverStagedVerdict` · `IntermediateCleanupReconciler`) against a real object store and asserts what is IN it afterwards: a second attempt's bytes are refused at an immutable key, a convergent rewrite still succeeds, two interleaved attempts each read back their own half, a document the address does not name reads `unknown`, a never-staged half reads `absent` (the real `NoSuchKey`, not a fake's `undefined`), and the reconciler's zero is read back rather than counted | `apps/api/src/trust/intermediate-artifacts.trust.test.ts` |
 
 ## Mutation gates — removing a fence must turn the suite red
 
@@ -253,6 +257,8 @@ not something a reviewer remembers:
 | Stop recording a failed teardown's owner / neuter the reconciler | TRUST-177 — a crashed cancel's children stay non-terminal and no sweep closes them |
 | Drop `NOT cancel_requested` from authorize/complete/fail/restamp/pending, or unfreeze `activity_at` on a cancelled touch, or skip the cancelled-lease sweep | TRUST-178 — each predicate has its own scenario, and each was verified red with the predicate removed from the built store |
 | Neuter `applyInputTrust`, or make the settle record no input observation | TRUST-179 — the divergence and legacy scenarios return `pass` where the answer must be `not_comparable`, which is the false green light this row exists for |
+| Let `due()` return `retained` rows, or `complete()` accept one no settlement released | TRUST-180 — a sweep is handed an artifact whose case has not settled, which is the ledger destroying the recovery it exists to enable |
+| Remove `IfNoneMatch: "*"` from `S3ArtifactStore.put`, or read its 412 as success without comparing the bytes | TRUST-181 — a second attempt's document replaces an immutable object. ⚠️ The MOCKED counterexample (`packages/storage/src/immutable-conflict.counterexample.test.ts`) stays 4/4 GREEN under this mutation, verified; that gap is why this scenario is on the blocking lane |
 
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
@@ -322,7 +328,20 @@ The env vars are deliberately two:
   keeps `pnpm test` (and therefore the push gate) fast.
 - `EVERDICT_TRUST_DATABASE_URL` — the database the Pg-backed scenarios drive. Falls back to `DATABASE_URL`.
 
-The MinIO scenario needs the workspace-filesystem endpoint instead:
+- `EVERDICT_TRUST_S3_ENDPOINT` / `_ACCESS_KEY` / `_SECRET_KEY` — the object store the intermediate-artifact
+  scenario (TRUST-181) drives. Point them at a THROWAWAY MinIO; the scenario writes immutable keys, which by
+  construction a rerun cannot rewrite.
+
+```bash
+docker run -d --name evd-minio-tmp -p 19110:9000 \
+  -e MINIO_ROOT_USER=everdict -e MINIO_ROOT_PASSWORD=everdict-trust \
+  minio/minio:latest server /data
+EVERDICT_TRUST_SUITE=1 EVERDICT_TRUST_S3_ENDPOINT=http://127.0.0.1:19110 \
+EVERDICT_TRUST_S3_ACCESS_KEY=everdict EVERDICT_TRUST_S3_SECRET_KEY=everdict-trust \
+  pnpm --filter @everdict/api exec vitest run src/trust/intermediate-artifacts.trust.test.ts
+```
+
+The workspace-filesystem scenario is a separate, nightly one and reads its own pair:
 
 ```bash
 EVERDICT_E2E_S3_ENDPOINT=http://127.0.0.1:9102 \
@@ -386,8 +405,8 @@ job's minutes, would trade that away. Three workflows, three questions:
 
 | | `ci.yml` (every push) | `trust-fast.yml` (every push) | `trust-nightly.yml` (nightly) |
 | --- | --- | --- | --- |
-| asks | did this change break the code? | do the guarantees that need only a database still hold? | do ALL the guarantees still hold? |
-| runs against | fakes, in-memory stores | real Postgres | real Postgres, real MinIO, real Temporal, Windows |
+| asks | did this change break the code? | do the guarantees that need only a database and an object store still hold? | do ALL the guarantees still hold? |
+| runs against | fakes, in-memory stores | real Postgres, real MinIO | real Postgres, real MinIO, real Temporal, Windows |
 | scope | every unit test | `apps/api/src/trust`, minus the Temporal durability files | every `*.trust.test.ts` |
 | blocks | yes — a red `main` blocks everyone | yes — required check | no — it reports |
 
@@ -400,7 +419,7 @@ What stays nightly is what needs a server the fast job does not start.
 `scripts/ci-local.mjs` mirrors `ci.yml` step for step and is **not** extended to cover either trust workflow:
 the local gate must not require a database before every push. `trust-fast` is therefore the one required
 check that `pnpm ci:local` cannot pre-run — to reproduce it, point `EVERDICT_TRUST_DATABASE_URL` at any
-throwaway Postgres and run the same command the workflow does.
+throwaway Postgres, `EVERDICT_TRUST_S3_*` at any throwaway MinIO, and run the same command the workflow does.
 
 ## Tier B — the process-level scenarios (roadmap)
 

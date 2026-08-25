@@ -64,10 +64,43 @@ jobs:
       # The trust files import built package entrypoints (@everdict/db, @everdict/domain, …), same as any test.
       - run: pnpm build
 
-      # No Temporal and no MinIO here, deliberately: the excluded prefix is what keeps this job a few minutes
-      # long, and the scenarios it drops are exactly the ones that need a server this job does not start.
-      # They are NOT unowned — trust-nightly runs them with the infrastructure they require.
-      - name: Trust suite (Postgres-only subset)
+      # ── AND ONE OBJECT STORE, ADDED DELIBERATELY (arch-review 68) ────────────────────────────────
+      #
+      # No Temporal here: the excluded prefix is what keeps this job a few minutes long, and the durability
+      # scenarios it drops need a server this job does not start. They are NOT unowned — trust-nightly runs
+      # them with the infrastructure they require.
+      #
+      # MinIO used to be in that same sentence, and four consecutive reviews are the argument for moving it.
+      # 61, 62, 66 and 67 all centred on the two-phase case's intermediates — how the agent half is keyed,
+      # whether its address authenticates its bytes, whether a taken key is the same bytes, who owes their
+      # deletion — and every one of those repairs was certified against a mocked `S3Client.send` throwing a
+      # SYNTHETIC 412. That proves the adapter's branch and cannot prove the premise it rests on, which is a
+      # sentence about somebody else's software: `IfNoneMatch: "*"` reaching MinIO and coming back 412.
+      #
+      # Measured, not assumed: the container is ready in ~4s and TRUST-181 runs in under a second, against a
+      # job that already takes minutes. Deleting the conditional create leaves the mocked counterexample 4/4
+      # green and this scenario red — which is the whole reason it is on the blocking lane rather than the
+      # nightly. Started with `docker run` for the reason the nightly does it: MinIO needs a server
+      # subcommand, which the `services:` block cannot express.
+      - name: Start MinIO
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=everdict -e MINIO_ROOT_PASSWORD=everdict-trust \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null && { echo "▶ minio ready after $((i * 2))s"; exit 0; }
+            sleep 2
+          done
+          echo "✗ minio never became ready — the intermediate-artifact scenario has nothing to run against" >&2
+          docker logs minio 2>&1 | tail -40 >&2
+          exit 1
+
+      - name: Trust suite (Postgres + object store subset)
+        env:
+          EVERDICT_TRUST_S3_ENDPOINT: http://127.0.0.1:9000
+          EVERDICT_TRUST_S3_ACCESS_KEY: everdict
+          EVERDICT_TRUST_S3_SECRET_KEY: everdict-trust # throwaway container on the runner, never reachable off-box
         run: >-
           node scripts/trust/trust-suite.mjs
           apps/api/src/trust
