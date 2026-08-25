@@ -88,6 +88,12 @@ See skill `ci`.
   mutates, for the same reason.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.
+  ⚠️ **`biome check --write` DOES NOT APPLY BIOME'S "UNSAFE" FIXES**, and it exits 0 anyway. `useTemplate`
+  and `noUnusedTemplateLiteral` are both in that class, so a file can come back from `--write` reporting
+  success and still fail `pnpm lint` — which is how a lint-red commit got made in arch-review 69, found only
+  because an unrelated probe happened to run the commit gate over it. Running the formatter is not evidence;
+  `pnpm lint` afterwards is. This is the same shape as the substitution-that-silently-missed in arch-review
+  67: the tool said nothing, and nothing is not confirmation.
 - **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`
   (job name **`trust fast (real Postgres)`**) runs the trust subset that needs a real Postgres **and a real
   object store** on every push and PR, through `scripts/trust/trust-suite.mjs` so that a scenario which
