@@ -150,6 +150,19 @@ interface QueueEntry {
   // proof back (arch-review 54 Phase 1) and re-presents it at the birth (arch-review 57). ONE field, because
   // this allowlist is where `onActivate` silently died when it was a second one (arch-review 58 W2).
   authority?: ManagedDispatchAuthority;
+  // ── …AND THE DURABLE HANDOVER, WHICH DIED HERE AS THE THIRD (arch-review 69 P0) ─────────────────
+  //
+  // `acknowledgeResult` is how a managed lane hands its parsed `CaseResult` to a durable owner BEFORE the
+  // `finally` that reclaims the container. Both managed lanes read it; `withVerifierPass` sets it; this
+  // allowlist never learned it. So on every path that goes through the Scheduler — which is the production
+  // path — the ordering that arch-review 67 P0-lifecycle exists for did not happen at all:
+  //
+  //     result parsed → Job deleted → dispatch returns → ✗ → nothing staged, nothing to recover
+  //
+  // The two comments above warn about the FIRST field that died here, and this one was dropped three lines
+  // below them. `pnpm option-forwarding` is the part that binds now (rule `ci`): prose at the site of the
+  // defect has now failed twice, in the same block, about the same mistake.
+  acknowledgeResult?: DispatchOptions["acknowledgeResult"];
 }
 
 export interface SchedulerOptions {
@@ -370,6 +383,7 @@ export class Scheduler {
         ...(opts?.onWaiting ? { onWaiting: opts.onWaiting } : {}),
         ...(opts?.onAttempt ? { onAttempt: opts.onAttempt } : {}),
         ...(opts?.authority ? { authority: opts.authority } : {}),
+        ...(opts?.acknowledgeResult ? { acknowledgeResult: opts.acknowledgeResult } : {}),
       };
       if (opts?.signal) {
         // Aborted while still QUEUED → remove and reject, so a cancelled job never wastes a placement slot. Once
@@ -720,7 +734,12 @@ export class Scheduler {
     // hook). A managed backend fires onStarted at its dispatch entry (= now, post-admission); the self-hosted backend
     // forwards it to the lease hub so it fires only when a runner actually takes the job.
     const dispatchOpts =
-      entry.signal || entry.onStarted || entry.onWaiting || entry.onAttempt || entry.authority
+      entry.signal ||
+      entry.onStarted ||
+      entry.onWaiting ||
+      entry.onAttempt ||
+      entry.authority ||
+      entry.acknowledgeResult
         ? {
             ...(entry.signal ? { signal: entry.signal } : {}),
             ...(entry.onStarted ? { onStarted: entry.onStarted } : {}),
@@ -735,6 +754,10 @@ export class Scheduler {
             // arch-review 52) AND the re-presentation that keeps a cancelled reservation from being spent.
             // It is one field on purpose: `onActivate` died here as a second one (arch-review 58 W2).
             ...(entry.authority ? { authority: entry.authority } : {}),
+            // …and the durable handover (arch-review 69 P0). Omitting it here is not a lost hook but a lost
+            // GUARANTEE: the lane reclaims its container and the only copy of a completed execution's result
+            // is this process's memory until the caller stages it, one stack frame later.
+            ...(entry.acknowledgeResult ? { acknowledgeResult: entry.acknowledgeResult } : {}),
           }
         : undefined;
     this.registry

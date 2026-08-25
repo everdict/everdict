@@ -2081,6 +2081,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 69 P0. The Scheduler rebuilds the dispatch options out of `QueueEntry`, and a field nobody
+    // adds to that rebuild is dropped in silence. `acknowledgeResult` was the second to die there. The rung
+    // is aimed at the ORDER the option exists to produce, not at the copy: a field assertion would pass the
+    // moment somebody re-adds the line and say nothing about whether the handover still precedes the reclaim.
+    name: "dispatch options — the durable handover dies in the scheduler's allowlist",
+    file: "packages/backends/src/scheduling/scheduler.ts",
+    from: "            ...(entry.acknowledgeResult ? { acknowledgeResult: entry.acknowledgeResult } : {}),",
+    to: "            ...{},",
+    build: "@everdict/backends",
+    suite: ["--root", "apps/api", "src/core/execution/acknowledge-through-scheduler.counterexample.test.ts"],
+  },
+  {
     // arch-review 68. Memory and CPU were bounded PER PROCESS ONLY — declared envelopes with nothing
     // observing allocation, so two replicas holding one 4 GiB budget could each reserve 3 GiB. Folding only
     // this process's accounting puts that back.

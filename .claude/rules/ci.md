@@ -22,7 +22,8 @@ See skill `ci`.
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
-  **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm language-policy`**, **`pnpm source-bytes`**,
+  **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
+  **`pnpm language-policy`**, **`pnpm source-bytes`**,
   **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
@@ -62,6 +63,16 @@ See skill `ci`.
   leaving every production private-verifier case recording no cleanup debt. Ports satisfied STRUCTURALLY (an
   object literal at the root) are deliberately not flagged — the compiler already refuses a missing one where
   it is passed. `DECLARED_UNWIRED` states why a capability is inert on purpose.
+- **`pnpm option-forwarding` is the allowlist-forwarding law, enforced instead of stated** (arch-review 69).
+  `DispatchOptions` travels through several decorating dispatchers and the Scheduler; most links pass the
+  object whole, but a Scheduler entry WAITS, so its options are taken apart into `QueueEntry` and rebuilt at
+  `runOne`. That rebuild is an allowlist, and it has now silently eaten two fields — `onActivate`
+  (arch-review 58 W2) and `acknowledgeResult` (69), the second while the block carried TWO comments warning
+  about the first, three lines above where it was dropped. The check reads the field names off the interface
+  (never a second copy), treats whole-object forwarding as safe by construction, and asks only the rebuilders
+  to name every field. ⚠️ Its first draft also flagged three HTTP proxy dispatchers, which use undici's
+  unrelated `Dispatcher.DispatchOptions` — eighteen healthy lines, which is how a scanner teaches people to
+  skip its output. Narrow before wiring: a check nobody reads is worse than none.
 - **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A
