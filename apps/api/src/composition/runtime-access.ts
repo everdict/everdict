@@ -141,6 +141,19 @@ export function buildRuntimeAccess(deps: {
   // Where a produced VERDICT becomes durable before its row claims it exists (arch-review 64 P0). Absent =
   // this deployment cannot recover a two-phase case whose verifier container was already reclaimed.
   verdicts?: AgentHalfStore;
+  // ── …AND WHAT THOSE BYTES OWE, WHICH ONLY THE AGENT LANE WAS TOLD (arch-review 69 P1) ────────────
+  //
+  // `stageVerifierVerdict` records the verdict's cleanup debt when it is given a ledger, and this
+  // composition never gave it one — while the AGENT half's lane did, through
+  // `VerifierAwareDispatcher`'s fifth constructor argument. So a normally-completing private-verifier case
+  // wrote `verifier-verdict/...` bytes that no row names: the settlement discharges what it can find, the
+  // reconciler reads rows, and there was no row. The object is permanent.
+  //
+  // ⚠️ Two halves of ONE feature, wired in one of them — the sibling-lane shape this review series has now
+  // found seven times (58, 59, 61, 64, 66, 67, 69). `pnpm unwired-capabilities` does not see it: the port IS
+  // constructed at the composition root, so the check it performs (a producer EXISTS) passes. What it does
+  // not check is that the producer reaches every consumer declaring the dep optional.
+  cleanup?: IntermediateCleanupStore;
   verifierSlots?: {
     // …including RENEWAL (arch-review 61 P1). The ledger's permit is a 30-minute LEASE and the Scheduler
     // renews the ones it holds every ten; this lane was handed only `tryAdmit`/`releaseAdmission`, so a
@@ -667,6 +680,10 @@ export function buildRuntimeAccess(deps: {
             ...(attempts ? { attempts } : {}),
             // …and where this verdict becomes durable before the row says it exists (arch-review 64 P0).
             ...(deps.verdicts ? { verdicts: deps.verdicts } : {}),
+            // …and what those bytes OWE, so the settlement can discharge them (arch-review 69 P1). Without
+            // this the verdict is durable and unowned, which is the leak `stageVerifierVerdict` records a
+            // debt to prevent.
+            ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),
           },
           dispatched,
           (j, hooks) => backend.dispatchVerifier(j, hooks),

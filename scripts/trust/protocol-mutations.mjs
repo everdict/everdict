@@ -2081,6 +2081,16 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 69 P1. The verdict's cleanup debt reached the ledger only if the composition passed one,
+    // and for two waves it did not — while the agent half's lane did. Removing the spread reproduces the
+    // production state exactly: bytes written, no row, nothing that can ever find them.
+    name: "verdict debt — the composition judges without handing over a ledger",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "            ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),",
+    to: "            ...{},",
+    suite: ["--root", "apps/api", "src/composition/verdict-debt-is-wired.counterexample.test.ts"],
+  },
+  {
     // arch-review 69 P0. The Scheduler rebuilds the dispatch options out of `QueueEntry`, and a field nobody
     // adds to that rebuild is dropped in silence. `acknowledgeResult` was the second to die there. The rung
     // is aimed at the ORDER the option exists to produce, not at the copy: a field assertion would pass the

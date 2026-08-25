@@ -738,6 +738,10 @@ async function main(): Promise<void> {
     // Where a produced verdict becomes durable before the ledger says it exists, and where a recovery reads
     // it back when the verifier's container is already gone (arch-review 64 P0).
     ...(artifacts ? { verdicts: artifacts } : {}),
+    // …and the ledger those verdict bytes are OWED to. The agent half's lane has had this since
+    // arch-review 67 and the verifier's did not, so every completed private-verifier case left a
+    // `verifier-verdict/...` object no settlement could find (arch-review 69 P1).
+    cleanup: intermediateCleanup,
     // ONE accounting for both lanes: the verifier places containers on the same backends the Scheduler does,
     // and a placement is invisible to the cluster probe until its object exists — so two separate maps meant
     // one envelope spent twice (arch-review 63 P1-high).

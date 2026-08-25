@@ -373,6 +373,26 @@ the missing wiring is indistinguishable from a deployment that legitimately has 
 - Grep for the producer before writing the consumer. `deps.x?.y()` with zero production writers of `x` is
   dead code wearing a comment.
 
+## A CONSTRUCTED CAPABILITY IS NOT A DELIVERED ONE
+`unwired-capabilities` was built in arch-review 67 for the law above, and it asks one question: does some
+composition root CONSTRUCT an implementation of this port? Two waves later the cleanup ledger was constructed
+in `persistence.ts`, handed to the agent half's lane, and never handed to the verifier's — so the check passed
+while `verifier-verdict/…` objects were written with no ledger row naming them, one per completed case,
+forever (arch-review 69 P1).
+
+    a producer exists   ≠   the producer reaches this consumer
+
+- **A capability with two consumers is wired in two places, and the second one is the one nobody does.** When
+  a port gains a consumer, `grep -n` for every OTHER site that declares the same dep optional and count them
+  in the commit message — the same instruction the one-lane-only law gives, applied to composition rather
+  than to a guarded write. This series has now found that shape SEVEN times (58, 59, 61, 64, 66, 67, 69), and
+  this is the first where the two lanes were the two halves of the feature being wired.
+- **The scanner and the test are different shapes on purpose.** A test cannot prove a producer exists — a
+  test that constructs one has just supplied the thing whose absence is the bug — so the scanner owns that.
+  A scanner cannot cheaply prove delivery through a composition root, so a counterexample that DRIVES the
+  root owns that. Neither substitutes for the other, and a feature with an optional dep needs both.
+- The tell at the call site is the same `?.` as ever, which is why neither reading nor typechecking finds it.
+
 ## A SUB-STEP'S TERMINAL IS NOT THE CANONICAL TERMINAL
 `committed` means "this attempt's result is the case's answer". The verifier lane stamped it the moment its
 container returned scores — before the merge decides whether the verdict is USED, before the deferred trace
