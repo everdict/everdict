@@ -1,4 +1,4 @@
-import { IntermediateCleanupReconciler, cleanupRemover } from "@everdict/application-control";
+import { IntermediateCleanupReconciler, cleanupRemover, dischargeIntermediates } from "@everdict/application-control";
 import type { ExecutionId } from "@everdict/contracts";
 import { PgIntermediateCleanupStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -104,8 +104,8 @@ describeTrust("TRUST-180 — the intermediate cleanup debt outlives the process 
     // A retry re-stages the same object: it is owed once, not twice.
     await store.owe({ tenant: "acme", executionId, refs: [{ key: half, digest: "sha256:again" }] });
 
-    const refs = await store.releaseForGc("acme", executionId);
-    expect(refs.map((r) => r.key).sort(), "the row forgot a half or double-counted a re-stage").toEqual(
+    const released = await store.releaseForGc("acme", executionId);
+    expect(released?.refs.map((r) => r.key).sort(), "the row forgot a half or double-counted a re-stage").toEqual(
       [half, verdict].sort(),
     );
   });
@@ -130,6 +130,44 @@ describeTrust("TRUST-180 — the intermediate cleanup debt outlives the process 
     const held = (await store.due("2026-08-25T01:00:00.000Z", 500)).find((d) => d.executionId === executionId);
     expect(held?.state, "the unconfirmed debt was terminalized instead of held").toBe("retry_wait");
     expect(held?.lastError).toContain("never confirmed");
+  });
+
+  it("records the BACKOFF when an inline discharge fails — against the identity the row actually has", async () => {
+    // ── THE CALLER WAS SPELLING THE ROW'S NAME ITSELF (arch-review 69 P2) ────────────────────────────
+    //
+    // `dischargeIntermediates` deferred against `gc-${executionId}` while this adapter mints
+    // `gc/${tenant}/${executionId}`. So on real Postgres the UPDATE matched no row: the debt stayed
+    // `gc_owed`, attempts/lastError/nextAttemptAt never moved, no backoff applied, and the reconciler
+    // re-attempted the same failing delete every tick with nothing recording why. The in-memory twin spelled
+    // it the same way the caller did, which is why every unit test agreed with the bug.
+    //
+    // This drives the REAL adapter through the real discharge with a remove that throws.
+    //
+    // Seen RED before `releaseForGc` returned the row's own operationId, observed:
+    //   the failed discharge did not move the debt off gc_owed: expected 'gc_owed' to be 'retry_wait'
+    const executionId = `evd-${trustId("run")}` as ExecutionId;
+    const half = `agent-half/acme/${executionId}/unremovable.json`;
+    const store = await staged(executionId, [half]);
+
+    const outcome = await dischargeIntermediates(
+      {
+        cleanup: store,
+        remove: async () => {
+          throw new Error("the object store refused the delete");
+        },
+      },
+      "acme",
+      executionId,
+    );
+    expect(outcome.owed, "the discharge reported nothing owed after a failed delete").toBe(1);
+
+    const held = (await store.due(new Date(Date.now() + 86_400_000).toISOString(), 500)).find(
+      (d) => d.executionId === executionId,
+    );
+    expect(held?.state, "the failed discharge did not move the debt off gc_owed").toBe("retry_wait");
+    expect(held?.attempts, "the attempt an operator reads was never counted").toBe(1);
+    expect(held?.lastError, "nothing recorded WHY the delete did not converge").toContain("refused the delete");
+    expect(held?.nextAttemptAt, "no backoff was applied, so the reconciler retries every tick").toBeDefined();
   });
 
   it("REFUSES to complete a debt no settlement released", async () => {

@@ -98,6 +98,7 @@ export {
   InMemoryIntermediateCleanupStore,
   type IntermediateCleanupDebt,
   type IntermediateCleanupStore,
+  type ReleasedCleanup,
   removeStagedObject,
   requireOwed,
 } from "./ports/intermediate-cleanup-store.js";

@@ -1,4 +1,9 @@
-import type { ArtifactRef, IntermediateCleanupDebt, IntermediateCleanupStore } from "@everdict/application-control";
+import type {
+  ArtifactRef,
+  IntermediateCleanupDebt,
+  IntermediateCleanupStore,
+  ReleasedCleanup,
+} from "@everdict/application-control";
 import { type ExecutionId, InternalError } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
@@ -116,7 +121,7 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
   // THE SETTLEMENT'S RELEASE. Until this runs the artifacts are retained and no sweep may remove them.
   // Returns what became collectable so the caller can delete inline as a latency optimization — the
   // reconciler is the correctness owner either way.
-  async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]> {
+  async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ReleasedCleanup | undefined> {
     const { rows } = await this.client.query<CleanupRow>(
       `UPDATE everdict_intermediate_cleanup SET state = 'gc_owed', next_attempt_at = NULL, updated_at = now()
         WHERE operation_id = $1 AND tenant = $2 AND state <> 'completed'
@@ -124,7 +129,12 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
       [operationIdOf(tenant, executionId), tenant],
     );
     const row = rows[0];
-    return row ? toDebt(row).refs : [];
+    // The row's OWN operation id travels back with the refs. The caller used to re-derive it as
+    // `gc-${executionId}` while this adapter mints `gc/${tenant}/${executionId}`, so every inline-cleanup
+    // failure deferred against a row that did not exist (arch-review 69 P2).
+    if (!row) return undefined;
+    const debt = toDebt(row);
+    return { operationId: debt.operationId, refs: debt.refs };
   }
 
   // Only a RELEASED debt may be completed. Refusing from `retained` is the guard that keeps a stray caller

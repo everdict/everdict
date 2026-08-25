@@ -81,7 +81,19 @@ export interface IntermediateCleanupStore {
   confirm(input: { tenant: string; executionId: ExecutionId; keys: string[] }): Promise<void>;
   // THE SETTLEMENT'S RELEASE. Until this, the artifacts are retained and no sweep may remove them. Returns
   // what became collectable, so the caller can delete inline as a latency optimization.
-  releaseForGc(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]>;
+  //
+  // ── …AND THE ROW'S OWN NAME, BECAUSE THE CALLER WAS RE-DERIVING IT (arch-review 69 P2) ────────────
+  //
+  // This answered `ArtifactRef[]`, so `dischargeIntermediates` had to invent an operation id to defer
+  // against — and it invented `gc-${executionId}` while the Postgres adapter mints
+  // `gc/${tenant}/${executionId}`. Against a real database the deferral therefore matched NO ROW: the debt
+  // stayed `gc_owed`, attempts and lastError never moved, no backoff applied, and the reconciler re-attempted
+  // the same failing delete every tick with nothing recording why. In-memory the two spellings agreed, which
+  // is why every unit test was green (rule `testing`: a guard the in-memory twin does not have).
+  //
+  // Rule `protocol` L3 — a predicate written twice has already diverged. The identity now comes back from
+  // the row that was released, so there is no second spelling to keep in step.
+  releaseForGc(tenant: string, executionId: ExecutionId): Promise<ReleasedCleanup | undefined>;
   // The reconciler's discharge: mark a released debt paid.
   complete(tenant: string, executionId: ExecutionId): Promise<boolean>;
   // The reconciler's worklist — RELEASED debts only, oldest first. A `retained` row is not work.
@@ -89,6 +101,14 @@ export interface IntermediateCleanupStore {
   // A deletion that did not converge. Backoff, never a terminal: "we could not find out" is an escalation
   // field (rule `protocol` L5), so the row stays owed and the attempt count is what an operator reads.
   deferred(operationId: string, error: string, nextAttemptAt: string): Promise<void>;
+}
+
+// What a release actually freed: the row's own identity, and what it names. `undefined` is "there was no
+// debt to release" — a case that staged nothing, or one already swept — which is different from a debt that
+// released zero refs and is why this is a union rather than an empty array.
+export interface ReleasedCleanup {
+  operationId: string;
+  refs: ArtifactRef[];
 }
 
 // In-process store for dev/test, the same posture as the other InMemory ports.
@@ -144,12 +164,12 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
     });
   }
 
-  async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ArtifactRef[]> {
+  async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ReleasedCleanup | undefined> {
     const k = this.key(tenant, executionId);
     const debt = this.debts.get(k);
-    if (!debt || debt.state === "completed") return [];
+    if (!debt || debt.state === "completed") return undefined;
     this.debts.set(k, { ...debt, state: "gc_owed" });
-    return debt.refs;
+    return { operationId: debt.operationId, refs: debt.refs };
   }
 
   async complete(tenant: string, executionId: ExecutionId): Promise<boolean> {
@@ -214,8 +234,9 @@ export async function dischargeIntermediates(
 ): Promise<{ deleted: number; owed: number }> {
   if (!deps.cleanup) return { deleted: 0, owed: 0 };
   // RELEASE, not read: this is the canonical settlement, and until it runs the artifacts are retained.
-  const refs = await deps.cleanup.releaseForGc(tenant, executionId);
-  if (refs.length === 0) return { deleted: 0, owed: 0 };
+  const released = await deps.cleanup.releaseForGc(tenant, executionId);
+  if (released === undefined || released.refs.length === 0) return { deleted: 0, owed: 0 };
+  const refs = released.refs;
   let deleted = 0;
   const failures: string[] = [];
   for (const ref of refs) {
@@ -229,8 +250,10 @@ export async function dischargeIntermediates(
   if (failures.length > 0) {
     // Owed still. The reconciler retries; the settlement is not failed for it, because the case's outcome is
     // not what a storage hiccup should decide.
+    // The identity the ROW has, not one this caller spells for itself (arch-review 69 P2). The two spellings
+    // disagreed for two waves and the Postgres deferral matched nothing.
     await deps.cleanup
-      .deferred(`gc-${executionId}`, failures.join("; "), new Date(Date.now() + 60_000).toISOString())
+      .deferred(released.operationId, failures.join("; "), new Date(Date.now() + 60_000).toISOString())
       .catch(() => undefined);
     return { deleted, owed: failures.length };
   }

@@ -2081,6 +2081,20 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 69 P2. The discharge used to spell the row's name itself (`gc-${executionId}`) while the Pg
+    // adapter mints `gc/${tenant}/${executionId}`, so every inline-cleanup failure deferred against no row.
+    // Re-introducing the caller-side spelling is exactly the production state; only real Postgres can see it,
+    // because the in-memory twin spelled it the same way the caller did.
+    name: "cleanup backoff — the caller spells the row's identity instead of reading it",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: '      .deferred(released.operationId, failures.join("; "), new Date(Date.now() + 60_000).toISOString())',
+    to: '      .deferred(`gc-${executionId}`, failures.join("; "), new Date(Date.now() + 60_000).toISOString())',
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/trust/intermediate-cleanup.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
+  {
     // arch-review 69 P1. The verdict's cleanup debt reached the ledger only if the composition passed one,
     // and for two waves it did not — while the agent half's lane did. Removing the spread reproduces the
     // production state exactly: bytes written, no row, nothing that can ever find them.
