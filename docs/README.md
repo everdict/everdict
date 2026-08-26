@@ -109,6 +109,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/product-timeline.md](architecture/product-timeline.md) — Product ⊃ Release over an imported version ledger (the "what we ship" axis)
 - [architecture/workspace-filesystem.md](architecture/workspace-filesystem.md) — one isolated file tree per workspace, attributed revisions, three-way merge
 - [architecture/knowledge-graph.md](architecture/knowledge-graph.md) — the workspace knowledge graph
+- [architecture/evolution-lineage.md](architecture/evolution-lineage.md) — evolution lineage: ancestry recorded at the write, events on the outbox, the campaign as a settlement
 - [architecture/capability-store.md](architecture/capability-store.md) — the capability store (SSOT)
 - [architecture/analysis-studio.md](architecture/analysis-studio.md) — natural-language analysis, artifacts, scheduled reports over Views
 - [architecture/event-plumbing.md](architecture/event-plumbing.md) — the platform's nervous system: facts, one log + N cursor consumers, subscriptions
