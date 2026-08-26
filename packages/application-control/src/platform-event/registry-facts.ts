@@ -38,13 +38,22 @@ export function withRegisteredFact<
   ): Promise<void> => {
     await registry.register(tenant, spec, createdBy, teamId, origin); // a refused registration (409/validation) emits nothing
     if (tenant === SHARED_TENANT) return;
+    // The payload carries the origin summary so a consumer learns FROM WHAT without a registry read — the
+    // fact must hold every value its rendering/filtering needs (rule `events`). A re-pin is a registration
+    // whose `from` names its own family; it is this payload, not a second event kind.
+    const from = origin?.from;
+    const fromLabel = from !== undefined ? `${from.id}${from.version !== undefined ? `@${from.version}` : ""}` : "";
     void events.emit({
       workspace: tenant,
       kind,
       subject: { type: subjectType, id: spec.id },
       ...(createdBy !== undefined ? { actor: createdBy } : {}),
-      payload: { id: spec.id, version: spec.version },
-      message: `${subjectType} ${spec.id}@${spec.version} registered`,
+      payload: {
+        id: spec.id,
+        version: spec.version,
+        ...(origin !== undefined ? { origin: { via: origin.via, ...(from !== undefined ? { from } : {}) } } : {}),
+      },
+      message: `${subjectType} ${spec.id}@${spec.version} registered${from !== undefined ? ` — from ${from.type} ${fromLabel}` : ""}`,
     });
   };
   // A Proxy rather than object spread: registry impls are classes, and a spread would drop every prototype

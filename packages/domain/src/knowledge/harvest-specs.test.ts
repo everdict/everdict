@@ -167,3 +167,45 @@ describe("spec harvest — the born_from lineage and team scoping", () => {
     expect(res.edges.some((e) => e.predicate === "belongs_to")).toBe(false);
   });
 });
+
+describe("origin lineage — a same-family origin is the succeeds edge", () => {
+  const ds = (version: string): Dataset => ({ id: "web-bench", version, cases: [], tags: [] });
+
+  it("a same-family origin with a version becomes succeeds, version-pinned to the ancestor", () => {
+    // A re-pin/derived registration records its merge base as CapabilityOrigin.from naming ITS OWN family.
+    // That fact IS the version lineage — one fact, one predicate: `succeeds`, never a self-referential
+    // born_from. RED before Track A: the edge came out as born_from and `succeeds` had no emitter at all.
+    const res = harvestDataset(
+      { ...meta, origin: { via: "ci", from: { type: "dataset", id: "web-bench", version: "1.9.0" } } },
+      ds("2.0.0"),
+    );
+    const p = preds(res.edges);
+    expect(p.get("succeeds")).toBe(nodeId("acme", { type: "dataset", key: "web-bench", version: "1.9.0" }));
+    expect(p.has("born_from")).toBe(false);
+    const succ = res.edges.find((e) => e.predicate === "succeeds");
+    expect(succ?.edgeAttrs).toMatchObject({ via: "ci" });
+    valid(res);
+  });
+
+  it("a same-family origin WITHOUT a version cannot name an ancestor and stays born_from", () => {
+    // Absent lineage is absent, not inferred: no version → no succeeds edge, and the intent edge keeps the
+    // fact rather than dropping it.
+    const res = harvestDataset(
+      { ...meta, origin: { via: "web", from: { type: "dataset", id: "web-bench" } } },
+      ds("2.0.0"),
+    );
+    const p = preds(res.edges);
+    expect(p.has("succeeds")).toBe(false);
+    expect(p.get("born_from")).toBe(nodeId("acme", { type: "dataset", key: "web-bench" }));
+  });
+
+  it("an origin naming ANOTHER entity of the same type is still born_from — succeeds is one family's chain", () => {
+    const res = harvestDataset(
+      { ...meta, origin: { via: "import", from: { type: "dataset", id: "swe-mini", version: "1.0.0" } } },
+      ds("2.0.0"),
+    );
+    const p = preds(res.edges);
+    expect(p.has("succeeds")).toBe(false);
+    expect(p.get("born_from")).toBe(nodeId("acme", { type: "dataset", key: "swe-mini", version: "1.0.0" }));
+  });
+});

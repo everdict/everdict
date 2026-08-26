@@ -1,4 +1,4 @@
-import { BadRequestError, type HarnessInstanceSpec } from "@everdict/contracts";
+import { BadRequestError, type CapabilityOrigin, type HarnessInstanceSpec } from "@everdict/contracts";
 import { z } from "zod";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 
@@ -16,6 +16,13 @@ export const RepinBodySchema = z.object({
   allowTags: z.boolean().default(false),
 });
 export type RepinBody = z.infer<typeof RepinBodySchema>;
+
+// The caller's half of the birth stamp — channel + attribution (+ an optional stated reason). The `from`
+// half is the merge BASE, which only this service knows at the moment it registers the successor, so it is
+// constructed below and cannot be supplied: a caller-declared ancestor would be a second spelling of a fact
+// this write owns (rule `protocol` L3). Required, not optional — the optional shape is how the ancestry was
+// dropped for as long as it was (docs/architecture/evolution-lineage.md, Track A).
+export type RepinOrigin = Omit<CapabilityOrigin, "from">;
 
 export interface RepinResult {
   workspace: string;
@@ -47,6 +54,7 @@ export async function repinHarnessImages(
   subject: string | undefined,
   id: string,
   body: RepinBody,
+  origin: RepinOrigin,
 ): Promise<RepinResult> {
   if (!body.allowTags) {
     for (const [slot, image] of Object.entries(body.pins)) {
@@ -73,6 +81,14 @@ export async function repinHarnessImages(
   const taken = new Set(await instances.versions(tenant, id));
   const version = body.version ?? nextVersion(base.version, taken);
   const next: HarnessInstanceSpec = { ...base, version, pins: merged };
-  await instances.register(tenant, next, subject); // re-registering the same content = no-op, different content at the same version = 409 (immutable)
+  // The ancestor is stamped by the write that knows it: `base.version` is already in hand (it is answered to
+  // the caller as RepinResult.base), and it is the MERGE base — a re-pin from an old version records that
+  // version, never whatever happens to be numerically previous.
+  const stamped: CapabilityOrigin = {
+    ...origin,
+    from: { type: "harness", id, version: base.version },
+    note: origin.note ?? `re-pin: ${Object.keys(body.pins).sort().join(", ")}`.slice(0, 500),
+  };
+  await instances.register(tenant, next, subject, undefined, stamped); // re-registering the same content = no-op, different content at the same version = 409 (immutable)
   return { workspace: tenant, id, version, base: base.version, unchanged: false, pins: merged };
 }

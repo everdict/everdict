@@ -981,6 +981,34 @@ describe("MCP tools", () => {
     expect((JSON.parse(text(theirs)) as Array<{ id: string }>).map((e) => e.id)).not.toContain("bu-cli");
   });
 
+  it("pin_harness_images records the merge base and via 'mcp' as the new version's origin", async () => {
+    // The re-pin is the registration whose `from` no caller may declare — the service constructs it from the
+    // merge base it resolved (docs/architecture/evolution-lineage.md, Track A). The tool's contribution is
+    // the channel. RED before Track A: `versionOrigins` had no entry for the re-pinned version at all.
+    const deps = harness();
+    const me = await connect(deps, ["member"]);
+    await me.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    await me.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
+    const digest = `img@sha256:${"c".repeat(64)}`;
+    const pinned = await me.callTool({
+      name: "pin_harness_images",
+      arguments: { id: "bu", pins: { "agent-server": digest } },
+    });
+    expect(pinned.isError).toBeFalsy();
+    const { version, base } = JSON.parse(text(pinned)) as { version: string; base: string };
+    const list = await me.callTool({ name: "list_harnesses", arguments: {} });
+    const entry = (
+      JSON.parse(text(list)) as Array<{
+        id: string;
+        versionOrigins?: Record<string, { via: string; from?: { type: string; id: string; version?: string } }>;
+      }>
+    ).find((e) => e.id === "bu");
+    expect(entry?.versionOrigins?.[version]).toMatchObject({
+      via: "mcp",
+      from: { type: "harness", id: "bu", version: base },
+    });
+  });
+
   it("set_harness_version_tags — replace version tags (mutable metadata outside the spec), then exposed via list_harnesses.versionTags", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]); // harnesses:register is viewer+ (same gate as register)

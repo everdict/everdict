@@ -396,12 +396,23 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         "harnesses:register",
         await teamOfEntity(deps.harnessInstances, principal.workspace, req.params.id),
       ); // same gate as instance register (ungated viewer+; the CI role has it too)
+      // The channel is the route's contribution to the origin; the merge base is the service's — only it
+      // knows the base at the write (docs/architecture/evolution-lineage.md, Track A). The keyless GitHub
+      // Actions federation authenticates as the `ci` role, which is what tells a headless re-pin apart here.
+      const agent = agentAttributionFrom(req.headers);
       const result = await repinHarnessImages(
         deps.harnessInstances,
         principal.workspace,
         principal.subject,
         req.params.id,
         parsed.data,
+        {
+          via: principal.roles.includes("ci") ? "ci" : "web",
+          ...(agent?.agentId !== undefined ? { agentId: agent.agentId } : {}),
+          ...(agent?.agentName !== undefined ? { agentName: agent.agentName } : {}),
+          ...(agent?.conversationId !== undefined ? { conversationId: agent.conversationId } : {}),
+          ...(agent?.runId !== undefined ? { runId: agent.runId } : {}),
+        },
       );
       return reply.code(result.unchanged ? 200 : 201).send(result);
     } catch (err) {

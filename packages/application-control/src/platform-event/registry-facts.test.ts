@@ -98,6 +98,25 @@ describe("withRegisteredFact — a registration is a transition, so it emits its
     ]);
   });
 
+  it("the fact's payload carries the origin summary, so a consumer learns FROM WHAT without a registry read", async () => {
+    // A re-pin is a registration whose origin names its own family — the evolution event is not a new kind,
+    // it is this payload saying so (docs/architecture/evolution-lineage.md, Track A). RED before Track A:
+    // payload was `{id, version}` and the ancestry died at this emit.
+    const { emitted, emitter } = collector();
+    const registry = withRegisteredFact(new FakeRegistry(), "harness.registered", "harness", emitter);
+    const origin: CapabilityOrigin = { via: "ci", from: { type: "harness", id: "bu", version: "1.0.0" } };
+
+    await registry.register("acme", { id: "bu", version: "1.0.1" }, "ci-bot", undefined, origin);
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.payload).toEqual({
+      id: "bu",
+      version: "1.0.1",
+      origin: { via: "ci", from: { type: "harness", id: "bu", version: "1.0.0" } },
+    });
+    expect(emitted[0]?.message).toBe("harness bu@1.0.1 registered — from harness bu@1.0.0");
+  });
+
   it("other methods still delegate with `this` bound (class prototype methods survive the wrap)", async () => {
     const { emitter } = collector();
     const inner = new FakeRegistry();

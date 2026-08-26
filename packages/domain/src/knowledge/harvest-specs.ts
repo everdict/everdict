@@ -56,10 +56,20 @@ function rubricRefNode(rubric: string | RubricRef | undefined): NodeRef | undefi
   return { type: "rubric", key: rubric.id, version: rubric.version };
 }
 
-// The edges every spec shares: workspace scoping, ownership, tag classification, team scoping, and the `born_from`
-// lineage — WHY this version exists (the issue/scorecard/… its CapabilityOrigin names). Origin `from.type` values that
+// The edges every spec shares: workspace scoping, ownership, tag classification, team scoping, and the origin
+// lineage. An origin whose `from` names the SPEC'S OWN family (same type, same id, a version to point at) is
+// the version lineage itself — the re-pin/derivation base — and becomes the `succeeds` edge, version-pinned;
+// any other `from` is the intent edge `born_from` (WHY this exists). One recorded fact, one predicate — and
+// never version adjacency: a version with no recorded same-family origin gets NO `succeeds` edge, because an
+// inferred ancestor is exactly the re-derivation rule `protocol` L3 forbids. Origin `from.type` values that
 // are not node types (`trace`, `benchmark`) are skipped by the safeParse, same idiom as harvestComment.
-function common(b: HarvestBuilder, tenant: string, meta: SpecHarvestMeta, tags: string[]): void {
+function common(
+  b: HarvestBuilder,
+  tenant: string,
+  meta: SpecHarvestMeta,
+  tags: string[],
+  self: Pick<NodeRef, "type" | "key">,
+): void {
   b.ref("in_workspace", { type: "workspace", key: tenant }, "tenant");
   if (meta.createdBy !== undefined && meta.createdBy !== "")
     b.ref("created_by", { type: "user", key: meta.createdBy }, "createdBy");
@@ -70,13 +80,17 @@ function common(b: HarvestBuilder, tenant: string, meta: SpecHarvestMeta, tags: 
   if (from !== undefined) {
     const ft = NodeTypeSchema.safeParse(from.type);
     if (ft.success) {
-      const ref =
-        from.version !== undefined && from.version !== ""
-          ? { type: ft.data, key: from.id, version: from.version }
-          : { type: ft.data, key: from.id };
       const edgeAttrs: Record<string, unknown> = { via: meta.origin?.via };
       if (meta.origin?.agentId !== undefined && meta.origin.agentId !== "") edgeAttrs.agentId = meta.origin.agentId;
-      b.ref("born_from", ref, "origin.from", edgeAttrs);
+      const hasVersion = from.version !== undefined && from.version !== "";
+      if (ft.data === self.type && from.id === self.key && hasVersion) {
+        b.ref("succeeds", { type: ft.data, key: from.id, version: from.version }, "origin.from", edgeAttrs);
+      } else {
+        const ref = hasVersion
+          ? { type: ft.data, key: from.id, version: from.version }
+          : { type: ft.data, key: from.id };
+        b.ref("born_from", ref, "origin.from", edgeAttrs);
+      }
     }
   }
 }
@@ -91,7 +105,7 @@ export function harvestHarness(meta: SpecHarvestMeta, spec: HarnessSpec): Harves
     meta.updatedAt,
     meta.createdAt,
   ).self({ type: "harness", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, { kind: spec.kind });
-  common(b, meta.tenant, meta, meta.tags ?? []);
+  common(b, meta.tenant, meta, meta.tags ?? [], { type: "harness", key: spec.id });
   if (spec.kind === "command") {
     const mr = spec.model !== undefined ? modelRefNode(spec.model) : undefined;
     if (mr !== undefined) b.ref("uses_model", mr, "model");
@@ -118,7 +132,7 @@ export function harvestDataset(meta: SpecHarvestMeta, spec: Dataset): HarvestRes
   ).self({ type: "dataset", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {
     cases: spec.cases.length,
   });
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "dataset", key: spec.id });
   return b.result();
 }
 
@@ -132,7 +146,7 @@ export function harvestJudge(meta: SpecHarvestMeta, spec: JudgeSpec): HarvestRes
     meta.updatedAt,
     meta.createdAt,
   ).self({ type: "judge", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, { kind: spec.kind });
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "judge", key: spec.id });
   if (spec.kind === "model") {
     const mr = modelRefNode(spec.model);
     if (mr !== undefined) b.ref("uses_model", mr, "model");
@@ -162,7 +176,7 @@ export function harvestRuntime(meta: SpecHarvestMeta, spec: RuntimeSpec): Harves
     meta.updatedAt,
     meta.createdAt,
   ).self({ type: "runtime", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, { kind: spec.kind });
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "runtime", key: spec.id });
   if (spec.kind === "nomad" && spec.authSecret !== undefined) {
     b.ref("uses_secret", { type: "secret", key: spec.authSecret }, "authSecret");
   }
@@ -187,7 +201,7 @@ export function harvestModel(meta: SpecHarvestMeta, spec: ModelSpec): HarvestRes
     provider: spec.provider,
     model: spec.model,
   });
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "model", key: spec.id });
   if (spec.apiKeySecret !== undefined && spec.apiKeySecret !== "") {
     b.ref("uses_secret", { type: "secret", key: spec.apiKeySecret }, "apiKeySecret");
   }
@@ -204,7 +218,7 @@ export function harvestRubric(meta: SpecHarvestMeta, spec: RubricSpec): HarvestR
     meta.updatedAt,
     meta.createdAt,
   ).self({ type: "rubric", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {});
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "rubric", key: spec.id });
   return b.result();
 }
 
@@ -220,7 +234,7 @@ export function harvestAgent(meta: SpecHarvestMeta, spec: AgentSpec): HarvestRes
     meta.updatedAt,
     meta.createdAt,
   ).self({ type: "agent", key: spec.id, version: spec.version }, `${spec.id}@${spec.version}`, {});
-  common(b, meta.tenant, meta, spec.tags);
+  common(b, meta.tenant, meta, spec.tags, { type: "agent", key: spec.id });
   if (spec.model !== undefined && spec.model !== "") b.ref("uses_model", { type: "model", key: spec.model }, "model");
   spec.mcpServers.forEach((s, i) => {
     if (s.authSecret !== undefined && s.authSecret !== "") {

@@ -207,12 +207,26 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
       ({ id, pins, version, base, allow_tags }) =>
         run(principal, "harnesses:register", async () =>
           ok(
-            await repinHarnessImages(instances, ws, principal.subject, id, {
-              pins,
-              ...(version !== undefined ? { version } : {}),
-              ...(base !== undefined ? { base } : {}),
-              allowTags: allow_tags ?? false,
-            }),
+            await repinHarnessImages(
+              instances,
+              ws,
+              principal.subject,
+              id,
+              {
+                pins,
+                ...(version !== undefined ? { version } : {}),
+                ...(base !== undefined ? { base } : {}),
+                allowTags: allow_tags ?? false,
+              },
+              // Channel + attribution only — the merge base half of the origin is the service's to construct.
+              {
+                via: "mcp",
+                ...(ctx.agent?.agentId !== undefined ? { agentId: ctx.agent.agentId } : {}),
+                ...(ctx.agent?.agentName !== undefined ? { agentName: ctx.agent.agentName } : {}),
+                ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
+                ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
+              },
+            ),
           ),
         ),
     );

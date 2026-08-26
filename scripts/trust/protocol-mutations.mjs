@@ -2275,6 +2275,29 @@ const MUTATIONS = [
     env: { EVERDICT_TRUST_SUITE: "1" },
     requiresEnv: ["EVERDICT_TRUST_S3_ENDPOINT", "EVERDICT_TRUST_S3_ACCESS_KEY", "EVERDICT_TRUST_S3_SECRET_KEY"],
   },
+  {
+    // evolution-lineage Track A. The ancestry was in hand (`RepinResult.base` answers it to the caller) and
+    // dropped at the write — `register(tenant, next, subject)` with no origin, which is the exact pre-fix
+    // call shape this mutation restores. The counterexample drives the production composition (the real
+    // service over the real in-memory registry) and must go red.
+    name: "Track A — the re-pin registers its successor without the merge-base origin",
+    file: "packages/application-control/src/harness/harness-pin-service.ts",
+    from: '    from: { type: "harness", id, version: base.version },',
+    to: "",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
+  },
+  {
+    // evolution-lineage Track A. A recorded same-family origin IS the version lineage; collapsing the
+    // succeeds arm back into born_from leaves the `succeeds` predicate declared-but-dead again — the state
+    // the whole track exists to end. The harvest suite must notice.
+    name: "Track A — the harvester files a same-family origin as born_from instead of succeeds",
+    file: "packages/domain/src/knowledge/harvest-specs.ts",
+    from: "      if (ft.data === self.type && from.id === self.key && hasVersion) {",
+    to: '      if (ft.data === self.type && from.id === self.key && hasVersion && from.id === "") {',
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/knowledge/harvest-specs.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────

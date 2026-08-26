@@ -1,8 +1,14 @@
 import { IssueService, withOriginBacklink } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
+import type { Authenticator } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
+import type { HarnessTemplateSpec } from "@everdict/contracts";
 import { InMemoryIssueStore, InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
-import { InMemoryJudgeRegistry } from "@everdict/registry";
+import {
+  InMemoryHarnessInstanceRegistry,
+  InMemoryHarnessTemplateRegistry,
+  InMemoryJudgeRegistry,
+} from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../server.js";
 
@@ -73,6 +79,86 @@ async function judgeOrigin(app: ReturnType<typeof build>["app"], id: string, ver
   );
   return entry?.versionOrigins?.[version];
 }
+
+describe("re-pin origin — the durable re-pin records the channel and the merge base", () => {
+  // The re-pin is the one registration whose `from` the CALLER may not declare: only the service knows the
+  // merge base at the moment it registers the successor (docs/architecture/evolution-lineage.md, Track A).
+  // The route's contribution is the CHANNEL — `ci` for the keyless CI role, `web` otherwise.
+  const template: HarnessTemplateSpec = {
+    kind: "service",
+    category: "topology",
+    id: "bu",
+    version: "1",
+    services: [{ name: "planner", needs: [], perRun: [], replicas: 1, env: {} }],
+    dependencies: [],
+    frontDoor: { service: "planner", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+  };
+  const D = (c: string): string => `img@sha256:${c.repeat(64)}`;
+
+  async function buildWithHarness(authenticator?: Authenticator) {
+    const harnessTemplates = new InMemoryHarnessTemplateRegistry();
+    const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
+    await harnessTemplates.register("acme", template);
+    await harnessInstances.register(
+      "acme",
+      { template: { id: "bu", version: "1" }, id: "bu", version: "1.0.0", pins: { planner: D("a") } },
+      "alice",
+    );
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      harnessTemplates,
+      harnessInstances,
+      ...(authenticator !== undefined ? { authenticator, requireAuth: true } : {}),
+    });
+    return { app, harnessInstances };
+  }
+
+  async function originOf(harnessInstances: InMemoryHarnessInstanceRegistry, version: string) {
+    const entry = (await harnessInstances.list("acme")).find((e) => e.id === "bu");
+    return entry?.versionOrigins?.[version];
+  }
+
+  it("a member's re-pin stamps via 'web' and the merge base, service-owned", async () => {
+    const { app, harnessInstances } = await buildWithHarness();
+    const res = await app.inject({
+      method: "POST",
+      url: "/harnesses/bu/pins",
+      headers: H,
+      payload: { pins: { planner: D("b") } },
+    });
+    expect(res.statusCode).toBe(201);
+    const { version } = res.json() as { version: string };
+    expect(await originOf(harnessInstances, version)).toEqual({
+      via: "web",
+      from: { type: "harness", id: "bu", version: "1.0.0" },
+      note: "re-pin: planner",
+    });
+    await app.close();
+  });
+
+  it("the CI role's headless re-pin stamps via 'ci'", async () => {
+    const ciAuth: Authenticator = {
+      async authenticate() {
+        return { subject: "github-actions", workspace: "acme", roles: ["ci"], via: "oidc" };
+      },
+    };
+    const { app, harnessInstances } = await buildWithHarness(ciAuth);
+    const res = await app.inject({
+      method: "POST",
+      url: "/harnesses/bu/pins",
+      headers: { authorization: "Bearer t" },
+      payload: { pins: { planner: D("c") } },
+    });
+    expect(res.statusCode).toBe(201);
+    const { version } = res.json() as { version: string };
+    expect(await originOf(harnessInstances, version)).toMatchObject({
+      via: "ci",
+      from: { type: "harness", id: "bu", version: "1.0.0" },
+    });
+    await app.close();
+  });
+});
 
 describe("capability origin — a registration records where it came from", () => {
   it("stamps the declared issue and resolves it to the STABLE record id, with a display snapshot", async () => {
