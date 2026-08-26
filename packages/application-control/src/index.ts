@@ -75,6 +75,7 @@ export {
 export type { AdmissionLedger } from "./ports/admission-ledger.js";
 export {
   type AgentHalfStore,
+  type AgentHalfStageOutcome,
   type StagedAgentHalf,
   agentHalfKey,
   discardAgentHalf,
@@ -746,4 +747,5 @@ export {
   type VerifierDispatchHooks,
   type VerifierOperationDeps,
   verifierOperation,
+  type VerifierDurabilityPolicy,
 } from "./execution/verifier-operation.js";

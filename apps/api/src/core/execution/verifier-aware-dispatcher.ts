@@ -35,6 +35,10 @@ export class VerifierAwareDispatcher implements Dispatcher {
     // Same shape as the argument above and the same history: the capability existed, the tests passed one
     // in, and production had no parameter to carry it — so every case staged artifacts nothing owned.
     private readonly cleanup?: VerifierPassDeps["cleanup"],
+    // …and what an unwritable AGENT HALF costs, from the same deployment policy the verdict uses
+    // (arch-review 70 P0). One policy for both halves of a two-phase case: requiring the verdict be durable
+    // while the evidence it judges is best-effort is not a coherent position.
+    private readonly durability?: VerifierPassDeps["durability"],
   ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
@@ -47,6 +51,7 @@ export class VerifierAwareDispatcher implements Dispatcher {
       ...(this.agentHalves ? { agentHalves: this.agentHalves } : {}),
       ...(this.attempts ? { attempts: this.attempts } : {}),
       ...(this.cleanup ? { cleanup: this.cleanup } : {}),
+      ...(this.durability ? { durability: this.durability } : {}),
     });
   }
 }

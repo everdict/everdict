@@ -11,7 +11,7 @@ import {
 import type { ExecutionAttemptStore, RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AdmissionLedger, AgentHalfStore } from "@everdict/application-control";
-import type { IntermediateCleanupStore } from "@everdict/application-control";
+import type { IntermediateCleanupStore, VerifierDurabilityPolicy } from "@everdict/application-control";
 import {
   dischargeIntermediates,
   recoverStagedVerdict,
@@ -154,6 +154,9 @@ export function buildRuntimeAccess(deps: {
   // constructed at the composition root, so the check it performs (a producer EXISTS) passes. What it does
   // not check is that the producer reaches every consumer declaring the dep optional.
   cleanup?: IntermediateCleanupStore;
+  // …and what an unwritable verdict COSTS, chosen by the deployment rather than defaulted into
+  // (arch-review 70 P0). Absent = `best_effort`, which is what every caller had before the policy existed.
+  durability?: VerifierDurabilityPolicy;
   verifierSlots?: {
     // …including RENEWAL (arch-review 61 P1). The ledger's permit is a 30-minute LEASE and the Scheduler
     // renews the ones it holds every ten; this lane was handed only `tryAdmit`/`releaseAdmission`, so a
@@ -684,6 +687,9 @@ export function buildRuntimeAccess(deps: {
             // this the verdict is durable and unowned, which is the leak `stageVerifierVerdict` records a
             // debt to prevent.
             ...(deps.cleanup ? { cleanup: deps.cleanup } : {}),
+            // …and the policy this deployment CHOSE (arch-review 70 P0). Passing nothing here is what made
+            // `best_effort` an accident rather than a decision.
+            ...(deps.durability ? { durability: deps.durability } : {}),
           },
           dispatched,
           (j, hooks) => backend.dispatchVerifier(j, hooks),

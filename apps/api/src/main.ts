@@ -82,7 +82,13 @@ import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
 import { deploymentCompute } from "./composition/compute-env.js";
 import { buildDispatch } from "./composition/dispatch.js";
-import { artifactStoreFromEnv, meterUsagePolicyFromEnv, workspaceFsFromEnv } from "./composition/env-policy.js";
+import {
+  artifactStoreFromEnv,
+  assertVerifierDurabilitySatisfiable,
+  meterUsagePolicyFromEnv,
+  verifierDurabilityFromEnv,
+  workspaceFsFromEnv,
+} from "./composition/env-policy.js";
 import {
   buildBudgets,
   buildExecutionScheduling,
@@ -513,6 +519,16 @@ async function main(): Promise<void> {
     },
   };
 
+  // ── THE DEPLOYMENT CHOOSES WHAT AN UNWRITABLE INTERMEDIATE COSTS (arch-review 70 P0) ──────────────
+  //
+  // `VerifierDurabilityPolicy` existed for two waves and no composition root passed it, so every deployment
+  // silently took `best_effort` and `required` lived only in tests. A policy type is not a policy the
+  // deployment chose — and the default standing in for the decision was the permissive arm.
+  //
+  // Read here because both halves of a two-phase case spend it; VALIDATED below, once the stores it depends
+  // on are known. An unrecognised value throws rather than falling back to the permissive arm.
+  const verifierDurability = verifierDurabilityFromEnv();
+
   const {
     runnerHub,
     callbackRendezvous,
@@ -530,6 +546,8 @@ async function main(): Promise<void> {
     invalidateTenantBackends,
     releaseSelfRunnerBackend,
   } = buildDispatch({
+    // The SAME policy the verifier lane takes — both halves of a two-phase case, one decision.
+    durability: verifierDurability,
     // LATE-BOUND, like `cascadeCancel` below: the verifier lane is resolved by `buildRuntimeAccess`, which
     // runs after this call. The holder is what lets the dispatch chain be built once while the lane it may
     // need is wired further down — an absent lane still means `unmeasured`, never grading in the agent's
@@ -714,6 +732,15 @@ async function main(): Promise<void> {
 
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
+  // …and the claim is checked against what is actually wired. `required` means crash-safe private-verifier
+  // evaluation, which rests on three stores; a deployment missing one is refused at BOOT with the env var to
+  // fix, rather than discovering it during an incident.
+  assertVerifierDurabilitySatisfiable(verifierDurability, {
+    artifacts: artifacts !== undefined,
+    cleanup: intermediateCleanup !== undefined,
+    attempts: executionAttemptStore !== undefined,
+  });
+
   const {
     adoptWorkFn,
     readCaseLogsFn,
@@ -729,6 +756,9 @@ async function main(): Promise<void> {
     killUnhandled,
     dispatchVerifier,
   } = buildRuntimeAccess({
+    // …and the deployment's own answer to "what does an unwritable intermediate cost" (arch-review 70 P0).
+    // Read once, validated against what is actually wired, and spent by both halves of a two-phase case.
+    durability: verifierDurability,
     runtimeRegistry,
     runtimeSecretsFor,
     runtimeBuildBackend,

@@ -1,11 +1,18 @@
-import { AppError } from "@everdict/contracts";
+import { AppError, UpstreamError } from "@everdict/contracts";
 import type { CaseJob, CaseResult, Score, VerifierInvocation, VerifierJob } from "@everdict/contracts";
 import { verifierPlanOf } from "@everdict/domain";
 import type { DispatchOptions } from "../ports/dispatcher.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
-import { type AgentHalfStore, agentHalfDigest, mergeVerifierPass, stageAgentHalf } from "./agent-half.js";
+import {
+  type AgentHalfStageOutcome,
+  type AgentHalfStore,
+  agentHalfDigest,
+  mergeVerifierPass,
+  stageAgentHalf,
+} from "./agent-half.js";
 import { jobAttemptId } from "./open-physical-attempt.js";
+import type { VerifierDurabilityPolicy } from "./verifier-operation.js";
 
 // ── A CASE WHOSE VERDICT IS PRIVATE STILL RUNS (arch-review 56, Wave K) ──────────────────────────────
 //
@@ -53,6 +60,12 @@ export interface VerifierPassDeps {
   // case where the record is demonstrably false, in the vocabulary that exists: the attempt is SUPERSEDED,
   // which is what an attempt whose work another one replaced already means.
   attempts?: Pick<ExecutionAttemptStore, "transition">;
+  // ── WHAT AN UNWRITABLE AGENT HALF COSTS, DECLARED RATHER THAN ASSUMED (arch-review 70 P0) ────────
+  //
+  // The same policy `verifierOperation` takes for the verdict, spelled once for BOTH halves of a two-phase
+  // case: a deployment cannot sensibly require the verdict be durable and let the evidence it judges be
+  // best-effort. Absent = `best_effort`, which is what every caller had before this existed.
+  durability?: VerifierDurabilityPolicy;
 }
 
 // The verdict a case owes but did not get. `unmeasured` rather than a zero, for the reason the reward-file
@@ -86,6 +99,23 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // refused case is garbage the moment it is written. Every refusal below is decidable HERE — the lane's
   // presence and the tenant/run coordinate are known before the dispatch, and the snapshot kind is on the
   // result being handed over — so the decision is made once and spent twice.
+  // ── WHAT THE HANDOVER PROVED, NOT THAT IT RAN (arch-review 70 P0) ────────────────────────────────
+  //
+  // This was a boolean set immediately after an awaited `Promise<void>`, so it recorded that the stage had
+  // been CALLED. A refused put therefore produced a successful acknowledgement, a reclaimed container, and a
+  // skipped fallback — three consequences of one unread answer.
+  //
+  // `required` is the deployment that treats the private verdict as constitutional evidence: an unwritable
+  // half fails the acknowledgement, so the lane never reaches its cleanup and the container stays
+  // inspectable. `best_effort` (the default, and what every caller had before this) keeps the measurement
+  // and accepts that a crash here costs the recovery — the same trade `verifierOperation` already declares
+  // for the verdict, now spelled once for both halves.
+  const requiresDurableHalf = deps.durability === "required";
+  const stageHalf = async (r: CaseResult, tenant: string, runId: string): Promise<AgentHalfStageOutcome> =>
+    await stageAgentHalf(deps.agentHalves, tenant, runId, r, deps.cleanup).catch((err: unknown) => {
+      if (requiresDurableHalf) throw err;
+      return { kind: "absent" as const, reason: err instanceof Error ? err.message : String(err) };
+    });
   let stagedEarly = false;
   const willJudge = (r: CaseResult): boolean =>
     deps.dispatchVerifier !== undefined &&
@@ -97,8 +127,16 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
     {
       acknowledgeResult: async (r) => {
         if (!willJudge(r) || job.tenant === undefined || job.runId === undefined) return r;
-        await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, r, deps.cleanup);
-        stagedEarly = true;
+        const staged = await stageHalf(r, job.tenant, job.runId);
+        if (requiresDurableHalf && staged.kind !== "staged")
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { runId: job.runId, reason: staged.reason },
+            `this case's agent half could not be made durable (${staged.reason}), and this deployment requires durability before its container is reclaimed`,
+          );
+        // The bytes, not the call. A stage that answered `absent` leaves the fallback below its second
+        // chance rather than silently spending it.
+        stagedEarly = staged.kind === "staged";
         return r;
       },
     },
@@ -202,7 +240,7 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // dispatched, and therefore garbage the moment they were written.
   // …unless the lane already did it, before reclaiming. A lane with no acknowledgement keeps the ordering it
   // had, which is this line.
-  if (!stagedEarly) await stageAgentHalf(deps.agentHalves, job.tenant, job.runId, result, deps.cleanup);
+  if (!stagedEarly) await stageHalf(result, job.tenant, job.runId);
 
   const invocation = await deps.dispatchVerifier(verifierJob).catch((err: unknown) => err);
   if (invocation instanceof Error || !(invocation as VerifierInvocation)?.scores) {

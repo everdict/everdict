@@ -13,6 +13,7 @@ import {
 } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
+import type { VerifierPassDeps } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type CaseRuntimeSample,
@@ -92,6 +93,9 @@ export function buildDispatch(deps: {
   dispatchVerifier?: (job: VerifierJob) => Promise<VerifierInvocation>;
   agentHalves?: AgentHalfStore;
   cleanup?: IntermediateCleanupStore;
+  // What an unwritable agent half costs, chosen by the deployment (arch-review 70 P0). The verifier's verdict
+  // takes the same policy through `buildRuntimeAccess`: one decision, both halves.
+  durability?: VerifierPassDeps["durability"];
 }) {
   const {
     callbackStore,
@@ -447,6 +451,7 @@ export function buildDispatch(deps: {
     // not exist, so that correction was inert in production for a whole review cycle (arch-review 64 P1-high).
     attempts,
     deps.cleanup,
+    deps.durability,
   );
   // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
   // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's

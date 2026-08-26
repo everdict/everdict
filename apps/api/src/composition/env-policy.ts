@@ -1,3 +1,5 @@
+import type { VerifierDurabilityPolicy } from "@everdict/application-control";
+import { InternalError } from "@everdict/contracts";
 import { S3ArtifactStore, S3WorkspaceFs } from "@everdict/storage";
 
 // Per-workspace metering policy: if EVERDICT_METER_TENANTS (comma list) is set, only those tenants; otherwise EVERDICT_METER_USAGE=1
@@ -54,4 +56,51 @@ export async function artifactStoreFromEnv(): Promise<S3ArtifactStore | undefine
   });
   await store.ensureBucket().catch(() => {});
   return store;
+}
+
+// ── WHAT AN UNWRITABLE INTERMEDIATE COSTS, CHOSEN BY THE DEPLOYMENT (arch-review 70 P0) ─────────────
+//
+// `VerifierDurabilityPolicy` shipped in arch-review 67 so a deployment could say what it loses when a
+// two-phase case's artifacts cannot be written. No composition root ever passed it, so every deployment
+// silently took `best_effort` and `required` existed only in tests — a policy type is not a policy the
+// deployment chose, and the default that stood in for the decision was the permissive arm.
+//
+// Absent stays `best_effort` DELIBERATELY: making the strict arm the default would start failing cases that
+// deployments have been measuring successfully, which is a behaviour change nobody asked for. What changes
+// is that the choice is now readable, reported, and validated against what the deployment actually wired.
+//
+// An unrecognised value THROWS rather than falling back. A misspelled `EVERDICT_VERIFIER_DURABILITY=requird`
+// silently meaning "best effort" is the shape this whole law is about (rule `typescript`: no fallback on a
+// bad enum).
+export function verifierDurabilityFromEnv(): VerifierDurabilityPolicy {
+  const raw = process.env.EVERDICT_VERIFIER_DURABILITY;
+  if (raw === undefined || raw === "") return "best_effort";
+  if (raw === "required" || raw === "best_effort") return raw;
+  throw new InternalError(
+    "NOT_CONFIGURED",
+    { value: raw },
+    `EVERDICT_VERIFIER_DURABILITY must be "required" or "best_effort", not "${raw}".`,
+  );
+}
+
+// A deployment cannot CLAIM crash-safe private-verifier evaluation without the three stores that make it
+// true. Under `required` the claim is refused at boot rather than at the first case that needs it: the
+// artifacts a recovery reads, the ledger that owns their removal, and the attempt rows a cancellation
+// enumerates are each a precondition, and a missing one is a deployment error, not a runtime surprise.
+export function assertVerifierDurabilitySatisfiable(
+  policy: VerifierDurabilityPolicy,
+  wired: { artifacts: boolean; cleanup: boolean; attempts: boolean },
+): void {
+  if (policy !== "required") return;
+  const missing = [
+    ...(wired.artifacts ? [] : ["an artifact store (EVERDICT_S3_*)"]),
+    ...(wired.cleanup ? [] : ["an intermediate cleanup ledger (DATABASE_URL)"]),
+    ...(wired.attempts ? [] : ["an execution attempt ledger (DATABASE_URL)"]),
+  ];
+  if (missing.length === 0) return;
+  throw new InternalError(
+    "NOT_CONFIGURED",
+    { missing },
+    `EVERDICT_VERIFIER_DURABILITY=required needs ${missing.join(", ")}. Wire them, or choose best_effort and accept that a crash between a case's two halves loses work already paid for.`,
+  );
 }

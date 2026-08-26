@@ -373,6 +373,115 @@ the missing wiring is indistinguishable from a deployment that legitimately has 
 - Grep for the producer before writing the consumer. `deps.x?.y()` with zero production writers of `x` is
   dead code wearing a comment.
 
+## A CALLBACK THAT RAN IS NOT BYTES THAT LANDED
+arch-review 67 moved the agent handover to the right MOMENT — the backend calls `acknowledgeResult` inside
+its try, before the `finally` that reclaims the container — and arch-review 69 made the Scheduler carry it.
+The ordering is now correct in production and the guarantee is still empty, because the acknowledgement's
+type is `CaseResult → CaseResult`:
+
+    await stageAgentHalf(...);   // Promise<void>, ends `.catch(() => undefined)`
+    stagedEarly = true;          // proves the FUNCTION was called
+
+So a put or a confirm that failed produces a successful acknowledgement, a reclaimed Job, a verifier running
+against a digest whose bytes do not exist, and — because `stagedEarly` gates it — no fallback attempt either
+(arch-review 70 P0).
+
+⚠️ THE SAME FILE ALREADY CONTAINED THE FIX, 120 LINES DOWN. `stageVerifierVerdict` returns
+`VerdictStageOutcome` and deliberately does not swallow; arch-review 67 wrote that for the verdict and left
+the agent half as it was. Sibling-lane, eighth occurrence (58 · 59 · 61 · 64 · 66 · 67 · 69 · 70), shortest
+distance yet — which is the strongest argument there is that proximity does not transfer a law.
+
+- **A handover returns a PROOF, not the document it was handed.** A staged/absent union carrying the ref —
+  the shape `VerdictStageOutcome` already has — not the same `CaseResult` back. A caller whose next act is
+  destroying the only other copy must be able to tell those apart, and a type that cannot express the
+  difference guarantees nobody will.
+  ⚠️ This bullet first cited a handover type by a name nothing declared, and `pnpm docs-check` refused it.
+  That is the gate working: a rule may not teach a name the repo does not have. A name that does not exist
+  is written WITHOUT backticks, exactly as a deleted one is.
+- **Both stages of a two-phase case answer the same contract.** If one of them returns an outcome and the
+  other returns `void`, the difference is not a design choice; it is the half somebody has not done yet.
+- The swallow belongs at the site that DECIDES what the loss costs, never inside the writer. Rule `protocol`
+  already says a swallow inside a function named `stage`/`persist`/`commit`/`acknowledge` is reviewed as a
+  protocol decision — this is that rule, unenforced, one wave later.
+
+## A POLICY THAT EXISTS IS NOT A POLICY THE DEPLOYMENT CHOSE
+`VerifierDurabilityPolicy` (`required` | `best_effort`) was added so a deployment could say what an
+unwritable verdict costs. No production constructor passes it, so every deployment silently takes
+`best_effort`, and `durability: "required"` appears only in tests (arch-review 70 P0).
+
+    the policy type exists   ≠   this deployment selected a policy
+
+This is "a constructed capability is not a delivered one" in its third form: not a missing producer, not a
+producer that misses a consumer, but a DEFAULT standing in for a decision nobody made. It is more dangerous
+than either, because the default is the permissive arm.
+
+- **A policy whose arms differ in what they LOSE is selected explicitly at the composition root**, from
+  configuration, and the readiness surface reports which arm is in force. A default is acceptable only when
+  it is the strict one, or when the loss is disclosed where an operator will read it.
+- **A trust-grade claim validates its own preconditions at startup.** "Private verifier enabled" implies an
+  attempt store, an artifact store, a cleanup store and `required` durability; a deployment missing any of
+  them may still run, but it may not be described as crash-safe.
+- Two sentences that cannot both be true: *this verdict is constitutional evidence* and *a failed verdict
+  artifact continues as an ordinary success*.
+
+## CANONICAL TRUTH AND CLEANUP ELIGIBILITY ARE BORN TOGETHER OR NOT AT ALL
+The cleanup ledger became durable in arch-review 68 and the release is still a second commit:
+
+    settlement transaction COMMIT   →   ✗   →   releaseForGc never ran
+
+The row stays `retained`, and `due()` returns only `gc_owed | retry_wait` — correctly, because a retained
+artifact is one a recovery may still need. So the intermediates of an execution that is already terminal are
+kept forever. Not a failed delete: a row that never became eligible to be deleted (arch-review 70 P1).
+
+- **The write that makes an outcome canonical is the write that makes its intermediates collectable.** Same
+  transaction, same decision — `retained → gc_owed` alongside the terminal row, the receipt and the attempt
+  adoption.
+- A sweeper that flips old `retained` rows is a MIGRATION and a crash repair, never the mechanism. If it is
+  the mechanism, it needs the same read the settlement had (exact terminal state, no open contributing
+  attempt) and it will get it wrong in the cases that matter.
+- The general form, which this file has now paid for three times: **a decision and the effect it authorizes
+  must be one durable act**, or the gap between them is a state nobody owns.
+
+## EVERY ENDING RELEASES ITS OWN REFS, AND A LOSER MAY NOT REOPEN A WINNER'S DEBT
+Release is wired to the normal canonical settlement and nowhere else. `RunService.cancel()` contains zero
+calls to the discharge, so a cancelled private-verifier run converges its teardown and leaves its debt
+`retained` forever. Scorecard losers and superseded attempts have no release path at all.
+
+Worse, the debt is EXECUTION-scoped and `owe` reopens it unconditionally (`ON CONFLICT … state = 'retained'`),
+so a speculative loser that stages late reopens the row the winner already completed — and then loses its
+commit and never releases it (arch-review 70 P1).
+
+    winner: stage → win → release → completed
+    loser:  stage (late) → completed becomes retained → loses → nothing releases
+
+- **The refs belong to the attempt and the phase that wrote them** (`{executionId, attemptId, phase}`), and
+  every ending releases its own: committed · failed · cancelled · superseded · retry-abandoned ·
+  merge-refused. Execution-level GC aggregates those; it is not a shared mutable row several attempts race on.
+- **Enumerate the endings, not the happy path** — arch-review 66 wrote that sentence about deriving refs from
+  a receipt, and it is failing again one level down because the row, not the coordinate, is now shared.
+- A `state` field that answers both "does this execution still need its artifacts" and "did THIS attempt
+  finish" is one value doing two jobs, which is the annotation failure this whole file is about.
+
+## A PLANNED WRITE IS NOT A WRITTEN ARTIFACT
+`owe` precedes the put deliberately, so a ref can name bytes that do not exist. The reconciler respects that
+(`written !== true` → do not delete, defer) and the INLINE discharge does not — it removes every released ref
+without looking. Deleting an absent key succeeds everywhere, so the settlement completes a debt whose put is
+still in flight, and when that put lands the object has no owner (arch-review 70 P1).
+
+And the half that remains even after the inline path is fixed: an unconfirmed ref is deferred forever. If the
+writer died and the write genuinely failed, `written` never becomes true and the row retries until someone
+looks at it.
+
+    the put is still in flight   ≠   the put will never land
+
+- **`planned | written | abandoned`**, converged after the canonical settlement by an EXACT object read:
+  digest matches → written, then delete; absent with no live writer → abandoned; unreadable → `retry_wait`,
+  because "we could not find out" is L2's third value and never a terminal.
+- **One evaluator, shared by the inline discharge and the reconciler.** L5 already says one verifier serves
+  the request path and the sweep; two readings of one ref is that law broken for artifacts.
+- A vocabulary without a transition owner is not a lifecycle. `written?: boolean` existed; nothing was
+  responsible for making it true or giving up on it.
+
 ## A CONSTRUCTED CAPABILITY IS NOT A DELIVERED ONE
 `unwired-capabilities` was built in arch-review 67 for the law above, and it asks one question: does some
 composition root CONSTRUCT an implementation of this port? Two waves later the cleanup ledger was constructed

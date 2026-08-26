@@ -139,6 +139,22 @@ export async function discardAgentHalf(store: AgentHalfStore | undefined, key: s
 //
 // `discardAgentHalf` stays: it is the one-key primitive the discharge and the tests both spend.
 
+// ── WHAT A STAGE ACTUALLY DID, BECAUSE ITS CALLER RECLAIMS A CONTAINER (arch-review 70 P0) ────────
+//
+// This answered `void` and swallowed its own write, so `stagedEarly = true` proved the FUNCTION had been
+// called and nothing about whether the bytes exist. The verdict's stage has answered a union since
+// arch-review 67 — 120 lines down this same file — and the agent half was left as it was: the sibling-lane
+// shape at the shortest distance this series has found it (rule `protocol`, "a callback that ran is not
+// bytes that landed").
+//
+// Same two arms as `VerdictStageOutcome`, and for the same reason: `absent` is the honest answer for a
+// deployment with no store or a document this schema cannot parse, and a FAILURE is not an arm — it
+// propagates, because the caller's next act is destroying the only other copy and only the caller knows what
+// that costs here.
+export type AgentHalfStageOutcome =
+  | { kind: "staged"; ref: { key: string; digest: string } }
+  | { kind: "absent"; reason: string };
+
 export async function stageAgentHalf(
   store: AgentHalfStore | undefined,
   tenant: string,
@@ -150,8 +166,8 @@ export async function stageAgentHalf(
   // recovered document differ from the normal one. It is a ledger row now, written first: an object whose
   // removal nothing owns is exactly the leak this staging created.
   cleanup?: IntermediateCleanupStore,
-): Promise<void> {
-  if (!store) return;
+): Promise<AgentHalfStageOutcome> {
+  if (!store) return { kind: "absent", reason: "no agent-half store" };
   // The SAME digest the verifier will carry, over the SAME document, by the same function.
   // Canonicalized ONCE: the bytes written, the key they are written under and the digest a recovery
   // re-derives all come from this one value.
@@ -167,21 +183,22 @@ export async function stageAgentHalf(
       return undefined;
     }
   })();
-  if (!canonical) return;
+  if (!canonical) return { kind: "absent", reason: "this result does not validate as a CaseResult" };
   const digest = contentDigest(canonical);
   const key = agentHalfKey(tenant, runId, digest);
   // Owed FIRST. A debt recorded for bytes that then failed to write costs one wasted delete attempt; bytes
   // written with no debt recorded are a leak forever, and only one of those is recoverable.
   await cleanup?.owe({ tenant, executionId: storedExecutionId(runId), refs: [{ key, digest }] });
-  await store
-    .put(key, new TextEncoder().encode(JSON.stringify(canonical)), "application/json", { immutable: true, digest })
-    .then(async () => {
-      // Confirmed AFTER the write, so a sweep can tell an object that exists from one whose put never landed.
-      await cleanup?.confirm({ tenant, executionId: storedExecutionId(runId), keys: [key] });
-    })
-    // Swallowed HERE and nowhere else: this is the one call whose failure genuinely costs nothing the case
-    // needs, and the comment above says what it does cost. Every other read in this file answers three ways.
-    .catch(() => undefined);
+  // NOT SWALLOWED (arch-review 70). A store that throws throws, and `withVerifierPass` decides what the loss
+  // costs — which is the RECOVERY under `best_effort` and the CASE under `required`. Deciding it here made
+  // the two indistinguishable to every caller, and made `stagedEarly` a lie.
+  await store.put(key, new TextEncoder().encode(JSON.stringify(canonical)), "application/json", {
+    immutable: true,
+    digest,
+  });
+  // Confirmed AFTER the write, so a sweep can tell an object that exists from one whose put never landed.
+  await cleanup?.confirm({ tenant, executionId: storedExecutionId(runId), keys: [key] });
+  return { kind: "staged", ref: { key, digest } };
 }
 
 // ── AND THE SECOND HALF, WHICH WAS NEVER STAGED AT ALL (arch-review 64 P0) ──────────────────────────
