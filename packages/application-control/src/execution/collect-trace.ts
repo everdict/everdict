@@ -12,7 +12,7 @@ import {
   UpstreamError,
   stamp,
 } from "@everdict/contracts";
-import { classifyFailure } from "@everdict/domain";
+import { classifyFailure, observationsFromTrace } from "@everdict/domain";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 
 // Out-of-job trace collection (the collection phase of the 2-phase design, D4) — the completion step for spec.trace.collect="control-plane" cases.
@@ -171,8 +171,10 @@ export async function collectDeferredTrace(
   const ctx: GradeContext = {
     case: evalCase,
     deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
-    // control-plane collection scores from the pulled trace — the run's live channel is gone — stated, never an empty series (Track C).
-    observations: { kind: "unobserved", reason: "no_environment" },
+    // The channel the RUN sealed into its trace (Track C): a live run's samples reconstruct here, so a
+    // deferred scoring judges over the same observations the in-run graders saw; a trace with no marker is
+    // honestly unobserved{no_environment}.
+    observations: observationsFromTrace(trace),
     trace,
     snapshot: result.snapshot,
   };

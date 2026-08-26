@@ -65,9 +65,14 @@ describe("runCase — live-trace tee (runCtx.liveTrace)", () => {
 
     // The final release() flush carries the tail (fire-and-forget) — every drained event reaches the observer,
     // in order; waitFor absorbs the flush's microtask scheduling.
-    await vi.waitFor(() => expect(reported.map((e) => e.t)).toEqual([0, 1, 2]));
+    // The platform's own observation-channel events (Track C) ride the trace too — the tee ordering this
+    // test pins is about HARNESS events, so they are filtered like the infra plane below.
+    const harnessEvents = () => reported.filter((e) => e.kind !== "env_action");
+    await vi.waitFor(() => expect(harnessEvents().map((e) => e.t)).toEqual([0, 1, 2]));
     // The tee never altered the sealed record: the result's own trace still carries the same events.
-    expect(result.trace.filter((e) => e.kind !== "infra").map((e) => e.t)).toEqual([0, 1, 2]);
+    expect(result.trace.filter((e) => e.kind !== "infra" && e.kind !== "env_action").map((e) => e.t)).toEqual([
+      0, 1, 2,
+    ]);
   });
 
   it("a failing reporter never affects the eval result", async () => {

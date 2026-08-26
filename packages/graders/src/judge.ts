@@ -24,6 +24,10 @@ export interface JudgeVerdict {
   score: number;
   reason: string;
   criteria?: Record<string, CriterionVerdict>; // per-criterion verdicts when the judge was given criteria
+  // The judge's answer about the INDEPENDENT observations (asked only when the channel sampled): does the
+  // world's own account support the claims it judged? Durable via the sealed judge execution — the raw
+  // completion carries it, and this parse is what downstream readers consume (Track C).
+  observationConsistency?: { status: "consistent" | "divergent" | "unclear"; note?: string };
 }
 
 // Image (screenshot) bytes passed to VLM judging. The ref (path) is read from the environment by the grader and resolved to base64.
@@ -58,6 +62,10 @@ export interface JudgeInput {
   // into prose so an absent channel is STATED to the judge rather than silently missing (Track C; an
   // unobserved run must never read like a run in which nothing changed).
   observations: string;
+  // Whether the channel actually SAMPLED (vs a stated absence) — set by the sole constructor; it is what
+  // makes the verdict contract ask for observation_consistency. Optional so hand-built test inputs default
+  // to the arm that demands nothing (fail-closed: the judge is never asked about observations it lacks).
+  observationsSampled?: boolean;
   promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
 }
 
@@ -175,6 +183,7 @@ export async function assembleJudgeInput(
   return {
     task: ctx.case.task,
     observations: renderObservations(ctx.observations),
+    observationsSampled: ctx.observations.kind === "sampled",
     ...(wants("trace") ? { trace: ctx.trace } : {}),
     ...(required.length > 0 ? { requiredEvidence: required } : {}),
     ...(snap.kind === "browser" && wants("dom") ? { dom: snap.dom } : {}),

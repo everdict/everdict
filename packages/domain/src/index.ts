@@ -513,6 +513,14 @@ export {
   registryAuthSecretName,
 } from "./image/image-ref.js";
 
+// observation — the channel sealed into the trace + its one reader (evolution-lineage Track C)
+export {
+  OBSERVATION_CHANNEL_ACTION,
+  OBSERVATION_SAMPLE_ACTION,
+  OBSERVATION_SAMPLE_DETAIL_CAP,
+  observationTraceEvents,
+  observationsFromTrace,
+} from "./observation/observation-trace.js";
 // evolution — the campaign settlement's pure adoption gate (docs/architecture/evolution-lineage.md, Track D)
 export { type CampaignGateAnswer, campaignAdoption } from "./evolution/campaign-gate.js";
 // image — which BYTES a case ran from: the manifest reader, the driver/placement merge, and the comparison

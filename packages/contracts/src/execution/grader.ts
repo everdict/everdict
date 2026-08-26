@@ -288,13 +288,13 @@ export type StoreReader = (q: StoreReadQuery) => Promise<string>;
 // grader could weigh a claim against what the world actually did. Three-valued on purpose (L2):
 //   sampled{[]}              the platform watched and nothing changed — a real, meaningful answer
 //   unobserved{unsupported}  this environment cannot sample (browser/os-use/prompt today)
+//   unobserved{sampling_failed} the environment supports sampling and EVERY attempt failed — fewer deltas
+//                              must never read as a calmer world
 //   unobserved{no_environment} this judging path has no live environment at all (control-plane re-score,
 //                              the private verifier's container, a zero-cost preview)
-// A failed individual sample is currently folded inside the environment's best-effort sampler (it answers
-// undefined); surfacing it as its own reason is the named follow-up in the design doc.
 export type CaseObservations =
   | { kind: "sampled"; deltas: EnvDelta[] }
-  | { kind: "unobserved"; reason: "unsupported" | "no_environment" };
+  | { kind: "unobserved"; reason: "unsupported" | "sampling_failed" | "no_environment" };
 
 export interface GradeContext {
   case: EvalCase;

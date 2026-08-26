@@ -34,6 +34,7 @@ import {
   computeNeedsFor,
   fsFileCommand,
   fsTreeCommand,
+  observationTraceEvents,
   parseFsFile,
   parseFsTree,
   validRepoPath,
@@ -193,13 +194,17 @@ function startEnvDeltaCapture(
   compute: ComputeHandle,
   environment: Environment,
   out: EnvDelta[],
-): { stop: () => void; final: () => Promise<void> } | undefined {
+): { stop: () => void; final: () => Promise<void>; outcomes: { succeeded: number; failed: number } } | undefined {
   if (!environment.sampleDelta) return undefined;
   const sample = environment.sampleDelta.bind(environment);
   const intervalMs = 3000;
   const maxEntries = 40;
   let stopped = false;
   let inFlight = false;
+  // The channel's own ledger: samples the environment ANSWERED vs failed. Best-effort lives HERE — the
+  // sampler throws — so a run whose every sample failed reports `sampling_failed` instead of reading as a
+  // calmer world (Track C).
+  const outcomes = { succeeded: 0, failed: 0 };
   const push = (delta: { kind: "repo-diff"; text: string } | undefined): void => {
     if (!delta || out.length >= maxEntries) return;
     const last = out.length > 0 ? out[out.length - 1]?.text : undefined;
@@ -210,8 +215,9 @@ function startEnvDeltaCapture(
     inFlight = true;
     try {
       push(await sample(compute));
+      outcomes.succeeded += 1;
     } catch {
-      // best-effort — a recording sample never affects the run
+      outcomes.failed += 1; // counted, never silent — the channel reports sampling_failed when nothing succeeded
     } finally {
       inFlight = false;
     }
@@ -219,6 +225,7 @@ function startEnvDeltaCapture(
   const timer = setInterval(() => void tick(), intervalMs);
   (timer as { unref?: () => void }).unref?.();
   return {
+    outcomes,
     stop: () => {
       stopped = true;
       clearInterval(timer);
@@ -228,8 +235,9 @@ function startEnvDeltaCapture(
     final: async () => {
       try {
         push(await sample(compute));
+        outcomes.succeeded += 1;
       } catch {
-        // best-effort
+        outcomes.failed += 1;
       }
     },
   };
@@ -314,12 +322,15 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // The observation channel the graders receive (evolution-lineage Track C): the environment's own account,
   // frozen per grading call. `unobserved{unsupported}` when this environment cannot sample — never an empty
   // series, which would claim "watched and nothing changed" about a world nobody watched (L2).
-  const observationsOf = (): CaseObservations =>
-    envRecorder !== undefined
-      ? { kind: "sampled", deltas: [...envDeltas] }
-      : { kind: "unobserved", reason: "unsupported" };
+  const observationsOf = (): CaseObservations => {
+    if (envRecorder === undefined) return { kind: "unobserved", reason: "unsupported" };
+    // Every attempt failed and none answered: fewer deltas must never read as a calmer world (L2).
+    if (envRecorder.outcomes.succeeded === 0 && envRecorder.outcomes.failed > 0)
+      return { kind: "unobserved", reason: "sampling_failed" };
+    return { kind: "sampled", deltas: [...envDeltas] };
+  };
   const envDeltas: EnvDelta[] = [];
-  let envRecorder: { stop: () => void; final: () => Promise<void> } | undefined;
+  let envRecorder: ReturnType<typeof startEnvDeltaCapture>;
   // Live-trace tee (opt-in) — batches drained TraceEvents out to the observer while the harness still runs.
   // Started before the drain, stopped inside release() (with a final flush) like the other capture loops.
   const liveTrace = deps.runCtx.liveTrace ? startLiveTraceReport(deps.runCtx.liveTrace) : undefined;
@@ -418,6 +429,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // With defer, observation scoring happens on the control plane — carry the screenshot in the result snapshot (slims the offload).
     if (defer) snapshot = materialized;
     await envRecorder?.final(); // final env delta while the compute is still alive (before teardown)
+    // Seal the channel into the TRACE the judgment stands on (Track C): one capped event per sample plus the
+    // channel marker, so a re-score reads the same observations the in-run judges saw — the replay recording
+    // keeps full fidelity, the trace keeps the judged account.
+    trace.push(...observationTraceEvents(observationsOf()));
     // The remaining work (platform pull · observation scoring) doesn't need the environment — release the
     // sandbox here, and RECORD the teardown as its own placement fact: how long the run held its environment
     // after the work ended is the fourth phase of a case's lifecycle (queue → placed → run → released), and

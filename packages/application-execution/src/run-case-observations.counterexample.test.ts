@@ -100,3 +100,64 @@ describe("[TRACK-C COUNTEREXAMPLE] the world's own account reaches the grader", 
     expect(seen[0]).toEqual({ kind: "unobserved", reason: "unsupported" });
   });
 });
+
+describe("[TRACK-C SEAL] the observation channel is sealed into the trace the judgment stands on", () => {
+  // A re-score reads the sealed trajectory, not the live run — an observation that lives only in the replay
+  // recording makes the same execution judge differently in-line vs after a crash (the durable-document
+  // law). The channel therefore rides the TRACE: one capped env_action per sample plus a channel marker, so
+  // a sealed trace states the channel's outcome durably and a reconstruction is total.
+  // RED as of 6ec2a4b4: the trace carried no observation events at all.
+  it("sampled deltas land as observation trace events, and the channel marker says 'sampled'", async () => {
+    const seen: Array<CaseObservations | undefined> = [];
+    const environment = {
+      seed: async () => {},
+      snapshot: async () => ({ kind: "prompt", output: "" }),
+      sampleDelta: async () => ({ kind: "repo-diff" as const, text: "+++ b/a.txt" }),
+    } as unknown as Environment;
+    const driver = { id: "fake", provision: async () => fakeComputeHandle() } as Driver;
+
+    const result = await runCase(CASE, {
+      driver,
+      environment,
+      harness: quickHarness,
+      graders: [capturingGrader(seen)],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    const observationEvents = result.trace.filter(
+      (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_sample",
+    );
+    expect(observationEvents.length).toBeGreaterThanOrEqual(1);
+    const marker = result.trace.find(
+      (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_channel",
+    );
+    expect(marker, "the sealed trace does not state the channel's outcome").toBeDefined();
+    expect((marker as { detail?: unknown })?.detail).toBe("sampled");
+  });
+
+  it("an env whose every sample FAILED is unobserved{sampling_failed} — never silently fewer deltas", async () => {
+    const seen: Array<CaseObservations | undefined> = [];
+    const environment = {
+      seed: async () => {},
+      snapshot: async () => ({ kind: "prompt", output: "" }),
+      sampleDelta: async () => {
+        throw new Error("git unavailable in this box");
+      },
+    } as unknown as Environment;
+    const driver = { id: "fake", provision: async () => fakeComputeHandle() } as Driver;
+
+    const result = await runCase(CASE, {
+      driver,
+      environment,
+      harness: quickHarness,
+      graders: [capturingGrader(seen)],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    expect(seen[0]).toEqual({ kind: "unobserved", reason: "sampling_failed" });
+    const marker = result.trace.find(
+      (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_channel",
+    );
+    expect((marker as { detail?: unknown })?.detail).toBe("sampling_failed");
+  });
+});

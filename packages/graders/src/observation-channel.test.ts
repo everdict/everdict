@@ -1,7 +1,7 @@
 import type { GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { assembleJudgeInput } from "./judge.js";
-import { previewJudge } from "./model-judge.js";
+import { parseVerdict, previewJudge } from "./model-judge.js";
 
 // ── The observation channel reaches the judge's PROMPT, three-valued (Track C) ───────────────────────
 //
@@ -41,5 +41,33 @@ describe("the judge sees the world's own account", () => {
     expect(none.observations).toContain("no live environment");
     const { prompt } = previewJudge(none);
     expect(prompt).toContain("No independent observation channel");
+  });
+});
+
+describe("the judge is ASKED to weigh the observations, and its answer survives the parse", () => {
+  // A channel the judge reads but never has to answer about is advisory — the verdict contract asks for
+  // observation_consistency exactly when observations were SAMPLED, and the parse carries the answer onto
+  // JudgeVerdict so the sealed judge execution holds it (Track C follow-through).
+  // RED as of 6ec2a4b4: the instruction never mentioned observations and the parse dropped the field.
+  it("a sampled channel extends the verdict instruction; an unobserved one does not", async () => {
+    const sampled = await assembleJudgeInput(
+      base({ kind: "sampled", deltas: [{ t: 5, kind: "repo-diff", text: "+++ b/x" }] }),
+    );
+    const { prompt } = previewJudge(sampled);
+    expect(prompt).toContain('"observation_consistency"');
+    const none = await assembleJudgeInput(base({ kind: "unobserved", reason: "no_environment" }));
+    expect(previewJudge(none).prompt).not.toContain('"observation_consistency"');
+  });
+
+  it("the parsed verdict carries the judge's consistency answer", () => {
+    const verdict = parseVerdict(
+      '{"pass": true, "score": 1, "reason": "did the work", "observation_consistency": "divergent", "observation_note": "the trace claims a fix the diff does not contain"}',
+    );
+    expect(verdict.observationConsistency).toEqual({
+      status: "divergent",
+      note: "the trace claims a fix the diff does not contain",
+    });
+    // …and a verdict that says nothing about it carries nothing — never a fabricated "consistent".
+    expect(parseVerdict('{"pass": true, "score": 1, "reason": "ok"}').observationConsistency).toBeUndefined();
   });
 });

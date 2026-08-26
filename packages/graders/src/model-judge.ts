@@ -32,13 +32,18 @@ function finalAnswerOf(trace: TraceEvent[] | undefined): string | undefined {
 
 // The JSON verdict instruction — single verdict, or the multi-criteria shape scoring every listed criterion.
 // Expanded into custom templates via the {verdict_instruction} placeholder (the parser relies on this shape).
-function verdictInstruction(criteria?: JudgeCriterion[]): string {
+function verdictInstruction(criteria?: JudgeCriterion[], observed?: boolean): string {
+  // Asked ONLY when the channel sampled: a judge must weigh the world's own account against the claims it
+  // judged, and say so — but it is never asked about observations it was not given (Track C).
+  const observation = observed
+    ? ' Also include "observation_consistency": "consistent"|"divergent"|"unclear" — whether the INDEPENDENT OBSERVATIONS support the claims you judged — and, when divergent, "observation_note": string naming the contradiction.'
+    : "";
   if (!criteria?.length)
-    return 'Respond with ONLY a JSON object, no prose: {"pass": boolean, "score": number in [0,1], "reason": string}.';
+    return `Respond with ONLY a JSON object, no prose: {"pass": boolean, "score": number in [0,1], "reason": string}.${observation}`;
   const shape = criteria
     .map((c) => `"${c.id}": {"score": number in [0,1], "pass": boolean, "reason": string}`)
     .join(", ");
-  return `Respond with ONLY a JSON object, no prose, scoring EVERY listed criterion: {"criteria": {${shape}}, "pass": boolean, "score": number in [0,1], "reason": string} — top-level "pass"/"score" are the overall verdict.`;
+  return `Respond with ONLY a JSON object, no prose, scoring EVERY listed criterion: {"criteria": {${shape}}, "pass": boolean, "score": number in [0,1], "reason": string} — top-level "pass"/"score" are the overall verdict.${observation}`;
 }
 
 // The criteria bullet list — a section in the default template, the {criteria} placeholder in custom templates.
@@ -66,7 +71,7 @@ function renderTemplate(template: string, input: JudgeInput): string {
     required_evidence: (input.requiredEvidence ?? [])
       .map(({ label, text }) => `${label}:\n${text.slice(0, MAX_CHARS)}`)
       .join("\n\n"),
-    verdict_instruction: verdictInstruction(input.criteria),
+    verdict_instruction: verdictInstruction(input.criteria, input.observationsSampled),
   };
   for (const [name, value] of Object.entries(input.custom ?? {})) {
     if (!(name in values)) values[name] = value.slice(0, MAX_CHARS);
@@ -141,7 +146,7 @@ function buildPrompt(input: JudgeInput): string {
     ...(input.requiredEvidence ?? []).map(({ label, text }) => `${label}:\n${text.slice(0, MAX_CHARS)}`),
     // Since the trace JSON may be truncated, tell it to look at the section above even if the final answer is cut off.
     `EXECUTION TRACE (JSON, truncated${finalAnswer ? "; see AGENT FINAL ANSWER above" : ""}):\n${trace}`,
-    verdictInstruction(input.criteria),
+    verdictInstruction(input.criteria, input.observationsSampled),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -226,7 +231,7 @@ export function previewJudge(input: JudgeInput): JudgePreview {
 
 // Extracts the JSON verdict from the model response (surrounding prose allowed). Format errors → UpstreamError (blame the external dependency).
 // With criteria, every declared criterion must be scored — a missing one is a format-contract violation (explicit, never a silent 0).
-function parseVerdict(text: string, criteria?: JudgeCriterion[]): JudgeVerdict {
+export function parseVerdict(text: string, criteria?: JudgeCriterion[]): JudgeVerdict {
   const m = text.match(/\{[\s\S]*\}/);
   if (!m)
     throw new UpstreamError(
@@ -241,12 +246,26 @@ function parseVerdict(text: string, criteria?: JudgeCriterion[]): JudgeVerdict {
     throw new UpstreamError("UPSTREAM_ERROR", { text: m[0].slice(0, 200) }, "Failed to parse the judge verdict JSON.");
   }
   const o = obj as Record<string, unknown>;
+  // The judge's answer about the independent observations — carried only when it actually answered (a
+  // silent verdict stays silent; nothing fabricates "consistent").
+  const oc = o.observation_consistency;
+  const observation: Pick<JudgeVerdict, "observationConsistency"> =
+    oc === "consistent" || oc === "divergent" || oc === "unclear"
+      ? {
+          observationConsistency: {
+            status: oc,
+            ...(typeof o.observation_note === "string" && o.observation_note !== ""
+              ? { note: o.observation_note }
+              : {}),
+          },
+        }
+      : {};
   if (!criteria?.length) {
     if (typeof o.score !== "number" || typeof o.reason !== "string")
       throw new UpstreamError("UPSTREAM_ERROR", {}, "The judge verdict format is invalid (score/reason).");
     const score = Math.max(0, Math.min(1, o.score));
     const pass = typeof o.pass === "boolean" ? o.pass : score >= 0.5;
-    return { pass, score, reason: o.reason };
+    return { pass, score, reason: o.reason, ...observation };
   }
 
   const raw = (o.criteria ?? {}) as Record<string, unknown>;
@@ -272,7 +291,7 @@ function parseVerdict(text: string, criteria?: JudgeCriterion[]): JudgeVerdict {
   const overallScore = typeof o.score === "number" ? Math.max(0, Math.min(1, o.score)) : weighted / weightSum;
   const overallPass = typeof o.pass === "boolean" ? o.pass : overallScore >= 0.5;
   const overallReason = typeof o.reason === "string" ? o.reason : "weighted mean of the criteria scores";
-  return { pass: overallPass, score: overallScore, reason: overallReason, criteria: perCriterion };
+  return { pass: overallPass, score: overallScore, reason: overallReason, criteria: perCriterion, ...observation };
 }
 
 // model judge — takes a JudgeCompletion (model call) and returns a Judge. Transport is injected via anthropicComplete etc.

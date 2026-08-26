@@ -100,5 +100,8 @@ export interface Environment<S extends EnvSnapshot = EnvSnapshot> {
   // replay shows how the world evolved (not just the final snapshot). Must be NON-INTRUSIVE (never mutate the agent's
   // state): RepoEnvironment returns a git-diff vs HEAD via a throwaway index. Absent = only the final snapshot is
   // captured. Best-effort — a sampling failure never affects the run. docs/architecture/replay.md (Principle 1).
+  // `undefined` = sampled and NOTHING CHANGED (a real answer). A sample that could not be taken THROWS —
+  // the recorder owns best-effort and counts the failure, because a swallow here turned every broken sampler
+  // into a calmer-looking world (evolution-lineage Track C, sampling_failed).
   sampleDelta?(compute: ComputeHandle): Promise<{ kind: "repo-diff"; text: string } | undefined>;
 }

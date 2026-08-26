@@ -241,8 +241,9 @@ describe("runCase — early compute release (observation-only graders score afte
     expect(collectedAt?.disposed).toBe(true);
     const injected = result.trace.find((e) => e.kind === "message");
     expect(injected && "text" in injected && injected.text).toBe(collectedAt?.runId);
-    // The observation grader sees the collected platform events too (1 run event + 1 platform).
-    expect(seenTraceLen).toBe(2);
+    // The observation grader sees the collected platform events too (1 run event + 1 platform), plus the
+    // observation channel's sealed marker (Track C — every run's trace states its channel outcome).
+    expect(seenTraceLen).toBe(3);
     expect(result.traceRef).toBeUndefined(); // job collection — nothing deferred
   });
 

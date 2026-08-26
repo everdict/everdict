@@ -26,6 +26,7 @@ import {
   initialScoringPassId,
   inputObservationOf,
   judgmentReceiptsFromPlane,
+  observationsFromTrace,
   scorecardModels,
   summarizeScorecard,
   verdictSummaryOf,
@@ -349,8 +350,9 @@ export class ScorecardIngestService {
       const ctx: GradeContext = {
         case: evalCase,
         deadlineAt: Date.now() + evalCase.timeoutSec * 1000, // this scoring phase's bound (arch-review 25 P1)
-        // an ingested trace ran on somebody else's runtime — there was never a channel to sample — stated, never an empty series (Track C).
-        observations: { kind: "unobserved", reason: "no_environment" },
+        // An ingested trace carries whatever channel ITS platform sealed — ours reconstructs, a foreign one
+        // has no marker and is honestly unobserved{no_environment} (Track C).
+        observations: observationsFromTrace(trace),
         trace,
         snapshot,
       };

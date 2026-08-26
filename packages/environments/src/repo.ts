@@ -5,6 +5,7 @@ import {
   type Environment,
   GIT_MACHINE_IDENTITY,
   type RepoSnapshot,
+  UpstreamError,
   gitAuthEnv,
   shq,
 } from "@everdict/contracts";
@@ -57,14 +58,21 @@ export class RepoEnvironment implements Environment<RepoSnapshot> {
   // touching the agent's own index/staging: stage everything into a throwaway index under .git (GIT_INDEX_FILE, git
   // never scans .git so it self-excludes) and diff THAT vs HEAD, then delete it. Includes untracked files. run-case
   // polls this into CaseResult.envDeltas so a coding harness replays how the repo evolved. Empty diff → undefined.
+  // `undefined` = sampled and nothing changed. A sample that could not be taken THROWS: the old swallow
+  // (catch → undefined, and a shell line that sent git's own failures to /dev/null) made a broken sampler
+  // indistinguishable from a calm world, so every delta the run "didn't have" read as evidence of nothing
+  // happening (evolution-lineage Track C). The recorder owns best-effort — it counts the failure and the
+  // channel reports `sampling_failed` instead of silently fewer deltas.
   async sampleDelta(compute: ComputeHandle): Promise<{ kind: "repo-diff"; text: string } | undefined> {
     const idx = ".git/everdict-rec.index";
-    const cmd = `rm -f ${idx}; GIT_INDEX_FILE=${idx} git add -A >/dev/null 2>&1; GIT_INDEX_FILE=${idx} git diff --cached HEAD 2>/dev/null; rm -f ${idx}`;
-    try {
-      const text = (await compute.exec(cmd, { cwd: WORK })).stdout;
-      return text.trim() ? { kind: "repo-diff", text } : undefined;
-    } catch {
-      return undefined; // best-effort — a recording sample never affects the run
-    }
+    const cmd = `rm -f ${idx}; GIT_INDEX_FILE=${idx} git add -A >/dev/null 2>&1 && GIT_INDEX_FILE=${idx} git diff --cached HEAD; s=$?; rm -f ${idx}; exit $s`;
+    const res = await compute.exec(cmd, { cwd: WORK });
+    if (res.exitCode !== 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { exitCode: res.exitCode },
+        `environment sample failed: ${res.stderr.slice(0, 500) || "git diff exited non-zero"}`,
+      );
+    return res.stdout.trim() ? { kind: "repo-diff", text: res.stdout } : undefined;
   }
 }

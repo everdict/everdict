@@ -15,6 +15,7 @@ import {
   executionEvidenceTrace,
   judgeGradeable,
   modelBindingLabel,
+  observationsFromTrace,
   pinnedDocumentMismatch,
 } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
@@ -314,8 +315,9 @@ export class ScoringService {
       case: evalCase,
       // One deadline for this scoring phase, bounded by the case's declared budget (arch-review 25 P1).
       deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
-      // a re-score reads sealed evidence — no live environment stands behind it — stated, never an empty series (Track C).
-      observations: { kind: "unobserved", reason: "no_environment" },
+      // The channel the run sealed into its trace (Track C) — a re-score reads the SAME observations the
+      // original judgment saw (the durable-document law); a pre-channel trace is honestly unobserved.
+      observations: observationsFromTrace(result.trace),
       trace: executionEvidenceTrace(result.trace),
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),

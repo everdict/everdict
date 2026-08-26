@@ -158,16 +158,21 @@ asserting the manifest carries the registry digest.
 
 *The heaviest track; last on purpose.*
 
-> Status: **channel landed.** `GradeContext.observations` is a REQUIRED three-valued channel
-> (`sampled{deltas}` | `unobserved{unsupported | no_environment}`) — the compiler enumerated every
-> construction site, and each states what it knows; `runCase` feeds the sampled series at grading time, and
-> the judge's prompt ALWAYS carries the section, so an absent channel is a stated fact rather than a missing
-> paragraph. What remains of this track, named: sealing the deltas into the judged evidence so a re-score
-> reads the same observations (they still fold into the replay recording afterwards), the
-> `observationConsistency` field on the judge's verdict that gates can weigh, a `sampling_failed` reason
-> (today an individual failed sample is folded inside the environment's best-effort sampler), and threading
-> the run's channel into DEFERRED observation scoring (the control-plane path currently states
-> `no_environment`).
+> Status: **landed, follow-through included.** `GradeContext.observations` is a REQUIRED channel
+> (`sampled{deltas}` | `unobserved{unsupported | sampling_failed | no_environment}`) — the compiler
+> enumerated every construction site, and each states what it knows; `runCase` feeds the sampled series at
+> grading time, and the judge's prompt ALWAYS carries the section, so an absent channel is a stated fact
+> rather than a missing paragraph. The follow-through: the channel is SEALED into the trace
+> (`observationTraceEvents` / `observationsFromTrace` — one writer, one reader; capped sample events plus a
+> channel marker), so a re-score and the deferred scoring paths (collect / re-score / ingest) reconstruct
+> the SAME observations the in-run judges saw, and a pre-channel or foreign trace is honestly
+> `unobserved{no_environment}`. The environment sampler now THROWS on a failed sample (the shell no longer
+> hides git's own failures) and the recorder counts outcomes, so a run whose every sample failed is
+> `sampling_failed` — never a calmer-looking world. The judge's verdict contract asks for
+> `observation_consistency` exactly when the channel sampled, parsed onto
+> `JudgeVerdict.observationConsistency` (a gate weighing it is the remaining consumer). Nomad image
+> readback was investigated and settled: the allocation API exposes no structured pulled-digest field, so
+> the reference reading stays that lane's honest answer and a digest pin remains the user's escape.
 
 **The gap.** `EnvDelta[]` is an independent observation of the world (sampled by the environment, not
 reported by the agent), and today its terminal consumer is the replay recording — it is cleared off the

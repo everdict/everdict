@@ -2349,6 +2349,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
   },
   {
+    // evolution-lineage Track C follow-through. The seal is what makes a re-score read the same observations
+    // the in-run judges saw; dropping the push leaves the channel live-only and the durable-document law
+    // broken again. The seal counterexample must notice.
+    name: "Track C — the observation channel is no longer sealed into the trace",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "    trace.push(...observationTraceEvents(observationsOf()));",
+    to: "",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track C. The observation channel exists so the judgment can weigh the world's own
     // account; a channel that reports `sampled` while dropping the deltas is the emptiest form of the
     // annotation defect — present, and carrying nothing. The run-case counterexample must notice.
