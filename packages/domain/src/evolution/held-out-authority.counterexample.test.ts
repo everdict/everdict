@@ -169,3 +169,43 @@ describe("[R71 COUNTEREXAMPLE] a divergent observation account refuses adoption"
     expect(campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]).kind).toBe("adopt");
   });
 });
+
+// ── AN ADOPTED LABEL IS NOT ADOPTED BYTES (arch-review 71 P0-evolution) ─────────────────────────────
+//
+// The round named a candidate VERSION and the close named the same version. A version is a LABEL: candidate
+// C1 is evaluated, C2 is saved under the same `id@version`, and nothing in the campaign can tell them apart
+// — so "this version was proved" is a claim about a string rather than about bytes.
+//
+// The scorecard already seals the digest of the spec its batch ran (`manifest.harness.specDigest`), so the
+// join was in hand and dropped at the write. It is recorded on the round that proved it and carried into the
+// gate's answer, which is what any later adoption effect has to check what it is about to register against.
+//
+// ⚠️ THIS IS THE JOIN, NOT THE WHOLE PROTOCOL. Campaign adoption still executes no registry effect — the
+// close is a decision record and the caller is still told to save separately. What this closes is the part
+// every later proof would have rested on: without the digest, no proof-carrying adoption could be trusted
+// even once it exists.
+//
+// Seen RED before the digest travelled, observed:
+//   the adoption named a version but not the bytes it proved: expected undefined to be 'sha256:c1'
+
+describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
+  it("carries the proving round's candidate spec digest into the answer", () => {
+    const proved = round({ heldOutImprovements: 1 });
+    (proved.verdict as { candidateSpecDigest?: string }).candidateSpecDigest = "sha256:c1";
+
+    const answer = campaignAdoption(frame(), [proved]);
+
+    expect(answer.kind).toBe("adopt");
+    expect(
+      answer.kind === "adopt" ? answer.candidateSpecDigest : undefined,
+      "the adoption named a version but not the bytes it proved",
+    ).toBe("sha256:c1");
+  });
+
+  it("says plainly when the round could not name them", () => {
+    // A built-in harness has no declarative spec to digest, and older rows have none. Absent is an honest
+    // weaker adoption an operator can see — not one that reads the same as a strong one.
+    const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]);
+    expect(answer.kind === "adopt" ? answer.candidateSpecDigest : "x").toBeUndefined();
+  });
+});

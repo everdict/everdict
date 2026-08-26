@@ -126,6 +126,17 @@ export const CampaignRoundSchema = z.object({
         regressions: z.number().int().min(0),
       })
       .optional(),
+    // ── THE EXACT BYTES THIS ROUND EVALUATED (arch-review 71 P0-evolution) ─────────────────────────
+    //
+    // The round names a candidate VERSION, which is a label. Two different specs can wear one label — a
+    // candidate C1 is evaluated, C2 is saved under the same `id@version`, and the campaign has nothing to
+    // tell them apart with. Every later proof rests on this join, so it is recorded where the evaluation
+    // happened rather than reconstructed at adoption time (L3: provenance is born at the source).
+    //
+    // Taken from the candidate scorecard's OWN sealed manifest — the digest of the spec that batch ran.
+    // Optional because a built-in harness has no declarative spec to digest, and for the rows written
+    // before this existed; `campaignAdoption` decides what an absent one is worth.
+    candidateSpecDigest: z.string().optional(),
     // …and what the judges said about the candidate's account of itself (arch-review 71 P1-evolution).
     // Counted over the CANDIDATE side: the question is whether the thing being adopted tells the truth about
     // what it did. Optional for the rows written before this existed.
@@ -161,6 +172,9 @@ export const CampaignCloseSchema = z.object({
       kind: z.literal("adopted"),
       version: z.string().min(1),
       provingScorecardId: z.string().min(1),
+      // …and WHICH BYTES that version was when it was proved (arch-review 71 P0-evolution). A close that
+      // names only a label cannot be checked against what a registry later holds under that label.
+      candidateSpecDigest: z.string().optional(),
       // Identity axes adoption proceeded over under the frame's recorded waiver — empty on a clean adopt.
       waivedAxes: z.array(z.string().max(100)).default([]),
     }),

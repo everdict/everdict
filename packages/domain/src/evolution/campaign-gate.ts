@@ -12,7 +12,17 @@ import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 // whereas no_improvement and budget_exhausted are the campaign's own endings.
 
 export type CampaignGateAnswer =
-  | { kind: "adopt"; version: string; provingScorecardId: string; waivedAxes: string[] }
+  | {
+      kind: "adopt";
+      version: string;
+      provingScorecardId: string;
+      waivedAxes: string[];
+      // WHICH BYTES the adoption is about (arch-review 71 P0-evolution). The version is a label; two specs
+      // can wear one. An effect that consumes this answer can check what it is about to register against
+      // what was actually proved — and `undefined` says plainly that this round could not name them, which
+      // is a weaker adoption an operator can see rather than one that reads the same as a strong one.
+      candidateSpecDigest?: string;
+    }
   | { kind: "continue"; roundsLeft: number; consecutiveRejected: number }
   | { kind: "halt"; reason: "no_improvement" | "budget_exhausted" | "identity_unverified"; detail: string };
 
@@ -69,6 +79,10 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
       provingScorecardId: latest.candidateScorecardId,
       // Waived axes are RECORDED on the answer, so the adoption that proceeds over them says so durably.
       waivedAxes: frame.allowUnverifiedIdentity ? [...unverified] : [],
+      // …minted from the round that PROVED it, never re-derived at adoption time (L3).
+      ...(latest.verdict.candidateSpecDigest !== undefined
+        ? { candidateSpecDigest: latest.verdict.candidateSpecDigest }
+        : {}),
     };
   }
 

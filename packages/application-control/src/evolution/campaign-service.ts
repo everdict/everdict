@@ -36,6 +36,10 @@ export interface CampaignComparisonSide {
     // `record.scorecard.results` is the per-case `CaseResult[]` the detail read carries — the same rows the
     // analyst sees, so nothing new is fetched and nothing is re-derived from rendering.
     scorecard?: { results: ReadonlyArray<{ scores: Score[] }> };
+    // The digest of the spec that batch actually ran, sealed at submit. This is the join every later
+    // adoption proof rests on: a version label cannot tell an evaluated C1 from a saved C2 (arch-review 71
+    // P0-evolution).
+    manifest?: { harness?: { specDigest?: string } };
   };
 }
 
@@ -280,6 +284,10 @@ export class CampaignService {
           version: answer.version,
           provingScorecardId: answer.provingScorecardId,
           waivedAxes: answer.waivedAxes,
+          // …and WHICH BYTES were proved (arch-review 71 P0-evolution). A close that names only a label
+          // cannot be checked against whatever a registry later holds under that label, so a candidate
+          // substituted between the evaluation and the save is undetectable.
+          ...(answer.candidateSpecDigest !== undefined ? { candidateSpecDigest: answer.candidateSpecDigest } : {}),
         },
         at: this.now(),
         by,
@@ -416,6 +424,11 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
       improvements: heldOutCases.filter((c) => c.delta > 0).length,
       regressions: heldOutCases.filter((c) => c.delta < 0).length,
     },
+    // …and the exact bytes evaluated, so an adopted label can be checked against what a registry holds
+    // under it (arch-review 71 P0-evolution).
+    ...(snapshot.candidate.record.manifest?.harness?.specDigest !== undefined
+      ? { candidateSpecDigest: snapshot.candidate.record.manifest.harness.specDigest }
+      : {}),
     // …and the candidate's own judges on whether its account holds up (arch-review 71 P1-evolution).
     ...(observationsOf(snapshot.candidate) !== undefined ? { observations: observationsOf(snapshot.candidate) } : {}),
     unverifiedAxes,
