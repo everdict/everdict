@@ -218,10 +218,22 @@ machinery extended to cover them.
 
 > Status: **landed** (record + stores + pure gate + service + both transports + facts). `save_agent` now
 > carries the origin declaration too (fromIssue for a first version; a BUMP records the base it succeeds —
-> the service knows the ancestor, so the caller may not restate it), and the agent registry's list forwards
-> `versionOrigins`, so the adopted version's lineage reaches the graph on both families. Still open on this
-> track: a hard refusal of a campaign-candidate save that arrives WITHOUT the gate's `adopt` answer (today
-> the coupling is the settle tool's contract, not a guard).
+> the service knows the ancestor, and a caller restating its own family is REFUSED at every register door:
+> `capabilityOriginFor` takes the capability's `self` and rejects a same-family declared `from`, review
+> wave C), and the agent registry's list forwards `versionOrigins` all the way to the wire and the web
+> schema, so the adopted version's lineage reaches the graph on both families. The settlement itself was
+> review-hardened (wave A): the close CAS fences the ROUNDS COUNT as well as the state (a gate answer
+> computed over N rounds may not close a record holding N+1 — settle-vs-append race certified on real
+> Postgres, TRUST-183), `logRound` refuses identity drift (the candidate scorecard must have evaluated the
+> frame's subject at the declared version), `verdictOf` enforces the frame (scenario set, trials floor,
+> judge set — drift is non-comparable with the reason) and records CONFOUNDS (axes VERIFIED different,
+> never waivable) as their own verdict field, and the frozen significance + the caller's team ceiling ride
+> the diffSnapshot dependency so the identity checks read the documents the significance was computed
+> from. Derivation writes also preserve the owning team (wave C: re-pin reads the base's team through the
+> now-REQUIRED `teamOfVersion` port method; the agent bump reads its entity's team), and the MCP pin tool
+> authorizes against the entity's team like the route. Still open on this track: a hard refusal of a
+> campaign-candidate save that arrives WITHOUT the gate's `adopt` answer (today the coupling is the settle
+> tool's contract, not a guard).
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is
