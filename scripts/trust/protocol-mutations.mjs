@@ -2500,10 +2500,14 @@ const MUTATIONS = [
   {
     // evolution-lineage Track D. Zero significant regressions is half the adoption bar; dropping it lets a
     // candidate that broke a case ship on the strength of the cases it helped. The gate suite must notice.
+    //
+    // ⚠️ RE-AIMED in arch-review 71: adoption authority moved to the HELD-OUT population, so the counts this
+    // bar is about are `held.*` now. The invariant is unchanged and its line moved — which is exactly the
+    // failure the gate reports rather than silently testing nothing.
     name: "Track D — the adoption gate stops requiring zero regressions",
     file: "packages/domain/src/evolution/campaign-gate.ts",
-    from: "  return v.comparable && v.significantImprovements >= 1 && v.significantRegressions === 0;",
-    to: "  return v.comparable && v.significantImprovements >= 1;",
+    from: "  return held.improvements >= 1 && held.regressions === 0;",
+    to: "  return held.improvements >= 1;",
     build: "@everdict/domain",
     suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
   },
