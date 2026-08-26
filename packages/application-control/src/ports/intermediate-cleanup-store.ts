@@ -98,6 +98,18 @@ export interface IntermediateCleanupStore {
   complete(tenant: string, executionId: ExecutionId): Promise<boolean>;
   // The reconciler's worklist — RELEASED debts only, oldest first. A `retained` row is not work.
   due(now: string, limit: number): Promise<IntermediateCleanupDebt[]>;
+  // ── …AND THE ROWS NO SETTLEMENT WILL EVER RELEASE (arch-review 71, migration) ──────────────────────
+  //
+  // `retained` means "a recovery may still need these bytes", and the release now rides the settlement
+  // transaction — so a row written AFTER that change cannot get stuck. Rows written BEFORE it can: their
+  // settlement committed and the separate release call never ran, and `due()` correctly refuses to return
+  // them, so they are kept forever by a reconciler working exactly as designed.
+  //
+  // This is the worklist for the ONE owner allowed to fix that: stale retained rows, oldest first, for a
+  // sweeper that then asks the ledger whether their execution is actually terminal. It is NOT a second
+  // release path — nothing here decides anything, it only offers candidates (rule `protocol` L5: a debt
+  // owns its worklist, and a repair reads the same truth the settlement did).
+  staleRetained(olderThan: string, limit: number): Promise<IntermediateCleanupDebt[]>;
   // A deletion that did not converge. Backoff, never a terminal: "we could not find out" is an escalation
   // field (rule `protocol` L5), so the row stays owed and the attempt count is what an operator reads.
   deferred(operationId: string, error: string, nextAttemptAt: string): Promise<void>;
@@ -197,6 +209,14 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
     if (!debt || debt.state === "completed" || debt.state === "retained") return false;
     this.debts.set(k, { ...debt, state: "completed" });
     return true;
+  }
+
+  // No clock here, and none needed: this store lives for one process, so it cannot hold a row left behind by
+  // a settlement that committed before the release rode the transaction. The age filter is the Pg twin's,
+  // where the rows that need it actually are. Returning every retained row is safe because the SWEEPER —
+  // not this list — decides, by reading whether the execution is terminal.
+  async staleRetained(_olderThan: string, limit: number): Promise<IntermediateCleanupDebt[]> {
+    return [...this.debts.values()].filter((d) => d.state === "retained").slice(0, limit);
   }
 
   async due(now: string, limit: number): Promise<IntermediateCleanupDebt[]> {

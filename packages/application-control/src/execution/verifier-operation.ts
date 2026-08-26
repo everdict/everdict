@@ -56,9 +56,20 @@ export interface VerifierOperationDeps {
   // settlement lost a decision that had already been computed. Correct ordering, empty guarantee.
   //
   // The trade is real and it has two honest answers, so it is DECLARED rather than assumed:
-  //   `required`    — a write that did not land fails the acknowledgement, and therefore the lane's cleanup.
-  //                   The case ends `unmeasured` and the container may still be inspectable. This is what a
-  //                   deployment running private verifiers as constitutional evidence wants.
+  //   `required`    — a write that did not land fails the acknowledgement, so no verdict this deployment
+  //                   cannot recover is ever used. The case ends `unmeasured`. This is what a deployment
+  //                   running private verifiers as constitutional evidence wants.
+  //
+  //                   ⚠️ IT DOES NOT PRESERVE THE CONTAINER, and the first version of this comment said it
+  //                   might ("the container may still be inspectable"). It cannot: both managed lanes call
+  //                   the acknowledgement inside their `try` and delete the object in a `finally`, so a
+  //                   throw from here reaches the reclaim exactly as a success does. What `required` buys is
+  //                   REFUSAL — a false measured verdict is never accepted — not RE-HARVEST.
+  //
+  //                   Preserving the source is a different feature and a bigger one: the lane would need a
+  //                   teardown debt for the object it did not delete and a retention TTL to bound it, or a
+  //                   crash between the two would leak containers instead of bytes. Worth doing when
+  //                   forensics needs it; not claimed here until it is (arch-review 71 P2-lifecycle).
   //   `best_effort` — availability first: the verdict this process holds is still returned and used, and the
   //                   deployment accepts that a crash can lose it. The default, because it is what every
   //                   caller had before this existed.

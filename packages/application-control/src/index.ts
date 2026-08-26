@@ -88,6 +88,12 @@ export {
   stageAgentHalf,
 } from "./execution/agent-half.js";
 export {
+  type ExecutionDisposition,
+  RetainedMigrationSweeper,
+  type RetainedMigrationSweeperDeps,
+  type RetainedSweepTick,
+} from "./ops/retained-migration-sweeper.js";
+export {
   type CleanupTick,
   cleanupProbe,
   cleanupRemover,

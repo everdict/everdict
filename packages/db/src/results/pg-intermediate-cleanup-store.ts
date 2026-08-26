@@ -174,6 +174,25 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
     return rows.map(toDebt);
   }
 
+  // The rows no settlement will ever release (arch-review 71, migration). A row written before the release
+  // rode the settlement transaction can be `retained` on an execution that is already terminal: its
+  // settlement committed and the separate release call never ran. `due()` correctly refuses to return them,
+  // which is what keeps them forever.
+  //
+  // Age-filtered because a LIVE case is legitimately retained for as long as it runs: anything recent is a
+  // case in flight, not a leak. Candidates only — the sweeper reads the execution's terminal state before
+  // it flips anything.
+  async staleRetained(olderThan: string, limit: number): Promise<IntermediateCleanupDebt[]> {
+    const { rows } = await this.client.query<CleanupRow>(
+      `SELECT * FROM everdict_intermediate_cleanup
+        WHERE state = 'retained' AND updated_at <= $1::timestamptz
+        ORDER BY updated_at
+        LIMIT $2`,
+      [olderThan, limit],
+    );
+    return rows.map(toDebt);
+  }
+
   // A deletion that did not converge. Backoff and an attempt count an operator can read — never a terminal:
   // "we could not find out" is an escalation field (rule `protocol` L5), so the row stays owed.
   async deferred(operationId: string, error: string, nextAttemptAt: string): Promise<void> {
