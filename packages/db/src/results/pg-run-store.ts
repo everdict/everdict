@@ -234,7 +234,7 @@ export class PgRunStore implements RunStore {
     guard: RunUpdateGuard,
     // The caller's ambient ledger is on `stamp.attempts` and deliberately unused: the stamp must go through
     // the SAME transaction as the write, so a transaction-bound twin is handed to it instead.
-    stamp: AttemptStamp,
+    stamp?: AttemptStamp,
     release?: CleanupRelease,
   ): Promise<RunRecord | undefined> {
     return withTransaction(this.client, "the run settlement (attempt stamp + terminal write)", async (tx) => {
@@ -244,7 +244,7 @@ export class PgRunStore implements RunStore {
       // closes it. Inside one transaction the two writes commit together, but the GUARD still reads the row
       // as this transaction has left it — so settling first made the ledger refuse its own settlement, every
       // time. Being atomic is not the same as being ordered.
-      await stamp.apply(new PgExecutionAttemptStore(tx));
+      if (stamp !== undefined) await stamp.apply(new PgExecutionAttemptStore(tx));
       const settled = await this.updateOn(tx, id, patch, events, guard);
       // …and a refused fence takes the stamp with it. Thrown rather than returned, because ROLLBACK is this
       // helper's contract for a throw — the same shape `commitCase` uses for its own refused child write.

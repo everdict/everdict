@@ -350,12 +350,15 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
         ? {
             // The transaction, modelled: the settled row becomes visible only once the stamp has landed too,
             // so a stamp that throws leaves the run exactly as open as a ROLLBACK would.
-            async settleWith(id, patch, _events, guard, stamp) {
+            async settleWith(id, patch, _events, guard, stamp, release) {
               const cur = rows.get(id);
               if (!cur) return undefined;
               if (guard.expectNonTerminal === true && terminal(cur)) return undefined;
               order?.push(`settleWith:${patch.status}`);
-              await stamp.apply(stamp.attempts);
+              // Both riders are optional now: the seam is chosen by whether ANY effect must ride this
+              // decision, not by whether the attempt rider happens to be present (arch-review 71 P1).
+              if (stamp) await stamp.apply(stamp.attempts);
+              if (release) await release.apply(release.cleanup);
               const next = { ...cur, ...patch, id: cur.id };
               rows.set(id, next);
               return next;

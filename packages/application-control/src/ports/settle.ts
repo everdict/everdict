@@ -84,7 +84,16 @@ export async function settleRun(
   };
   // One fence, two ways to commit it — the condition above is built once so the atomic path can never be
   // guarded more weakly than the ordinary one (which is how five reviews' worth of forgotten fences happened).
-  if (opts?.stamp !== undefined && store.settleWith !== undefined)
-    return store.settleWith(id, patch, events, guard, opts.stamp, opts.release);
+  // ── ANY RIDER TAKES THE ATOMIC PATH (arch-review 71 P1) ───────────────────────────────────────────
+  //
+  // This asked `opts.stamp !== undefined`, which is a question about ONE rider rather than about the thing
+  // that matters: is there an effect that has to be born with this decision? A release-only settlement — the
+  // standalone cancel — answered no, fell through to `update`, and lost its release without a word.
+  //
+  // A seam gated on one rider silently demotes every rider added after it, and the next one will not make
+  // anybody re-read this line: it type checks, and the dropped field is optional.
+  const rides = opts?.stamp !== undefined || opts?.release !== undefined;
+  if (rides && store.settleWith !== undefined)
+    return store.settleWith(id, patch, events, guard, opts?.stamp, opts?.release);
   return store.update(id, patch, events, guard);
 }

@@ -18,9 +18,21 @@ export type CampaignGateAnswer =
 
 // A round is a WIN only when its comparison actually held: a non-comparable pair produced no significance
 // signal, and counts riding on it are not evidence.
+// ── …AND THE WIN IS DECIDED ON THE HELD-OUT POPULATION (arch-review 71 P1-high) ────────────────────
+//
+// This read the whole round's counts, so a candidate that improved only where the loop had been pushing —
+// and nowhere it was not allowed to look — adopted. The training set is the loop's own feedback; it is
+// evidence about the search, not about the capability.
+//
+// A round that cannot separate the two populations is NOT adoption evidence. Older rows have no `heldOut`
+// block, and treating their whole-round counts as held-out results would be reading a number that answers a
+// different question — so they lose, which is the fail-closed direction.
 function winning(round: CampaignRound): boolean {
   const v = round.verdict;
-  return v.comparable && v.significantImprovements >= 1 && v.significantRegressions === 0;
+  if (!v.comparable) return false;
+  const held = v.heldOut;
+  if (held === undefined) return false;
+  return held.improvements >= 1 && held.regressions === 0;
 }
 
 export function campaignAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {

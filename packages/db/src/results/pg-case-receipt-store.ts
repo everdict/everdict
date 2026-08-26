@@ -2,6 +2,7 @@ import type {
   CaseReceiptStore,
   CaseSettleOutcome,
   ExecutionAttemptStore,
+  IntermediateCleanupStore,
   RunStore,
 } from "@everdict/application-control";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@everdict/contracts";
 import { type SqlClient, withTransaction } from "../client.js";
 import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
+import { PgIntermediateCleanupStore } from "./pg-intermediate-cleanup-store.js";
 import { PgRunStore } from "./pg-run-store.js";
 
 interface ReceiptRow {
@@ -152,18 +154,30 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
   // state are one decision or none of them.
   async commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
-    // The caller's ambient run store and ledger — deliberately unused here: the settle must go through the
-    // SAME transaction as the claim, so transaction-bound twins are handed in instead. The parameters exist
-    // because the in-memory implementation has no transaction to bind one to.
+    settle: (
+      runs: RunStore,
+      attempts?: ExecutionAttemptStore,
+      cleanup?: IntermediateCleanupStore,
+    ) => Promise<RunRecord | undefined>,
+    // The caller's ambient stores — deliberately unused here: the settle must go through the SAME transaction
+    // as the claim, so transaction-bound twins are handed in instead. The parameters exist because the
+    // in-memory implementation has no transaction to bind one to.
     _runs: RunStore,
     _attempts?: ExecutionAttemptStore,
+    _cleanup?: IntermediateCleanupStore,
   ): Promise<CaseSettleOutcome> {
     try {
       return await withTransaction(this.client, "the case commit (receipt + child settle)", async (tx) => {
         const outcome = await this.commitOn(tx, receipt);
         if (outcome.kind === "already_committed") return outcome;
-        const settled = await settle(new PgRunStore(tx), new PgExecutionAttemptStore(tx));
+        // …and the cleanup ledger, bound to the SAME transaction (arch-review 71 P1). The release used to
+        // run after this commit returned, so a crash in the gap left an already-terminal case holding
+        // `retained` artifacts that `due()` never returns.
+        const settled = await settle(
+          new PgRunStore(tx),
+          new PgExecutionAttemptStore(tx),
+          new PgIntermediateCleanupStore(tx),
+        );
         // The fence refused the child's write → abort, which rolls the claim back too. Thrown (not returned)
         // because ROLLBACK is the transaction helper's contract for a throw; unwrapped below.
         if (settled === undefined) throw new UnsettledSignal();

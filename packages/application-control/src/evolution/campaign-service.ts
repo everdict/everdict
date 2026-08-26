@@ -372,10 +372,22 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
       );
   }
   const significant = comparison.trials.cases.filter((c) => c.significant);
+  // ── …AND THE HELD-OUT POPULATION, COUNTED APART (arch-review 71 P1-high) ──────────────────────────
+  //
+  // The whole-round counts are the loop's own feedback: it has been optimizing against the training
+  // scenarios, so improving there is evidence about the SEARCH, not about the capability. Adoption
+  // authority reads the held-out block (`campaignAdoption`), and this is where the frame's annotation
+  // finally decides something.
+  const heldOutIds = new Set(frame.scenarios.filter((sc) => sc.heldOut).map((sc) => sc.id));
+  const heldOutCases = significant.filter((c) => heldOutIds.has(c.caseId));
   return {
     comparable: true,
     significantImprovements: significant.filter((c) => c.delta > 0).length,
     significantRegressions: significant.filter((c) => c.delta < 0).length,
+    heldOut: {
+      improvements: heldOutCases.filter((c) => c.delta > 0).length,
+      regressions: heldOutCases.filter((c) => c.delta < 0).length,
+    },
     unverifiedAxes,
     confoundedAxes,
   };

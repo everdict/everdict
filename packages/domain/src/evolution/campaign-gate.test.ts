@@ -39,14 +39,29 @@ const round = (
     candidateVersion: `1.0.${seq}`,
     baselineScorecardId: "sc-base",
     candidateScorecardId: `sc-cand-${seq}`,
-    verdict: {
-      comparable: true,
-      significantImprovements: 0,
-      significantRegressions: 0,
-      unverifiedAxes: [],
-      confoundedAxes: [],
-      ...verdict,
-    },
+    verdict: ((): CampaignRound["verdict"] => {
+      const v = {
+        comparable: true,
+        significantImprovements: 0,
+        significantRegressions: 0,
+        unverifiedAxes: [],
+        confoundedAxes: [],
+        ...verdict,
+      };
+      // ── HELD-OUT MIRRORS THE ROUND HERE, ON PURPOSE (arch-review 71 P1-high) ──────────────────────
+      //
+      // Adoption authority comes from the held-out population now, and these cases are about the gate's
+      // OTHER axes — the recorded waiver, the rejection streak, the budget. Deriving the held-out block from
+      // the counts they set keeps each of them testing its own axis instead of silently becoming a
+      // held-out test. The separation itself is pinned in `held-out-authority.counterexample.test.ts`.
+      return {
+        ...v,
+        heldOut: v.heldOut ?? {
+          improvements: v.significantImprovements,
+          regressions: v.significantRegressions,
+        },
+      };
+    })(),
     at: "2026-08-26T00:00:00.000Z",
     by: "agent:everdict",
     ...over,

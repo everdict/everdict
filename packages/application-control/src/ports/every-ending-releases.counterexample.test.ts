@@ -100,18 +100,41 @@ const cancelledRun = (id: string): RunRecord => ({
   updatedAt: "2026-08-22T00:00:00.000Z",
 });
 
+// ⚠️ THIS DOUBLE HAS `settleWith`, AND THE FIRST VERSION DID NOT (arch-review 71 P1).
+//
+// Without it, `cleanupRider` sees no atomic seam, returns no release, and the cancel takes the
+// `dischargeStaged` fallback — which DOES release, so the test passed over a branch production never enters.
+// Every real deployment has `settleWith`, takes the atomic path, and (before this wave) dropped the release
+// entirely because the seam was gated on the ATTEMPT rider. A double that lacks the method under test proves
+// the other branch (rule `protocol`).
 function runStore(records: RunRecord[]) {
   const rows = new Map(records.map((r) => [r.id, r]));
+  const write = (id: string, patch: Partial<RunRecord>) => {
+    const cur = rows.get(id);
+    if (!cur) return undefined;
+    const next = { ...cur, ...patch, id: cur.id };
+    rows.set(id, next);
+    return next;
+  };
   return {
     async create(record: RunRecord) {
       rows.set(record.id, record);
     },
     async update(id: string, patch: Partial<RunRecord>) {
-      const cur = rows.get(id);
-      if (!cur) return undefined;
-      const next = { ...cur, ...patch, id: cur.id };
-      rows.set(id, next);
-      return next;
+      return write(id, patch);
+    },
+    // The atomic seam, in the only way an in-memory store can offer one: the riders run, then the write.
+    async settleWith(
+      id: string,
+      patch: Partial<RunRecord>,
+      _e: unknown,
+      _g: unknown,
+      stamp?: { attempts: unknown; apply: (a: unknown) => Promise<void> },
+      release?: { cleanup: unknown; apply: (c: unknown) => Promise<void> },
+    ) {
+      if (stamp) await stamp.apply(stamp.attempts);
+      if (release) await release.apply(release.cleanup);
+      return write(id, patch);
     },
     async get(id: string) {
       return rows.get(id);
@@ -153,5 +176,62 @@ describe("[R70 COUNTEREXAMPLE] a cancelled run releases what it staged", () => {
     const debt = cleanup.snapshot()[0];
     expect(debt?.state, "a cancelled run left its staged artifacts owed to nobody").not.toBe("retained");
     expect(removed, "the cancelled run's staged half was never collected").toContain("agent-half/r1.json");
+  });
+});
+
+// ── A PAUSED WRITER OUTLIVES THE SWEEP THAT DECLARED ITS BYTES ABANDONED (arch-review 71 P1) ────────
+//
+// arch-review 70 taught an unconfirmed ref to converge: probe the store, and `absent` means the write is not
+// coming, so the debt may close. That is right when the writer is finished and wrong while it is merely
+// paused — and `owe` runs BEFORE the put, so the paused window is a window the protocol creates on purpose:
+//
+//     loser:  owe(K) → PAUSE before put
+//     winner: canonical settlement → row gc_owed
+//     sweep:  probe K absent → ABANDONED → row completed
+//     loser:  resume → put(K) → confirm(K)      ← the object exists, owned by nobody
+//
+// `confirm` only flipped `written` on the ref; it could not move a settled row back to collectable. Before
+// the convergence arm the same race leaked RETRIES — noisy, visible, and the row stayed owed so the late put
+// was eventually collected. After it, the race leaks an OBJECT and nothing is left looking.
+//
+// `owe` already re-opens a settled row when a stage arrives late. `confirm` is the same event from the other
+// side and must do the same thing: bytes have just been proven to EXIST under a debt somebody already closed.
+//
+// Seen RED before confirm re-opened, observed:
+//   a late writer's object was left with no debt naming it: expected 'completed' to be 'gc_owed'
+
+describe("[R71 COUNTEREXAMPLE] a write that lands after the sweep is owed again", () => {
+  it("RE-OPENS a completed debt when a paused writer finally confirms its bytes", async () => {
+    const cleanup = new InMemoryIntermediateCleanupStore();
+    const key = "agent-half/paused-writer.json";
+    // The loser records its debt and then stalls before the put.
+    await cleanup.owe({ tenant: "acme", executionId: EXECUTION, refs: [{ key, digest: "sha256:k" }] });
+    // The winner settles and the sweep converges: the bytes are absent, so the ref is abandoned and the debt
+    // closes. Everything here is correct given what the sweep could see.
+    await cleanup.releaseForGc("acme", EXECUTION);
+    expect(await cleanup.complete("acme", EXECUTION)).toBe(true);
+
+    // …and now the paused writer wakes up and its put lands.
+    await cleanup.confirm({ tenant: "acme", executionId: EXECUTION, keys: [key] });
+
+    const debt = cleanup.snapshot()[0];
+    expect(debt?.state, "a late writer's object was left with no debt naming it").toBe("gc_owed");
+    const due = await cleanup.due(new Date(Date.now() + 60_000).toISOString(), 50);
+    expect(
+      due.flatMap((d) => d.refs.filter((r) => r.written === true).map((r) => r.key)),
+      "the orphaned object is in nobody's worklist",
+    ).toContain(key);
+  });
+
+  it("leaves an ordinary mid-case confirm exactly as it was", async () => {
+    // The control. Confirming during a live execution must not make anything collectable — that is the
+    // retention the whole ledger exists for.
+    const cleanup = new InMemoryIntermediateCleanupStore();
+    const key = "agent-half/live.json";
+    await cleanup.owe({ tenant: "acme", executionId: EXECUTION, refs: [{ key, digest: "sha256:l" }] });
+
+    await cleanup.confirm({ tenant: "acme", executionId: EXECUTION, keys: [key] });
+
+    expect(cleanup.snapshot()[0]?.state, "a live case's artifacts became collectable mid-run").toBe("retained");
   });
 });

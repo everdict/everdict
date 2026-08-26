@@ -26,7 +26,13 @@ import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
 import { requireAdopted } from "../ports/execution-attempt-store.js";
-import { dischargeIntermediates, removeStagedObject } from "../ports/intermediate-cleanup-store.js";
+import {
+  type ReleasedCleanup,
+  collectReleased,
+  dischargeIntermediates,
+  probeStagedObject,
+  removeStagedObject,
+} from "../ports/intermediate-cleanup-store.js";
 import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
@@ -440,6 +446,8 @@ export class CaseOutcomeCommitter {
     // `failed` is a terminal outcome of a REAL execution, not a supersede: the case ended here, with this
     // attempt's frozen failure as the answer.
     const terminalState: ExecutionAttemptState = input.outcome === "failed" ? "failed" : "committed";
+    // What the in-transaction release freed, collected after the commit (arch-review 71 P1).
+    let freed: ReleasedCleanup | undefined;
     const outcome = await receipts
       .commitCase(
         this.receiptOf(input.scorecardId, covered, {
@@ -455,7 +463,15 @@ export class CaseOutcomeCommitter {
           judges: input.judges,
           ...(input.sealedJudges ? { sealedJudges: input.sealedJudges } : {}),
         }),
-        async (runs, attempts) => {
+        async (runs, attempts, cleanup) => {
+          // ── THE RELEASE RIDES THIS TRANSACTION (arch-review 71 P1) ──────────────────────────────────
+          //
+          // It used to run after `commitCase` returned, so a crash in the gap left `child = succeeded ·
+          // receipt = committed · attempts = committed · cleanup = retained` — and `due()` returns only
+          // released states, so an already-terminal case kept its artifacts forever. The standalone lane
+          // learned this in arch-review 70; this is its sibling, closed for the same reason.
+          if (cleanup !== undefined && input.tenant !== undefined)
+            freed = await cleanup.releaseForGc(input.tenant, storedExecutionId(input.executionId));
           const settled = await this.settleChildOn(
             runs,
             childId,
@@ -563,6 +579,9 @@ export class CaseOutcomeCommitter {
         },
         runStore,
         this.deps.attempts,
+        // …and the cleanup ledger, so a store with a transaction binds a twin and the release rides the
+        // commit (arch-review 71 P1). Absent = this deployment has no ledger and nothing changes.
+        this.deps.cleanup,
       )
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
@@ -584,15 +603,19 @@ export class CaseOutcomeCommitter {
       // SUCCESSFUL ending happened to carry. The debt is a row written when the bytes were staged, so this
       // discharge covers the endings that carry no document at all, and a delete that does not converge
       // leaves the row owed for the reconciler instead of vanishing with this process.
-      if (input.tenant !== undefined)
-        await dischargeIntermediates(
-          {
-            ...(this.deps.cleanup ? { cleanup: this.deps.cleanup } : {}),
-            remove: removeStagedObject(this.deps),
-          },
-          input.tenant,
-          storedExecutionId(input.executionId),
-        );
+      // The OBJECTS, after the commit. The state flip already rode the transaction above; deleting is the
+      // latency optimization whose failure costs nothing because the reconciler owns convergence. A store
+      // that could not bind a cleanup twin freed nothing, so it keeps the two-step discharge it had.
+      if (input.tenant !== undefined) {
+        const collectDeps = {
+          ...(this.deps.cleanup ? { cleanup: this.deps.cleanup } : {}),
+          remove: removeStagedObject(this.deps),
+          probe: probeStagedObject(this.deps),
+        };
+        if (freed !== undefined)
+          await collectReleased(collectDeps, freed, input.tenant, storedExecutionId(input.executionId));
+        else await dischargeIntermediates(collectDeps, input.tenant, storedExecutionId(input.executionId));
+      }
       // The fact is already persisted (it rode the commit transaction); this is only the live-bus nudge.
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);

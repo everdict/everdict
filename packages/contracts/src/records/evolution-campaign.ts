@@ -21,32 +21,61 @@ export type CampaignSubject = z.infer<typeof CampaignSubjectSchema>;
 
 // The frozen half of the campaign. Everything the adoption decision depends on is HERE, at open — a value
 // that arrived later would be a rule the loop chose after seeing the data.
-export const CampaignFrameSchema = z.object({
-  subject: CampaignSubjectSchema,
-  // Scenario/case ids, with the held-out ones marked. The skill's discipline (≥2 held out) is authored
-  // here once and then immutable.
-  scenarios: z
-    .array(z.object({ id: z.string().min(1).max(300), heldOut: z.boolean().default(false) }))
-    .min(1)
-    .max(500),
-  judges: z.array(z.string().min(1).max(200)).default([]),
-  trialsPerCase: z.number().int().min(1).max(100),
-  // The budget is ROUNDS: one round = one hypothesis = one baseline↔candidate comparison. Trials/scenarios
-  // are fixed above, so rounds is the axis a runaway loop spends on.
-  budget: z.object({ maxRounds: z.number().int().min(1).max(1000) }),
-  stopAfterRejectedRounds: z.number().int().min(1).max(100).default(3),
-  // Significance settings, frozen with everything else the verdict depends on.
-  significance: z
-    .object({
-      fdrAlpha: z.number().gt(0).lt(1).optional(),
-      minDelta: z.number().min(0).max(1).optional(),
-    })
-    .default({}),
-  // The RECORDED waiver for adopting over an unverified world-identity axis. Absent/false = the gate
-  // refuses (`identity_unverified`) — an optimization verdict on an unverifiable world is the claim this
-  // product exists to prevent.
-  allowUnverifiedIdentity: z.boolean().default(false),
-});
+export const CampaignFrameSchema = z
+  .object({
+    subject: CampaignSubjectSchema,
+    // Scenario/case ids, with the held-out ones marked. The skill's discipline (≥2 held out) is authored
+    // here once and then immutable.
+    scenarios: z
+      .array(z.object({ id: z.string().min(1).max(300), heldOut: z.boolean().default(false) }))
+      .min(1)
+      .max(500),
+    judges: z.array(z.string().min(1).max(200)).default([]),
+    trialsPerCase: z.number().int().min(1).max(100),
+    // The budget is ROUNDS: one round = one hypothesis = one baseline↔candidate comparison. Trials/scenarios
+    // are fixed above, so rounds is the axis a runaway loop spends on.
+    budget: z.object({ maxRounds: z.number().int().min(1).max(1000) }),
+    stopAfterRejectedRounds: z.number().int().min(1).max(100).default(3),
+    // Significance settings, frozen with everything else the verdict depends on.
+    significance: z
+      .object({
+        fdrAlpha: z.number().gt(0).lt(1).optional(),
+        minDelta: z.number().min(0).max(1).optional(),
+      })
+      .default({}),
+    // The RECORDED waiver for adopting over an unverified world-identity axis. Absent/false = the gate
+    // refuses (`identity_unverified`) — an optimization verdict on an unverifiable world is the claim this
+    // product exists to prevent.
+    allowUnverifiedIdentity: z.boolean().default(false),
+  })
+  // ── THE DISCIPLINE IS ENFORCED HERE, NOT DESCRIBED (arch-review 71 P1-high) ────────────────────────
+  //
+  // The comment above said "the skill's discipline (>=2 held out) is authored here once and then immutable"
+  // and the schema required `scenarios.min(1)` with `heldOut` defaulting to false. So a campaign with zero
+  // held-out scenarios was valid, and the gate — which never read `heldOut` either — adopted on training
+  // gains. An annotation the validator does not enforce and the decision does not read is documentation.
+  //
+  // Two, not one: a single case that moved is exactly what a loop optimizing against a small set produces
+  // by chance, so one held-out scenario is a coin flip wearing the word evidence.
+  //
+  // Ids are unique because the gate compares scenario-id SETS across the two sides, and duplicates make that
+  // comparison weaker than it reads as — and make "how many held-out scenarios are there" unanswerable.
+  .superRefine((frame, ctx) => {
+    const ids = frame.scenarios.map((s) => s.id);
+    if (new Set(ids).size !== ids.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["scenarios"],
+        message: "scenario ids must be unique — the gate compares the two sides by id set",
+      });
+    const held = frame.scenarios.filter((s) => s.heldOut).length;
+    if (held < 2)
+      ctx.addIssue({
+        code: "custom",
+        path: ["scenarios"],
+        message: `a campaign needs at least 2 held-out scenarios to have adoption evidence (this frame has ${held})`,
+      });
+  });
 export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 
 // One hypothesis tested. The verdict is DERIVED by the service from the one production diff predicate
@@ -64,6 +93,21 @@ export const CampaignRoundSchema = z.object({
     comparable: z.boolean(),
     significantImprovements: z.number().int().min(0),
     significantRegressions: z.number().int().min(0),
+    // ── …AND THE HELD-OUT POPULATION, COUNTED APART (arch-review 71 P1-high) ───────────────────────
+    //
+    // The counts above are the whole round, and the gate won on them — so a candidate that improved only
+    // where the loop had been pushing adopted. That is the loop grading the homework it was optimizing
+    // against, which is the single thing a held-out set exists to prevent.
+    //
+    // Held-out is where the claim has to hold, so it is counted separately and it is what the gate reads.
+    // Optional for the rows written before this existed: a round that cannot say is not adoption evidence,
+    // which `campaignAdoption` enforces rather than assuming.
+    heldOut: z
+      .object({
+        improvements: z.number().int().min(0),
+        regressions: z.number().int().min(0),
+      })
+      .optional(),
     // Experiment-identity axes the diff could not verify (execution_world, …). Non-empty blocks adoption
     // unless the frame recorded the waiver at open.
     unverifiedAxes: z.array(z.string().max(100)).default([]),

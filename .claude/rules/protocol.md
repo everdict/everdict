@@ -373,6 +373,51 @@ the missing wiring is indistinguishable from a deployment that legitimately has 
 - Grep for the producer before writing the consumer. `deps.x?.y()` with zero production writers of `x` is
   dead code wearing a comment.
 
+## AN ATOMIC SEAM IS SELECTED BY THE EFFECT, NEVER BY WHICH RIDER HAPPENED TO COME FIRST
+arch-review 70 gave the settlement a `CleanupRelease` rider so the release could ride the transaction. The
+seam that chooses the transactional path was left as it was:
+
+    if (opts?.stamp !== undefined && store.settleWith !== undefined)   // ← the ATTEMPT rider, only
+
+The standalone cancel passes a release and no stamp. So the atomic path is skipped, `opts.release` is dropped
+on the floor, the caller's `collect()` finds nothing freed, and the row stays `retained` — which `due()` never
+returns. The fix for the leak was inert on every deployment with a real Postgres, one wave after it shipped
+(arch-review 71 P1).
+
+    a rider exists   ≠   this settlement takes the path that honours riders
+
+- **The condition is "is there any effect that must be born with this decision", not "is THIS rider here".**
+  A seam gated on one rider silently demotes every other rider added later, and adding the next one will not
+  make anybody re-read the condition — it type checks, and the dropped field is optional.
+- **When a second rider joins a seam, the seam's own predicate is part of the change.** Grep the condition,
+  not just the call site.
+- ⚠️ AND THE COUNTEREXAMPLE HAS TO USE A STORE THAT HAS THE ATOMIC METHOD. Mine did not: its double omitted
+  `settleWith`, so the code took the non-transactional fallback — which DOES release — and the test passed
+  over a production path it never entered. That is the adapter-divergence law below, hit while fixing
+  something else. A double that lacks the method under test proves the other branch.
+
+## A FIX CAN CREATE THE NEXT DEFECT BY CLOSING THE LOUDER HALF
+The same wave taught an unconfirmed artifact ref to converge: probe the store, and `absent` means the write is
+not coming, so the debt may close (`abandoned`). That is right when the writer is finished and wrong while it
+is merely paused:
+
+    loser:  owe(K) → PAUSE before put
+    winner: settlement → row gc_owed
+    sweep:  probe K absent → abandoned → row COMPLETED
+    loser:  resume → put(K) → confirm(K)      ← the object now exists, owned by nobody
+
+Before the convergence arm this leaked RETRIES — noisy, visible, and the row stayed owed, so the late put was
+eventually collected. After it, the same race leaks an OBJECT and nothing is left looking (arch-review 71 P1).
+
+- **`absent` is a fact about the store, not about the writer.** Concluding "the write is not coming" needs the
+  WRITER to be provably done: its attempt terminal, or a write lease expired. Otherwise the probe has read a
+  moment, not an outcome.
+- **When a change turns a loud failure into a quiet one, say which failure replaced which.** A retry storm is
+  a worse day and a better signal than a silent orphan; trading them is a decision, and it was made here
+  without being noticed.
+- The mirror already existed and was not applied: `owe` re-opens a settled row when a stage arrives late.
+  `confirm` on a settled row is the same event from the other side and does nothing.
+
 ## A CALLBACK THAT RAN IS NOT BYTES THAT LANDED
 arch-review 67 moved the agent handover to the right MOMENT — the backend calls `acknowledgeResult` inside
 its try, before the `finally` that reclaims the container — and arch-review 69 made the Scheduler carry it.

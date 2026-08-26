@@ -1,6 +1,7 @@
 import { type CaseCommitOutcome, type CaseCommitReceipt, type ReadResult, readOrUnknown } from "@everdict/contracts";
 import type { RunRecord } from "@everdict/contracts";
 import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
+import type { IntermediateCleanupStore } from "./intermediate-cleanup-store.js";
 import type { RunStore } from "./run-store.js";
 
 // ── WHERE A CASE'S CANONICAL OUTCOME IS DECIDED (review 39 P0 · review 40 P0) ────────────────────────
@@ -54,14 +55,29 @@ export interface CaseReceiptStore {
   // the same transaction by the same rule as `runs`; `undefined` means no ledger is wired and there is
   // nothing to stamp. A throw from that stamp aborts the commit exactly like any other store fault — the
   // ledger could not record what the receipt is about to claim, so the receipt is not made.
+  // ── …AND THE INTERMEDIATES THIS CASE FREES (arch-review 71 P1) ─────────────────────────────────────
+  //
+  // The standalone lane learned in arch-review 70 that the write making an outcome canonical is the write
+  // making its intermediates collectable. This lane did not: `dischargeIntermediates` ran after `commitCase`
+  // returned, so a crash in the gap left `child = succeeded · receipt = committed · attempts = committed ·
+  // cleanup = retained` — and `due()` returns only released states, so an already-terminal case kept its
+  // artifacts forever. One lane fixed, its sibling left, for the ninth time in this review series.
+  //
+  // Same binding rule as `attempts`: an implementation that can open a transaction hands the callback a
+  // transaction-bound twin; one that cannot hands back the ambient store and keeps the window it had.
   commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
+    settle: (
+      runs: RunStore,
+      attempts?: ExecutionAttemptStore,
+      cleanup?: IntermediateCleanupStore,
+    ) => Promise<RunRecord | undefined>,
     runs: RunStore,
     // The caller's ambient ledger, for the implementations that cannot bind one to a transaction — the same
     // seam `runs` is, and passed by the caller rather than wired at construction so the store the service
     // stamps through can never drift from the one it opened the attempt on.
     attempts?: ExecutionAttemptStore,
+    cleanup?: IntermediateCleanupStore,
   ): Promise<CaseSettleOutcome>;
   // Every receipt of one batch — the parent's aggregation input, and the parity check against the ledger.
   list(scorecardId: string): Promise<CaseCommitReceipt[]>;
@@ -98,13 +114,18 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
 
   async commitCase(
     receipt: CaseCommitReceipt,
-    settle: (runs: RunStore, attempts?: ExecutionAttemptStore) => Promise<RunRecord | undefined>,
+    settle: (
+      runs: RunStore,
+      attempts?: ExecutionAttemptStore,
+      cleanup?: IntermediateCleanupStore,
+    ) => Promise<RunRecord | undefined>,
     runs: RunStore,
     // Handed straight back, like `runs`: a single-process store has no transaction to bind a twin to. What it
     // therefore cannot give is ROLLBACK — a stamp that throws leaves this store's receipt unmade (the decision
     // is un-happened, which is the guarantee that matters) but cannot un-write what the settle already wrote.
     // The Pg twin is where the promotion is atomic; this one keeps the ordering and the refusal.
     attempts?: ExecutionAttemptStore,
+    cleanup?: IntermediateCleanupStore,
   ): Promise<CaseSettleOutcome> {
     const key = InMemoryCaseReceiptStore.key(receipt);
     const prior = this.commits.get(key) ?? Promise.resolve();
@@ -113,7 +134,7 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
       if (existing) return { kind: "already_committed", receipt: existing };
       // The settle runs BEFORE the claim is visible, exactly like the Pg transaction: a throw or a refusal
       // leaves no receipt behind. Serialization above is what makes check-settle-set atomic here.
-      const settled = await settle(runs, attempts);
+      const settled = await settle(runs, attempts, cleanup);
       if (settled === undefined) return { kind: "unsettled" };
       this.receipts.set(key, receipt);
       return { kind: "committed", receipt };

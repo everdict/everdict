@@ -118,6 +118,10 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
            ), '[]'::jsonb)
            FROM jsonb_array_elements(refs) AS r
          ),
+         -- …and a confirm arriving AFTER the sweep re-opens the debt (arch-review 71 P1). owe precedes the
+         -- put, so a writer can be paused between them; the sweep probes an absent key, correctly closes the
+         -- debt, and then the put lands. Bytes proven to exist under a settled debt are collectable NOW.
+         state = CASE WHEN everdict_intermediate_cleanup.state = 'retained' THEN 'retained' ELSE 'gc_owed' END,
          updated_at = now()
        WHERE operation_id = $1 AND tenant = $2`,
       [operationIdOf(input.tenant, input.executionId), input.tenant, input.keys],

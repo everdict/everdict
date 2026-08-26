@@ -231,9 +231,16 @@ export interface RunStore extends AdmissionLedger {
     patch: Partial<RunRecord>,
     events: OutboxEvent[] | undefined,
     guard: RunUpdateGuard,
-    stamp: AttemptStamp,
+    // ── EVERY RIDER IS OPTIONAL, BECAUSE THE SEAM IS CHOSEN BY THE EFFECT (arch-review 71 P1) ────────
+    //
+    // `stamp` was required, so the caller that chose this path had to have one — and the seam's predicate was
+    // written to match (`if (opts.stamp && store.settleWith)`). The standalone cancel has a RELEASE and no
+    // stamp, so it silently took the non-transactional path and its release was dropped on the floor: the fix
+    // for the cleanup leak was inert on every deployment with a real Postgres, one wave after it shipped.
+    //
+    // Both riders are optional now and the seam asks whether ANY of them is present.
+    stamp?: AttemptStamp,
     // …and the intermediates this settlement frees, flipped in the SAME transaction (arch-review 70 P1).
-    // Optional: a lane with no cleanup ledger settles exactly as it did.
     release?: CleanupRelease,
   ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;

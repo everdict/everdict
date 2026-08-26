@@ -19,8 +19,12 @@ import { InMemoryEvolutionCampaignStore, PgEvolutionCampaignStore } from "./camp
 
 const frame: CampaignFrame = {
   subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
+  // Both HELD OUT (arch-review 71 P1-high). The frame used to mark `c1` as training and these cases then
+  // improved on `c1` alone — which the gate accepted, and which is exactly the defect the held-out split
+  // closes: the loop adopting on the scenarios it had been optimizing against. The schema also requires at
+  // least two held-out scenarios now, because one that moved is a coin flip wearing the word evidence.
   scenarios: [
-    { id: "c1", heldOut: false },
+    { id: "c1", heldOut: true },
     { id: "c2", heldOut: true },
   ],
   judges: [],
@@ -288,6 +292,10 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       comparable: true,
       significantImprovements: 1,
       significantRegressions: 0,
+      // The population adoption authority actually reads (arch-review 71 P1-high). Both scenarios in this
+      // frame are held out, so the one significant improvement is a held-out one — which is why the gate
+      // below still answers `adopt`. On a training-only improvement it would answer `continue`.
+      heldOut: { improvements: 1, regressions: 0 },
       unverifiedAxes: [],
       confoundedAxes: [],
     });

@@ -166,8 +166,19 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
     const k = this.key(input.tenant, input.executionId);
     const debt = this.debts.get(k);
     if (!debt) return;
+    // ── …AND A CONFIRM THAT ARRIVES AFTER THE SWEEP RE-OPENS THE DEBT (arch-review 71 P1) ────────────
+    //
+    // `owe` precedes the put, so a writer can be PAUSED between them — and the settlement's sweep, probing an
+    // absent key, correctly concludes the write is not coming and closes the debt. Then the writer wakes up
+    // and its put lands: an object exists that no row names, and nothing is left looking for it.
+    //
+    // This is the mirror of `owe`'s own guard. Bytes have just been proven to EXIST under a debt somebody
+    // already settled, so they are collectable NOW — the case they belong to is over. Leaving the row
+    // `completed` is what makes the orphan permanent.
+    const settled = debt.state !== "retained";
     this.debts.set(k, {
       ...debt,
+      ...(settled ? { state: "gc_owed" as const } : {}),
       refs: debt.refs.map((r) => (input.keys.includes(r.key) ? { ...r, written: true } : r)),
     });
   }

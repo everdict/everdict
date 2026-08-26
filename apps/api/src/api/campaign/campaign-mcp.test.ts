@@ -20,7 +20,7 @@ const unusedDispatcher: Dispatcher = {
 const frame: CampaignFrame = {
   subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
   scenarios: [
-    { id: "c1", heldOut: false },
+    { id: "c1", heldOut: true },
     { id: "c2", heldOut: true },
   ],
   judges: [],
