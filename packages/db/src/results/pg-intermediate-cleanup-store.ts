@@ -82,7 +82,13 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
               ORDER BY r ->> 'key', (r ->> 'written') NULLS LAST
            ) AS merged
          ),
-         state = 'retained',
+         -- ── …BUT NOT BACK INTO RETENTION ONCE THE EXECUTION HAS SETTLED (arch-review 70 P1) ────────
+         -- retained means "a recovery may still need these bytes", which stops being true at the
+         -- settlement. A speculative LOSER staging after the winner completed used to flip this row back and
+         -- then release nothing, and due() never returns a retained row. A late stage is owed COLLECTABLE.
+         -- (No backticks in here: this is inside a JS template literal and one would close the string. Same
+         -- trap as arch-review 67, hit again in 70.)
+         state = CASE WHEN everdict_intermediate_cleanup.state = 'retained' THEN 'retained' ELSE 'gc_owed' END,
          next_attempt_at = NULL,
          updated_at = now()
        RETURNING *`,

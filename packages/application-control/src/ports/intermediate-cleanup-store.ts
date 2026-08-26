@@ -138,9 +138,17 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
       tenant: input.tenant,
       executionId: input.executionId,
       refs,
-      // A re-stage after a completed sweep re-opens the debt as RETAINED: new bytes exist and the case that
-      // wrote them is not finished, whatever happened to the older ones.
-      state: "retained",
+      // ── …BUT NOT BACK INTO RETENTION ONCE THE EXECUTION HAS SETTLED (arch-review 70 P1) ──────────
+      //
+      // This read "a re-stage re-opens the debt as RETAINED: new bytes exist and the case that wrote them is
+      // not finished". That is true for a RETRY of a live execution and false for the case that actually
+      // produces late writes: a speculative LOSER, still in flight when the winner settled. It staged, flipped
+      // the completed row back to `retained`, then lost its own commit and released nothing — and `due()`
+      // never returns a retained row, so a terminal execution kept its artifacts forever.
+      //
+      // `retained` means "a recovery may still need these bytes". After the settlement that is false, so a
+      // stage arriving afterwards is owed COLLECTABLE and the sweep takes it. Nothing is waiting for it.
+      state: prior !== undefined && prior.state !== "retained" ? "gc_owed" : "retained",
       attempts: prior?.attempts ?? 0,
     };
     this.debts.set(k, debt);
@@ -221,9 +229,63 @@ export function removeStagedObject(stores: {
   };
 }
 
+// …and the ASK, routed the same way. A store fault is `unknown`, never "absent" — reading a fault as absence
+// is what would let a settlement certify a deletion it never made (rule `protocol` L2).
+export function probeStagedObject(stores: {
+  agentHalves?: { get(key: string): Promise<Uint8Array | undefined> };
+  verdicts?: { get(key: string): Promise<Uint8Array | undefined> };
+}): ArtifactProbe {
+  return async (key: string) => {
+    const store = key.startsWith("verifier-verdict/") ? stores.verdicts : stores.agentHalves;
+    if (!store) return "unknown"; // nothing here can answer for this prefix, and silence is not absence
+    try {
+      return (await store.get(key)) !== undefined ? "present" : "absent";
+    } catch {
+      return "unknown";
+    }
+  };
+}
+
 // The settlement's half, in one place so both lanes spend it the same way. Reads what the execution owes,
 // deletes it best-effort, and marks the debt paid ONLY when every delete converged — an unconfirmed delete
 // leaves the row owed for the reconciler, which is the difference between a cleanup and a lifecycle.
+// ── A PLANNED WRITE IS NOT A WRITTEN ARTIFACT (arch-review 70 P1) ──────────────────────────────────
+//
+// `owe` precedes the put deliberately, so a ref can name bytes that do not exist. The reconciler respected
+// that — `written !== true` → do not delete, defer — and the INLINE discharge did not: it removed every
+// released ref without looking. Deleting an absent key succeeds on every object store, so the settlement
+// completed a debt whose put was still in flight, and when that put landed the object had no owner.
+//
+// One ref, two readings. That is L5's "one verifier, one durable wrapper" broken for artifacts, so this is
+// the one evaluator both paths spend.
+//
+// And the half that remained even with the inline path fixed: an unconfirmed ref was deferred FOREVER. If the
+// writer died and the write genuinely failed, `written` never becomes true and the row retries until a human
+// looks at it. "The put is still in flight" and "the put will never land" are different states, and the only
+// thing that can tell them apart is the object store itself.
+export type ArtifactWriteState = "written" | "abandoned" | "unknown";
+
+// Probe a key the way L2 requires: present, absent, or WE COULD NOT FIND OUT. A store fault must never read
+// as "the object is gone", which is the reading that would let a sweep certify a deletion it never made.
+export type ArtifactProbe = (key: string) => Promise<"present" | "absent" | "unknown">;
+
+// What to do with one released ref, decided once for both the inline discharge and the reconciler.
+//
+//   confirmed written        delete it
+//   unconfirmed, present     the put landed and the confirm did not — delete it
+//   unconfirmed, absent      the write is not coming; nothing to delete, and the debt may close (ABANDONED)
+//   unconfirmed, unreadable  we could not find out — the row stays owed (rule `protocol` L2/L5)
+//
+// The `absent` arm is safe precisely because this runs AFTER the canonical settlement: the execution that
+// would have written those bytes is over, and since arch-review 70 a put that threw propagates rather than
+// being swallowed, so an absent key here is a write that genuinely never landed.
+export async function evaluateRef(ref: ArtifactRef, probe: ArtifactProbe | undefined): Promise<ArtifactWriteState> {
+  if (ref.written === true) return "written";
+  if (probe === undefined) return "unknown"; // no way to ask: the old behaviour, held open for the next sweep
+  const seen = await probe(ref.key);
+  return seen === "present" ? "written" : seen === "absent" ? "abandoned" : "unknown";
+}
+
 // ── THE TWO HALVES OF A DISCHARGE, SEPARABLE BECAUSE ONE OF THEM IS ATOMIC (arch-review 70 P1) ─────
 //
 // `retained → gc_owed` must ride the settlement transaction; the object deletes must NOT (a remote round
@@ -231,7 +293,7 @@ export function removeStagedObject(stores: {
 // discharge is two functions, and `dischargeIntermediates` below is simply both of them for the lanes whose
 // store cannot open a transaction.
 export async function collectReleased(
-  deps: { cleanup?: IntermediateCleanupStore; remove: (key: string) => Promise<void> },
+  deps: { cleanup?: IntermediateCleanupStore; remove: (key: string) => Promise<void>; probe?: ArtifactProbe },
   released: ReleasedCleanup,
   tenant: string,
   executionId: ExecutionId,
@@ -240,6 +302,14 @@ export async function collectReleased(
   let deleted = 0;
   const failures: string[] = [];
   for (const ref of released.refs) {
+    // THE SAME READING THE SWEEP MAKES (arch-review 70 P1). This loop used to remove every ref without
+    // looking at `written`, which completed debts whose put was still in flight.
+    const state = await evaluateRef(ref, deps.probe);
+    if (state === "unknown") {
+      failures.push(`${ref.key}: never confirmed written, and the store would not say whether it exists`);
+      continue;
+    }
+    if (state === "abandoned") continue; // the write never landed; there is nothing to delete and nothing owed
     try {
       await deps.remove(ref.key);
       deleted += 1;
@@ -262,6 +332,9 @@ export async function dischargeIntermediates(
   deps: {
     cleanup?: IntermediateCleanupStore;
     remove: (key: string) => Promise<void>;
+    // …and how to ASK whether a ref's bytes exist, so an unconfirmed one converges instead of being deleted
+    // blind or deferred forever (arch-review 70 P1).
+    probe?: ArtifactProbe;
   },
   tenant: string,
   executionId: ExecutionId,

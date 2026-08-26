@@ -19,6 +19,7 @@ import {
   TaskService,
   TeamService,
   WorkflowStateService,
+  cleanupProbe,
   cleanupRemover,
   collectDeferredTrace,
   registryLatestVersionResolver,
@@ -1005,6 +1006,11 @@ async function main(): Promise<void> {
     const cleanupReconciler = new IntermediateCleanupReconciler({
       cleanup: intermediateCleanup,
       remove: cleanupRemover({ agentHalves: artifacts, verdicts: artifacts }),
+      // …and how to ASK whether a ref's bytes exist (arch-review 70 P1). Without it an unconfirmed ref is
+      // deferred forever: `written` never becomes true once its writer has died, so the row retries until a
+      // human looks at it. With it the sweep resolves the ref — present → delete, absent → abandoned,
+      // unreadable → still owed.
+      probe: cleanupProbe({ agentHalves: artifacts, verdicts: artifacts }),
     });
     setInterval(
       whenLeader(leader, () => void cleanupReconciler.tick().catch(() => {})),

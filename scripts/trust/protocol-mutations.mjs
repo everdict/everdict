@@ -2081,6 +2081,26 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 70 P1. `owe` reopened a settled row unconditionally, so a late speculative loser dragged a
+    // completed execution back into `retained` — a state `due()` never returns.
+    name: "cleanup retention — a late loser reopens a settled execution's debt",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: '      state: prior !== undefined && prior.state !== "retained" ? "gc_owed" : "retained",',
+    to: '      state: "retained",',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/every-ending-releases.counterexample.test.ts"],
+  },
+  {
+    // arch-review 70 P1. The inline discharge removed every released ref without reading `written`, while the
+    // reconciler refused exactly those — one ref, two meanings.
+    name: "artifact convergence — the inline discharge deletes what it never confirmed",
+    file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
+    from: "    const state = await evaluateRef(ref, deps.probe);",
+    to: '    const state = "written" as const;\n    void evaluateRef;',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ops/artifact-write-convergence.counterexample.test.ts"],
+  },
+  {
     // arch-review 70 P0. `stagedEarly` recorded that the stage had been CALLED, so a refused put produced a
     // successful acknowledgement AND skipped the fallback. Restoring the boolean reproduces both.
     name: "agent handover — the stage is believed rather than read",
@@ -2317,6 +2337,26 @@ const MUTATIONS = [
     to: "",
     build: "@everdict/application-control",
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
+  },
+  {
+    // evolution-lineage Track D. Zero significant regressions is half the adoption bar; dropping it lets a
+    // candidate that broke a case ship on the strength of the cases it helped. The gate suite must notice.
+    name: "Track D — the adoption gate stops requiring zero regressions",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "  return v.comparable && v.significantImprovements >= 1 && v.significantRegressions === 0;",
+    to: "  return v.comparable && v.significantImprovements >= 1;",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
+  },
+  {
+    // evolution-lineage Track D. The identity refusal is what keeps an optimization verdict off an
+    // unverifiable world; neutralizing the check adopts over it with no recorded waiver.
+    name: "Track D — the adoption gate adopts over an unverified world identity",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "    if (unverified.length > 0 && !frame.allowUnverifiedIdentity) {",
+    to: '    if (unverified.length > 0 && !frame.allowUnverifiedIdentity && frame.subject.id === "") {',
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
   },
   {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping

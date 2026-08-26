@@ -1,4 +1,5 @@
-import type { ArtifactRef, IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
+import type { ArtifactProbe, ArtifactRef, IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
+import { evaluateRef } from "../ports/intermediate-cleanup-store.js";
 
 // ── THE DEBT IS PAID BY SOMEBODY WHO OUTLIVES THE PROCESS THAT INCURRED IT (arch-review 68) ─────────
 //
@@ -21,6 +22,9 @@ export interface IntermediateCleanupReconcilerDeps {
   // Remove one staged object. Routed by key prefix at the composition root, exactly as the settlement's
   // discharge routes it, so both spend the same function.
   remove: (key: string) => Promise<void>;
+  // How to ask whether a ref's bytes exist — see `evaluateRef`. Absent = this deployment cannot ask, and an
+  // unconfirmed ref then holds the debt open exactly as it did before (arch-review 70 P1).
+  probe?: ArtifactProbe;
   now?: () => string;
   // How many debts one tick drains. Small on purpose: this competes with live dispatch for the object
   // store, and a debt that waits one more minute costs storage rather than correctness.
@@ -57,10 +61,19 @@ export class IntermediateCleanupReconciler {
         // Unconfirmed refs therefore hold the debt open. The staging confirms within milliseconds of the
         // put; a ref still unconfirmed when a sweep arrives is a write that died, and the next tick asks
         // again rather than this one guessing.
-        if (ref.written !== true) {
-          failures.push(`${ref.key}: never confirmed written`);
+        // ── …AND AN UNCONFIRMED REF CONVERGES RATHER THAN DEFERRING FOREVER (arch-review 70 P1) ─────
+        //
+        // The refusal above was right and it was not a lifecycle: if the writer died and the write genuinely
+        // failed, `written` never becomes true and this row retries until a human looks at it. So the ref is
+        // now RESOLVED against the object store — the only thing that can tell "still in flight" from "never
+        // landed" — through the same evaluator the inline discharge spends.
+        const state = await evaluateRef(ref, this.deps.probe);
+        if (state === "unknown") {
+          failures.push(`${ref.key}: never confirmed written, and the store would not say whether it exists`);
           continue;
         }
+        // ABANDONED: the write is not coming, so there is nothing to delete and nothing left owed for it.
+        if (state === "abandoned") continue;
         try {
           await this.deps.remove(ref.key);
         } catch (err) {
@@ -90,6 +103,23 @@ export class IntermediateCleanupReconciler {
 
 // The composition root's key router, shared by the settlement's discharge and this sweep so an object is
 // deleted from the same bucket by both.
+// …and how to ASK. Same prefix routing as the remover, because a ref is answered by the store that would
+// have written it — and a store fault is `unknown`, never "absent" (rule `protocol` L2).
+export function cleanupProbe(stores: {
+  agentHalves?: { get(key: string): Promise<Uint8Array | undefined> };
+  verdicts?: { get(key: string): Promise<Uint8Array | undefined> };
+}): ArtifactProbe {
+  return async (key: string) => {
+    const store = key.startsWith("verifier-verdict/") ? stores.verdicts : stores.agentHalves;
+    if (!store) return "unknown"; // nothing here can answer for this prefix, and silence is not absence
+    try {
+      return (await store.get(key)) !== undefined ? "present" : "absent";
+    } catch {
+      return "unknown";
+    }
+  };
+}
+
 export function cleanupRemover(stores: {
   agentHalves?: { remove(key: string): Promise<void> };
   verdicts?: { remove(key: string): Promise<void> };

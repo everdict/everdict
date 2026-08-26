@@ -83,6 +83,7 @@ import {
   type ReleasedCleanup,
   collectReleased,
   dischargeIntermediates,
+  probeStagedObject,
   removeStagedObject,
 } from "../ports/intermediate-cleanup-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -1615,14 +1616,30 @@ export class RunService {
     // it was owed — the method's own comment named the caller's retry as the owner, which is true of a 5xx
     // and false of a crash. The instruction rides the settle for the same reason the outbox facts do: two
     // commits have a window, and the window is exactly the crash this row exists to survive.
+    // ── A CANCEL IS AN ENDING, AND EVERY ENDING RELEASES ITS OWN REFS (arch-review 70 P1) ────────────
+    //
+    // This lane terminalized the run, converged its teardown, and never touched the cleanup ledger: a
+    // private-verifier run that had staged its half and its verdict ended CANCELLED with its debt still
+    // `retained`, which `due()` never returns. The artifacts of a case nobody will ever finish were kept
+    // forever, on the one path where it is most obvious nothing is coming back for them.
+    //
+    // Rides the settle for the same reason the normal path does — two commits have a window — and the
+    // objects are deleted after it.
+    const rider = this.cleanupRider(rec.tenant, RunService.runIdFor(rec));
     const settled = await settleRun(
       this.deps.store,
       rec.id,
       patch,
       stamped.map((f) => f.record),
-      this.deps.cancellations ? { requestCancellation: true as const } : undefined,
+      {
+        ...(this.deps.cancellations ? { requestCancellation: true as const } : {}),
+        ...(rider.release !== undefined ? { release: rider.release } : {}),
+      },
     );
     if (settled === undefined) return (await this.get(rec.id)) ?? rec; // the run finished first — nothing to stop
+    // …and what the cancel freed is collected, or discharged the two-step way on a store with no transaction.
+    if (rider.release !== undefined) await rider.collect();
+    else await this.dischargeStaged(rec.tenant, RunService.runIdFor(rec));
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     // The physical attempt was abandoned before it could claim the case — `superseded` is the ledger's word
     // for exactly that. Best-effort (a diagnostic row, never an outcome), and awaited so a process that exits
@@ -2080,6 +2097,7 @@ export class RunService {
       {
         ...(this.deps.cleanup ? { cleanup: this.deps.cleanup } : {}),
         remove: removeStagedObject(this.deps),
+        probe: probeStagedObject(this.deps),
       },
       tenant,
       executionId,
@@ -2111,7 +2129,12 @@ export class RunService {
       },
       collect: async () => {
         if (freed === undefined) return;
-        await collectReleased({ cleanup, remove: removeStagedObject(this.deps) }, freed, tenant, executionId);
+        await collectReleased(
+          { cleanup, remove: removeStagedObject(this.deps), probe: probeStagedObject(this.deps) },
+          freed,
+          tenant,
+          executionId,
+        );
       },
     };
   }
@@ -2135,8 +2158,32 @@ export class RunService {
       attempts,
       attemptId,
       apply: async (bound) => {
-        // The transition's own answer is deliberately unread: a refusal is a silent no-op by contract (an
-        // already-terminal row meeting a late stamp is ordinary), and only a throw aborts the settlement.
+        // ── THE ANSWER IS CONSUMED, AND ITS ARMS ARE NAMED (arch-review 70 P2) ───────────────────────
+        //
+        // This read the boolean and threw it away, defending the choice as "a refusal is a silent no-op by
+        // contract". The defence is right about ONE arm and wrong about the vocabulary: `false` collapses
+        // already-terminal, revoked, failed, superseded and parent-authorization-refused into a single
+        // no-op, and the scorecard lane has consumed the semantic union since arch-review 66. Two settlement
+        // lanes, two protocols for one question.
+        //
+        // The arms, and why each does what it does:
+        //   adopted / already_adopted   this settlement owns the attempt — proceed (a late stamp converging
+        //                               on the same adoption is the ordinary case the old comment meant)
+        //   absent                      no ledger row for this attempt; the lane legitimately runs without
+        //                               one and refusing here would make the ledger a prerequisite
+        //   incompatible_state          revoked · failed · superseded · committed by a DIFFERENT child. The
+        //   wrong_parent                run may not settle on an attempt somebody else owns, and inside this
+        //                               transaction the throw takes the terminal write with it — which is
+        //                               the behaviour the silent no-op was hiding.
+        const adopted = await bound.adoptAtSettlement(attemptId, {
+          parent: { kind: "run", id, adoptingEpoch: this.driverEpoch.get(id) ?? 0 },
+          expectedExecutionId: runExecutionId(id),
+          childRunId: id,
+        });
+        if (adopted.kind === "incompatible_state" || adopted.kind === "wrong_parent")
+          requireAdopted(adopted, attemptId);
+        // The terminal the row should carry, once the adoption established this settlement may write it. A
+        // refusal here stays the ordinary no-op it always was.
         await bound.transition(attemptId, to, { childRunId: id, ...(error !== undefined ? { error } : {}) });
         // …and the verdict's own row, to the SAME terminal. `verdict_produced → committed` is exactly the
         // adoption this settlement is performing, and it happens here or the phase has no reader — which is

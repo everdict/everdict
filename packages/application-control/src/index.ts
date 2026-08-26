@@ -89,11 +89,13 @@ export {
 } from "./execution/agent-half.js";
 export {
   type CleanupTick,
+  cleanupProbe,
   cleanupRemover,
   IntermediateCleanupReconciler,
   type IntermediateCleanupReconcilerDeps,
 } from "./ops/intermediate-cleanup-reconciler.js";
 export {
+  type ArtifactProbe,
   type ArtifactRef,
   collectReleased,
   dischargeIntermediates,
@@ -101,6 +103,7 @@ export {
   type IntermediateCleanupDebt,
   type IntermediateCleanupStore,
   type ReleasedCleanup,
+  probeStagedObject,
   removeStagedObject,
   requireOwed,
 } from "./ports/intermediate-cleanup-store.js";
