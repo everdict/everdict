@@ -67,11 +67,17 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     id: string,
     state: Exclude<CampaignState, "open">,
     close: CampaignClose,
+    expectedRounds: number,
     events?: OutboxEvent[],
   ): Promise<CampaignCloseOutcome> {
     const record = await this.get(tenant, id);
     if (!record) return { kind: "absent" };
     if (record.state !== "open") return { kind: "already", state: record.state };
+    // The gate answer being closed was computed over exactly `expectedRounds` rounds — a round that landed
+    // since makes the answer stale, and closing over it would record a settlement the record's own gate,
+    // recomputed, would refuse.
+    if (record.rounds.length !== expectedRounds)
+      return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
     this.byId.set(id, { ...record, state, close, updatedAt: close.at });
     if (events) this.events.push(...events);
     return { kind: "closed" };
@@ -212,15 +218,16 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
     id: string,
     state: Exclude<CampaignState, "open">,
     close: CampaignClose,
+    expectedRounds: number,
     events?: OutboxEvent[],
   ): Promise<CampaignCloseOutcome> {
-    const base = [tenant, id, state, JSON.stringify(close), close.at];
+    const base = [tenant, id, state, JSON.stringify(close), close.at, expectedRounds];
     const ev = events && events.length > 0 ? eventValuesClause(events, base.length + 1) : undefined;
     const { rows } = await this.client.query<{ id: string }>(
       `WITH upd AS (
          UPDATE everdict_evolution_campaigns
          SET state = $3, close = $4::jsonb, updated_at = $5::timestamptz
-         WHERE tenant=$1 AND id=$2 AND state='open'
+         WHERE tenant=$1 AND id=$2 AND state='open' AND jsonb_array_length(rounds) = $6
          RETURNING id
        )${
          ev !== undefined
@@ -235,12 +242,14 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
       [...base, ...(ev?.params ?? [])],
     );
     if (rows[0] !== undefined) return { kind: "closed" };
-    const { rows: readback } = await this.client.query<{ state: string }>(
-      "SELECT state FROM everdict_evolution_campaigns WHERE tenant=$1 AND id=$2",
+    // The write refused — read back WHY: closed already, a round landed since the gate's read, or gone.
+    const { rows: readback } = await this.client.query<{ state: string; n: number | string }>(
+      "SELECT state, jsonb_array_length(rounds) AS n FROM everdict_evolution_campaigns WHERE tenant=$1 AND id=$2",
       [tenant, id],
     );
     const row = readback[0];
     if (row === undefined) return { kind: "absent" };
-    return { kind: "already", state: row.state as CampaignState };
+    if (row.state !== "open") return { kind: "already", state: row.state as CampaignState };
+    return { kind: "conflict", expected: expectedRounds, actual: Number(row.n) };
   }
 }

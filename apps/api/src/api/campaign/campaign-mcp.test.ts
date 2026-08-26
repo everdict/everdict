@@ -1,4 +1,4 @@
-import { type CampaignComparison, CampaignService, RunService } from "@everdict/application-control";
+import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import type { CampaignFrame } from "@everdict/contracts";
@@ -20,8 +20,8 @@ const unusedDispatcher: Dispatcher = {
 const frame: CampaignFrame = {
   subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
   scenarios: [
-    { id: "s1", heldOut: false },
-    { id: "s2", heldOut: true },
+    { id: "c1", heldOut: false },
+    { id: "c2", heldOut: true },
   ],
   judges: [],
   trialsPerCase: 5,
@@ -31,36 +31,52 @@ const frame: CampaignFrame = {
   allowUnverifiedIdentity: false,
 };
 
-const winning: CampaignComparison = {
-  comparability: "full",
-  trials: {
-    baseline: "b",
-    candidate: "c",
-    zThreshold: 1.96,
-    minDelta: 0,
-    cases: [
-      {
-        caseId: "c1",
-        baselineRate: 0,
-        baselineTrials: 5,
-        candidateRate: 1,
-        candidateTrials: 5,
-        delta: 1,
-        z: 3,
-        method: "fisher",
-        p: 0.0079,
-        significant: true,
-      },
-    ],
-  } as CampaignComparison["trials"],
-  experiment: { held: ["execution_world"], confounds: [], unverified: [] },
+const winning: CampaignSnapshot = {
+  diff: {
+    comparability: "full",
+    trials: {
+      baseline: "b",
+      candidate: "c",
+      zThreshold: 1.96,
+      minDelta: 0,
+      cases: [
+        {
+          caseId: "c1",
+          baselineRate: 0,
+          baselineTrials: 5,
+          candidateRate: 1,
+          candidateTrials: 5,
+          delta: 1,
+          z: 3,
+          method: "fisher",
+          p: 0.0079,
+          significant: true,
+        },
+        {
+          caseId: "c2",
+          baselineRate: 0.2,
+          baselineTrials: 5,
+          candidateRate: 0.2,
+          candidateTrials: 5,
+          delta: 0,
+          z: 0,
+          method: "fisher",
+          p: 1,
+          significant: false,
+        },
+      ],
+    } as NonNullable<CampaignSnapshot["diff"]["trials"]>,
+    experiment: { held: ["execution_world"], confounds: [], unverified: [] },
+  },
+  baseline: { record: { harness: { id: "agent:everdict", version: "1.0.0" } } },
+  candidate: { record: { harness: { id: "agent:everdict", version: "1.0.1" } } },
 };
 
 function makeDeps(): McpDeps {
   const campaignService = new CampaignService({
     store: new InMemoryEvolutionCampaignStore(),
     issues: { get: async () => ({ id: "iss_1" }) },
-    diffs: { diff: async () => winning },
+    diffs: { diffSnapshot: async () => winning },
     newId: () => "evc_mcp",
     now: () => "2026-08-26T04:00:00.000Z",
   });

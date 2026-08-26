@@ -1,4 +1,4 @@
-import { type CampaignComparison, CampaignService, RunService } from "@everdict/application-control";
+import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { CampaignFrame } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
@@ -21,8 +21,8 @@ const H = { "x-everdict-tenant": "acme" };
 const frame: CampaignFrame = {
   subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
   scenarios: [
-    { id: "s1", heldOut: false },
-    { id: "s2", heldOut: true },
+    { id: "c1", heldOut: false },
+    { id: "c2", heldOut: true },
   ],
   judges: [],
   trialsPerCase: 5,
@@ -32,7 +32,7 @@ const frame: CampaignFrame = {
   allowUnverifiedIdentity: false,
 };
 
-function build(comparison: CampaignComparison) {
+function build(snapshot: CampaignSnapshot) {
   const store = new InMemoryEvolutionCampaignStore();
   const campaignService = new CampaignService({
     store,
@@ -42,7 +42,7 @@ function build(comparison: CampaignComparison) {
         return { id: "iss_1" };
       },
     },
-    diffs: { diff: async () => comparison },
+    diffs: { diffSnapshot: async () => snapshot },
     newId: () => "evc_fixed",
     now: () => "2026-08-26T03:00:00.000Z",
   });
@@ -53,29 +53,45 @@ function build(comparison: CampaignComparison) {
   return { app, store };
 }
 
-const winning: CampaignComparison = {
-  comparability: "full",
-  trials: {
-    baseline: "b",
-    candidate: "c",
-    zThreshold: 1.96,
-    minDelta: 0,
-    cases: [
-      {
-        caseId: "c1",
-        baselineRate: 0,
-        baselineTrials: 5,
-        candidateRate: 1,
-        candidateTrials: 5,
-        delta: 1,
-        z: 3,
-        method: "fisher",
-        p: 0.0079,
-        significant: true,
-      },
-    ],
-  } as CampaignComparison["trials"],
-  experiment: { held: ["execution_world"], confounds: [], unverified: [] },
+const winning: CampaignSnapshot = {
+  diff: {
+    comparability: "full",
+    trials: {
+      baseline: "b",
+      candidate: "c",
+      zThreshold: 1.96,
+      minDelta: 0,
+      cases: [
+        {
+          caseId: "c1",
+          baselineRate: 0,
+          baselineTrials: 5,
+          candidateRate: 1,
+          candidateTrials: 5,
+          delta: 1,
+          z: 3,
+          method: "fisher",
+          p: 0.0079,
+          significant: true,
+        },
+        {
+          caseId: "c2",
+          baselineRate: 0.2,
+          baselineTrials: 5,
+          candidateRate: 0.2,
+          candidateTrials: 5,
+          delta: 0,
+          z: 0,
+          method: "fisher",
+          p: 1,
+          significant: false,
+        },
+      ],
+    } as NonNullable<CampaignSnapshot["diff"]["trials"]>,
+    experiment: { held: ["execution_world"], confounds: [], unverified: [] },
+  },
+  baseline: { record: { harness: { id: "agent:everdict", version: "1.0.0" } } },
+  candidate: { record: { harness: { id: "agent:everdict", version: "1.0.1" } } },
 };
 
 describe("campaign routes — the settlement over HTTP", () => {
@@ -124,8 +140,8 @@ describe("campaign routes — the settlement over HTTP", () => {
       payload: { issueId: "nope", frame },
     });
     expect(res.statusCode).toBe(404);
-    // The round body has no verdict field — a caller trying to smuggle one is a schema refusal, because the
-    // verdict is derived from the production diff, never accepted (Track D, L3).
+    // A COMPLETE body that also smuggles a verdict: the schema strips the field and the logged round's
+    // verdict is the DERIVED one — the loop cannot write its own report card (Track D, L3).
     const opened = await app.inject({
       method: "POST",
       url: "/campaigns",
@@ -137,9 +153,18 @@ describe("campaign routes — the settlement over HTTP", () => {
       method: "POST",
       url: `/campaigns/${id}/rounds`,
       headers: H,
-      payload: { hypothesis: "h", candidateVersion: "1.0.1", baselineScorecardId: "b" }, // missing candidate id
+      payload: {
+        hypothesis: "h",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+        verdict: { comparable: true, significantImprovements: 99, significantRegressions: 0 },
+      },
     });
-    expect(smuggled.statusCode).toBe(400);
+    expect(smuggled.statusCode).toBe(201);
+    const loggedVerdict = (smuggled.json() as { round: { verdict: { significantImprovements: number } } }).round
+      .verdict;
+    expect(loggedVerdict.significantImprovements).toBe(1); // the diff's answer, not the smuggled 99
     await app.close();
   });
 

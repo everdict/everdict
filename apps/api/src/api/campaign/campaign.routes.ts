@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
+import { teamCeiling } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
@@ -83,7 +84,15 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       try {
         return reply
           .code(201)
-          .send(await deps.campaignService.logRound(principal.workspace, req.params.id, body, principal.subject));
+          .send(
+            await deps.campaignService.logRound(
+              principal.workspace,
+              req.params.id,
+              body,
+              principal.subject,
+              await teamCeiling(deps, principal),
+            ),
+          );
       } catch (err) {
         return sendError(reply, err); // missing scorecard 404 / concurrent round · closed campaign 409
       }

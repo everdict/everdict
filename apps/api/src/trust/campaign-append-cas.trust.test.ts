@@ -58,7 +58,13 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       candidateVersion: `1.0.${seq}`,
       baselineScorecardId: "sc-base",
       candidateScorecardId: `sc-cand-${seq}`,
-      verdict: { comparable: true, significantImprovements: 1, significantRegressions: 0, unverifiedAxes: [] },
+      verdict: {
+        comparable: true,
+        significantImprovements: 1,
+        significantRegressions: 0,
+        unverifiedAxes: [],
+        confoundedAxes: [],
+      },
       at: "2026-08-26T00:00:00.000Z",
       by: "agent:everdict",
     });
@@ -98,14 +104,51 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       expect(await eventCount(id)).toBe(1);
     });
 
+    it("a settle racing a round: the stale gate answer and the round cannot BOTH land", async () => {
+      // The close CAS covers the rounds count as well as the state — a gate answer computed over N rounds
+      // may not close a record that now holds N+1. Whichever write wins, the record stays coherent with its
+      // own gate: never adopted-over-a-longer-trace, never a round appended into a closed campaign.
+      const id = trustId("evc");
+      await store.create(record(id));
+      const close = {
+        outcome: { kind: "halted" as const, reason: "no_improvement" as const, detail: "stale answer" },
+        at: "2026-08-26T02:00:00.000Z",
+        by: "trust",
+      };
+      const [appended, closed] = await Promise.all([
+        store.appendRound("trust", id, round(1), 0),
+        store.close("trust", id, "no_improvement", close, 0),
+      ]);
+      expect(
+        appended.kind === "appended" && closed.kind === "closed",
+        "both the round and the stale close landed",
+      ).toBe(false);
+      const after = await store.get("trust", id);
+      if (closed.kind === "closed") {
+        expect(after?.state).toBe("no_improvement");
+        expect(after?.rounds).toHaveLength(0);
+        expect(appended.kind).toBe("terminal");
+      } else {
+        expect(after?.state).toBe("open");
+        expect(after?.rounds).toHaveLength(1);
+        expect(closed.kind).toBe("conflict");
+      }
+    });
+
     it("a closed campaign refuses the append as terminal and writes no fact", async () => {
       const id = trustId("evc");
       await store.create(record(id));
-      await store.close("trust", id, "no_improvement", {
-        outcome: { kind: "halted", reason: "no_improvement", detail: "dry" },
-        at: "2026-08-26T01:00:00.000Z",
-        by: "trust",
-      });
+      await store.close(
+        "trust",
+        id,
+        "no_improvement",
+        {
+          outcome: { kind: "halted", reason: "no_improvement", detail: "dry" },
+          at: "2026-08-26T01:00:00.000Z",
+          by: "trust",
+        },
+        0,
+      );
       const refused = await store.appendRound("trust", id, round(1), 0, [event(trustId("ev"), id)]);
       expect(refused).toEqual({ kind: "terminal", state: "no_improvement" });
       expect(await eventCount(id)).toBe(0);

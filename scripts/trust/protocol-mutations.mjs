@@ -2371,6 +2371,36 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
   {
+    // evolution-lineage Track D (review follow-through). The settle's gate answer is computed over the rounds
+    // it read — the close CAS must fence that count, or a concurrent round makes the sealed answer stale.
+    // The SQL-pin suite must notice the fence leaving the statement.
+    name: "Track D — the close CAS stops fencing the round count",
+    file: "packages/db/src/evolution/campaign-store.ts",
+    from: "         WHERE tenant=$1 AND id=$2 AND state='open' AND jsonb_array_length(rounds) = $6",
+    to: "         WHERE tenant=$1 AND id=$2 AND state='open'",
+    build: "@everdict/db",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // …and the service must REFUSE identity drift, not record it: a candidate scorecard that evaluated a
+    // different version than the declared one is a mislabeled request (L3). The service suite must notice.
+    name: "Track D — the round accepts a candidate the scorecard never evaluated",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    if (candidateHarness.version !== input.candidateVersion)",
+    to: "    if (false && candidateHarness.version !== input.candidateVersion)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // …and a confound (an axis VERIFIED different) may never read as a comparable round.
+    name: "Track D — a confounded comparison is filed as comparable",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "  if (confoundedAxes.length > 0)",
+    to: "  if (confoundedAxes.length > 9999)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // evolution-lineage Track D. Zero significant regressions is half the adoption bar; dropping it lets a
     // candidate that broke a case ship on the strength of the cases it helped. The gate suite must notice.
     name: "Track D — the adoption gate stops requiring zero regressions",

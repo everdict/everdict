@@ -67,6 +67,10 @@ export const CampaignRoundSchema = z.object({
     // Experiment-identity axes the diff could not verify (execution_world, …). Non-empty blocks adoption
     // unless the frame recorded the waiver at open.
     unverifiedAxes: z.array(z.string().max(100)).default([]),
+    // Axes the diff VERIFIED as different (a confound — e.g. two resolved but different image digests).
+    // Stronger than unverified and never waivable here: a delta across different worlds is not evidence
+    // about the change under test, so a confounded round records the axes and is not comparable.
+    confoundedAxes: z.array(z.string().max(100)).default([]),
     detail: z.string().max(1000).optional(),
   }),
   at: z.string(),

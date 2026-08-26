@@ -1828,7 +1828,10 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
+    // `fdrAlpha` is DECLARED here, not merely forwarded: the campaign settlement passes its frozen alpha
+    // through this facade, and a contract that omitted it survived only by whole-object passthrough — the
+    // exact allowlist-rebuild shape that has eaten two fields already (rule `option-forwarding`).
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["diff"]> {
     return this.analytics.diff(tenant, baselineId, candidateId, opts);
   }
@@ -1840,7 +1843,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["diffSnapshot"]> {
     return this.analytics.diffSnapshot(tenant, baselineId, candidateId, opts);
   }

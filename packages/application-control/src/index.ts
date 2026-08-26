@@ -429,9 +429,12 @@ export type {
 export {
   CampaignService,
   type CampaignComparison,
+  type CampaignComparisonSide,
   type CampaignServiceDeps,
+  type CampaignSnapshot,
   type NewCampaignInput,
   type NewRoundInput,
+  type TeamAccess,
 } from "./evolution/campaign-service.js";
 export {
   adoptedImageReach,

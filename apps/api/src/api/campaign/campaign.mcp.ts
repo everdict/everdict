@@ -1,6 +1,7 @@
 import { CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { teamCeiling } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // Evolution campaigns — MCP twin of the /campaigns routes (BFF↔MCP parity: same service, second transport).
@@ -77,6 +78,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
               candidateScorecardId: candidate_scorecard_id,
             },
             principal.subject,
+            await teamCeiling(deps, principal),
           ),
         ),
       ),

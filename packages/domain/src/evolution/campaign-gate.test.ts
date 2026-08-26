@@ -44,6 +44,7 @@ const round = (
       significantImprovements: 0,
       significantRegressions: 0,
       unverifiedAxes: [],
+      confoundedAxes: [],
       ...verdict,
     },
     at: "2026-08-26T00:00:00.000Z",
