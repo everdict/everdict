@@ -1,6 +1,6 @@
 import type { GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { assembleJudgeInput } from "./judge.js";
+import { JudgeGrader, assembleJudgeInput } from "./judge.js";
 import { parseVerdict, previewJudge } from "./model-judge.js";
 
 // ── The observation channel reaches the judge's PROMPT, three-valued (Track C) ───────────────────────
@@ -42,6 +42,15 @@ describe("the judge sees the world's own account", () => {
     const { prompt } = previewJudge(none);
     expect(prompt).toContain("No independent observation channel");
   });
+
+  it("a channel whose every sample FAILED says so — never 'no live environment' (review wave B)", async () => {
+    // sampling_failed is the arm where the environment EXISTED and the platform tried and could not watch
+    // it. Rendering it as "no live environment" told the judge a different (and milder) fact than the run
+    // recorded — a suppressed outage. Seen RED: the render collapsed the reason into the no_environment arm.
+    const failed = await assembleJudgeInput(base({ kind: "unobserved", reason: "sampling_failed" }));
+    expect(failed.observations).toContain("every sample attempt failed");
+    expect(failed.observations).not.toContain("no live environment");
+  });
 });
 
 describe("the judge is ASKED to weigh the observations, and its answer survives the parse", () => {
@@ -69,5 +78,28 @@ describe("the judge is ASKED to weigh the observations, and its answer survives 
     });
     // …and a verdict that says nothing about it carries nothing — never a fabricated "consistent".
     expect(parseVerdict('{"pass": true, "score": 1, "reason": "ok"}').observationConsistency).toBeUndefined();
+  });
+
+  it("the consistency answer lands on the DURABLE score, not only the in-memory verdict (review wave B)", async () => {
+    // JudgeVerdict lives for one call; the Score is what the scorecard stores and an analyst reads. An
+    // answer parsed onto the verdict and dropped at Score assembly was diagnosable for exactly as long as
+    // the process lived. Seen RED: Score.detail carried the reason alone and the divergence vanished.
+    const judge = {
+      judge: async () => ({
+        pass: true,
+        score: 1,
+        reason: "did the work",
+        observationConsistency: {
+          status: "divergent" as const,
+          note: "the trace claims a fix the diff does not contain",
+        },
+      }),
+    };
+    const grader = new JudgeGrader(judge);
+    const score = await grader.grade(base({ kind: "sampled", deltas: [{ t: 5, kind: "repo-diff", text: "+++ b/x" }] }));
+    const overall = Array.isArray(score) ? score[0] : score;
+    expect(overall?.detail).toContain("did the work");
+    expect(overall?.detail).toContain("observations: divergent");
+    expect(overall?.detail).toContain("the trace claims a fix the diff does not contain");
   });
 });

@@ -143,9 +143,17 @@ async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Pr
 const OBSERVATION_DELTA_CAP = 4000;
 function renderObservations(observations: CaseObservations): string {
   if (observations.kind === "unobserved") {
-    return observations.reason === "unsupported"
-      ? "No independent observation channel: this environment does not support platform sampling."
-      : "No independent observation channel: this judging path has no live environment.";
+    // Exhaustive on the reason: sampling_failed used to collapse into the no_environment sentence, telling
+    // the judge a milder fact than the run recorded — an environment EXISTED and the platform could not
+    // watch it, which is itself evidence the verdict should weigh (review wave B, seen RED).
+    switch (observations.reason) {
+      case "unsupported":
+        return "No independent observation channel: this environment does not support platform sampling.";
+      case "sampling_failed":
+        return "The platform attempted to sample the environment, but every sample attempt failed — the run went unwatched despite a live environment.";
+      case "no_environment":
+        return "No independent observation channel: this judging path has no live environment.";
+    }
   }
   if (observations.deltas.length === 0)
     return "The platform sampled the environment during the run and observed no changes.";
@@ -292,12 +300,19 @@ export class JudgeGrader implements Grader {
     // The signal rides from safeGrade's per-grader controller: when this grader's slice of the case budget
     // runs out, the provider call is told to stop rather than left to finish unheard.
     const verdict = await this.judge.judge(input, ctx.signal);
+    // The consistency answer is folded into the DURABLE detail (review wave B): JudgeVerdict lives for one
+    // call, the Score is what the scorecard stores and an analyst reads — parsed-then-dropped was
+    // diagnosable only while the process lived. Prose on detail, deliberately: nothing downstream may
+    // re-derive a decision from it (L3); a gate that wants to weigh it needs the field on the contract.
+    const consistency = verdict.observationConsistency;
     const overall: MeasuredScore = {
       graderId: this.id,
       metric: JUDGE_OVERALL_METRIC,
       value: verdict.score,
       pass: verdict.pass,
-      detail: verdict.reason,
+      detail: consistency
+        ? `${verdict.reason}\n[observations: ${consistency.status}${consistency.note ? ` — ${consistency.note}` : ""}]`
+        : verdict.reason,
     };
     if (criteria.length === 0) return overall;
     const perCriterion = criteria.map((c): Score => {

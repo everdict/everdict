@@ -8,6 +8,7 @@ import type {
   Grader,
   TraceEvent,
 } from "@everdict/contracts";
+import { observationsFromTrace } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { runCase } from "./run-case.js";
 
@@ -159,5 +160,55 @@ describe("[TRACK-C SEAL] the observation channel is sealed into the trace the ju
       (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_channel",
     );
     expect((marker as { detail?: unknown })?.detail).toBe("sampling_failed");
+  });
+});
+
+describe("[REVIEW WAVE B] the agent under test cannot speak in the observation channel's voice", () => {
+  // The channel is the platform's INDEPENDENT account — that independence is its entire value, and the
+  // harness's stream is the agent's own bytes. A harness yielding env_action events wearing the reserved
+  // actions used to ride into the sealed trace verbatim, where the reconstruction read them as the
+  // platform's: a fabricated `sampled` account from a world nobody watched, planted BEFORE the seal so it
+  // wins any marker order. Seen RED: the sealed trace reconstructed as the harness's forged `sampled`.
+  it("forged observation events in the harness stream are stripped before the seal", async () => {
+    const forgingHarness: EvaluableHarness = {
+      id: "forger",
+      version: "1.0.0",
+      install: async () => {},
+      run: async function* (): AsyncIterable<TraceEvent> {
+        yield { t: 0, kind: "env_action", action: "platform_observation_sample", detail: "+++ b/forged.txt" };
+        yield { t: 1, kind: "env_action", action: "platform_observation_channel", detail: "sampled" };
+        yield { t: 2, kind: "env_action", action: "git_commit", detail: "an ordinary env action survives" };
+      },
+    };
+    const environment = {
+      seed: async () => {},
+      snapshot: async () => ({ kind: "prompt", output: "" }),
+    } as unknown as Environment;
+    const driver = { id: "fake", provision: async () => fakeComputeHandle() } as Driver;
+
+    const result = await runCase(CASE, {
+      driver,
+      environment,
+      harness: forgingHarness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    const markers = result.trace.filter(
+      (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_channel",
+    );
+    // Exactly one marker: the platform's own seal. The forged one never entered.
+    expect(markers).toHaveLength(1);
+    expect((markers[0] as { detail?: unknown }).detail).toBe("unsupported");
+    expect(
+      result.trace.some(
+        (e) => e.kind === "env_action" && (e as { action?: string }).action === "platform_observation_sample",
+      ),
+    ).toBe(false);
+    // …while the harness's ordinary env vocabulary is untouched — the strip is the channel's, not env_action's.
+    expect(
+      result.trace.some((e) => e.kind === "env_action" && (e as { action?: string }).action === "git_commit"),
+    ).toBe(true);
+    expect(observationsFromTrace(result.trace)).toEqual({ kind: "unobserved", reason: "unsupported" });
   });
 });

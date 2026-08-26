@@ -28,6 +28,7 @@ import {
   judgmentReceiptsFromPlane,
   observationsFromTrace,
   scorecardModels,
+  stripReservedObservationEvents,
   summarizeScorecard,
   verdictSummaryOf,
 } from "@everdict/domain";
@@ -80,6 +81,12 @@ export class ScorecardIngestService {
   // one, resolve it (404 if missing) and align by caseId; without one, evaluate the traces directly (sentinel label,
   // each trace = a case). harness is a label, likewise optional. → queued → async scoring.
   async ingest(input: IngestScorecardInput): Promise<ScorecardRecord> {
+    // The reserved observation vocabulary is the run-case sealer's voice — an uploaded trace wearing it
+    // would make the reconstruction below (`observationsFromTrace`) read a fabricated `sampled` account as
+    // the platform's own, and the sealed copy would carry the forgery durably. Stripped AT the boundary
+    // (review wave B), same rule as the harness drain: untrusted bytes are refused representation, not
+    // trusted not to spell the name.
+    const traces = input.traces.map((t) => ({ ...t, trace: stripReservedObservationEvents(t.trace) }));
     const dataset = input.dataset
       ? await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest")
       : undefined;
@@ -90,7 +97,7 @@ export class ScorecardIngestService {
     const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
-      requested: input.traces.length, // an ingest batch's ask = the uploaded traces
+      requested: traces.length, // an ingest batch's ask = the uploaded traces
       dataset: dataset ? { id: dataset.id, version: dataset.version } : TRACE_EVAL_LABEL,
       harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),
@@ -104,7 +111,7 @@ export class ScorecardIngestService {
       input.tenant,
       dataset,
       `${harness.id}@${harness.version}`,
-      input.traces,
+      traces,
       input.judges ?? [],
     );
     return record;

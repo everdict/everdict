@@ -518,8 +518,11 @@ export {
   OBSERVATION_CHANNEL_ACTION,
   OBSERVATION_SAMPLE_ACTION,
   OBSERVATION_SAMPLE_DETAIL_CAP,
+  isReservedObservationAction,
+  isReservedObservationEvent,
   observationTraceEvents,
   observationsFromTrace,
+  stripReservedObservationEvents,
 } from "./observation/observation-trace.js";
 // evolution — the campaign settlement's pure adoption gate (docs/architecture/evolution-lineage.md, Track D)
 export { type CampaignGateAnswer, campaignAdoption } from "./evolution/campaign-gate.js";

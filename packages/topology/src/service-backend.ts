@@ -976,6 +976,9 @@ export class ServiceTopologyBackend
         snapshot,
         graders,
         ...(readStore ? { readStore } : {}),
+        // A service topology has a live world and no delta sampler for it — `unsupported` is the honest arm
+        // (the field is required so this path STATES it rather than inheriting a default; review wave B).
+        observations: { kind: "unobserved", reason: "unsupported" },
       });
 
       // The SERVICE-plane infra record: the warm topology's per-unit state at case completion (role/status/

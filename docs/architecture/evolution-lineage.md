@@ -170,9 +170,16 @@ asserting the manifest carries the registry digest.
 > hides git's own failures) and the recorder counts outcomes, so a run whose every sample failed is
 > `sampling_failed` — never a calmer-looking world. The judge's verdict contract asks for
 > `observation_consistency` exactly when the channel sampled, parsed onto
-> `JudgeVerdict.observationConsistency` (a gate weighing it is the remaining consumer). Nomad image
-> readback was investigated and settled: the allocation API exposes no structured pulled-digest field, so
-> the reference reading stays that lane's honest answer and a digest pin remains the user's escape.
+> `JudgeVerdict.observationConsistency` and folded into the overall judge score's durable `detail` (prose,
+> deliberately — nothing may re-derive a decision from rendered text; a gate weighing it needs the field on
+> the contract and is the remaining consumer). The channel is also UNFORGEABLE from outside the sealer
+> (review wave B): the reserved `platform_observation_*` vocabulary is stripped where untrusted bytes enter
+> a trace (the harness drain, the in-job platform pull, the push ingest), a foreign span spelling it is
+> demoted to a structural span at the mapper, and the reader takes the FIRST marker with only the samples
+> before it — so bytes appended after the seal can neither fabricate nor suppress the sampled account.
+> Nomad image readback was investigated and settled: the allocation API exposes no structured pulled-digest
+> field, so the reference reading stays that lane's honest answer and a digest pin remains the user's
+> escape.
 
 **The gap.** `EnvDelta[]` is an independent observation of the world (sampled by the environment, not
 reported by the agent), and today its terminal consumer is the replay recording — it is cleared off the

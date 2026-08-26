@@ -34,9 +34,11 @@ import {
   computeNeedsFor,
   fsFileCommand,
   fsTreeCommand,
+  isReservedObservationEvent,
   observationTraceEvents,
   parseFsFile,
   parseFsTree,
+  stripReservedObservationEvents,
   validRepoPath,
 } from "@everdict/domain";
 import { safeGrade } from "./safe-grade.js";
@@ -372,6 +374,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const drain = (async () => {
       for await (const ev of deps.harness.run(compute, evalCase.task, runCtx)) {
         if (signal?.aborted) return; // about to dispose the compute out from under the run — stop accumulating
+        // The observation channel's vocabulary is the PLATFORM'S — sealed below, after the harness is done.
+        // The harness's stream is the agent's own bytes, and an agent that can spell the reserved actions can
+        // fabricate a `sampled` account of a world nobody watched (review wave B, seen RED). Refused
+        // representation at the boundary, not at the reader — the sealed trace must never carry them.
+        if (isReservedObservationEvent(ev)) continue;
         trace.push(ev);
         liveTrace?.push(ev); // tee to the live observer (batched flush) — the array above stays the record
       }
@@ -456,7 +463,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     if (!defer) {
       if (deps.harness.collectTrace && source) {
         try {
-          trace.push(...(await deps.harness.collectTrace(runId)));
+          // Foreign bytes a tenant's observability store served, appended AFTER the seal above — stripped of
+          // the reserved observation vocabulary for the same reason the drain strips it (and the reader's
+          // first-marker rule backstops any trace sealed before this strip existed).
+          trace.push(...stripReservedObservationEvents(await deps.harness.collectTrace(runId)));
         } catch (err) {
           // Keep the work: execution succeeded and the compute-bound scores exist — only observability failed.
           // Stamp the result {collect} and carry a traceRef, so the control plane can re-pull (executeCase right

@@ -24,9 +24,12 @@ export interface ScoreObservationsInput {
   skipComputeBound?: boolean;
   provision?: (spec: ComputeSpec) => Promise<ComputeHandle>; // dedicated grading compute (script grader image mode)
   readStore?: StoreReader; // read a data store's post-run slice (store-state grading, P2) — from a store-capable runtime
-  // The run's observation channel, when the caller still holds it. Absent = this scoring path has no live
-  // environment (control-plane re-score) — stated as unobserved below, never as an empty series (Track C).
-  observations?: CaseObservations;
+  // The run's observation channel — REQUIRED, so every scoring path states what it knows (review wave B).
+  // Optional-with-a-default was the annotation shape: a caller that forgot the field silently scored under
+  // `no_environment`, which reads identically to a deliberate control-plane re-score. A path with no live
+  // environment says `unobserved{no_environment}`; one whose environment cannot sample says
+  // `unobserved{unsupported}`; nobody says it by omission.
+  observations: CaseObservations;
 }
 
 export async function scoreObservations(input: ScoreObservationsInput): Promise<Score[]> {
@@ -44,7 +47,7 @@ export async function scoreObservations(input: ScoreObservationsInput): Promise<
         snapshot: input.snapshot,
         ...(input.provision ? { provision: input.provision } : {}),
         ...(input.readStore ? { readStore: input.readStore } : {}),
-        observations: input.observations ?? { kind: "unobserved", reason: "no_environment" },
+        observations: input.observations,
       })),
     );
   }

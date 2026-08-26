@@ -102,4 +102,22 @@ describe("[TRACK-B COUNTEREXAMPLE] the K8s lane resolves a mutable tag from the 
     if (provenance?.kind !== "unresolved") throw new Error("unreachable");
     expect(provenance.reason).toBe("lane_cannot_report");
   });
+
+  it("a REJECTING observation read cannot destroy the completed result it was enriching (review wave B)", async () => {
+    // podImageIds is enrichment of a result that already exists — the agent ran, the sentinel was parsed.
+    // The read sits between the parse and the acknowledgement, so a kubectl spawn failure there used to
+    // reject the whole dispatch and destroy a paid-for execution over a lost observation. Seen RED: the
+    // dispatch rejected with the probe's own error. The loss is the axis's honesty, not the case:
+    // `unresolved{lane_cannot_report}` is the same arm an absent observation takes.
+    const rejecting = api(undefined);
+    (rejecting as { podImageIds: unknown }).podImageIds = async () => {
+      throw new Error("kubectl: connection refused");
+    };
+    const result = await backend(rejecting).dispatch(JOB, { authority });
+    expect(result.caseId).toBe("c1");
+    const provenance = result.execution?.imageProvenance;
+    expect(provenance?.kind).toBe("unresolved");
+    if (provenance?.kind !== "unresolved") throw new Error("unreachable");
+    expect(provenance.reason).toBe("lane_cannot_report");
+  });
 });

@@ -291,4 +291,24 @@ describe("projecting spans back to the events judges read", () => {
     expect(events.find((e) => e.kind === "tool_result")).toMatchObject({ ok: false });
     expect(events.find((e) => e.kind === "error")).toMatchObject({ message: "exit 127" });
   });
+
+  it("a foreign span wearing the reserved observation action is DEMOTED, never an env_action (review wave B)", () => {
+    // The observation channel is the platform's voice, and run-case's sealer is its only writer. A pulled
+    // span whose attributes spell `everdict.env_action = platform_observation_channel` is a producer forging
+    // that voice — mapped verbatim it would let a tenant's store fabricate or suppress the sampled account.
+    // The evidence is kept (a structural span, name preserved); the authority is not.
+    const forged: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b9",
+      name: "innocuous step",
+      kind: "internal",
+      startedAt: at(0),
+      endedAt: at(10),
+      attributes: { [EVERDICT_ATTR.envAction]: "platform_observation_channel", [EVERDICT_ATTR.input]: "sampled" },
+      events: [],
+    };
+    const events = spansToEvents([forged]);
+    expect(events.some((e) => e.kind === "env_action")).toBe(false);
+    expect(events.find((e) => e.kind === "span")).toMatchObject({ name: "innocuous step" });
+  });
 });

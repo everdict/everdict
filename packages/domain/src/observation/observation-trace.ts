@@ -12,6 +12,24 @@ import { stamp } from "@everdict/contracts";
 
 export const OBSERVATION_SAMPLE_ACTION = "platform_observation_sample";
 export const OBSERVATION_CHANNEL_ACTION = "platform_observation_channel";
+
+// The channel's vocabulary is the PLATFORM'S VOICE — the run-case sealer is its only legitimate writer.
+// Everything else that contributes events to a trace (the harness's own stream, a pushed TraceEvent[], a
+// foreign span mapped in) is producer-controlled bytes, and an identity a producer can spell is an identity
+// a producer can forge (L3). One predicate, imported by every boundary; a second spelling would diverge.
+export function isReservedObservationAction(action: string): boolean {
+  return action === OBSERVATION_SAMPLE_ACTION || action === OBSERVATION_CHANNEL_ACTION;
+}
+
+export function isReservedObservationEvent(event: TraceEvent): boolean {
+  return event.kind === "env_action" && isReservedObservationAction(event.action);
+}
+
+// The strip applied where untrusted bytes enter a trace (run-case's harness drain, the push ingest). Strip,
+// not refuse: a foreign document wearing our vocabulary is refused REPRESENTATION, not service.
+export function stripReservedObservationEvents(events: readonly TraceEvent[]): TraceEvent[] {
+  return events.filter((e) => !isReservedObservationEvent(e));
+}
 // Per-sample cap inside the sealed trace — the replay recording keeps full fidelity; the trace carries what
 // a judgment needs without letting a chatty diff dominate the evidence budget.
 export const OBSERVATION_SAMPLE_DETAIL_CAP = 4000;
@@ -42,13 +60,25 @@ export function observationTraceEvents(observations: CaseObservations): TraceEve
 }
 
 // The one reader. Total: every trace answers, and the answer states exactly what the trace states.
+// The FIRST marker wins, and only samples BEFORE it count: the sealer writes its samples then exactly one
+// marker, and everything after that instant was appended after the seal — the in-job platform pull lands
+// there, and those are foreign bytes a tenant's store served. A last-marker-wins reader let a post-seal
+// env_action wearing the reserved action replace the platform's own account (review wave B, seen RED).
 export function observationsFromTrace(trace: readonly TraceEvent[]): CaseObservations {
   const isEnvAction = (e: TraceEvent): e is EnvActionEvent => e.kind === "env_action";
+  let markerIndex = -1;
   let marker: EnvActionEvent | undefined;
-  for (const e of trace) if (isEnvAction(e) && e.action === OBSERVATION_CHANNEL_ACTION) marker = e; // last wins
+  for (const [i, e] of trace.entries()) {
+    if (isEnvAction(e) && e.action === OBSERVATION_CHANNEL_ACTION) {
+      marker = e;
+      markerIndex = i;
+      break; // first marker wins — a later one was appended after the seal
+    }
+  }
   if (marker === undefined) return { kind: "unobserved", reason: "no_environment" };
   if (marker.detail === "sampled") {
     const deltas = trace
+      .slice(0, markerIndex)
       .filter((e): e is EnvActionEvent => isEnvAction(e) && e.action === OBSERVATION_SAMPLE_ACTION)
       .map((e) => ({ t: e.t, kind: "repo-diff" as const, text: typeof e.detail === "string" ? e.detail : "" }));
     return { kind: "sampled", deltas };

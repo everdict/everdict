@@ -2371,6 +2371,57 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
   {
+    // review wave B. The observation channel cannot be forged from after the seal: the sealer writes its
+    // samples then ONE marker, and the in-job platform pull appends foreign bytes after it — the reader
+    // takes the FIRST marker and counts only samples before it. Removing the break restores last-wins.
+    name: "wave B — the reader lets a post-seal marker override the platform's seal",
+    file: "packages/domain/src/observation/observation-trace.ts",
+    from: "      break; // first marker wins — a later one was appended after the seal",
+    to: "      // (break removed — last marker wins)",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/observation/observation-trace.test.ts"],
+  },
+  {
+    // …and the harness's own stream may not spell the reserved vocabulary — the strip at the drain is the
+    // boundary. Neutralized, a forged `sampled` account seals into the trace as the platform's.
+    name: "wave B — the boundary stops stripping the forged channel from the harness stream",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "        if (isReservedObservationEvent(ev)) continue;",
+    to: "        if (false && isReservedObservationEvent(ev)) continue;",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
+  },
+  {
+    // …and a foreign span spelling `everdict.env_action = platform_observation_*` is demoted at the mapper,
+    // never promoted into the channel's voice.
+    name: "wave B — the span mapper promotes a forged observation action",
+    file: "packages/domain/src/trace/spans-to-events.ts",
+    from: "      !isReservedObservationAction(asText(a[EVERDICT_ATTR.envAction]))",
+    to: '      !isReservedObservationAction("")',
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/trace/span-event-bridge.test.ts"],
+  },
+  {
+    // …and the re-score reads the observations the RUN sealed — detached from the trace, every deferred
+    // judgment silently downgrades to no_environment while the in-line one saw the samples.
+    name: "wave B — the re-score detaches from the sealed observations",
+    file: "packages/application-control/src/execution/scoring-service.ts",
+    from: "      observations: observationsFromTrace(result.trace),",
+    to: "      observations: observationsFromTrace([]),",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/scoring-service.test.ts"],
+  },
+  {
+    // …and the push ingest strips the reserved vocabulary at the door — unstripped, an uploaded trace
+    // scores (and seals) a fabricated `sampled` account as the platform's own.
+    name: "wave B — the push ingest accepts a trace speaking in the platform's voice",
+    file: "packages/application-control/src/scorecard/scorecard-ingest-service.ts",
+    from: "    const traces = input.traces.map((t) => ({ ...t, trace: stripReservedObservationEvents(t.trace) }));",
+    to: "    const traces = input.traces.map((t) => ({ ...t, trace: stripReservedObservationEvents(t.trace.slice(0, 0)).concat(t.trace) }));",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/server.test.ts"],
+  },
+  {
     // evolution-lineage Track D (review follow-through). The settle's gate answer is computed over the rounds
     // it read — the close CAS must fence that count, or a concurrent round makes the sealed answer stale.
     // The SQL-pin suite must notice the fence leaving the statement.

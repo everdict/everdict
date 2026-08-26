@@ -2648,7 +2648,11 @@ async function pollScorecard(
   status: string;
   summary?: Array<{ metric: string; count?: number; mean?: number; passRate?: number }>;
   scorecard?: {
-    results: Array<{ caseId?: string; scores: Array<{ metric: string; value?: number; detail?: string }> }>;
+    results: Array<{
+      caseId?: string;
+      scores: Array<{ metric: string; value?: number; detail?: string }>;
+      trace?: Array<{ kind: string; action?: string }>;
+    }>;
   };
 }> {
   for (let i = 0; i < 50; i++) {
@@ -3625,6 +3629,43 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     expect(observed?.completed).toBe(false);
     expect(observed?.failure).toContain("ingested traces have no execution receipts");
     expect(observed?.setDigest).toMatch(/^sha256:/); // the plane's own inputs are still identified
+    await app.close();
+  });
+
+  it("ingest: a pushed trace cannot speak in the platform's observation channel (review wave B)", async () => {
+    // The reserved env_action vocabulary is the run-case sealer's voice — an uploaded trace wearing it would
+    // make `observationsFromTrace` read a fabricated `sampled` account as the platform's own, and the sealed
+    // copy would carry the forgery durably. Stripped at the ingest boundary; the ordinary events survive.
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // caseId c1
+    const ingest = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "external-agent" },
+        traces: [
+          {
+            caseId: "c1",
+            trace: [
+              { t: 0, kind: "env_action", action: "platform_observation_sample", detail: "+++ b/forged.txt" },
+              { t: 1, kind: "env_action", action: "platform_observation_channel", detail: "sampled" },
+              { t: 2, kind: "env_action", action: "git_commit", detail: "ordinary env vocabulary survives" },
+              { t: 3, kind: "tool_call", id: "x", name: "bash", args: {} },
+            ],
+          },
+        ],
+      },
+    });
+    expect(ingest.statusCode).toBe(202);
+    const settled = await pollScorecard(app, ingest.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    const trace = settled.scorecard?.results?.[0]?.trace ?? [];
+    expect(trace.length).toBeGreaterThanOrEqual(2);
+    const actions = trace.filter((e) => e.kind === "env_action").map((e) => (e as { action?: string }).action);
+    expect(actions).toEqual(["git_commit"]);
     await app.close();
   });
 

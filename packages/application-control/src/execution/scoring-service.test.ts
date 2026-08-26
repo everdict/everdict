@@ -1,4 +1,5 @@
 import type { CaseResult, EvalCase, GradeContext, JudgeSpec } from "@everdict/contracts";
+import { observationTraceEvents } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "./scoring-service.js";
 
@@ -81,6 +82,54 @@ describe("ScoringService — applyJudgesToCase", () => {
     // …and the STORED score carries no transport slot.
     expect(result.scores).toHaveLength(1);
     expect(result.scores[0]?.traceEvents).toBeUndefined();
+  });
+
+  it("a re-score reads the observations the RUN sealed — never a silent no_environment (review wave B)", async () => {
+    // The deferred/re-score path judges from the stored CaseResult, where the observation channel lives only
+    // as the sealed trace events. This drives the production reader end-to-end: seal with the production
+    // sealer, re-score, and the judge's context must hold the run's own account. The RED direction is the
+    // mutation rung (neutralize `observationsFromTrace` in scoring-service → this test), because the reader
+    // already existed — what was missing was any production test that would notice it detaching.
+    const seen: GradeContext[] = [];
+    const service = new ScoringService({
+      judgeRunner: {
+        async run(_spec: unknown, _tenant: unknown, ctx: GradeContext) {
+          seen.push(ctx);
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 1, pass: true }]);
+        },
+      } as never,
+    });
+    const sealedResult: CaseResult = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [
+        { t: 1, kind: "message", role: "user", text: "task" },
+        ...observationTraceEvents({
+          kind: "sampled",
+          deltas: [{ t: 500, kind: "repo-diff", text: "+++ b/answer.txt" }],
+        }),
+      ],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [],
+    };
+    await service.applyJudgesToCase(
+      "acme",
+      CASE,
+      [{ spec: JUDGE }],
+      sealedResult,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        passId: "pass-test",
+      },
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.observations).toEqual({
+      kind: "sampled",
+      deltas: [{ t: 500, kind: "repo-diff", text: "+++ b/answer.txt" }],
+    });
   });
 
   it("hands the judge the agent's trace WITHOUT the infra plane (placement noise must not crowd the judged window)", async () => {

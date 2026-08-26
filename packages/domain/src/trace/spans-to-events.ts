@@ -8,6 +8,7 @@ import {
   type TraceEvent,
   type TraceSpan,
 } from "@everdict/contracts";
+import { isReservedObservationAction } from "../observation/observation-trace.js";
 
 // The model a pulled span did not name — a VISIBLE bucket on every model axis (usage, observed models),
 // never an empty string that renders as nothing. Billing attribution already treats an unattributable call
@@ -301,7 +302,14 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
         output: pickStr(a, keys.toolResult) ?? asText(firstDefined(a, IO_OUTPUT_KEYS)),
         parentId: span.spanId,
       });
-    } else if (str(a[EVERDICT_ATTR.envAction]) !== undefined) {
+    } else if (
+      str(a[EVERDICT_ATTR.envAction]) !== undefined &&
+      // The observation channel's vocabulary is the platform's voice, sealed only by run-case — a pulled
+      // span spelling it is a producer forging that voice (fabricate or suppress the sampled account). The
+      // evidence is DEMOTED to the structural `span` arm below, name preserved: kept as bytes, stripped of
+      // authority (review wave B; `isReservedObservationAction` is the one predicate).
+      !isReservedObservationAction(asText(a[EVERDICT_ATTR.envAction]))
+    ) {
       const detail = a[EVERDICT_ATTR.input];
       out.push({
         ...structure,

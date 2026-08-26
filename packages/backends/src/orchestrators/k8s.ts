@@ -2345,8 +2345,11 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           // `status.containerStatuses[].imageID` is the kubelet's own account of the pulled digest — an
           // observation rather than an inference, which is what resolves a mutable tag. Read here, BEFORE
           // the `finally` reclaims the Job and the pod with it; best-effort, so a failed read keeps the
-          // honest `unresolved{lane_cannot_report}` reference answer rather than blocking the result.
-          const observed = await api.podImageIds(name, ns);
+          // honest `unresolved{lane_cannot_report}` reference answer rather than blocking the result — and
+          // the swallow is HERE, at the site that decides what the loss costs (review wave B): the result
+          // already exists, this read only enriches it, and a rejecting probe used to destroy a paid-for
+          // execution over a lost observation. Absent and failed take the same fail-closed arm downstream.
+          const observed = await api.podImageIds(name, ns).catch(() => undefined);
           const placed = mergePlacedImage(result, job, "the Kubernetes API", observed);
           // ── HANDED OVER BEFORE THE `finally` RECLAIMS IT (arch-review 67 P0-lifecycle) ─────────────
           //
