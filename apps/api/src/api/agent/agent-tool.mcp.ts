@@ -89,7 +89,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ key, bindings }) =>
       run(principal, "agents:write", async () =>
-        ok(await tooling.bindToolSecrets(ws, principal.subject, key, bindings)),
+        ok(await tooling.bindToolSecrets(ws, principal.subject, key, bindings, "mcp")),
       ),
   );
 

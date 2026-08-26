@@ -2339,6 +2339,16 @@ const MUTATIONS = [
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
   },
   {
+    // evolution-lineage Track A follow-through (save_agent). A bump's ancestor is known only at this write;
+    // dropping the stamp reverts the agent family to versions with no succeeds lineage — the counterexample
+    // asserting the bump's origin must notice.
+    name: "Track A — the agent save stops stamping the base its bump succeeds",
+    file: "apps/api/src/core/agent/agent-service.ts",
+    from: '      const stamped: CapabilityOrigin = { ...origin, from: { type: "agent", id, version: latest.version } };',
+    to: "      const stamped: CapabilityOrigin = { ...origin };",
+    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
+  },
+  {
     // evolution-lineage Track C. The observation channel exists so the judgment can weigh the world's own
     // account; a channel that reports `sampled` while dropping the deltas is the emptiest form of the
     // annotation defect — present, and carrying nothing. The run-case counterexample must notice.

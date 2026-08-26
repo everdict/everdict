@@ -236,7 +236,18 @@ export function buildSubscription(deps: {
         const spec = await deps.agentRegistry.get(tenant, agentId, "latest");
         if (spec.triggers.length === 0) return;
         const { id: _id, version: _version, ...rest } = spec;
-        await agentSaves.saveAgent(tenant, undefined, agentId, { ...rest, triggers: [] });
+        // A platform-driven clear (runaway-trigger brake) — no human channel stands behind it; "web" is the
+        // in-product surface it acts for, and the note says which mechanism wrote the version.
+        await agentSaves.saveAgent(
+          tenant,
+          undefined,
+          agentId,
+          { ...rest, triggers: [] },
+          {
+            via: "web",
+            note: "trigger auto-clear (runaway brake)",
+          },
+        );
       },
     },
   });

@@ -33,6 +33,7 @@ export const CAPABILITY_ORIGIN_SOURCE_TYPES = [
   "run",
   "trace",
   "harness",
+  "agent",
   "dataset",
   "judge",
   "benchmark",

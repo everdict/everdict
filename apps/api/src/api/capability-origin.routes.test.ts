@@ -277,3 +277,77 @@ describe("capability origin — a registration records where it came from", () =
     expect(spec.json()).not.toHaveProperty("origin");
   });
 });
+
+describe("agent save origin — the upsert records why the version exists, and what it succeeds", () => {
+  // The version-free save is the adoption path the evolve loop lands on, and it registered with no origin —
+  // the same dropped-ancestry shape the harness re-pin had (evolution-lineage Track A follow-up).
+  // RED as of 93e7b74f: versionOrigins was undefined for both the fresh save and the bump.
+  const AGENT_BODY = {
+    description: "workspace assistant",
+    instructions: "be brief",
+    mcpServers: [],
+    capabilities: [],
+    tags: [],
+  };
+
+  async function buildWithAgents() {
+    const { InMemoryAgentRegistry } = await import("@everdict/registry");
+    const { AgentService } = await import("../core/agent/agent-service.js");
+    const agents = new InMemoryAgentRegistry();
+    const issueStore = new InMemoryIssueStore();
+    const issueService = new IssueService({
+      teams: teamAllocator,
+      store: issueStore,
+      scorecards: new InMemoryScorecardStore(),
+    });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      issueService,
+      agentRegistry: agents,
+      agentService: new AgentService({ agents }),
+    });
+    return { app, agents };
+  }
+
+  async function agentOrigin(
+    agents: { list(tenant: string): Promise<Array<{ id: string; versionOrigins?: Record<string, unknown> }>> },
+    version: string,
+  ) {
+    const entry = (await agents.list("acme")).find((e) => e.id === "helper");
+    return entry?.versionOrigins?.[version];
+  }
+
+  it("a FRESH save records the caller's declared issue origin (born_from intent)", async () => {
+    const { app, agents } = await buildWithAgents();
+    const issue = await createIssue(app);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: H,
+      payload: { ...AGENT_BODY, origin: { from: { type: "issue", id: issue.id }, note: "born in a campaign" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(await agentOrigin(agents, "1.0.0")).toMatchObject({
+      via: "web",
+      from: { type: "issue", id: issue.id },
+      note: "born in a campaign",
+    });
+  });
+
+  it("a BUMP records the base version as its origin — the service knows the ancestor, the caller may not restate it", async () => {
+    const { app, agents } = await buildWithAgents();
+    await app.inject({ method: "PUT", url: "/agents/helper", headers: H, payload: AGENT_BODY });
+    const bumped = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: H,
+      payload: { ...AGENT_BODY, instructions: "be brief and cite ids" },
+    });
+    expect(bumped.statusCode).toBe(200);
+    expect((bumped.json() as { version: string }).version).toBe("1.0.1");
+    expect(await agentOrigin(agents, "1.0.1")).toMatchObject({
+      via: "web",
+      from: { type: "agent", id: "helper", version: "1.0.0" },
+    });
+  });
+});

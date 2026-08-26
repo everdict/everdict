@@ -20,9 +20,18 @@ export interface AgentRegistry {
   // createdBy = creator of the first-registered version (for who-may-delete gating; undefined for seed/_shared).
   // `teamId` = the owning team (mig 0106) — absent means unowned (a `_shared`/seeded entry, or one from
   // before the axis), which is the workspace's. Surfaced because the read applies the visible-team ceiling.
-  list(
-    tenant: string,
-  ): Promise<Array<{ id: string; versions: string[]; owner: string; teamId?: string; createdBy?: string }>>;
+  // `versionOrigins` = version → birth stamp (only stamped versions; omitted when none) — the same
+  // per-version answer every other registry list carries, and what the succeeds/born_from harvest reads.
+  list(tenant: string): Promise<
+    Array<{
+      id: string;
+      versions: string[];
+      owner: string;
+      teamId?: string;
+      createdBy?: string;
+      versionOrigins?: Record<string, CapabilityOrigin>;
+    }>
+  >;
   // Creator subject of a live version this tenant directly owns (undefined if none). Missing/deleted/non-owned version → NotFound — no fallback.
   creatorOf(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Soft delete (tombstone) — preserve the data but exclude it from reads. Tenant directly-owned only; missing/already-deleted version → NotFound.

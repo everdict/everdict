@@ -104,6 +104,7 @@ export function registerAgentToolRoutes(app: FastifyInstance, deps: ServerDeps):
             principal.subject,
             req.params.key,
             parsed.data.bindings,
+            "web",
           ),
         );
       } catch (err) {

@@ -3,6 +3,8 @@ import { AgentSpecSchema } from "@everdict/contracts";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { agentDocs } from "./agent.docs.js";
 import { DeleteAgentVersionsBodySchema } from "./request/delete-agent-versions.js";
@@ -85,8 +87,18 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     const parsed = SaveAgentBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
+      // The birth stamp, same three pieces as every register (docs/registry.md §origin): channel from this
+      // route, agent attribution from the headers, the declared `origin` sibling off the raw body (the spec
+      // schema strips it, so it can never become content).
+      const origin = await capabilityOriginFor(
+        deps,
+        principal.workspace,
+        "web",
+        agentAttributionFrom(req.headers),
+        declaredOriginFrom(req.body),
+      );
       return reply.send(
-        await deps.agentService.saveAgent(principal.workspace, principal.subject, req.params.id, parsed.data),
+        await deps.agentService.saveAgent(principal.workspace, principal.subject, req.params.id, parsed.data, origin),
       );
     } catch (err) {
       return sendError(reply, err); // immutable conflict (concurrent same-version write) → 409

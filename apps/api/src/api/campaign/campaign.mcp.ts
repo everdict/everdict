@@ -103,9 +103,9 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         "Settle per the gate's answer: close as adopted (version + proving scorecard + waived axes recorded) " +
         "or as the gate's own ending. Refuses (CONFLICT) while the gate answers continue or " +
         "identity_unverified. Adoption approval is over THIS answer. Afterwards, register the adopted " +
-        "version: register_harness accepts the campaign's issue as its origin (from_issue), which becomes " +
-        "born_from lineage; save_agent does not carry an origin declaration yet — that coupling is the " +
-        "named follow-up in docs/architecture/evolution-lineage.md.",
+        "version declaring the campaign's issue as its origin — register_harness and save_agent both take " +
+        "fromIssue: a first version records born_from intent, and a bump records the base it succeeds, so " +
+        "lineage and intent both land in the graph.",
       inputSchema: { id: z.string() },
     },
     ({ id }) => run(principal, "scorecards:run", async () => ok(await campaigns.settle(ws, id, principal.subject))),

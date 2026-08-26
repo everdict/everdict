@@ -152,6 +152,9 @@ export class AgentMemberToolingService {
     subject: string,
     key: string,
     bindings: Record<string, string>,
+    // The transport this binding arrived through — the save below registers a new agent version, and a
+    // version's birth stamp names its channel (Track A).
+    via: "web" | "mcp",
   ): Promise<AgentToolDetailResponse> {
     const agentService = this.deps.agentService;
     if (!agentService)
@@ -175,7 +178,10 @@ export class AgentMemberToolingService {
     }
     // The upsert takes everything but the coordinates it assigns itself (a changed spec becomes a new version).
     const { id: _id, version: _version, ...body } = applyBindings(spec, tool, bindings);
-    await agentService.saveAgent(tenant, subject, AGENT_CHAT_CONFIG_ID, body);
+    await agentService.saveAgent(tenant, subject, AGENT_CHAT_CONFIG_ID, body, {
+      via,
+      note: `tool secret binding (${key})`,
+    });
     return this.getTool(tenant, subject, key);
   }
 

@@ -4,6 +4,12 @@ import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import {
+  FROM_ISSUE_TOOL_DESCRIPTION,
+  ORIGIN_NOTE_TOOL_DESCRIPTION,
+  capabilityOriginFor,
+  declaredOriginFromIssue,
+} from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { SaveAgentBodySchema } from "./request/save-agent.js";
 
@@ -143,9 +149,11 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
         inputSchema: {
           id: z.string().describe("agent id (the config's stable identity)"),
           agent: z.string().describe("AgentSpec JSON minus id/version"),
+          fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
+          originNote: z.string().optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ id, agent }) =>
+      ({ id, agent, fromIssue, originNote }) =>
         run(principal, "agents:write", async () => {
           let parsed: unknown;
           try {
@@ -155,7 +163,16 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = SaveAgentBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await agentService.saveAgent(ws, principal.subject, id, result.data));
+          // The declared issue applies to a FIRST version (born_from intent); a bump's `from` is the base
+          // the service resolves — it knows the ancestor, the caller may not restate it (Track A).
+          const origin = await capabilityOriginFor(
+            deps,
+            ws,
+            "mcp",
+            ctx.agent,
+            declaredOriginFromIssue(fromIssue, originNote),
+          );
+          return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
         }),
     );
   }

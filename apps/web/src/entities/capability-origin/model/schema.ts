@@ -15,6 +15,7 @@ export const capabilityOriginSourceTypeSchema = z.enum([
   'run',
   'trace',
   'harness',
+  'agent',
   'dataset',
   'judge',
   'benchmark',

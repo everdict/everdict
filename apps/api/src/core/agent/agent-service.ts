@@ -1,4 +1,4 @@
-import type { AgentSpec } from "@everdict/contracts";
+import type { AgentSpec, CapabilityOrigin } from "@everdict/contracts";
 import type { SaveAgentResult } from "@everdict/contracts/wire";
 import { specsEqual } from "@everdict/domain";
 import type { AgentRegistry } from "@everdict/registry";
@@ -35,11 +35,18 @@ export class AgentService {
 
   // Version-free upsert. New id → 1.0.0; a changed spec on an existing id → next patch version (new immutable version,
   // `latest` moves); an unchanged spec → idempotent no-op (created:false, no version written).
+  // The birth stamp is REQUIRED at this seam (evolution-lineage Track A): the optional shape is how the
+  // harness re-pin dropped its ancestry for as long as it did. The caller assembles the channel half (and
+  // may declare `from` — the campaign's issue — for a FIRST version); on a BUMP the service overrides
+  // `from` with the base it just resolved, because it is the only code that knows the ancestor at the write
+  // and a caller-declared one would be a second spelling of that fact (L3). The harvester then reads a
+  // same-family `from` as the `succeeds` lineage edge.
   async saveAgent(
     tenant: string,
     subject: string | undefined,
     id: string,
     body: AgentUpsert,
+    origin: CapabilityOrigin,
   ): Promise<SaveAgentResult> {
     const own = await this.deps.agents.ownVersions(tenant, id); // tenant-owned live versions, ascending; no _shared fallback
     if (own.length > 0) {
@@ -48,11 +55,12 @@ export class AgentService {
       if (specsEqual({ ...body, id, version: latest.version }, latest))
         return { workspace: tenant, id, version: latest.version, created: false };
       const version = nextVersion(latest.version, new Set(own));
-      await this.deps.agents.register(tenant, { ...body, id, version }, subject);
+      const stamped: CapabilityOrigin = { ...origin, from: { type: "agent", id, version: latest.version } };
+      await this.deps.agents.register(tenant, { ...body, id, version }, subject, undefined, stamped);
       return { workspace: tenant, id, version, created: true };
     }
     const version = "1.0.0";
-    await this.deps.agents.register(tenant, { ...body, id, version }, subject);
+    await this.deps.agents.register(tenant, { ...body, id, version }, subject, undefined, origin);
     return { workspace: tenant, id, version, created: true };
   }
 }

@@ -204,13 +204,12 @@ machinery extended to cover them.
 
 ## Track D — the campaign is a settlement, the guards are code
 
-> Status: **landed** (record + stores + pure gate + service + both transports + facts). What remains of
-> this track: the registry-side coupling (a `save_agent`/`register_harness` call that names a campaign
-> candidate refusing without the gate's `adopt` answer — today the settle tool points the loop at
-> `register_harness`'s from_issue origin, which Track A turns into lineage; `save_agent` carries no origin
-> declaration yet), and a
-> real-Postgres rung for the append-CAS (the in-memory twin makes the same decision, so the unit suite
-> exercises the refusal; the SQL text is pinned by a fake client).
+> Status: **landed** (record + stores + pure gate + service + both transports + facts). `save_agent` now
+> carries the origin declaration too (fromIssue for a first version; a BUMP records the base it succeeds —
+> the service knows the ancestor, so the caller may not restate it), and the agent registry's list forwards
+> `versionOrigins`, so the adopted version's lineage reaches the graph on both families. Still open on this
+> track: a hard refusal of a campaign-candidate save that arrives WITHOUT the gate's `adopt` answer (today
+> the coupling is the settle tool's contract, not a guard).
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is
