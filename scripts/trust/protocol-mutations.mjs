@@ -2081,6 +2081,37 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
   {
+    // arch-review 70 P0. `stagedEarly` recorded that the stage had been CALLED, so a refused put produced a
+    // successful acknowledgement AND skipped the fallback. Restoring the boolean reproduces both.
+    name: "agent handover — the stage is believed rather than read",
+    file: "packages/application-control/src/execution/verifier-pass.ts",
+    from: '        stagedEarly = staged.kind === "staged";',
+    to: "        stagedEarly = true;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/agent-handover-proof.counterexample.test.ts"],
+  },
+  {
+    // arch-review 70 P0. The policy existed and the composition never passed it, so every deployment took
+    // the permissive default. Dropping the spread is exactly the production state of two waves.
+    name: "durability policy — the composition judges without choosing what a loss costs",
+    file: "apps/api/src/composition/runtime-access.ts",
+    from: "            ...(deps.durability ? { durability: deps.durability } : {}),",
+    to: "            ...{},",
+    suite: ["--root", "apps/api", "src/composition/durability-policy-is-chosen.counterexample.test.ts"],
+  },
+  {
+    // arch-review 70 P1. The release was a second commit, so a crash in the gap left the row `retained` —
+    // a state `due()` never returns, on an execution that is already terminal.
+    name: "settlement release — the debt is freed in a second commit",
+    file: "packages/db/src/results/pg-run-store.ts",
+    from: "      if (release !== undefined) await release.apply(new PgIntermediateCleanupStore(tx));",
+    to: "      void release;",
+    build: "@everdict/db",
+    suite: ["--root", "apps/api", "src/trust/settlement-release-atomicity.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
+  {
     // arch-review 69 P2. The discharge used to spell the row's name itself (`gc-${executionId}`) while the Pg
     // adapter mints `gc/${tenant}/${executionId}`, so every inline-cleanup failure deferred against no row.
     // Re-introducing the caller-side spelling is exactly the production state; only real Postgres can see it,

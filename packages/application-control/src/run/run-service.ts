@@ -80,12 +80,14 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import { type ExecutionAttemptStore, requireAdopted } from "../ports/execution-attempt-store.js";
 import {
   type IntermediateCleanupStore,
+  type ReleasedCleanup,
+  collectReleased,
   dischargeIntermediates,
   removeStagedObject,
 } from "../ports/intermediate-cleanup-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import { type RecordingStore, recordingGenerationOf } from "../ports/recording-store.js";
-import type { AttemptStamp, RunStore } from "../ports/run-store.js";
+import type { AttemptStamp, CleanupRelease, RunStore } from "../ports/run-store.js";
 import { settleRun } from "../ports/settle.js";
 import {
   type TrajectorySegmentWire,
@@ -2014,6 +2016,10 @@ export class RunService {
     // ordinary path that completes without crashing never discarded anything, so every private-verifier case
     // left a full intermediate `CaseResult` in object storage forever. `recoverVerifiedCase`'s own comment
     // said "the settlement owns the discard"; this is the settlement, and it did not.
+    // …and the release rides that same write now (arch-review 70 P1). It used to run after the transaction
+    // returned, so a crash in the gap left the row `retained` — a state `due()` never returns, on an
+    // execution that is already terminal.
+    const rider = this.cleanupRider(current.tenant, runExecutionId(id));
     let settled: RunRecord | undefined;
     let faulted = false;
     try {
@@ -2025,6 +2031,7 @@ export class RunService {
         {
           ...this.fence(id),
           ...(riding !== undefined ? { stamp: riding } : {}),
+          ...(rider.release !== undefined ? { release: rider.release } : {}),
         },
       );
     } catch (err) {
@@ -2052,7 +2059,12 @@ export class RunService {
     }
     // …and only a settlement that LANDED ends the window. A refused fence means somebody else owns this run
     // and their settlement will discard; a fault means the run is still open and the halves are still owed.
-    if (settled !== undefined && !faulted) await this.dischargeStaged(settled.tenant, runExecutionId(id));
+    // The objects, AFTER the commit. The state flip already rode the transaction; this is the latency
+    // optimization whose failure costs nothing because the reconciler owns convergence. A lane with no
+    // transaction to ride keeps the two-step discharge it always had.
+    if (settled !== undefined && !faulted)
+      if (rider.release !== undefined) await rider.collect();
+      else await this.dischargeStaged(settled.tenant, runExecutionId(id));
     return settled;
   }
 
@@ -2072,6 +2084,36 @@ export class RunService {
       tenant,
       executionId,
     );
+  }
+
+  // ── THE RELEASE THAT RIDES THE SETTLEMENT (arch-review 70 P1) ──────────────────────────────────────
+  //
+  // `retained → gc_owed` belongs in the transaction that makes the outcome canonical: a crash between the
+  // two commits left the row `retained`, and `due()` never returns a retained row, so an already-terminal
+  // execution kept its artifacts forever. The rider flips the state atomically; what it FREED comes back out
+  // here so the objects are deleted after the commit, where a remote round trip belongs.
+  //
+  // A store that cannot open a transaction gets `undefined` and keeps the two-step it had — the window is
+  // then exactly as wide as before, which is the most an untransactional store can offer.
+  private cleanupRider(
+    tenant: string,
+    executionId: ExecutionId,
+  ): { release?: CleanupRelease; collect: () => Promise<void> } {
+    const cleanup = this.deps.cleanup;
+    if (!cleanup || this.deps.store.settleWith === undefined) return { collect: async () => undefined };
+    let freed: ReleasedCleanup | undefined;
+    return {
+      release: {
+        cleanup,
+        apply: async (bound) => {
+          freed = await bound.releaseForGc(tenant, executionId);
+        },
+      },
+      collect: async () => {
+        if (freed === undefined) return;
+        await collectReleased({ cleanup, remove: removeStagedObject(this.deps) }, freed, tenant, executionId);
+      },
+    };
   }
 
   // The atomic seam AS THIS DEPLOYMENT ACTUALLY HAS IT — three conditions asking three different questions:

@@ -1,5 +1,6 @@
 import type {
   AttemptStamp,
+  CleanupRelease,
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
@@ -20,6 +21,7 @@ import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import { type SqlClient, withTransaction } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 import { PgExecutionAttemptStore } from "./pg-execution-attempt-store.js";
+import { PgIntermediateCleanupStore } from "./pg-intermediate-cleanup-store.js";
 import { withRunUsage } from "./run-store.js";
 
 interface RunRow {
@@ -233,6 +235,7 @@ export class PgRunStore implements RunStore {
     // The caller's ambient ledger is on `stamp.attempts` and deliberately unused: the stamp must go through
     // the SAME transaction as the write, so a transaction-bound twin is handed to it instead.
     stamp: AttemptStamp,
+    release?: CleanupRelease,
   ): Promise<RunRecord | undefined> {
     return withTransaction(this.client, "the run settlement (attempt stamp + terminal write)", async (tx) => {
       // ── THE STAMP GOES FIRST (arch-review 63 P1-high) ──────────────────────────────────────────────
@@ -246,6 +249,13 @@ export class PgRunStore implements RunStore {
       // …and a refused fence takes the stamp with it. Thrown rather than returned, because ROLLBACK is this
       // helper's contract for a throw — the same shape `commitCase` uses for its own refused child write.
       if (settled === undefined) throw new UnsettledRunSignal();
+      // ── AND THE INTERMEDIATES BECOME COLLECTABLE IN THE SAME DECISION (arch-review 70 P1) ─────────
+      //
+      // After the fence held, so a refused settlement frees nothing — and inside the transaction, so a crash
+      // between "this outcome is canonical" and "its artifacts may be swept" is not a state that exists. The
+      // object deletes are the CALLER's, after the commit: a remote round trip has no business holding a
+      // database transaction open, and the reconciler owns convergence either way.
+      if (release !== undefined) await release.apply(new PgIntermediateCleanupStore(tx));
       return settled;
     }).catch((err: unknown) => {
       if (err instanceof UnsettledRunSignal) return undefined; // the fence refused; nothing was written

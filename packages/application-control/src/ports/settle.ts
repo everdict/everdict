@@ -1,5 +1,5 @@
 import type { RunRecord, ScorecardRecord } from "@everdict/contracts";
-import type { AttemptStamp, OutboxEvent, RunStore, RunUpdateGuard } from "./run-store.js";
+import type { AttemptStamp, CleanupRelease, OutboxEvent, RunStore, RunUpdateGuard } from "./run-store.js";
 import { ABORTABLE_SETTLE_STATUSES, type ScorecardStore, type SettleOptions } from "./scorecard-store.js";
 
 // ── THE TERMINAL VERB ────────────────────────────────────────────────────────────────────────────────
@@ -69,6 +69,10 @@ export async function settleRun(
     // THE CANCEL'S OWED TEARDOWN, committed with the decision (arch-review 52, Wave 3) — the run-scale twin
     // of `settleScorecard`'s option above. See `RunUpdateGuard.requestCancellation`.
     requestCancellation?: true;
+    // The intermediates this settlement frees, flipped inside the SAME transaction as the terminal write
+    // (arch-review 70 P1). Only the atomic path can honour it; the fallback below releases separately, which
+    // is exactly the window this exists to close and is the best a store without a transaction can do.
+    release?: CleanupRelease;
   },
 ): Promise<RunRecord | undefined> {
   const guard: RunUpdateGuard = {
@@ -81,6 +85,6 @@ export async function settleRun(
   // One fence, two ways to commit it — the condition above is built once so the atomic path can never be
   // guarded more weakly than the ordinary one (which is how five reviews' worth of forgotten fences happened).
   if (opts?.stamp !== undefined && store.settleWith !== undefined)
-    return store.settleWith(id, patch, events, guard, opts.stamp);
+    return store.settleWith(id, patch, events, guard, opts.stamp, opts.release);
   return store.update(id, patch, events, guard);
 }

@@ -95,6 +95,7 @@ export {
 } from "./ops/intermediate-cleanup-reconciler.js";
 export {
   type ArtifactRef,
+  collectReleased,
   dischargeIntermediates,
   InMemoryIntermediateCleanupStore,
   type IntermediateCleanupDebt,
@@ -107,6 +108,7 @@ export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js"
 export type { BudgetStore } from "./ports/budget-store.js";
 export type {
   AttemptStamp,
+  CleanupRelease,
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,

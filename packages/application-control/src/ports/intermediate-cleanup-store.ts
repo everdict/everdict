@@ -224,6 +224,40 @@ export function removeStagedObject(stores: {
 // The settlement's half, in one place so both lanes spend it the same way. Reads what the execution owes,
 // deletes it best-effort, and marks the debt paid ONLY when every delete converged — an unconfirmed delete
 // leaves the row owed for the reconciler, which is the difference between a cleanup and a lifecycle.
+// ── THE TWO HALVES OF A DISCHARGE, SEPARABLE BECAUSE ONE OF THEM IS ATOMIC (arch-review 70 P1) ─────
+//
+// `retained → gc_owed` must ride the settlement transaction; the object deletes must NOT (a remote round
+// trip has no business holding a database transaction open, and the reconciler owns convergence). So the
+// discharge is two functions, and `dischargeIntermediates` below is simply both of them for the lanes whose
+// store cannot open a transaction.
+export async function collectReleased(
+  deps: { cleanup?: IntermediateCleanupStore; remove: (key: string) => Promise<void> },
+  released: ReleasedCleanup,
+  tenant: string,
+  executionId: ExecutionId,
+): Promise<{ deleted: number; owed: number }> {
+  if (!deps.cleanup || released.refs.length === 0) return { deleted: 0, owed: 0 };
+  let deleted = 0;
+  const failures: string[] = [];
+  for (const ref of released.refs) {
+    try {
+      await deps.remove(ref.key);
+      deleted += 1;
+    } catch (err) {
+      failures.push(`${ref.key}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (failures.length > 0) {
+    // The identity the ROW has, not one this caller spells for itself (arch-review 69 P2).
+    await deps.cleanup
+      .deferred(released.operationId, failures.join("; "), new Date(Date.now() + 60_000).toISOString())
+      .catch(() => undefined);
+    return { deleted, owed: failures.length };
+  }
+  await deps.cleanup.complete(tenant, executionId);
+  return { deleted, owed: 0 };
+}
+
 export async function dischargeIntermediates(
   deps: {
     cleanup?: IntermediateCleanupStore;
@@ -235,30 +269,8 @@ export async function dischargeIntermediates(
   if (!deps.cleanup) return { deleted: 0, owed: 0 };
   // RELEASE, not read: this is the canonical settlement, and until it runs the artifacts are retained.
   const released = await deps.cleanup.releaseForGc(tenant, executionId);
-  if (released === undefined || released.refs.length === 0) return { deleted: 0, owed: 0 };
-  const refs = released.refs;
-  let deleted = 0;
-  const failures: string[] = [];
-  for (const ref of refs) {
-    try {
-      await deps.remove(ref.key);
-      deleted += 1;
-    } catch (err) {
-      failures.push(`${ref.key}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  if (failures.length > 0) {
-    // Owed still. The reconciler retries; the settlement is not failed for it, because the case's outcome is
-    // not what a storage hiccup should decide.
-    // The identity the ROW has, not one this caller spells for itself (arch-review 69 P2). The two spellings
-    // disagreed for two waves and the Postgres deferral matched nothing.
-    await deps.cleanup
-      .deferred(released.operationId, failures.join("; "), new Date(Date.now() + 60_000).toISOString())
-      .catch(() => undefined);
-    return { deleted, owed: failures.length };
-  }
-  await deps.cleanup.complete(tenant, executionId);
-  return { deleted, owed: 0 };
+  if (released === undefined) return { deleted: 0, owed: 0 };
+  return await collectReleased(deps, released, tenant, executionId);
 }
 
 // A staging call that could not record its debt must not proceed to hand the bytes to a lane that will

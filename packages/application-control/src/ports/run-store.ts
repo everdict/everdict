@@ -1,6 +1,7 @@
 import type { PlatformEventRecord, RunRecord } from "@everdict/contracts";
 import type { AdmissionLedger } from "./admission-ledger.js";
 import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
+import type { IntermediateCleanupStore } from "./intermediate-cleanup-store.js";
 
 // list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
 // With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
@@ -172,6 +173,31 @@ export interface AttemptStamp {
   apply: (attempts: ExecutionAttemptStore) => Promise<void>;
 }
 
+// ── …AND THE RELEASE THAT RIDES THE SAME DECISION (arch-review 70 P1) ───────────────────────────────
+//
+// The cleanup ledger became durable in arch-review 68 and its RELEASE stayed a second commit: the settlement
+// transaction committed, and `releaseForGc` ran afterwards as an ordinary call. A crash in that gap leaves
+// the row `retained` — and `due()` deliberately returns only released states, because a retained artifact is
+// one a recovery may still need. So the intermediates of an execution that is already terminal are kept
+// forever. Not a failed delete: a row that never became eligible to be deleted.
+//
+// Same rider shape as `AttemptStamp`, for the same reason: the write that makes an outcome canonical is the
+// write that makes its intermediates collectable, and two commits have a window.
+//
+// ⚠️ ONLY THE STATE FLIP RIDES THE TRANSACTION. The object deletes stay outside it — an S3 round trip inside
+// a database transaction holds a connection open on a remote service's latency, and the deletes are a
+// latency optimization whose failure costs nothing because the reconciler owns convergence (rule `protocol`,
+// "an inline cleanup after a commit is not a lifecycle"). What must be atomic is `retained → gc_owed`.
+export interface CleanupRelease {
+  // The caller's AMBIENT ledger, ignored by a store that can open a transaction — exactly as `AttemptStamp`
+  // carries one so the row this lands in can never drift from the one the debt was recorded on.
+  cleanup: IntermediateCleanupStore;
+  // Flip the debt through whichever ledger the store hands over, and keep what it freed: the caller deletes
+  // those objects AFTER the commit. A throw takes the settlement down with it, which is correct — the same
+  // database is answering both, so a fault here is a fault there.
+  apply: (cleanup: IntermediateCleanupStore) => Promise<void>;
+}
+
 export interface RunStore extends AdmissionLedger {
   // THE CHILD ROW IS THE DISPATCH INTENT (arch-review 33 P1). A batch creates a case's child run immediately
   // before dispatching it, so conditioning that INSERT on the parent's fencing token is what makes "may I
@@ -206,6 +232,9 @@ export interface RunStore extends AdmissionLedger {
     events: OutboxEvent[] | undefined,
     guard: RunUpdateGuard,
     stamp: AttemptStamp,
+    // …and the intermediates this settlement frees, flipped in the SAME transaction (arch-review 70 P1).
+    // Optional: a lane with no cleanup ledger settles exactly as it did.
+    release?: CleanupRelease,
   ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
