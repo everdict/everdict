@@ -2339,6 +2339,17 @@ const MUTATIONS = [
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
   },
   {
+    // evolution-lineage Track C. The observation channel exists so the judgment can weigh the world's own
+    // account; a channel that reports `sampled` while dropping the deltas is the emptiest form of the
+    // annotation defect — present, and carrying nothing. The run-case counterexample must notice.
+    name: "Track C — the sampled observation channel drops its deltas",
+    file: "packages/application-execution/src/run-case.ts",
+    from: '      ? { kind: "sampled", deltas: [...envDeltas] }',
+    to: '      ? { kind: "sampled", deltas: [] }',
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track D. Zero significant regressions is half the adoption bar; dropping it lets a
     // candidate that broke a case ship on the strength of the cases it helped. The gate suite must notice.
     name: "Track D — the adoption gate stops requiring zero regressions",

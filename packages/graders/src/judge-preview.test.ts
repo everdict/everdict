@@ -4,9 +4,13 @@ import { assessEvidence } from "./assess-evidence.js";
 import { assembleJudgeInput } from "./judge.js";
 import { modelJudge, previewJudge } from "./model-judge.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+const OBS_TEXT = "No independent observation channel: this judging path has no live environment.";
+
 function promptCtx(trace: TraceEvent[], expected?: string): GradeContext {
   return {
     deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+    observations: OBS_NONE,
     case: {
       id: "c",
       env: { kind: "prompt" },
@@ -37,6 +41,7 @@ describe("assembleJudgeInput", () => {
   it("maps a browser snapshot's dom and a prompt snapshot's output as evidence", async () => {
     const browser: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [],
       snapshot: { kind: "browser", url: "u", dom: "<h1>Done</h1>", console: [] },
@@ -53,6 +58,7 @@ describe("assembleJudgeInput", () => {
     const diff = "diff --git a/plan.md b/plan.md\n+++ b/plan.md\n+Day 1: fly ...";
     const repo: GradeContext = {
       deadlineAt: Date.now() + 60_000,
+      observations: OBS_NONE,
       case: {
         id: "c",
         env: { kind: "repo", source: { files: {} } },
@@ -89,6 +95,7 @@ describe("assembleJudgeInput", () => {
   // artifact resolver puts base64 into snap.screenshot without a content-type, so a `*.png` ref would mislabel a JPEG.
   const browserShot = (screenshot: string, screenshotRef: string): GradeContext => ({
     deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+    observations: OBS_NONE,
     case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
     trace: [],
     snapshot: { kind: "browser", url: "u", dom: "", console: [], screenshotRef, screenshot },
@@ -125,6 +132,7 @@ describe("custom evidence slots (mapping-authored → {<name>} placeholders)", (
 
   it("a custom template placeholder renders from the resolved slot; unbound identifiers stay verbatim", () => {
     const preview = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task: "t",
       trace: TRACE,
       custom: { confirmation_id: "R-42" },
@@ -139,6 +147,7 @@ describe("custom evidence slots (mapping-authored → {<name>} placeholders)", (
 
   it("without a custom template, resolved custom slots get default-template EVIDENCE sections", () => {
     const preview = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task: "t",
       trace: TRACE,
       custom: { run_log: "step1 ok\nstep2 ok" },
@@ -165,6 +174,7 @@ describe("previewJudge", () => {
     const big = "x".repeat(7000);
     const input = {
       task: "t",
+      observations: OBS_TEXT,
       trace: [{ t: 0, kind: "message", role: "assistant", text: big }] as TraceEvent[],
       rubric: "r",
     };
@@ -178,21 +188,37 @@ describe("previewJudge", () => {
   });
 
   it("warns when a custom template references evidence the run does not carry", () => {
-    const input = { task: "t", trace: TRACE, promptTemplate: "Judge the page: {dom}\n{verdict_instruction}" };
+    const input = {
+      task: "t",
+      observations: OBS_TEXT,
+      trace: TRACE,
+      promptTemplate: "Judge the page: {dom}\n{verdict_instruction}",
+    };
     const { warnings } = previewJudge(input);
     expect(warnings.some((w) => w.includes("{dom}"))).toBe(true);
   });
 
   it("warns on truncation of an oversized trace", () => {
     const big: TraceEvent[] = [{ t: 0, kind: "message", role: "user", text: "y".repeat(7000) }];
-    const { warnings } = previewJudge({ task: "t", trace: big });
+    const { warnings } = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: big,
+    });
     expect(warnings.some((w) => w.includes("truncated"))).toBe(true);
   });
 
   it("flags a screenshot as present when the input carries image bytes", () => {
-    const withImg = previewJudge({ task: "t", screenshot: { base64: "AAAA", mediaType: "image/png" } });
+    const withImg = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      screenshot: { base64: "AAAA", mediaType: "image/png" },
+    });
     expect(withImg.evidence.screenshot?.present).toBe(true);
-    const without = previewJudge({ task: "t" });
+    const without = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+    });
     expect(without.evidence.screenshot?.present).toBe(false);
   });
 });
@@ -246,6 +272,7 @@ describe("assessEvidence", () => {
   it("satisfies a dom requirement from a browser snapshot", () => {
     const browser: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "browser", startUrl: "u" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [],
       snapshot: { kind: "browser", url: "u", dom: "<h1>ok</h1>", console: [] },

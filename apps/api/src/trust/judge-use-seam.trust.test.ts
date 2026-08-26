@@ -6,6 +6,8 @@ import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js"
 import { defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 // Trust suite (docs/trust-certification.md) — TRUST-109 · TRUST-110.
 //
 // VERIFICATION BELONGS AT THE READ THAT PRODUCES THE BYTES ACTUALLY USED.
@@ -22,6 +24,7 @@ const describeTrust = TRUST_SUITE_ENABLED ? describe : describe.skip;
 
 const ctx: GradeContext = {
   deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+  observations: OBS_NONE,
   case: { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "do x", graders: [], timeoutSec: 60, tags: [] },
   trace: [{ t: 0, kind: "llm_call", model: "m" }],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },

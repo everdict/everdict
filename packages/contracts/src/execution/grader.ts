@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ComputeHandle, ComputeSpec } from "./compute.js";
 import type { EnvSnapshot } from "./environment.js";
-import type { EvalCase, Scorecard } from "./eval-case.js";
+import type { EnvDelta, EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvidence } from "./trace-source.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
 import { type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
@@ -281,6 +281,21 @@ export interface StoreReadQuery {
 }
 export type StoreReader = (q: StoreReadQuery) => Promise<string>;
 
+// ── THE WORLD'S OWN ACCOUNT, DELIVERED TO THE JUDGMENT (evolution-lineage Track C) ──────────────────
+//
+// `EnvDelta[]` is an INDEPENDENT observation — sampled by the environment on its own clock, never reported
+// by the agent — and until this channel existed its only terminal consumer was the replay recording, so no
+// grader could weigh a claim against what the world actually did. Three-valued on purpose (L2):
+//   sampled{[]}              the platform watched and nothing changed — a real, meaningful answer
+//   unobserved{unsupported}  this environment cannot sample (browser/os-use/prompt today)
+//   unobserved{no_environment} this judging path has no live environment at all (control-plane re-score,
+//                              the private verifier's container, a zero-cost preview)
+// A failed individual sample is currently folded inside the environment's best-effort sampler (it answers
+// undefined); surfacing it as its own reason is the named follow-up in the design doc.
+export type CaseObservations =
+  | { kind: "sampled"; deltas: EnvDelta[] }
+  | { kind: "unobserved"; reason: "unsupported" | "no_environment" };
+
 export interface GradeContext {
   case: EvalCase;
   // WHEN THIS CASE'S GRADING MUST BE OVER (epoch ms) — ONE deadline for the whole scoring phase, not one per
@@ -309,6 +324,9 @@ export interface GradeContext {
   // runtime that can exec into its stores; other paths leave it unset (a store-state grader then fails, like a
   // missing-compute outcome grader). docs/architecture/dependency-store-roles.md
   readStore?: StoreReader;
+  // REQUIRED, not optional: every construction site states what it knows about the observation channel,
+  // because an optional identity is how a channel stays unread for three reviews (rule `protocol`).
+  observations: CaseObservations;
   baseline?: Scorecard; // for regression comparison
 }
 

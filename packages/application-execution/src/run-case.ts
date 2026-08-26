@@ -2,6 +2,7 @@ import type {
   CaseFailure,
   CaseFsRequest,
   CaseFsServicing,
+  CaseObservations,
   CaseResult,
   ComputeHandle,
   ComputeSpec,
@@ -310,6 +311,13 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   let stopCaseFs: (() => void) | undefined;
   // In-run environment deltas (repo git-diff checkpoints) + the recorder handle — the environment plane for a coding
   // harness's replay. Started after install, stopped inside release(); a final sample is taken before release. replay.md.
+  // The observation channel the graders receive (evolution-lineage Track C): the environment's own account,
+  // frozen per grading call. `unobserved{unsupported}` when this environment cannot sample — never an empty
+  // series, which would claim "watched and nothing changed" about a world nobody watched (L2).
+  const observationsOf = (): CaseObservations =>
+    envRecorder !== undefined
+      ? { kind: "sampled", deltas: [...envDeltas] }
+      : { kind: "unobserved", reason: "unsupported" };
   const envDeltas: EnvDelta[] = [];
   let envRecorder: { stop: () => void; final: () => Promise<void> } | undefined;
   // Live-trace tee (opt-in) — batches drained TraceEvents out to the observer while the harness still runs.
@@ -402,6 +410,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
           snapshot,
           compute: gradingCompute,
           provision,
+          observations: observationsOf(),
         });
       }
     }
@@ -455,6 +464,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
               trace,
               snapshot: materialized,
               provision,
+              observations: observationsOf(),
             });
           }
         }

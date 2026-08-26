@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { RewardFileGrader } from "./reward-file.js";
 import { TestsPassGrader } from "./tests-pass.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 // A container that behaves like a Terminal-Bench task's: the verifier command PUBLISHES its reward to a file and
 // then exits 0 whatever the outcome — the shape every real task in terminal-bench-datasets and terminal-bench-2 has.
 function verifierCompute(opts: { publish?: Record<string, string>; verifierExit?: number }): ComputeHandle {
@@ -39,6 +41,7 @@ function verifierCompute(opts: { publish?: Record<string, string>; verifierExit?
 function ctx(compute: ComputeHandle): GradeContext {
   return {
     deadlineAt: Date.now() + 60_000,
+    observations: OBS_NONE,
     case: {
       id: "chess-best-move",
       env: { kind: "repo", source: { path: "/app" } },

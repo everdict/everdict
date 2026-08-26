@@ -1,4 +1,5 @@
 import type {
+  CaseObservations,
   ComputeHandle,
   ComputeSpec,
   EnvSnapshot,
@@ -23,6 +24,9 @@ export interface ScoreObservationsInput {
   skipComputeBound?: boolean;
   provision?: (spec: ComputeSpec) => Promise<ComputeHandle>; // dedicated grading compute (script grader image mode)
   readStore?: StoreReader; // read a data store's post-run slice (store-state grading, P2) — from a store-capable runtime
+  // The run's observation channel, when the caller still holds it. Absent = this scoring path has no live
+  // environment (control-plane re-score) — stated as unobserved below, never as an empty series (Track C).
+  observations?: CaseObservations;
 }
 
 export async function scoreObservations(input: ScoreObservationsInput): Promise<Score[]> {
@@ -40,6 +44,7 @@ export async function scoreObservations(input: ScoreObservationsInput): Promise<
         snapshot: input.snapshot,
         ...(input.provision ? { provision: input.provision } : {}),
         ...(input.readStore ? { readStore: input.readStore } : {}),
+        observations: input.observations ?? { kind: "unobserved", reason: "no_environment" },
       })),
     );
   }

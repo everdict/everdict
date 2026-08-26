@@ -2,6 +2,8 @@ import type { GradeContext, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { costGrader, latencyGrader, stepsGrader } from "./trace-graders.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 // Downstream report 1.1's third assertion: the judge's execution, attached to the judged case's trace as
 // judge-named `span` events RE-TIMED to the trace's last instant, must not move the judged agent's own
 // cost / steps / latency measurements — the measurement plane stays the agent's.
@@ -25,6 +27,7 @@ describe("trace graders — judge evidence spans are invisible to the agent's me
     ({
       case: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
       deadlineAt: Date.now() + 60_000,
+      observations: OBS_NONE,
       trace,
       snapshot: { kind: "prompt", output: "" },
     }) as GradeContext;

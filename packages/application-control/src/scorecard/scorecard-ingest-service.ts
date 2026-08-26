@@ -349,6 +349,8 @@ export class ScorecardIngestService {
       const ctx: GradeContext = {
         case: evalCase,
         deadlineAt: Date.now() + evalCase.timeoutSec * 1000, // this scoring phase's bound (arch-review 25 P1)
+        // an ingested trace ran on somebody else's runtime — there was never a channel to sample — stated, never an empty series (Track C).
+        observations: { kind: "unobserved", reason: "no_environment" },
         trace,
         snapshot,
       };

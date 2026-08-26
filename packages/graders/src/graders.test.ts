@@ -5,9 +5,12 @@ import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browse
 import { type Judge, JudgeGrader } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 function browserCtx(dom: string, url: string): GradeContext {
   return {
     deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+    observations: OBS_NONE,
     case: { id: "c", env: { kind: "browser", startUrl: url }, task: "buy item", graders: [], timeoutSec: 1, tags: [] },
     trace: [] as TraceEvent[],
     snapshot: { kind: "browser", url, dom, console: [] },
@@ -27,6 +30,7 @@ describe("browser graders", () => {
   it("errors on a repo snapshot", async () => {
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: browserCtx("", "").case,
       trace: [],
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
@@ -38,6 +42,7 @@ describe("browser graders", () => {
 describe("answer-match grader (QA benchmark answer matching)", () => {
   const ctxWithAnswer = (text: string): GradeContext => ({
     deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+    observations: OBS_NONE,
     case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "q", graders: [], timeoutSec: 1, tags: [] },
     trace: [{ t: 0, kind: "message", role: "assistant", text }] as TraceEvent[],
     snapshot: { kind: "browser", url: "https://x", dom: "", console: [] },
@@ -226,6 +231,7 @@ describe("JudgeGrader", () => {
     };
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "prompt" }, task: "answer q", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
       snapshot: { kind: "prompt", output: "the final response body" },
@@ -244,6 +250,7 @@ describe("JudgeGrader", () => {
     };
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "prompt" }, task: "answer q", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
       snapshot: { kind: "prompt", output: "" },
@@ -275,6 +282,7 @@ describe("JudgeGrader", () => {
     };
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "os-use" }, task: "open the remote form", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
       snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // none embedded → compute fallback
@@ -310,6 +318,7 @@ describe("JudgeGrader", () => {
     };
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "os-use" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
       snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", screenshot: "RU1CRURERUQ=", windows: [] },
@@ -343,6 +352,7 @@ describe("JudgeGrader", () => {
     };
     const ctx: GradeContext = {
       deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+      observations: OBS_NONE,
       case: { id: "c", env: { kind: "os-use" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
       snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", screenshot: "", windows: [] },

@@ -25,6 +25,7 @@ describe("inline judge criteria are namespaced", () => {
     case: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
     trace: [],
     snapshot: { kind: "prompt", output: "" },
+    observations: { kind: "unobserved", reason: "no_environment" },
   } as unknown as GradeContext;
 
   it("namespaced: a criterion is three segments deep — DIAGNOSTIC, exactly as a registered judge's is", async () => {

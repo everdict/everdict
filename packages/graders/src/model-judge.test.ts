@@ -8,25 +8,50 @@ const TRACE: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
 describe("modelJudge", () => {
   it("parses the JSON verdict from a JudgeCompletion (surrounding prose allowed)", async () => {
     const complete = async () => 'sure: {"pass": true, "score": 0.9, "reason": "looks correct"} done';
-    const v = await modelJudge(complete).judge({ task: "t", trace: TRACE });
+    const v = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: TRACE,
+    });
     expect(v).toEqual({ pass: true, score: 0.9, reason: "looks correct" });
   });
 
   it("derives pass from the score threshold (0.5) when missing, clamps score to [0,1]", async () => {
-    const v = await modelJudge(async () => '{"score": 1.4, "reason": "great"}').judge({ task: "t" });
+    const v = await modelJudge(async () => '{"score": 1.4, "reason": "great"}').judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+    });
     expect(v).toEqual({ pass: true, score: 1, reason: "great" });
-    const low = await modelJudge(async () => '{"score": 0.2, "reason": "no"}').judge({ task: "t" });
+    const low = await modelJudge(async () => '{"score": 0.2, "reason": "no"}').judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+    });
     expect(low.pass).toBe(false);
   });
 
   it("UpstreamError (502) when JSON is missing or malformed", async () => {
-    await expect(modelJudge(async () => "no json here").judge({ task: "t" })).rejects.toBeInstanceOf(AppError);
-    await expect(modelJudge(async () => '{"reason":"x"}').judge({ task: "t" })).rejects.toBeInstanceOf(AppError);
+    await expect(
+      modelJudge(async () => "no json here").judge({
+        observations: "No independent observation channel: this judging path has no live environment.",
+        task: "t",
+      }),
+    ).rejects.toBeInstanceOf(AppError);
+    await expect(
+      modelJudge(async () => '{"reason":"x"}').judge({
+        observations: "No independent observation channel: this judging path has no live environment.",
+        task: "t",
+      }),
+    ).rejects.toBeInstanceOf(AppError);
   });
 
   it("includes task/rubric/trace in the prompt", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "do X", rubric: "be correct", trace: TRACE });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "do X",
+      rubric: "be correct",
+      trace: TRACE,
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     expect(prompt).toContain("do X");
     expect(prompt).toContain("be correct");
@@ -45,7 +70,11 @@ describe("modelJudge", () => {
     const trace: TraceEvent[] = [...filler, { t: 999, kind: "message", role: "assistant", text: FINAL }];
 
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "do X", trace });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "do X",
+      trace,
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
 
     // Thanks to the dedicated AGENT FINAL ANSWER section, the final answer is fully present in the prompt (it would have been lost before the fix — regression).
@@ -63,7 +92,11 @@ describe("modelJudge", () => {
       { t: 2, kind: "message", role: "assistant", text: "the-real-final-answer" },
     ];
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "t", trace });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace,
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     const section = prompt.slice(prompt.indexOf("AGENT FINAL ANSWER"), prompt.indexOf("EXECUTION TRACE"));
     expect(section).toContain("the-real-final-answer");
@@ -78,6 +111,7 @@ describe("modelJudge", () => {
   it("a custom promptTemplate replaces the default framing; placeholders expand to raw evidence + the verdict instruction", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
     await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task: "do X",
       rubric: "be correct",
       trace: TRACE,
@@ -96,7 +130,12 @@ describe("modelJudge", () => {
         '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"},"style":{"score":1,"pass":true,"reason":"b"}},"pass":true,"score":1,"reason":"ok"}',
       ),
     );
-    await modelJudge(complete).judge({ task: "t", trace: TRACE, criteria: CRITERIA });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: TRACE,
+      criteria: CRITERIA,
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     expect(prompt).toContain("CRITERIA (score each):");
     expect(prompt).toContain("- accuracy (weight 2): is it right");
@@ -107,7 +146,11 @@ describe("modelJudge", () => {
   it("criteria: parses per-criterion verdicts; overall = the model's verdict when present", async () => {
     const complete = async () =>
       '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"right"},"style":{"score":0.5,"pass":false,"reason":"messy"}},"pass":true,"score":0.8,"reason":"overall"}';
-    const v = await modelJudge(complete).judge({ task: "t", criteria: CRITERIA });
+    const v = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      criteria: CRITERIA,
+    });
     expect(v.score).toBe(0.8);
     expect(v.criteria?.accuracy).toEqual({ pass: true, score: 0.9, reason: "right" });
     expect(v.criteria?.style).toEqual({ pass: false, score: 0.5, reason: "messy" });
@@ -116,7 +159,11 @@ describe("modelJudge", () => {
   it("criteria: overall falls back to the weighted mean when the model gives no overall score", async () => {
     const complete = async () =>
       '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"},"style":{"score":0.1,"pass":false,"reason":"b"}}}';
-    const v = await modelJudge(complete).judge({ task: "t", criteria: CRITERIA });
+    const v = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      criteria: CRITERIA,
+    });
     expect(v.score).toBeCloseTo((2 * 1 + 1 * 0.1) / 3); // Σ(w·score)/Σw
     expect(v.pass).toBe(true); // 0.7 >= 0.5
     expect(v.reason).toContain("weighted mean");
@@ -125,26 +172,42 @@ describe("modelJudge", () => {
   it("criteria: a criterion missing from the verdict is an explicit UpstreamError (never a silent 0)", async () => {
     const complete = async () =>
       '{"criteria":{"accuracy":{"score":1,"pass":true,"reason":"a"}},"pass":true,"score":1,"reason":"r"}';
-    await expect(modelJudge(complete).judge({ task: "t", criteria: CRITERIA })).rejects.toBeInstanceOf(AppError);
+    await expect(
+      modelJudge(complete).judge({
+        observations: "No independent observation channel: this judging path has no live environment.",
+        task: "t",
+        criteria: CRITERIA,
+      }),
+    ).rejects.toBeInstanceOf(AppError);
   });
 
   it("criteria: a per-criterion passThreshold re-decides that criterion's pass from its score", async () => {
     const strict = [{ id: "accuracy", description: "d", weight: 1, passThreshold: 0.95 }];
     const complete = async () =>
       '{"criteria":{"accuracy":{"score":0.9,"pass":true,"reason":"a"}},"pass":true,"score":0.9,"reason":"r"}';
-    const v = await modelJudge(complete).judge({ task: "t", criteria: strict });
+    const v = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      criteria: strict,
+    });
     expect(v.criteria?.accuracy?.pass).toBe(false); // 0.9 < 0.95 despite the model's pass:true
   });
 
   it("includes the case's expected output as reference evidence (default section + {expected} placeholder)", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "t", trace: TRACE, expected: "the reference answer" });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: TRACE,
+      expected: "the reference answer",
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     expect(prompt).toContain("EXPECTED OUTPUT (reference):");
     expect(prompt).toContain("the reference answer");
 
     const complete2 = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
     await modelJudge(complete2).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task: "t",
       expected: "ref",
       promptTemplate: "Reference: {expected}\n{verdict_instruction}",
@@ -154,7 +217,12 @@ describe("modelJudge", () => {
 
   it("includes the result-channel final response in the prompt when the trace has no assistant answer (regression: it was dropped, leaving the judge without evidence)", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "t", trace: TRACE, response: "the produced result body" });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: TRACE,
+      response: "the produced result body",
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     expect(prompt).toContain("AGENT FINAL RESPONSE");
     expect(prompt).toContain("the produced result body");
@@ -163,7 +231,12 @@ describe("modelJudge", () => {
   it("omits the response section when it duplicates the trace's final answer", async () => {
     const trace: TraceEvent[] = [{ t: 0, kind: "message", role: "assistant", text: "same answer" }];
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
-    await modelJudge(complete).judge({ task: "t", trace, response: "same answer" });
+    await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace,
+      response: "same answer",
+    });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
     expect(prompt).toContain("AGENT FINAL ANSWER");
     expect(prompt).not.toContain("AGENT FINAL RESPONSE");
@@ -174,7 +247,11 @@ describe("modelJudge", () => {
       Promise.resolve('{"pass":true,"score":1,"reason":"goal state shown"}'),
     );
     const screenshot = { base64: "AAAA", mediaType: "image/png" };
-    const v = await modelJudge(complete).judge({ task: "show the remote form", screenshot });
+    const v = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "show the remote form",
+      screenshot,
+    });
     expect(v.pass).toBe(true);
     expect(complete.mock.calls[0]?.[1]).toEqual(screenshot); // image passed to transport
     expect(complete.mock.calls[0]?.[0]).toContain("SCREENSHOT"); // prompt notes the attached screenshot
@@ -243,7 +320,12 @@ describe("harnessComplete", () => {
         { t: 0, kind: "message", role: "assistant", text: '{"pass":true,"score":1,"reason":"ok"}' },
       ],
     });
-    const verdict = await modelJudge(complete).judge({ task: "t", trace: TRACE, rubric: "r" });
+    const verdict = await modelJudge(complete).judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task: "t",
+      trace: TRACE,
+      rubric: "r",
+    });
     expect(verdict).toEqual({ pass: true, score: 1, reason: "ok" });
   });
 });
@@ -254,7 +336,11 @@ describe("harnessComplete", () => {
 describe("judge prompt: the task is bounded like every other section", () => {
   it("truncates an oversized task and says so, in the prompt and in the preview", () => {
     const task = "x".repeat(44_300);
-    const preview = previewJudge({ task, rubric: "PASS if ok" });
+    const preview = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task,
+      rubric: "PASS if ok",
+    });
     expect(preview.prompt.length).toBeLessThan(task.length);
     expect(preview.prompt).toContain("[truncated");
     expect(preview.warnings.some((w) => w.startsWith("task is truncated"))).toBe(true);
@@ -262,7 +348,11 @@ describe("judge prompt: the task is bounded like every other section", () => {
 
   it("leaves an ordinary task byte-identical and unwarned", () => {
     const task = "plan a 3-day trip";
-    const preview = previewJudge({ task, rubric: "PASS if ok" });
+    const preview = previewJudge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task,
+      rubric: "PASS if ok",
+    });
     expect(preview.prompt).toContain(task);
     expect(preview.prompt).not.toContain("[truncated");
     expect(preview.warnings.some((w) => w.startsWith("task is truncated"))).toBe(false);

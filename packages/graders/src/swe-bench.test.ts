@@ -3,6 +3,8 @@ import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/contract
 import { describe, expect, it } from "vitest";
 import { SweBenchGrader } from "./swe-bench.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 // mock compute: inject git apply / pytest exit codes to verify only the scoring logic deterministically.
 function mockCompute(opts: { applyExit?: number; testExit?: number }): { compute: ComputeHandle; cmds: string[] } {
   const cmds: string[] = [];
@@ -24,6 +26,7 @@ function mockCompute(opts: { applyExit?: number; testExit?: number }): { compute
 
 const ctxWith = (compute?: ComputeHandle): GradeContext => ({
   deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+  observations: OBS_NONE,
   case: { id: "i1", env: { kind: "repo", source: { files: {} } }, task: "fix", graders: [], timeoutSec: 1, tags: [] },
   trace: [],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },

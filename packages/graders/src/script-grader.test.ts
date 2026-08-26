@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptGrader } from "./script-grader.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 const pexec = promisify(exec);
 
 function mockCompute(stdout: string, exitCode = 0) {
@@ -33,6 +35,7 @@ function mockCompute(stdout: string, exitCode = 0) {
 
 const ctx = (compute?: ComputeHandle): GradeContext => ({
   deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+  observations: OBS_NONE,
   case: { id: "c1", env: { kind: "prompt" }, task: "answer q", graders: [], timeoutSec: 60, tags: [] },
   trace: [{ t: 0, kind: "message", role: "assistant", text: "42" }],
   snapshot: { kind: "prompt", output: "42" },

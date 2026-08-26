@@ -158,6 +158,17 @@ asserting the manifest carries the registry digest.
 
 *The heaviest track; last on purpose.*
 
+> Status: **channel landed.** `GradeContext.observations` is a REQUIRED three-valued channel
+> (`sampled{deltas}` | `unobserved{unsupported | no_environment}`) — the compiler enumerated every
+> construction site, and each states what it knows; `runCase` feeds the sampled series at grading time, and
+> the judge's prompt ALWAYS carries the section, so an absent channel is a stated fact rather than a missing
+> paragraph. What remains of this track, named: sealing the deltas into the judged evidence so a re-score
+> reads the same observations (they still fold into the replay recording afterwards), the
+> `observationConsistency` field on the judge's verdict that gates can weigh, a `sampling_failed` reason
+> (today an individual failed sample is folded inside the environment's best-effort sampler), and threading
+> the run's channel into DEFERRED observation scoring (the control-plane path currently states
+> `no_environment`).
+
 **The gap.** `EnvDelta[]` is an independent observation of the world (sampled by the environment, not
 reported by the agent), and today its terminal consumer is the replay recording — it is cleared off the
 persisted result and no judgment input carries it. The judge grades the agent's trace: the agent's own
@@ -192,6 +203,13 @@ of a sealed case reads identical observation bytes (digest equality), the `scori
 machinery extended to cover them.
 
 ## Track D — the campaign is a settlement, the guards are code
+
+> Status: **landed** (record + stores + pure gate + service + both transports + facts). What remains of
+> this track: the registry-side coupling (a `save_agent`/`register_harness` call that names a campaign
+> candidate refusing without the gate's `adopt` answer — today the settle tool's contract instructs the
+> loop to save with the campaign's issue as origin, which Track A then turns into lineage), and a
+> real-Postgres rung for the append-CAS (the in-memory twin makes the same decision, so the unit suite
+> exercises the refusal; the SQL text is pinned by a fake client).
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is

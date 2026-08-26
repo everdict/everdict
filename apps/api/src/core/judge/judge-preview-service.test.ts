@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { codeJudgeRunSubmitter } from "../../composition/run.js";
 import { JudgePreviewService } from "./judge-preview-service.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 const CODE_JUDGE: Extract<JudgeSpec, { kind: "code" }> = {
   kind: "code",
   id: "quality",
@@ -93,6 +95,7 @@ describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () =>
       spec: CODE_JUDGE,
       ctx: {
         deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+        observations: OBS_NONE,
         case: { id: "preview", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
         trace: [],
         snapshot: { kind: "prompt", output: "" },
@@ -114,6 +117,7 @@ describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () =>
     const submit = codeJudgeRunSubmitter(service);
     const sourceCtx = {
       deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+      observations: OBS_NONE,
       case: {
         id: "c1",
         env: { kind: "prompt" as const },

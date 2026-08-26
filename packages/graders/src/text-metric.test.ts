@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { TextMetricGrader } from "./text-metric.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 const CASE: EvalCase = {
   id: "c1",
   env: { kind: "prompt" },
@@ -22,6 +24,7 @@ const msg = (text: string, role: "user" | "assistant" = "assistant"): TraceEvent
 
 const ctx = (trace: TraceEvent[]) => ({
   deadlineAt: Date.now() + 60_000,
+  observations: OBS_NONE,
   case: CASE,
   trace,
   snapshot: { kind: "prompt" as const, output: "" },

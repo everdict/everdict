@@ -314,6 +314,8 @@ export class ScoringService {
       case: evalCase,
       // One deadline for this scoring phase, bounded by the case's declared budget (arch-review 25 P1).
       deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
+      // a re-score reads sealed evidence — no live environment stands behind it — stated, never an empty series (Track C).
+      observations: { kind: "unobserved", reason: "no_environment" },
       trace: executionEvidenceTrace(result.trace),
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),

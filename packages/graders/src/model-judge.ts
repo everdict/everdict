@@ -124,6 +124,10 @@ function buildPrompt(input: JudgeInput): string {
     input.diff
       ? `FILES THE AGENT PRODUCED OR CHANGED (git diff vs the seeded baseline, truncated):\n${input.diff.slice(0, MAX_CHARS)}`
       : "",
+    // The platform's own account of the run — always present, so an absent channel is a stated fact the
+    // judge weighs, not a silently missing section. Claims in the trace that contradict it are the judge's
+    // to call out (Track C).
+    `INDEPENDENT OBSERVATIONS (sampled by the platform, not reported by the agent):\n${input.observations.slice(0, MAX_CHARS)}`,
     input.screenshot
       ? "A SCREENSHOT of the final UI/desktop state is attached. Judge whether it shows the task's goal state."
       : "",
@@ -166,6 +170,7 @@ const EVIDENCE_PLACEHOLDERS = [
   "trace",
   "dom",
   "diff",
+  "observations",
 ] as const;
 
 // Zero-cost preview: render the exact judging prompt for an assembled input and report per-placeholder coverage

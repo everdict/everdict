@@ -1,4 +1,5 @@
 import type {
+  CaseObservations,
   ComputeHandle,
   EnvSnapshot,
   EvalCase,
@@ -53,6 +54,10 @@ export interface JudgeInput {
   requiredEvidence?: HoistedEvidence[];
   rubric?: string;
   criteria?: JudgeCriterion[]; // multi-criteria: the verdict must score every listed criterion
+  // The platform's INDEPENDENT account of the run — rendered from GradeContext.observations, three-valued
+  // into prose so an absent channel is STATED to the judge rather than silently missing (Track C; an
+  // unobserved run must never read like a run in which nothing changed).
+  observations: string;
   promptTemplate?: string; // custom judging prompt (must carry {verdict_instruction}) — absent: the default template
 }
 
@@ -125,6 +130,22 @@ async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Pr
 // constructor of JudgeInput — JudgeGrader.grade and the preview/dry-run surfaces all go through it, so a
 // preview cannot diverge from a real grade. Screenshot resolution reads embedded base64 (no compute) or, for
 // os-use with only a ref, the compute file; in a preview (no compute) an os-use ref simply resolves to absent.
+// The observation channel, rendered for the prompt. Every arm produces a SENTENCE — the judge is told when
+// there was no channel and why, because "no section" and "nothing changed" must not read alike (Track C).
+const OBSERVATION_DELTA_CAP = 4000;
+function renderObservations(observations: CaseObservations): string {
+  if (observations.kind === "unobserved") {
+    return observations.reason === "unsupported"
+      ? "No independent observation channel: this environment does not support platform sampling."
+      : "No independent observation channel: this judging path has no live environment.";
+  }
+  if (observations.deltas.length === 0)
+    return "The platform sampled the environment during the run and observed no changes.";
+  return observations.deltas
+    .map((d) => `[t=+${d.t}ms ${d.kind}]\n${d.text.slice(0, OBSERVATION_DELTA_CAP)}`)
+    .join("\n\n");
+}
+
 export async function assembleJudgeInput(
   ctx: GradeContext,
   opts: {
@@ -153,6 +174,7 @@ export async function assembleJudgeInput(
   const required = opts.requires?.length ? hoistRequiredEvidence(opts.requires, ctx.trace) : [];
   return {
     task: ctx.case.task,
+    observations: renderObservations(ctx.observations),
     ...(wants("trace") ? { trace: ctx.trace } : {}),
     ...(required.length > 0 ? { requiredEvidence: required } : {}),
     ...(snap.kind === "browser" && wants("dom") ? { dom: snap.dom } : {}),

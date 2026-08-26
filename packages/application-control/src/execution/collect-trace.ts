@@ -171,6 +171,8 @@ export async function collectDeferredTrace(
   const ctx: GradeContext = {
     case: evalCase,
     deadlineAt: Date.now() + evalCase.timeoutSec * 1000,
+    // control-plane collection scores from the pulled trace — the run's live channel is gone — stated, never an empty series (Track C).
+    observations: { kind: "unobserved", reason: "no_environment" },
     trace,
     snapshot: result.snapshot,
   };

@@ -30,8 +30,14 @@ describe.skipIf(!BASE || !KEY || !MODEL)("model judge — live OpenAI-compatible
 
   // Live models are non-deterministic, so judge both good/bad in one test and assert on meaning (pass) + separation (score).
   it("an achieving trace passes, a non-achieving trace fails, and the scores separate", async () => {
-    const good = await judge.judge({ task, rubric, trace: [...goodTrace] });
+    const good = await judge.judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task,
+      rubric,
+      trace: [...goodTrace],
+    });
     const bad = await judge.judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task,
       rubric,
       trace: [{ t: 0, kind: "message", role: "assistant", text: "I am not sure how to do that." }],
@@ -47,7 +53,14 @@ describe.skipIf(!BASE || !KEY || !MODEL)("model judge — live OpenAI-compatible
       { id: "completion", description: "The task's goal state was fully achieved.", weight: 2 },
       { id: "efficiency", description: "The agent achieved it without unnecessary steps.", weight: 1 },
     ];
-    const v = await judge.judge({ task, rubric, criteria, expected: "done", trace: [...goodTrace] });
+    const v = await judge.judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
+      task,
+      rubric,
+      criteria,
+      expected: "done",
+      trace: [...goodTrace],
+    });
     // Structure: every declared criterion is scored (the parser enforces it — reaching here proves the live model complied).
     expect(Object.keys(v.criteria ?? {}).sort()).toEqual(["completion", "efficiency"]);
     expect(v.criteria?.completion?.pass).toBe(true); // the clearly-achieving trace completes
@@ -57,6 +70,7 @@ describe.skipIf(!BASE || !KEY || !MODEL)("model judge — live OpenAI-compatible
 
   it("a custom promptTemplate drives the live verdict end to end", async () => {
     const v = await judge.judge({
+      observations: "No independent observation channel: this judging path has no live environment.",
       task,
       rubric,
       promptTemplate:

@@ -47,6 +47,7 @@ const spec = {
 const ctx = {
   case: { id: "c1", task: "t", env: { kind: "prompt" }, graders: [], timeoutSec: 60 },
   deadlineAt: Date.now() + 60_000,
+  observations: { kind: "unobserved", reason: "no_environment" },
   trace: [],
   snapshot: { kind: "prompt", output: "done" },
 } as unknown as GradeContext;

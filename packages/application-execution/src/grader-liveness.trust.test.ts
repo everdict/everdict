@@ -18,6 +18,7 @@ const describeTrust = process.env.EVERDICT_TRUST_SUITE === "1" ? describe : desc
 
 const context = (timeoutSec: number): GradeContext => ({
   // ONE deadline for the whole scoring phase, computed where the clock starts.
+  observations: { kind: "unobserved", reason: "no_environment" },
   deadlineAt: Date.now() + timeoutSec * 1000,
   case: EvalCaseSchema.parse({
     id: "c-1",

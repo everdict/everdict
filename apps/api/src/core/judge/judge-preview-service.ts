@@ -79,6 +79,8 @@ export function gradeContextFromTrace(evidence: Extract<JudgeEvidenceInput, { so
     // a placeholder for a run that never happens, and a one-second deadline would fail every real judge call.
     // This is an interactive request, so what it needs is a bound a person will wait for.
     deadlineAt: Date.now() + 60_000,
+    // A zero-cost preview has no live environment — stated, never an empty series (Track C).
+    observations: { kind: "unobserved", reason: "no_environment" },
     case: {
       id: "preview",
       env: { kind: "prompt" },
@@ -121,6 +123,8 @@ export class JudgePreviewService {
     return {
       // Same: the preview's own interactive bound, not the case's execution window (which already happened).
       deadlineAt: Date.now() + 60_000,
+      // A zero-cost preview has no live environment — stated, never an empty series (Track C).
+      observations: { kind: "unobserved", reason: "no_environment" },
       case: evalCase,
       // The SAME canonical projection a real grade applies (scoring-service): a stored trace carries the
       // infra plane and prior judgments' judge:* spans — a preview that showed them would diverge from the

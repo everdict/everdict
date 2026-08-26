@@ -5,7 +5,14 @@ import { StoreStateGrader } from "./store-state.js";
 const CASE: EvalCase = { id: "c", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] };
 
 function ctx(over: Partial<GradeContext> = {}): GradeContext {
-  return { deadlineAt: Date.now() + 60_000, case: CASE, trace: [], snapshot: { kind: "prompt", output: "" }, ...over };
+  return {
+    deadlineAt: Date.now() + 60_000,
+    observations: { kind: "unobserved", reason: "no_environment" },
+    case: CASE,
+    trace: [],
+    snapshot: { kind: "prompt", output: "" },
+    ...over,
+  };
 }
 
 describe("StoreStateGrader", () => {

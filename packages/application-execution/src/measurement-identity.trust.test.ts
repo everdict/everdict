@@ -22,6 +22,7 @@ const CTX = {
   case: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
   trace: [],
   snapshot: { kind: "prompt", output: "" },
+  observations: { kind: "unobserved", reason: "no_environment" },
 } as unknown as GradeContext;
 
 const matchedMetrics = (specs: GraderSpec[]): string[] =>

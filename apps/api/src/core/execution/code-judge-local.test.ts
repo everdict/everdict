@@ -3,6 +3,8 @@ import type { GradeContext, JudgeSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 // REAL end-to-end, no infra: LocalBackend dispatches the code judge's wrapper job in-process →
 // @everdict/job-runner runCase materializes the context/code env files, runs the no-op command harness, and the
 // script grader executes the user's Node code as a real subprocess on this host. Proves the WHOLE chain
@@ -10,6 +12,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 describe("code judge — real dispatch end-to-end (in-process LocalBackend)", () => {
   const judgeCtx: GradeContext = {
     deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+    observations: OBS_NONE,
     case: {
       id: "c1",
       env: { kind: "prompt" },

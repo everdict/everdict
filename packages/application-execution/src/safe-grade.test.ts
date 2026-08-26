@@ -6,6 +6,7 @@ const CTX = {
   case: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
   trace: [],
   snapshot: { kind: "browser", url: "", dom: "", console: [] },
+  observations: { kind: "unobserved", reason: "no_environment" },
 } as unknown as GradeContext;
 
 describe("safeGrade — isolate a grader's run-time failure", () => {

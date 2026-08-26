@@ -2,6 +2,8 @@ import type { EnvSnapshot, GradeContext } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { resolveJudgeArtifacts } from "./resolve-judge-artifacts.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 const png = Buffer.from("PNGBYTES");
 // A fetch that returns image bytes for *.png urls and text for everything else (like a real artifact store).
 const artifactFetch = () =>
@@ -19,6 +21,7 @@ const artifactFetch = () =>
 
 const ctxWith = (snapshot: EnvSnapshot, evidence?: GradeContext["evidence"]): GradeContext => ({
   deadlineAt: Date.now() + 60_000, // the scoring phase's own bound
+  observations: OBS_NONE,
   case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
   trace: [],
   snapshot,

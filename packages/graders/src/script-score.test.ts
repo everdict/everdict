@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptScoreGrader } from "./script-score.js";
 
+const OBS_NONE = { kind: "unobserved", reason: "no_environment" } as const;
+
 function mockCompute(stdout: string, exitCode = 0): ComputeHandle {
   return {
     image: NO_IMAGE,
@@ -20,6 +22,7 @@ function mockCompute(stdout: string, exitCode = 0): ComputeHandle {
 
 const ctx = (compute?: ComputeHandle): GradeContext => ({
   deadlineAt: Date.now() + 60_000, // one shared deadline for the case's whole scoring phase
+  observations: OBS_NONE,
   case: { id: "c", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 1, tags: [] },
   trace: [],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },

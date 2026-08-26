@@ -125,6 +125,9 @@ export async function runVerifierJob(job: VerifierJob, opts: { driver: Driver })
           trace: [],
           snapshot: job.workspace,
           compute,
+          // The verifier judges in a container the agent never had — the run's observation channel does not
+          // reach here (its deltas belong to the AGENT's execution). Stated, never an empty series (Track C).
+          observations: { kind: "unobserved", reason: "no_environment" },
         })),
       );
     return scores;
