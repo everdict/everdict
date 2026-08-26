@@ -2365,8 +2365,8 @@ const MUTATIONS = [
     // annotation defect — present, and carrying nothing. The run-case counterexample must notice.
     name: "Track C — the sampled observation channel drops its deltas",
     file: "packages/application-execution/src/run-case.ts",
-    from: '      ? { kind: "sampled", deltas: [...envDeltas] }',
-    to: '      ? { kind: "sampled", deltas: [] }',
+    from: '    return { kind: "sampled", deltas: [...envDeltas] };',
+    to: '    return { kind: "sampled", deltas: [] };',
     build: "@everdict/application-execution",
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
