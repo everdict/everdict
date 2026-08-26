@@ -1,6 +1,12 @@
 import { CURRENT_EXECUTION_MANIFEST_ERA, type ExecutionManifest, NO_IMAGE, imageResolved } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { imageProvenanceOf, laneImageProvenance, sameResolvedImages, withPlacementImage } from "./image-provenance.js";
+import {
+  imageProvenanceOf,
+  laneImageProvenance,
+  observedPlacementImage,
+  sameResolvedImages,
+  withPlacementImage,
+} from "./image-provenance.js";
 
 const era1 = (over: Partial<ExecutionManifest> = {}): ExecutionManifest => ({
   os: "linux",
@@ -117,5 +123,42 @@ describe("sameResolvedImages — two worlds ran the same bytes", () => {
   it("refuses to call two unresolved worlds the same — an unknown is not a match", () => {
     const unknown = laneImageProvenance("acme/api:1", "the Nomad API");
     expect(sameResolvedImages(unknown, unknown)).toBe(false);
+  });
+});
+
+describe("observedPlacementImage — the kubelet's account of the pulled bytes", () => {
+  const D = `sha256:${"b".repeat(64)}`;
+
+  it("extracts the digest from a docker-pullable imageID for the matching container", () => {
+    const p = observedPlacementImage("ghcr.io/acme/task:latest", [
+      { image: "ghcr.io/acme/task:latest", imageID: `docker-pullable://ghcr.io/acme/task@${D}` },
+    ]);
+    expect(p).toEqual({
+      kind: "resolved",
+      by: "orchestrator",
+      images: [{ ref: "ghcr.io/acme/task:latest", digest: D }],
+    });
+  });
+
+  it("accepts the bare repo@digest imageID form some runtimes report", () => {
+    const p = observedPlacementImage("task:1.2", [{ image: "task:1.2", imageID: `docker.io/library/task@${D}` }]);
+    expect(p).toEqual({ kind: "resolved", by: "orchestrator", images: [{ ref: "task:1.2", digest: D }] });
+  });
+
+  it("a single-container status matches even when the runtime normalized the image string", () => {
+    const p = observedPlacementImage("task:latest", [{ image: "docker.io/library/task:latest", imageID: `x@${D}` }]);
+    expect(p?.kind).toBe("resolved");
+  });
+
+  it("answers undefined — never a fabricated resolution — when no status names the placed ref", () => {
+    // Two containers, neither matching: picking either would attribute another container's bytes to the case.
+    expect(
+      observedPlacementImage("task:latest", [
+        { image: "sidecar:1", imageID: `s@${D}` },
+        { image: "other:2", imageID: `o@${D}` },
+      ]),
+    ).toBeUndefined();
+    // An imageID with no digest (imagePullPolicy: Never local images) has nothing to extract.
+    expect(observedPlacementImage("task:latest", [{ image: "task:latest", imageID: "" }])).toBeUndefined();
   });
 });

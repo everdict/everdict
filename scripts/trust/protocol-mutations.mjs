@@ -2288,6 +2288,17 @@ const MUTATIONS = [
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
   },
   {
+    // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping
+    // the read reverts the lane to `unresolved{lane_cannot_report}` for every unpinned reference, and the
+    // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.
+    name: "Track B — the K8s lane stops reading the kubelet's image observation",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: "          const observed = await api.podImageIds(name, ns);",
+    to: "          const observed = undefined;",
+    build: "@everdict/backends",
+    suite: ["--root", "packages/backends", "src/orchestrators/k8s-image-observation.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track A. A recorded same-family origin IS the version lineage; collapsing the
     // succeeds arm back into born_from leaves the `succeeds` predicate declared-but-dead again — the state
     // the whole track exists to end. The harvest suite must notice.

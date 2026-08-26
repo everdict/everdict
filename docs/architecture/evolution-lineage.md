@@ -119,40 +119,40 @@ Fact test: the registered fact's payload carries `origin.from` in the same store
 and emit must be impossible by construction — assert via the outbox row, not the live push). Mutation rung:
 neutralize the origin construction in the repin service; the suite must go red.
 
-## Track B — the world identity a comparison stands on (finish the reader)
+## Track B — the world identity a comparison stands on (the producer the reader was waiting for)
 
-**The gap.** Image provenance is now *produced* (era 2) but nothing *decides* on it. `imageWarnings` at
-registration warns and never blocks (`packages/domain/src/image/image-ref.ts`); the K8s lane cannot yet
-report observed digests; and — the arch-review-55 lesson — an effect was hardened while no reader was
-added: a scorecard diff will happily compare a `resolved` run against an `unresolved{lane_cannot_report}`
-run and call the delta significant. For the evolution loop this is the self-deception path: a "win" that is
-actually a base-image drift.
+**Correction (2026-08-26).** The first draft of this track claimed the diff had no reader — that a
+comparison would happily treat a `resolved` run against an `unresolved` one as significant. That was wrong:
+the `execution_world` identity axis already reads `imageProvenanceOf` from both sides' results
+(`packages/domain/src/scorecard/experiment-identity.ts`), answers `unverified{unresolved}` when either side
+cannot pin its bytes, `confound` when resolved digests differ, covers the enforced box and the verifier
+receipt — and the gate refuses an unverified axis unless the policy records `allowUnverifiedIdentity`
+(`packages/domain/src/scorecard/gate.ts`). The reader landed with the world-axis waves; what remained was a
+**producer**: the K8s lane could not name an unpinned tag (`unresolved{lane_cannot_report}`), so every
+`:latest`-style run on that lane carried an unverifiable world and the axis degraded exactly where drift is
+most likely.
 
-**The design.**
+**The design (landed with this track).**
 
-- **The reader first**: the diff/comparability layer treats image identity as an axis. Comparing two
-  scorecards where either side's manifest is not `resolved` (or where resolved digests differ across
-  sides for the same declared ref) degrades `comparability` with an explicit reason — the same shape the
-  existing `input_diverged` gate arm uses (`packages/domain/src/scorecard/gate.ts`,
-  `packages/domain/src/scorecard/scoring-revision.ts`). Degraded, not refused, for ordinary diffs; the
-  **campaign adoption gate (Track D) refuses** — an optimization verdict on unresolved world identity is
-  exactly the claim we sell against. A recorded waiver (the `DecisionInputTrust` precedent) is the only
-  bypass, and it appears in the gate answer.
-- **Then the missing producer**: the K8s lane reads `status.containerStatuses[].imageID` at the point the
-  code comment already reserves for it, turning `lane_cannot_report` into observed digests. Nomad
-  equivalently from its allocation's driver state, or it keeps reporting `unresolved` honestly — an
-  unresolved arm consumed by a real reader is no longer a dead field.
+- The K8s lane reads `status.containerStatuses[].imageID` — the kubelet's own account of the pulled digest,
+  an observation rather than an inference — before the dispatch reclaims the Job, at the point the code
+  comment had reserved for it. One extractor owns the imageID formats (`observedPlacementImage`,
+  `packages/domain/src/image/image-provenance.ts`): no match or no digest answers `undefined`, and the merge
+  falls back to the honest reference reading — never a fabricated resolution.
+- `mergePlacedImage` takes the observation as a **required** parameter
+  (`packages/backends/src/orchestrators/placement-image.ts`): `undefined` states "this lane has no
+  readback" explicitly. Nomad passes it deliberately — its allocation driver state is a follow-up — so an
+  unpinned tag there stays honestly unresolved, consumed by the axis as `unverified`.
+- The **campaign adoption gate (Track D) refuses** an `unverified` world axis rather than degrading — an
+  optimization verdict on unresolved world identity is exactly the claim we sell against; a recorded waiver
+  is the only bypass and it appears in the gate answer.
 
-**Checklist answers.** The read a decision rests on: `imageProvenance` — three answers already exist in the
-type; the new consumer must exhaustively match them (no `?? resolved` fold). Provenance: digests come only
-from the driver/orchestrator observation path that already stamps `by`; the gate never re-derives from the
-spec's ref string.
-
-**Verification.** Counterexample: two runs, same declared ref, different observed digests → diff
-comparability degraded with the image reason; RED before the reader exists. Campaign gate refusal on
-`unresolved` — RED first, then the waiver path asserted separately (a waiver that is not recorded in the
-answer is the annotation defect again). Live: a kind-cluster case run twice across an image retag, asserting
-the two manifests disagree and the diff says so.
+**Verification.** Counterexample drives the production dispatch with a fake cluster: a placed `:latest`
+whose pod reports a `docker-pullable://…@sha256:…` imageID resolves to that digest stamped
+`by: "orchestrator"` (RED before the read existed: `expected 'unresolved' to be 'resolved'`), and an
+unavailable observation keeps `unresolved{lane_cannot_report}`. The extractor's format variants and its
+refuse-to-guess arm are pinned in the domain suite. Live: a kind-cluster case from an unpinned tag,
+asserting the manifest carries the registry digest.
 
 ## Track C — the observation delivered to the judgment
 

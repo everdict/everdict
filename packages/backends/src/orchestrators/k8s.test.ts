@@ -110,6 +110,9 @@ function mockApi(
   let polls = 0;
   const api: K8sApi = {
     async ensureNamespace() {},
+    async podImageIds() {
+      return undefined; // these cases assert placement mechanics, not the image observation
+    },
     // The lane ties a network policy to its Job when the case declares an offline world (arch-review 58 W5);
     // these cases declare none, so the patch is never reached.
     async patchOwnedByJob() {},

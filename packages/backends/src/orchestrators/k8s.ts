@@ -175,6 +175,12 @@ export interface K8sApi {
   ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string; suspended?: boolean }> | undefined>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
+  // The job's pods' (image, imageID) pairs — the kubelet's own account of the bytes it pulled, read BEFORE
+  // the dispatch reclaims the Job so a mutable tag resolves to the digest that actually ran (Track B,
+  // docs/architecture/evolution-lineage.md). Best-effort: `undefined` when the query fails, which the merge
+  // reads as "no observation" and keeps the honest reference answer — never `[]`, which would claim the pod
+  // reported nothing.
+  podImageIds(name: string, ns: string): Promise<Array<{ image: string; imageID: string }> | undefined>;
   // The job's pods with their live placement status (phase/node/restarts + the waiting|terminated reason, plus
   // the resource ask [millicores/MiB] and start time) — the case-scoped placement read (CaseInspectable).
   // undefined when the query itself fails (best-effort).
@@ -395,6 +401,30 @@ export function kubectlApi(
       if (tokens.includes("OOMKilled") || tokens.includes("137")) return "OOMKilled";
       const reason = tokens.find((t) => !/^\d+$/.test(t)); // named reasons win over bare non-137 exit codes
       return reason || undefined;
+    },
+    async podImageIds(name, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        "pods",
+        "-l",
+        `job-name=${name}`,
+        "-o",
+        // One (image, imageID) pair per container status. Neither value can contain a space, so a space
+        // separator is unambiguous — and it stays a printable byte (rule `typescript`, control bytes).
+        'jsonpath={range .items[*].status.containerStatuses[*]}{.image}{" "}{.imageID}{"\\n"}{end}',
+      ]);
+      if (res.code !== 0) return undefined;
+      return res.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l !== "")
+        .flatMap((l) => {
+          const sp = l.indexOf(" ");
+          return sp > 0 ? [{ image: l.slice(0, sp), imageID: l.slice(sp + 1) }] : [];
+        });
     },
     async podsForJob(name, ns) {
       const res = await run(bin, [...ctx, "-n", ns, "get", "pods", "-l", `job-name=${name}`, "-o", "json"]);
@@ -2311,12 +2341,13 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
           // The image THIS lane placed, added to what the in-container driver could see — which is nothing,
           // since it pulled nothing (arch-review 57 P1-high). See `mergePlacedImage`.
           //
-          // From the REFERENCE, not yet from the pod: `status.containerStatuses[].imageID` carries the digest
-          // the kubelet actually pulled, which is an observation rather than an inference and strictly better
-          // for a mutable tag. Reading it is a separate API round trip on a path that is already deleting the
-          // Job, so it is left for the wave that gives this lane a PlacementReceipt; until then an unpinned tag
-          // is honestly `unresolved{lane_cannot_report}` rather than dishonestly `none`.
-          const placed = mergePlacedImage(result, job, "the Kubernetes API");
+          // From the POD, not only the reference (Track B, docs/architecture/evolution-lineage.md):
+          // `status.containerStatuses[].imageID` is the kubelet's own account of the pulled digest — an
+          // observation rather than an inference, which is what resolves a mutable tag. Read here, BEFORE
+          // the `finally` reclaims the Job and the pod with it; best-effort, so a failed read keeps the
+          // honest `unresolved{lane_cannot_report}` reference answer rather than blocking the result.
+          const observed = await api.podImageIds(name, ns);
+          const placed = mergePlacedImage(result, job, "the Kubernetes API", observed);
           // ── HANDED OVER BEFORE THE `finally` RECLAIMS IT (arch-review 67 P0-lifecycle) ─────────────
           //
           // The reclaim below runs whichever way this block leaves, so returning first meant the Job was

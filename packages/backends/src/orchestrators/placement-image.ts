@@ -1,5 +1,5 @@
 import type { CaseJob, CaseResult, NetworkPolicy, ProvisionedWorldProof, ResourceRequest } from "@everdict/contracts";
-import { laneImageProvenance, withPlacementImage } from "@everdict/domain";
+import { laneImageProvenance, observedPlacementImage, withPlacementImage } from "@everdict/domain";
 
 // ── WHAT THE PLACEMENT RAN, ADDED TO WHAT THE DRIVER SAW (arch-review 57 P1-high) ────────────────────
 //
@@ -16,15 +16,34 @@ import { laneImageProvenance, withPlacementImage } from "@everdict/domain";
 // The merge rule is the careful part, and `withPlacementImage` owns it: the placement FILLS a gap and never
 // overwrites. A driver that really did pull the image (Docker reads the digest back off the container) knows
 // strictly more than a placement can infer, and trading that observation for an inference would be a loss.
-export function mergePlacedImage(result: CaseResult, job: CaseJob, lane: string): CaseResult {
+// A container status a lane read back off its orchestrator — the observed (image, imageID) pair.
+export interface ObservedContainerImage {
+  image: string;
+  imageID: string;
+}
+
+export function mergePlacedImage(
+  result: CaseResult,
+  job: CaseJob,
+  lane: string,
+  // What the orchestrator OBSERVED about the pulled bytes (the kubelet's imageID), when the lane read it
+  // back before reclaiming the object. REQUIRED, `undefined` stating "this lane has no readback" explicitly:
+  // an optional parameter here is the shape that keeps an axis process-local for three reviews (rule
+  // `protocol`, the optional-dependency law), and the whole point of the observation is that it must reach
+  // this merge or it identified nothing.
+  observed: readonly ObservedContainerImage[] | undefined,
+): CaseResult {
   const ref = job.evalCase.image;
   // Nothing placed, or a result from before the manifest era: there is nothing to qualify, and inventing a
   // manifest here would make a thin result look like a rich one.
   if (ref === undefined || result.execution === undefined) return result;
-  // `laneImageProvenance` is the honest reading of a REFERENCE: a digest-pinned ref names its own bytes, and
-  // a mutable tag is `unresolved{lane_cannot_report}` — "we could not find out", which is a third thing and
-  // not a weaker "none".
-  return { ...result, execution: withPlacementImage(result.execution, laneImageProvenance(ref, lane)) };
+  // The OBSERVATION wins over the inference: a kubelet-reported digest identifies the bytes of a mutable tag,
+  // which is the case `laneImageProvenance` can only answer `unresolved{lane_cannot_report}` for. An
+  // observation that names no digest for this ref falls back to the reference reading — honest either way,
+  // never fabricated (`observedPlacementImage` answers undefined rather than guessing).
+  const provenance =
+    (observed !== undefined ? observedPlacementImage(ref, observed) : undefined) ?? laneImageProvenance(ref, lane);
+  return { ...result, execution: withPlacementImage(result.execution, provenance) };
 }
 
 // ── AND WHAT IT ENFORCED, TOLD INWARD (arch-review 57 P1-high) ───────────────────────────────────────

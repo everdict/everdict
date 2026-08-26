@@ -66,6 +66,26 @@ export function laneImageProvenance(ref: string, lane: string): ImageProvenance 
   );
 }
 
+// THE OBSERVATION A LANE READS BACK — the kubelet's `containerStatuses[].imageID` is its own account of the
+// digest it actually pulled (`docker-pullable://repo@sha256:…` / `repo@sha256:…`), strictly better than any
+// inference from the reference: it identifies the bytes of a mutable tag. One extractor, because the imageID
+// format varies by container runtime and a second spelling would diverge on exactly the odd one.
+// `undefined` = no status names the placed ref, or the named one carries no digest — the caller falls back
+// to the reference reading (`laneImageProvenance`), never to a fabricated resolution.
+export function observedPlacementImage(
+  ref: string,
+  statuses: readonly { image: string; imageID: string }[],
+): ImageProvenance | undefined {
+  // Prefer the status whose `image` is the placed ref verbatim; a single-container pod may report a
+  // runtime-normalized image string (`docker.io/library/…`), so the only status stands in when there is
+  // exactly one. Multiple non-matching statuses are ambiguity, and picking one would attribute another
+  // container's bytes to the case.
+  const match = statuses.find((s) => s.image === ref) ?? (statuses.length === 1 ? statuses[0] : undefined);
+  const digest = match !== undefined ? /sha256:[0-9a-f]{64}/.exec(match.imageID)?.[0] : undefined;
+  if (digest === undefined) return undefined;
+  return imageResolved([{ ref, digest }], "orchestrator");
+}
+
 // Whether two worlds ran the SAME bytes. Compares the (unit, ref@digest) set rather than the array, so the
 // order two lanes happened to report their units in is not a difference. Only ever asked of two `resolved`
 // provenances — an unresolved side has no claim to compare.

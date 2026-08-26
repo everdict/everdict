@@ -517,6 +517,7 @@ export {
 export {
   imageProvenanceOf,
   laneImageProvenance,
+  observedPlacementImage,
   sameResolvedImages,
   withPlacementImage,
 } from "./image/image-provenance.js";

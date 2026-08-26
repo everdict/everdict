@@ -47,7 +47,12 @@ const job = (image?: string): CaseJob =>
 
 describe("[R57 COUNTEREXAMPLE] a managed result records the image its PLACEMENT ran, not the inner driver's silence", () => {
   it("fills a `none` provenance with the lane's own answer", () => {
-    const merged = mergePlacedImage(result(manifest({ imageProvenance: { kind: "none" } })), job("task:1"), "Nomad");
+    const merged = mergePlacedImage(
+      result(manifest({ imageProvenance: { kind: "none" } })),
+      job("task:1"),
+      "Nomad",
+      undefined,
+    );
     expect(merged.execution?.imageProvenance, "the inner driver's `none` survived a placed image").not.toEqual({
       kind: "none",
     });
@@ -56,13 +61,23 @@ describe("[R57 COUNTEREXAMPLE] a managed result records the image its PLACEMENT 
   it("says UNRESOLVED for a mutable tag rather than inventing a digest", () => {
     // The lane placed `task:1`, which names no bytes. "We could not find out" is the honest answer and is a
     // different statement from "there was no image" — the whole point of the three-valued provenance.
-    const merged = mergePlacedImage(result(manifest({ imageProvenance: { kind: "none" } })), job("task:1"), "Nomad");
+    const merged = mergePlacedImage(
+      result(manifest({ imageProvenance: { kind: "none" } })),
+      job("task:1"),
+      "Nomad",
+      undefined,
+    );
     expect(merged.execution?.imageProvenance).toMatchObject({ kind: "unresolved" });
   });
 
   it("reads a DIGEST-PINNED reference as resolved, from the ref itself", () => {
     const pinned = "registry.example/task@sha256:abc123";
-    const merged = mergePlacedImage(result(manifest({ imageProvenance: { kind: "none" } })), job(pinned), "K8s");
+    const merged = mergePlacedImage(
+      result(manifest({ imageProvenance: { kind: "none" } })),
+      job(pinned),
+      "K8s",
+      undefined,
+    );
     expect(merged.execution?.imageProvenance).toMatchObject({ kind: "resolved" });
   });
 
@@ -70,18 +85,18 @@ describe("[R57 COUNTEREXAMPLE] a managed result records the image its PLACEMENT 
     // A Docker driver read the digest back off the container it launched. That is a stronger claim than the
     // placement's, and a merge that clobbered it would trade an observation for an inference.
     const observed = { kind: "resolved", images: [{ ref: "task:1", digest: "sha256:real" }], source: "container" };
-    const merged = mergePlacedImage(result(manifest({ imageProvenance: observed })), job("task:1"), "Nomad");
+    const merged = mergePlacedImage(result(manifest({ imageProvenance: observed })), job("task:1"), "Nomad", undefined);
     expect(merged.execution?.imageProvenance).toEqual(observed);
   });
 
   it("leaves a result with NO manifest alone — there is nothing to qualify", () => {
     // A pre-manifest result (or one from a lane that records none) is not made to look richer than it is.
     const bare = result(undefined);
-    expect(mergePlacedImage(bare, job("task:1"), "Nomad")).toEqual(bare);
+    expect(mergePlacedImage(bare, job("task:1"), "Nomad", undefined)).toEqual(bare);
   });
 
   it("is a no-op when the placement itself has no image to report", () => {
     const only = result(manifest({ imageProvenance: { kind: "none" } }));
-    expect(mergePlacedImage(only, job(undefined), "Nomad")).toEqual(only);
+    expect(mergePlacedImage(only, job(undefined), "Nomad", undefined)).toEqual(only);
   });
 });
