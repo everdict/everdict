@@ -9,6 +9,7 @@ import { registerBillingTools } from "./api/billing/billing.mcp.js";
 import { registerBrowserProfileTools } from "./api/browser-profile/browser-profile.mcp.js";
 import { registerBrowserSessionTools } from "./api/browser-session/browser-session.mcp.js";
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
+import { registerCampaignTools } from "./api/campaign/campaign.mcp.js";
 import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
 import { registerCheckpointTools } from "./api/checkpoint/checkpoint.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
@@ -102,6 +103,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerBundleTools(server, ctx);
   registerScheduleTools(server, ctx);
   registerViewTools(server, ctx);
+  registerCampaignTools(server, ctx);
   registerCheckpointTools(server, ctx);
   registerTaskTools(server, ctx);
   registerTeamTools(server, ctx);

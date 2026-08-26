@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lookup as lookupDnsCb } from "node:dns";
 import { promisify } from "node:util";
 import {
+  CampaignService,
   CycleService,
   GithubIssueSync,
   InitiativeService,
@@ -251,6 +252,7 @@ async function main(): Promise<void> {
     workflowStateStore,
     projectUpdateStore,
     issueStore,
+    campaignStore,
     issueLabelStore,
     projectStore,
     initiativeStore,
@@ -1188,6 +1190,14 @@ async function main(): Promise<void> {
   // Connect the registries' origin backlink now that the tracker exists (construction-order forwarder, like
   // lateEvents): from here on, registering a capability stamped `from: {type:"issue"}` also links it there.
   lateIssueLinks.bind(issueService);
+  // The evolution-campaign settlement (docs/architecture/evolution-lineage.md, Track D): frame frozen at
+  // open, round verdicts DERIVED from the one production diff predicate (the scorecard facade's diff), the
+  // close carrying the pure adoption gate's answer. The issue service is the journal resolver.
+  const campaignService = new CampaignService({
+    store: campaignStore,
+    issues: issueService,
+    diffs: scorecardService,
+  });
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
   const githubIssueSync = new GithubIssueSync({
     store: issueStore,
@@ -1700,6 +1710,7 @@ async function main(): Promise<void> {
     scheduleService,
     queueService,
     viewService,
+    campaignService,
     checkpointService,
     taskService,
     teamService,

@@ -31,6 +31,7 @@ import type {
   CycleStore,
   EnvelopeStore,
   EventConsumerStateStore,
+  EvolutionCampaignStore,
   FsRevisionStore,
   InitiativeStore,
   InitiativeUpdateStore,
@@ -63,6 +64,7 @@ import {
   InMemoryCycleStore,
   InMemoryEnvelopeStore,
   InMemoryEventConsumerStateStore,
+  InMemoryEvolutionCampaignStore,
   InMemoryFsRevisionStore,
   InMemoryHandoffCheckpointStore,
   InMemoryInitiativeStore,
@@ -120,6 +122,7 @@ import {
   PgCycleStore,
   PgEnvelopeStore,
   PgEventConsumerStateStore,
+  PgEvolutionCampaignStore,
   PgExecutionAttemptStore,
   PgFsRevisionStore,
   PgHandoffCheckpointStore,
@@ -286,6 +289,8 @@ export interface Persistence {
   workflowStateStore: WorkflowStateStore;
   projectUpdateStore: ProjectUpdateStore;
   issueStore: IssueStore;
+  // The evolution-campaign settlement (docs/architecture/evolution-lineage.md, Track D).
+  campaignStore: EvolutionCampaignStore;
   issueLabelStore: IssueLabelStore;
   projectStore: ProjectStore;
   initiativeStore: InitiativeStore;
@@ -477,6 +482,7 @@ export async function makePersistence(): Promise<Persistence> {
       workflowStateStore: new InMemoryWorkflowStateStore(),
       projectUpdateStore: new InMemoryProjectUpdateStore(),
       issueStore: inMemoryIssues,
+      campaignStore: new InMemoryEvolutionCampaignStore(),
       issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
@@ -550,6 +556,7 @@ export async function makePersistence(): Promise<Persistence> {
     workflowStateStore: new PgWorkflowStateStore(client),
     projectUpdateStore: new PgProjectUpdateStore(client),
     issueStore: new PgIssueStore(client),
+    campaignStore: new PgEvolutionCampaignStore(client),
     issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),
     initiativeStore: new PgInitiativeStore(client),

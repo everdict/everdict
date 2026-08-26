@@ -25,6 +25,7 @@ import type { FileExecutionService, FsService } from "@everdict/application-cont
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
+  CampaignService,
   CheckpointService,
   CycleService,
   GithubIssueSync,
@@ -122,6 +123,7 @@ export interface McpDeps {
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
+  campaignService?: CampaignService; // evolution-campaign settlement — open/round/decision/settle
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/list/get
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.

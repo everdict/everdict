@@ -73,6 +73,15 @@ function template(fact: DomainFact): string | undefined {
       return `${s(p, "fromIdentifier")} moved to another team as ${s(p, "toIdentifier")}`;
     case "issue.linked":
       return `Issue linked to ${s(p, "linkType")} ${s(p, "linkId")} — ${s(p, "title")}`;
+    // ── evolution campaign (docs/architecture/evolution-lineage.md, Track D) ──
+    case "campaign.opened":
+      return `Campaign opened on ${s(p, "subjectType")} ${s(p, "subjectId")} (baseline ${s(p, "baselineVersion")})`;
+    case "campaign.round_logged":
+      return `Campaign round ${s(p, "seq")} — candidate ${s(p, "candidateVersion")}: ${s(p, "improvements")} up, ${s(p, "regressions")} down`;
+    case "campaign.closed":
+      return p?.state === "adopted"
+        ? `Campaign adopted ${s(p, "subjectId")}@${s(p, "version")}`
+        : `Campaign closed — ${s(p, "state")}`;
     case "issue_label.created":
       return `Label ${s(p, "name")} was defined.`;
     case "issue_label.updated":

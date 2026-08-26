@@ -12,6 +12,7 @@ import { registerBrowserProfileRoutes } from "./api/browser-profile/browser-prof
 import { attachBrowserSessionWs } from "./api/browser-session/browser-session-ws.js";
 import { registerBrowserSessionRoutes } from "./api/browser-session/browser-session.routes.js";
 import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
+import { registerCampaignRoutes } from "./api/campaign/campaign.routes.js";
 import { registerCapabilityRoutes } from "./api/capability/capability.routes.js";
 import { registerCheckpointRoutes } from "./api/checkpoint/checkpoint.routes.js";
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
@@ -159,6 +160,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerEventRoutes(routes, deps);
     registerCommentRoutes(routes, deps);
     registerViewRoutes(routes, deps);
+    registerCampaignRoutes(routes, deps);
     registerCheckpointRoutes(routes, deps);
     registerTaskRoutes(routes, deps);
     registerTeamRoutes(routes, deps);

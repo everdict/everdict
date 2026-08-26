@@ -17,6 +17,7 @@ export * from "./ops-report.js";
 export * from "./ownership.js";
 export * from "./capability-diff.js";
 export * from "./capability-origin.js";
+export * from "./evolution-campaign.js";
 export * from "./comment.js";
 export * from "./delegation-brief.js";
 export * from "./event-selector.js";

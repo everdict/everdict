@@ -420,6 +420,19 @@ export {
   type RepinResult,
   repinHarnessImages,
 } from "./harness/harness-pin-service.js";
+// evolution campaign — the agent-evolve loop's settlement (docs/architecture/evolution-lineage.md, Track D)
+export type {
+  CampaignAppendOutcome,
+  CampaignCloseOutcome,
+  EvolutionCampaignStore,
+} from "./ports/evolution-campaign-store.js";
+export {
+  CampaignService,
+  type CampaignComparison,
+  type CampaignServiceDeps,
+  type NewCampaignInput,
+  type NewRoundInput,
+} from "./evolution/campaign-service.js";
 export {
   adoptedImageReach,
   type AdoptedImageReachDeps,

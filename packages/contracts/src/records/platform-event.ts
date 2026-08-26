@@ -112,6 +112,11 @@ export const PLATFORM_EVENT_KINDS = [
   // everyone's links stopped being the name in the list. It carries both identifiers and both team ids.
   "issue.moved",
   "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue
+  // The evolution campaign — the settlement behind the agent-evolve loop (docs/architecture/evolution-lineage.md
+  // Track D): opened with a frozen frame, one fact per hypothesis round, closed with the adoption gate's answer.
+  "campaign.opened",
+  "campaign.round_logged",
+  "campaign.closed",
   // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
   // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".
   "cycle.created",
