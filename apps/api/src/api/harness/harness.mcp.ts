@@ -6,7 +6,7 @@ import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import { diffHarnessSpecs, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
@@ -161,6 +161,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             "mcp",
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
+            { type: "harness", id: result.data.id },
           );
           // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
           await instances.register(ws, result.data, principal.subject, teamId, origin); // resolve validation (missing template / absent pins → error)
@@ -204,31 +205,41 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             .describe("lift the digest requirement (default false — tag pins break reproducibility)"),
         },
       },
-      ({ id, pins, version, base, allow_tags }) =>
-        run(principal, "harnesses:register", async () =>
-          ok(
-            await repinHarnessImages(
-              instances,
-              ws,
-              principal.subject,
-              id,
-              {
-                pins,
-                ...(version !== undefined ? { version } : {}),
-                ...(base !== undefined ? { base } : {}),
-                allowTags: allow_tags ?? false,
-              },
-              // Channel + attribution only — the merge base half of the origin is the service's to construct.
-              {
-                via: "mcp",
-                ...(ctx.agent?.agentId !== undefined ? { agentId: ctx.agent.agentId } : {}),
-                ...(ctx.agent?.agentName !== undefined ? { agentName: ctx.agent.agentName } : {}),
-                ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
-                ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
-              },
+      async ({ id, pins, version, base, allow_tags }) => {
+        // Same gate as the HTTP re-pin (BFF↔MCP parity, review wave C): the write targets an EXISTING
+        // harness, so it is authorized against the entity's owning team. This tool used to check the bare
+        // action, so an agent could re-pin another team's harness through a call the route refused. A
+        // registry read failure here refuses the pin (fail-closed), same as the route's gate would.
+        const owner = await teamOfEntity(instances, ws, id);
+        return run(
+          principal,
+          "harnesses:register",
+          async () =>
+            ok(
+              await repinHarnessImages(
+                instances,
+                ws,
+                principal.subject,
+                id,
+                {
+                  pins,
+                  ...(version !== undefined ? { version } : {}),
+                  ...(base !== undefined ? { base } : {}),
+                  allowTags: allow_tags ?? false,
+                },
+                // Channel + attribution only — the merge base half of the origin is the service's to construct.
+                {
+                  via: "mcp",
+                  ...(ctx.agent?.agentId !== undefined ? { agentId: ctx.agent.agentId } : {}),
+                  ...(ctx.agent?.agentName !== undefined ? { agentName: ctx.agent.agentName } : {}),
+                  ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
+                  ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
+                },
+              ),
             ),
-          ),
-        ),
+          owner,
+        );
+      },
     );
   }
 }

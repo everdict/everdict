@@ -89,6 +89,10 @@ export async function repinHarnessImages(
     from: { type: "harness", id, version: base.version },
     note: origin.note ?? `re-pin: ${Object.keys(body.pins).sort().join(", ")}`.slice(0, 500),
   };
-  await instances.register(tenant, next, subject, undefined, stamped); // re-registering the same content = no-op, different content at the same version = 409 (immutable)
+  // The successor stays with the team that owns the harness (review wave C): ownership is read off the
+  // newest own version, so registering the new latest with no team re-files the entity out of its team.
+  // The base's team is the registry's own answer — same source the transports gate on.
+  const teamId = await instances.teamOfVersion(tenant, id, base.version);
+  await instances.register(tenant, next, subject, teamId, stamped); // re-registering the same content = no-op, different content at the same version = 409 (immutable)
   return { workspace: tenant, id, version, base: base.version, unchanged: false, pins: merged };
 }

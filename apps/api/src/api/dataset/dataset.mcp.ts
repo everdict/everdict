@@ -158,6 +158,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             "mcp",
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
+            { type: "dataset", id: result.data.id },
           );
           const constitutional = assertDatasetConstitution(principal, result.data); // same door as the REST create
           // Bytes + receipt + capability generation, as ONE publication (creator = subject, delete permission).

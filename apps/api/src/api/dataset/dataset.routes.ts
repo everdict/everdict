@@ -44,14 +44,15 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     const parsed = DatasetSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     // Birth stamp beside the spec (the spec schema strips it, so provenance never becomes content).
-    const origin = await capabilityOriginFor(
-      deps,
-      principal.workspace,
-      "web",
-      agentAttributionFrom(req.headers),
-      declaredOriginFrom(req.body),
-    );
     try {
+      const origin = await capabilityOriginFor(
+        deps,
+        principal.workspace,
+        "web",
+        agentAttributionFrom(req.headers),
+        declaredOriginFrom(req.body),
+        { type: "dataset", id: parsed.data.id },
+      );
       // The constitutional act, gated where the declaration is AUTHORED (arch-review 22 P0-2) — and RECORDED,
       // so the artifact can later say who authorized it (arch-review 23 P1).
       const constitutional = assertDatasetConstitution(principal, parsed.data);

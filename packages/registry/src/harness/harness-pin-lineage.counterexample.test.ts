@@ -91,6 +91,27 @@ describe("re-pin lineage — the ancestor is recorded by the write that knows it
     });
   });
 
+  it("a re-pinned version stays with the team that owns the harness (review wave C)", async () => {
+    // Ownership belongs to the ENTITY (rule `registry`), and the entity's team is read off its newest own
+    // version — so a successor registered with no team moves the whole harness out of its team's list the
+    // moment it becomes latest. The re-pin knows the base; the base's team is the registry's own answer.
+    // Seen RED: the successor's entry lost `teamId` entirely.
+    const teamed = new InMemoryHarnessInstanceRegistry(templates);
+    await teamed.register("acme", instance("1.0.0", { planner: D("a"), browser: D("b") }), "alice", "team-eng");
+    const r = await repinHarnessImages(
+      teamed,
+      "acme",
+      "ci-bot",
+      "bu",
+      { pins: { planner: D("c") }, allowTags: false },
+      { via: "ci" },
+    );
+    expect(r.unchanged).toBe(false);
+    const entry = (await teamed.list("acme")).find((e) => e.id === "bu");
+    expect(entry?.latestVersion).toBe(r.version);
+    expect(entry?.teamId).toBe("team-eng");
+  });
+
   it("an unchanged re-pin registers nothing, so it mints no origin", async () => {
     const r = await repinHarnessImages(
       instances,

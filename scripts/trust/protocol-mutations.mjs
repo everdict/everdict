@@ -2371,6 +2371,42 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
   {
+    // review wave C. A declared origin naming its own family would mint the version-lineage `succeeds`
+    // edge for a derivation that never happened — only the platform's re-pin/bump writes may say it (L3).
+    name: "wave C — a register may declare its own family as its origin",
+    file: "apps/api/src/api/capability-origin.ts",
+    from: "  if (from !== undefined && from.type === self.type && from.id === self.id) {",
+    to: "  if (false && from !== undefined && from.type === self.type && from.id === self.id) {",
+    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
+  },
+  {
+    // …and the re-pin preserves the team that owns the harness: detached from the base's row, the
+    // successor becomes the newest own version with no owner and re-files the entity out of its team.
+    name: "wave C — the re-pin detaches from the base version's owning team",
+    file: "packages/application-control/src/harness/harness-pin-service.ts",
+    from: "  const teamId = await instances.teamOfVersion(tenant, id, base.version);",
+    to: '  const teamId = await instances.teamOfVersion(tenant, id, "");',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
+  },
+  {
+    // …and the agent bump preserves its entity's team the same way.
+    name: "wave C — the agent bump detaches from its entity's owning team",
+    file: "apps/api/src/core/agent/agent-service.ts",
+    from: "      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === id)?.teamId;",
+    to: '      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === "")?.teamId;',
+    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
+  },
+  {
+    // …and the MCP pin tool authorizes against the entity's owning team (BFF↔MCP parity) — read from the
+    // wrong id, the gate sees an unowned resource and lets an outsider re-pin another team's harness.
+    name: "wave C — the MCP pin gate reads the wrong entity's team",
+    file: "apps/api/src/api/harness/harness.mcp.ts",
+    from: "        const owner = await teamOfEntity(instances, ws, id);",
+    to: '        const owner = await teamOfEntity(instances, ws, "");',
+    suite: ["--root", "apps/api", "src/mcp.test.ts"],
+  },
+  {
     // review wave B. The observation channel cannot be forged from after the seal: the sealer writes its
     // samples then ONE marker, and the in-job platform pull appends foreign bytes after it — the reader
     // takes the FIRST marker and counts only samples before it. Removing the break restores last-wins.

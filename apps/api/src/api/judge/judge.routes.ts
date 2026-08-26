@@ -41,14 +41,15 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     // The birth stamp rides beside the spec (the spec schema strips it, so it never becomes content): channel +
     // the agent that acted + whatever the caller declared it was built from.
-    const origin = await capabilityOriginFor(
-      deps,
-      principal.workspace,
-      "web",
-      agentAttributionFrom(req.headers),
-      declaredOriginFrom(req.body),
-    );
     try {
+      const origin = await capabilityOriginFor(
+        deps,
+        principal.workspace,
+        "web",
+        agentAttributionFrom(req.headers),
+        declaredOriginFrom(req.body),
+        { type: "judge", id: parsed.data.id },
+      );
       await deps.judgeRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {

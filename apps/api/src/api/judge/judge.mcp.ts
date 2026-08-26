@@ -179,6 +179,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
             "mcp",
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
+            { type: "judge", id: result.data.id },
           );
           await judges.register(ws, result.data, principal.subject, teamId, origin); // creator stamp — HTTP parity
           return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });

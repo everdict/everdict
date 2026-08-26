@@ -1,5 +1,5 @@
-import type { CapabilityOrigin, CapabilityOriginChannel } from "@everdict/contracts";
-import { CapabilityOriginRefSchema } from "@everdict/contracts";
+import type { CapabilityOrigin, CapabilityOriginChannel, CapabilityOriginSourceType } from "@everdict/contracts";
+import { BadRequestError, CapabilityOriginRefSchema } from "@everdict/contracts";
 import { z } from "zod";
 import type { AgentAttribution } from "./fs/fs-actor.js";
 import type { ServerDeps } from "./route-context.js";
@@ -67,8 +67,21 @@ export async function capabilityOriginFor(
   via: CapabilityOriginChannel,
   agent: AgentAttribution | undefined,
   declared: DeclaredOrigin | undefined,
+  // The capability BEING registered. A declared `from` naming its own family is refused (review wave C):
+  // the harvester reads a same-family `from` as the version-lineage `succeeds` edge, and only the
+  // platform's own writes (re-pin, bump) may say it — they resolve the base at the write (L3). A caller
+  // declaring it would mint a lineage edge for a derivation that never happened. Required, not optional —
+  // an optional self is a call site that forgot to say who it is.
+  self: { type: CapabilityOriginSourceType; id: string },
 ): Promise<CapabilityOrigin> {
   const from = declared?.from;
+  if (from !== undefined && from.type === self.type && from.id === self.id) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { from },
+      `origin.from may not name this capability's own family (${self.type} '${self.id}'): version lineage is stamped by the platform's re-pin/bump writes, never declared.`,
+    );
+  }
   const resolved = from?.type === "issue" ? await resolveIssueRef(deps, tenant, from.id) : undefined;
   return {
     via,

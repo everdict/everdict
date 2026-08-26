@@ -72,8 +72,11 @@ export interface HarnessInstanceRegistry {
   creatorOf(tenant: string, id: string): Promise<string | undefined>;
   // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as datasets).
   // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned
-  // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's".
-  teamOfVersion?(tenant: string, id: string, version: string): Promise<string | undefined>;
+  // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's". REQUIRED, no longer optional
+  // (review wave C): the re-pin preserves the base's team through it — a successor registered without its
+  // base's team moved the whole entity out of that team's list the moment it became latest, and the
+  // optional shape is exactly how that read stayed unwired.
+  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Ownership transfer — the ENTITY moves, so every version of it moves (see VersionedStore.moveToTeam). A
   // transfer mints no version: ownership is metadata beside createdBy, outside the immutable spec. Tenant
   // directly-owned live entities only → NotFound otherwise; authorization lives in the caller.

@@ -5,6 +5,8 @@ import type {
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
+import { versionOriginsSchema } from '@/entities/capability-origin'
+
 // 워크스페이스 에이전트(대화형 어시스턴트) 설정의 경계 검증은 여기 zod v4 에서만, EXPORT 타입은 @everdict/contracts 에 고정(P4).
 // `import type` 만 — zod v3 wire 스키마는 웹에서 실행되지 않는다.
 
@@ -140,11 +142,15 @@ export type AgentDefault = z.infer<typeof agentDefaultSchema>
 export const agentDefaultsSchema = z.object({ defaults: z.array(agentDefaultSchema) })
 
 // GET /agents 200 — 에이전트 id 당 한 항목(워크스페이스 소유 + _shared 폴백).
+// teamId/versionOrigins 는 다른 레지스트리 목록과 같은 팀·리니지 한 줄 — 파서가 벗겨내면 목록이 팀 축과
+// "이 버전이 왜 존재하나"를 그릴 수 없다(review wave C).
 export const agentSummarySchema = z.object({
   id: z.string(),
   versions: z.array(z.string()),
   owner: z.string(),
   createdBy: z.string().optional(),
+  teamId: z.string().optional(),
+  versionOrigins: versionOriginsSchema.optional(),
 })
 export const agentsSchema = z.array(agentSummarySchema)
 export type AgentSummary = z.infer<typeof agentSummarySchema>

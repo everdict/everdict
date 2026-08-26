@@ -67,6 +67,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         "web",
         agentAttributionFrom(req.headers),
         declaredOriginFrom(req.body),
+        { type: "harness", id: parsed.data.id },
       );
       await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin);
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).

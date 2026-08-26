@@ -252,6 +252,30 @@ describe("capability origin — a registration records where it came from", () =
     });
   });
 
+  it("a register may not DECLARE its own family as its origin — lineage is stamped, never claimed (review wave C)", async () => {
+    // The harvester reads a same-family `from` as the version-lineage `succeeds` edge, and only the
+    // platform's own writes (re-pin, bump) may say it — they resolve the base at the write. A caller
+    // declaring its own family would mint that edge for a derivation that never happened (L3). Seen RED:
+    // the forged declaration was stamped and the lineage edge became claimable from any register body.
+    const { app } = build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: H,
+      payload: { ...CODE_JUDGE, origin: { from: { type: "judge", id: "truncation", version: "0.9.0" } } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { message: string }).message).toContain("own family");
+    // …while a DIFFERENT capability of the same type stays a legitimate born_from declaration.
+    const sibling = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: H,
+      payload: { ...CODE_JUDGE, origin: { from: { type: "judge", id: "another-judge" } } },
+    });
+    expect(sibling.statusCode).toBe(201);
+  });
+
   it("never lets the declaration leak into the spec — versions stay content-identical", async () => {
     // Given: a judge registered with an origin
     const { app } = build();
@@ -300,13 +324,14 @@ describe("agent save origin — the upsert records why the version exists, and w
       store: issueStore,
       scorecards: new InMemoryScorecardStore(),
     });
+    const agentService = new AgentService({ agents });
     const app = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
       agentRegistry: agents,
-      agentService: new AgentService({ agents }),
+      agentService,
     });
-    return { app, agents };
+    return { app, agents, agentService };
   }
 
   async function agentOrigin(
@@ -349,5 +374,78 @@ describe("agent save origin — the upsert records why the version exists, and w
       via: "web",
       from: { type: "agent", id: "helper", version: "1.0.0" },
     });
+  });
+
+  it("a save that tries to RESTATE its own ancestry is refused at the door, and the service overrides the seam (review wave C)", async () => {
+    // The ancestor is the one `from` a caller may not declare: only the bump's write knows the base, and a
+    // caller-declared one would be a second spelling of that fact (L3) — a forged `succeeds` edge if it
+    // named an older or foreign version. Two layers, both proven: the DOOR refuses the declaration
+    // (`capabilityOriginFor` self check), and the SERVICE overrides `from` with the resolved base — the
+    // seam a transport that forgot the door check would still hit.
+    const { app, agents, agentService } = await buildWithAgents();
+    await app.inject({ method: "PUT", url: "/agents/helper", headers: H, payload: AGENT_BODY });
+    const restated = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: H,
+      payload: {
+        ...AGENT_BODY,
+        instructions: "be brief and cite ids",
+        origin: { from: { type: "agent", id: "helper", version: "0.0.1" }, note: "hand-written ancestry" },
+      },
+    });
+    expect(restated.statusCode).toBe(400);
+    expect((restated.json() as { message: string }).message).toContain("own family");
+    // The service seam, driven directly with a smuggled self-family origin: the base it resolved wins.
+    const bumped = await agentService.saveAgent(
+      "acme",
+      "u",
+      "helper",
+      {
+        ...AGENT_BODY,
+        instructions: "be brief and cite ids",
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      },
+      { via: "web", from: { type: "agent", id: "helper", version: "0.0.1" }, note: "hand-written ancestry" },
+    );
+    expect(bumped.version).toBe("1.0.1");
+    expect(await agentOrigin(agents, "1.0.1")).toMatchObject({
+      via: "web",
+      from: { type: "agent", id: "helper", version: "1.0.0" }, // the resolved base, never the restated 0.0.1
+      note: "hand-written ancestry",
+    });
+  });
+
+  it("a BUMP stays with the team that owns the agent (review wave C)", async () => {
+    // Ownership is read off the newest version — a bump registered with no team moved the whole agent out
+    // of its team's list the moment the new version became latest. Seen RED: the entry's teamId vanished.
+    const { app, agents } = await buildWithAgents();
+    await agents.register(
+      "acme",
+      {
+        ...AGENT_BODY,
+        id: "helper",
+        version: "1.0.0",
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      },
+      "alice",
+      "team-eng",
+    );
+    const bumped = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: H,
+      payload: { ...AGENT_BODY, instructions: "be brief and cite ids" },
+    });
+    expect(bumped.statusCode).toBe(200);
+    expect((bumped.json() as { version: string }).version).toBe("1.0.1");
+    const entry = (await agents.list("acme")).find((e) => e.id === "helper");
+    expect(entry?.teamId).toBe("team-eng");
   });
 });

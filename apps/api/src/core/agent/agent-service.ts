@@ -56,7 +56,11 @@ export class AgentService {
         return { workspace: tenant, id, version: latest.version, created: false };
       const version = nextVersion(latest.version, new Set(own));
       const stamped: CapabilityOrigin = { ...origin, from: { type: "agent", id, version: latest.version } };
-      await this.deps.agents.register(tenant, { ...body, id, version }, subject, undefined, stamped);
+      // The bump stays with the team that owns the agent (review wave C): ownership is read off the newest
+      // version, so registering the successor with no team re-files the agent out of its team's list. The
+      // entity's team is the registry's own answer, read from the same list() every team-scoped read uses.
+      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === id)?.teamId;
+      await this.deps.agents.register(tenant, { ...body, id, version }, subject, teamId, stamped);
       return { workspace: tenant, id, version, created: true };
     }
     const version = "1.0.0";

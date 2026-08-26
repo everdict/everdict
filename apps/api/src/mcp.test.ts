@@ -981,6 +981,30 @@ describe("MCP tools", () => {
     expect((JSON.parse(text(theirs)) as Array<{ id: string }>).map((e) => e.id)).not.toContain("bu-cli");
   });
 
+  it("pin_harness_images is gated by the harness's owning team — BFF↔MCP parity (review wave C)", async () => {
+    // The HTTP re-pin authorizes against the ENTITY's owning team (`teamOfEntity`); this tool authorized the
+    // bare action only, so an agent on MCP could re-pin another team's harness that the route refused. Seen
+    // RED: the outsider's pin succeeded and minted a version.
+    const deps = harness();
+    await deps.harnessTemplates.register("acme", JSON.parse(HARNESS_TEMPLATE));
+    await deps.harnessInstances.register("acme", JSON.parse(HARNESS_INSTANCE), "alice", "team-x");
+    const outsider = await connect(deps, ["member"], "acme", "not-on-team-x");
+    const digest = `img@sha256:${"d".repeat(64)}`;
+    const pinned = await outsider.callTool({
+      name: "pin_harness_images",
+      arguments: { id: "bu", pins: { "agent-server": digest } },
+    });
+    expect(pinned.isError).toBe(true);
+    expect(await deps.harnessInstances.versions("acme", "bu")).toEqual(["1.0.0"]); // nothing was minted
+    // …while an admin (governs every team) still can — same rule the routes' gate applies.
+    const admin = await connect(deps, ["admin"], "acme", "boss");
+    const ok = await admin.callTool({
+      name: "pin_harness_images",
+      arguments: { id: "bu", pins: { "agent-server": digest } },
+    });
+    expect(ok.isError).toBeFalsy();
+  });
+
   it("pin_harness_images records the merge base and via 'mcp' as the new version's origin", async () => {
     // The re-pin is the registration whose `from` no caller may declare — the service constructs it from the
     // merge base it resolved (docs/architecture/evolution-lineage.md, Track A). The tool's contribution is

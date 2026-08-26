@@ -171,6 +171,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
             "mcp",
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
+            { type: "agent", id },
           );
           return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
         }),

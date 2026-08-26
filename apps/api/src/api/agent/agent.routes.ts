@@ -96,6 +96,7 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
         "web",
         agentAttributionFrom(req.headers),
         declaredOriginFrom(req.body),
+        { type: "agent", id: req.params.id },
       );
       return reply.send(
         await deps.agentService.saveAgent(principal.workspace, principal.subject, req.params.id, parsed.data, origin),
