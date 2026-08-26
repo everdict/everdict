@@ -360,8 +360,11 @@ const MUTATIONS = [
     // really pulled the image knows more than a placement can infer.
     name: "R57 — the placement overwrites a driver that actually read the digest",
     file: "packages/backends/src/orchestrators/placement-image.ts",
-    from: "  return { ...result, execution: withPlacementImage(result.execution, laneImageProvenance(ref, lane)) };",
-    to: "  return { ...result, execution: { ...result.execution, imageProvenance: laneImageProvenance(ref, lane) } };",
+    // RE-AIMED (Track B): the provenance is now observation-first (`observedPlacementImage` ?? lane reading),
+    // but the protocol under test is unchanged — the placement FILLS a gap and never overwrites a driver
+    // that actually read the digest, and `withPlacementImage` owns that merge.
+    from: "  return { ...result, execution: withPlacementImage(result.execution, provenance) };",
+    to: "  return { ...result, execution: { ...result.execution, imageProvenance: provenance } };",
     suite: ["--root", "packages/backends", "src/orchestrators/placement-image.counterexample.test.ts"],
   },
   {
@@ -1086,8 +1089,10 @@ const MUTATIONS = [
     // RE-AIMED (arch-review 66): the staging also records the cleanup debt now, so it takes the ledger.
     // RE-AIMED (arch-review 67): staging happens in the acknowledgement when the lane has one, and here
     // otherwise. Neutralizing the WRITER covers both paths — see the durability rung for the same move.
-    from: "  if (!store) return;",
-    to: "  if (true) return;",
+    // RE-AIMED (arch-review 70): the writer answers a staged/absent union now — neutralized to always
+    // report absent without writing, which is the same "never staged" world.
+    from: '  if (!store) return { kind: "absent", reason: "no agent-half store" };',
+    to: '  if (!store || true) return { kind: "absent", reason: "no agent-half store" };',
     suite: ["--root", "packages/application-control", "src/execution/agent-half.counterexample.test.ts"],
   },
   {
@@ -2027,14 +2032,15 @@ const MUTATIONS = [
     // execution whose container was already gone.
     name: "agent handover — the half becomes durable only after its container is gone",
     file: "packages/application-control/src/execution/verifier-pass.ts",
-    from: "        stagedEarly = true;",
-    to: "        stagedEarly = false;",
+    // RE-AIMED (arch-review 70 follow-through): the flag is derived from the stage's PROOF now
+    // (`staged.kind === "staged"`) — neutralized back to the defect this law is about: a callback that
+    // ran claiming bytes that landed, so a failed put still skips the fallback stage.
+    from: '        stagedEarly = staged.kind === "staged";',
+    to: "        stagedEarly = true;",
     build: "@everdict/application-control",
-    suite: [
-      "--root",
-      "packages/application-control",
-      "src/execution/verdict-acknowledged-before-reclaim.counterexample.test.ts",
-    ],
+    // …and the suite that sees the flag's semantics is the handover-proof one: the fallback must fire
+    // after a stage that wrote nothing, which the acknowledge-ordering file never drives.
+    suite: ["--root", "packages/application-control", "src/execution/agent-handover-proof.counterexample.test.ts"],
   },
   {
     // arch-review 67 P2-contract. `AttemptAdoption` advertises a parent kind and id and only the epoch
@@ -2207,8 +2213,10 @@ const MUTATIONS = [
     // is still in flight behind it, orphaning the object the row exists to protect.
     name: "cleanup sweep — an unwritten ref is counted deleted",
     file: "packages/application-control/src/ops/intermediate-cleanup-reconciler.ts",
-    from: "        if (ref.written !== true) {",
-    to: "        if (false) {",
+    // RE-AIMED (arch-review 70 P1): the guard became the shared evaluator (`evaluateRef`) — neutralized
+    // so every ref reads as written, and the sweep deletes-and-counts a debt whose put never landed.
+    from: "        const state = await evaluateRef(ref, this.deps.probe);",
+    to: '        const state = await evaluateRef(ref, this.deps.probe).then((s) => (s ? "written" : s));',
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/ops/cleanup-reconciler.counterexample.test.ts"],
   },
@@ -2243,7 +2251,9 @@ const MUTATIONS = [
     // needed. Retention and deletion are two states.
     name: "cleanup lifecycle — a staged artifact is collectable before its case settles",
     file: "packages/application-control/src/ports/intermediate-cleanup-store.ts",
-    from: '      state: "retained",',
+    // RE-AIMED (arch-review 70 P1): the birth line carries the loser-reopen guard now — the protocol under
+    // test is still the RETAINED birth (a staged artifact is not collectable before its case settles).
+    from: '      state: prior !== undefined && prior.state !== "retained" ? "gc_owed" : "retained",',
     to: '      state: "gc_owed",',
     build: "@everdict/application-control",
     suite: [
@@ -2513,7 +2523,9 @@ const MUTATIONS = [
     // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.
     name: "Track B — the K8s lane stops reading the kubelet's image observation",
     file: "packages/backends/src/orchestrators/k8s.ts",
-    from: "          const observed = await api.podImageIds(name, ns);",
+    // RE-AIMED (review wave B): the read wears its best-effort catch now — the observation is enrichment
+    // and a rejecting probe may not destroy the completed result it decorates.
+    from: "          const observed = await api.podImageIds(name, ns).catch(() => undefined);",
     to: "          const observed = undefined;",
     build: "@everdict/backends",
     suite: ["--root", "packages/backends", "src/orchestrators/k8s-image-observation.counterexample.test.ts"],
